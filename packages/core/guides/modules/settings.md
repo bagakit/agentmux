@@ -14,6 +14,22 @@ them. A saved route/template is not a connected Host, running Agent or human app
 Read amux settings --help to select the exact configuration domain, then the matching leaf
 help for its fields, authority, revision and save receipt. Discovering settings saves nothing.
 
+## Host home directory
+
+settings hosts home --host HOST reads that exact configured Host's current homeDirectory.
+The path comes from its original Core; a local path, SSH user name or display label is
+not a remote home source. This read does not start Native, scan Sessions or register a
+project. An unavailable Host remains unavailable; keep its original work and retry the
+same read when its connection returns. Do not substitute the caller's home.
+
+In Desktop Space, select a device name to open its home workface without manually
+creating a project. The disclosure arrow still expands/collapses that device's folders;
+the adjacent + opens another directory. Existing registered home directories reuse the
+original workface. Opening does not start an Agent or change another Session's cwd.
+For explicit CLI registration, use the returned path unchanged with the existing
+settings workspaces register input {hostId,path,name?}. A directory is not required to
+be a Git repository. Registration, navigation and Agent creation have separate receipts.
+
 ## Tailcat transport
 
 Settings → Remote → Hosts → Connection holds the original Host's transport selection:

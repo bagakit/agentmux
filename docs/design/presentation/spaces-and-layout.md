@@ -108,6 +108,9 @@ Branch／Worktree 与 Topic 沿同一控件语言选择原工作面；资源身�
 
 ### Project Rail 与 Topic 行密度
 
+设备目录分区的名称是可点击的 home 入口，沿原行密度与命中区呈现；折叠箭头和 `+` 各保有独立动作。零目录时名称仍清楚可用，本机也使用准确设备名。打开中的轻量反馈与失败原因贴近该设备行，不挤压名称、不另铺导航面板；所选目录与原工作面继续沿既有选中语言。行为唯一见[设备主目录工作面](../behavior/spaces-and-layout.md#设备主目录工作面)。
+
+
 - Folder/Project、Topic 与 Mote 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 总入口使用特殊图标，Category 树行与分类页 Topic 列表的导航层级按[知识库呈现合同](#topics-知识库的导航与内容层级)表达；产品归属与共同框架分别见交互 SSOT[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)与[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
 - 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。Category 树行与分类页／总览列表使用各自适合的密度，导航收敛不能把 Topic 列表缩成只有一列名称；两处都消费同一事实和既有控件能力。Topics 分类入口保留可辨身份，列表行首图标继续遵守[《控件语言》](shared-rules.md#控件语言)中同图标不重复占位的规则。
 - Space 树中 Folder/Project 与 Category 的显示应可区分。Folder/Project 的主身份表达目录或项目；Category 使用分类名，具体 Topic 在分类页使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头通用 `+` 打开紧凑动作菜单，各分区保同级就地创建图标；Topics 的创建分类入口唯一见本页知识库呈现合同；入口含义与 Topic 的自动识别规则只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。

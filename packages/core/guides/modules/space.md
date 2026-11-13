@@ -47,4 +47,10 @@ selection, layout, cwd and Runs stay unchanged. Applied preferences and disk con
 are separate. After a partial or unknown save, read this same list before changing it.
 A missing client owner is unavailable, never an empty confirmed list.
 
+Desktop device names open their original Host's home workface without a manual project
+setup step. settings hosts home --host HOST reads that exact homeDirectory from its
+Core. Retain the returned Host/path; do not expand a remote ~ with local environment
+facts. Opening an existing home reuses its durable Folder/Zone/Tab work, and does not
+change any existing Session cwd or automatically create an Agent.
+
 [spatial](../shared/spatial.md "amux:include")
