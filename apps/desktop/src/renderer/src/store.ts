@@ -242,6 +242,10 @@ import { frozenBrowserInput, matchesBrowserInputMessage, type BrowserCapturedInp
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
+import {
+  retainUnconfirmedStop, sessionStopErrorCode, sessionStopFailedStage, sessionStopFailure, sessionStopInspectCommand, sessionStopIntentFor,
+  settleSessionStop, STALE_STOP_CODE, unconfirmedStopFor, type SessionStopOutcome
+} from './lib/session-stop-intent'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
 import { agentContinuityDetail, currentUnconfirmedResumeOperation } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
@@ -1665,7 +1669,8 @@ export type AppState = GitReadingActions & {
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string, options?: { moteMain?: MoteMainInputSelection; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]; preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
   restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
-  stopSession(sessionId: string): Promise<void>
+  /** Never silent: every result other than `stopped` names what happened and the action that works. */
+  stopSession(sessionId: string): Promise<SessionStopOutcome>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string, options?: { observationOnly?: boolean }): Promise<void>
   applyEvent(event: RuntimeEvent): void
@@ -1784,7 +1789,7 @@ async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewC
     const pending = close(resource)
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(
-        `The ${resource.kind} close result is unknown after 5 seconds. Its View is retained; review it before retrying.${resource.kind === 'session' ? ' You can keep the Session and close only its display; the original Stop remains unconfirmed.' : ''}`
+        `The ${resource.kind} close result is unknown after 5 seconds. Its View is retained; review it before retrying.${resource.kind === 'session' ? ` You can keep the Session and close only its display; the original Stop${unconfirmedStopSuffix(resource.control)} remains unconfirmed.` : ''}`
       )), 5_000)
       // Observe the original operation after our UI deadline; it has not been cancelled.
       // A late settlement cannot apply this completed View plan again.
@@ -1794,6 +1799,12 @@ async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewC
   return results.map((result, index) => result.status === 'fulfilled'
     ? { key: resources[index]!.key, status: 'fulfilled' }
     : { key: resources[index]!.key, status: 'rejected', reason: result.reason })
+}
+
+/** Names the operation a timed-out View close sent, so inspect reads that same Stop. */
+function unconfirmedStopSuffix(control: SessionControl): string {
+  const intent = control.kind === 'agent' ? unconfirmedStopFor(control) : undefined
+  return intent ? ` ${intent.operationId} (${sessionStopInspectCommand(intent)})` : ''
 }
 
 /** The one stop step of every View close (Tab or split): exact Run, rechecked against other Views. */
@@ -1812,7 +1823,17 @@ async function stopLastViewSession(
   })) {
     throw new Error(`Session gained another View while closing: ${resource.sessionId}`)
   }
-  await api.sessions.stop(resource.control)
+  if (resource.control.kind !== 'agent') { await api.sessions.stop(resource.control); return }
+  // Closing the View again resends this same Stop, so Core continues it.
+  const intent = sessionStopIntentFor(resource.control)
+  retainUnconfirmedStop(intent)
+  try {
+    await api.sessions.stop(intent.control, intent.operationId)
+    settleSessionStop(intent)
+  } catch (error) {
+    if (sessionStopErrorCode(error) === STALE_STOP_CODE) settleSessionStop(intent)
+    throw sessionStopFailure(error, intent)
+  }
 }
 
 function workbenchViewCloseFailure(receipts: readonly WorkbenchViewCloseReceipt[]): Error {
@@ -12554,24 +12575,47 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async stopSession(sessionId) {
     const state = get()
-    if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) return
-    const original = state.sessions.find(item => item.id === sessionId)
-    const recovery = cancelMoteSessionRecovery(sessionId)
-    if (recovery) await recovery
-    const session = get().sessions.find(item => item.id === sessionId)
-    if (!session || !original || !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId)) return
+    // A closing View already owns this Session's Stop; a second sender would race its receipt.
+    if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) {
+      return { status: 'not-sent', reason: 'view-closing', message: 'This Session’s View is closing and that close owns its Stop. No second Stop was sent.',
+        action: 'Wait for the close result; if it stays unconfirmed, close the View again to continue that same Stop.' }
+    }
+    const session = state.sessions.find(item => item.id === sessionId)
+    if (!session) {
+      return { status: 'not-sent', reason: 'session-missing', message: 'This Session is not in the current Session list. No Stop was sent.',
+        action: 'Refresh the Session list, then stop its current entry.' }
+    }
+    // The user's Stop wins over the startup recovery attempt. Cancel it and stop the Run the user saw
+    // without waiting: Core checks that exact Run and fences a prepared resume of it, so a recovery that
+    // already moved the Session answers STALE_AGENT_SESSION instead of a hidden wait.
+    cancelMoteSessionRecovery(sessionId)
+    if (session.kind === 'terminal') {
+      try { await api.sessions.stop(session.control); return { status: 'stopped' } }
+      catch (error) {
+        get().reportError(error)
+        return { status: 'unconfirmed', message: presentError(error), action: 'Stop this Terminal again; its View is kept.' }
+      }
+    }
+    const intent = sessionStopIntentFor(session.control)
+    retainUnconfirmedStop(intent)
     try {
-      if (recovery && original.kind === 'agent' && session.kind === 'agent') {
-        if (session.control.hostId !== original.control.hostId || session.control.agentSessionId !== original.control.agentSessionId) return
-        const canonical = await api.sessions.refresh(session.control)
-        if (canonical.kind !== 'agent' || canonical.control.hostId !== original.control.hostId || canonical.control.agentSessionId !== original.control.agentSessionId)
-          throw new Error('Stop response belongs to another Agent Session. The original work is kept.')
-        const live = get().sessions.find(item => item.id === sessionId)
-        if (live?.kind !== 'agent' || live.control.hostId !== original.control.hostId || live.control.agentSessionId !== original.control.agentSessionId ||
-          !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId)) return
-        await api.sessions.stop(canonical.control)
-      } else await api.sessions.stop(session.control)
-    } catch (error) { get().reportError(error) }
+      const receipt = await api.sessions.stop(intent.control, intent.operationId)
+      settleSessionStop(intent)
+      return { status: 'stopped', ...(receipt ? { receipt } : {}) }
+    } catch (error) {
+      if (sessionStopErrorCode(error) === STALE_STOP_CODE) {
+        settleSessionStop(intent)
+        // Re-read the Session so the next Stop names its current Run with a fresh intent.
+        await get().refreshSession(sessionId).catch(() => undefined)
+        return { status: 'run-changed', operationId: intent.operationId,
+          message: 'The Run changed; stop the current Run. Nothing was stopped.', action: 'Stop again to stop the current Run.' }
+      }
+      const failure = sessionStopFailure(error, intent)
+      get().reportError(failure)
+      const stage = sessionStopFailedStage(error)
+      return { status: 'unconfirmed', operationId: intent.operationId, ...(stage ? { stage } : {}), message: failure.message,
+        action: `Stop again to continue Stop ${intent.operationId}; its Session and View are kept.` }
+    }
   },
   async canonicalizeAgentLaunch(result) {
     const id = result.created.agentSessionId

@@ -113,6 +113,8 @@ import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
+import type { SessionStopOutcome } from '../lib/session-stop-intent'
+import { useSessionStopElapsed } from '../lib/use-session-stop-elapsed'
 import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
 import {
   useBrowserSurfaceReleased,
@@ -1198,6 +1200,8 @@ function PaneGroup({
   const stopSession = useAppStore.getState().stopSession
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
+  const [stopFeedback, setStopFeedback] = useState<Exclude<SessionStopOutcome, { status: 'stopped' }> | null>(null)
+  const stopElapsed = useSessionStopElapsed(stopping)
   const placed = useAppStore(state => workbenchDisplayGroupMatches(state.layouts[workspaceId], group.id))
   const { setNodeRef, isOver } = useDroppable({
     id: `pane:${group.id}`,
@@ -1258,11 +1262,14 @@ function PaneGroup({
     if (!pendingStopSessionId || stopping) return
     const sessionId = pendingStopSessionId
     setStopping(true)
+    setStopFeedback(null)
     try {
-      await stopSession(sessionId)
+      const outcome = await stopSession(sessionId)
+      // Success closes quietly. Anything else keeps the dialog with what happened and the action that works.
+      if (outcome.status === 'stopped') setPendingStopSessionId(null)
+      else setStopFeedback(outcome)
     } finally {
       setStopping(false)
-      setPendingStopSessionId(null)
     }
   }
 
@@ -1303,7 +1310,7 @@ function PaneGroup({
               className="pane-action pane-action--stop"
               title="Stop Run"
               aria-label={`Stop Run ${activeRuntimeSession.label}`}
-              onClick={() => setPendingStopSessionId(activeRuntimeSession.id)}
+              onClick={() => { setStopFeedback(null); setPendingStopSessionId(activeRuntimeSession.id) }}
             >
               <ThemeActionStopIcon size={12} />
             </button>
@@ -1376,12 +1383,18 @@ function PaneGroup({
       </div>
       <ConfirmationDialog
         open={pendingStopSessionId !== null}
-        title={`Stop this ${pendingStopSession?.kind === 'terminal' ? 'terminal' : 'agent'} Run?`}
-        description="This immediately stops the underlying Run for every open View."
+        title={stopFeedback?.status === 'unconfirmed' ? 'Stop not confirmed' : stopFeedback?.status === 'run-changed' ? 'Run changed'
+          : `Stop this ${pendingStopSession?.kind === 'terminal' ? 'terminal' : 'agent'} Run?`}
+        description={stopFeedback ? stopFeedback.action : 'This immediately stops the underlying Run for every open View.'}
         subject={pendingStopSession?.label ?? 'Run'}
-        confirmLabel="Stop Run"
+        confirmLabel={stopFeedback?.status === 'unconfirmed' ? 'Continue Stop' : stopFeedback?.status === 'run-changed' ? 'Stop current Run' : 'Stop Run'}
+        intent={stopFeedback?.status === 'unconfirmed' ? 'neutral' : 'danger'}
         busy={stopping}
-        onCancel={() => !stopping && setPendingStopSessionId(null)}
+        feedback={stopElapsed || stopFeedback ? <div className="confirmation-dialog__description" role="status" data-session-stop-status="">
+          {stopElapsed ? <p data-session-stop-elapsed="">Stopping · {stopElapsed}</p> : null}
+          {stopFeedback ? <p>{stopFeedback.message}</p> : null}
+        </div> : undefined}
+        onCancel={() => { if (!stopping) { setPendingStopSessionId(null); setStopFeedback(null) } }}
         onConfirm={() => void confirmStop()}
       />
       {splitTarget?.groupId === group.id ? (

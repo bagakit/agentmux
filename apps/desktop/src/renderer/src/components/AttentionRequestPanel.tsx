@@ -273,8 +273,11 @@ export function AttentionRequestPanel({
     // The existing service window reports stop failures. A deadline restores the retry action
     // without guessing whether a slow IPC stopped anything, or hiding the original work surface.
     closeDeadline.current = setTimeout(unconfirmed, 5_000)
-    try { await useAppStore.getState().stopSession(claim.sessionId) }
-    catch (error) {
+    try {
+      // A result other than `stopped` names what happened and the action that works; show it here.
+      const outcome = await useAppStore.getState().stopSession(claim.sessionId)
+      if (outcome.status !== 'stopped' && failedCloseRef.current === claim) setActionError(`${outcome.message} ${outcome.action}`)
+    } catch (error) {
       if (failedCloseRef.current === claim) setActionError(presentError(error))
     } finally { unconfirmed() }
   }
