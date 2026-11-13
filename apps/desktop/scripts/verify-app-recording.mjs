@@ -20,7 +20,7 @@ const mutants = [
   { id: 'late-duration-frame', entry: boundaryEntry, file: 'apps/desktop/src/main/app-recording.ts', before: 'if (active.stop || active.interrupted || performance.now() - start >= record.durationMs) break', after: 'if (active.interrupted) break', oracle: 'A frame delivered after the original duration deadline cannot be appended' },
   { id: 'lost-dispose', entry: boundaryEntry, file: 'apps/desktop/src/main/app-recording.ts', before: "active.abort.abort(new RecordingObservationEnded('The original Desktop recording owner was disposed; any in-flight source observation remains unconfirmed.'))", after: 'void active.abort', oracle: 'disposal ends only this recording observer and retains unknown native completion' },
   { id: 'lost-frame-gap', entry: boundaryEntry, file: 'apps/desktop/src/main/app-recording.ts', before: "if ((error as { code?: string }).code !== 'APP_CAPTURE_FRAME_CHANGED') throw error", after: 'throw error', oracle: 'A same-document frame gap must retain the original recording' },
-  { id: 'lost-SDK-checksum', file: 'packages/core/src/app-capture.ts', before: "if (createHash('sha256').update(data).digest('hex') !== recording.sha256)", after: 'if (false)', oracle: 'SDK WebM checksum must reject changed original bytes' }
+  { id: 'lost-SDK-checksum', file: 'packages/core/src/app-capture.ts', before: "if (Array.from(sha256(data), byte => byte.toString(16).padStart(2, '0')).join('') !== recording.sha256)", after: 'if (false)', oracle: 'SDK WebM checksum must reject changed original bytes' }
 ]
 const killed = []
 for (const mutation of mutants) {
