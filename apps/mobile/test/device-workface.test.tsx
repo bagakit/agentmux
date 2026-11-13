@@ -349,3 +349,40 @@ describe('one durable mobile workface owner', () => {
     expect(disk.setItem).not.toHaveBeenCalled(); expect(disk.raw()).toBeNull()
   })
 })
+
+describe('a workface near its saved limit', () => {
+  // Drafts of 64 KiB each until the saved record sits just below its 2 MiB limit.
+  function nearLimit(): DeviceWorkface {
+    const limit = 2 * 1024 * 1024, base = original()
+    const drafts: Array<[string, string]> = [], bytes = (value: DeviceWorkface) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+    const record = (): DeviceWorkface => ({ ...base, conversation: { ...base.conversation, drafts: [...drafts] } })
+    while (bytes(record()) + 70_000 < limit) drafts.push([`draft-${drafts.length}`, 'x'.repeat(64 * 1024)])
+    const remaining = limit - bytes(record()) - 64
+    drafts.push(['draft-last', 'y'.repeat(remaining)])
+    expect(bytes(record())).toBeLessThan(limit); expect(bytes(record())).toBeGreaterThan(limit - 256)
+    return record()
+  }
+  it('exports a backup that its own import and the recovery panel both restore completely', async () => {
+    const owner = getDeviceWorkface()
+    await owner.replaceBackup(nearLimit())
+    expect(owner.snapshot().issue).toBeNull()
+    const saved = owner.snapshot().record, backup = owner.exportBackup()
+    expect(owner.parseBackup(backup)).toEqual(saved)
+    const restored = vi.fn(), view = await mount(<MobileRecoveryPanel onRestored={restored} />)
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!
+    await act(async () => {
+      Object.defineProperty(input, 'files', { configurable: true, value: [new File([backup], 'agentmux-workface.json', { type: 'application/json' })] })
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(view.element.textContent).toContain('尚未替换当前工作面')
+    await click(button(view.element, '恢复这份工作面'))
+    expect(domain(owner.snapshot().record)).toEqual(domain(saved)); expect(restored).toHaveBeenCalledOnce()
+  })
+  it('still imports an earlier indented backup and still refuses a workface over the saved limit', () => {
+    const owner = getDeviceWorkface(), workface = { ...original() }
+    expect(domain(owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface }, null, 2)))).toEqual(original())
+    const over = { ...original(), conversation: { ...original().conversation,
+      drafts: Array.from({ length: 33 }, (_, index) => [`draft-${index}`, 'x'.repeat(64 * 1024)] as [string, string]) } }
+    expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: over }))).toThrow()
+  })
+})
