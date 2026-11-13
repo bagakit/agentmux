@@ -38,9 +38,8 @@
 .note-canvas-unbound { flex: none; border: 0; border-radius: 3px; padding: 2px 4px; margin-left: auto; background: var(--wash-1); color: var(--text-2); font-size: 9px !important; white-space: nowrap; }
 .note-canvas-unbound:hover { color: var(--blue); background: var(--wash-2); }
 .note-canvas-title { display: flex; align-items: flex-start; gap: 8px; width: 100%; margin: 9px 0 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 15px !important; font-weight: 550 !important; line-height: 1.45; text-align: left; overflow-wrap: anywhere; }
-.note-canvas-title > svg { flex: none; margin: 4px 0 0 auto; opacity: .4; }
 .note-canvas-title > span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.note-canvas-title:hover > svg { opacity: 1; color: var(--blue); }
+.note-canvas-title:hover > span { color: var(--blue); }
 .note-canvas-note-state { display: block; margin-top: 7px; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
 .note-canvas-card > footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px; padding: 7px 10px; border-top: 1px solid var(--line-soft); }
 .note-canvas-card > footer > .note-reader-metadata { margin: 0; padding: 0; border: 0; }

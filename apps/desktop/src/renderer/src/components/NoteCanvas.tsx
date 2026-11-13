@@ -33,7 +33,7 @@ const FullNoteIcon = semanticIconComponent('action.show-full-note'), RelatedBloc
 const RelationshipsIcon = semanticIconComponent('object.relationships')
 const RefreshIcon = semanticIconComponent('action.refresh'), FitIcon = semanticIconComponent('layout.expand')
 const ArrangeIcon = semanticIconComponent('action.arrange-graph'), PlusIcon = semanticIconComponent('action.zoom-in'), MinusIcon = semanticIconComponent('action.zoom-out')
-const OpenIcon = semanticIconComponent('action.open-external'), CloseIcon = semanticIconComponent('action.close')
+const CloseIcon = semanticIconComponent('action.close')
 type OpenNote = (page: NotebookPage, blockId?: string) => void
 type OpenOriginal = (noteId: string, blockId?: string, resource?: NoteResource) => void
 export type CanvasFileTarget = Pick<NotebookPage, 'noteId' | 'resource'>
@@ -172,7 +172,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
     onDoubleClick={event => event.stopPropagation()}>
     <header className="note-canvas-block-drag">
       <span className="note-canvas-block-badge" title={`Original block: ${data.blockId}`}><NoteBlockIcon size={12} /><span>{data.topBlockIndex !== undefined ? `Block ${data.topBlockIndex + 1}` : 'Related block'}</span></span>
-      {data.openable && data.topBlockIndex === undefined && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><OpenIcon size={11} /></button> : null}
+      {data.openable && data.topBlockIndex === undefined && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><NoteIcon size={11} /></button> : null}
     </header>
     {mountedPorts.map(blockId => <div key={blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={blockId} title={`Original block: ${blockId}`} style={{ visibility: activePorts.includes(blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={blockId} /></div>)}
     <div className="note-canvas-reader nodrag nopan nowheel" data-selected-block={selectedBlock} onClick={event => {
@@ -184,7 +184,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
     }}>
       <NoteReader key={data.draftView ? 'draft' : 'saved'} resource={data.resource} agentNames={agentNames} noteProvenance={data.readable.noteProvenance} content={data.readable.content} path={data.resource.path} workspaceId={data.resource.workspaceId} revision={data.readable.revision} documents={data.documents} graph={data.snapshot.graph} draftIncludes={data.draftView ? draftIncludes : undefined} onOpenDraftSource={target => data.onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => data.onRead(target.noteId)} blockIds={readerBlockIds} topBlockIndex={data.topBlockIndex} previewBlockCount={data.previewBlockCount} compactIncludes showDocumentMetadata={false} highlightBlockIds={data.draftView ? NO_BLOCK_IDS : data.highlightedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
     </div>
-    {selectedBlock && data.source?.blocks.has(selectedBlock) && data.openable ? <button type="button" className="note-canvas-open-block nodrag" onClick={() => data.onOpen(data.noteId, selectedBlock)}><OpenIcon size={12} />Open selected block</button> : null}
+    {selectedBlock && data.source?.blocks.has(selectedBlock) && data.openable ? <button type="button" className="note-canvas-open-block nodrag" onClick={() => data.onOpen(data.noteId, selectedBlock)}><NoteIcon size={12} />Open selected block</button> : null}
   </section>
 })
 
@@ -237,7 +237,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
     onMouseEnter={() => data.onPeekNote(item.id)} onMouseLeave={() => data.onPeekNote(null)}>
     {canvasRole === 'note-area' && !overview ? <svg className="note-canvas-area__envelope" width={data.areaWidth} height={data.areaHeight} aria-hidden="true"><path d={data.envelope} /></svg> : null}
     <header className="note-canvas-drag note-canvas-endpoint" data-endpoint-kind="page"><EndpointHandles kind="page" /><span className="note-canvas-book">{item.page ? <NotebookIcon size={12} /> : item.kind === 'shared-block' ? <SharedBlockIcon size={12} /> : <NoteIcon size={12} />}<span title={item.notebook}>{item.kind === 'shared-block' && hostCount > 1 ? `Shared bridge · ${hostCount} notes` : item.notebook}</span>{item.context && <em>Related</em>}{item.unbound.length > 0 && <button type="button" className="note-canvas-unbound nodrag" aria-label={`Inspect ${item.unbound.length} unbound links in ${item.title}`} onClick={() => data.onUnbound(item.id)}>{item.unbound.length} unbound</button>}</span>
-      {openable ? <button type="button" className="note-canvas-title nodrag" data-note-id={item.id} title={title} onClick={() => data.onOpen(item.id)}><span>{title}</span><OpenIcon size={12} /></button>
+      {openable ? <button type="button" className="note-canvas-title nodrag" data-note-id={item.id} title={title} onClick={() => data.onOpen(item.id)}><span>{title}</span></button>
         : <strong className="note-canvas-title" title={item.id}>{title}</strong>}
       {!openable || item.observation?.status !== 'read' ? <span className="note-canvas-note-state" title={item.observation && 'message' in item.observation ? item.observation.message : item.id}>{item.observation?.status ?? 'Target not observed'}</span> : null}
     </header>
@@ -271,7 +271,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
                 }}>
                   <NoteReader key={bodyStatus.draftView ? 'draft' : 'saved'} resource={data.sharedResource} agentNames={agentNames} noteProvenance={data.sharedReadable.noteProvenance} content={data.sharedReadable.content} path={data.sharedResource.path} workspaceId={data.sharedResource.workspaceId} revision={data.sharedReadable.revision} documents={data.documents} graph={data.snapshot.graph} readInclude={target => data.onRead(target.noteId)} previewBlockCount={item.kind !== 'shared-block' && bodyStatus.readingMode === 'summary' ? 3 : undefined} compactIncludes showDocumentMetadata={item.kind === 'shared-block'} highlightBlockIds={data.selectedBlockIds.length ? data.selectedBlockIds : data.focusedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
                 </div>
-                {selectedSharedBlock && data.source?.blocks.has(selectedSharedBlock) ? <button type="button" className="note-canvas-open-block" onClick={() => data.onOpen(item.id, selectedSharedBlock)}><OpenIcon size={12} />Open selected block</button> : null}
+                {selectedSharedBlock && data.source?.blocks.has(selectedSharedBlock) ? <button type="button" className="note-canvas-open-block" onClick={() => data.onOpen(item.id, selectedSharedBlock)}><NoteIcon size={12} />Open selected block</button> : null}
               </>
               : <div className="note-canvas-area-stage" style={{ height: data.stageHeight }} />}
           </>}
@@ -280,7 +280,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
       </div> : null}
     <div className="note-canvas-block-summary note-canvas-endpoint" data-empty={data.blockIds.length === 0} aria-hidden={data.blockIds.length === 0} data-endpoint-kind="block" title="Some relationships attach here until their exact passage is visible. Inspect a relationship to read its original content."><EndpointHandles kind="block" /><span>Referenced passages</span><span>{data.blockIds.length}</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span><SemanticIcon name="note.reference-incoming" size={10} /> {item.incoming} incoming</span><span><SemanticIcon name="note.reference-outgoing" size={10} /> {item.outgoing} outgoing</span></div>
-    <footer className="nodrag">{item.kind === 'shared-block' ? <button type="button" onClick={() => data.onOpen(item.id)} disabled={!openable}><OpenIcon size={12} />Open original</button> : <button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Show related blocks' : 'Full note'}: ${title}`} onClick={() => { if (!data.content?.pending && (!data.content?.value || data.content.value.status !== 'read')) data.onRead(item.id); data.onPreview(item.id) }} disabled={!readable}>{data.preview ? <RelatedBlocksIcon size={12} /> : <FullNoteIcon size={12} />}{data.preview ? 'Related blocks' : 'Full note'}</button>}
+    <footer className="nodrag">{item.kind === 'shared-block' ? <button type="button" onClick={() => data.onOpen(item.id)} disabled={!openable}><NoteIcon size={12} />Open original</button> : <button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Show related blocks' : 'Full note'}: ${title}`} onClick={() => { if (!data.content?.pending && (!data.content?.value || data.content.value.status !== 'read')) data.onRead(item.id); data.onPreview(item.id) }} disabled={!readable}>{data.preview ? <RelatedBlocksIcon size={12} /> : <FullNoteIcon size={12} />}{data.preview ? 'Related blocks' : 'Full note'}</button>}
       <button type="button" aria-expanded={data.expanded} aria-label={`${data.expanded ? 'Collapse' : 'Expand'} relationships: ${item.title}`} onClick={() => data.onNeighbors(item.id)} disabled={!item.neighbors}><RelationshipsIcon size={12} />{data.expanded ? 'Collapse' : 'Explore'}<small>{item.neighbors}</small></button>
       {item.kind !== 'shared-block' && !overview ? <NoteReaderMetadata noteProvenance={bodyStatus?.noteProvenance} /> : null}
     </footer>
