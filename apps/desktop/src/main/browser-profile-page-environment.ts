@@ -5,7 +5,11 @@ import {
 } from '@agentmux/core/control'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 
-export type BrowserProfilePageEnvironmentPorts = { applyScreen(): void }
+export type BrowserProfilePageEnvironmentPorts = {
+  applyScreen(): void
+  /** The original BVM entry/view/Profile binding, independent of presentation or preparation. */
+  isCurrent(): boolean
+}
 /** Native page application belonging to the original Profile environment owner; no persisted projection. */
 export function createBrowserProfilePageEnvironment(ports: {
   settings(profileId: string): BrowserProfileEnvironment | undefined
@@ -361,7 +365,24 @@ export function createBrowserProfilePageEnvironment(ports: {
       for (const page of profiles.get(profileId)?.values() ?? []) void schedule(page)
     },
     inspect(profileId: string): BrowserProfileEnvironmentPageApplication[] {
-      return [...(profiles.get(profileId)?.values() ?? [])].map((page) => structuredClone(page.receipt))
+      const key = keyOf(ports.settings(profileId))
+      return [...(profiles.get(profileId)?.values() ?? [])]
+        .filter((page) => !page.disposed && page.port.isCurrent())
+        .map((page) =>
+          page.requested === key
+            ? structuredClone(page.receipt)
+            : {
+                browserId: page.browserId,
+                status: 'pending',
+                fields: {},
+                scope: scope(false),
+                reason: 'The saved environment is waiting for its original native page application.'
+              }
+        )
+    },
+    /** BVM has atomically changed its original binding; this republishes projection, not native commands. */
+    publishBindings(profileIds: readonly string[]): void {
+      for (const profileId of new Set(profileIds)) ports.changed(profileId)
     },
     hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean {
       const page = profiles.get(profileId)?.get(contents)

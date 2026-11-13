@@ -57,6 +57,7 @@ export function createBrowserProfileEnvironment(ports: {
     },
     preparePage(profileId: string, browserId: string, contents: WebContents, port: BrowserProfilePageEnvironmentPorts): Promise<void> { return pageEnvironment.preparePage(profileId, browserId, contents, port) },
     applyPages(profileId: string): void { pageEnvironment.apply(profileId) },
+    publishBindings(profileIds:readonly string[]):void { pageEnvironment.publishBindings(profileIds) },
     hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean { return pageEnvironment.hasOnlyEnvironmentDebugger(profileId,contents) },
     inspect(profileId: string): BrowserProfileEnvironmentApplication | undefined {
       const settings = ports.settings(profileId), outcome = outcomes.get(profileId)
@@ -64,7 +65,7 @@ export function createBrowserProfileEnvironment(ports: {
       if (outcome?.key === keyOf(settings)) {
         const application = structuredClone(outcome.application)
         if (pages.length) { application.pages = pages; application.unsupported = ['canvas','webgl','fonts','tls','deviceMemory','complete-fingerprint']; if (pages.some(page => page.status === 'unknown')) application.status = 'unknown'; else if (application.status !== 'unknown' && pages.some(page => page.status === 'pending')) application.status = 'not-applied' }
-        else if (settings && Object.keys(settings).some(key => !['userAgent','acceptLanguages'].includes(key))) { application.status = 'not-applied'; application.unsupported = ['canvas','webgl','fonts','tls','deviceMemory','complete-fingerprint']; application.reason = 'The saved native page settings have no live target application yet. Open a Browser in this Profile to apply them.' }
+        else if (settings && Object.keys(settings).some(key => !['userAgent','acceptLanguages'].includes(key))) { application.status = 'not-applied'; application.unsupported = ['canvas','webgl','fonts','tls','deviceMemory','complete-fingerprint']; application.reason = 'The saved native page settings have no current Browser target application yet. Open a Browser in this Profile to apply them.' }
         return application
       }
       return settings ? { status: 'not-applied', scope: 'session-defaults', unsupported: [...unsupported] } : undefined

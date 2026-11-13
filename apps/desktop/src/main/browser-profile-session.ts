@@ -87,6 +87,7 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     preparePageEnvironment(profileId: string, browserId: string, contents: WebContents, port: BrowserProfilePageEnvironmentPorts): Promise<void> { return environment?.preparePage(profileId, browserId, contents, port) ?? Promise.resolve() },
     environmentApplication(profileId: string) { return environment?.inspect(profileId) },
     hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean { return environment?.hasOnlyEnvironmentDebugger(profileId,contents) === true },
+    publishEnvironmentBindings(profileIds:readonly string[]):void { environment?.publishBindings(profileIds) },
     onEnvironmentApplicationChange(listener: (profileId: string) => void): () => void { return environment?.subscribe(listener) ?? (() => {}) },
 
     /** A saved route change: apply it now, so open pages reconnect through the new route. */

@@ -96,6 +96,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   preparePageEnvironment(profileId: string, browserId: string, contents: import('electron').WebContents, port: import('./browser-profile-page-environment.js').BrowserProfilePageEnvironmentPorts): Promise<void> { return this.sessions.preparePageEnvironment?.(profileId, browserId, contents, port) ?? Promise.resolve() }
   environmentApplication(profileId: string) { return this.sessions.environmentApplication?.(profileId) }
   hasOnlyEnvironmentDebugger(profileId: string, contents: import('electron').WebContents): boolean { return this.sessions.hasOnlyEnvironmentDebugger?.(profileId,contents) === true }
+  publishEnvironmentBindings(profileIds:readonly string[]):void { this.sessions.publishEnvironmentBindings?.(profileIds) }
   onEnvironmentApplicationChange(listener: (profileId: string) => void): () => void {
     return this.sessions.onEnvironmentApplicationChange?.(listener) ?? (() => {})
   }

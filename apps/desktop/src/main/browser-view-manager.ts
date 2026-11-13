@@ -391,6 +391,7 @@ export interface BrowserProfileResolver {
   preparePageEnvironment?(profileId: string, browserId: string, contents: WebContents, port: import('./browser-profile-page-environment.js').BrowserProfilePageEnvironmentPorts): Promise<void>
   environmentApplication?(profileId: string): BrowserProfileEnvironmentApplication | undefined
   hasOnlyEnvironmentDebugger?(profileId: string, contents: WebContents): boolean
+  publishEnvironmentBindings?(profileIds:readonly string[]):void
   onEnvironmentApplicationChange?(listener: (profileId: string) => void): () => void
   readonly activityObserverId?: string
   activitySource?(profileId: string): string | null
@@ -545,7 +546,7 @@ export class BrowserViewManager {
 
   private async prepareProfilePageEnvironment(entry: BrowserEntry, view = entry.view, profileId = entry.storage.mode === 'normal' ? entry.storage.profileId : null): Promise<void> {
     if (!profileId || 'capsule' in entry.storage) return
-    await this.profiles.preparePageEnvironment?.(profileId, entry.id, view.webContents, { applyScreen: () => {
+    await this.profiles.preparePageEnvironment?.(profileId, entry.id, view.webContents, { isCurrent:()=>this.owns(entry,view)&&entry.storage.mode==='normal'&&entry.storage.profileId===profileId, applyScreen: () => {
       if (view.webContents.isDestroyed()) throw new Error('The original native Browser page ended before screen application.')
       this.applyViewport(entry, view, entry.viewport, this.profiles.environmentSettings?.(profileId)?.screen ?? null)
     } })
@@ -2414,7 +2415,7 @@ export class BrowserViewManager {
 
       const zoomFactor = authoritativeView.webContents.getZoomFactor()
       candidate.webContents.setZoomFactor(zoomFactor)
-      this.applyViewport(entry, candidate)
+      this.applyViewport(entry, candidate, entry.viewport, this.profiles.environmentSettings?.(profileId)?.screen ?? null)
       if (entry.bounds) candidate.setBounds(entry.bounds)
       candidate.setVisible(entry.visible)
       const inputSurface = this.inputSurfaces.get(authoritativeView)
@@ -2453,6 +2454,7 @@ export class BrowserViewManager {
       entry.annotationRevision += 1
       entry.error = null
       committed = true
+      this.profiles.publishEnvironmentBindings?.([previousStorage.profileId,profileId].filter((value):value is string=>value!==null))
       try { this.closeNativeView({ id: entry.id, workspaceId: entry.workspaceId, storage: previousStorage, requestedUrl: url, viewport: entry.viewport }, authoritativeView) }
       catch (error) {
         // The new Profile already owns this Browser. Publish that fact even if old cleanup failed.
