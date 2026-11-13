@@ -174,7 +174,7 @@ For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
 the same requested order, while --after-content independently pages unresolved content. Managed callers
 can list and inspect body-free receipts on their exact original Host/Session binding and audience,
-including historical revisions, without being the bot creator. To explicitly retry your own original
+including historical revisions, without being the bot creator. Explicit --source-read-evidence returns sourceReadEvidence with the paired original observation and opaque checkpoint. Missing observation/cut is null; the evidence query does not read, wake or recut the source. Use the exact original publication revision: a later input-trigger revision can point to an older publicationBoundary and has no lane of its own. The returned checkpoint belongs to that observed cut, not a current Store lookup or a content-gap anchor. Pass it unchanged to agent conversation changes for a separate authorized read. Default delivery lists, source recovery receipts and redacted diagnose do not add this evidence. To explicitly retry your own original
 delivery, save {operationId,source} from its owner-qualified retrySource and use connection delivery
 retry --input FILE|-. Each exact message or content-upload source attempt accepts one durable
 continuation; retain that complete input after a lost reply. Repeating it observes the same accepted
