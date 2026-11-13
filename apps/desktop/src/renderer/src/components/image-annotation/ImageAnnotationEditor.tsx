@@ -501,7 +501,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function runObjectCommand(command: ObjectCommand) {
     const shapes = documentState.shapes, distance = 10 / viewRef.current.scale
     const offset = capture ? { x: Math.round(distance), y: Math.round(distance) } : { x: distance, y: distance }
-    if (command === 'select-all') setSelectedIds(new Set(shapes.filter(shape => !shape.locked).map(shape => shape.id)))
+    // Like the marquee, Select All takes what the canvas shows: unlocked marks, never a note hidden under a mask.
+    if (command === 'select-all') setSelectedIds(new Set(screenshotOutputShapes(shapes, documentState.crop).filter(shape => !shape.locked).map(shape => shape.id)))
     else if (command === 'duplicate') { if (groupIds.size) addShapes(duplicateShapes(shapes, groupIds, offset, mintObjectId)) }
     else if (command === 'copy') { if (selectedShapes.length) copiedRef.current = selectedShapes }
     else if (command === 'paste') {
