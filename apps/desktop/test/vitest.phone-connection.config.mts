@@ -11,6 +11,14 @@ import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtim
 // it neither rebuilds shared dist nor claims compiled Core qualification.
 const suites = ['settings-direct-actions', 'mobile-connection-toolkit', 'toolkit-current-link', 'toolkit-survey-and-phone-settings']
 const report = process.env.AGENTMUX_PHONE_CONNECTION_LOADED
+const mutation = process.env.AGENTMUX_PHONE_CONNECTION_MUTATION
+const variants: Record<string, { before: string; after: string; target: string }> = {
+  'survey-global-flight': { before: 'inFlight.current?.url === url', after: 'inFlight.current !== null', target: 'in flight \\(opened, waiting\\)' },
+  'survey-unscoped-result': { before: 'if (inFlight.current === request) setResult', after: 'setResult', target: 'in flight \\(opened, waiting\\)' },
+  'survey-stale-url-feedback': { before: 'result.url === url ? result', after: 'true ? result', target: 'focus with its URL \\(opened\\)' }
+}
+if (mutation && !Object.hasOwn(variants, mutation)) throw Error('Unknown phone connection mutation: ' + mutation)
+const variant = mutation ? variants[mutation] : undefined
 const owners = new Set([
   ...suites.map(name => `apps/desktop/test/${name}.test.tsx`),
   ...['SettingsPanel', 'settings/DeviceManagementSettings', 'settings/BuiltinMobileConnectionSettings',
@@ -35,11 +43,21 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/phone-connecti
     load(id) { if (id === '\0phone-connection-identity') return runtime },
     transform(original, id) {
       const file = relative(root, id.split('?')[0]!)
-      if (!report || !owners.has(file)) return
-      const row = { file, originalSHA256: sha(readFileSync(resolve(root, file), 'utf8')), loadedSHA256: sha(original) }
-      return { code: `import { appendFileSync as __phoneLoaded } from 'node:fs'; __phoneLoaded(${JSON.stringify(resolve(root, report))},${JSON.stringify(JSON.stringify(row) + '\n')});\n` + original, map: null }
+      if (!owners.has(file)) return
+      let code = original
+      const changed = variant && file.endsWith('/toolkit/ToolkitResultLink.tsx')
+      if (changed) {
+        if (code.split(variant.before).length !== 2) throw Error('One actual Survey mutation anchor: ' + mutation)
+        code = code.replace(variant.before, variant.after)
+      }
+      if (report) {
+        const row = { file, originalSHA256: sha(readFileSync(resolve(root, file), 'utf8')), loadedSHA256: sha(code), mutation: changed ? mutation : null }
+        code = `import { appendFileSync as __phoneLoaded } from 'node:fs'; __phoneLoaded(${JSON.stringify(resolve(root, report))},${JSON.stringify(JSON.stringify(row) + '\n')});\n` + code
+      }
+      return code === original ? undefined : { code, map: null }
     }
   }],
-  test: { include: suites.map(name => `apps/desktop/test/${name}.test.tsx`), setupFiles: [resolve(root, 'vitest.setup.ts')],
+  test: { include: (variant ? ['toolkit-survey-and-phone-settings'] : suites).map(name => `apps/desktop/test/${name}.test.tsx`),
+    testNamePattern: variant?.target, setupFiles: [resolve(root, 'vitest.setup.ts')],
     environment: 'happy-dom', maxWorkers: 1, fileParallelism: false, passWithNoTests: false, testTimeout: 15000 }
 })

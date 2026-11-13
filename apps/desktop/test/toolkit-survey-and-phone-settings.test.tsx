@@ -49,6 +49,62 @@ describe('Toolkit links open in Survey', () => {
     expect(dom.container.querySelector('.toolkit-result__survey-feedback[role="alert"]')?.textContent).toBe('System page opening is unconfirmed.')
     expect(open).toHaveBeenCalledOnce()
   })
+
+  it.each(['opened', 'unconfirmed', 'failed'] as const)('keeps feedback and focus with its URL (%s)', async outcome => {
+    const firstURL = 'https://example.org/first', nextURL = 'https://example.org/next'
+    const open = vi.fn(async (url: string) => {
+      if (url === firstURL && outcome === 'failed') throw Error('First opening failed')
+      return url === firstURL && outcome === 'unconfirmed'
+        ? { state: 'unconfirmed' as const, browserId: null, reference: null, message: 'First opening unconfirmed' } : opened
+    })
+    useAppStore.setState({ openUrlInSurvey: open })
+    await dom.render(<ToolkitResultLink label="Docs" url={firstURL} copy={() => {}} />)
+    await act(async () => button('Open in Survey')!.click())
+    expect(dom.container.querySelector('.toolkit-result__survey-feedback')).not.toBeNull()
+    const retained = button('Open in Survey')!
+    await act(async () => retained.focus())
+    await dom.render(<ToolkitResultLink label="Docs" url={nextURL} copy={() => {}} />)
+    expect(button('Open in Survey')).toBe(retained)
+    expect(document.activeElement).toBe(retained)
+    expect(retained.disabled).toBe(false)
+    expect(dom.container.querySelector('.toolkit-result__survey-feedback')).toBeNull()
+    await act(async () => retained.click())
+    expect(open.mock.calls.map(([url]) => url)).toEqual([firstURL, nextURL])
+  })
+
+  it.each((['opened', 'unconfirmed', 'failed'] as const).flatMap(outcome =>
+    (['waiting', 'finished'] as const).map(timing => [outcome, timing] as const)))
+  ('keeps the selected URL actionable while a previous opening is in flight (%s, %s)', async (outcome, timing) => {
+    const firstURL = 'https://example.org/first', nextURL = 'https://example.org/next'
+    const nextOutcome = { state: 'unconfirmed' as const, browserId: null, reference: null, message: 'Next original opening is unconfirmed' }
+    let finishFirst!: (value: typeof opened | typeof nextOutcome) => void, failFirst!: (reason: Error) => void
+    let finishNext!: (value: typeof nextOutcome) => void
+    const first = new Promise<typeof opened | typeof nextOutcome>((resolve, reject) => { finishFirst = resolve; failFirst = reject })
+    const next = new Promise<typeof nextOutcome>(resolve => { finishNext = resolve })
+    const open = vi.fn((url: string) => url === firstURL ? first : next)
+    useAppStore.setState({ openUrlInSurvey: open })
+    await dom.render(<OpenInSurveyButton url={firstURL} />)
+    await act(async () => button('Open in Survey')!.click())
+    await dom.render(<OpenInSurveyButton url={nextURL} />)
+    const retained = button('Open in Survey')!
+    expect(retained.disabled).toBe(false)
+    await act(async () => { retained.click(); retained.click() })
+    expect(open.mock.calls.map(([url]) => url)).toEqual([firstURL, nextURL])
+    expect(button('Opening…')?.disabled).toBe(true)
+    if (timing === 'finished') await act(async () => finishNext(nextOutcome))
+    await act(async () => {
+      if (outcome === 'failed') failFirst(Error('Late first opening failed'))
+      else finishFirst(outcome === 'opened' ? opened : { ...nextOutcome, message: 'Late first opening unconfirmed' })
+    })
+    if (timing === 'waiting') {
+      expect(button('Opening…')?.disabled).toBe(true)
+      expect(dom.container.querySelector('.toolkit-result__survey-feedback')).toBeNull()
+      await act(async () => finishNext(nextOutcome))
+    }
+    expect(button('Open in Survey')).toBe(retained)
+    expect(dom.container.querySelector('.toolkit-result__survey-feedback[role="alert"]')?.textContent).toBe(nextOutcome.message)
+    expect(open).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('the phone connection tool settings', () => {
