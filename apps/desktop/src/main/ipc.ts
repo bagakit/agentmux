@@ -1361,8 +1361,9 @@ export async function registerIpc(args: {
   })
   const screenshotPins = new ScreenshotPins({ hostId: 'local', appearance: () => config.appearance,
     copy: image => getDesktopNativeUiOwner().writeClipboardImage(image) })
-  const pinScreenshot = (image: import('../shared/contracts').BrowserPng, operationId: string) => screenshotPins.call('image.pin', {
-    hostId: 'local', operationId, image: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: 1 }
+  const pinScreenshot = (image: import('../shared/contracts').BrowserPng, operationId: string, origin?: import('@agentmux/core').ImageOrigin) => screenshotPins.call('image.pin', {
+    hostId: 'local', operationId, image: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: 1 },
+    ...(origin ? { origin } : {})
   }, { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
   const inspectScreenshotPin = (operationId: string) => screenshotPins.call('image.inspect', { hostId: 'local', operationId },
     { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })

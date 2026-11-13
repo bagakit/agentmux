@@ -1,17 +1,41 @@
 @import '../src/styles/tokens.css';
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-body { font: var(--fs-meta)/1.45 var(--font-sans); color: var(--text); background: var(--surface-0); }
-.screenshot-pin { height: 100%; display: flex; flex-direction: column; }
-.screenshot-pin header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
-.screenshot-pin__label { flex: 1; white-space: nowrap; font-weight: 600; }
-.screenshot-pin small { margin-left: 5px; color: var(--text-3); font-size: 10px; font-weight: 400; }
-.screenshot-pin nav { display: flex; gap: 3px; -webkit-app-region: no-drag; }
-.screenshot-pin button { border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); padding: 4px 7px; font: inherit; cursor: pointer; }
-.screenshot-pin button:hover { background: var(--surface-2); }
-.screenshot-pin button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.screenshot-pin button:disabled { opacity: .5; cursor: default; }
-.screenshot-pin__image { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--surface-1); }
-.screenshot-pin__image img { position: absolute; inset: 0; display: block; min-width: 0; min-height: 0; object-fit: contain; width: 100%; height: 100%; }
-.screenshot-pin footer { padding: 3px 8px; color: var(--text-3); font-size: 10px; max-height: 42px; overflow: auto; overflow-wrap: anywhere; }
-.screenshot-pin footer[role=alert] { color: var(--text); }
+body { font: var(--fs-meta)/1.4 var(--font-sans); color: var(--text); background: var(--surface-0); user-select: none; }
+.screenshot-pin { position: relative; width: 100%; height: 100%; container-type: size; }
+.screenshot-pin img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+.screenshot-pin__controls { position: absolute; top: 6px; left: 0; right: 0; width: max-content; max-width: calc(100% - 12px); margin-inline: auto; transform: translateY(-4px);
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; padding: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent); backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: var(--elev-2), var(--hl-strong); opacity: 0; pointer-events: none; transition: opacity .14s ease, transform .14s ease; }
+.screenshot-pin:hover .screenshot-pin__controls, .screenshot-pin:focus-within .screenshot-pin__controls { opacity: 1; transform: none; pointer-events: auto; }
+.screenshot-pin[data-click-through] .screenshot-pin__controls { display: none; }
+
+.screenshot-pin button { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text-2); font: 600 var(--fs-micro, 11px)/1 var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; }
+.screenshot-pin button svg { width: 15px; height: 15px; stroke-width: var(--icon-stroke-width, 1.75); }
+.screenshot-pin button:hover { background: var(--wash-2); color: var(--text); }
+.screenshot-pin button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.screenshot-pin button:disabled { opacity: .45; cursor: default; }
+.screenshot-pin .screenshot-pin__primary { background: var(--green); color: var(--bg); box-shadow: var(--hl-strong); }
+.screenshot-pin .screenshot-pin__primary:hover { background: var(--green-2); color: var(--bg); }
+.screenshot-pin .screenshot-pin__grip { min-width: 20px; padding: 0; color: var(--text-3); cursor: grab; touch-action: none; }
+.screenshot-pin .screenshot-pin__grip:active { cursor: grabbing; }
+.screenshot-pin .screenshot-pin__text { min-width: 34px; }
+
+.screenshot-pin__restore { position: absolute; right: 6px; bottom: 6px; }
+.screenshot-pin .screenshot-pin__restore { width: 28px; background: color-mix(in srgb, var(--surface-1) 90%, transparent); color: var(--text); box-shadow: var(--elev-2), var(--hl-strong); }
+
+.screenshot-pin__notice { position: absolute; left: 0; right: 0; bottom: 8px; width: max-content; max-width: calc(100% - 16px); margin-inline: auto; padding: 4px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(14px); box-shadow: var(--elev-2), var(--hl);
+  color: var(--text); font-size: var(--fs-micro, 11px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.screenshot-pin__notice[data-failed] { color: var(--red); white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+
+/* Small pins keep every action on one compact row; below that the capsule wraps as a rounded panel. */
+@container (max-width: 260px) {
+  .screenshot-pin__controls { gap: 0; padding: 2px; border-radius: var(--radius-lg); }
+  .screenshot-pin button { min-width: 24px; height: 24px; padding: 0 4px; }
+  .screenshot-pin .screenshot-pin__grip { min-width: 16px; }
+  .screenshot-pin .screenshot-pin__text { min-width: 28px; }
+}

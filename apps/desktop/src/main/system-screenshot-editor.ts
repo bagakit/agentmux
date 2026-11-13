@@ -29,7 +29,7 @@ export class SystemScreenshotEditor {
   private disposed = false
 
   constructor(private readonly readAppearance: () => AppearanceConfig = () => ({ terminalTheme: 'graphite' }),
-    private readonly outputs?: { pin(image: BrowserPng, operationId: string): Promise<import('@agentmux/core').ImageResult>;
+    private readonly outputs?: { pin(image: BrowserPng, operationId: string, origin?: import('@agentmux/core').ImageOrigin): Promise<import('@agentmux/core').ImageResult>;
       inspectPin?(operationId: string): Promise<import('@agentmux/core').ImageResult>;
       copyText?(text: string): Promise<void>;
       originalFiles?(window: BrowserWindow): ScreenshotOriginalApi & { dispose?(): void } }) {
@@ -139,7 +139,10 @@ export class SystemScreenshotEditor {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')
       pngBytes(params.image!)
       if (!this.outputs) throw new Error('Pinned image presentation is unavailable in this host. Your image and editing remain available.')
-      return await this.outputs.pin(params.image!, params.operationId)
+      // The pin opens where the capture was taken, at the image's own logical size; an edit may have cropped it.
+      const source = request.input.source
+      return await this.outputs.pin(params.image!, params.operationId, source
+        ? { x: source.rect.x, y: source.rect.y, width: params.image!.width / source.scale, height: params.image!.height / source.scale } : undefined)
     }
     if (action === 'save-png') {
       if (params.logicalSize !== undefined && typeof params.logicalSize !== 'boolean') throw new Error('Choose PNG pixels or 1× logical size.')
