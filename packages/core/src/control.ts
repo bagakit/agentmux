@@ -408,6 +408,8 @@ export type AgentMuxControlSettingsResourceResult =
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; removed: true }
+/** One setting whose current value could not be read this time. The other entries remain valid; this key is unknown, not absent. */
+export type AgentMuxControlSettingIssue = { key: string; code: string; message: string }
 export type AgentMuxControlSettingEntry =
   | { key: string; kind: 'string'; value: string; default: string; enum?: string[] }
   | { key: string; kind: 'boolean'; value: boolean; default: boolean; enum?: boolean[] }
@@ -831,7 +833,7 @@ export type AgentMuxControlResult =
   | { operation: 'list.agents'; agents: AgentMuxControlExecutor[] }
   | { operation: 'list.projects'; projects: AgentMuxControlProject[] }
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
-  | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
+  | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true; issues?: AgentMuxControlSettingIssue[] }
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry; requestId?: string }
   | BrowserDefaultResult
   | BrowserProfileControlResult

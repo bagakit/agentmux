@@ -14,13 +14,22 @@ export async function executeSettingsControl(
   notes?: Pick<NotesStorageOwner, 'inspect' | 'change'>
 ): Promise<Extract<AgentMuxControlResult, { operation: 'settings.get' | 'settings.set' }>> {
   if (request.operation === 'settings.get') {
-    const directory = notes && (request.target === undefined || request.target === '' || request.target === 'notes' || request.target === 'notes.directory') ? { key: 'notes.directory', kind: 'string' as const, value: (await notes.inspect()).directory, default: defaultNotesDirectory() } : null
-    if (request.target === 'notes.directory' && directory) return { operation: request.operation, entries: [directory], partial: true }
+    const notesDirectory = async () => ({ key: 'notes.directory', kind: 'string' as const, value: (await notes!.inspect()).directory, default: defaultNotesDirectory() })
+    // Asked by name, the directory's own read failure is the answer.
+    if (request.target === 'notes.directory' && notes) return { operation: request.operation, entries: [await notesDirectory()], partial: true }
     const snapshot = owner.current, settings = scalarSettings(snapshot)
     const selected = request.target === undefined || request.target === '' ? settings
       : settings.filter(setting => setting.key === request.target || setting.key.startsWith(`${request.target}.`))
     if (!selected.length) throw unsupported(request.target ?? '')
-    return { operation: request.operation, entries: [...selected.map((setting) => setting.entry(snapshot)), ...(directory ? [directory] : [])], partial: true as const }
+    const entries = selected.map((setting) => setting.entry(snapshot))
+    if (!notes || !(request.target === undefined || request.target === '' || request.target === 'notes')) return { operation: request.operation, entries, partial: true as const }
+    // In a broad read, an unreadable Notes location is one unknown key, never every other setting.
+    try { return { operation: request.operation, entries: [...entries, await notesDirectory()], partial: true as const } }
+    catch (cause) {
+      const code = typeof (cause as { code?: unknown })?.code === 'string' ? (cause as { code: string }).code : 'NOTES_DIRECTORY_UNAVAILABLE'
+      const message = `${cause instanceof Error ? cause.message : String(cause)} The other settings were read; run amux settings inspect notes.directory to read it again.`
+      return { operation: request.operation, entries, partial: true as const, issues: [{ key: 'notes.directory', code, message }] }
+    }
   }
   if (request.key === 'notes.directory' && notes) { const current = await notes.inspect(request.requestId); const saved = await notes.change({ operationId: request.requestId, expectedDirectory: current.operation?.expectedDirectory ?? current.directory, directory: request.value }); return { operation: request.operation, requestId: request.requestId, entry: { key: request.key, kind: 'string', value: saved.directory, default: defaultNotesDirectory() } } }
   const saved = await owner.update(current => {

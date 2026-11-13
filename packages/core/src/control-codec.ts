@@ -49,6 +49,7 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxControlResult,
   type AgentMuxControlSettingEntry,
+  type AgentMuxControlSettingIssue,
   type AgentMuxControlSettingsResourceRequest,
   type AgentMuxControlSettingsResourceKind,
   type AgentMuxControlSettingsResourceItem,
@@ -1108,6 +1109,17 @@ function resourceItem(value: unknown): AgentMuxControlSettingsResourceItem {
     ...(source.readonly === undefined ? {} : { readonly: source.readonly }) }
 }
 
+/** A key that is unknown this time is named once, beside the entries that were read. */
+function settingIssues(value: unknown): AgentMuxControlSettingIssue[] {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  if (!Array.isArray(value) || value.length === 0) throw new AgentMuxError('Setting issues are invalid.', code)
+  return value.map(item => {
+    const source = object(item, 'Setting issue is invalid.', code)
+    settingsFields(source, ['key', 'code', 'message'], code)
+    return { key: id(source.key, 'Setting issue key is invalid.', code), code: id(source.code, 'Setting issue code is invalid.', code), message: text(source.message, 'Setting issue message', code) }
+  })
+}
+
 function resourceIssues(value: unknown): { id: string; message: string }[] {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const issues = settingsResourceValue(value, code)
@@ -1475,16 +1487,18 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       result: { observation: parseClientNotificationsObservation(observation, parseClientNotificationsTarget(observation.target), true) } }
   }
   if (operation === 'settings.get') {
-    settingsFields(result, ['entries', 'partial'], 'CONTROL_PROTOCOL_ERROR')
+    settingsFields(result, ['entries', 'partial', 'issues'], 'CONTROL_PROTOCOL_ERROR')
     if (result.partial !== true || !Array.isArray(result.entries) || result.entries.length === 0) {
       throw new AgentMuxError('Settings result is invalid.', 'CONTROL_PROTOCOL_ERROR')
     }
     const entries = result.entries.map(settingEntry)
-    if (new Set(entries.map(({ key }) => key)).size !== entries.length) {
+    const issues = result.issues === undefined ? undefined : settingIssues(result.issues)
+    const keys = [...entries.map(({ key }) => key), ...(issues ?? []).map(({ key }) => key)]
+    if (new Set(keys).size !== keys.length) {
       throw new AgentMuxError('Setting keys are not unique.', 'CONTROL_PROTOCOL_ERROR')
     }
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
-      result: { entries, partial: true } }
+      result: { entries, partial: true, ...(issues ? { issues } : {}) } }
   }
   if (operation === 'settings.set') {
     settingsFields(result, ['entry', 'requestId'], 'CONTROL_PROTOCOL_ERROR')
