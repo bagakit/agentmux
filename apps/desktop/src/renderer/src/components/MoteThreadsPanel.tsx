@@ -40,7 +40,8 @@ export function MoteThreadsPanel({ scope, active, onSelect }: {
       }} />
     {issue ? <p role="status" className="mote-conversation__issue">{issue}</p> : null}
     {locations.length ? <div className="mote-threads-panel__locations" role="group" aria-label="选择原工作位置">
-      {locations.map((reference, index) => <button type="button" key={JSON.stringify(reference)} onClick={() => { if (onSelect(reference)) setLocations([]) }}>位置 {index + 1} · {reference.displayWorkspaceId}</button>)}
+      {locations.map((reference, index) => <button type="button" key={JSON.stringify(reference)} onClick={() => { if (onSelect(reference)) setLocations([]) }}>
+        位置 {index + 1} · {facts.config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? '项目未确认'}</button>)}
       <button type="button" onClick={() => setLocations([])}>取消</button>
     </div> : null}
   </div>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
+import { mobileAgentStateLabel, ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
 import './agent-status.css'
 
 /** Original directory copy stays available on demand; refreshing is read-only. */
@@ -13,7 +13,8 @@ export function MobileAgentStatusDetails({ presentation, onRefresh }: {
     <div className="mobile-agent-status-details__body">
       {ordinaryUnknownAgentStatus(presentation) && <p>运行状态还没确认，不代表对话已结束，仍可打开对话。</p>}
       {!presentation && <p>目录还没有提供这个 Agent 的状态，可以刷新目录。</p>}
-      {presentation?.stateLabel && <p className="mobile-agent-status-details__label">{presentation.stateLabel}</p>}
+      {/* The same Chinese state the row shows; the Host's label is for its own English surfaces. */}
+      {presentation && <p className="mobile-agent-status-details__label">{mobileAgentStateLabel(presentation)}</p>}
       {presentation?.detail && <p className="mobile-agent-status-details__reason">{presentation.detail}</p>}
       <p className="mobile-agent-status-details__source">来自上次目录读取，刷新后在目录中查看新的状态。</p>
       {onRefresh && <button type="button" onClick={() => setNotice(onRefresh() === false
