@@ -57,6 +57,7 @@ export type MaintenanceSourceOwner = { maintain(now: number): Promise<void>; qua
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
   private maintenanceOwner: MaintenanceSourceOwner | undefined
+  private maintenancePromise: Promise<{ owner: MaintenanceSourceOwner; error: unknown } | null> | undefined
   /** In memory only: a restarted Host asks every source again. */
   private readonly deferredMaintenance = new Map<string, { until: number; waitMs: number }>()
   setMaintenanceOwner(owner: MaintenanceSourceOwner): () => void {
@@ -128,6 +129,7 @@ export class ContinuousProgressLoopManager {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     await this.checkPromise?.catch(() => {})
+    await this.maintenancePromise
     await this.store.save(this.scheduler.list())
   }
   list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] { return this.scheduler.list(target) }
@@ -287,16 +289,15 @@ export class ContinuousProgressLoopManager {
     for (const controller of this.activations.get(this.targetKey(target)) ?? []) controller.abort()
     for (const loop of this.list(target)) this.cancelDelivery(loop.loopId)
   }
-  private async goalSource(loop: ContinuousProgressLoop): Promise<{ action: 'continue' | 'pause' | 'stop'; reason: string }> {
+  private async goalSource(loop: ContinuousProgressLoop): Promise<{ action: 'continue' | 'pause' | 'stop' | 'defer'; reason: string }> {
     if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
+    let goal: GoalProgressRecord | null
     try {
-      return await readContinuousProgressTaskSource(loop.taskSource, new AbortController().signal, async goalId => {
-        const goal = await this.goals?.read(goalId)
-        if (!goal || !goal.sessionIds.includes(loop.agentSessionId)) throw new Error('The exact Session is no longer associated with this Goal. Original input and Agent are retained.')
-        return goal
-      })
-    } catch (error) { return { action: 'pause', reason: 'Reading the original Goal is unconfirmed. Its loop, outbox and manual Agent input are kept. Restore the Goal owner and inspect before resuming. ' + (error instanceof Error ? error.message : String(error)) } }
-
+      if (!this.goals) throw new Error('The original Goal owner is unavailable.')
+      goal = await this.goals.read(loop.taskSource.goalId)
+    } catch (error) { return { action: 'defer', reason: 'Reading the original Goal is unconfirmed. This occurrence is skipped; the original arrangement and manual input are kept for the next source check. ' + (error instanceof Error ? error.message : String(error)) } }
+    if (goal && !goal.sessionIds.includes(loop.agentSessionId)) return { action: 'pause', reason: 'The exact Session is no longer associated with this Goal. Original input and Agent are retained.' }
+    return decideGoalProgressSource(loop.taskSource, goal)
   }
   /**
    * Ask the maintenance source whether this due occurrence may run. A confirmed change pauses the arrangement.
@@ -320,7 +321,12 @@ export class ContinuousProgressLoopManager {
       default: return decision satisfies never
     }
   }
-  private async pauseForSource(loop: ContinuousProgressLoop, source: { action: 'continue' | 'pause' | 'stop'; reason: string }): Promise<void> {
+  private async pauseForSource(loop: ContinuousProgressLoop, source: { action: 'continue' | 'pause' | 'stop' | 'defer'; reason: string }): Promise<void> {
+    if (source.action === 'defer') {
+      this.patch(loop.loopId, { lastDecision: source.reason })
+      await this.persist(loop.loopId)
+      return
+    }
     this.patch(loop.loopId, { status: this.require(loop.loopId).status === 'stopped' || source.action === 'stop' ? 'stopped' : 'paused', lastDecision: source.reason })
     this.cancelDelivery(loop.loopId)
     await this.persist(loop.loopId)
@@ -657,19 +663,24 @@ export class ContinuousProgressLoopManager {
     for (const listener of this.listeners) listener(this.require(loopId))
   }
   async check(now?: number, onlyLoopId?: string): Promise<void> {
-    if (this.checkPromise) return await this.checkPromise
-    this.checkPromise = this.checkOnce(now, onlyLoopId).finally(() => { this.checkPromise = null })
-    return await this.checkPromise
-  }
-  private async checkOnce(now?: number, onlyLoopId?: string): Promise<void> {
     if (!this.running) return
-    const checkAt = now ?? this.now()
-    // A slow source or Agent read in maintenance must not hold back an occurrence that is already due.
-    // Its failure still reaches this check's caller once the due occurrences are done.
-    const maintenance = this.maintenanceOwner?.maintain(checkAt).then(() => null, (error: unknown) => ({ error }))
-    try { await this.runDue(checkAt, now, onlyLoopId) } finally {
-      const failed = await maintenance
-      if (failed) throw failed.error
+    const checkAt = now ?? this.now(), owner = this.maintenanceOwner
+    // Maintenance is single-flight beside scheduler checks. Holding its read must not hold
+    // checkPromise, which would prevent every subsequent due occurrence from running.
+    if (owner && !this.maintenancePromise) {
+      const maintenance = Promise.resolve().then(() => owner.maintain(checkAt))
+        .then(() => null, (error: unknown) => ({ owner, error }))
+        .finally(() => { if (this.maintenancePromise === maintenance) this.maintenancePromise = undefined })
+      this.maintenancePromise = maintenance
+    }
+    const maintenance = this.maintenancePromise
+    const checking = this.checkPromise ?? (this.checkPromise = this.runDue(checkAt, now, onlyLoopId)
+      .finally(() => { if (this.checkPromise === checking) this.checkPromise = null }))
+    try { await checking } finally {
+      // Callers still receive the original maintenance result, while later due checks run.
+      // Releasing an owner does not assign its old result to the new owner.
+      const failure = await maintenance
+      if (failure && failure.owner === this.maintenanceOwner) throw failure.error
     }
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
