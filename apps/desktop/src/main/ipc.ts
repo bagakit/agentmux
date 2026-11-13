@@ -2123,8 +2123,8 @@ export async function registerIpc(args: {
     return await browsers.switchProfile(id, profileId)
   })
   // Every surface renders Main's one committed list; the manager announces each commit once.
-  browserProfiles.onChange(({ revision, sequence, profiles, folders }) => {
-    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders })
+  browserProfiles.onChange(({ revision, sequence, profiles, folders, views }) => {
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders, views })
   })
   // Profile handlers return their refusals as data so the Renderer keeps each error code.
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
@@ -2133,10 +2133,13 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:readProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
-    return { revision: browserProfiles.listRevision(), sequence: browserProfiles.listSequence(), profiles: browserProfiles.listProfiles(), folders: browserProfiles.listFolders() }
+    return { revision: browserProfiles.listRevision(), sequence: browserProfiles.listSequence(), profiles: browserProfiles.listProfiles(), folders: browserProfiles.listFolders(), views: browserProfiles.listViews() }
   }))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
   handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: string) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
+  handleWithEvent('browser:saveProfileView', (_event, label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string) => ipcResult(() => browserProfiles.saveView(label, query, expectedRevision, viewId)))
+  handleWithEvent('browser:deleteProfileView', (_event, viewId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteView(viewId, expectedRevision)))
+  handleWithEvent('browser:bulkUpdateProfiles', (_event, items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction) => ipcResult(() => browserProfiles.bulkUpdate(items, action)))
   handleWithEvent('browser:createProfileFolder', (_event, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.createFolder(label, expectedRevision)))
   handleWithEvent('browser:renameProfileFolder', (_event, folderId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.renameFolder(folderId, label, expectedRevision)))
   handleWithEvent('browser:deleteProfileFolder', (_event, folderId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteFolder(folderId, expectedRevision)))

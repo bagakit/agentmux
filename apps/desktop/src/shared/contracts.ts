@@ -1371,7 +1371,7 @@ export type BrowserProfileSummary = {
   agentAccess?: false
 }
 
-export type BrowserProfileList = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[] }
+export type BrowserProfileList = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[]; views: import('@agentmux/core/control').BrowserProfileView[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string; tags?: string[]; folderId?: string | null; pinned?: boolean
@@ -2049,6 +2049,9 @@ export type AgentMuxDesktopApi = {
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary>
+    saveProfileView(label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<import('@agentmux/core/control').BrowserProfileView>
+    deleteProfileView(viewId: string, expectedRevision: number): Promise<void>
+    bulkUpdateProfiles(items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
     createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>

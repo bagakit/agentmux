@@ -19,6 +19,7 @@ import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-defa
 import type { BrowserProfileControlPayload, BrowserProfileControlResult } from './browser-profile-control.js'
 export * from './browser-default.js'
 export * from './browser-profile-control.js'
+export * from './browser-profile-library.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
@@ -1190,6 +1191,10 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.ls': 'short',
   'browser.profile.inspect': 'short',
   // Writes wait for the durable metadata write; delete also clears the Profile's website data.
+  'browser.profile.view.create': 'long',
+  'browser.profile.view.update': 'long',
+  'browser.profile.view.delete': 'long',
+  'browser.profile.bulk-update': 'long',
   'browser.profile.folder.create': 'long',
   'browser.profile.folder.rename': 'long',
   'browser.profile.folder.delete': 'long',

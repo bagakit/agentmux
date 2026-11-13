@@ -1,4 +1,4 @@
-import { parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
+import { parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -100,6 +100,10 @@ const pendingImportSchema = z
   })
   .strict()
 
+const viewSchema = z.custom<BrowserProfileView>(value => {
+  try { return JSON.stringify(parseBrowserProfileView(value)) === JSON.stringify(value) } catch { return false }
+}, 'Saved Profile view is not canonical')
+
 const metadataSchema = z
   .object({
     version: z.literal(BROWSER_PROFILE_METADATA_VERSION),
@@ -110,6 +114,7 @@ const metadataSchema = z
     defaultProfileId: profileIdSchema,
     profiles: z.array(profileRecordSchema).min(1),
     folders: z.array(folderSchema).optional(),
+    views: z.array(viewSchema).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
@@ -141,6 +146,11 @@ const metadataSchema = z
       })
     }
 
+    const viewIds = new Set<string>()
+    for (const [index, view] of (metadata.views ?? []).entries()) {
+      if (viewIds.has(view.id)) context.addIssue({ code: 'custom', path: ['views', index, 'id'], message: 'Duplicate saved Profile view identity' })
+      viewIds.add(view.id)
+    }
     const pendingIds = new Set<string>()
     for (const [index, pending] of metadata.pendingImports.entries()) {
       if (profileIds.has(pending.profileId)) {
@@ -173,7 +183,7 @@ type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -183,7 +193,7 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
   return { activitySources: Object.fromEntries(metadata.profiles.filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
-    revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
+    views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
 
@@ -405,6 +415,26 @@ export class BrowserProfileStore {
     })
   }
 
+  saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<{ snapshot: BrowserProfileSnapshot; view: BrowserProfileView }> {
+    return this.enqueue(async () => {
+      const name = validateBrowserProfileLabel(label), definition = parseBrowserProfileQuery(query), metadata = await this.readMetadata()
+      this.assertRevision(metadata, expectedRevision)
+      if (viewId !== undefined && !(metadata.views ?? []).some(view => view.id === viewId)) throw new Error(`Unknown saved Profile view: ${viewId}`)
+      const view = { id: viewId === undefined ? this.createUnusedProfileId(metadata) : folderIdSchema.parse(viewId), label: name, query: definition }
+      const views = viewId === undefined ? [...(metadata.views ?? []), view] : metadata.views!.map(value => value.id === viewId ? view : value)
+      return { snapshot: await this.commit({ ...metadata, views }), view: structuredClone(view) }
+    })
+  }
+
+  deleteView(viewId: string, expectedRevision: number): Promise<BrowserProfileSnapshot> {
+    return this.enqueue(async () => {
+      const id = folderIdSchema.parse(viewId), metadata = await this.readMetadata()
+      this.assertRevision(metadata, expectedRevision)
+      if (!(metadata.views ?? []).some(view => view.id === id)) throw new Error(`Unknown saved Profile view: ${id}`)
+      return this.commit({ ...metadata, views: metadata.views!.filter(view => view.id !== id) })
+    })
+  }
+
   createFolder(label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
     return this.enqueue(async () => {
       const name = validateBrowserProfileLabel(label), metadata = await this.readMetadata()
@@ -591,7 +621,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.pendingDeletes ?? []).includes(id) || (metadata.folders ?? []).some(folder => folder.id === id)
+      (metadata.pendingDeletes ?? []).includes(id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

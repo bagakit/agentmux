@@ -1,3 +1,4 @@
+import { parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
@@ -55,6 +56,7 @@ function throwPublicBrowserProfileError(message: string, cause: unknown): never 
 
 export class BrowserProfileManager implements BrowserProfileResolver {
   private folders: BrowserProfileFolder[] = []
+  private views: BrowserProfileView[] = []
   private readonly profiles = new Map<string, BrowserProfileSummary>()
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
   private readonly importWindows = new Set<BrowserWindow>()
@@ -159,6 +161,48 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   listProfiles(): BrowserProfileSummary[] {
     this.assertInitialized()
     return [...this.profiles.values()].map(profile => this.presentProfile(profile))
+  }
+
+  listViews(): BrowserProfileView[] { this.assertInitialized(); return structuredClone(this.views) }
+
+  async saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<BrowserProfileView> {
+    this.assertInitialized()
+    return this.trackMutation((async () => {
+      const { snapshot, view } = await this.store.saveView(label, parseBrowserProfileQuery(query), expectedRevision, viewId)
+      this.adopt(snapshot)
+      return view
+    })())
+  }
+
+  async deleteView(viewId: string, expectedRevision: number): Promise<void> {
+    this.assertInitialized()
+    return this.trackMutation((async () => { this.adopt(await this.store.deleteView(viewId, expectedRevision)) })())
+  }
+
+  async bulkUpdate(itemsInput: BrowserProfileSelectionItem[], actionInput: BrowserProfileBulkAction): Promise<BrowserProfileBulkItemResult[]> {
+    this.assertInitialized()
+    // Validate the entire request before a first write. Never recompute a selection from a query.
+    const items = parseBrowserProfileSelection(itemsInput), action = parseBrowserProfileBulkAction(actionInput)
+    if (action.kind === 'move' && action.folderId !== null && !this.folders.some(folder => folder.id === action.folderId)) throw new Error('The selected destination folder is unavailable. No Profile was changed.')
+    const results: BrowserProfileBulkItemResult[] = []
+    for (const item of items) {
+      try {
+        const profile = await this.configuration(item.profileId, async () => {
+          const { profile: current } = await this.store.inspectProfile(item.profileId)
+          if (current.revision !== item.expectedRevision) throw new BrowserProfileConfigurationConflict(current.revision)
+          const edit: BrowserProfileEdit = action.kind === 'pin' ? { pinned: action.pinned } : action.kind === 'move' ? { folderId: action.folderId }
+            : { tags: action.kind === 'add-tag' ? [...(current.tags ?? []), action.tag] : (current.tags ?? []).filter(tag => tag !== action.tag) }
+          const saved = await this.store.updateProfile(item.profileId, edit, item.expectedRevision)
+          this.adopt(saved.snapshot)
+          return this.presentProfile(saved.profile)
+        })
+        results.push({ ...item, outcome: 'updated', profile })
+      } catch (cause) {
+        results.push({ ...item, outcome: 'failed', code: cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string' ? cause.code : 'BROWSER_PROFILE_BULK_UPDATE_FAILED',
+          message: cause instanceof Error ? cause.message : 'This Profile change could not be confirmed. Read the original Profile before retrying.' })
+      }
+    }
+    return results
   }
 
   listFolders(): BrowserProfileFolder[] { this.assertInitialized(); return this.folders.map(folder => ({ ...folder })) }
@@ -340,6 +384,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       this.importWindows.clear()
       this.profiles.clear()
       this.folders = []
+      this.views = []
       this.defaultId = null
     })()
     return this.disposePromise
@@ -448,6 +493,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   private replace(snapshot: BrowserProfileSnapshot): void {
     this.profiles.clear()
+    this.views = structuredClone(snapshot.views)
     this.folders = snapshot.folders.map(folder => ({ ...folder }))
     for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
     this.defaultId = snapshot.defaultProfileId
@@ -462,7 +508,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.replace(snapshot)
     for (const listener of this.changeListeners) {
       // A subscriber cannot turn a committed write into a failure.
-      try { listener({ activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders() }) }
+      try { listener({ activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders(), views: this.listViews() }) }
       catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }

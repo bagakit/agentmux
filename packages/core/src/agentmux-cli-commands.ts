@@ -51,6 +51,7 @@ import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 import { parseAppWindowParams } from './public-rpc-windows.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 import { parseAgentInputSubmit } from './agent-input-submit.js'
+import { parseBrowserProfileQuery, parseBrowserProfileBulkAction, parseBrowserProfileSelection } from './browser-profile-library.js'
 import { parseBrowserProfileProxySignIn } from './browser-profile-control.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
@@ -759,7 +760,26 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('browser.task.stop', '--browser ID --run ID', 'Stop an exact task run while retaining its original progress cursor.', { '--browser': 'data', '--run': 'data' }, f => ({ browserId: id(f, '--browser', true), runId: id(f, '--run') })),
   command('browser.input.inspect', '--host-id HOST --operation-id ID', 'Read the original captured input scene and message digest; no body or live Browser grant.', { '--host-id': 'data', ...OP }, f => parseAgentInputContextCaptureReference({ hostId: id(f, '--host-id', true), operationId: id(f, '--operation-id') }), 'The Host identifies the capture owner; operation-id is the original input ID, independently of the Browser operation ID. Managed Agents may read only captures addressed to their own Session on the exact execution Host. This read supplies no author, permission or delivery conclusion.'),
   command('browser.history', '[--browser ID]', 'Read retained Browser operation history.', { '--browser': 'data' }, f => fields(f, { '--browser': 'browserId' })),
-  empty('browser.profile.ls', 'List Profiles with per-Profile configuration tokens, collection revision and snapshot sequence.'),
+  command('browser.profile.ls', '[--query JSON | --view ID]', 'Read Profiles, folders and saved views with exact configuration tokens and query scope.', { '--query': 'data', '--view': 'data' }, f => {
+    if (f.values.has('--query') && f.values.has('--view')) invalid('Choose --query or --view, not both.')
+    return { ...(f.values.has('--query') ? { query: parseBrowserProfileQuery(jsonValue(value(f, '--query', true)!, '--query')) } : {}), ...fields(f, { '--view': 'viewId' }) }
+  }, 'The full list discovers views and configuration collection revision. --query accepts {search?,folderId?,tag?,status?:running|idle|unknown,route?:system|direct|proxy,lastUsed?:day|week|month|unknown,sort?:name|recent|observed-time}. null folderId means unfiled. Status and time are partial native observations; missing is unknown, never idle or unused. A filtered reply includes filter.query/evaluatedAt; it is not the full catalog. Deleted folder scope refuses instead of expanding. Reads open no website.'),
+  ...(['create', 'update'] as const).map(action => command(`browser.profile.view.${action}`, `${action === 'update' ? '--view ID ' : ''}--label TEXT --query JSON --expected-revision N`, 'Save a named Profile query without saving a selection or changing any Profile.',
+    { '--view': 'data', '--label': 'data', '--query': 'data', '--expected-revision': 'value' }, f => {
+      const expectedRevision = Number(value(f, '--expected-revision', true))
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) invalid('--expected-revision needs the configuration collection revision from profile ls.')
+      if (action === 'create' && f.values.has('--view')) invalid('Create assigns a new saved-view identity; do not supply --view.')
+      return { label: value(f, '--label', true)!, query: parseBrowserProfileQuery(jsonValue(value(f, '--query', true)!, '--query')), expectedRevision,
+        ...(action === 'update' ? { viewId: id(f, '--view', true) } : {}) }
+    }, 'Views are listed by browser profile ls. Apply one with profile ls --view ID. This saves only its query; matching Profiles are resolved when read. Activity checkpoints do not invalidate the configuration collection revision. Unknown storage keeps the original view and Profile data.')),
+  command('browser.profile.view.delete', '--view ID --expected-revision N', 'Delete only one saved query, retaining all Profiles and website data.', { '--view': 'data', '--expected-revision': 'value' }, f => {
+    const expectedRevision = Number(value(f, '--expected-revision', true))
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) invalid('--expected-revision needs the configuration collection revision from profile ls.')
+    return { viewId: id(f, '--view', true), expectedRevision }
+  }),
+  command('browser.profile.bulk-update', '--items JSON --action JSON', 'Apply organization changes to an explicit frozen set of exact Profile IDs and tokens.', { '--items': 'data', '--action': 'data' }, f => ({
+    items: parseBrowserProfileSelection(jsonValue(value(f, '--items', true)!, '--items')), action: parseBrowserProfileBulkAction(jsonValue(value(f, '--action', true)!, '--action'))
+  }), 'Items are a nonempty unique array [{profileId,expectedRevision}] using each exact Profile revision token, never a query or the collection revision. Action is {kind:pin,pinned:boolean}, {kind:move,folderId:ID|null}, or {kind:add-tag|remove-tag,tag:TEXT}. Metadata only: no network, credential, permission, environment, open, close or delete action. Results preserve every input ID/token in order, individually updated or failed. One failure does not cancel other items. Do not blindly replay a lost receipt; inspect original IDs to confirm current configuration first.'),
   command('browser.profile.inspect', '--profile ID', 'Read one Browser Profile and the open and saved Browsers that use it.', { '--profile': 'data' },
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' complete:false means saved Tabs could not be read; the list then names only open Browsers.'),
   command('browser.profile.create', '--label TEXT', 'Create an empty Browser Profile with its own sign-ins and site data.', { '--label': 'data' },

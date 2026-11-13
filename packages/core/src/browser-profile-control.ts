@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileSelectionItem, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from './browser-profile-library.js'
 
 /**
  * Public Browser Profile control. The Desktop Main Profile owner holds every fact; Core only carries
@@ -7,6 +8,7 @@ import { AgentMuxError } from './errors.js'
  */
 export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
+  'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.copy', 'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
   'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
@@ -22,7 +24,11 @@ export type BrowserProfileControlEdit = { label?: string; hue?: number | null; n
   environment?: BrowserProfileEnvironment | null; tags?: string[]; folderId?: string | null; pinned?: boolean }
 
 export type BrowserProfileControlPayload =
-  | { operation: 'browser.profile.ls' }
+  | { operation: 'browser.profile.ls'; query?: BrowserProfileQuery; viewId?: string }
+  | { operation: 'browser.profile.view.create'; label: string; query: BrowserProfileQuery; expectedRevision: number }
+  | { operation: 'browser.profile.view.update'; viewId: string; label: string; query: BrowserProfileQuery; expectedRevision: number }
+  | { operation: 'browser.profile.view.delete'; viewId: string; expectedRevision: number }
+  | { operation: 'browser.profile.bulk-update'; items: BrowserProfileSelectionItem[]; action: BrowserProfileBulkAction }
   | { operation: 'browser.profile.folder.create'; label: string; expectedRevision: number }
   | { operation: 'browser.profile.folder.rename'; folderId: string; label: string; expectedRevision: number }
   | { operation: 'browser.profile.folder.delete'; folderId: string; expectedRevision: number }
@@ -361,7 +367,10 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean }
 
 export type BrowserProfileControlResult =
-  | { operation: 'browser.profile.ls'; revision: number; sequence: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[] }
+  | { operation: 'browser.profile.ls'; revision: number; sequence: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; filter?: { query: BrowserProfileQuery; evaluatedAt: number; viewId?: string } }
+  | { operation: 'browser.profile.view.create' | 'browser.profile.view.update'; revision: number; view: BrowserProfileView }
+  | { operation: 'browser.profile.view.delete'; revision: number; viewId: string; deleted: true }
+  | { operation: 'browser.profile.bulk-update'; revision: number; results: BrowserProfileBulkItemResult[] }
   | { operation: 'browser.profile.folder.create'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.rename'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.delete'; revision: number; folderId: string; deleted: true; unassignedProfileIds: string[] }
@@ -435,13 +444,14 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   const operation = source.operation
   if (!isBrowserProfileControlOperation(operation)) fail(code, 'Browser Profile operation is invalid.')
   const fields: Record<BrowserProfileControlOperation, readonly string[]> = {
-    'browser.profile.ls': [], 'browser.profile.folder.create': ['label', 'expectedRevision'],
+    'browser.profile.ls': ['query', 'viewId'],
+    'browser.profile.view.create': ['label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['label', 'expectedRevision'],
     'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
     'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId']
   }
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
-  for (const key of fields[operation]) if (!Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
+  for (const key of fields[operation]) if (operation !== 'browser.profile.ls' && !Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
   switch (operation) {
     case 'browser.profile.proxy-sign-in.set': return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), signIn: parseBrowserProfileProxySignIn(source.signIn) }
     case 'browser.profile.folder.create': case 'browser.profile.folder.rename': {
@@ -452,7 +462,17 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
         : { operation, label, expectedRevision }
     }
     case 'browser.profile.folder.delete': return { operation, folderId: identity(source.folderId, code, 'Folder ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile list revision') }
-    case 'browser.profile.ls': return { operation }
+    case 'browser.profile.ls':
+      if (source.query !== undefined && source.viewId !== undefined) fail(code, 'Choose an exact saved view or a query, not both.')
+      return { operation, ...(source.query === undefined ? {} : { query: parseBrowserProfileQuery(source.query) }), ...(source.viewId === undefined ? {} : { viewId: identity(source.viewId, code, 'Saved view ID') }) }
+    case 'browser.profile.view.create': case 'browser.profile.view.update': {
+      const label = text(source.label, code, 'View name', 128)
+      if (!label.trim() || label !== label.trim()) fail(code, 'A view needs a name without surrounding whitespace.')
+      return { operation, label, query: parseBrowserProfileQuery(source.query), expectedRevision: count(source.expectedRevision, code, 'Expected configuration collection revision'),
+        ...(operation === 'browser.profile.view.update' ? { viewId: identity(source.viewId, code, 'Saved view ID') } : {}) } as BrowserProfileControlPayload
+    }
+    case 'browser.profile.view.delete': return { operation, viewId: identity(source.viewId, code, 'Saved view ID'), expectedRevision: count(source.expectedRevision, code, 'Expected configuration collection revision') }
+    case 'browser.profile.bulk-update': return { operation, items: parseBrowserProfileSelection(source.items), action: parseBrowserProfileBulkAction(source.action) }
     case 'browser.profile.copy': {
       const label = text(source.label, code, 'Browser Profile label', 512)
       if (!label.trim()) fail(code, 'Browser Profile label is required.')
@@ -565,7 +585,8 @@ export type BrowserProfileControlResultBody = OmitEach<BrowserProfileControlResu
 export function parseBrowserProfileControlResult(operation: BrowserProfileControlOperation, value: unknown): BrowserProfileControlResultBody {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
-    'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders'],
+    'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders', 'views', 'filter'],
+    'browser.profile.view.create': ['revision', 'view'], 'browser.profile.view.update': ['revision', 'view'], 'browser.profile.view.delete': ['revision', 'viewId', 'deleted'], 'browser.profile.bulk-update': ['revision', 'results'],
     'browser.profile.folder.create': ['revision', 'folder'], 'browser.profile.folder.rename': ['revision', 'folder'],
     'browser.profile.folder.delete': ['revision', 'folderId', 'deleted', 'unassignedProfileIds'], 'browser.profile.inspect': ['revision', 'sequence', 'profile', 'usage'],
     'browser.profile.create': ['revision', 'profile'], 'browser.profile.copy': ['revision', 'sourceProfileId', 'profile'], 'browser.profile.update': ['revision', 'profile'],
@@ -574,7 +595,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     'browser.profile.network.check': ['profileId', 'check']
   }
   const row = record(value, keys[operation], code, 'Browser Profile result')
-  for (const key of keys[operation]) if (!Object.hasOwn(row, key)) fail(code, `Browser Profile result ${key} is required.`)
+  for (const key of keys[operation]) if (key !== 'filter' && !Object.hasOwn(row, key)) fail(code, `Browser Profile result ${key} is required.`)
   if (operation === 'browser.profile.proxy-sign-in.set') {
     if (row.saved !== true || typeof row.reconnected !== 'boolean') fail(code, 'Proxy sign-in save receipt is invalid.')
     return { profileId: identity(row.profileId, code, 'Browser Profile ID'), saved: true, reconnected: row.reconnected }
@@ -603,11 +624,40 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     case 'browser.profile.ls': {
       if (!Array.isArray(row.profiles)) fail(code, 'Browser Profile list is invalid.')
       const profiles = row.profiles.map(item => profile(item, code))
-      if (new Set(profiles.map(item => item.id)).size !== profiles.length || profiles.filter(item => item.isDefault).length !== 1) fail(code, 'Browser Profile list is inconsistent.')
+      if (new Set(profiles.map(item => item.id)).size !== profiles.length || (row.filter ? profiles.filter(item => item.isDefault).length > 1 : profiles.filter(item => item.isDefault).length !== 1)) fail(code, 'Browser Profile list is inconsistent.')
       if (!Array.isArray(row.folders)) fail(code, 'Profile folders are invalid.')
       const folders = row.folders.map(item => folder(item, code)), folderIds = new Set(folders.map(item => item.id))
       if (folderIds.size !== folders.length || profiles.some(item => item.folderId !== undefined && !folderIds.has(item.folderId))) fail(code, 'Profile folder references are inconsistent.')
-      return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profiles, folders }
+      if (!Array.isArray(row.views)) fail(code, 'Saved Profile views are invalid.')
+      const views = row.views.map(item => parseBrowserProfileView(item, code))
+      if (new Set(views.map(view => view.id)).size !== views.length) fail(code, 'Saved view identities are duplicated.')
+      let filter: { query: BrowserProfileQuery; evaluatedAt: number; viewId?: string } | undefined
+      if (row.filter !== undefined) {
+        const selected = record(row.filter, ['query', 'evaluatedAt', 'viewId'], code, 'Profile query scope')
+        filter = { query: parseBrowserProfileQuery(selected.query, code), evaluatedAt: count(selected.evaluatedAt, code, 'Profile query time'),
+          ...(selected.viewId === undefined ? {} : { viewId: identity(selected.viewId, code, 'Saved view ID') }) }
+      }
+      return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profiles, folders, views, ...(filter ? { filter } : {}) }
+    }
+    case 'browser.profile.view.create': case 'browser.profile.view.update': return { revision, view: parseBrowserProfileView(row.view, code) }
+    case 'browser.profile.view.delete':
+      if (row.deleted !== true) fail(code, 'Saved view deletion is unconfirmed.')
+      return { revision, viewId: identity(row.viewId, code, 'Saved view ID'), deleted: true }
+    case 'browser.profile.bulk-update': {
+      if (!Array.isArray(row.results) || !row.results.length) fail(code, 'Bulk Profile results are missing.')
+      const results: BrowserProfileBulkItemResult[] = row.results.map(value => {
+        const item = record(value, ['profileId', 'expectedRevision', 'outcome', 'profile', 'code', 'message'], code, 'Bulk Profile result')
+        const target = { profileId: identity(item.profileId, code, 'Profile ID'), expectedRevision: identity(item.expectedRevision, code, 'Input configuration token') }
+        if (item.outcome === 'updated' && item.code === undefined && item.message === undefined) {
+          const updated = profile(item.profile, code)
+          if (updated.id !== target.profileId) fail(code, 'Bulk item returned a different Profile.')
+          return { ...target, outcome: 'updated', profile: updated }
+        }
+        if (item.outcome === 'failed' && item.profile === undefined) return { ...target, outcome: 'failed', code: identity(item.code, code, 'Failure code'), message: text(item.message, code, 'Failure reason') }
+        return fail(code, 'Bulk Profile result outcome is invalid.')
+      })
+      if (new Set(results.map(item => item.profileId)).size !== results.length) fail(code, 'Bulk Profile result identities are duplicated.')
+      return { revision, results }
     }
     case 'browser.profile.folder.create': case 'browser.profile.folder.rename': return { revision, folder: folder(row.folder, code) }
     case 'browser.profile.folder.delete': {
@@ -628,6 +678,22 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
 
 /** The answer must be about the Profile this request named. */
 export function assertBrowserProfileControlTarget(request: BrowserProfileControlPayload, result: BrowserProfileControlResult): void {
+  if (request.operation === 'browser.profile.bulk-update') {
+    if (result.operation !== request.operation || result.results.length !== request.items.length || result.results.some((item, index) => item.profileId !== request.items[index]!.profileId || item.expectedRevision !== request.items[index]!.expectedRevision)) fail('CONTROL_PROTOCOL_ERROR', 'Bulk result does not preserve the exact requested selection and tokens.')
+    return
+  }
+  if (request.operation === 'browser.profile.view.create' || request.operation === 'browser.profile.view.update') {
+    if (result.operation !== request.operation || !('view' in result) || result.view.label !== request.label || JSON.stringify(result.view.query) !== JSON.stringify(request.query) || (request.operation === 'browser.profile.view.update' && result.view.id !== request.viewId)) fail('CONTROL_PROTOCOL_ERROR', 'Saved view receipt belongs to another view or query.')
+    return
+  }
+  if (request.operation === 'browser.profile.view.delete') {
+    if (result.operation !== request.operation || result.viewId !== request.viewId) fail('CONTROL_PROTOCOL_ERROR', 'Saved view deletion belongs to another view.')
+    return
+  }
+  if (request.operation === 'browser.profile.ls') {
+    if (result.operation !== request.operation || (request.query !== undefined && JSON.stringify(result.filter?.query) !== JSON.stringify(request.query)) || (request.viewId !== undefined && result.filter?.viewId !== request.viewId) || (request.query === undefined && request.viewId === undefined && result.filter !== undefined)) fail('CONTROL_PROTOCOL_ERROR', 'Profile list scope differs from the requested query.')
+    return
+  }
   if (request.operation === 'browser.profile.folder.create' || request.operation === 'browser.profile.folder.rename') {
     if (result.operation !== request.operation || !('folder' in result) || result.folder.label !== request.label ||
       (request.operation === 'browser.profile.folder.rename' && result.folder.id !== request.folderId)) fail('CONTROL_PROTOCOL_ERROR', 'Folder result belongs to another folder or name.')

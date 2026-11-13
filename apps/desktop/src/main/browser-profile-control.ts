@@ -1,4 +1,4 @@
-import { AgentMuxError, isBrowserProfileControlOperation, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxNameActor,
+import { queryBrowserProfiles, AgentMuxError, isBrowserProfileControlOperation, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxNameActor,
   type BrowserProfileControlOperation } from '@agentmux/core/control'
 import { ZodError } from 'zod'
 import type { BrowserProfileSummary } from '../shared/contracts.js'
@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -70,8 +70,26 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       const receipt = await owned(() => ports.profiles.deleteFolder(request.folderId, request.expectedRevision))
       return { operation: request.operation, revision: ports.profiles.listRevision(), deleted: true, ...receipt }
     }
-    case 'browser.profile.ls':
-      return { operation: request.operation, revision: ports.profiles.listRevision(), sequence: ports.profiles.listSequence(), profiles: ports.profiles.listProfiles(), folders: ports.profiles.listFolders() }
+    case 'browser.profile.view.create': case 'browser.profile.view.update': {
+      const view = await owned(() => ports.profiles.saveView(request.label, request.query, request.expectedRevision, request.operation === 'browser.profile.view.update' ? request.viewId : undefined))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), view }
+    }
+    case 'browser.profile.view.delete':
+      await owned(() => ports.profiles.deleteView(request.viewId, request.expectedRevision))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), viewId: request.viewId, deleted: true }
+    case 'browser.profile.bulk-update': {
+      const results = await owned(() => ports.profiles.bulkUpdate(request.items, request.action))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), results }
+    }
+    case 'browser.profile.ls': {
+      const profiles = ports.profiles.listProfiles(), folders = ports.profiles.listFolders(), views = ports.profiles.listViews()
+      const view = request.viewId === undefined ? undefined : views.find(value => value.id === request.viewId)
+      if (request.viewId !== undefined && !view) throw new AgentMuxError('The exact saved Profile view is unavailable. Read profile ls for current view IDs.', 'BROWSER_PROFILE_VIEW_NOT_FOUND')
+      const query = view?.query ?? request.query, evaluatedAt = Date.now()
+      return { operation: request.operation, revision: ports.profiles.listRevision(), sequence: ports.profiles.listSequence(),
+        profiles: query === undefined ? profiles : queryBrowserProfiles(profiles, folders, query, evaluatedAt), folders, views,
+        ...(query === undefined ? {} : { filter: { query, evaluatedAt, ...(view ? { viewId: view.id } : {}) } }) }
+    }
     case 'browser.profile.inspect': {
       const profile = existing(ports, request.profileId)
       const revision = ports.profiles.listRevision()
