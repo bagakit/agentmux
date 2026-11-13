@@ -1,0 +1,12 @@
+/* The first message sits in the conversation's own message row; one quiet line under it names the stage.
+   The only motion is the message settling once; the status mark is a still dot, never a spinner loop. */
+.mote-first-message { display: grid; gap: 6px; animation: mote-first-message-settle 220ms var(--ease-enter, ease-out) both; }
+@keyframes mote-first-message-settle { from { opacity: 0; translate: 0 4px; } }
+.mote-first-message__status { display: flex; align-items: center; gap: 8px; margin: 0; padding-inline: 4px; min-height: 28px;
+  color: var(--text-3); font-size: var(--fs-small, 13px); }
+.mote-first-message__mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green, currentColor); opacity: .8; }
+.mote-first-message[data-stage='unconfirmed'] .mote-first-message__mark { background: var(--text-3); opacity: .6; }
+.mote-first-message__status button { margin-inline-start: auto; min-height: 28px; padding: 2px 10px; border: 0; border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text-2); font: inherit; cursor: pointer; }
+.mote-first-message__status button:disabled { opacity: .55; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .mote-first-message { animation: none; } }

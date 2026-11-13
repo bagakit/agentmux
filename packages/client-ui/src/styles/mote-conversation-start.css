@@ -15,6 +15,11 @@
 .mote-start__greeting { min-width: 0; max-width: 100%; }
 .mote-start__eyebrow { color: var(--text-3); font-size: var(--fs-meta, 12px); letter-spacing: .03em; }
 .mote-start__greeting h1 { margin: 8px 0 0; font-size: clamp(23px, 4.3cqw, 32px); line-height: 1.4; font-weight: 550; letter-spacing: -.025em; text-wrap: balance; overflow-wrap: anywhere; }
+/* While the first message is in flight it fills the space above the composer and sits at its bottom edge,
+   the same place the conversation shows the newest message; the backdrop recedes. */
+.mote-start__pending { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; padding-block: 16px 12px; }
+.mote-start[data-pending] .mote-start__aura { opacity: .3; }
+.mote-start[data-pending] .mote-start__grid { opacity: .15; }
 .mote-start__composer { min-width: 0; width: 100%; }
 .mote-start__composer .composer { width: 100%; }
 .mote-workface__period { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px 20px 24px; }

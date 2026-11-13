@@ -6,11 +6,14 @@ import '../styles/mote-conversation-start.css'
 /** A scene over the original identity, Composer and history owners; no launch or role state lives here.
  * The backdrop is pure CSS around this Mote's portrait: no decoded artwork, no paint containment band,
  * and at most one composited layer in motion. The app brand stays a small mark beside the wordmark. */
-export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, mode = 'start', active = true, drafting = false }: {
+export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, pending, mode = 'start', active = true, drafting = false }: {
   name: string | undefined; portrait: ReactNode; brand?: ReactNode; composer: ReactNode; history?: ReactNode
   notice?: ReactNode; actions?: ReactNode; mode?: 'start' | 'new' | 'unconfirmed'; active?: boolean
   /** True while the host's draft has text; the scene recedes without searching the composer subtree. */
   drafting?: boolean
+  /** The person's first message while its Main is created. It replaces the greeting and history and sits right
+   * above the composer, where the conversation shows it, so taking over does not move it. */
+  pending?: ReactNode
 }) {
   // A Topic whose title is still being read has no name yet; the scene keeps the Mote wordmark alone.
   const label = typeof name === 'string' ? name.trim() : ''
@@ -18,20 +21,21 @@ export function MoteConversationStart({ name, portrait, brand, composer, history
   // The ref is set after commit, so a repeated development render still sees the first showing.
   const shown = useRef(false), entering = active && !shown.current
   useEffect(() => { if (active) shown.current = true }, [active])
-  return <section className="mote-start" data-mode={mode} data-active={active} data-entering={entering || undefined} data-drafting={drafting || undefined} aria-label={label ? `${label} · 开始对话` : '开始对话'}>
+  return <section className="mote-start" data-mode={mode} data-active={active} data-entering={entering || undefined} data-drafting={drafting || undefined}
+    data-pending={pending ? true : undefined} aria-label={label ? `${label} · 开始对话` : '开始对话'}>
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
       <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}
         {label ? <span className="mote-start__name">{label}</span> : null}{label.toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions}</header>
-      <div className="mote-start__invitation">
+      {pending ? <div className="mote-start__pending">{pending}</div> : <div className="mote-start__invitation">
         <div className="mote-start__portrait"><span className="mote-start__halo" aria-hidden="true" />{portrait}</div>
         <div className="mote-start__greeting"><span className="mote-start__eyebrow">{mode === 'new' ? '同一个伙伴，新的一轮' : '你的想法，从这里开始'}</span>
           <h1>{mode === 'unconfirmed' ? '想法先写在这里。' : mode === 'new' ? '接下来，想聊点什么？' : '今天，想一起做点什么？'}</h1>
         </div>
-      </div>
+      </div>}
       <div className="mote-start__composer">{composer}</div>
       {notice && <div className="mote-start__notice">{notice}</div>}
-      {history && <div className="mote-start__history">{history}</div>}
+      {history && !pending && <div className="mote-start__history">{history}</div>}
     </div>
   </section>
 }
