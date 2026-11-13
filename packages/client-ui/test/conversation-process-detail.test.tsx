@@ -133,3 +133,18 @@ it('an unavailable exact version remains a retryable original target instead of 
   await eventually(() => expect(read).toHaveBeenCalledTimes(2))
   expect(read.mock.calls[0]![0]).toEqual(read.mock.calls[1]![0])
 })
+
+it('deferred step rows read like eager steps: recorded time, shared source label, no status wall', async () => {
+  const f = await fixture(), { host, render } = surface()
+  function Consumer() {
+    const owner = useConversationView(f.client, f.ref, true)
+    return owner.snapshot ? view(owner.snapshot, owner.readProcessDetail) : <p>Opening</p>
+  }
+  await render(<Consumer />)
+  await eventually(() => expect(host.querySelector('[data-deferred-process-id="captured-tool"]')).not.toBeNull())
+  const row = (id: string) => host.querySelector<HTMLElement>(`[data-deferred-process-id="${id}"] > .log-row, [data-deferred-process-id="${id}"] > button`)!
+  for (const id of ['native-tool', 'captured-tool']) expect(row(id)?.textContent).not.toContain('Status not recorded')
+  expect(host.querySelector('[data-deferred-process-id="native-tool"]')!.textContent).not.toContain('Native record')
+  // The captured record has a recorded span, so its row carries the time an eager step shows.
+  expect(host.querySelector('[data-deferred-process-id="captured-tool"] .log-row__time')).not.toBeNull()
+})
