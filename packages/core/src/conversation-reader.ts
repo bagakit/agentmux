@@ -112,7 +112,7 @@ export function conversationReadNativeSource(input: ConversationTimelineReadInpu
 const nativeSource = (port: ConversationReaderPort): ConversationSourceRef => {
   const history = port.descriptor.history, providerId = history?.providerId
   if (!providerId) return fail('The retained Session has no original Provider identity.', 'UNKNOWN_AGENT_SESSION')
-  return history?.nativeHandle?.kind === 'provider' ? { kind: 'native', providerId, nativeSessionId: history.nativeHandle.sessionId }
+  return history?.nativeHandle?.kind === 'provider' ? { kind: 'native', providerId: history.nativeHandle.providerId, nativeSessionId: history.nativeHandle.sessionId }
     : { kind: 'native-unavailable', providerId }
 }
 function initialCoverage(source: ConversationSourceRef): ConversationSourceCoverage {

@@ -1,3 +1,5 @@
+import { sourceReviewItems, recoveryRecordClosed } from './publication-source-review.js'
+import type { ConnectionSourceReview, ConnectionSourceReviewAction } from '@agentmux/core/connections'
 import { queryInputPosition, queryInputPage, queryInputPending, queryInputReceipt, type QueryInputPosition } from './publication-query-input.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId, reconcileQueryFeedback } from './publication-query-feedback.js'
@@ -127,6 +129,20 @@ export type PublicationPageOptions = {
 const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
+
+/** Exact-record resource reads can omit page identity. Reuse only the same
+ * version's original Provider fact, retained before its asynchronous body read. */
+function admissionProofs(unit: ConversationUnit, retained?: PublicationOperation['sourceProofs']): NonNullable<PublicationOperation['sourceProofs']> {
+  return unit.records.map(record => {
+    const proof = { record: record.reference!, revision: record.revision,
+      semanticRevision: isCompleteConversationRecord(record) ? conversationContentRevision(record) : record.revision,
+      protocolIdentity: record.order.kind === 'native-page' && record.order.recordIdentity === 'protocol',
+      closed: recoveryRecordClosed(record, unit) }
+    const original = retained?.find(value => same(value.record, proof.record) && value.revision === proof.revision && value.semanticRevision === proof.semanticRevision)
+    return original?.protocolIdentity ? { ...proof, protocolIdentity: true } : proof
+  })
+}
+
 const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) => encode([source.providerId, source.nativeSessionId])
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
@@ -212,7 +228,7 @@ const recoverableGapPredicate = "json_extract(decision_json,'$.kind')='gap' AND 
 const rateLimitSourcePredicate = "state='not-applied' AND json_extract(operation_json,'$.reason')='rate-limited' AND json_type(operation_json,'$.prepared')='object' AND json_extract(operation_json,'$.rateLimit.source.kind')='message' AND json_extract(operation_json,'$.rateLimit.source.attempt')=json_extract(operation_json,'$.attempt')"
 const rateLimitOtherScope = "CASE WHEN json_extract(operation_json,'$.rateLimit.scopeKey')=json_extract(operation_json,'$.rateLimitScopes.request') THEN COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),'') ELSE json_extract(operation_json,'$.rateLimitScopes.request') END"
 export type NativePublicationRecovery = {
-  id: string; phase: 'clearing' | 'qualifying' | 'scanning' | 'validating' | 'replaying' | 'complete' | 'blocked'; effectAfter: number; validatedAfter: number; nativeScanned?: true; original: ConversationCheckpoint;
+  id: string; phase: 'clearing' | 'qualifying' | 'scanning' | 'validating' | 'awaiting-review' | 'replaying' | 'complete' | 'blocked'; reviewOperationId?: string; reviewApproved?: true; effectAfter: number; validatedAfter: number; nativeScanned?: true; original: ConversationCheckpoint;
   range: NonNullable<ConversationChangesPage['nativeRecoveryRange']>; checkpoint: ConversationCheckpoint
 }
 /** Both candidate selection and the final claim consume the same durable resource window. */
@@ -237,6 +253,10 @@ export class PublicationStore {
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, recovery_json TEXT NOT NULL,
         PRIMARY KEY(binding_id,binding_revision)
       );
+      CREATE TABLE IF NOT EXISTS connector_publication_native_review (
+        binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, operation_id TEXT NOT NULL, review_json TEXT NOT NULL,
+        PRIMARY KEY(binding_id,binding_revision,operation_id)
+      );
       CREATE TABLE IF NOT EXISTS connector_publication_native_effect_proof (
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, record_key TEXT NOT NULL,
         semantic_revision TEXT NOT NULL, ordinal INTEGER NOT NULL,
@@ -244,7 +264,7 @@ export class PublicationStore {
       );
       CREATE TABLE IF NOT EXISTS connector_publication_native_recovery_record (
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, record_key TEXT NOT NULL,
-        record_json TEXT NOT NULL, revision TEXT NOT NULL, semantic_revision TEXT NOT NULL, conflict INTEGER NOT NULL DEFAULT 0,
+        record_json TEXT NOT NULL, revision TEXT NOT NULL, semantic_revision TEXT NOT NULL, conflict INTEGER NOT NULL DEFAULT 0, identity_qualified INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY(binding_id,binding_revision,record_key)
       );
       CREATE TABLE IF NOT EXISTS connector_publication_frontier (
@@ -322,6 +342,9 @@ export class PublicationStore {
         WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle'
           AND state IN ('pending','dispatching','unknown');
     `)
+    // Preserve T2 in-flight rows; its complete preflight qualified public identities.
+    if (!database.prepare('PRAGMA table_info(connector_publication_native_recovery_record)').all().some(column => column.name === 'identity_qualified'))
+      database.exec('ALTER TABLE connector_publication_native_recovery_record ADD COLUMN identity_qualified INTEGER NOT NULL DEFAULT 1')
     if (!database.prepare('PRAGMA table_info(connector_publication_decision)').all().some(c => c.name === 'decision_json'))
       database.exec('ALTER TABLE connector_publication_decision ADD COLUMN decision_json TEXT')
     database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_content ON connector_publication_decision(binding_id,binding_revision)
@@ -575,16 +598,23 @@ export class PublicationStore {
   private saveNativeRecovery(boundary: PublicationBoundary, value: NativePublicationRecovery): void {
     this.database.prepare('INSERT INTO connector_publication_native_recovery VALUES(?,?,?) ON CONFLICT(binding_id,binding_revision) DO UPDATE SET recovery_json=excluded.recovery_json').run(...scopeKey(boundary), encode(value))
   }
-  beginNativeRecovery(boundary: PublicationBoundary, range: NonNullable<ConversationChangesPage['nativeRecoveryRange']>, expected: ConversationCheckpoint, authorized: () => boolean): void {
+  beginNativeRecovery(boundary: PublicationBoundary, range: NonNullable<ConversationChangesPage['nativeRecoveryRange']>, expected: ConversationCheckpoint, authorized: () => boolean, reviewOperationId?: string): void {
     this.transaction(() => {
-      if (!authorized() || !this.nativeReplayQualified(boundary)) throw new AgentMuxError('The original Binding or complete original effect evidence changed.', 'PUBLICATION_SOURCE_CONFLICT')
+      if (!authorized() || !reviewOperationId && !this.nativeReplayQualified(boundary)) throw new AgentMuxError('The original Binding or complete original effect evidence changed.', 'PUBLICATION_SOURCE_CONFLICT')
       const current = this.nativeRecovery(boundary)
-      if (current && current.phase !== 'complete') return
-      const original = this.retainedCheckpoint(boundary)!
+      if (current && current.phase !== 'complete' && !(reviewOperationId && ['blocked', 'awaiting-review'].includes(current.phase))) throw new AgentMuxError('The original source recovery is still active. Its range is retained.', 'PUBLICATION_SOURCE_CONFLICT')
+      const original = this.retainedCheckpoint(boundary)!, native = original.frontier.cuts.find(cut => cut.kind === 'native')
+      if (!native || native.kind !== 'native' || range.from.agentSessionId !== boundary.agentSessionId || range.through.agentSessionId !== boundary.agentSessionId || !same(range.from.source, native.checkpoint.source) || !same(range.through.source, native.checkpoint.source) || original.sourceHostId !== expected.sourceHostId) throw new AgentMuxError('The offered range belongs to another original native source.', 'PUBLICATION_SOURCE_CONFLICT')
       if (!same(original.frontier.cuts.find(cut => cut.kind === 'native'), expected.frontier.cuts.find(cut => cut.kind === 'native'))) return
       const source = { kind: 'native' as const, ...range.from.source }, checkpoint: ConversationCheckpoint = { ...ref(boundary), sourceHostId: original.sourceHostId,
         frontier: { hostId: original.sourceHostId, agentSessionId: boundary.agentSessionId, scope: { sources: [source] }, cuts: [{ kind: 'native', checkpoint: range.from }] } }
-      const value: NativePublicationRecovery = { id: digest([scopeKey(boundary), range]), phase: 'clearing', effectAfter: 0, validatedAfter: 0, original, range, checkpoint }
+      const value: NativePublicationRecovery = { ...(reviewOperationId ? { reviewOperationId } : {}), id: digest([scopeKey(boundary), range]), phase: 'clearing', effectAfter: 0, validatedAfter: 0, original, range, checkpoint }
+      if (reviewOperationId) {
+        if (this.nativeReview(boundary, reviewOperationId)) return
+        const through = { ...checkpoint, frontier: { ...checkpoint.frontier, cuts: [{ kind: 'native' as const, checkpoint: range.through }] } }
+        this.saveNativeReview(boundary, { operationId: reviewOperationId, state: 'preparing', target: { connectionId: boundary.connectionId, bindingId: boundary.bindingId, bindingRevision: boundary.revision, application: boundary.application, externalConversationId: boundary.externalConversationId }, original, from: checkpoint, through,
+          publicRecords: 0, excludedRecords: 0, unmappedEffects: 0, unmappedOperations: [], first: null, last: null, items: [], next: null })
+      }
       this.saveNativeRecovery(boundary, value)
       this.saveDecision(boundary, 'native-recovery-' + value.id, 'current', { kind: 'native-recovery', original, range })
     })
@@ -592,11 +622,17 @@ export class PublicationStore {
   stageNativeRecovery(boundary: PublicationBoundary, expected: NativePublicationRecovery, page: ConversationChangesPage, units: readonly ConversationUnit[], authorized: () => boolean): void {
     this.transaction(() => {
       if (!authorized() || !same(this.nativeRecovery(boundary), expected) || expected.phase !== 'scanning') throw new AgentMuxError('The exact original recovery phase changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
-      const insert = this.database.prepare('INSERT INTO connector_publication_native_recovery_record(binding_id,binding_revision,record_key,record_json,revision,semantic_revision) VALUES(?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,record_key) DO UPDATE SET conflict=CASE WHEN revision!=excluded.revision THEN 1 ELSE conflict END')
+      const insert = this.database.prepare('INSERT INTO connector_publication_native_recovery_record(binding_id,binding_revision,record_key,record_json,revision,semantic_revision,identity_qualified) VALUES(?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,record_key) DO UPDATE SET conflict=CASE WHEN revision!=excluded.revision THEN 1 ELSE conflict END,identity_qualified=MIN(identity_qualified,excluded.identity_qualified)')
+      const preview = sourceReviewItems(units, boundary, expected.reviewOperationId ? this.nativeReview(boundary, expected.reviewOperationId)!.through : page.checkpoint, !!expected.reviewOperationId)
+      const publicKeys = new Set(preview.items.map(item => conversationRecordId(item.anchor.record)))
       for (const unit of units) for (const record of unit.records) {
         if (record.reference?.source.kind !== 'native') continue
         if (!isCompleteConversationRecord(record)) throw new AgentMuxError('Recovery requires complete original source records.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
-        insert.run(...scopeKey(boundary), record.id, encode(record.reference), record.revision, conversationContentRevision(record))
+        insert.run(...scopeKey(boundary), record.id, encode(record.reference), record.revision, conversationContentRevision(record), !publicKeys.has(record.id) ? 2 : record.order.kind === 'native-page' && record.order.recordIdentity === 'protocol' && recoveryRecordClosed(record, unit) ? 1 : 0)
+      }
+      if (expected.reviewOperationId) {
+        const review = this.nativeReview(boundary, expected.reviewOperationId)!
+        this.saveNativeReview(boundary, { ...review, publicRecords: review.publicRecords + preview.items.length, excludedRecords: review.excludedRecords + preview.excluded, first: review.first ?? preview.items[0]?.anchor ?? null, last: preview.items.at(-1)?.anchor ?? review.last })
       }
       this.saveNativeRecovery(boundary, { ...expected, checkpoint: page.checkpoint })
     })
@@ -634,6 +670,11 @@ export class PublicationStore {
           })) {
             const gap: ConnectionDeliveryGap = { gapId: 'native-effect-unqualified-' + operation.operationId, source: { kind: 'native', ...value.range.from.source }, code: 'CONVERSATION_RECOVERY_EFFECT_UNCONFIRMED', reason: 'version-unavailable' }
             this.saveDecision(boundary, gap.gapId, value.id, { kind: 'gap', state: 'unresolved', gap })
+            if (value.reviewOperationId) {
+              const review = this.nativeReview(boundary, value.reviewOperationId)!
+              this.saveNativeReview(boundary, { ...review, unmappedEffects: review.unmappedEffects + 1, unmappedOperations: review.unmappedOperations.length < 100 ? [...review.unmappedOperations, operation.operationId] : review.unmappedOperations })
+              continue
+            }
             this.saveNativeRecovery(boundary, { ...value, phase: 'blocked' }); return
           }
           for (const proof of proofs) insert.run(...scopeKey(boundary), conversationRecordId(proof.record), proof.semanticRevision, Number(row.ordinal))
@@ -647,37 +688,91 @@ export class PublicationStore {
       if (this.database.prepare('SELECT 1 FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND ordinal>? LIMIT 1').get(...scopeKey(boundary), value.effectAfter)) {
         this.saveNativeRecovery(boundary, { ...value, phase: 'qualifying', validatedAfter: 0 }); return
       }
-      const rows = this.database.prepare('SELECT rowid,record_key,record_json,semantic_revision,conflict FROM connector_publication_native_recovery_record WHERE binding_id=? AND binding_revision=? AND rowid>? ORDER BY rowid LIMIT 100').all(...scopeKey(boundary), value.validatedAfter)
+      const rows = this.database.prepare('SELECT rowid,record_key,record_json,semantic_revision,conflict,identity_qualified FROM connector_publication_native_recovery_record WHERE binding_id=? AND binding_revision=? AND rowid>? ORDER BY rowid LIMIT 100').all(...scopeKey(boundary), value.validatedAfter)
       const original = this.database.prepare('SELECT semantic_revision FROM connector_publication_native_effect_proof WHERE binding_id=? AND binding_revision=? AND record_key=?')
       for (const row of rows) {
         const previous = original.get(...scopeKey(boundary), String(row.record_key))
-        if (!row.conflict && (!previous || previous.semantic_revision === row.semantic_revision)) continue
+        if (row.identity_qualified === 2) continue
+        if (!row.conflict && row.identity_qualified && (!previous || previous.semantic_revision === row.semantic_revision)) continue
         const record = JSON.parse(String(row.record_json)) as ConversationItemRef
-        this.database.prepare('INSERT OR IGNORE INTO connector_publication_native_version_gap VALUES(?,?,?,?)').run(...scopeKey(boundary), String(row.record_key), String(row.semantic_revision))
+        this.database.prepare('INSERT OR IGNORE INTO connector_publication_native_version_gap VALUES(?,?,?,?)').run(...scopeKey(boundary), String(row.record_key), row.conflict || !row.identity_qualified ? '*' : String(row.semantic_revision))
         const gap: ConnectionDeliveryGap = { gapId: 'native-recovery-version-' + digest([scopeKey(boundary), row.record_key]), record, code: 'CONVERSATION_RECOVERY_VERSION_UNCONFIRMED', reason: 'version-unavailable' }
         this.saveDecision(boundary, gap.gapId, String(row.semantic_revision), { kind: 'gap', state: 'unresolved', gap })
       }
       if (rows.length) { this.saveNativeRecovery(boundary, { ...value, validatedAfter: Number(rows.at(-1)!.rowid) }); return }
+      if (value.reviewOperationId && !value.reviewApproved) {
+        const review = this.nativeReview(boundary, value.reviewOperationId)!
+        const offered = { ...review, state: review.unmappedEffects ? 'blocked' as const : 'ready' as const }
+        this.saveNativeReview(boundary, { ...offered, digest: createHash('sha256').update(encode([scopeKey(boundary), offered.original, offered.from, offered.through, offered.publicRecords, offered.excludedRecords, offered.unmappedEffects, value.effectAfter])).digest('hex') })
+        this.saveNativeRecovery(boundary, { ...value, phase: 'awaiting-review' }); return
+      }
+      if (value.reviewOperationId && this.nativeReview(boundary, value.reviewOperationId)?.unmappedEffects) {
+        this.saveNativeRecovery(boundary, { ...value, phase: 'blocked' }); return
+      }
       const current = this.retainedCheckpoint(boundary)!, before = value.original.frontier.cuts.find(c => c.kind === 'native'), actual = current.frontier.cuts.find(c => c.kind === 'native')
       if (!same(before, actual)) throw new AgentMuxError('The retained native frontier changed during recovery; its original range is retained.', 'PUBLICATION_CHECKPOINT_CONFLICT')
       const checkpoint = { ...current, frontier: { ...current.frontier, cuts: current.frontier.cuts.map(cut => cut.kind === 'native' ? { kind: 'native' as const, checkpoint: value.range.from } : cut) } }
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(checkpoint), ...scopeKey(boundary), 'unified')
+      if (value.reviewOperationId) {
+        const authorizedOrigin = { ...current, frontier: { ...current.frontier, cuts: current.frontier.cuts.map(cut => cut.kind === 'native' ? value.checkpoint.frontier.cuts.find(c => c.kind === 'native')! : cut) } }
+        this.database.prepare('INSERT INTO connector_publication_frontier VALUES(?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key) DO UPDATE SET checkpoint_json=excluded.checkpoint_json').run(...scopeKey(boundary), 'authorized-origin', encode(authorizedOrigin))
+      }
       this.saveNativeRecovery(boundary, { ...value, phase: 'replaying' })
     })
   }
   private nativeRecoveryUnits(boundary: PublicationBoundary, units: readonly ConversationUnit[]): readonly ConversationUnit[] {
     if (units.some(unit => unit.records.some(record => !isCompleteConversationRecord(record)))) throw new AgentMuxError('Recovery requires complete original source records.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
-    const conflict = this.database.prepare('SELECT 1 FROM connector_publication_native_version_gap WHERE binding_id=? AND binding_revision=? AND record_key=? AND revision=?')
+    const conflict = this.database.prepare("SELECT 1 FROM connector_publication_native_version_gap WHERE binding_id=? AND binding_revision=? AND record_key=? AND revision IN (?,'*')")
     return units.filter(unit => !unit.records.some(record => isCompleteConversationRecord(record) && record.reference?.source.kind === 'native' && conflict.get(...scopeKey(boundary), record.id, conversationContentRevision(record))))
   }
   recoveryOrigin(boundary: PublicationBoundary): ConversationCheckpoint | null {
-    const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'origin')
+    const row = this.database.prepare("SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key IN ('authorized-origin','origin') ORDER BY CASE source_key WHEN 'authorized-origin' THEN 0 ELSE 1 END LIMIT 1").get(...scopeKey(boundary))
     return row ? parseConversationCheckpoint(JSON.parse(String(row.checkpoint_json)), ref(boundary)) : boundary.sourceFrontier ?? null
   }
   /** Replaying a source may only reconcile effects whose complete original
    * membership and identity were actually admitted, including unknown/prepared. */
   nativeReplayQualified(boundary: PublicationBoundary): boolean {
     return !!this.recoveryOrigin(boundary)?.frontier.cuts.some(cut => cut.kind === 'native' && cut.checkpoint.scopeEvidence)
+  }
+  nativeReview(boundary: PublicationBoundary, operationId: string): ConnectionSourceReview | null {
+    const row = this.database.prepare('SELECT review_json FROM connector_publication_native_review WHERE binding_id=? AND binding_revision=? AND operation_id=?').get(...scopeKey(boundary), operationId)
+    return row ? JSON.parse(String(row.review_json)) as ConnectionSourceReview : null
+  }
+  private saveNativeReview(boundary: PublicationBoundary, review: ConnectionSourceReview): void {
+    this.database.prepare('INSERT INTO connector_publication_native_review VALUES(?,?,?,?) ON CONFLICT(binding_id,binding_revision,operation_id) DO UPDATE SET review_json=excluded.review_json').run(...scopeKey(boundary), review.operationId, encode(review))
+  }
+  reviewItems(boundary: PublicationBoundary, review: ConnectionSourceReview, items: ConnectionSourceReview['items']): ConnectionSourceReview['items'] {
+    if (review.state === 'preparing' || review.unmappedEffects || this.nativeRecovery(boundary)?.reviewOperationId !== review.operationId) return items
+    const find = this.database.prepare(`SELECT candidate.conflict,candidate.identity_qualified,candidate.semantic_revision,proof.semantic_revision AS previous,original.operation_id
+      FROM connector_publication_native_recovery_record candidate LEFT JOIN connector_publication_native_effect_proof proof
+        ON proof.binding_id=candidate.binding_id AND proof.binding_revision=candidate.binding_revision AND proof.record_key=candidate.record_key
+      LEFT JOIN connector_publication_operation original ON original.ordinal=proof.ordinal
+      WHERE candidate.binding_id=? AND candidate.binding_revision=? AND candidate.record_key=?`)
+    return items.map(item => {
+      const row = find.get(...scopeKey(boundary), conversationRecordId(item.anchor.record))
+      if (!row || row.conflict || !row.identity_qualified || row.previous && row.previous !== row.semantic_revision) return item
+      return { ...item, disposition: row.previous ? 'existing-effect' as const : 'candidate' as const, ...(row.operation_id ? { existingOperationId: String(row.operation_id) } : {}) }
+    })
+  }
+  decideNativeReview(boundary: PublicationBoundary, action: Extract<ConnectionSourceReviewAction, { action: 'approve' | 'cancel' }>, authorized: () => boolean): ConnectionSourceReview {
+    return this.transaction(() => {
+      const review = this.nativeReview(boundary, action.operationId), value = this.nativeRecovery(boundary)
+      if (!authorized() || !review || value?.reviewOperationId !== action.operationId) throw new AgentMuxError('The exact original review or Binding authority changed.', 'PUBLICATION_SOURCE_CONFLICT')
+      if (review.acceptedDigest) {
+        if (action.action !== 'approve' || action.digest !== review.acceptedDigest) throw new AgentMuxError('This original range already has a retained authorization receipt.', 'PUBLICATION_SOURCE_CONFLICT')
+        return review
+      }
+      if (action.digest !== review.digest || action.action === 'approve' && !['ready', 'blocked'].includes(review.state)) throw new AgentMuxError('Inspect the same original completed offer and confirm its exact digest.', 'PUBLICATION_SOURCE_CONFLICT')
+      if (action.action === 'cancel') {
+        const result = { ...review, state: 'cancelled' as const }; this.saveNativeReview(boundary, result)
+        this.saveNativeRecovery(boundary, { ...value, phase: 'blocked' }); return result
+      }
+      const result = { ...review, acceptedDigest: action.digest, state: review.unmappedEffects ? 'blocked' as const : 'approved' as const }
+      this.saveNativeReview(boundary, result)
+      this.saveNativeRecovery(boundary, { ...value, reviewApproved: true, phase: review.unmappedEffects ? 'blocked' : 'qualifying', validatedAfter: 0 })
+      this.saveDecision(boundary, 'native-range-grant-' + action.operationId, action.digest, { kind: 'native-range-grant', original: review.original, from: review.from, through: review.through })
+      return result
+    })
   }
   /** Lift frozen cuts, or the explicitly authorized creation's first real native origin. Never replace a saved cut. */
   checkpoint(boundary: PublicationBoundary, sourceHostId: string, origin?: ConversationCheckpoint): ConversationCheckpoint {
@@ -865,6 +960,7 @@ export class PublicationStore {
   commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions): void {
     const page = parseConversationChangesPageForWindow(value, { ...ref(boundary), checkpoint: after, limit: 100, maxBytes: value.budgetBytes })
     const units = this.nativeRecoveryUnits(boundary, parseConversationUnitsForPage(options.units, page))
+    const recovering = !!page.nativeRecoveryRange && same(page.nativeRecoveryRange, this.nativeRecovery(boundary)?.range)
     const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id), ...(options.speakers?.has(unit.event.id) ? { attributed: true } : {}) }) }))
     const questionRecords = units.flatMap(unit => unit.records.flatMap(record => {
       const reference = record.reference
@@ -882,7 +978,7 @@ export class PublicationStore {
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
       this.reconcileCapturedStartGap(boundary)
       if (options.queryFeedback) projectQueryFeedback(this, boundary, units, options.queryAuthorized)
-      const replyProjections = options.replyMetadata ? this.acceptReplyFacts(boundary, units) : []
+      const replyProjections = options.replyMetadata ? this.acceptReplyFacts(boundary, units, recovering) : []
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
@@ -930,7 +1026,7 @@ export class PublicationStore {
               continue
             }
           }
-          this.saveDecision(boundary, gap.gapId, revision, { kind: 'gap', state: 'unresolved', sourceKey: key, gap })
+          this.saveDecision(boundary, gap.gapId, revision, { kind: 'gap', state: 'unresolved', sourceKey: key, gap, ...(recovering ? { nativeRecoveryId: this.nativeRecovery(boundary)!.id } : {}) })
         }
       }
       for (const decision of decisions) {
@@ -974,7 +1070,7 @@ export class PublicationStore {
         // A later Core coalescence can be a payload no-op. Retain its exact
         // representation link in the original decision owner without rewriting
         // historical operations, prepared bytes or platform receipts.
-        if (!mappingConflict) this.saveDecision(boundary, 'event-' + digest(unit.event.id), unit.event.revision, { kind: 'event-representation', event: { id: unit.event.id, revision: unit.event.revision }, records: references, projectionId })
+        if (!mappingConflict) this.saveDecision(boundary, 'event-' + digest(unit.event.id), unit.event.revision, { kind: 'event-representation', event: { id: unit.event.id, revision: unit.event.revision }, records: references, ...(plan.gaps.some(gap => gap.part) ? { sourceProofs: admissionProofs(unit) } : {}), projectionId })
         // Resolve only decisions superseded by these accepted original versions.
         const relatedGaps = unit.records.flatMap(record => this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.part.record')=?").all(...scopeKey(boundary), encode(record.reference)))
         for (const row of relatedGaps) {
@@ -989,8 +1085,12 @@ export class PublicationStore {
           // A replacement window does not change this missing part's original read cut.
           const retained = this.database.prepare("SELECT 1 FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND json_extract(decision_json,'$.state')='unresolved'")
             .get(...scopeKey(boundary), stored.gapId, gap.part?.recordRevision ?? unit.event.revision)
-          if (retained) continue
-          this.saveDecision(boundary, stored.gapId, gap.part?.recordRevision ?? unit.event.revision, { kind: 'gap', gap: stored, state: 'unresolved', ...(inputAlias ? { inputAlias } : {}) })
+          if (retained) {
+            if (recovering) this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.nativeRecoveryId',?) WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND json_extract(decision_json,'$.state')='unresolved'")
+              .run(this.nativeRecovery(boundary)!.id, ...scopeKey(boundary), stored.gapId, gap.part?.recordRevision ?? unit.event.revision)
+            continue
+          }
+          this.saveDecision(boundary, stored.gapId, gap.part?.recordRevision ?? unit.event.revision, { kind: 'gap', gap: stored, state: 'unresolved', ...(recovering ? { nativeRecoveryId: this.nativeRecovery(boundary)!.id } : {}), ...(inputAlias ? { inputAlias } : {}) })
         }
         for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
         if (mappingConflict) continue
@@ -999,7 +1099,7 @@ export class PublicationStore {
         // Keep its original captured representation instead of dropping that receipt.
         const inputWireOnly = !plan.pieces.length && unit.records.length > 0 && unit.records.every(record => isCompleteConversationRecord(record) && record.original.kind === 'native' && record.original.item.kind === 'user-message' && conversationNativeInputWitness(record)?.key !== undefined)
         if (!inputWireOnly) this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
-          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id), undefined, options.replyMetadata)
+          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id), undefined, options.replyMetadata, recovering)
         // A turn result supplements ordinary content. Its own fragment cannot replace
         // or withdraw a public answer that shares the accepted original event.
         if (plan.failure || this.latestProjection(projectionId + '-failure')) this.queueRepresentation(boundary, projectionId + '-failure', unit,
@@ -1081,7 +1181,7 @@ export class PublicationStore {
     this.saveDecision(boundary, 'reply-snapshot-' + digest([projection.projectionId, snapshot.metadata]), digest([projection, snapshot.witnesses]), { kind: 'reply-snapshot', projection, ...snapshot })
     return snapshot.metadata
   }
-  private acceptReplyFacts(boundary: PublicationBoundary, units: readonly ConversationUnit[]): Set<string> {
+  private acceptReplyFacts(boundary: PublicationBoundary, units: readonly ConversationUnit[], recovering = false): Set<string> {
     const projections = new Set<string>()
     for (const record of units.flatMap(unit => unit.records)) {
       if (!isCompleteConversationRecord(record)) continue
@@ -1090,6 +1190,10 @@ export class PublicationStore {
       const id = 'reply-fact-' + digest(witness.recordKey)
       const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'").get(...scopeKey(boundary), id)
       const prior = row ? JSON.parse(String(row.decision_json)) as ReplyFact : undefined, item = record.original.item
+      // A rewritten observation cannot re-establish precedence among old turn
+      // facts. Keep their exact accepted versions and ordering. A new public
+      // response may carry its own directly scoped response usage.
+      if (recovering && (prior || item.kind !== 'assistant-message' || item.metrics?.scope !== 'response' || item.turnOutcome || !item.contentParts.some(part => part.contentEligibility === 'public' && (part.kind === 'text' || part.kind === 'resource')))) continue
       if (!prior && !item.metrics && !item.turnOutcome) continue
       const fact: ReplyFact = { kind: 'reply-fact', ...witness, ...(item.metrics ? { metrics: item.metrics } : {}), ...(item.turnOutcome && witness.turnKey ? { outcome: item.turnOutcome.status } : {}) }
       if (same(prior, fact)) continue
@@ -1101,10 +1205,15 @@ export class PublicationStore {
           AND json_extract(decision_json,'$.${field}')=?`).all(...scopeKey(boundary), key)) projections.add((JSON.parse(String(linked.decision_json)) as ReplyProjection).projectionId)
       }
     }
-    return projections
+    return recovering ? new Set() : projections
   }
-  private projectReplyMetadata(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, exists: boolean): ReplyPublicationMetadata | undefined {
+  private projectReplyMetadata(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, exists: boolean, recovering = false): ReplyPublicationMetadata | undefined {
     const prior = this.replyProjection(boundary, projectionId)
+    if (recovering && exists) {
+      const original = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal DESC')
+        .all(projectionId).map(row => this.read(row)!).find(operation => operation.effect === 'upsert' && operation.payload.kind === 'speech')
+      return original?.payload.kind === 'speech' ? original.payload.replyMetadata : undefined
+    }
     // Upgrades cannot enroll a previously frozen request, even when its source reappears.
     if (!prior && exists) return
     const piece = [...plan.pieces].reverse().find(piece => piece.text && !piece.image && !piece.file)
@@ -1143,13 +1252,13 @@ export class PublicationStore {
     this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
       .run(operationId, projectionId, revision, operation.fragment.ordinal, ...scopeKey(boundary), encode(operation), operation.state)
   }
-  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage, metadataEnabled?: true): void {
+  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage, metadataEnabled?: true, recovering = false, originalProofs?: PublicationOperation['sourceProofs']): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.failure && !plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
     const payload = plan.failure ?? representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
     if (!question && !originalMessage && !plan.failure && (metadataEnabled || this.replyProjection(boundary, projectionId))) {
-      const metadata = this.projectReplyMetadata(boundary, projectionId, unit, plan, latest.length > 0)
+      const metadata = this.projectReplyMetadata(boundary, projectionId, unit, plan, latest.length > 0, recovering)
       withReplyMetadata(payload, metadata)
     }
     const represented = question && plan.text && (plan.complete || plan.gaps.every(gap => gap.reason === 'resource-unavailable'))
@@ -1171,6 +1280,7 @@ export class PublicationStore {
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     // A form status update has its own original receipt; unchanged media must not be sent again.
     if (question && payload.kind === 'sequence' && parts.length === latest.length && latest.every((operation, index) => operation.effect === 'upsert' && !['cancelled', 'superseded'].includes(operation.state) && same(operation.payload, parts[index]))) return
+    const sourceProofs = admissionProofs(unit, originalProofs)
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
     for (let ordinal = 0; ordinal < count; ordinal++) {
       const prior = previous.get(ordinal), body = parts[ordinal]
@@ -1191,14 +1301,7 @@ export class PublicationStore {
         const presentationTime = originalMessage?.createdAt ?? (sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
           ? sourceTime : prior?.presentationTime ?? Date.now())
         const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
-          sourceProofs: unit.records.map(record => {
-            const protocolIdentity = record.order.kind === 'native-page' && record.order.recordIdentity === 'protocol'
-            if (!isCompleteConversationRecord(record)) return { record: record.reference!, revision: record.revision, semanticRevision: record.revision, protocolIdentity, closed: false }
-            const original = record.original, provenance = original.item.conversation, target = provenance?.sameEvent
-            const closedRelations = !provenance || Object.keys(provenance).every(key => key === 'nativeInvocationScope' || key === 'sameEvent')
-            return { record: record.reference!, revision: record.revision, semanticRevision: conversationContentRevision(record), protocolIdentity,
-              closed: closedRelations && (original.kind !== 'native' || !original.item.questionRequest && !original.item.questionAnswers) && (!target || unit.records.some(member => same(member.reference, target))) }
-          }),
+          sourceProofs,
           ...(speaker && (payload.kind === 'speech' || payload.kind === 'question') ? { speaker } : {}),
           ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, ...(originalMessage.notificationId ? { notificationId: originalMessage.notificationId } : {}) } } : {}),
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
@@ -1262,7 +1365,7 @@ export class PublicationStore {
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
-  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker): boolean {
+  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, metadataEnabled?: true): boolean {
     if (!gap.anchor || !gap.part || !gap.event) return false
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
@@ -1277,9 +1380,9 @@ export class PublicationStore {
       // parts were gaps. Recovery updates that intent, never creates a second
       // event/message or substitutes a newer original record.
       if (!represented) return false
-      const { projectionId, records } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[] }
+      const { projectionId, records, sourceProofs } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[]; sourceProofs?: PublicationOperation['sourceProofs'] }
       const before = this.latestProjection(projectionId)?.operationId
-      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], undefined, records), fragmentBytes, event, records, undefined, fragmentText, speaker)
+      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], undefined, records), fragmentBytes, event, records, undefined, fragmentText, speaker, undefined, metadataEnabled, typeof JSON.parse(String(row.decision_json)).nativeRecoveryId === 'string', sourceProofs)
       for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
       let recovered = false
       for (const piece of plan.pieces) {

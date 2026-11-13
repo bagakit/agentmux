@@ -61,6 +61,7 @@ export class NativeSourceSnapshots {
       throw fail('The original snapshot manifest could not be verified.')
     return m
   }
+  async metadata(reference: string): Promise<NativeSnapshotManifest> { return this.manifest(this.identity(reference, 'read')) }
   async recoveryFailure(source: FileHandle, scope: string): Promise<AgentMuxError | undefined> {
     try {
       const saved = JSON.parse(await readFile(join(this.directory, 'recovery-failure.json'), 'utf8')) as { value: { revision: 1; origin: Stamp; dataGeneration: number; scope: string; code: string; message: string }; signature: string }

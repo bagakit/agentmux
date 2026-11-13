@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import type { AgentProviderSessionHistoryContext } from './types.js'
 import { NativeSourceSnapshots, type NativeSnapshotManifest } from './native-source-snapshot.js'
-export type NativeSnapshotCursor = { version: 1; kind: 'scope' | 'range'; reference: string; cursor: string; origin: NativeSnapshotManifest['origin']; recovery?: { start: number; index: { ino: number; size: number; mtimeMs: number; ctimeMs: number } } }
+export type NativeSnapshotCursor = { version: 1; kind: 'scope' | 'range'; reference: string; cursor: string; scopeStart?: number; origin: NativeSnapshotManifest['origin']; recovery?: { start: number; index: { ino: number; size: number; mtimeMs: number; ctimeMs: number } } }
 export function nativeSnapshotStore(context: AgentProviderSessionHistoryContext): NativeSourceSnapshots {
   if (!context.nativeSnapshotDirectory || !context.nativeSnapshotSecret || !context.agentSessionId || !context.transcriptPath)
     throw new AgentMuxError('The original private native snapshot owner is unavailable. Ordinary reading remains available.', 'AGENT_SESSION_HISTORY_SNAPSHOT_UNAVAILABLE')
@@ -23,7 +23,7 @@ export function decodeNativeSnapshotCursor(context: AgentProviderSessionHistoryC
   if (!timingSafeEqual(actual, expected)) throw invalid()
   try {
     const result = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as NativeSnapshotCursor
-    if (result.version !== 1 || !['scope', 'range'].includes(result.kind) || typeof result.reference !== 'string' || typeof result.cursor !== 'string' || !result.origin) throw invalid()
+    if (result.version !== 1 || !['scope', 'range'].includes(result.kind) || typeof result.reference !== 'string' || typeof result.cursor !== 'string' || !result.origin || result.scopeStart !== undefined && (!Number.isSafeInteger(result.scopeStart) || result.scopeStart < 0)) throw invalid()
     return result
   } catch { throw invalid() }
 }

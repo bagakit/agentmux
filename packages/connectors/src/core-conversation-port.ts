@@ -26,7 +26,7 @@ export function createPublicationConversationPort(clients: () => readonly { host
     },
     checkpoint: async (reference, signal) => {
       let page = await original(reference.hostId).conversationCheckpoint({ ...reference, hostId: 'local', nativeSnapshot: reference.nativeSnapshot ?? 'scope' }, { signal })
-      if (!page.checkpoint.frontier.cuts.some(cut => cut.kind === 'native')) page = await original(reference.hostId).conversationCheckpoint({ hostId: 'local', agentSessionId: reference.agentSessionId, ...(reference.nativePosition ? { nativePosition: reference.nativePosition } : {}) }, { signal })
+      if (!page.checkpoint.frontier.cuts.some(cut => cut.kind === 'native')) page = await original(reference.hostId).conversationCheckpoint({ hostId: 'local', agentSessionId: reference.agentSessionId, ...(reference.nativePosition ? { nativePosition: reference.nativePosition } : {}), ...(reference.nativeSource ? { nativeSource: reference.nativeSource } : {}) }, { signal })
       return parseConversationCheckpointPage({ ...page, hostId: reference.hostId, checkpoint: { ...page.checkpoint, hostId: reference.hostId } }, reference)
     },
     release: async input => { const forwarded = forwardConversationInput(input); await original(input.hostId).releaseConversationView(forwarded.input) },

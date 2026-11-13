@@ -378,7 +378,7 @@ const NATIVE_FIELDS = {
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
   'agent.conversation.snapshot.ls': ['hostId', 'agentSessionId', 'source', 'after', 'limit'],
   'agent.conversation.snapshot.release': ['hostId', 'agentSessionId', 'source', 'reference'],
-  'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot'],
+  'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot', 'nativeSource'],
   'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'recover', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
@@ -1024,6 +1024,7 @@ export class AgentMuxRpcService {
       }
       if (caller && method === 'connection.delivery.source.recover') {
         const request = parseConnectionDeliveryParams(method, input)
+        if (request.review) throw new AgentMuxError('Reviewing a new sharing range requires the original authenticated user or device.', 'CONTROL_PERMISSION_DENIED')
         if (!owner.bindings || !owner.delivery?.recoverSource) throw new AgentMuxError('Original source recovery is unavailable on this Host.', 'CONTROL_UNAVAILABLE')
         const binding = (await owner.bindings.inspect({ bindingId: request.bindingId, revision: request.bindingRevision })).binding
         if (!binding || binding.bindingId !== request.bindingId || binding.revision !== request.bindingRevision || binding.connectionId !== request.connectionId ||

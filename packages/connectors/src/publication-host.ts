@@ -1,3 +1,4 @@
+import { sourceReviewItems } from './publication-source-review.js'
 import { PublicationQueryInputObserver, type PublicationQueryInputPort } from './publication-query-input.js'
 import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
@@ -428,7 +429,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(adapter.replyMetadata ? { replyMetadata: true } : {}), ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true, ...(this.options.queryInput ? { queryAuthorized: (query: import('@agentmux/core/connections').ConnectionIngressMessage) => this.options.queryInput!.authorized(query, binding) } : {}) } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = replaying ? undefined : page.window.view!; lane.viewId = replaying ? undefined : page.window.id; lane.read = { after }
       if (replaying) await this.releaseRead(binding, state)
-      if (nativeFailure && !recoveryAttempted && ['AGENT_SESSION_HISTORY_REWRITTEN', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'].includes(nativeFailure.code ?? '') && !['clearing', 'qualifying', 'scanning', 'validating', 'replaying', 'blocked'].includes(this.store.nativeRecovery(binding)?.phase ?? '') && this.store.nativeReplayQualified(binding)) {
+      if (nativeFailure && !recoveryAttempted && ['AGENT_SESSION_HISTORY_REWRITTEN', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'].includes(nativeFailure.code ?? '') && !['clearing', 'qualifying', 'scanning', 'validating', 'awaiting-review', 'replaying', 'blocked'].includes(this.store.nativeRecovery(binding)?.phase ?? '') && this.store.nativeReplayQualified(binding)) {
         const origin = this.store.recoveryOrigin(binding)
         if (origin) {
           recoveryAttempted = true
@@ -664,7 +665,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           const speakers = await this.speakers(reference, [unit], signal)
           const resolved = await this.until(this.resolve(reference, [unit], signal, binding, adapter, gap.part), signal)
           signal.throwIfAborted()
-          this.store.recoverPart(binding, gap, unit, resolved, () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id))
+          this.store.recoverPart(binding, gap, unit, resolved, () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id), adapter.replyMetadata)
         }
       }).catch(() => { /* The exact original gap remains durable; no input or effect is replayed. */ })
         .finally(() => {
@@ -995,6 +996,51 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const authority = this.authority({ bindingId, revision })
     return authority === null ? { state: 'unavailable', reason: 'storage-unconfirmed' } : authority.authorized ? { state: 'unknown', reason: 'not-started' } : { state: 'disabled' }
   }
+  private async reviewSource(binding: RoomBinding, action: NonNullable<import('@agentmux/core/connections').ConnectionDeliverySourceRecoverInput['review']>, context: RoomBindingCallContext) {
+    const lane = action.action === 'inspect' ? undefined : this.ensureLane(binding), reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane?.abort.signal ?? new AbortController().signal
+    let review = this.store.nativeReview(binding, action.operationId)
+    if (action.action === 'prepare' && !review) {
+      const original = this.store.retainedCheckpoint(binding), native = original?.frontier.cuts.find(cut => cut.kind === 'native')
+      if (!original || !native || native.kind !== 'native') throw new AgentMuxError('The original exact source cut is unavailable.', 'PUBLICATION_SOURCE_CONFLICT')
+      const captured = parseConversationCheckpointPage(await this.options.conversation.checkpoint({ ...reference, nativePosition: 'beginning', nativeSnapshot: 'range', nativeSource: native.checkpoint.source }, signal), reference)
+      const cuts = captured.checkpoint.frontier.cuts.filter(cut => cut.kind === 'native')
+      if (captured.sourceHostId !== original.sourceHostId || cuts.length !== 1 || cuts[0]!.kind !== 'native' || conversationSourceKey({ kind: 'native', ...cuts[0]!.checkpoint.source }) !== conversationSourceKey({ kind: 'native', ...native.checkpoint.source })) throw new AgentMuxError('The exact immutable source range is unavailable; ordinary reading and input remain available.', 'AGENT_SESSION_HISTORY_SNAPSHOT_UNAVAILABLE')
+      const checkpoint: ConversationCheckpoint = { ...captured.checkpoint, frontier: { ...captured.checkpoint.frontier, scope: { sources: cuts.map(cut => ({ kind: 'native' as const, ...cut.checkpoint.source })) }, cuts } }
+      const input = { ...reference, checkpoint, limit: 1, maxBytes: CONVERSATION_MAX_READ_BYTES }
+      const reading: { view?: string | undefined } = {}
+      try {
+        const page = await this.retainPage(lane!, reading, this.options.conversation.changes(input, signal).then(page => parseConversationChangesPageForWindow(page, input)))
+        if (!page.nativeRecoveryRange || page.coverage.some(source => source.current === 'unavailable' || source.gaps.length)) throw new AgentMuxError('The exact immutable original range could not be acquired.', 'AGENT_SESSION_HISTORY_SNAPSHOT_UNAVAILABLE')
+        await context.assertCurrent?.()
+        this.store.beginNativeRecovery(binding, page.nativeRecoveryRange, original, () => this.authorized(binding), action.operationId)
+      } finally { await this.releaseRead(binding, reading) }
+      review = this.store.nativeReview(binding, action.operationId); this.wake(lane!)
+    }
+    if (!review) throw new AgentMuxError('The original source review operation is unknown. Retain its original identity.', 'PUBLICATION_SOURCE_CONFLICT')
+    if (action.action === 'approve' || action.action === 'cancel') {
+      await context.assertCurrent?.()
+      review = this.store.decideNativeReview(binding, action, () => action.action === 'cancel' ? !!this.options.bindings.readExact(binding.bindingId, binding.revision) : this.authorized(binding)); this.wake(lane!)
+    }
+    if (action.action === 'inspect') {
+      const checkpoint = action.after ?? review.from
+      if (checkpoint.hostId !== review.from.hostId || checkpoint.agentSessionId !== review.from.agentSessionId || checkpoint.sourceHostId !== review.from.sourceHostId || checkpoint.frontier.cuts.length !== 1 || checkpoint.frontier.cuts[0]?.kind !== 'native' || conversationSourceKey(checkpoint.frontier.scope.sources[0]!) !== conversationSourceKey(review.from.frontier.scope.sources[0]!)) throw new AgentMuxError('The review continuation belongs to another original source.', 'PUBLICATION_SOURCE_CONFLICT')
+      let cursor: string | undefined, pending: ConversationWindowAssembly | undefined
+      const reading: { view?: string | undefined } = {}
+      try { for (;;) {
+        await context.assertCurrent?.()
+        const input: ConversationChangesInput = { ...reference, checkpoint, through: review.through, limit: action.limit ?? 30, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(cursor ? { cursor } : {}) }
+        const page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input)
+        reading.view = page.window.view ?? page.window.replay
+        if (page.coverage.some(source => source.current === 'unavailable' || source.gaps.length)) throw new AgentMuxError('The original offered range is unavailable. Its proposal and receipts are retained.', 'PUBLICATION_SOURCE_CONFLICT')
+        const consumed = consumeConversationWindowPage(page, pending)
+        if (consumed.kind === 'pending') { pending = consumed.pending; cursor = page.nextCursor!; continue }
+        const preview = sourceReviewItems(consumed.snapshot.units, binding, review.through)
+        await context.assertCurrent?.()
+        review = { ...review, items: this.store.reviewItems(binding, review, preview.items), next: page.more ? page.checkpoint : null }; break
+      } } finally { await this.releaseRead(binding, reading) }
+    }
+    return { disposition: 'requested' as const, observation: this.observation(binding.bindingId, binding.revision), review }
+  }
   async recoverSource(value: import('@agentmux/core/connections').ConnectionDeliverySourceRecoverInput, context: RoomBindingCallContext) {
     if (this.closed) throw new AgentMuxError('The original publication owner is closed.', 'PUBLICATION_OWNER_UNAVAILABLE')
     const input = parseConnectionDeliveryParams('connection.delivery.source.recover', value)
@@ -1004,9 +1050,13 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (!requested || requested.connectionId !== input.connectionId) throw new AgentMuxError('Source recovery requires the exact original Binding and Connection.', 'PUBLICATION_SOURCE_CONFLICT')
     const binding = readRoomPublicationBinding(this.options.bindings, requested)
     if (!binding) throw new AgentMuxError('The original publication scope is unconfirmed. Its cut and effects are retained.', 'PUBLICATION_SOURCE_CONFLICT')
+    if (input.review && (context.actor.kind === 'agent' || context.actor.kind !== binding.authorizedBy.kind || context.actor.id !== binding.authorizedBy.id))
+      throw new AgentMuxError('A new sharing range requires the original authenticated user or device on this exact Binding.', 'CONTROL_PERMISSION_DENIED')
+    if (input.review?.action === 'inspect' || input.review?.action === 'cancel') return await this.reviewSource(binding, input.review, context)
     const authority = this.authority(binding)
     if (authority === null) throw new AgentMuxError('The original publication authority could not be read. Existing work is retained.', 'PUBLICATION_STORAGE_UNCONFIRMED')
     if (!authority.authorized) return { disposition: 'disabled' as const, observation: { state: 'disabled' as const } }
+    if (input.review) return await this.reviewSource(binding, input.review, context)
     const lane = this.ensureLane(binding), disposition = lane.work ? 'joined' as const : 'requested' as const
     // Explicit recovery observes the same original cut; it grants no jump or replay.
     if (!lane.work) this.wake(lane)

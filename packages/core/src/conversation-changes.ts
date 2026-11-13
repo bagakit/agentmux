@@ -42,7 +42,7 @@ export type AgentConversationReadPage = ConversationRef & { sourceHostId: string
   order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow; processDetails?: 'deferred' }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
-export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning'; nativeSnapshot?: 'scope' | 'range' }
+export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning'; nativeSnapshot?: 'scope' | 'range'; nativeSource?: { providerId: string; nativeSessionId: string } }
 export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; recover?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean; nativeRecoveryRange?: { from: NativeConversationCheckpoint; through: NativeConversationCheckpoint } }
 export type ConversationWatchInput = ConversationRef & { view?: string }
@@ -158,11 +158,12 @@ function scope(value: unknown): ConversationScope {
   return { sources }
 }
 export function parseConversationCheckpointInput(value: unknown): ConversationCheckpointInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot', 'nativeSource'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   if (p.nativePosition !== undefined && p.nativePosition !== 'beginning') return bad('Native checkpoint position must be beginning when supplied.', 'INVALID_CONTROL_REQUEST')
   if (p.nativeSnapshot !== undefined && p.nativeSnapshot !== 'scope' && p.nativeSnapshot !== 'range') return bad('Native snapshot must be scope or range.', 'INVALID_CONTROL_REQUEST')
-  return { ...ref, ...(p.nativePosition === undefined ? {} : { nativePosition: 'beginning' as const }), ...(p.nativeSnapshot === undefined ? {} : { nativeSnapshot: p.nativeSnapshot as 'scope' | 'range' }) }
+  const source = p.nativeSource === undefined ? undefined : rpcRecord(p.nativeSource, ['providerId', 'nativeSessionId'])
+  return { ...ref, ...(source ? { nativeSource: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) } } : {}), ...(p.nativePosition === undefined ? {} : { nativePosition: 'beginning' as const }), ...(p.nativeSnapshot === undefined ? {} : { nativeSnapshot: p.nativeSnapshot as 'scope' | 'range' }) }
 }
 export function parseConversationFrontier(value: unknown, expected?: ConversationRef): ConversationFrontier {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'scope', 'cuts'], 'CONTROL_PROTOCOL_ERROR')

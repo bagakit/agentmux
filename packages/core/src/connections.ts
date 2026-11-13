@@ -54,3 +54,5 @@ export * from './connection-application-access-codec.js'
 
 export * from './connection-api-contract.js'
 export * from './connection-api-codec.js'
+
+export type { ConnectionSourceReview, ConnectionSourceReviewAction } from './connection-source-review.js'

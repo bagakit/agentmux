@@ -99,8 +99,9 @@ export type ConnectionDeliverySourceReadEvidence = {
 }
 export type ConnectionDeliveryListInput = { includeSourceReadEvidence?: boolean; connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number; order?: 'oldest' | 'newest' }
 /** Wake the original publication reader; no new input, source cut or platform retry. */
-export type ConnectionDeliverySourceRecoverInput = { connectionId: string; bindingId: string; bindingRevision: number }
+export type ConnectionDeliverySourceRecoverInput = { connectionId: string; bindingId: string; bindingRevision: number; review?: import('./connection-source-review.js').ConnectionSourceReviewAction }
 export type ConnectionDeliverySourceRecoverResult = {
+  review?: import('./connection-source-review.js').ConnectionSourceReview
   disposition: 'requested' | 'joined' | 'disabled'
   observation: ConnectionDeliveryObservation
   sourceObservation?: ConnectionDeliverySourceObservation

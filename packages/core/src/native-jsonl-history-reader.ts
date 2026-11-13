@@ -176,7 +176,15 @@ export class NativeJsonlHistoryReader {
     let lease: NativeSnapshotLease | undefined
     let physicalPath = path
     let captured: NativeSnapshotCursor | undefined
-    if (retained?.kind === 'range' || context.nativeSnapshotReference) { lease = await nativeSnapshotStore(context).open(context.nativeSnapshotReference ?? retained!.reference); physicalPath = lease.path; captured = retained ?? { version: 1, kind: 'range', reference: context.nativeSnapshotReference!, cursor: '', origin: lease.manifest.origin } }
+    let exactFrozenRecord = false
+    if (retained?.kind === 'scope' && typeof Reflect.get(context, 'recordId') === 'string') {
+      try {
+        const manifest = await nativeSnapshotStore(context).metadata(retained.reference)
+        const cut = JSON.parse(Buffer.from(retained.cursor, 'base64url').toString('utf8')) as { offset: number }
+        exactFrozenRecord = Number.isSafeInteger(cut.offset) && cut.offset <= manifest.end
+      } catch { /* A missing optional image cannot remove current exact-record reading; its version still has to match. */ }
+    }
+    if (retained?.kind === 'range' || exactFrozenRecord || context.nativeSnapshotReference) { lease = await nativeSnapshotStore(context).open(context.nativeSnapshotReference ?? retained!.reference); physicalPath = lease.path; captured = retained ?? { version: 1, kind: 'range', reference: context.nativeSnapshotReference!, cursor: '', origin: lease.manifest.origin } }
     let originalFile = lease?.file ?? await open(path, constants.O_RDONLY | constants.O_NONBLOCK)
     try {
       if (changes.snapshot || changes.recover && retained?.kind !== 'range') {
@@ -240,7 +248,8 @@ export class NativeJsonlHistoryReader {
       const before = await store.open(scope.reference)
       try {
         if (before.manifest.origin.ino !== sourceOrigin.ino || before.manifest.origin.birth !== sourceOrigin.birth) return failure('SOURCE_CHANGED', 'The original scope snapshot belongs to another physical native source.')
-        start = before.manifest.start
+        start = scope.scopeStart ?? before.manifest.start
+        if (start > before.manifest.end) return failure('INVALID_CURSOR', 'The original scope cut exceeds its immutable observation.')
         if (start > this.cut) return failure('SOURCE_REPAIR_REQUIRED', 'The original sharing prefix is missing from this frozen source.')
         for (let at = 0; at < start; at += 64 * 1024) {
           const length = Math.min(64 * 1024, start - at)
@@ -307,9 +316,9 @@ export class NativeJsonlHistoryReader {
     if (this.snapshotCursor) await nativeSnapshotStore(this.context).rememberRecoveryFailure(this.snapshotCursor.origin, this.snapshotLease?.manifest.dataGeneration, scope, error).catch(() => undefined)
   }
   async recoveryRange(): Promise<{ from: string; through: string } | undefined> {
-    if (!this.snapshotCursor?.recovery || !this.snapshotLease) return undefined
+    if (!this.snapshotCursor || !this.snapshotLease || this.snapshotCursor.kind !== 'range' && !this.snapshotCursor.recovery) return undefined
     const at = async (offset: number) => encodeNativeSnapshotCursor(this.context, { ...this.snapshotCursor!, kind: 'range', cursor: Buffer.from(JSON.stringify({ version: 1, ...this.context.source, ...this.identity, birth: this.birth, offset, ...await this.prefixFingerprints(offset) })).toString('base64url') })
-    return { from: await at(this.snapshotCursor.recovery.start), through: await at(this.snapshotLease.manifest.end) }
+    return { from: await at(this.snapshotCursor.recovery?.start ?? this.snapshotLease.manifest.start), through: await at(this.snapshotLease.manifest.end) }
   }
   get recovered(): boolean { return !!this.snapshotCursor?.recovery }
 
@@ -626,9 +635,9 @@ export class NativeJsonlHistoryReader {
       offset: this.forwardPosition, ...await this.prefixFingerprints(this.forwardPosition) })).toString('base64url')
     if (this.snapshotCursor) {
       if (this.snapshotLease) await nativeSnapshotStore(this.context).retain(this.snapshotLease)
-      const completed = this.snapshotCursor.recovery && this.snapshotLease && this.forwardPosition >= this.snapshotLease.manifest.end
+      const completed = !(this.context as ProviderConversationChangesContext).head && !(this.context as ProviderConversationChangesContext).tail && this.snapshotCursor.kind === 'range' && this.snapshotLease && this.forwardPosition >= this.snapshotLease.manifest.end
       if ((this.snapshotCursor.kind === 'scope' || completed) && this.snapshotLease) cursor = liveNativeCut(cursor, this.snapshotCursor.origin)
-      if (completed) this.snapshotCursor = { ...this.snapshotCursor, kind: 'scope' }; if (completed) delete this.snapshotCursor.recovery
+      if (completed) this.snapshotCursor = { ...this.snapshotCursor, kind: 'scope', scopeStart: this.snapshotCursor.recovery?.start ?? this.snapshotLease!.manifest.end }; if (completed) delete this.snapshotCursor.recovery
       cursor = encodeNativeSnapshotCursor(this.context, { ...this.snapshotCursor, cursor })
     }
     return cursor

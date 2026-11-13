@@ -1,3 +1,4 @@
+import { parseConnectionSourceReviewAction, parseConnectionSourceReview } from './connection-source-review.js'
 import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCodes, type ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
 import { parseExternalConversationAuthor } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
@@ -200,8 +201,8 @@ export function parseConnectionDeliverySourceObservation(value: unknown): Connec
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
   if (method === 'connection.delivery.source.recover') {
-    const p = object(value, ['connectionId', 'bindingId', 'bindingRevision'])
-    return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1) } as ConnectionDeliveryParamsMap[M]
+    const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'review'])
+    return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.review === undefined ? {} : { review: parseConnectionSourceReviewAction(p.review) }) } as ConnectionDeliveryParamsMap[M]
   }
   if (method === 'connection.delivery.retry') { const p = object(value, ['operationId', 'source']); return { operationId: text(p.operationId), source: parseConnectionDeliveryRetrySource(p.source) } as ConnectionDeliveryParamsMap[M] }
   if (method === 'connection.delivery.inspect') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
@@ -213,9 +214,11 @@ export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
   if (method === 'connection.delivery.source.recover') {
-    const p = object(value, ['disposition', 'observation', 'sourceObservation'])
+    const p = object(value, ['disposition', 'observation', 'sourceObservation', 'review'])
     if (!['requested', 'joined', 'disabled'].includes(p.disposition as string)) fail()
-    return { disposition: p.disposition as 'requested' | 'joined' | 'disabled', observation: parseConnectionDeliveryObservation(p.observation),
+    const review = p.review === undefined ? undefined : parseConnectionSourceReview(p.review), expected = input as ConnectionDeliveryParamsMap['connection.delivery.source.recover']
+    if (review && (!expected.review || review.operationId !== expected.review.operationId || review.target.bindingId !== expected.bindingId || review.target.connectionId !== expected.connectionId)) fail()
+    return { ...(review ? { review } : {}), disposition: p.disposition as 'requested' | 'joined' | 'disabled', observation: parseConnectionDeliveryObservation(p.observation),
       ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }) } as ConnectionDeliveryResultMap[M]
   }
   if (method === 'connection.delivery.ls') {
