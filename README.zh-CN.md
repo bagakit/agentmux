@@ -45,7 +45,7 @@ AgentMux 在三个层面处理这些问题：
 
 ### 1 · 关掉 App，Agent 照样在干活
 
-Agent 进程活在 ctxmux daemon 里，不在窗口里。关闭或重启 App、只热更新界面时，健康的 Run 不受影响；回来时 Core 接回**同一个 PID 和 PTY**，终端从字节游标续读。进程确实已经结束时，Core 沿同一个 Session 和 Provider 原生会话句柄做 native resume，**不会悄悄换成一个空白新会话**。冷启动时，最近 24 小时内活动过的 Agent 自动恢复；更早的先恢复 Tab、布局、草稿和可读历史，等你第一次需要它执行时再接上。宿主机重启或断电后原 PTY 不再存在，这时由 Core 沿原生句柄为同一 Session 创建新的 Run，而不是冒充原进程还在。
+Agent 进程活在 ctxmux daemon 里，不在窗口里。关闭或重启 App、只热更新界面时，健康的 Run 不受影响；回来时 Core 接回**同一个 PID 和 PTY**，终端从字节游标续读。进程确实已经结束、且该 Provider 支持原生恢复时，Core 沿同一个 Session 和 Provider 原生会话句柄做 native resume，**不会悄悄换成一个空白新会话**。冷启动时，默认最近 24 小时内活动过的 Agent 自动恢复；更早的先恢复 Tab、布局、草稿和可读历史，等你第一次需要它执行时再接上。宿主机重启或断电后原 PTY 不再存在，这时由 Core 沿原生句柄为同一 Session 创建新的 Run，而不是冒充原进程还在。
 
 > 见 [Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [冷启动按需恢复](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal 运行时](docs/architecture/terminal-runtime.md)
 
@@ -54,7 +54,7 @@ Agent 进程活在 ctxmux daemon 里，不在窗口里。关闭或重启 App、�
 Space › Zone › Tab › Region 是**展示位置**，AgentSession / Run 是**执行身份**，两者严格分开。把一个 Agent 拖到另一个 Tab、放进独立窗口或一键排成 `grid-4`，它的 Session、Run、Host 和工作目录都不变，也不会停下来。空间图由 Core 持有，没有 GUI 时同样能读写。
 
 ```sh
-amux space mv --from-region '<region-id>' --expect-session '<session-id>' --new-tab
+amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
 amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 · grid-6 · grid-9
 ```
 
@@ -66,7 +66,7 @@ amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 ·
 
 ### 4 · Agent 用 CLI 操作产品，而不是模拟点击
 
-`amux` 是这个产品的完整控制面：25 个对象模块、400 多条命令，背后是同样数量级的 typed JSON-RPC 方法。AgentMux 启动的每个 Agent 都自带 `amux`（`$AGENTMUX_CLI`）。所以在 AgentMux 里开一个 Agent 去优化 AgentMux 本身，是明确支持的自举路径。
+`amux` 是这个产品的公共控制面：25 个对象模块、400 多条命令，背后是同样数量级的 typed JSON-RPC 方法。AgentMux 启动的每个 Agent 都自带 `amux`（`$AGENTMUX_CLI`）。所以在 AgentMux 里开一个 Agent 去优化 AgentMux 本身，是明确支持的自举路径。
 
 ```sh
 amux whoami                                   # 我是谁、在哪个 Zone / Tab / Region、有哪些能力
@@ -168,11 +168,11 @@ Agent 的工作成果不该随对话一起消失。Know 分组（Survey、Recall
 | **Toolkit** | 在状态栏放自己的工具：脚本、动作按钮和结果展示。保存和查看从不执行脚本。官方 Performance 面板本身也是一个 Toolkit，完全经由公开 CLI 取数。 | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
 | **连接器** | 把 Agent 对话接入飞书和 Discord（当前内置的两个适配器），收发消息、文件、问题和权限确认。Core 不依赖这个可选包。 | [`@agentmux/connectors`](packages/connectors/README.md) |
 | **文件与 Git** | 浏览、编辑、预览工作目录里的文件，查看差异，管理工作区与 worktree。 | [文件与 Git](docs/design/behavior/files-and-git.md) |
-| **Mobile** | 手机扫码接入，经端到端加密 Relay 继续已有 Agent 的对话、观看终端。Agent 与历史仍由 Mac 持有。 | [AgentMux Mobile](apps/mobile/README.md) |
+| **Mobile** | 手机与 Mac 在同一 Wi-Fi 下扫码接入，经 Mac 自带的端到端加密局域网 Relay 继续已有 Agent 的对话、观看终端。Agent 与历史仍由 Mac 持有。 | [AgentMux Mobile](apps/mobile/README.md) |
 
 <img src="docs/assets/readme/focus-map.webp" alt="Focus Map：Agent 协作图，节点、区域与消息关系" width="100%">
 
-<p align="center"><sub>Focus Map：Agent 之间的消息与出生关系画成一张协作图，点开任一节点即可回到它的原工作面。</sub></p>
+<p align="center"><sub>Focus Map：嵌套区域表示 Agent 所在的空间，连线表示它们之间真实的消息与创建关系，点开任一节点即可回到它的原工作面。</sub></p>
 
 ## 架构：三层，三个唯一 owner
 
@@ -189,11 +189,11 @@ Agent 的工作成果不该随对话一起消失。Know 分组（Survey、Recall
 
 Core 不依赖 Electron、React 或任何编辑器实现。三类身份严格区分：Space / Zone / Tab / Region 是**展示位置**，Project / Workspace 是**资源与工作目录**，AgentSession / Run 是**执行身份**。完整定义见 [概念词典](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)，源码机制见 [系统职责地图](docs/architecture/system-ownership.md)。
 
-Core 随包固定一份 ctxmux 0.1.0（protocol 25）的 daemon、CLI 与 SDK，覆盖 macOS arm64 与 Linux x64；安装和激活前逐项校验 SHA-256。ctxmux CLI 能脱离 AgentMux 独立管理 Run，AgentMux 是它的 client。
+Core 随包固定一份 ctxmux 的 daemon、CLI 与 SDK，覆盖 macOS arm64 与 Linux x64（精确版本见 [darwin-arm64](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) 与 [linux-x64](packages/core/vendor/ctxmux/linux-x64/manifest.json) manifest）；安装和激活前逐项校验 SHA-256。ctxmux CLI 能脱离 AgentMux 独立管理 Run，AgentMux 是它的 client。
 
 ### 13 个内置 Provider
 
-各家差异只留在 Provider 里，由各自的 catalog 如实声明；能力未经核实就不声明。client 不需要为任何一家写分支。
+各家差异只留在 Provider 里，由各自的 catalog 如实声明；能力未经核实就不声明。client 不需要为任何一家的协议行为写分支。
 
 | Provider | 权限 | 原生恢复 | 原生 fork | 原生历史 |
 | --- | :---: | :---: | :---: | :---: |
@@ -218,7 +218,7 @@ Core 随包固定一份 ctxmux 0.1.0（protocol 25）的 daemon、CLI 与 SDK，
 | 已确认完全正常 | 不打扰 |
 | 分不清 | 明说未知，不猜正常也不猜死亡 |
 
-这条原则来自一次真实的 P0 事故：一个进程活着、PTY 仍在收字节的 Agent，因为我们自己的 readiness 记账没有续期，[永远收不到消息](docs/casestudy/prompt-refused-after-readiness-consumed.md)。从那以后，新增任何 `throw`、早退或置灰之前，都要先回答 [RED-LINES.md](RED-LINES.md) 的四个问题，其中最关键的一问是：**「绕过这段代码，这条路还通不通？」**
+一次真实的 P0 事故说明，只写成原则还不够：一个进程活着、PTY 仍在收字节的 Agent，因为我们自己的 readiness 记账没有续期，[永远收不到消息](docs/casestudy/prompt-refused-after-readiness-consumed.md)。从那以后，新增任何 `throw`、早退或置灰之前，都要先回答 [RED-LINES.md](RED-LINES.md) 的四个问题，其中最关键的一问是：**「绕过这段代码，这条路还通不通？」**
 
 **持久 Session 是地基。** 原 Session 能以原身份恢复，是其余一切的前提。新开一个进程、当前画面看起来正常或另起空会话，都不能冒充恢复成功。
 
@@ -234,9 +234,9 @@ Core 随包固定一份 ctxmux 0.1.0（protocol 25）的 daemon、CLI 与 SDK，
 
 | 依赖 | 要求 | 来源 |
 | --- | --- | --- |
-| 平台 | Desktop：macOS Apple Silicon。Core 随包 Runtime：macOS arm64、Linux x64 | [打包脚本](apps/desktop/scripts/package-macos.mjs) · [ctxmux manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) |
-| Node.js | 24 或更高（CI 使用 24.14.1） | [Core package](packages/core/package.json) 的 `engines` |
-| pnpm | 11.5.1 | [根 package](package.json) 的 `packageManager` |
+| 平台 | Desktop：macOS Apple Silicon。Core 随包 Runtime：macOS arm64、Linux x64 | [打包脚本](apps/desktop/scripts/package-macos.mjs) · ctxmux manifest（[darwin-arm64](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) · [linux-x64](packages/core/vendor/ctxmux/linux-x64/manifest.json)） |
+| Node.js | 24 或更高 | [Core package](packages/core/package.json) 的 `engines` |
+| pnpm | `packageManager` 声明的版本 | [根 package](package.json) |
 | Xcode 或 Command Line Tools | 开发 Desktop 时需要：clang 与 Swift 6 工具链，用于构建原生层和工作区辅助程序 | [native-desktop](packages/native-desktop/README.md) |
 | Agent CLI | 在本机单独安装并完成登录 | 各 Agent 官方文档 |
 
@@ -251,7 +251,7 @@ pnpm dev                         # predev 自动构建依赖链、Swift 原生�
 
 ### 构建并安装 macOS 应用
 
-打包要求源码树干净，并需要一个签名身份：设置 `AGENTMUX_MACOS_SIGN_IDENTITY`（Developer ID Application 证书），或先用 `node apps/desktop/scripts/macos-local-signing.mjs --setup` 建立本机签名身份。详见 [Signing identity](docs/architecture/desktop-updates.md#signing-identity)。
+打包要求源码树干净，并需要一个签名身份：设置 `AGENTMUX_MACOS_SIGN_IDENTITY`（Developer ID Application 证书），或先运行一次 `node apps/desktop/scripts/macos-local-signing.mjs --setup` 建立本机签名身份，再用 `--trust` 完成 macOS 代码签名信任认证。详见 [Signing identity](docs/architecture/desktop-updates.md#signing-identity)。
 
 ```sh
 pnpm package:mac           # 构建 AgentMux.app 与 DMG（未公证）
@@ -292,7 +292,7 @@ try {
     executorId: 'codex',                 // 默认 Executor 的 id 与 Provider id 相同
     workspacePath: process.cwd(),
     injectAgentMuxGuide: true,
-    createOperationId: mintObjectId(),   // 保留它：用同一 ID 重试会回到同一个 Session
+    createOperationId: mintObjectId(),   // 保留它：结果不确定时用它核对这次创建
     prompt: '检查仓库，说明当前结构和需要验证的内容'
   })
   console.log(session.agentSessionId, creation.initialPrompt)
@@ -302,14 +302,14 @@ try {
 ```
 
 - `creation.initialPrompt` 是首个 Prompt 的投递事实（`confirmed`、`unconfirmed`、`unknown` 或 `not-requested`），不代表任务已经完成。
-- 用同一个 `createOperationId` 重试创建，返回的是已有的 Session，不会重复启动 Agent。
+- 保留 `createOperationId`。结果不确定时，用它按 [Core 接入说明](packages/core/README.md#agent-调用与输入) 核对这次创建，同一意图不会重复启动 Agent；不要换新 ID 重建。
 - 只需要终端时，用 `connectLocalAgentMuxRuntime()`：它只连接物理 Runtime，不等待 Session 与 Provider 观察。
 
 会话接回、后续 Prompt、结构化回答、Terminal、Attachment 与可恢复输入，见 [Core 接入说明](packages/core/README.md#agent-调用与输入)。自定义 Provider 的扩展点是 [`defineAgentProvider`](packages/core/src/agent-provider.ts) 与 [plugins](packages/core/src/agent-plugin.ts)；Desktop 目前只列出内置 Provider。
 
 ## `amux`：AgentMux 本身就是 CLI
 
-产品的每项能力都经同一套 typed JSON-RPC 公共服务开放。CLI、Mobile 和你的程序直接调用这套服务；Desktop 经可信 IPC 复用同一批业务 owner，所以 GUI 与 CLI 看到的是同一份事实。
+AgentMux 的设计目标是让产品的每项能力都经同一套 typed JSON-RPC 公共服务开放。CLI、Mobile 和你的程序直接调用这套服务；Desktop 经可信 IPC 复用同一批业务 owner，所以 GUI 与 CLI 看到的是同一份事实。
 
 - **Agent 操作产品，不需要模拟点击。** Agent 用 `app inspect` 读主画面的真实选择与呈现，用 `app snapshot` 读跨对象的全局观察，再用对象命令操作。产品已有的功能，不靠截图和坐标点击来用。
 - **能力面自描述。** `amux --skill` 是一份约 4 KB 的模块目录，`amux <module> --skill` 按需加载模块指南。正文与 [Core guides](packages/core/guides/README.md) 同源生成。
@@ -393,7 +393,7 @@ CI 的定义见 [`.github/workflows`](.github/workflows)：Verify 在 ubuntu-24.
 - [交互专题索引](docs/design/agentmux-desktop-interaction.md) 与 [呈现专题索引](docs/design/agentmux-surface-density.md)：产品行为与视觉规则
 - [系统职责地图](docs/architecture/system-ownership.md)：分层、身份与唯一事实 owner
 - [公共能力源码入口](docs/specs/public-capabilities.md)：公开 API / CLI 的实际合同
-- [事故复盘](docs/casestudy/)：13 次重大故障的现场、证据与改进
+- [事故复盘](docs/casestudy/)：重大故障的现场、证据与改进
 
 本 README 的功能描述以已确认的产品设计和源码接线为依据。源码中存在某项能力，不代表它已经打包、安装或通过行为验收；各能力的当前实现范围以对应文档中的说明为准。文中的界面截图来自用正式组件和演示数据渲染的采图场景。
 
