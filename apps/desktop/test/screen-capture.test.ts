@@ -14,7 +14,7 @@ afterEach(async () => { await Promise.all(homes.splice(0).map(path => rm(path, {
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'amux-capture-')); homes.push(home)
   const native = { captureScreenshot: vi.fn(async () => captured), writeClipboardImage: vi.fn(async (_image: BrowserPng) => {}) }
-  const edit = vi.fn(async (_image: BrowserPng, _attach: boolean, _complete: (png: BrowserPng) => Promise<void>, _issue?: string) => {})
+  const edit = vi.fn(async (_image: BrowserPng, _attach: boolean, _complete: (png: BrowserPng) => Promise<void>, _context: { initialIssue?: string; source?: unknown }) => {})
   const reportIssue = vi.fn()
   return { home, native, edit, reportIssue, owner: new ScreenCapture({ home, native: () => native, edit, reportIssue }) }
 }
@@ -126,7 +126,7 @@ it('closing an editor cannot erase an already submitted delivery or release its 
 it('recovery of a failed draft save never repeats the already successful clipboard write', async () => {
   const f = await fixture()
   await writeFile(join(f.home, '.agentmux'), 'original user resource')
-  f.edit.mockImplementationOnce(async (_image, _attach, complete, issue) => {
+  f.edit.mockImplementationOnce(async (_image, _attach, complete, { initialIssue: issue }) => {
     expect(issue).toContain('on the clipboard')
     await rm(join(f.home, '.agentmux'))
     await complete(image)
@@ -139,7 +139,7 @@ it('unknown clipboard writes retain the original receipt and are not replayed fr
   const f = await fixture()
   const original = Object.assign(new Error('Clipboard reply lost'), { code: 'operation_unknown', operation: { state: 'unknown', operationId: 'original-copy', instanceId: 'original-native' } })
   f.native.writeClipboardImage.mockRejectedValueOnce(original)
-  f.edit.mockImplementationOnce(async (_image, _attach, complete, issue) => {
+  f.edit.mockImplementationOnce(async (_image, _attach, complete, { initialIssue: issue }) => {
     expect(issue).toContain('original-copy')
     await expect(complete(image)).rejects.toMatchObject({ cause: original })
   })
@@ -153,4 +153,17 @@ it.each([{ state: 'captured' }, { ...captured, screenshot: { ...captured.screens
   f.native.captureScreenshot.mockResolvedValueOnce(result as never)
   await expect(f.owner.capture(true)).rejects.toThrow()
   expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
+})
+
+it('hands the editor the capture rectangle, scale and start time', async () => {
+  vi.useFakeTimers({ now: new Date(2026, 0, 2, 3, 4, 5), toFake: ['Date'] })
+  try {
+    const f = await fixture(), rect = { x: -1200, y: 40, width: 640, height: 360 }
+    f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit', selectionRect: rect } as never)
+    await f.owner.capture(false)
+    expect(f.edit.mock.calls[0]![3]).toEqual({ source: { rect, scale: 2, capturedAt: new Date(2026, 0, 2, 3, 4, 5).getTime() } })
+    f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit' } as never)
+    await f.owner.capture(false)
+    expect(f.edit.mock.calls[1]![3], 'no source without a native rectangle').toEqual({})
+  } finally { vi.useRealTimers() }
 })

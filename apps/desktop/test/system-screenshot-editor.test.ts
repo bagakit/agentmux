@@ -6,12 +6,17 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const native = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], savePath: null as string | null, saveCalls: 0 }))
+const native = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], savePath: null as string | null, saveCalls: 0,
+  saveNames: [] as string[], resized: [] as Array<{ width: number; height: number }>,
+  displays: [] as Array<{ bounds: { x: number; y: number; width: number; height: number }; workArea: { x: number; y: number; width: number; height: number } }> }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   return {
     nativeTheme: { shouldUseDarkColors: true },
-    dialog: { showSaveDialog: async () => { native.saveCalls++; return { canceled: native.savePath === null, filePath: native.savePath } } },
+    dialog: { showSaveDialog: async (_parent: unknown, options: { defaultPath: string }) => { native.saveCalls++; native.saveNames.push(options.defaultPath); return { canceled: native.savePath === null, filePath: native.savePath } } },
+    nativeImage: { createFromBuffer: (bytes: Buffer) => ({ resize: (size: { width: number; height: number }) => { native.resized.push(size); return { toPNG: () => bytes } } }) },
+    screen: { getDisplayMatching: (rect: { x: number; y: number }) => native.displays.find(display => rect.x >= display.bounds.x && rect.x < display.bounds.x + display.bounds.width
+      && rect.y >= display.bounds.y && rect.y < display.bounds.y + display.bounds.height) ?? native.displays[0] },
     ipcMain: { handle: (channel: string, handler: (...args: any[]) => Promise<any>) => native.handlers.set(channel, handler),
       removeHandler: (channel: string) => native.handlers.delete(channel) },
     BrowserWindow: class extends EventEmitter {
@@ -30,11 +35,16 @@ vi.mock('electron', async () => {
 
 const image = pngFromBytes(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWZkAAAAASUVORK5CYII=', 'base64'))
 let editor: SystemScreenshotEditor
-beforeEach(() => { native.windows = []; native.handlers.clear(); native.savePath = null; native.saveCalls = 0; editor = new SystemScreenshotEditor() })
+beforeEach(() => {
+  native.windows = []; native.handlers.clear(); native.savePath = null; native.saveCalls = 0; native.saveNames = []; native.resized = []
+  native.displays = [{ bounds: { x: 0, y: 0, width: 1440, height: 900 }, workArea: { x: 0, y: 25, width: 1440, height: 875 } },
+    { bounds: { x: 1440, y: -200, width: 2560, height: 1440 }, workArea: { x: 1440, y: -200, width: 2560, height: 1400 } }]
+  editor = new SystemScreenshotEditor()
+})
 afterEach(() => editor.dispose())
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
-async function open(complete = vi.fn(async () => {}), attachToDraft = false, initialIssue?: string) {
-  const closed = editor.edit(image, attachToDraft, complete, initialIssue)
+async function open(complete = vi.fn(async () => {}), attachToDraft = false, initialIssue?: string, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource) {
+  const closed = editor.edit(image, attachToDraft, complete, { ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}) })
   await Promise.resolve()
   const window = native.windows.at(-1)
   const call = (action: string, params?: unknown, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
@@ -144,18 +154,17 @@ it('saves the processed PNG through the exact editor and keeps editing after sav
   const root = await mkdtemp(join(tmpdir(), 'agentmux-editor-export-'))
   try {
     const current = await open(undefined, true)
-    const first = { requestId: current.input.requestId, operationId: 'save-cancel', image }
+    const first = { requestId: current.input.requestId, image }
     expect(await current.call('save-png', first)).toEqual({ status: 'cancelled' })
     expect(current.window.dead).toBe(false)
     native.savePath = join(root, 'processed.png')
-    const next = { ...first, operationId: 'save-original-pixels' }
-    const result = await current.call('save-png', next)
+    const result = await current.call('save-png', first)
     expect(result.status).toBe('saved')
     expect((await readFile(native.savePath)).toString('base64')).toBe(image.dataUrl.split(',')[1])
     expect(current.complete, 'PNG save must not copy or attach to the draft').not.toHaveBeenCalled()
     expect(current.window.dead, 'PNG save must retain the exact editor').toBe(false)
-    expect(await current.call('save-png', next)).toEqual(result)
-    expect(native.saveCalls).toBe(2)
+    expect((await current.call('save-png', first)).status, 'every Save click opens its own save sheet').toBe('saved')
+    expect(native.saveCalls).toBe(3)
     await current.call('cancel', { requestId: current.input.requestId }); await current.closed
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -194,4 +203,37 @@ it('returns an unknown original file write receipt while preserving independent 
   expect(copyText).toHaveBeenCalledExactlyOnceWith('Original context')
   expect(await current.call('finish', { requestId: current.input.requestId, operationId: 'independent-copy', image })).toEqual({ status: 'completed' })
   expect(current.window.dead).toBe(false)
+})
+
+const source = { rect: { x: 1600, y: 100, width: 400, height: 300 }, scale: 2, capturedAt: new Date(2026, 0, 2, 3, 4, 5).getTime() }
+
+it('names the save by the capture time and saves at 1x by the capture scale only when asked', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agentmux-editor-logical-'))
+  try {
+    native.savePath = join(root, 'logical.png')
+    const current = await open(undefined, false, undefined, source)
+    expect(current.input.source, 'the renderer receives the capture source to forward to pin and save').toEqual(source)
+    expect((await current.call('save-png', { requestId: current.input.requestId, image })).status).toBe('saved')
+    expect(native.resized, 'Save PNG keeps the captured pixels').toEqual([])
+    expect((await current.call('save-png', { requestId: current.input.requestId, image, logicalSize: true })).status).toBe('saved')
+    expect(native.resized).toHaveLength(1)
+    expect(native.saveNames).toEqual(['Screenshot 2026-01-02 at 03.04.05.png', 'Screenshot 2026-01-02 at 03.04.05.png'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('refuses a 1x save without a capture scale and keeps the editor', async () => {
+  const current = await open()
+  await expect(current.call('save-png', { requestId: current.input.requestId, image, logicalSize: true })).rejects.toThrow('display scale')
+  expect(native.saveCalls).toBe(0)
+  expect(current.window.dead).toBe(false)
+})
+
+it('opens the editor centred on the display that holds the capture', async () => {
+  await open(undefined, false, undefined, source)
+  expect(native.windows.at(-1).options).toMatchObject({ x: 1440 + (2560 - 1040) / 2, y: -200 + (1400 - 760) / 2, width: 1040, height: 760 })
+  native.displays[1]!.workArea = { x: 1440, y: -200, width: 900, height: 600 }
+  await open(undefined, false, undefined, source)
+  expect(native.windows.at(-1).options, 'a small work area clamps the editor inside it').toMatchObject({ x: 1440, y: -200, width: 900, height: 600 })
+  await open()
+  expect(native.windows.at(-1).options).not.toHaveProperty('x')
 })

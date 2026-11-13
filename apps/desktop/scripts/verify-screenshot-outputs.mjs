@@ -19,7 +19,8 @@ const source = slice === 'capture' ? 'apps/desktop/src/main/screenshot-source-pi
 const original = await readFile(source, 'utf8')
 const mutations = slice === 'capture' ? [
   { id: 'exact-source-key', source, from: 'request.choices.get(input.key)', to: 'request.choices.values().next().value', owner: 'selects the exact original display key rather than the first or similarly labelled display' },
-  { id: 'original-source-request', source, from: 'input?.requestId !== request.input.requestId', to: 'false', owner: 'rejects stale source requests and embedded frames without changing a healthy selection' }
+  { id: 'original-source-request', source, from: 'input?.requestId !== request.input.requestId', to: 'false', owner: 'rejects stale source requests and embedded frames without changing a healthy selection' },
+  { id: 'capture-source-metadata', source: 'apps/desktop/src/main/screen-capture.ts', from: 'scale: shot.scale, capturedAt } } : {}', to: 'scale: 1, capturedAt } } : {}', owner: 'hands the editor the capture rectangle, scale and start time' }
 ] : slice === 'documents' ? [
   { id: 'original-file-revision', source, from: 'expectedRevision, ...(expectedRevision === null ? { exclusive: true } : {})',
     to: 'expectedRevision: (await this.read(grant, false)).file.revision, ...(expectedRevision === null ? { exclusive: true } : {})', owner: 'preserves an externally changed original instead of overwriting it with an earlier revision' },
@@ -27,7 +28,13 @@ const mutations = slice === 'capture' ? [
   { id: 'unknown-first-save', source: 'apps/desktop/src/renderer/screenshot-editor/use-system-screenshot-original.ts', from: 'uncertain.current.set(operationId, attempt)', to: 'void attempt', owner: 'retains the first save operation after a lost IPC response and reconciles only that receipt' }
 ] : [
   { id: 'cancel-must-not-write', source, from: "if (path === null) return { status: 'cancelled' }", to: 'void path', owner: 'cancelling the native save choice writes no file and keeps the image' },
-  { id: 'actual-final-pixels', source, from: 'await ports.writeFile(path, bytes)', to: 'await ports.writeFile(path, new Uint8Array([1, 2, 3]))', owner: 'exports the actual processed PNG bytes to the user chosen destination' }
+  { id: 'actual-final-pixels', source, from: 'await ports.writeFile(path, bytes)', to: 'await ports.writeFile(path, new Uint8Array([1, 2, 3]))', owner: 'exports the actual processed PNG bytes to the user chosen destination' },
+  { id: 'capture-time-name', source, from: 'two(time.getHours())', to: 'two(time.getMinutes())', owner: 'names the save choice by the local capture time' },
+  { id: 'logical-size-halved', source, from: 'Math.round(image.width / scale)', to: 'Math.round(image.width)', owner: 'saves at 1x logical size by halving a scale 2 image before choosing a destination' },
+  { id: 'pixel-save-keeps-pixels', source, from: 'scale !== undefined && scale > 1', to: 'scale !== undefined', owner: 'a pixel-exact save never resizes' },
+  { id: 'overwrite-needs-confirmation', source, from: "properties: ['showOverwriteConfirmation', 'createDirectory']", to: "properties: ['createDirectory']", owner: 'the native save sheet names the capture, belongs to the image window and confirms replacing a file' },
+  { id: 'editor-on-capture-display', source: 'apps/desktop/src/main/system-screenshot-editor.ts', from: 'screen.getDisplayMatching(rect).workArea', to: 'screen.getDisplayMatching({ x: 0, y: 0, width: 1, height: 1 }).workArea', owner: 'opens the editor centred on the display that holds the capture' },
+  { id: 'logical-size-uses-capture-scale', source: 'apps/desktop/src/main/system-screenshot-editor.ts', from: '{ logicalScale: source!.scale }', to: '{}', owner: 'names the save by the capture time and saves at 1x by the capture scale only when asked' }
 ]
 const originals = Object.fromEntries(await Promise.all([...new Set([source, ...mutations.map(row => row.source)])].map(async path => [path, await readFile(path, 'utf8')])))
 await mkdir(resolve('.tmp'), { recursive: true })
