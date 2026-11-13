@@ -30,9 +30,9 @@ function replaceOne(code: string, anchor: string, replacement: string): string {
   assert.equal(code.split(anchor).length - 1, 1, `唯一非空 Source observation/mutation anchor: ${anchor}`)
   return code.replace(anchor, replacement)
 }
-function profiler(code: string, opening: string, id: string): string {
+function profiler(code: string, opening: string, closing: string, id: string): string {
   code = replaceOne(code, opening, opening.replace('  return (\n', `  return (\n    <SourceSettingsProfiler id="${id}" onRender={(id, phase, actualDuration, baseDuration, startTime, commitTime) =>\n      globalThis.__settingsParentRecord?.('commit', id, { phase, actualDuration, baseDuration, startTime, commitTime })}>\n`))
-  code = replaceOne(code, '    </div>\n  )\n}', '    </div>\n    </SourceSettingsProfiler>\n  )\n}')
+  code = replaceOne(code, closing, closing.replace('    </div>\n', '    </div>\n    </SourceSettingsProfiler>\n'))
   return `import { Profiler as SourceSettingsProfiler } from 'react'\n${code}`
 }
 function observedCallback(value: string, caller: string): string {
@@ -49,23 +49,23 @@ export default defineConfig({
       let code = source
       if (path.endsWith('/renderer/src/App.tsx')) {
         code = replaceOne(code, 'function DesktopApp() {\n', "function DesktopApp() {\n  globalThis.__settingsParentRecord?.('render', 'DesktopApp')\n")
-        const callback = mutant === 'callback-unstable' ? '() => setSettingsRoute(null)' : 'closeSettings'
+        const callback = mutant === 'callback-unstable' ? '() => setSettingsOpen(false)' : 'closeSettings'
         code = replaceOne(code, 'onClose={closeSettings}', `onClose={${observedCallback(callback, 'SettingsPanel')}}`)
         code = replaceOne(code, 'onCloseSettings={closeSettings}', `onCloseSettings={${observedCallback('closeSettings', 'SurfaceSwitch')}}`)
       }
       if (path.endsWith('/components/SettingsPanel.tsx')) {
         code = replaceOne(code, '  const config = useAppStore((state) => state.config)',
           "  globalThis.__settingsParentRecord?.('render', 'SettingsPanel', { initialSection, executorId })\n  const config = useAppStore((state) => state.config)")
-        code = profiler(code, '  return (\n    <div className="settings-page"', 'SettingsPanel')
+        code = profiler(code, '  return (\n    <div ref={page} className="settings-page"', '    </div>\n  )\n}\n\nexport const SettingsPanel', 'SettingsPanel')
         if (mutant === 'memo-removed') code = replaceOne(code, 'export const SettingsPanel = memo(SettingsPanelView)', 'export const SettingsPanel = SettingsPanelView')
         if (mutant === 'frozen-props') code = replaceOne(code, 'export const SettingsPanel = memo(SettingsPanelView)', 'export const SettingsPanel = memo(SettingsPanelView, () => true)')
       }
       if (path.endsWith('/settings/HostSettingsPane.tsx')) {
         code = replaceOne(code, '  const resource = useResourceDrafts(', "  globalThis.__settingsParentRecord?.('render', 'HostSettingsPane')\n  const resource = useResourceDrafts(")
-        code = replaceOne(code, '  // The keyed Host card owns this component', "  globalThis.__settingsParentRecord?.('render', 'HostConnectionFields', { hostId: host.id })\n  // The keyed Host card owns this component")
-        code = replaceOne(code, 'sessions.filter((session) => session.hostId === host.id)',
-          'sessions.filter((session) => { globalThis.__settingsParentVisit?.(host.id); return session.hostId === host.id })')
-        code = profiler(code, '  return (\n    <div className="settings-pane-stack"', 'HostSettingsPane')
+        code = replaceOne(code, "  const transport = host.transport ?? 'ssh'", "  globalThis.__settingsParentRecord?.('render', 'HostConnectionFields', { hostId: host.id })\n  const transport = host.transport ?? 'ssh'")
+        code = replaceOne(code, '    for (const session of sessions) {',
+          '    for (const session of sessions) {\n      globalThis.__settingsParentVisit?.(session.hostId)')
+        code = profiler(code, '  return (\n    <div ref={container} className="settings-pane-stack', '    </div>\n  )\n}\n\nfunction HostConnectionFields', 'HostSettingsPane')
       }
       appendFileSync(resolve(evidence, 'loaded-source.jsonl'), JSON.stringify({ path, originalSHA256: sha(readFileSync(resolve(root, path))),
         transformInputSHA256: sha(source), moduleId: id, consumedSHA256: sha(code), bytes: Buffer.byteLength(code), mutant,
@@ -77,7 +77,7 @@ export default defineConfig({
       }
     }
   }],
-  test: { ...original.test, include: [
+  test: { ...original.test, env: { AGENTMUX_SETTINGS_PARENT_SOURCE_OBSERVATION: '1' }, include: [
     'apps/desktop/test/settings-parent-cost.test.tsx', 'apps/desktop/test/settings-search.test.ts',
     'apps/desktop/test/settings-draft-conflict.test.tsx', 'apps/desktop/test/settings-keyboard-shortcuts.test.tsx',
     'apps/desktop/test/settings-prompts-liquid.test.tsx', 'apps/desktop/test/settings-workbench.test.tsx',

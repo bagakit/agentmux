@@ -88,12 +88,12 @@ async function callers() {
 async function run(name, mutant, expected) {
   const output = resolve(evidence, name); await mkdir(output, { recursive: true })
   const tests = [fixture, ...(mode === '--unit' ? adjacentTests.map(name => `apps/desktop/test/${name}`) : [])]
-  const args = ['exec', 'vitest', 'run', '--config', config, ...tests, '--maxWorkers=1',
+  const args = ['node_modules/vitest/vitest.mjs', 'run', '--config', config, ...tests, '--maxWorkers=1',
     '--reporter=json', '--outputFile', resolve(output, 'vitest.json')]
   const env = { ...process.env, pnpm_config_verify_deps_before_run: 'false',
     AGENTMUX_SETTINGS_PARENT_MUTANT: mutant, AGENTMUX_SETTINGS_PARENT_EVIDENCE: output }
   let exitCode = 0, stdout = '', stderr = ''
-  try { const value = await execute('pnpm', args, { cwd: root, env, timeout: 150_000, maxBuffer: 20 * 1024 * 1024 })
+  try { const value = await execute(process.execPath, args, { cwd: root, env, timeout: 150_000, maxBuffer: 20 * 1024 * 1024 })
     stdout = value.stdout; stderr = value.stderr
   } catch (error) { exitCode = typeof error.code === 'number' ? error.code : -1; stdout = error.stdout ?? ''; stderr = error.stderr ?? '' }
   await writeFile(resolve(output, 'run.log'), stdout + stderr)

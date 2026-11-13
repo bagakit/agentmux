@@ -21,6 +21,7 @@ vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDo
 import { App } from '../src/renderer/src/App'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { selectSettingsHost } from './helpers/settings-host-ui'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
 import { observations, report } from '../scripts/fixtures/settings-parent-cost/observations'
@@ -94,7 +95,7 @@ async function section(id: SettingsSectionId) { await click(`[data-settings-targ
 function hostField(card: ParentNode, name: string): HTMLInputElement {
   const labels = [...card.querySelectorAll<HTMLLabelElement>('label')]
   expect(labels.length).toBeGreaterThan(0)
-  const label = labels.find(node => node.querySelector('span')?.textContent === name)
+  const label = labels.find(node => node.querySelector('span')?.textContent?.startsWith(name))
   expect(label, `原 Host 字段 ${name}`).toBeDefined()
   return connected<HTMLInputElement>('input', label!)
 }
@@ -111,13 +112,17 @@ function sameWorkingFacts(before: ReturnType<typeof useAppStore.getState>) {
   expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
 }
 
-it('actual App parent cost stays zero with nonempty stable original JSX callback samples', async () => {
+// The owning transform records the actual JSX props and source Profiler callbacks.
+// Run: node node_modules/vitest/vitest.mjs run --config apps/desktop/scripts/fixtures/settings-parent-cost/vitest.config.mts apps/desktop/test/settings-parent-cost.test.tsx
+it.skipIf(process.env.AGENTMUX_SETTINGS_PARENT_SOURCE_OBSERVATION !== '1')('actual App parent cost stays zero with nonempty stable original JSX callback samples', async () => {
   let summary: ReturnType<typeof observation.summary> | undefined, passed = false
   try {
     await mount(); await section('hosts')
+    await selectSettingsHost(container, 'configured-0')
     const pane = connected('[data-settings-pane="hosts"]'), cards = pane.querySelectorAll<HTMLElement>('.host-settings-card')
-    expect(cards).toHaveLength(8)
-    const input = hostField(cards[1]!, 'Label')
+    expect(pane.querySelectorAll('[data-host-disclosure]')).toHaveLength(8)
+    expect(cards).toHaveLength(1)
+    const input = hostField(cards[0]!, 'Name')
     await fill(input, 'Actual App draft retained'); await section('general')
     expect(pane.hidden).toBe(true); observation.proveCollected()
     const facts = useAppStore.getState(), config = facts.config
@@ -140,7 +145,7 @@ it('actual App parent cost stays zero with nonempty stable original JSX callback
     expect(summary.settingsSubtreeCommits).toBe(0)
     expect(useAppStore.getState().config).toBe(config); sameWorkingFacts(facts)
     expect(connected('.settings-page').dataset.settingsPage).toBe('general')
-    expect(pane.hidden).toBe(true); expect(hostField(cards[1]!, 'Label')).toBe(input)
+    expect(pane.hidden).toBe(true); expect(hostField(cards[0]!, 'Name')).toBe(input)
     expect(input.value).toBe('Actual App draft retained'); expect(api.config.save).not.toHaveBeenCalled()
     passed = true
   } finally { report('parent-cost', { passed, summary, rawEvents: observation.events }) }
@@ -157,16 +162,17 @@ it('actual App public SettingsNavigation changes section and exact same-section 
     expect(useAppStore.getState().config).toBe(facts.config); sameWorkingFacts(facts)
     expect(shell.dataset.settingsPage, 'App public route 的 initialSection 必须进入原 Panel').toBe('agents')
     expect(connected('.settings-page')).toBe(shell); expect(search.value).toBe('')
-    const first = connected<HTMLDetailsElement>('#executor-settings-codex')
-    expect(first.open).toBe(true); expect(first.closest('[hidden], [inert]')).toBeNull()
+    const first = connected<HTMLElement>('#executor-settings-codex')
+    expect(first.dataset.resourceEditor).toBe('codex'); expect(first.closest('[hidden], [inert]')).toBeNull()
     expect(document.activeElement).toBe(connected('input[data-executor-name]', first))
     await publicRoute('agents', 'review')
     expect(useAppStore.getState().config).toBe(facts.config); sameWorkingFacts(facts)
-    const second = connected<HTMLDetailsElement>('#executor-settings-review')
-    expect(second.open, 'App public same-section executorId 必须进入另一真实配置对象').toBe(true)
+    const second = connected<HTMLElement>('#executor-settings-review')
+    expect(second.dataset.resourceEditor, 'App public same-section executorId 必须进入另一真实配置对象').toBe('review')
     expect(second.closest('[hidden], [inert]')).toBeNull()
     expect(document.activeElement).toBe(connected('input[data-executor-name]', second))
-    expect(connected('#executor-settings-codex')).toBe(first)
+    expect(container.querySelector('#executor-settings-codex')).toBeNull()
+    expect(first.isConnected).toBe(false)
     expect(connected('.settings-page')).toBe(shell)
     passed = true
   } finally { report('public-route', { passed, rawEvents: observation.events, configAndSessionIdentityUnchanged: passed }) }
@@ -179,17 +185,19 @@ it('actual App hidden config publication preserves dirty authored field, clean r
     await act(async () => configFixture.owner.edit(previous, { ...previous,
       hosts: previous.hosts.map(host => host.kind === 'ssh' ? { ...host, hostname: `${host.id}.invalid` } : host) }))
     await mount(); await section('hosts')
+    await selectSettingsHost(container, 'configured-0')
     const pane = connected('[data-settings-pane="hosts"]'), cards = pane.querySelectorAll<HTMLElement>('.host-settings-card')
-    expect(cards).toHaveLength(8)
-    const dirty = hostField(cards[1]!, 'Label'), clean = hostField(cards[1]!, 'Hostname'), neighbor = hostField(cards[2]!, 'Label')
+    expect(pane.querySelectorAll('[data-host-disclosure]')).toHaveLength(8)
+    expect(cards).toHaveLength(1)
+    const dirty = hostField(cards[0]!, 'Name'), clean = hostField(cards[0]!, 'Host or SSH alias')
     await fill(dirty, 'Authored dirty label'); await section('general')
     const before = configFixture.owner.current
     await act(async () => configFixture.owner.edit(before, { ...before, hosts: before.hosts.map(host => host.id === 'configured-0'
       ? { ...host, hostname: 'published.invalid' } : host.id === 'configured-1' ? { ...host, label: 'Published neighbor' } : host) }))
     expect(pane.hidden).toBe(true); expect(dirty.isConnected).toBe(true)
     expect(dirty.value).toBe('Authored dirty label'); expect(clean.value).toBe('published.invalid')
-    expect(neighbor.value).toBe('Published neighbor')
-    await section('hosts'); expect(hostField(cards[1]!, 'Label')).toBe(dirty)
+    expect(pane.querySelector('[data-host-disclosure="configured-1"]')!.textContent).toContain('Published neighbor')
+    await section('hosts'); expect(hostField(cards[0]!, 'Name')).toBe(dirty)
     await click('.settings-pane-actions button', pane)
     expect(api.config.save).toHaveBeenCalledTimes(1)
     await act(async () => { await vi.mocked(api.config.save).mock.results[0]!.value })
@@ -198,7 +206,7 @@ it('actual App hidden config publication preserves dirty authored field, clean r
     expect(expected!.hosts[2]).toMatchObject({ label: 'Published neighbor' })
     expect(submitted.hosts[1]).toMatchObject({ label: 'Authored dirty label', hostname: 'published.invalid' })
     expect((await configFixture.disk()).hosts[1]).toMatchObject({ label: 'Authored dirty label', hostname: 'published.invalid' })
-    expect(hostField(cards[1]!, 'Label')).toBe(dirty)
+    expect(hostField(cards[0]!, 'Name')).toBe(dirty)
     passed = true
   } finally { report('config-publication', { passed, rawEvents: observation.events }) }
 })
@@ -225,13 +233,16 @@ it('actual App preserves visited Prompt editor selection, IME, close action and 
     expect(connected('.settings-page').dataset.settingsPage).toBe('prompts')
     expect(api.config.save).not.toHaveBeenCalled(); sameWorkingFacts(facts)
     await click('[aria-label="Close settings"]')
-    expect(container.querySelector('.settings-page')).toBeNull()
+    expect(connected('.settings-page').hidden).toBe(true)
     expect(connected('.app-shell__workspace')).toBe(workspace); expect(workspace.inert).toBe(false)
     expect(useAppStore.getState().activeWorkspaceId).toBe('alternate'); sameWorkingFacts(facts)
     await click('.window-status-bar [aria-label="Settings"]')
-    expect(connected('.settings-page').dataset.settingsPage).toBe('overview')
+    expect(connected('.settings-page')).toBe(shell)
+    expect(shell.hidden).toBe(false); expect(shell.dataset.settingsPage).toBe('overview')
+    expect(connected<HTMLTextAreaElement>('[data-prompt-editor] textarea')).toBe(editor)
+    expect(editor.value).toBe('中文组字\nexact draft')
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(container.querySelector('.settings-page')).toBeNull(); sameWorkingFacts(facts)
+    expect(connected('.settings-page').hidden).toBe(true); sameWorkingFacts(facts)
     passed = true
   } finally { report('prompt-and-close', { passed, rawEvents: observation.events }) }
 })
