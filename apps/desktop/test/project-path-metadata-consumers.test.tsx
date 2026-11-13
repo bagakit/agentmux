@@ -144,12 +144,10 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     await dom.render(<ProjectActivity sessions={[session]} />)
     const trigger = element('.project-activity')
     await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
-    const zone = element('.project-activity-zone[data-zone-id]')
-    expect(zone.title).toContain(expected)
-    expect(element('.project-activity-zone__identity em').textContent).toBe(expected)
-    await act(async () => zone.focus()); await key(zone, 'ArrowRight')
-    expect(element('.project-activity-submenu .project-activity-tab').textContent).toBe('Original Tab')
-    const card = element('.project-activity-submenu .focus-context[data-session-id="reader"][data-region-id="activity-region"]')
+    const menu = element('.project-activity-menu[data-direct="true"]')
+    expect(element('.project-activity-submenu__heading', menu).title).toContain(expected)
+    expect(element('.project-activity-tab', menu).textContent).toBe('Original Tab')
+    const card = element('.project-activity-agent[data-session-id="reader"][data-region-id="activity-region"]', menu)
     expect(card.isConnected).toBe(true)
     await act(async () => card.focus()); await key(card, 'Enter')
     expect(reportError).not.toHaveBeenCalled()
@@ -177,13 +175,12 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     expect(facts.map(node => node.title)).toEqual(facts.map(() => `${host.id} · ${expected}`))
   })
 
-  it.each(modes)('Survey menus format project and related Topic body/hover without changing link identity: %j %s', async (host, absolute, expected) => {
+  it.each(modes)('Survey menus format linked locations and open the original project identity: %j %s', async (host, absolute, expected) => {
     const { workspace } = seed(host, absolute)
     const zone: AgentMuxZoneFact = { zoneId: 'zone', workspaceId: workspace.id, kind: 'worktree', hostId: host.id, directoryPath: path, branch: 'main' }
     const topic: AgentMuxSpaceFact = { spaceId: 'topic-one', kind: 'topic', name: 'Topic', hostId: host.id, directoryPath: path, projectId: null }
-    const link = vi.fn(), open = vi.fn()
-    await dom.render(<SurveyItemOptions visible title="One exploration" zone={zone} workspace={workspace} collected={false} relatedTopics={[topic]} activityDetails={null} panels={null}
-      relations={{ zone, topics: [topic], relatedTopics: [], pendingSpaceId: null, onLinkChange: link, onOpenTopic: open }}
+    const open = vi.fn()
+    await dom.render(<SurveyItemOptions visible title="One exploration" zone={zone} workspace={workspace} collected={false} relatedSpaces={[topic]} activityDetails={null}
       onCollectedChange={() => {}} onManageBrowsers={() => {}} onOpenWorkspace={open} />)
     const trigger = element('[aria-label="Exploration options"]')
     await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
@@ -192,16 +189,12 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     await act(async () => details.focus()); await key(details, 'ArrowRight')
     const body = element('.survey-item-details-content')
     expect(body.textContent).toContain(`One\n${host.id}\n${expected}\nBranch: main`)
-    expect(body.textContent).toContain('1 linked Topic')
+    expect(body.textContent).toContain('1 linked location')
     expect(body.textContent).toContain(`Topic · ${host.id} · ${expected}`)
-    const sub = element('[aria-label="Link Topics"]')
-    await act(async () => sub.focus()); await key(sub, 'ArrowRight')
-    const checkbox = element('[role="menuitemcheckbox"][data-survey-topic-id="topic-one"]')
-    expect(checkbox.getAttribute('aria-label')).toBe(`Link Topic: Topic, ${host.id}, ${expected}`)
-    expect(checkbox.title).toBe(`Topic\n${host.id}\n${expected}`)
-    expect(checkbox.textContent).toContain(`${host.id} · ${expected}`)
-    await act(async () => checkbox.click())
-    expect(link).toHaveBeenCalledExactlyOnceWith('topic-one', true)
+    expect(open).not.toHaveBeenCalled()
+    await act(async () => element('[aria-label^="Open resource Workspace:"]').click())
+    expect(open).toHaveBeenCalledExactlyOnceWith(workspace.id)
+    expect(zone.directoryPath).toBe(path)
     expect(topic.directoryPath).toBe(path)
     expect(workspace.path).toBe(path)
   })
