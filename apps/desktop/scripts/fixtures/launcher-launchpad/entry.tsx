@@ -157,11 +157,21 @@ const probe = {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' })
     document.dispatchEvent(new Event('visibilitychange'))
   },
+  /** Runs on states for review: preparing never settles, failed carries the original reason. */
+  deviceState(state: 'preparing' | 'failed') {
+    api.hosts.home = state === 'preparing' ? (() => new Promise(() => {})) as typeof api.hosts.home
+      : async () => { throw new Error('Device home requires its original authenticated Host. This preview does not invent home paths.') }
+  },
+  /** A Settings-prepared arrangement: the Agent starts in a folder on the project's own device. */
+  arrangement() {
+    const state = useAppStore.getState(), tab = state.tabs[tabId]!, surface = tab.regions[regionId]!
+    flushSync(() => useAppStore.setState({ tabs: { ...state.tabs, [tabId]: { ...tab, regions: { ...tab.regions, [regionId]: { ...surface, agentWorkspaceId: workspaceId } as typeof surface } } } }))
+  },
   pathStyle(absolute: boolean) {
     const config = useAppStore.getState().config!
     flushSync(() => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: absolute } }))
   },
-  scene({ split = false, long = false, theme = 'dark', ratio = 0.5, mount = true, executorCount = 6 } = {}) {
+  scene({ split = false, long = false, theme = 'dark', ratio = 0.5, mount = true, executorCount = 6, devices = 1 } = {}) {
     document.documentElement.dataset.appearance = theme
     const config = structuredClone(baseConfig)
     config.executors = Object.fromEntries(Object.entries(config.executors).slice(0, executorCount))
@@ -176,6 +186,11 @@ const probe = {
       name: long ? 'AgentMux · distributed runtime & workspace orchestration' : 'AgentMux',
       path: workspace.path } : item)
     config.hosts = config.hosts.map(host => host.id === workspace.hostId ? { ...host, label: long ? 'Local development · engineering workstation' : 'This Mac' } : host)
+    // Exactly `devices` configured devices: one shows the common page without Runs on; more
+    // bring the Agent section's Runs on field onto the start page.
+    const others = config.hosts.filter(host => host.id !== workspace.hostId).slice(0, Math.max(0, devices - 1))
+    config.hosts = [...config.hosts.filter(host => host.id === workspace.hostId), ...others]
+    config.workspaces = config.workspaces.filter(item => config.hosts.some(host => host.id === item.hostId))
     const detections = Object.fromEntries(Object.entries(config.executors).map(([executorId, executor]) => [executorDetectionKey(workspace.hostId, executorId), {
       state: 'ready' as const, input: { executorId, providerId: executor.providerId, command: executor.command, host: config.hosts.find(host => host.id === workspace.hostId)! },
       result: { availability: 'available', executable: executor.command }, detail: 'Controlled preview detection result' }]))

@@ -29,6 +29,13 @@ app.whenReady().then(async () => {
       await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type:'mouseWheel',...point,deltaY,deltaX:0})
       await paint()
     }
+    // Opens Runs on and picks one exact device (the first other device by default).
+    const chooseRunsOn = async (value = null) => {
+      const item = value ? `[role="menuitemradio"][data-value="${value}"]` : '[role="menuitemradio"][data-value]:not([data-value="local"])'
+      await click('.launcher-agent-device [aria-label="Runs on"]')
+      await wait(`Boolean(document.querySelector('${item}'))`)
+      await evaluate(`document.querySelector('${item}').click()`); await paint()
+    }
     const escape = async () => {
       for (const type of ['keyDown','keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
       await paint()
@@ -144,7 +151,23 @@ app.whenReady().then(async () => {
     await frame('availability-failed')
     receipt.checks.push({name:'Selected Mote, actions keyboard sequence and failed observation preserve original draft',draft:await evaluate('launchpad.facts().sourceDraft'),selectedMote})
     await viewport(360,520); await evaluate('launchpad.scene({long:true,theme:"light"});spaceLauncher.theme("light")'); await paint()
-    await click('[aria-label="Runtime environment"]'); await frame('narrow-environment'); await escape()
+    await evaluate(`document.querySelector('.launcher-environment__device').focus()`); await paint(); await frame('narrow-device-details')
+    await evaluate('document.activeElement?.blur?.()'); await viewport(1180,850); await evaluate('launchpad.scene({devices:2});spaceLauncher.theme("dark")'); await paint()
+    assert.ok(await evaluate(`Boolean(document.querySelector('.launcher-agent-device [aria-label="Runs on"]'))`))
+    await frame('wide-runs-on')
+    await evaluate(`document.querySelector('.launcher-environment__device').focus()`); await paint(); await frame('wide-device-details')
+    await evaluate('document.activeElement?.blur?.()'); await click('.launcher-agent-device [aria-label="Runs on"]'); await frame('wide-runs-on-open'); await escape(); await evaluate('document.activeElement?.blur?.()');
+    await evaluate('launchpad.scene({devices:2,theme:"light"});spaceLauncher.theme("light")'); await paint(); await frame('wide-runs-on-light')
+    await viewport(560,850); await evaluate('launchpad.scene({devices:2});spaceLauncher.theme("dark")'); await paint(); await frame('narrow-runs-on')
+    await viewport(1180,850); await evaluate('launchpad.scene({devices:2});spaceLauncher.theme("dark");launchpad.deviceState("preparing")'); await paint()
+    await chooseRunsOn(); await wait('Boolean(document.querySelector(".launcher-agent-device__status"))'); await frame('wide-runs-on-preparing')
+    // Choosing the project device cancels the never-settling preparation before the failed scene.
+    await chooseRunsOn('local'); await evaluate('launchpad.scene({devices:2});launchpad.deviceState("failed")'); await paint()
+    await chooseRunsOn(); await wait('Boolean(document.querySelector(".launcher-agent-device__status[data-state=failed]"))'); await frame('wide-runs-on-failed')
+    await viewport(560,850); await paint(); await frame('narrow-runs-on-failed')
+    await viewport(1180,850); await evaluate('launchpad.scene({devices:2});launchpad.arrangement()'); await paint()
+    await wait('Boolean(document.querySelector(".launcher-agent-device[data-arrangement=settings]"))'); await frame('wide-settings-arrangement')
+    await viewport(560,850); await paint(); await frame('narrow-settings-arrangement')
     await viewport(1180,850); await evaluate('launchpad.settings()'); await paint(); await frame('settings-reference')
     receipt.passed = true
   } catch (error) {
