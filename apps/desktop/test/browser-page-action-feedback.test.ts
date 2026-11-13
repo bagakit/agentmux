@@ -38,7 +38,11 @@ vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async
     }
     if (native.mode === 'concurrent-observe') native.observe = () => onPageCall('snapshot', [])
     if (native.mode === 'concurrent') await Promise.all([onPageCall('click', [page.nodes[0].ref]), onPageCall('hover', [page.nodes[0].ref])])
-    else await onPageCall(['navigation', 'concurrent-observe', 'wait'].includes(native.mode) ? 'click' : native.mode, [page.nodes[0].ref, native.key ?? 'private-invocation-value'])
+    else {
+      const method = ['navigation', 'concurrent-observe', 'wait'].includes(native.mode) ? 'click' : native.mode
+      // click's second argument is a validated options object, never a text value.
+      await onPageCall(method, method === 'click' ? [page.nodes[0].ref] : [page.nodes[0].ref, native.key ?? 'private-invocation-value'])
+    }
     if (native.mode === 'wait') await onPageCall('wait', [0])
     if (native.mode === 'navigation') {
       await onPageCall('gotoUrl', ['https://generic.invalid/next'])

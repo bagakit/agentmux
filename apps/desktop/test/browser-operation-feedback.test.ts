@@ -19,7 +19,15 @@ function target(x = 20, y = 30) {
 const moves: { element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn>; animation: { cancel: ReturnType<typeof vi.fn>; startTime: number | null; currentTime: number; ready: Promise<unknown>; effect: { setKeyframes: ReturnType<typeof vi.fn> } } }[] = []
 const labelMoves: typeof moves = []
 const presented = new WeakMap<HTMLElement, { x: number; y: number }>()
+const showPopoverDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'showPopover')
 beforeEach(() => {
+  // happy-dom has no top-layer compositor; Native proof covers actual painting.
+  const shown = new WeakSet<Element>(), matches = Element.prototype.matches
+  vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+    return selector === ':popover-open' ? shown.has(this) : matches.call(this, selector)
+  })
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, writable: true,
+    value: vi.fn(function (this: HTMLElement) { shown.add(this) }) })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const p = presented.get(this) ?? (/translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(this.style.transform)?.slice(1).map(Number))
     const left = Array.isArray(p) ? p[0]! : p?.x ?? 0, top = Array.isArray(p) ? p[1]! : p?.y ?? 0
@@ -39,6 +47,8 @@ afterEach(() => {
   const bridge = globals.__agentMuxBrowserOperationFeedbackBridge
   if (bridge) window.removeEventListener('message', bridge.listener)
   delete globals.__agentMuxBrowserOperationFeedbackBridge
+  if (showPopoverDescriptor) Object.defineProperty(HTMLElement.prototype, 'showPopover', showPopoverDescriptor)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'showPopover')
   document.body.replaceChildren(); moves.length = labelMoves.length = 0; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 describe('actual isolated feedback document script', () => {
@@ -71,6 +81,32 @@ describe('actual isolated feedback document script', () => {
     expect(value.shadow.querySelectorAll('button,input,a,[tabindex]')).toHaveLength(0)
     expect(value.shadow.querySelector('.label').textContent).toBe('Agent · Click')
     expect(document.activeElement).toBe(element)
+  })
+  it('presents the exact cue and acknowledged click in the document top layer without a light-dismiss or input surface', () => {
+    const element = target(); element.focus(); apply(base, element)
+    const host = state().host
+    expect(host.getAttribute('popover')).toBe('manual')
+    expect(host.showPopover).toHaveBeenCalledExactlyOnceWith()
+    expect(document.activeElement).toBe(element)
+    apply({ ...base, revision: 2, phase: 'click' })
+    const ripple = document.querySelector<HTMLElement>('[data-agentmux-browser-click-feedback]')!
+    expect(ripple).not.toBeNull(); expect(ripple.getAttribute('popover')).toBe('manual')
+    expect(ripple.style.pointerEvents).toBe('none')
+    expect(host.showPopover).toHaveBeenCalledTimes(2)
+    expect(document.activeElement).toBe(element)
+    apply({ ...base, revision: 3, phase: 'clear' })
+    expect(host.isConnected).toBe(false); expect(ripple.isConnected).toBe(false)
+    expect(document.activeElement).toBe(element)
+  })
+  it.each(['rejected', 'cancelled'])('removes only its failed %s top-layer cue and leaves the original page and focus intact', failure => {
+    const element = target(); element.focus()
+    vi.mocked(HTMLElement.prototype.showPopover).mockImplementationOnce(() => {
+      if (failure === 'rejected') throw new Error('Display unavailable')
+    })
+    expect(apply(base, element)).toBe(false)
+    expect(state().host).toBeNull(); expect(state().phase).toBe('clear')
+    expect(document.querySelector('[data-agentmux-browser-operation-feedback]')).toBeNull()
+    expect(element.isConnected).toBe(true); expect(document.activeElement).toBe(element)
   })
   it('clamps the measured label at the narrow bottom/right edge while retaining the actual pointer point', () => {
     vi.stubGlobal('innerWidth', 234.5); vi.stubGlobal('innerHeight', 112)
