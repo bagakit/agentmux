@@ -283,7 +283,7 @@ export class DesktopSpatialPersistence {
     this.arm(SAVE_STALL_AFTER_MS);
   }
   private arm(delay: number): void {
-    if (this.watchdog !== null) return;
+    if (this.watchdog !== null || this.disposed) return;
     this.watchdog = this.clock.setTimeout(() => { this.watchdog = null; this.check(); }, delay);
   }
   private check(): void {
@@ -316,7 +316,10 @@ export class DesktopSpatialPersistence {
   }
   /** Called once when a reported stall is confirmed saved again. */
   onRecovered: (() => void) | null = null;
+  private disposed = false;
+  /** A replaced owner never retries or reports again; its pending intent belongs to the next owner. */
   dispose(): void {
+    this.disposed = true;
     if (this.watchdog !== null) this.clock.clearTimeout(this.watchdog);
     this.watchdog = null;
   }
