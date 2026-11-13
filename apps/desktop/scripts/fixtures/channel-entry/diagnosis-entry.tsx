@@ -5,7 +5,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { channelFixture } from './facts'
 const { proof, connection, target } = channelFixture
 const scene = { active: false, mode: 'busy' as 'busy' | 'ready' | 'waiting' | 'admitted' | 'rewritten', bindingId: '', revision: 1, room: '', longName: false, receiver: 'ready' as 'ready' | 'ended' | 'recovering' | 'unknown', recoveryLost: false, statusMode: 'normal' as 'normal' | 'unknown', showAvatar: false }
-const statusAvatar = new URL('../../../src/renderer/src/assets/mote-origin/role-team.png', import.meta.url).href
+const statusAvatar = new URL('../../../../../packages/client-ui/brand/illustrations/mote-origin/role-team.png', import.meta.url).href
 Object.assign(proof, { diagnosis: scene })
 connection.capabilities = { ...connection.capabilities!, receiverRecovery: true }
 const recoveries = new Map<string, any>()

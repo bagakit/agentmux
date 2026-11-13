@@ -22,7 +22,7 @@ const sources = [
   'apps/desktop/src/renderer/src/styles/full-page-loading.css',
   'apps/desktop/src/renderer/src/styles/session-connecting.css',
   'apps/desktop/src/renderer/src/styles/tokens.css',
-  'apps/desktop/resources/settings-banner.png',
+  'packages/client-ui/brand/heroes/origin-launch.avif',
   'apps/desktop/scripts/fixtures/session-loading-recovery-quality/presentation.mjs'
 ]
 if(contextMode) sources.push('apps/desktop/src/renderer/src/components/SessionRecap.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx',

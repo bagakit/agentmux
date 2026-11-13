@@ -171,7 +171,7 @@ try {
   const route=one(collect(avatarTree,n=>ts.isCallExpression(n)&&n.expression.getText(avatarTree)==='navigation.open'),'actual Executor settings call')
   callers.push({symbol:'SettingsNavigation.open',file:path.relative(root,avatarFile),line:avatarTree.getLineAndCharacterOfPosition(route.getStart()).line+1,expression:route.getText(avatarTree)})
   assert.ok(inputs.size>0)
-  for (const filename of [panelFile,appFile,chromeFile,cssFile,file('resources/settings-banner.png')]) assert.ok(inputs.has(filename),'Actual loaded input missing: '+filename)
+  for (const filename of [panelFile,appFile,chromeFile,cssFile,path.join(root,'packages/client-ui/brand/heroes/origin-banner.avif')]) assert.ok(inputs.has(filename),'Actual loaded input missing: '+filename)
   for (const [filename,record] of inputs) {
     const bytes=await fs.readFile(filename),stat=await fs.stat(filename)
     assert.deepEqual({sha256:hash(bytes),bytes:bytes.length,mode:stat.mode&0o777},record,'Actual input changed after proof')

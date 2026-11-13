@@ -15,7 +15,7 @@ const privateHome = vi.hoisted(() => ({ directory: undefined as string | undefin
 vi.mock('node:os', async load => { const original = await load<typeof import('node:os')>(); return { ...original, homedir: () => privateHome.directory ?? original.homedir() } })
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
-export const png = process.env.AGENTMUX_TEST_IMAGE_VISUAL === '1' ? readFileSync(new URL('../../../desktop/resources/settings-banner.png', import.meta.url)) : Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
+export const png = process.env.AGENTMUX_TEST_IMAGE_VISUAL === '1' ? readFileSync(new URL('../../../../packages/client-ui/brand/illustrations/concepts/goals-companions.png', import.meta.url)) : Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
 export async function inputImagePublicationFixture() {
   const original = await rpcOwnerFixture(['image-agent'], core, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'image-native', transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(original.close)
   privateHome.directory = original.root

@@ -32,9 +32,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
   ...await files(mobileFixture), ...await files(path.join(root, 'apps/mobile/src')),
-  ...['artwork/demand-dialogue.png', 'artwork/goal-custom.png', 'artwork/goal-ideas.png', 'artwork/goal-next.png',
-    'artwork/goal-understand.png', 'settings-banner.png', 'startup-background.png']
-    .map(file => path.join(root, 'apps/desktop/resources', file)),
+  ...await files(path.join(root, 'packages/client-ui/brand')),
   path.join(import.meta.dirname, 'candidate-package-resolve.mjs'),
   path.join(import.meta.dirname, 'probe-process.mjs'), path.join(import.meta.dirname, 'package-smoke-context.mjs'),
   path.join(root, 'apps/desktop/test/helpers/local-runtime-connector.ts'), path.join(root, 'test/fixture-values.mjs'),

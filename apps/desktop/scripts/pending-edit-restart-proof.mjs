@@ -305,7 +305,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         packageSha256: sha(packageBytes),
         reason: 'The exact candidate lockfile resolution is linked only in the private build; shared links remain unchanged.' })
     }
-    const bannerPath = 'apps/desktop/resources/settings-banner.png'
+    const bannerPath = 'packages/client-ui/brand/heroes/origin-banner.avif'
     try { await readFile(join(privateRoot, bannerPath)) }
     catch (error) {
       if (error.code !== 'ENOENT') throw error
