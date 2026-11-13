@@ -109,6 +109,13 @@ describe('README HTML subset projection', () => {
     expect(textOf([document.blocks[0]!])).toBe('<iframe src="https://e.example">')
   })
 
+  it('an unclosed raw-text tag opening a block keeps the rest of the document readable as written', () => {
+    // CommonMark reads this as one type-1 HTML block to the end of the document; its lines stay lines.
+    expect(parseAgentMarkdown('Intro\n\n<script>\n\n# Heading\n\n- one')).toEqual([
+      { kind: 'paragraph', children: [{ kind: 'text', text: 'Intro' }] },
+      { kind: 'code', language: null, text: '<script>\n\n# Heading\n\n- one' }])
+  })
+
   it('a link label keeps only text: an autolink or Markdown link inside <a> gives up its destination', () => {
     expect(parseAgentMarkdown('<a href="https://x.dev/docs">https://x.dev/docs</a>')).toEqual([{ kind: 'paragraph', children: [
       { kind: 'link', href: 'https://x.dev/docs', children: [{ kind: 'text', text: 'https://x.dev/docs' }] }] }])

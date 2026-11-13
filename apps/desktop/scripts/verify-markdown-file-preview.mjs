@@ -3,12 +3,13 @@
 // must load, hit that anchor and fail a behavior assertion, and the unmutated source must pass.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const config = 'apps/desktop/test/vitest.markdown-file-preview.config.mts'
 const mutants = ['remote-port-undefined', 'layout-not-passed', 'expected-not-current', 'save-from-render-value', 'receipt-not-applied', 'failure-silenced']
+await mkdir(join(root, '.tmp'), { recursive: true })
 const proof = await mkdtemp(join(root, '.tmp/markdown-file-preview-mutation-'))
 
 async function run(mode, mutation) {
@@ -29,6 +30,7 @@ try {
   const green = await run('green')
   assert.equal(green.exitCode, 0, 'Unmutated Desktop source passes')
   assert.equal(green.collected, 1, 'The owning test file loads and collects tests')
+  assert.ok(green.passed > 0 && green.failed === 0, 'Every collected Desktop preview test runs and passes')
   console.log(`green: ${green.passed} passed`)
   for (const mutation of mutants) {
     const mutant = await run(mutation, mutation)

@@ -38,6 +38,7 @@ const mutations = [
   { mode: 'inherited-raw-text-lookup', path: parser, from: 'const rawMode = RAW_TEXT.get(name)', to: 'const rawMode = (Object.fromEntries(RAW_TEXT) as Record<string, number>)[name]' },
   { mode: 'flattened-heading-in-outline', path: parser, from: 'align, inlineDepth === 0)]', to: 'align, true)]' },
   { mode: 'quadratic-trim', path: parser, from: 'function trimEndHtml(text: string): string { let end = text.length; while (end > 0 && isHtmlSpace(text.charCodeAt(end - 1))) end--; return text.slice(0, end) }', to: "function trimEndHtml(text: string): string { return text.replace(/[\\t\\n\\f\\r ]+$/u, '') }" },
+  { mode: 'unclosed-raw-block-reflowed', path: parser, from: '  const index = nodes.findIndex(opensRawBlock)', to: '  const index = -1' },
   { mode: 'closed-details-searchable', path: renderer, from: 'if (node.kind === \'details\') return node.open ? project(node.children) : []', to: "if (node.kind === 'details') return project(node.children)" },
 ]
 
