@@ -11,11 +11,12 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from './probe
 const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2)
 const ownershipScope = args.includes('--ownership-scope'), returnControlScope = args.includes('--return-control-scope')
 const agentPreviewScope = args.includes('--agent-preview-scope')
-const pairedArgs = args.filter(value => !['--ownership-scope', '--return-control-scope', '--agent-preview-scope'].includes(value))
+const linkedAgentScope = args.includes('--linked-agent-scope')
+const pairedArgs = args.filter(value => !['--ownership-scope', '--return-control-scope', '--agent-preview-scope', '--linked-agent-scope'].includes(value))
 assert.ok(pairedArgs.length % 2 === 0 && pairedArgs.every((value, index) => index % 2 !== 0 || ['--receipt', '--recapture-phases'].includes(value)), 'Use an explicit receipt, scoped Browser control proof or bounded phase recapture')
 const take = flag => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined
 const recapture = take('--recapture-phases')?.split(',')
-assert.ok(Number(ownershipScope) + Number(returnControlScope) + Number(agentPreviewScope) + Number(Boolean(recapture)) <= 1, 'Ownership, direct-return, Agent preview and image-only recapture have separate scopes')
+assert.ok(Number(ownershipScope) + Number(returnControlScope) + Number(agentPreviewScope) + Number(linkedAgentScope) + Number(Boolean(recapture)) <= 1, 'Each original Renderer scenario has one explicit scope')
 const selectedPhases = returnControlScope ? ['human'] : ownershipScope ? ['waiting', 'completed', 'failed', 'stopped', 'human'] : recapture
 assert.ok(!recapture || recapture.length > 0 && new Set(recapture).size === recapture.length && recapture.every(phase => ['waiting', 'navigation', 'script', 'observe', 'completed', 'failed', 'stopped', 'human'].includes(phase)), 'Recapture only explicit original Renderer phases')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
@@ -35,7 +36,7 @@ const owners = [
   'apps/desktop/src/renderer/src/styles/browser-operation-surface.css', 'apps/desktop/src/shared/browser-agent-control.ts', 'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/shared/contracts.ts'
 ]
 const receipt = { schema: 'agentmux.browser-control-continuity.renderer.v1', candidate, passed: false, out,
-  scope: recapture ? { kind: 'phase-recapture', phases: recapture } : agentPreviewScope ? { kind: 'agent-preview-initial-and-completed-visibility-return', mutations: 'not-repeated', native: 'not-exercised' } : returnControlScope ? { kind: 'direct-return-normal-narrow-short-and-pane-callbacks', phases: selectedPhases, mutations: 'not-repeated' } : ownershipScope ? { kind: 'ownership-with-layout-and-button-mutations', phases: selectedPhases } : { kind: 'complete' },
+  scope: linkedAgentScope ? { kind: 'linked-Agent-menu-and-close-confirmation', mutations: 'separate-focused-tests', native: 'not-exercised' } : recapture ? { kind: 'phase-recapture', phases: recapture } : agentPreviewScope ? { kind: 'agent-preview-initial-and-completed-visibility-return', mutations: 'not-repeated', native: 'not-exercised' } : returnControlScope ? { kind: 'direct-return-normal-narrow-short-and-pane-callbacks', phases: selectedPhases, mutations: 'not-repeated' } : ownershipScope ? { kind: 'ownership-with-layout-and-button-mutations', phases: selectedPhases } : { kind: 'complete' },
   overlays: {}, sources: {}, assets: {}, runs: [], driverSha256: sha(await readFile(import.meta.filename)),
   boundary: 'Actual BrowserPane, StableWorkbenchView, BrowserPresentationStage, BrowserControlBoundary, operation chrome, media acquisition hook and real video playback. Maintained typed mock API seam and one private canvas.captureStream replace native IPC, operation/control facts and OS capture. PNGs are original complete Renderer WebContents frames, not native child composition, physical input, a live Agent or installation.',
   independentVisualReview: 'required' }
@@ -55,6 +56,7 @@ async function rendererScene() {
   const ownershipScope = process.env.AGENTMUX_CONTINUITY_RENDERER_OWNERSHIP === 'true'
   const returnControlScope = process.env.AGENTMUX_CONTINUITY_RENDERER_RETURN === 'true'
   const agentPreviewScope = process.env.AGENTMUX_CONTINUITY_RENDERER_AGENT_PREVIEW === 'true'
+  const linkedAgentScope = process.env.AGENTMUX_CONTINUITY_RENDERER_LINKED_AGENT === 'true'
   const result = { passed: false, cases: [], images: [], cleanup: [], errors: [], pid: process.pid,
     boundary: 'Actual complete Renderer with controlled typed API facts and canvas stream. No native page, actual Agent, OS screenshot or hardware input.' }
   let window
@@ -85,11 +87,13 @@ async function rendererScene() {
     const ranked = Object.entries(palette).map(([phase, rgb]) => ({ phase, distance: rgb.reduce((sum, value, index) => sum + (value - sample[index]) ** 2, 0) })).sort((a, b) => a.distance - b.distance)
     return ranked[0].phase === observed.sourcePhase && observed.sourceMarker.every((value, index) => Math.abs(value - sample[index]) < 64)
   }
-  async function image(name, observed) {
+  async function image(name, observed, modalCoversPage = false) {
     // DOM commit and the two actual video receivers must describe this scenario,
     // then an original Renderer compositor frame must contain those same pixels.
     await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-    const captured = await new Promise((resolve, reject) => {
+    // A real modal dims the page's source marker. Its complete frame is captured after
+    // the owning dialog is observed; the unoccluded page scenarios retain pixel matching.
+    const captured = modalCoversPage ? await window.webContents.capturePage() : await new Promise((resolve, reject) => {
       let latest, received = 0, samples = []
       const timer = setTimeout(async () => {
         window.webContents.endFrameSubscription()
@@ -119,7 +123,9 @@ async function rendererScene() {
     const bytes = captured.toPNG(), file = name + '.png'
     await fs.writeFile(path.join(output, file), bytes)
     result.images.push({ name, file, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), pixels: captured.getSize(), facts: observed,
-      boundary: 'Unmodified complete original Renderer frame subscription image, accepted only when both page-phase pixel markers match. No OS or native child composition.' })
+      boundary: modalCoversPage
+        ? 'Unmodified complete original Renderer capturePage image after the actual modal and two Renderer frames. The modal intentionally dims the source markers; no unoccluded page-color proof is claimed.'
+        : 'Unmodified complete original Renderer frame subscription image, accepted only when both page-phase pixel markers match. No OS or native child composition.' })
     await write()
   }
   app.on('window-all-closed', () => {})
@@ -133,6 +139,27 @@ async function rendererScene() {
     await until('fixture mounted', () => evaluate('Boolean(window.continuityRenderer)'))
     await evaluate(`window.continuityRenderer.setup(${JSON.stringify({ denyAgentSelection: agentPreviewScope })})`)
     await until('both actual video receivers have their original dimensions', async () => { const read = await facts(); return read.stages.length === 2 && read.stages.every(stage => stage.video?.width === 960 && stage.video.height === 540 && stage.video.readyState >= 2) })
+    if (linkedAgentScope) {
+      for (const [theme, state, confirmation] of [['dark', 'running', false], ['dark', 'interrupted', true], ['light', 'running', false], ['light', 'missing', false]]) {
+        await evaluate(`window.continuityRenderer.theme(${JSON.stringify(theme)});window.continuityRenderer.linkedAgent(${JSON.stringify(state)})`)
+        await until('linked Agent chrome ' + state, () => evaluate(`document.querySelector('[aria-label^="Browser activity:"]')?.title.includes(${JSON.stringify(state === 'missing' ? 'unconfirmed' : 'Research Agent')})`))
+        await evaluate(`document.querySelector('[aria-label^="Browser activity:"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))`)
+        await until('actual linked Agent menu', () => evaluate('Boolean(document.querySelector(".browser-operation-menu[role=menu]"))'))
+        const label = state === 'interrupted' ? 'Close Agent' : 'Stop Agent'
+        const actions = await evaluate('Array.from(document.querySelectorAll(".browser-operation-menu [role=menuitem]")).map(item=>item.textContent)')
+        assert.equal(actions.includes(label), state !== 'missing', 'Only the original observed Agent exposes its lifecycle action')
+        if (state === 'missing') assert.ok(actions.includes('Check Agent association'))
+        if (confirmation) {
+          await evaluate(`Array.from(document.querySelectorAll('.browser-operation-menu [role=menuitem]')).find(item=>item.textContent===${JSON.stringify(label)}).click()`)
+          await until('original Close confirmation', () => evaluate('document.querySelector("[role=dialog]")?.textContent.includes("This Run has already ended")'))
+        }
+        await image(`linked-agent-${theme}-${state}${confirmation ? '-confirm' : '-menu'}`, await facts(), confirmation)
+        result.cases.push({ name: `linked-agent-${theme}-${state}`, actions, confirmation, passed: true })
+        await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));Array.from(document.querySelectorAll('[role=dialog] button')).find(button=>button.textContent==='Cancel')?.click()`)
+        await until('original reading surface dismissed', () => evaluate('!document.querySelector(".browser-operation-menu[role=menu],[role=dialog]")'))
+      }
+      result.passed = true; return
+    }
     if (agentPreviewScope) {
       function readable(read, phase) {
         assert.equal(read.currentBrowser.control.owner, 'agent')
@@ -266,7 +293,7 @@ async function rendererScene() {
   }
 }
 try {
-  const paths = ['package.json', 'apps/desktop/package.json', 'apps/desktop/src', 'apps/desktop/resources']
+  const paths = ['package.json', 'apps/desktop/package.json', 'apps/desktop/src', 'apps/desktop/resources', 'packages/client-ui/brand']
   for (const name of await readdir(join(root, 'packages'))) for (const leaf of ['src', 'package.json']) {
     const file = 'packages/' + name + '/' + leaf
     try { git(['cat-file', '-e', candidate + ':' + file]); paths.push(file) } catch {}
@@ -295,7 +322,7 @@ try {
   await transform(pane.replace(from, to), { loader: 'tsx', jsx: 'automatic' })
   const html = join(source, fixture, 'renderer.html')
   await writeFile(html, '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Browser control continuity · Renderer proof</title><div id="root"></div><script type="module" src="./renderer.tsx"></script>')
-  for (const label of recapture || returnControlScope || agentPreviewScope ? ['baseline'] : ['baseline', 'omit-pane-control', 'take-control-uses-stop']) {
+  for (const label of recapture || returnControlScope || agentPreviewScope || linkedAgentScope ? ['baseline'] : ['baseline', 'omit-pane-control', 'take-control-uses-stop']) {
     const directory = join(out, label)
     await build({ configFile: false, root: dirname(html), base: './', logLevel: 'error', esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
       define: { __AGENTMUX_WEB_PREVIEW__: 'false' }, resolve: { dedupe: ['react', 'react-dom'], alias: aliases },
@@ -332,7 +359,7 @@ try {
   for (const file of [...owners, 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx']) assert.ok(receipt.sources[file], 'Actual Renderer consumer is nonempty: ' + file)
   receipt.engine = { executable: require('electron'), version: require('electron/package.json').version, sha256: sha(await readFile(require('electron'))) }
   await save()
-  for (const label of recapture || returnControlScope || agentPreviewScope ? ['baseline'] : ['baseline', 'omit-pane-control', 'take-control-uses-stop', 'restored']) {
+  for (const label of recapture || returnControlScope || agentPreviewScope || linkedAgentScope ? ['baseline'] : ['baseline', 'omit-pane-control', 'take-control-uses-stop', 'restored']) {
     const directory = join(out, label); await mkdir(directory, { recursive: true })
     const assets = receipt.assets[label === 'restored' ? 'baseline' : label]
     for (const [file, digest] of Object.entries(assets.files)) assert.equal(sha(await readFile(join(assets.directory, file))), digest)
@@ -346,6 +373,7 @@ try {
     if (ownershipScope) env.AGENTMUX_CONTINUITY_RENDERER_OWNERSHIP = 'true'
     if (returnControlScope) env.AGENTMUX_CONTINUITY_RENDERER_RETURN = 'true'
     if (agentPreviewScope) env.AGENTMUX_CONTINUITY_RENDERER_AGENT_PREVIEW = 'true'
+    if (linkedAgentScope) env.AGENTMUX_CONTINUITY_RENDERER_LINKED_AGENT = 'true'
     const row = { label, privateRoot, process: null, remaining: null }, logs = []; receipt.runs.push(row); await save()
     try { row.process = await runProbeProcess(receipt.engine.executable, [bootstrap], { cwd: privateRoot, env, timeoutMs: 60000, onLine: line => logs.push(line) }) }
     catch (error) { row.process = error.probe; throw error }
@@ -368,7 +396,7 @@ try {
       assert.equal(row.process.exitCode, 1); assert.equal(actual.failure?.name, 'AssertionError')
       assert.ok(actual.failure.message.includes(label === 'omit-pane-control' ? 'Actual BrowserPane passes original control to the mirrored stage:' : 'Actual BrowserPane Take control uses the trusted Browser API:'))
       row.owningAssertion = 'AssertionRED'
-    } else { assert.equal(row.process.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true); assert.equal(actual.images.length, agentPreviewScope ? 2 : recapture?.length ?? (selectedPhases?.length ?? 8) + (returnControlScope ? 2 : 4)); assert.equal(actual.cases.length, agentPreviewScope ? 2 : recapture?.length ?? (selectedPhases?.length ?? 8) + (returnControlScope ? 4 : 6)) }
+    } else { assert.equal(row.process.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true); assert.equal(actual.images.length, linkedAgentScope ? 4 : agentPreviewScope ? 2 : recapture?.length ?? (selectedPhases?.length ?? 8) + (returnControlScope ? 2 : 4)); assert.equal(actual.cases.length, linkedAgentScope ? 4 : agentPreviewScope ? 2 : recapture?.length ?? (selectedPhases?.length ?? 8) + (returnControlScope ? 4 : 6)) }
   }
   for (const [file, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(join(source, file))), digest)
   for (const [file, digest] of Object.entries(receipt.overlays)) assert.equal(sha(await readFile(join(root, file))), digest, 'Current exact Renderer owner retains consumed bytes: ' + file)

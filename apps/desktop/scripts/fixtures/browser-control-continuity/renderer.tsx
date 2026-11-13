@@ -150,6 +150,21 @@ Object.assign(window, { continuityRenderer: {
     }, 80)
   },
   phase,
+  async linkedAgent(state: 'running' | 'interrupted' | 'missing') {
+    const seed = (await api.sessions.snapshot()).sessions.find(session => session.kind === 'agent')
+    if (!seed || seed.kind !== 'agent') throw new Error('The declared Renderer fixture needs one typed mock Agent seed.')
+    const agent = { ...seed, id: 'linked-researcher', label: 'Research Agent', hostId: 'local',
+      control: { kind: 'agent' as const, hostId: 'local', agentSessionId: 'linked-researcher', run: { runId: 'linked-run' } },
+      processState: state === 'interrupted' ? 'interrupted' as const : 'running' as const,
+      status: { state: state === 'interrupted' ? 'disconnected' as const : 'working' as const, source: 'native-hook' as const, observedAt: Date.now() },
+      runUnobserved: false }
+    useAppStore.setState({ sessions: state === 'missing' ? [] : [agent], agentNames: { [agent.id]: 'Research Agent' } })
+    currentBrowser = { ...base, driving: false, loading: false, activity: { operation: null, control: 'human' },
+      control: { owner: 'human', activeOperationId: null, revision: 3, inputIsolation: 'inactive',
+        agent: { hostId: agent.control.hostId, agentSessionId: agent.control.agentSessionId } } }
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: currentBrowser })
+    paint('human')
+  },
   visibility(visible: boolean) { setPrimaryVisible?.(visible) },
   coverage(presentationId: string | null) {
     const event: BrowserPresentationEvent = { type: 'native-coverage-changed', browserId,
