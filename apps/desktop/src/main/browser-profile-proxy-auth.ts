@@ -79,7 +79,10 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
         const username = credential.username.trim()
         if (!username || username.length > 256 || credential.password.length > 1024) throw new BrowserProfileProxyAuthUnavailable('Enter a user name and a password for the proxy.')
         const current = await read()
-        await write({ version: 1, profiles: { ...current.profiles, [profileId]: { username, password: ports.crypto.encrypt(credential.password).toString('base64') } } })
+        let password: string
+        try { password = ports.crypto.encrypt(credential.password).toString('base64') }
+        catch { throw new BrowserProfileProxyAuthUnavailable('The proxy password could not be encrypted by the system keychain. Nothing was saved; retry when the keychain is available.') }
+        await write({ version: 1, profiles: { ...current.profiles, [profileId]: { username, password } } })
         for (const key of [...attempts.keys()]) if (key.startsWith(profileId + '\0')) attempts.delete(key)
         ports.report(profileId, null)
       })
