@@ -4,6 +4,14 @@ import type { MobileObjectIdentity } from './MobileIdentity'
 
 export type MobileChatStart = { sessionId: string | null; identity: MobileObjectIdentity | null; issue: string | null }
 
+/** Discovery chooses one typed object; a later presentation cannot substitute another owner. */
+export function mobileMoteOwner(catalog: AgentMuxSpaceCatalog, spaceId: string | null,
+  expected?: AgentMuxSpaceCatalog['spaces'][number]) {
+  const owners = catalog.spaces.filter(space => space.kind === 'mote' && (spaceId ? space.spaceId === spaceId : isPrimaryMoteSpace(space)))
+  const owner = owners.length === 1 ? owners[0] : undefined
+  return owner && (!expected || owner.spaceId === expected.spaceId && owner.hostId === expected.hostId && owner.topicId === expected.topicId) ? owner : undefined
+}
+
 /** Resolve saved identities, never activity, appearance or a first Session in the list. */
 export function mobileChatStart(catalog: AgentMuxSpaceCatalog, recentMoteSpaceId: string | null): MobileChatStart {
   const motes = catalog.spaces.filter(space => space.kind === 'mote')

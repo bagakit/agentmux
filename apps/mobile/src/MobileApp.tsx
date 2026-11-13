@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { TopicKnowledgeSource } from '@agentmux/core/control'
+import type { AgentMuxSpaceCatalog, TopicKnowledgeSource } from '@agentmux/core/control'
 
 import type { MobileTopicsContext } from './topics/MobileTopicsSurface'
 import type { MobileSurveyContext } from './survey/MobileSurveySurface'
@@ -26,7 +26,7 @@ import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
 import { mobileMoteMainIdentity, mobileMoteMemberName, type MobileMoteMember } from './navigation/mobile-mote-team'
 import { mobileMoteMemberIdentity } from './navigation/mobile-mote-team'
 import type { MobileMoteWork } from './conversation/MobileMoteConversation'
-import { isPrimaryMoteSpace, type MoteDefaultConversation } from '@agentmux/core/mote-preferences'
+import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { useMoteDialogue, type MoteDialogueReader } from '@agentmux/client-ui/use-mote-dialogue'
 
 import { useHostAppearance } from './appearance/useHostAppearance'
@@ -50,7 +50,7 @@ import './conversation/chrome.css'
 import type { MobileSpatialContext } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWorkface } from './navigation/home-preference'
 
-import { mobileChatStart } from './navigation/chat-start'
+import { mobileChatStart, mobileMoteOwner } from './navigation/chat-start'
 import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
@@ -291,11 +291,18 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }
     if (!source?.forwardRpc || !connected) { setNotice('暂时无法核对 Mote 主对话，可以从 Mote 目录继续对话。'); return }
     try {
-      const { catalog } = await source.forwardRpc('space.ls', { target: spaceId ? { spaceId } : {}, presentation: true })
+      let discovered: AgentMuxSpaceCatalog['spaces'][number] | undefined
+      if (!spaceId) {
+        const { catalog } = await source.forwardRpc('space.ls', { target: {} })
+        if (!isCurrent()) return
+        discovered = mobileMoteOwner(catalog, null)
+        if (!discovered) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
+        spaceId = discovered.spaceId
+      }
+      const { catalog } = await source.forwardRpc('space.ls', { target: { spaceId }, presentation: true })
       if (!isCurrent()) return
-      const owners = catalog.spaces.filter(owner => owner.kind === 'mote' && (spaceId ? owner.spaceId === spaceId : isPrimaryMoteSpace(owner)))
-      if (owners.length !== 1) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
-      const owner = owners[0]!
+      const owner = mobileMoteOwner(catalog, spaceId, discovered)
+      if (!owner) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
       // This entry is for one exact object; an unbound Mote cannot borrow another Main.
       const target = mobileChatStart({ ...catalog, spaces: [owner] }, owner.spaceId)
       const facts = target.identity?.mote?.facts
@@ -367,11 +374,33 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     const isCurrent = () => {
       const currentOwner = client.runtimeOwnerIdentity?.()
       return !disposed && navigationRevision.current === revision && getDeviceWorkface().recordIdentity() === recordId &&
+        originalConnection.current.client === client && originalConnection.current.connected &&
         owner?.runtimeId === currentOwner?.runtimeId && owner?.ownerInstanceId === currentOwner?.ownerInstanceId
     }
-    void client.forwardRpc('space.ls', { target: {}, presentation: true }).then(result => {
+    void (async () => {
+      let recentCatalog: AgentMuxSpaceCatalog | undefined
+      if (recentMoteSpaceId) {
+        const { catalog } = await client.forwardRpc!('space.ls', { target: { spaceId: recentMoteSpaceId }, presentation: true })
+        if (!isCurrent()) return
+        const recent = mobileMoteOwner(catalog, recentMoteSpaceId)
+        recentCatalog = { ...catalog, spaces: recent ? [recent] : [] }
+        const target = mobileChatStart(recentCatalog, recentMoteSpaceId)
+        const facts = target.identity?.mote?.facts
+        // Only a confirmed unconfigured recent Mote may fall through to the primary.
+        if (!facts || facts.quickMode.status === 'unconfirmed' || target.sessionId) return target
+      }
+      const { catalog: discovery } = await client.forwardRpc!('space.ls', { target: {} })
       if (!isCurrent()) return
-      const target = mobileChatStart(result.catalog, recentMoteSpaceId)
+      const primary = mobileMoteOwner(discovery, null)
+      if (!primary || primary.spaceId === recentMoteSpaceId) {
+        return mobileChatStart({ ...discovery, motePresentation: recentCatalog?.motePresentation ?? [] }, recentMoteSpaceId)
+      }
+      const { catalog } = await client.forwardRpc!('space.ls', { target: { spaceId: primary.spaceId }, presentation: true })
+      if (!isCurrent()) return
+      const confirmed = mobileMoteOwner(catalog, primary.spaceId, primary)
+      return mobileChatStart({ ...catalog, spaces: confirmed ? [confirmed] : [] }, primary.spaceId)
+    })().then(target => {
+      if (!target || !isCurrent()) return
       setChatStartIssue(target.issue)
       if (target.identity) { setObjectIdentity(target.identity); setIdentityRecipient(target.sessionId) }
       if (!target.sessionId) {
