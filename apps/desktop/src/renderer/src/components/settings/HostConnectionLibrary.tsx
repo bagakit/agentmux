@@ -1,6 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useHostConnectionTooltip } from '../HostConnectionTooltip'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -63,12 +64,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
           const open = event.currentTarget.open
           setExpanded((current) => current[item.id] === open ? current : { ...current, [item.id]: open })
         }}>
-        <summary className="settings-host-branch__summary" title={`${item.name} · ${item.id}`}>
-          <ThemeNavigationDisclosureIcon size={12} className="settings-host-branch__chevron" aria-hidden="true" />
-          <span className="settings-resource-row__mark">{item.mark}</span>
-          <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
-          <span className="settings-resource-row__status">{item.status}</span>
-        </summary>
+        <HostLibrarySummary item={item} />
         <div className="settings-host-branch__pages">
           {HOST_PANELS.map(({ id: page, title }) => {
             const selected = selectedId === item.id && panel === page
@@ -86,4 +82,14 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
       {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No hosts match “${query}”.` : 'No hosts yet.'}</p> : null}
     </div>
   </aside>
+}
+
+function HostLibrarySummary({ item }: { item: HostRow }) {
+  const tooltip = useHostConnectionTooltip(item.id, item.name)
+  return <><summary className="settings-host-branch__summary" {...tooltip.props}>
+    <ThemeNavigationDisclosureIcon size={12} className="settings-host-branch__chevron" aria-hidden="true" />
+    <span className="settings-resource-row__mark">{item.mark}</span>
+    <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
+    <span className="settings-resource-row__status">{item.status}</span>
+  </summary>{tooltip.content}</>
 }

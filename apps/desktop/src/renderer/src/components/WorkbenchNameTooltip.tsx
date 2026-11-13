@@ -1,6 +1,9 @@
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import { useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent } from 'react'
-import { WindowOverlayPortal } from './WindowOverlayHost'
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent } from 'react'
+import { markWindowOverlayDismissal, WindowOverlayPortal } from './WindowOverlayHost'
+
+// Pointer and keyboard can occupy different anchors. The latest reading intent owns one tooltip.
+const nameTooltipOwners = new WeakMap<Document, () => void>()
 
 /** Full names and descriptions stay outside their original surface’s overflow. */
 export function useWorkbenchNameTooltip(name: string, detail: string, suppressed: boolean,
@@ -8,15 +11,31 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
   const [anchor, setAnchor] = useState<Element | null>(null)
   const [overflowing, setOverflowing] = useState(false)
   const surface = useRef<HTMLDivElement>(null), id = useId()
+  const ownedDocument = useRef<Document | null>(null)
+  const close = useCallback((): void => {
+    const document = ownedDocument.current
+    if (document && nameTooltipOwners.get(document) === close) nameTooltipOwners.delete(document)
+    ownedDocument.current = null
+    setAnchor(null)
+  }, [])
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const keepOpen = () => clearTimeout(departure.current)
-  const hide = () => { keepOpen(); departure.current = setTimeout(() => setAnchor(null), 120) }
-  const showFor = (element: Element) => { keepOpen(); if (!suppressed) setAnchor(element) }
-  useEffect(() => () => clearTimeout(departure.current), [])
+  const hide = () => { keepOpen(); departure.current = setTimeout(close, 120) }
+  const showFor = (element: Element) => {
+    keepOpen()
+    if (suppressed) return
+    const document = element.ownerDocument, previous = nameTooltipOwners.get(document)
+    if (previous && previous !== close) previous()
+    ownedDocument.current = document; nameTooltipOwners.set(document, close); setAnchor(element)
+  }
+  useEffect(() => () => {
+    clearTimeout(departure.current)
+    if (ownedDocument.current && nameTooltipOwners.get(ownedDocument.current) === close) nameTooltipOwners.delete(ownedDocument.current)
+  }, [close])
   const visible = anchor !== null && !suppressed
   useEffect(() => {
-    if (suppressed) setAnchor(null)
-  }, [suppressed])
+    if (suppressed) close()
+  }, [suppressed, close])
   useEffect(() => {
     if (!visible || !anchor || !surface.current) return
     let disposed = false
@@ -38,13 +57,15 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
       void update()
       startFrame = window.requestAnimationFrame(() => { startFrame = undefined; subscribe() })
     } else subscribe()
-    const hide = () => setAnchor(null)
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') hide() }
+    const hide = close
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.isComposing) { markWindowOverlayDismissal(event); close() }
+    }
     window.addEventListener('blur', hide); document.addEventListener('visibilitychange', hide)
-    window.addEventListener('keydown', key)
+    document.addEventListener('keydown', key, true)
     return () => { disposed = true; if (startFrame !== undefined) window.cancelAnimationFrame(startFrame); stop?.(); window.removeEventListener('blur', hide)
-      document.removeEventListener('visibilitychange', hide); window.removeEventListener('keydown', key) }
-  }, [visible, anchor, name, detail, placement, pointerPassThrough])
+      document.removeEventListener('visibilitychange', hide); document.removeEventListener('keydown', key, true) }
+  }, [visible, anchor, name, detail, placement, pointerPassThrough, close])
   const show = (event: MouseEvent<Element> | FocusEvent<Element>) => showFor(event.currentTarget)
   return { showFor, hide, props: { onMouseEnter: show, onMouseLeave: hide, onFocus: show,
     onBlur: hide, 'aria-describedby': visible ? id : undefined },

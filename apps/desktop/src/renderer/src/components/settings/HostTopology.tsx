@@ -6,6 +6,7 @@ import type { HostCheckState } from '../../store'
 import { hostCheckLabel } from '../../lib/host-check'
 import { hostTransportLabel } from '../../lib/host-transport'
 import { HostIcon } from '../HostBadge'
+import { useHostConnectionTooltip } from '../HostConnectionTooltip'
 import '@xyflow/react/dist/base.css'
 
 const TopologyIcon = semanticIconComponent('object.topology')
@@ -27,12 +28,13 @@ type TopologyNode = HostNode | EntryNode
 
 const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<HostNode>) {
   const { host, check } = data
+  const tooltip = useHostConnectionTooltip(host.id, host.label)
   const checkedAt = check && check.state !== 'idle' && check.state !== 'checking' ? check.observedAt : undefined
   return <>
     <Handle className={data.selected ? 'remote-host-port remote-host-port--selected' : 'remote-host-port'} type="target" position={Position.Left} isConnectable={false} />
-    <button type="button" className="remote-host-node nodrag nopan" data-host-node={host.id} data-current-host={data.selected}
+    <button type="button" className="remote-host-node nodrag nopan" data-host-node={host.id} data-current-host={data.selected} {...tooltip.props}
       data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => data.onSelect(host.id)}
-      title={`${host.label} · ${host.id}`}>
+      >
       <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL ROUTE' : `${hostTransportLabel(host).toUpperCase()} HOST`}
         <span className="remote-host-node__selection" aria-hidden="true">{data.selected ? 'Selected' : null}</span></span>
       <strong>{host.label}</strong>
@@ -47,6 +49,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
         <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
         <span className="remote-host-node__work" title="Registered projects · client Session references">{data.projectCount} projects · {data.sessionCount} sessions</span></span>
     </button>
+    {tooltip.content}
   </>
 })
 function ManagementEntry({ data }: NodeProps<EntryNode>) {

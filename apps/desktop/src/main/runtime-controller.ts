@@ -43,6 +43,7 @@ import type {
   HostConfig,
   RuntimeEvent,
   RuntimeSnapshot,
+  HostTransportSnapshot,
   RuntimeEndpointWarning,
   ProviderCatalogObservation,
   SessionAttachResult,
@@ -124,6 +125,12 @@ export type RuntimePreparation = {
 
 function runtimeOwner(client: AgentMuxClient) {
   return 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : null
+}
+
+/** This synchronous metadata getter performs no connection or Runtime observation. */
+function hostTransportSnapshot(client: AgentMuxClient): HostTransportSnapshot | null {
+  try { return 'remoteTransportObservation' in client && typeof client.remoteTransportObservation === 'function' ? client.remoteTransportObservation() : null }
+  catch { return null } // Only this optional observation is unknown; the original client remains available.
 }
 
 function isSshHostedClient(client: AgentMuxClient): client is AgentMuxSshHostedClient {
@@ -924,6 +931,8 @@ export class RuntimeController {
     ))
     return {
       ...await sessionNames,
+      hostTransports: Object.fromEntries([...this.hosts].map(([hostId, host]) => [hostId, hostTransportSnapshot(host.client)])),
+      hostTransportCut: this.hostTransportSequence,
       sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates,
       ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {}),
       // A background connection can finish while another endpoint is being read. This cut still
@@ -2771,6 +2780,8 @@ export class RuntimeController {
     this.sessionAttachmentOwners.delete(key)
   }
 
+  private hostTransportSequence = 0
+
   private readonly coreEventObservers = new Map<AgentMuxClientEvent['type'], Set<(hostId: string, event: AgentMuxClientEvent) => void>>()
 
   private publish(hostId: string, event: AgentMuxClientEvent, connectionWarning?: RuntimeEndpointWarning): void {
@@ -2896,6 +2907,7 @@ export class RuntimeController {
     }
     const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
+      ...(event.type === 'connection-state' ? { hostTransport: this.hosts.has(hostId) ? hostTransportSnapshot(this.hosts.get(hostId)!.client) : null, hostTransportSequence: ++this.hostTransportSequence } : {}),
       ...(endpointObservation ? { endpointObservation } : {}),
       ...(warningChange !== undefined ? { endpointWarning: warningChange } : {}) }
     for (const client of this.clients) {

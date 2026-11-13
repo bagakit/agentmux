@@ -1036,6 +1036,10 @@ export const CONNECTION_OBSERVATION_SOURCE_STEP = 'Connection observation source
 
 export type RuntimeEvent = {
   type: 'core'
+  /** Passive exact-Host metadata, attached only to connection-state events. */
+  hostTransport?: HostTransportSnapshot | null
+  /** Original Main metadata order; independent of business event ordering. */
+  hostTransportSequence?: number
   hostId: string
   event: AgentMuxClientEvent
   /** Present only when this endpoint's observation availability changes. */
@@ -1104,7 +1108,13 @@ export type AgentSessionNameMetadata = {
   state: 'active' | 'retired'
 }
 
+/** Ephemeral original-client channel observation; never persisted or inferred from Host configuration. */
+export type HostTransportSnapshot = import('@agentmux/core').RemoteTransportObservation
+
 export type RuntimeSnapshot = {
+  hostTransports?: Record<string, HostTransportSnapshot | null>
+  /** Synchronous current-client metadata cut, after this snapshot’s awaited Runtime reads. */
+  hostTransportCut?: number
   /** Original local Core store metadata, independent of Runtime connection or recovery eligibility. */
   sessionNameMetadata?: AgentSessionNameMetadata[]
   /** A name read failed; this does not change any endpoint's connection or capabilities. */

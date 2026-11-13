@@ -1,5 +1,8 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { HostBadge, HostIcon } from './HostBadge'
+import { deviceHomeFailureDetail } from '../lib/device-home-feedback'
+import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
+import { useHostConnectionHint } from './HostConnectionTooltip'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import { projectGroupsFor } from '../lib/cross-device-project-groups'
@@ -13,7 +16,7 @@ import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object
 import { ProjectActivity } from './ProjectActivity'
 import { useDirectorySessions } from '../lib/workbench-session-subscriptions'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react'
 import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity, type WorkspaceRecord, type SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
@@ -48,6 +51,7 @@ const ThemeLayoutRows2Icon = semanticIconComponent('layout.rows-2')
 const ThemeLayoutRows3Icon = semanticIconComponent('layout.rows-3')
 const ThemeLayoutRows4Icon = semanticIconComponent('layout.rows-4')
 const ThemeObjectFoldersIcon = semanticIconComponent('object.folders')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 
 
 function folderSectionKey(hostId: string): string { return hostId === 'local' ? 'space:folders' : `space:folders:${hostId}` }
@@ -64,14 +68,14 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openHostHome = useAppStore(state => state.openHostHome)
-  const [homeReads, setHomeReads] = useState<Record<string, { busy: boolean; error?: string }>>({})
+  const [homeReads, setHomeReads] = useState<Record<string, { busy: boolean; error?: unknown }>>({})
   const pendingHomes = useRef(new Set<string>())
   async function openDeviceHome(hostId: string): Promise<void> {
     if (pendingHomes.current.has(hostId)) return
     pendingHomes.current.add(hostId)
     setHomeReads(current => ({ ...current, [hostId]: { busy: true } }))
     try { await openHostHome(hostId); setHomeReads(current => ({ ...current, [hostId]: { busy: false } })) }
-    catch (error) { setHomeReads(current => ({ ...current, [hostId]: { busy: false, error: error instanceof Error ? error.message : String(error) } })) }
+    catch (error) { setHomeReads(current => ({ ...current, [hostId]: { busy: false, error } })) }
     finally { pendingHomes.current.delete(hostId) }
   }
   const setMainSurface = useAppStore((state) => state.setMainSurface)
@@ -402,12 +406,13 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
+          <DeviceSectionHeader hostId={section.hostId} label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact suppressTooltip host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             onOpen={() => void openDeviceHome(section.hostId)} openLabel={`Open ${section.label} home`} opening={homeReads[section.hostId]?.busy === true}
+            labelSuffix={<><span className="space-device-home-mark" aria-hidden="true">~</span>{homeReads[section.hostId]?.busy ? <span className="space-device-home-progress" role="status" aria-label={`Opening ${section.label} home`}><ThemeStatusLoadingIcon size={10} animation="spin" /></span> : null}</>}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
-          {homeReads[section.hostId]?.busy ? <p className="space-device-home-status" role="status">Reading {section.label} home…</p> : homeReads[section.hostId]?.error ? <div className="space-device-home-status" role="status"><span>{homeReads[section.hostId]!.error}</span><button type="button" className="small-button" onClick={() => void openDeviceHome(section.hostId)}>Retry</button></div> : null}
+          {homeReads[section.hostId]?.error ? <DeviceHomeFailure label={section.label} error={homeReads[section.hostId]!.error} onRetry={() => void openDeviceHome(section.hostId)} /> : null}
           {filtering && section.groups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)
@@ -556,4 +561,18 @@ function ProjectPresence({ workspaces, recencyWorkspaces, visible, children }: {
 function DirectoryActivity({ workspaces, visible }: { workspaces: readonly WorkspaceRecord[]; visible: boolean }) {
   const sessions = useDirectorySessions(workspaces, visible)
   return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} /> : null
+}
+
+function DeviceHomeFailure({ label, error, onRetry }: { label: string; error: unknown; onRetry(): void }) {
+  const hint = useWorkbenchNameTooltip(`Home on ${label}`, deviceHomeFailureDetail(error), false, { pointerPassThrough: true })
+  return <div className="space-device-home-status" role="status">
+    <button type="button" className="space-device-home-reason" aria-label={`Home unavailable on ${label}: details`} {...hint.props}>Home unavailable</button>
+    <button type="button" className="space-device-home-retry" aria-label={`Retry opening ${label} home`} onClick={onRetry}>Retry</button>
+    {hint.content}
+  </div>
+}
+
+function DeviceSectionHeader({ hostId, ...props }: ComponentProps<typeof SpaceSectionHeader> & { hostId: string }) {
+  const hint = useHostConnectionHint(hostId, props.label, true)
+  return <SpaceSectionHeader {...props} labelHint={hint} />
 }

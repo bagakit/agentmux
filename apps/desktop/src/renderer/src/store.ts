@@ -1,3 +1,4 @@
+import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -909,6 +910,8 @@ export type LauncherExecutionSource = WorkbenchProjectionSelection | {
 }
 
 export type AppState = GitReadingActions & {
+  /** App-lifetime passive channel facts; omitted from the persisted user projection. */
+  hostTransports: import('../../shared/contracts').RuntimeSnapshot['hostTransports']
   runtimeOwnershipWarnings: string[] | undefined
   runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
@@ -3581,7 +3584,14 @@ function startSessionMembershipResync(
             runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning, observationStep)
           }
           entry.endpointWarnings.clear()
-          const next = { ...reconciled, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null, appIconIssue: snapshot.appIconIssue === undefined ? state.appIconIssue : snapshot.appIconIssue }
+          // Metadata sampled at the end of Main's read already supersedes older queued
+          // client events, including a same-Host route adopted while projections awaited.
+          const hostTransports = events.reduce((facts, pending) => {
+            const event = pending.event
+            return event.hostTransport === undefined || event.hostTransportSequence === undefined || snapshot.hostTransportCut === undefined || event.hostTransportSequence <= snapshot.hostTransportCut
+              ? facts : { ...facts, [event.hostId]: event.hostTransport }
+          }, snapshot.hostTransports ?? {})
+          const next = { ...reconciled, hostTransports, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null, appIconIssue: snapshot.appIconIssue === undefined ? state.appIconIssue : snapshot.appIconIssue }
           return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
         })
         if (!entry.historyReading && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && (entry.startupNotice?.startupSessionSnapshot || restoredHistory)) {
@@ -5405,6 +5415,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   startupProgress: { step: 'saved-workspace' },
   startupAgentAvailability: null,
+  hostTransports: undefined,
   runtimeOwnershipWarnings: undefined,
   runtimeEndpointWarnings: undefined,
   environmentWarning: undefined,
@@ -8735,34 +8746,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async openHostHome(hostId) {
     const host = get().config?.hosts.find(item => item.id === hostId)
-    if (!host) throw new Error('This device is no longer configured. Choose its current entry before opening home.')
+    if (!host) throw new DeviceHomeError('read', Object.assign(new Error('Device configuration is unavailable.'), { code: 'DEVICE_HOME_TARGET_CHANGED' }))
     const target = JSON.stringify(host), navigation = {}, selection = fileNavigationSelection(get())
     let navigationChanged = false
     const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== selection) navigationChanged = true })
     const canReveal = () => hostHomeNavigation === navigation && !navigationChanged && fileNavigationSelection(get()) === selection
     hostHomeNavigation = navigation
-    let step = 'Reading device home'
+    let step: DeviceHomeStep = 'read'
     try {
       const result = await api.hosts.home(structuredClone(host))
-      if (result.routeHostId !== hostId) throw new Error('The home response belongs to another device.')
-      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw new Error('The device configuration changed. Retry its current entry.')
+      if (result.routeHostId !== hostId) throw Object.assign(new Error('The home response belongs to another device.'), { code: 'DEVICE_HOME_TARGET_MISMATCH' })
+      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw Object.assign(new Error('The device configuration changed.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
       // A later explicit navigation owns the screen. This read never opens another workface.
       if (!canReveal()) return
       let workspace = get().config?.workspaces.find(item => item.hostId === hostId && item.path === result.homeDirectory)
       if (!workspace) {
-        step = 'Registering device home'
+        step = 'register'
         workspace = await api.workspaces.add({ hostId, path: result.homeDirectory })
         // Main's location owner may return an existing equivalent spelling (for example a trailing slash).
-        if (workspace.hostId !== hostId) throw new Error('The registered directory belongs to another device.')
+        if (workspace.hostId !== hostId) throw Object.assign(new Error('The registered directory belongs to another device.'), { code: 'DEVICE_HOME_TARGET_MISMATCH' })
         set(current => current.config && current.config.hosts.some(item => item.id === hostId) && !current.config.workspaces.some(item => item.id === workspace!.id)
           ? { config: { ...current.config, workspaces: [...current.config.workspaces, workspace!] } } : current)
       }
       if (!canReveal()) return
-      step = 'Opening device home'
-      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw new Error('The device configuration changed before opening home. Its registration and original work were retained; retry the current device entry.')
+      step = 'open'
+      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw Object.assign(new Error('The device configuration changed before opening home.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
       await get().selectWorkspace(workspace.id)
     } catch (error) {
-      throw new Error(`${step}: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+      throw new DeviceHomeError(step, error)
     } finally { stopWatching(); if (hostHomeNavigation === navigation) hostHomeNavigation = undefined }
   },
   async openProjectFolder() {
@@ -12450,6 +12461,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const observationSource = rendererSessionEventSource(event.hostId, event.event)
     try {
     const core = event.event
+    if (event.hostTransport !== undefined) set(state => ({ hostTransports: { ...state.hostTransports, [event.hostId]: event.hostTransport! } }))
     if (core.type === 'agent-lifecycle-observed') {
       set(state => observeRuntimeOperation(state, event))
       return
