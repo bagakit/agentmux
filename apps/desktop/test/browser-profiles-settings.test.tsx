@@ -6,8 +6,8 @@ import type { BrowserProfileList, BrowserProfileSummary } from '../src/shared/co
 
 const port = vi.hoisted(() => {
   const listeners = new Set<(list: BrowserProfileList) => void>()
-  let list: BrowserProfileList = { revision: 0, profiles: [] }
-  const commit = (next: BrowserProfileSummary[]) => { list = { revision: list.revision + 1, profiles: next }; for (const listener of listeners) listener(list) }
+  let list: BrowserProfileList = { revision: 0, folders: [], profiles: [] }
+  const commit = (next: BrowserProfileSummary[]) => { list = { revision: list.revision + 1, folders: [], profiles: next }; for (const listener of listeners) listener(list) }
   return {
     listeners, set(next: BrowserProfileList) { list = next }, get: () => list, commit,
     readProfiles: vi.fn(async () => list),
@@ -74,7 +74,7 @@ beforeEach(async () => {
   browserProfiles.reset(); port.listeners.clear()
   for (const fn of [port.readProfiles, port.updateProfile, port.setDefaultProfile, port.createProfile, port.deleteProfile,
     port.readProfileProxySignIn, port.setProfileProxySignIn]) fn.mockClear()
-  port.set({ revision: 4, profiles: [personal, client] })
+  port.set({ revision: 4, folders: [], profiles: [personal, client] })
   store.tabs = { t1: browserTab('b-open', 'p-client', false), t2: browserTab('b-saved', 'p-client', true) }
   store.layouts = { 'ws-1': { activeGroupId: 'g-1', groups: [{ id: 'g-1', tabOrder: ['t1'] }, { id: 'g-2', tabOrder: ['t2'] }] } }
   store.activeWorkspaceId = 'ws-1'
@@ -99,7 +99,7 @@ describe('Settings › Browser Profiles', () => {
     const sameHash = ['p-1', 'p-10', 'p-11', 'p-14']
       .map((id, index) => ({ ...client, id, label: `Profile ${id}`, createdAt: 10 + index, hue: undefined, isDefault: false }))
     expect(new Set(sameHash.map(profile => profileHue({ id: profile.id }))).size, 'the ids must collide on their own').toBe(1)
-    await act(async () => { port.set({ revision: 5, profiles: [personal, ...sameHash] }); await browserProfiles.refresh() })
+    await act(async () => { port.set({ revision: 5, folders: [], profiles: [personal, ...sameHash] }); await browserProfiles.refresh() })
     const rowHue = (label: string) => [...container.querySelectorAll<HTMLElement>('[data-resource-row]')]
       .find(row => row.textContent?.includes(label))!.querySelector<HTMLElement>('.profile-mark')!.style.getPropertyValue('--profile-hue')
     const hues = [personal.label, ...sameHash.map(profile => profile.label)].map(rowHue)
@@ -157,7 +157,7 @@ describe('Settings › Browser Profiles', () => {
   })
 
   it('a refused edit keeps the editor usable and offers Reload for a changed list', async () => {
-    port.set({ revision: 9, profiles: [personal, client] })
+    port.set({ revision: 9, folders: [], profiles: [personal, client] })
     await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
     const notes = $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
     await act(async () => {
@@ -206,7 +206,7 @@ describe('Settings › Browser Profiles', () => {
   })
 
   it('says why cookies were skipped on an imported Profile, by reason and count', async () => {
-    port.set({ revision: 4, profiles: [personal, { ...client, source: { browserLabel: 'Google Chrome', profileLabel: 'Work', importedAt: 1, importedCookies: 40, skippedCookies: 5,
+    port.set({ revision: 4, folders: [], profiles: [personal, { ...client, source: { browserLabel: 'Google Chrome', profileLabel: 'Work', importedAt: 1, importedCookies: 40, skippedCookies: 5,
       skippedByReason: { 'app-bound-encryption': 3, expired: 2 } } }] })
     await act(async () => { await browserProfiles.refresh() })
     await select('Northwind client')
@@ -321,7 +321,7 @@ describe('Settings › Browser Profiles keeps what the person typed', () => {
     await act(async () => root.unmount())
     root = createRoot(container)
     browserProfiles.reset()
-    port.set({ revision: 4, profiles: [personal, { ...client, label: 'Profile 1' }, { ...client, id: 'p-3', label: 'Profile 3' }] })
+    port.set({ revision: 4, folders: [], profiles: [personal, { ...client, label: 'Profile 1' }, { ...client, id: 'p-3', label: 'Profile 3' }] })
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
     const create = container.querySelector<HTMLButtonElement>('.settings-pane-toolbar button[aria-label="New Profile"]')!
     await act(async () => create.click())
@@ -482,7 +482,7 @@ describe('Settings › Browser Profiles exit check', () => {
 
   it('checks this Profile through its route and shows the reached address, status and time', async () => {
     store.config.browser.exitCheckUrl = 'https://ip.example.test/'
-    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 } } }, client] })
+    port.set({ revision: 4, folders: [], profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 } } }, client] })
     await act(async () => { await browserProfiles.refresh() })
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
     const check = [...section().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check')!
@@ -508,7 +508,7 @@ describe('Settings › Browser Profiles exit check', () => {
     const check = () => [...section().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check')!
     await act(async () => check().click())
     expect(section().textContent).toContain('203.0.113.7')
-    port.set({ revision: 5, profiles: [{ ...personal, network: { mode: 'direct' } }, client] })
+    port.set({ revision: 5, folders: [], profiles: [{ ...personal, network: { mode: 'direct' } }, client] })
     await act(async () => { await browserProfiles.refresh() })
     expect(section().textContent).toContain('Connects directly')
     expect(section().querySelector('[role="status"]')).toBeNull()
@@ -531,7 +531,7 @@ describe('Settings › Browser Profiles proxy sign-in', () => {
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) })
   }
   async function proxied() {
-    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
+    port.set({ revision: 4, folders: [], profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
     await act(async () => { await browserProfiles.refresh() })
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
     // The saved user name is read once on open; Add sign-in waits for that answer.
@@ -562,7 +562,7 @@ describe('Settings › Browser Profiles proxy sign-in', () => {
   it('keeps a newer sign-in save when the original read finishes late', async () => {
     let resolveRead!: (value: { username: string } | null) => void
     port.readProfileProxySignIn.mockReturnValueOnce(new Promise(resolve => { resolveRead = resolve }))
-    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
+    port.set({ revision: 4, folders: [], profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
     await act(async () => { await browserProfiles.refresh() })
     await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Set sign-in')!.click())
     await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy user name"]')!, 'alice')
