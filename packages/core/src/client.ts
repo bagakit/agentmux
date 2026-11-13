@@ -52,7 +52,7 @@ import type { AgentSessionHistoryItem } from './types.js'
 import type { AgentConversationReadPage, ConversationRef } from './conversation.js'
 import { readAgentConversation as readUnifiedConversation, conversationCheckpoint as cutUnifiedConversation, readConversationChanges as readUnifiedChanges,
   conversationReadNativeSource, ConversationReaderState, type ConversationReaderPort } from './conversation-reader.js'
-import { parseConversationRef, parseConversationCheckpointInput, parseConversationWatchInput, parseConversationViewReleaseInput, parseConversationWatchOpening, parseConversationObservation, parseConversationFrontier, parseConversationCheckpoint,
+import { parseConversationRef, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput, parseConversationWatchOpening, parseConversationObservation, parseConversationFrontier, parseConversationCheckpoint,
   type ConversationTimelineReadInput, type ConversationReadOptions, type ConversationCheckpointInput, type ConversationCheckpointPage, type ConversationChangesInput,
   type ConversationChangesPage, type ConversationObservation, type ConversationObservationHandle, type ConversationWatchInput, type ConversationViewReleaseInput, type ConversationViewReleaseResult } from './conversation-changes.js'
 import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
@@ -2699,6 +2699,8 @@ export class AgentMuxClient {
   }
 
   async readConversationChanges(input: ConversationChangesInput, options: ConversationReadOptions = {}): Promise<ConversationChangesPage> {
+    // A rewrite anchor is an explicit recovery intent; validate it at the owner as on the wire.
+    if (input.rewrite) parseConversationChangesInput(input)
     return this.observeConversationRead(input, 'changes', async () => {
       const owner = await this.conversationReader(input, options)
       parseConversationCheckpoint(input.checkpoint, input)
@@ -2756,7 +2758,7 @@ export class AgentMuxClient {
       nativePage: (cursor, limit) => this.readSessionHistoryPage(input.agentSessionId, { ...sourceOptions, limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeCheckpoint: async position => (await this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions,
         ...(position === 'beginning' ? { head: true as const } : { tail: true as const }), ...(options.signal ? { signal: options.signal } : {}) }, source)).checkpoint,
-      nativeChanges: (checkpoint, limit, through) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
+      nativeChanges: (checkpoint, limit, through, atRecords) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(atRecords ? { atRecords } : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
   }
 
@@ -3557,7 +3559,7 @@ export class AgentMuxClient {
     return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true },
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true; atRecords?: readonly string[] },
     originalSource?: AgentSessionHistorySource): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
@@ -3577,7 +3579,7 @@ export class AgentMuxClient {
       const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
         command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
-        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
+        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}), ...(options.atRecords ? { atRecords: [...options.atRecords] } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
       const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })

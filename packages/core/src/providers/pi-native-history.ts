@@ -172,6 +172,8 @@ export async function readPiConversationChanges(context: ProviderConversationCha
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
     await validateHeader(reader, context)
+    // Pi parent links decide branch continuity; a rewritten source requires a fresh selected read.
+    if (context.atRecords) throw new AgentMuxError('Pi conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     await reader.seekChanges(context.after, context.tail === true)
     const previous = await reader.readBeforeChanges()
     let leaf = previous && previous.value.type !== 'session' ? entryIdentity(previous.value).id : null

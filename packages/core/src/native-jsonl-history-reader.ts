@@ -411,18 +411,12 @@ export class NativeJsonlHistoryReader {
   /** Reuse the physical source boundary for durable append reads, independently of UI page cursors. */
   async seekChanges(after?: string, tail = false): Promise<void> {
     if (after !== undefined) {
-      let saved: { version: number; providerId: string; nativeSessionId: string; dev: number; ino: number; birth: number; offset: number; head: string; tail: string }
-      try { saved = JSON.parse(Buffer.from(after, 'base64url').toString('utf8')) as typeof saved }
-      catch { return failure('INVALID_CURSOR', 'Conversation checkpoint is malformed.') }
-      // Device numbers belong to one mount lifetime. Durable cuts retain the
-      // original file and boundary; verifyUnchanged still checks this open's device.
-      if (!saved || typeof saved !== 'object' || saved.version !== 1 || saved.providerId !== this.context.source.providerId || saved.nativeSessionId !== this.context.source.nativeSessionId ||
-          saved.ino !== this.identity.ino || saved.birth !== this.birth ||
-          !Number.isSafeInteger(saved.offset) || saved.offset < 0 || saved.offset > this.cut) {
-        return failure('SOURCE_CHANGED', 'The original conversation source was replaced, truncated or changed.')
-      }
-      const fingerprints = await this.prefixFingerprints(saved.offset)
-      if (saved.head !== fingerprints.head || saved.tail !== fingerprints.tail) return failure('SOURCE_CHANGED', 'The saved conversation source boundary changed.')
+      const saved = this.savedChangesCut(after), bound = Math.min(saved.offset, this.cut)
+      const fingerprints = await this.prefixFingerprints(bound)
+      if (saved.head !== fingerprints.head) return failure('SOURCE_CHANGED', 'The original conversation source was replaced.')
+      // Same file and beginning, but the bytes before the cut are gone or differ:
+      // the Provider rewrote an earlier suffix of this same source in place.
+      if (saved.offset > this.cut || saved.tail !== fingerprints.tail) return failure('REWRITTEN', 'The original conversation was rewritten before the saved reading position.')
       if (saved.offset && (await this.read(saved.offset - 1, 1))[0] !== 10) return failure('INVALID_CURSOR', 'Conversation checkpoint is not a complete record boundary.')
       this.forwardPosition = saved.offset
     } else if (tail) {
@@ -436,6 +430,61 @@ export class NativeJsonlHistoryReader {
       this.forwardPosition = 0
     }
     await this.verifyUnchanged()
+  }
+
+  /** Decode a durable changes cut issued for this same physical source. A
+   * different Provider, Session, inode or creation time is a different source. */
+  private savedChangesCut(after: string): { offset: number; head: string; tail: string } {
+    let saved: { version: number; providerId: string; nativeSessionId: string; dev: number; ino: number; birth: number; offset: number; head: string; tail: string }
+    try { saved = JSON.parse(Buffer.from(after, 'base64url').toString('utf8')) as typeof saved }
+    catch { return failure('INVALID_CURSOR', 'Conversation checkpoint is malformed.') }
+    // Device numbers belong to one mount lifetime. Durable cuts retain the
+    // original file and boundary; verifyUnchanged still checks this open's device.
+    if (!saved || typeof saved !== 'object' || saved.version !== 1 || saved.providerId !== this.context.source.providerId || saved.nativeSessionId !== this.context.source.nativeSessionId ||
+        saved.ino !== this.identity.ino || saved.birth !== this.birth || !Number.isSafeInteger(saved.offset) || saved.offset < 0 ||
+        typeof saved.head !== 'string' || typeof saved.tail !== 'string') {
+      return failure('SOURCE_CHANGED', 'The original conversation source was replaced, truncated or changed.')
+    }
+    return saved
+  }
+
+  /** After an in-place rewrite of this same physical source, position the
+   * changes read at the newest still-present record among the caller's already
+   * consumed original record IDs (newest first). One bounded backward scan from
+   * the old cut; nothing before the found record is read again. The caller
+   * verifies the record's original revision before it accepts a new cut. */
+  async seekChangesAtRecord(after: string, recordIds: readonly string[], identify: (row: Record<string, unknown>, start: number) => string | null | Promise<string | null>): Promise<void> {
+    const saved = this.savedChangesCut(after), wanted = new Set(recordIds)
+    if (!wanted.size) return failure('REWRITTEN', 'No original consumed record was supplied for this rewritten source.')
+    if ((await this.prefixFingerprints(Math.min(saved.offset, this.cut))).head !== saved.head) return failure('SOURCE_CHANGED', 'The original conversation source was replaced.')
+    // Start from the last complete record boundary at or before the old cut.
+    let end = Math.min(saved.offset, this.cut)
+    if (end > 0 && (await this.read(end - 1, 1))[0] !== 10) {
+      let boundary = 0
+      for (let at = end; at > 0;) {
+        const start = Math.max(0, at - 64 * 1024), newline = (await this.read(start, at - start)).lastIndexOf(10)
+        if (newline !== -1) { boundary = start + newline + 1; break }
+        at = start
+      }
+      end = boundary
+    }
+    const original = { position: this.position, lastRecordEnd: this.lastRecordEnd }
+    this.position = end
+    try {
+      for (let scanned = 0, bytes = 0; scanned < REWRITE_ANCHOR_MAX_RECORDS && bytes <= REWRITE_ANCHOR_MAX_BYTES; scanned++) {
+        const record = await this.readPrevious()
+        if (!record) break
+        bytes += record.end - record.start
+        const id = await identify(record.value, record.start)
+        if (id !== null && wanted.has(id)) {
+          this.forwardPosition = record.start
+          this.lastForwardStart = undefined
+          await this.verifyUnchanged()
+          return
+        }
+      }
+    } finally { this.position = original.position; this.lastRecordEnd = original.lastRecordEnd }
+    return failure('REWRITTEN', 'No original consumed record remains in the rewritten source within its bounded search.')
   }
 
   /** Apply a second opaque cut at this same original physical owner. */
@@ -522,12 +571,18 @@ export class NativeJsonlHistoryReader {
 }
 
 export const NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES = 64 * 1024
+/** Bounds of one rewrite re-anchor scan: a resumed interrupted turn, not a full history. */
+const REWRITE_ANCHOR_MAX_RECORDS = 4096
+const REWRITE_ANCHOR_MAX_BYTES = 32 * 1024 * 1024
 
 /** Physical append iteration is shared; the original Provider alone interprets each row. */
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
   convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>): Promise<ProviderConversationChangesPage> {
   if (context.head && (context.after !== undefined || context.tail)) return failure('INVALID_CURSOR', 'A beginning checkpoint cannot include another source position.')
-  await reader.seekChanges(context.after, context.tail === true)
+  if (context.atRecords) {
+    if (context.after === undefined || context.tail || context.head || context.through !== undefined) return failure('INVALID_CURSOR', 'A rewrite anchor requires only its original saved cut.')
+    await reader.seekChangesAtRecord(context.after, context.atRecords, async (row, start) => (await convert(row, start))?.id ?? null)
+  } else await reader.seekChanges(context.after, context.tail === true)
   if (context.through !== undefined) await reader.limitChanges(context.through)
   const items: AgentSessionHistoryItem[] = []
   let bytes = 0

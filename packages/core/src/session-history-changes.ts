@@ -24,6 +24,10 @@ export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistor
   tail?: true
   /** Cut-only at the original source beginning, without consuming its first record. Not combined with after/tail. */
   head?: true
+  /** With `after` only: the source was rewritten in place before that cut. Resume
+   * at the newest still-present record among these consumed original IDs (newest
+   * first), re-reading that record so its caller can verify the original revision. */
+  atRecords?: readonly string[]
 }
 export type ProviderConversationChangesPage = { source: AgentSessionHistorySource; items: AgentSessionHistoryItem[]; cursor: string; more: boolean }
 

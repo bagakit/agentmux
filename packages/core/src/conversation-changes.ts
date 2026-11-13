@@ -20,6 +20,8 @@ export const CONVERSATION_DEFAULT_READ_BYTES = 64 * 1024
 export const CONVERSATION_MAX_READ_BYTES = 4 * 1024 * 1024
 export const CONVERSATION_MAX_UNIT_BYTES = 32 * 1024 * 1024
 export const CONVERSATION_MAX_WINDOW_RECORDS = 1200
+/** Newest consumed records a rewrite anchor may name; older ones add no recovery value. */
+export const CONVERSATION_REWRITE_MAX_ANCHORS = 64
 export type ConversationScope = { sources: readonly ConversationSourceRef[] }
 export type ConversationFrontier = ConversationRef & { scope: ConversationScope; cuts: readonly (
   | { kind: 'native'; checkpoint: NativeConversationCheckpoint }
@@ -43,7 +45,13 @@ export type AgentConversationReadPage = ConversationRef & { sourceHostId: string
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
 export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
+/** One already-consumed original native record and its accepted revision, newest first. */
+export type ConversationRewriteAnchor = { recordId: string; revision: string }
+/** A reader rewrite anchor: the original native source was rewritten in place
+ * before its saved cut. The read resumes at the newest of these records that is
+ * still present with the same revision; its first returned record is that anchor. */
+export type ConversationRewriteRecovery = { anchors: readonly ConversationRewriteAnchor[] }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred'; rewrite?: ConversationRewriteRecovery }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
 export type ConversationWatchInput = ConversationRef & { view?: string }
 export type ConversationViewReleaseInput = ConversationRef & { view: string }
@@ -237,10 +245,21 @@ export function parseConversationTimelineReadInput(value: unknown): Conversation
     ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails', 'rewrite'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
-  return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p) }
+  let rewrite: ConversationRewriteRecovery | undefined
+  if (p.rewrite !== undefined) {
+    const r = rpcRecord(p.rewrite, ['anchors'])
+    if (!Array.isArray(r.anchors) || !r.anchors.length || r.anchors.length > CONVERSATION_REWRITE_MAX_ANCHORS || p.through !== undefined || p.view !== undefined ||
+        checkpoint.frontier.cuts.filter(cut => cut.kind === 'native').length !== 1) return bad('A rewrite anchor requires one original native cut, no upper frontier or view, and 1 to 64 anchors.', 'INVALID_CONTROL_REQUEST')
+    rewrite = { anchors: r.anchors.map(value => {
+      const a = rpcRecord(value, ['recordId', 'revision']), revision = text(a.revision)
+      if (!/^[a-f0-9]{64}$/u.test(revision)) return bad('A rewrite anchor requires an original record revision.', 'INVALID_CONTROL_REQUEST')
+      return { recordId: text(a.recordId), revision }
+    }) }
+  }
+  return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p), ...(rewrite ? { rewrite } : {}) }
 }
 export function parseConversationWatchInput(value: unknown): ConversationWatchInput {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'view'])

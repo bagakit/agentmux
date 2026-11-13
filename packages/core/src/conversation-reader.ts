@@ -21,7 +21,7 @@ export type ConversationReaderPort = {
   captured(input: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   nativePage(cursor: string | undefined, limit: number): Promise<AgentSessionHistoryPage>
   nativeCheckpoint(position?: 'beginning'): Promise<NativeConversationCheckpoint>
-  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint): Promise<NativeConversationChangesPage>
+  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint, atRecords?: readonly string[]): Promise<NativeConversationChangesPage>
   /** Original Provider interface fact. Unsupported sources retain complete process bodies. */
   nativeRecordAvailable?: boolean
   nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
@@ -31,7 +31,9 @@ type Position = { native?: string | null; capturedBefore?: number | null; captur
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
 type Cursor = ConversationRef & { processDetails?: 'deferred'; version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
-  through?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
+  through?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true
+  /** Fresh changes read only: resume a rewritten native source at a still-present consumed record. */
+  rewrite?: import('./conversation-changes.js').ConversationRewriteRecovery }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
   native?: { witness: string; first: string; last: string; count: number };
   captured?: { first: number; last: number; count: number };
@@ -259,12 +261,21 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
       try {
         const upper = state.through?.frontier.cuts.find(c => c.kind === 'native')
         if (state.through && upper?.kind !== 'native') throw new AgentMuxError('The upper frontier lacks this original native source.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
-        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined)
+        const anchors = state.rewrite?.anchors
+        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined, anchors?.map(anchor => anchor.recordId))
         if (page.agentSessionId !== ref.agentSessionId || page.hostId !== ref.hostId ||
           page.source.providerId !== source.providerId || page.source.nativeSessionId !== source.nativeSessionId ||
           page.checkpoint.agentSessionId !== ref.agentSessionId || page.checkpoint.source.providerId !== source.providerId || page.checkpoint.source.nativeSessionId !== source.nativeSessionId)
           return fail('The native primitive returned another original source. Its prior cut is retained.')
-        const sourceRows = page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
+        let items = page.items
+        if (anchors) {
+          // The Provider resumed at a still-present consumed record. Only its
+          // unchanged original revision proves this is the same consumed content.
+          const first = items[0], anchor = first && anchors.find(value => value.recordId === first.id)
+          if (!first || !anchor || conversationRevision(first) !== anchor.revision) throw new AgentMuxError('The rewritten source no longer holds an unchanged consumed record. Its original cut is retained.', 'AGENT_SESSION_HISTORY_REWRITTEN')
+          items = items.slice(1)
+        }
+        const sourceRows = items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
           pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])) }))
         const nextCoverage: ConversationSourceCoverage = { ...initialCoverage(source), current: page.more ? 'partial' : 'complete-through-cut', readExtent: { from: cut.checkpoint.cursor, through: page.checkpoint.cursor } }
         rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'native', checkpoint: page.checkpoint }
@@ -392,7 +403,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   let state: Cursor
   if (input.cursor) {
     state = decode(input.cursor, ref, mode)
-    if (mode === 'changes' && !same(state.through, (input as ConversationChangesInput).through)) return fail('The continuation changed its original upper frontier.')
+    if (mode === 'changes' && (!same(state.through, (input as ConversationChangesInput).through) || !same(state.rewrite, (input as ConversationChangesInput).rewrite))) return fail('The continuation changed its original upper frontier or rewrite anchor.')
     if (mode === 'changes' && !same(state.checkpoint, (input as ConversationChangesInput).checkpoint.frontier) || ('record' in input && input.record ? !same(state.anchor?.record, input.record) : !same(state.anchor, 'anchor' in input ? input.anchor : undefined))) return fail('The continuation belongs to another original frontier or anchor.')
   } else if (mode === 'inspect' && input.view && !('anchor' in input && input.anchor) && !('record' in input && input.record) && !('nativeSource' in input && input.nativeSource)) {
     state = decode(input.view, ref, 'inspect')
@@ -405,7 +416,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const checkpoint = (input as ConversationChangesInput).checkpoint.frontier
     const through = (input as ConversationChangesInput).through
     if (through && !same(through.frontier.scope, checkpoint.scope)) return fail('The upper frontier belongs to another original source scope.')
-    state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, ...(through ? {through} : {}), position: {} }
+    state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, ...(through ? {through} : {}), ...((input as ConversationChangesInput).rewrite ? { rewrite: (input as ConversationChangesInput).rewrite } : {}), position: {} }
   } else if ('anchor' in input && input.anchor) state = { ...ref, version: 1, mode, scope: input.anchor.frontier.frontier.scope, checkpoint: input.anchor.frontier.frontier, anchor: input.anchor, position: {} }
   else {
     const opening = await conversationCheckpoint(ref, port), checkpoint = opening.checkpoint.frontier
@@ -437,7 +448,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   try {
     state.viewId = view.id
     if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
-    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent, state.processDetails]))
+    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent, state.processDetails, state.rewrite]))
     if (!state.snapshotId) {
       const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
       if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
