@@ -130,6 +130,8 @@ it('opens an unregistered shared block and its inline child through the original
   await dom.render(<NoteCanvas scope={scope} seedNoteIds={[note.noteId]} onOpen={openPage} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader [data-note-inline-link]')).not.toBeNull())
   expect(dom.container.querySelector('button.note-canvas-title')?.textContent).toContain('Shared original evidence')
+  expect(dom.container.querySelector('button.note-canvas-title')?.querySelector('[data-semantic-icon]')).toBeNull()
+  expect([...dom.container.querySelectorAll('.note-canvas-card footer button')].find(button => button.textContent === 'Open original')?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.note')
   await dom.click('.note-canvas-reader [data-note-inline-link]')
   await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[docKey]).toMatchObject({ noteBlock: { noteId: note.noteId, blockId: 'shared-evidence' } }))
   expect(openPage).not.toHaveBeenCalled()
@@ -139,6 +141,17 @@ it('opens an unregistered shared block and its inline child through the original
   expect(Object.keys(useAppStore.getState().tabs['original-tab']!.regions)).toEqual(['original-region'])
   expect(useAppStore.getState().mainSurface).toBe('workbench')
   expect(useNotebookLibrary.getState().state!.pages[note.noteId]).toBeUndefined()
+})
+
+it('opens a selected block of an unregistered shared original from an entry identified as its Note', async () => {
+  const { note } = unregisteredShared(), openPage = vi.fn()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={[note.noteId]} onOpen={openPage} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-card .note-canvas-reader [data-block-id="shared-evidence"]')).not.toBeNull())
+  await dom.click('.note-canvas-card .note-canvas-reader [data-block-id="shared-evidence"]')
+  expect(dom.container.querySelector('.note-canvas-card .note-canvas-open-block [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.note')
+  await dom.click('.note-canvas-card .note-canvas-open-block')
+  await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[docKey]).toMatchObject({ noteBlock: { noteId: note.noteId, blockId: 'shared-evidence' } }))
+  expect(openPage).not.toHaveBeenCalled()
 })
 
 it('keeps a changed shared identity unopenable and preserves later navigation after a delayed read', async () => {

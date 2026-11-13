@@ -89,6 +89,7 @@ it('shows late related original blocks and actual reference/embed content withou
   await vi.waitFor(() => expect(noteReaderText('target')).toContain('The late decision is searchable'))
   expect(noteReaderText('target')).not.toContain('Unrelated context')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="closed-source"] .mobile-note-reference')?.textContent).toContain('The late decision is searchable'))
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="closed-source"] .note-canvas-block-open [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.note')
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
   expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] [data-author-block]')?.textContent).toBe('')
