@@ -54,13 +54,18 @@ export type WorkbenchShortcutCommand =
  * **终端里的输入也视为编辑作用域**（`insideTerminal` 为真时返回 true，让带 not-in-editable 门的工作台快捷键交给 TUI）；但普通表单控件里用户是
  * 在打字/改名，Cmd+D 不该顺手把这一格分屏、Cmd+W 不该关掉正在打字的那一格。DOM 侧由 App 判定
  * `insideTerminal`（`.xterm` 子树内即为真），这里只做与 DOM 无关的纯判定，测试够得着。
+ *
+ * **聚焦画面认领的和弦也算编辑作用域**（`surfaceOwnsChord`：事件目标所在的画面经 `claimSurfaceChords` 认领了这个和弦）。
+ * 截图标注编辑器的画布不是表单控件，但 Cmd+D 复制标注、Cmd+[ / Cmd+] 调层级由它自己处理；若窗口路由先拿走，按键会分屏
+ * 或切 Tab，编辑器见到 defaultPrevented 就放手。认领按和弦判定，画面没认领的工作台和弦照常生效。
  */
 export function isEditableChordTarget(target: {
   tagName: string
   isContentEditable: boolean
   insideTerminal: boolean
+  surfaceOwnsChord: boolean
 }): boolean {
-  if (target.insideTerminal) return true
+  if (target.insideTerminal || target.surfaceOwnsChord) return true
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
 }
 

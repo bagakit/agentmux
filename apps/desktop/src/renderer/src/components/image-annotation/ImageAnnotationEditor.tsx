@@ -4,6 +4,8 @@ import { Textarea } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
+import { claimSurfaceChords } from '../../lib/surface-chord-owners'
+import type { ShortcutEvent } from '../../lib/shortcut-registry'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { CaptureHint, CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
@@ -43,6 +45,16 @@ const DISTRIBUTIONS: readonly { id: 'horizontal' | 'vertical'; label: string; Ic
   { id: 'vertical', label: 'Distribute vertically', Icon: icon('drawing.distribute-vertical') }]
 // Stacking shortcuts by bracket; Shift turns forward and backward into front and back, whichever character it types.
 const BRACKETS: Readonly<Record<string, 'forward' | 'backward'>> = { ']': 'forward', '}': 'forward', '[': 'backward', '{': 'backward' }
+type ObjectCommand = 'select-all' | 'duplicate' | 'copy' | 'paste' | 'lock' | ShapeOrder
+/** The object command a Command or Control chord names. Command-C stays the screenshot copy, so marks copy and paste with
+ * Shift. The window shortcut router reads the same answer, so a focused editor keeps every chord it names. */
+function objectCommandFor(event: ShortcutEvent): ObjectCommand | null {
+  if (!event.metaKey && !event.ctrlKey) return null
+  const key = event.key.toLowerCase(), bracket = BRACKETS[event.key]
+  if (bracket) return event.shiftKey ? bracket === 'forward' ? 'front' : 'back' : bracket
+  if (event.shiftKey) return key === 'c' ? 'copy' : key === 'v' ? 'paste' : null
+  return key === 'a' ? 'select-all' : key === 'd' ? 'duplicate' : key === 'l' ? 'lock' : null
+}
 type Size = { width: number; height: number; dpr: number }
 const NO_SELECTION: ReadonlySet<string> = new Set()
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
@@ -485,27 +497,28 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // One command over the marks is one Undo step; a command that changes nothing records none.
   function editShapes(next: ScreenshotShape[]) { if (next !== documentState.shapes) edit(doc => setShapes(doc, next)) }
   function addShapes(result: { shapes: ScreenshotShape[]; ids: string[] }) { editShapes(result.shapes); setSelectedIds(new Set(result.ids)) }
-  /** Object shortcuts with Command or Control; true when the key named one. Command-C stays the screenshot copy, so marks
-   * copy and paste with Shift, only inside this editor and never through the system clipboard. */
-  function objectCommand(event: KeyboardEvent, key: string): boolean {
+  /** Marks copied with Shift stay inside this editor and never reach the system clipboard. */
+  function runObjectCommand(command: ObjectCommand) {
     const shapes = documentState.shapes, distance = 10 / viewRef.current.scale
     const offset = capture ? { x: Math.round(distance), y: Math.round(distance) } : { x: distance, y: distance }
-    if (key === 'a' && !event.shiftKey) { setSelectedIds(new Set(shapes.filter(shape => !shape.locked).map(shape => shape.id))); return true }
-    if (key === 'd' && !event.shiftKey) { if (groupIds.size) addShapes(duplicateShapes(shapes, groupIds, offset, mintObjectId)); return true }
-    if (key === 'c' && event.shiftKey) { if (selectedShapes.length) copiedRef.current = selectedShapes; return true }
-    if (key === 'v' && event.shiftKey) {
+    if (command === 'select-all') setSelectedIds(new Set(shapes.filter(shape => !shape.locked).map(shape => shape.id)))
+    else if (command === 'duplicate') { if (groupIds.size) addShapes(duplicateShapes(shapes, groupIds, offset, mintObjectId)) }
+    else if (command === 'copy') { if (selectedShapes.length) copiedRef.current = selectedShapes }
+    else if (command === 'paste') {
       // Each paste cascades from the last one, so repeated pastes do not stack exactly.
       const pasted = pasteShapes(shapes, copiedRef.current, offset, mintObjectId)
       if (pasted.ids.length) { addShapes(pasted); copiedRef.current = pasted.shapes.filter(shape => pasted.ids.includes(shape.id)) }
-      return true
     }
     // Locking keeps the ids selected but inert, so a second press unlocks them; with nothing selected it unlocks every mark.
-    if (key === 'l' && !event.shiftKey) { editShapes(selectedIds.size ? toggleShapeLock(shapes, selectedIds) : unlockAllShapes(shapes)); return true }
-    const bracket = BRACKETS[event.key]
-    if (!bracket) return false
-    const order: ShapeOrder = event.shiftKey ? bracket === 'forward' ? 'front' : 'back' : bracket
-    editShapes(reorderShapes(shapes, groupIds, order)); return true
+    else if (command === 'lock') editShapes(selectedIds.size ? toggleShapeLock(shapes, selectedIds) : unlockAllShapes(shapes))
+    else editShapes(reorderShapes(shapes, groupIds, command))
   }
+  // While shown, the editor owns the chords it names, so the window shortcut router does not split or switch tabs on them.
+  useEffect(() => {
+    const root = editorRef.current
+    if (!active || !root) return
+    return claimSurfaceChords(root, event => objectCommandFor(event) !== null)
+  }, [active, capture])
   useEffect(() => {
     if (!active) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -538,7 +551,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       const command = event.metaKey || event.ctrlKey, key = event.key.toLowerCase()
       if (!textDraftRef.current && !noteEditorRef.current) {
         if (event.key === 'Enter' && !command && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); complete(); return }
-        if (command && objectCommand(event, key)) { event.preventDefault(); return }
+        const object = objectCommandFor(event)
+        if (object) { event.preventDefault(); runObjectCommand(object); return }
         if (command && key === 'c') { event.preventDefault(); complete(); return }
         if (command && key === 's' && onSavePng) { event.preventDefault(); complete('save-png'); return }
         if (capture && command && key === 'p') { event.preventDefault(); complete('pin'); return }

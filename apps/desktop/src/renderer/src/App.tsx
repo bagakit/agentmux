@@ -28,6 +28,7 @@ import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { AgentInformationPreviewHost } from './components/AgentInformationPreview'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
+import { surfaceOwnsChord } from './lib/surface-chord-owners'
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
@@ -637,7 +638,8 @@ function DesktopApp() {
       const editableTarget = element !== null && isEditableChordTarget({
         tagName: element.tagName,
         isContentEditable: element.isContentEditable,
-        insideTerminal: element.closest('.xterm') !== null
+        insideTerminal: element.closest('.xterm') !== null,
+        surfaceOwnsChord: surfaceOwnsChord(element, event)
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
         toggleQuickSwitch: () => {
