@@ -97,20 +97,25 @@ describe('commandForWorkbenchId：绑定 id 翻译成命令', () => {
 
 describe('isEditableChordTarget：终端与其他编辑控件都放行带门的窗口快捷键', () => {
   it('Agent composer 的 textarea、Tab 重命名 input、contentEditable 都放行', () => {
-    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: false })).toBe(true)
-    expect(isEditableChordTarget({ tagName: 'INPUT', isContentEditable: false, insideTerminal: false })).toBe(true)
-    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'INPUT', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: false, surfaceOwnsChord: false })).toBe(true)
   })
 
   it('终端里的元素一律不放行——capture 存在就是为了抢在 xterm 前拿到键', () => {
     // 即便 xterm 的辅助层本身是个 textarea，在终端子树内也必须让快捷键接管。
-    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: true })).toBe(true)
-    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: true })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'TEXTAREA', isContentEditable: false, insideTerminal: true, surfaceOwnsChord: false })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: true, insideTerminal: true, surfaceOwnsChord: false })).toBe(true)
+  })
+
+  it('聚焦画面认领了这个和弦时放行——标注画布不是表单控件，但 Cmd+D、Cmd+[ / Cmd+] 归它', () => {
+    expect(isEditableChordTarget({ tagName: 'CANVAS', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: true })).toBe(true)
+    expect(isEditableChordTarget({ tagName: 'CANVAS', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: false })).toBe(false)
   })
 
   it('普通非可编辑元素不放行（快捷键照常接管）', () => {
-    expect(isEditableChordTarget({ tagName: 'BUTTON', isContentEditable: false, insideTerminal: false })).toBe(false)
-    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: false, insideTerminal: false })).toBe(false)
+    expect(isEditableChordTarget({ tagName: 'BUTTON', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: false })).toBe(false)
+    expect(isEditableChordTarget({ tagName: 'DIV', isContentEditable: false, insideTerminal: false, surfaceOwnsChord: false })).toBe(false)
   })
 })
 
