@@ -21,6 +21,7 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
@@ -149,6 +150,7 @@ beforeEach(async () => {
   vi.spyOn(api.workspaces, 'listBranches').mockImplementation(async id => ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: config.workspaces.find(value => value.id === id)?.path ?? fixtureRoot }))
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
+  await initializeSpatialControlFixture(topics)
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => {
