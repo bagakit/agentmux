@@ -18,6 +18,11 @@ a new page is wanted. Preserve material ambiguity and the user's exact target/to
 
 Read only the matching local help:
 - amux browser profile --help: original Profile identities, routes and usage.
+  Use browser profile copy to create a new identity from the source's saved settings,
+  naming its exact ID and the revision read from ls or inspect. It keeps the original
+  Profile and pages; site data, sign-ins, proxy passwords, human approvals and prior
+  runtime history do not move. Use the returned new Profile ID to inspect, edit or
+  open it. A missing reply leaves creation unknown; do not automatically repeat it.
   A person or device can set a proxy sign-in with browser profile proxy-sign-in set
   --profile ID --input FILE|-; the JSON contains only username and password. Never put
   a password in command arguments. Managed Agents cannot set or clear sign-ins. The
