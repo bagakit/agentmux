@@ -42,3 +42,26 @@ it('does not replace missing original content facts with the current configurati
     'same-operation', () => true, signal)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
   expect(runtime.submitPrompt).not.toHaveBeenCalled()
 })
+
+it('settles a tick as skipped when the person\'s input cancels it before Core claims the input', async () => {
+  const runtime = fixture(), active = () => true
+  runtime.submitPrompt.mockRejectedValueOnce(new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED'))
+  expect(await deliverContinuousProgress(runtime, loop, 'same-operation', active, signal)).toBe('skipped')
+  // A standing heartbeat is a future-message occurrence; its cancellation before the claim also sent nothing.
+  const future = { ...loop, lastOutcome: 'unknown' as const, pendingCompletion: { ...loop.pendingCompletion!, futureIntent: { intentId: 'standing', occurrenceAt: 1 } } }
+  runtime.submitPrompt.mockRejectedValueOnce(new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED'))
+  expect(await deliverContinuousProgress(runtime, future, 'same-operation', active, signal)).toBe('skipped')
+  // A changed completion still only ends an ordinary loop's claim, never a future-message occurrence.
+  runtime.submitPrompt.mockRejectedValueOnce(new AgentMuxError('changed', 'AGENT_COMPLETION_CHANGED'))
+  await expect(deliverContinuousProgress(runtime, future, 'same-operation', active, signal)).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+})
+
+it('settles a tick as skipped when its observation is cancelled, and keeps an unknown operation unknown', async () => {
+  const runtime = fixture(), controller = new AbortController()
+  runtime.observeContinuousProgress.mockImplementationOnce(async () => { controller.abort(); throw new Error('cancelled read') })
+  expect(await deliverContinuousProgress(runtime, loop, 'same-operation', () => true, controller.signal)).toBe('skipped')
+  expect(runtime.submitPrompt).not.toHaveBeenCalled()
+  const unknown = new AbortController()
+  runtime.observeContinuousProgress.mockImplementationOnce(async () => { unknown.abort(); throw new Error('cancelled read') })
+  await expect(deliverContinuousProgress(runtime, { ...loop, lastOutcome: 'unknown' }, 'same-operation', () => true, unknown.signal)).rejects.toThrow('cancelled read')
+})

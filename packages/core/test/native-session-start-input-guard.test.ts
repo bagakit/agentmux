@@ -40,11 +40,39 @@ it('holds a first input until the Run reports its native start, then sends it on
     expect(receipt).toMatchObject({ status: 'waiting' })
     await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: 'recipient',
       expectedRun: { runId: 'run-recipient' }, submissionId: 'first-question' } }))?.control.waiting).toMatchObject({ phase: 'session', reason: 'native-session-starting' }))
+    // An unrelated Session publication settles the waiter's observed target first, as status updates do in the product.
+    await f.startNative(at => ({ updatedAt: at }))
+    await new Promise(resolve => setTimeout(resolve, 200))
     expect(f.inputs()).toBe(0)
-    // The first authenticated Hook of this Run proves the native conversation started.
+    // The first authenticated Hook of this Run writes only its receipt; that alone proves the native start.
     await f.startNative(at => ({ hookReceipt: { id: 'session-start-receipt', providerId: 'claude', agentSessionId: 'recipient', run: { runId: 'run-recipient' },
       eventName: 'SessionStart', observedAt: at } }))
-    await vi.waitFor(() => expect(f.inputs()).toBeGreaterThan(0), { timeout: 10_000 })
+    await vi.waitFor(() => expect(f.inputs()).toBeGreaterThan(0), { timeout: 5_000 })
+  } finally { await f.close() }
+})
+
+it('releases a held input on the current Run\'s first native source observation alone', async () => {
+  const f = await fixture('claude')
+  try {
+    await f.submit('observed-first')
+    await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: 'recipient',
+      expectedRun: { runId: 'run-recipient' }, submissionId: 'observed-first' } }))?.control.waiting).toMatchObject({ reason: 'native-session-starting' }))
+    await f.startNative(at => ({ updatedAt: at }))
+    await new Promise(resolve => setTimeout(resolve, 200))
+    expect(f.inputs()).toBe(0)
+    await f.startNative(at => ({ nativeSourceObservation: { state: 'unknown', run: { runId: 'run-recipient' }, observedAt: at, reason: 'current-main-unconfirmed' } }))
+    await vi.waitFor(() => expect(f.inputs()).toBeGreaterThan(0), { timeout: 5_000 })
+  } finally { await f.close() }
+})
+
+it('holds input for a resume whose native target the user selected before any Hook', async () => {
+  const f = await fixture('claude')
+  try {
+    await f.startNative(at => ({ nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'claude-native-chosen' }, nativeBinding: { source: 'user-selected', run: { runId: 'run-recipient' }, observedAt: at } }))
+    await f.submit('selected-target')
+    await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: 'recipient',
+      expectedRun: { runId: 'run-recipient' }, submissionId: 'selected-target' } }))?.control.waiting).toMatchObject({ reason: 'native-session-starting' }))
+    expect(f.inputs()).toBe(0)
   } finally { await f.close() }
 })
 
@@ -91,18 +119,16 @@ it('round-trips the waiting reason through the public receipt codec, and refuses
   } finally { await f.close() }
 })
 
-it('releases a held input once the start window passes without any Hook, keeping the healthy Run usable', async () => {
+it('releases a held input once the start window passes without any Hook or Session event, keeping the healthy Run usable', async () => {
   const f = await fixture('claude')
   const inner = f.inner as unknown as { hookBindingActivatedAt: Map<string, number> }
   try {
-    inner.hookBindingActivatedAt.set('run-recipient', Date.now())
+    // The window is about to end; its own recheck timer, not a later Session event, must release the input.
+    inner.hookBindingActivatedAt.set('run-recipient', Date.now() - 119_000)
     await f.submit('no-hook-ever')
     const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, submissionId: 'no-hook-ever' }
     await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key }))?.control.waiting).toMatchObject({ reason: 'native-session-starting' }))
     expect(f.inputs()).toBe(0)
-    // The Run has been bound longer than the window: its start is unknown, so the input is not held.
-    inner.hookBindingActivatedAt.set('run-recipient', Date.now() - 121_000)
-    await f.startNative(at => ({ updatedAt: at }))
-    await vi.waitFor(() => expect(f.inputs()).toBeGreaterThan(0), { timeout: 10_000 })
+    await vi.waitFor(() => expect(f.inputs()).toBeGreaterThan(0), { timeout: 8_000 })
   } finally { await f.close() }
 })
