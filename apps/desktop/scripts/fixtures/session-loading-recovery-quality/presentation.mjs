@@ -12,6 +12,7 @@ const repository = resolve(import.meta.dirname, '../../../../..')
 const desktop = join(repository, 'apps/desktop'), require = createRequire(join(desktop, 'package.json'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const contextMode = process.env.AGENTMUX_RECOVERY_CONTEXT === '1'
+const closeChainMode = process.env.AGENTMUX_CLOSE_CHAIN === '1'
 const output = process.env.AGENTMUX_VERIFY_PRESENTATION_RECEIPT
 assert.ok(output, 'Explicit private receipt required')
 const evidence = resolve(output, '..'), temporary = await mkdtemp(join(repository, '.tmp/loading-presentation-'))
@@ -28,6 +29,10 @@ const sources = [
 if(contextMode) sources.push('apps/desktop/src/renderer/src/components/SessionRecap.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx',
   'apps/desktop/src/renderer/src/styles/session-recap.css', 'apps/desktop/src/renderer/src/lib/launcher-resume.ts',
   'apps/desktop/scripts/fixtures/session-recovery-context/presentation-cases.tsx')
+if(closeChainMode) sources.push('apps/desktop/src/renderer/src/components/AgentCloseAction.tsx',
+  'apps/desktop/src/renderer/src/components/SessionRunEndedActions.tsx', 'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx',
+  'apps/desktop/src/renderer/src/components/NotificationItem.tsx', 'apps/desktop/src/renderer/src/components/SessionStop.tsx',
+  'apps/desktop/src/renderer/src/lib/session-recovery-banner.ts', 'apps/desktop/src/renderer/src/lib/service-window-notice.ts')
 const inputsBefore = Object.fromEntries(await Promise.all(sources.map(async p => [p, hash(await readFile(join(repository, p)))])))
 const entry = `
 import React from 'react'
@@ -35,12 +40,17 @@ import { createRoot } from 'react-dom/client'
 import { FullPageLoadingSurface } from '${join(desktop, 'src/renderer/src/components/FullPageLoadingSurface.tsx')}'
 import { SessionConnectingSurface } from '${join(desktop, 'src/renderer/src/components/SessionConnectingSurface.tsx')}'
 import { api } from '${join(desktop, 'src/renderer/src/lib/api.ts')}'
-import { applyAppAppearance } from '${join(desktop, 'src/renderer/src/lib/app-appearance.ts')}'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import '${join(desktop, 'src/renderer/src/styles/index.css')}'
 ${contextMode ? `import { recoveryContextCase } from '${join(desktop,'scripts/fixtures/session-recovery-context/presentation-cases.tsx')}'` : ''}
 const root=createRoot(document.getElementById('root'))
+mountThemeRuntime(window,{appAppearance:'dark'})
+const applyAppAppearance=mode=>updateThemeSelection({appAppearance:mode})
 const prompt=${JSON.stringify(prompt)}
 window.__fixtureCopied=[]
+window.__fixtureErrors=[]
+window.addEventListener('error',event=>window.__fixtureErrors.push(event.error?.stack??event.message))
+window.addEventListener('unhandledrejection',event=>window.__fixtureErrors.push(String(event.reason?.stack??event.reason)))
 api.ui.writeClipboardText=async text=>{window.__fixtureCopied.push(text)}
 window.__renderCase=(kind,light)=>{
  applyAppAppearance(light?'light':'dark')
@@ -82,12 +92,13 @@ app.whenReady().then(async()=>{
   step('components-ready')
   const cases=[['startup','startup',1320,820,false,false],['connecting','connecting',720,680,false,false],['connecting-narrow','connecting',320,520,false,false],['connecting-short','connecting',420,340,false,false],['connecting-light','connecting',720,680,true,false],['connection-unknown','unknown',520,520,false,false],['restore-failed','failed',520,520,false,false],['empty-connection','empty',520,520,false,false],['connecting-reduced','connecting',420,520,false,true]]
   ${contextMode ? "cases.splice(0,cases.length, ['connect-wide','context-connect',900,720,false,false],['connect-narrow','context-connect',340,560,false,false],['connect-light','context-connect',900,720,true,false],['restore-wide','context-restore',900,720,false,false],['restore-narrow','context-restore',340,560,false,false],['restore-short','context-restore',440,360,false,false],['restore-light','context-restore',900,720,true,false],['indexed-history','context-indexed',600,600,false,false],['unknown-history','context-unknown',600,560,false,false],['failed-history','context-failed',600,560,false,false],['empty-history','context-empty',600,560,false,false],['long-recap','context-long',340,560,false,false],['source-details','context-connect',720,820,false,false])" : ''}
+  ${closeChainMode ? "cases.splice(0,cases.length, ['run-ended','context-runtime-ended',900,720,false,false],['run-ended-light','context-runtime-ended',900,720,true,false],['run-ended-narrow','context-runtime-ended',340,560,false,false],['run-ended-notification','context-runtime-notification',900,720,false,false],['run-ended-close','context-runtime-close',900,720,false,false],['run-unknown','context-runtime-unknown',900,720,false,false])" : ''}
   for(const[label,kind,width,height,light,reduced]of cases){
    step(label)
    window.setContentSize(width,height)
    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:reduced?'reduce':'no-preference'}]})
    await evaluate('window.__renderCase('+JSON.stringify(kind)+','+light+')')
-   await wait(()=>evaluate(kind==='connecting'?'Boolean(document.querySelector(".session-connecting__prompt pre"))':kind==='empty'?'Boolean(document.querySelector(".session-connecting"))':'Boolean(document.querySelector(".full-page-loading h1"))'),'real heading')
+   await wait(()=>evaluate(kind==='connecting'?'Boolean(document.querySelector(".session-connecting__prompt pre"))':kind==='empty'?'Boolean(document.querySelector(".session-connecting"))':'Boolean(document.querySelector(".full-page-loading .surface-state__title"))'),'real heading')
    await new Promise(done=>setTimeout(done,kind==='startup'?600:150))
    if(kind.startsWith('context-')){
     await wait(()=>evaluate('Boolean(document.querySelector(".session-recap__metadata")) && !document.querySelector(".session-recap")?.textContent.includes("Reading saved")'),'settled context')
@@ -98,10 +109,21 @@ app.whenReady().then(async()=>{
     await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
     await new Promise(done=>setTimeout(done,80))
    }
-   const facts=await evaluate('(()=>{const s=document.querySelector(".full-page-loading"),h=s.querySelector("h1"),p=s.querySelector("pre");return {title:h.textContent,headings:s.querySelectorAll("h1,h2").length,text:s.innerText,clientWidth:s.clientWidth,scrollWidth:s.scrollWidth,prompt:p?.textContent,promptOverflow:p?getComputedStyle(p).overflowY:null,reducedMotion:matchMedia("(prefers-reduced-motion:reduce)").matches,appearance:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight,devicePixelRatio}}})()')
+   if(kind==='context-runtime-notification'){
+    await evaluate('document.querySelector(".global-system-notices__trigger").click()')
+    await wait(()=>evaluate('document.querySelector(".global-system-notices__details").matches(":popover-open")'),'real notification popover')
+    await evaluate('for(const button of document.querySelectorAll(".notification-group__more[aria-expanded=false]"))button.click()')
+    await wait(()=>evaluate('Array.from(document.querySelectorAll(".notification-item button")).some(b=>b.textContent==="Resume")'),'notification recovery actions')
+   }
+   if(kind==='context-runtime-close'){
+    await evaluate('Array.from(document.querySelectorAll(".full-page-loading button")).find(b=>b.textContent.trim()==="Close Agent").click()')
+    await wait(()=>evaluate('Boolean(document.querySelector("[role=dialog]"))'),'real close confirmation')
+   }
+   if(kind.startsWith('context-runtime-'))await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+   const facts=await evaluate('(()=>{const s=document.querySelector(".full-page-loading"),h=s.querySelector(".surface-state__title"),p=s.querySelector("pre");return {title:h.textContent,headings:s.querySelectorAll("h1,h2").length,text:s.innerText,clientWidth:s.clientWidth,scrollWidth:s.scrollWidth,prompt:p?.textContent,promptOverflow:p?getComputedStyle(p).overflowY:null,reducedMotion:matchMedia("(prefers-reduced-motion:reduce)").matches,appearance:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight,devicePixelRatio}}})()')
    if(facts.headings!==1||facts.scrollWidth!==facts.clientWidth)throw new Error('heading/width '+label+JSON.stringify(facts))
    if(kind.startsWith('context-')){
-    const context=await evaluate('(()=>{const stage=document.querySelector(".full-page-loading__stage"),summary=document.querySelector(".session-recap__source summary");return {metadata:document.querySelector(".session-recap__metadata")?.innerText,time:document.querySelector(".session-recap time")?.dateTime,recap:document.querySelector(".session-recap__excerpt")?.textContent,action:document.querySelector(".full-page-loading__actions button")?.textContent,stageOverflow:getComputedStyle(stage).overflowY,sourceOpen:summary?.parentElement.open}})()')
+    const context=await evaluate('(()=>{const stage=document.querySelector(".full-page-loading__stage"),summary=document.querySelector(".session-recap__source summary");return {metadata:document.querySelector(".session-recap__metadata")?.innerText,time:document.querySelector(".session-recap time")?.dateTime,recap:document.querySelector(".session-recap__excerpt")?.textContent,action:document.querySelector(".surface-state__actions button")?.textContent,stageOverflow:getComputedStyle(stage).overflowY,sourceOpen:summary?.parentElement.open}})()')
     if(kind==='context-unknown'&&context.time)throw new Error('invented unknown time')
     if(kind==='context-indexed'&&/MiB|KiB/.test(context.metadata))throw new Error('invented indexed bytes')
     if(kind==='context-failed'&&!facts.text.includes('Recap could not be read.'))throw new Error('failure not visible')
@@ -122,6 +144,8 @@ app.whenReady().then(async()=>{
     if(copied!==${JSON.stringify(prompt)})throw new Error('complete Copy callback failed')
     facts.copiedComplete=true
    }
+   await evaluate('Promise.all(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getTiming().iterations??1)).map(animation=>animation.finished.catch(()=>{})))')
+   await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
    const png=await window.webContents.capturePage(),bytes=png.toPNG(),path=process.env.PRIVATE_EVIDENCE+'/'+label+'.png'
    writeFileSync(path,bytes);report.images.push({label,path,sha256:hash(bytes),facts})
   }
@@ -131,7 +155,10 @@ app.whenReady().then(async()=>{
   const expected=readFileSync(process.env.PRIVATE_MODULE)
   if(hash(Buffer.from(actual.scriptSource))!==hash(expected))throw new Error('loaded Renderer differs')
   report.loadedRendererSha256=hash(expected);report.passed=true
- }catch(e){report.phase=currentPhase;report.error=e.stack||String(e)}finally{writeFileSync(process.env.PRIVATE_REPORT,JSON.stringify(report,null,2));window?.destroy();app.exit(report.passed?0:1)}
+ }catch(e){report.phase=currentPhase;report.error=e.stack||String(e);if(window&&!window.isDestroyed()){
+  report.renderer=await window.webContents.executeJavaScript('({errors:window.__fixtureErrors,body:document.body.innerHTML})').catch(String)
+  const bytes=(await window.webContents.capturePage()).toPNG();writeFileSync(process.env.PRIVATE_EVIDENCE+'/failure.png',bytes)
+ }}finally{writeFileSync(process.env.PRIVATE_REPORT,JSON.stringify(report,null,2));window?.destroy();app.exit(report.passed?0:1)}
 })
 `
 let child, completed = false
@@ -140,18 +167,19 @@ try {
   await writeFile(join(temporary,'entry.tsx'),entry)
   const { build } = require('vite'), react = require('@vitejs/plugin-react').default
   const coreExports=JSON.parse(await readFile(join(repository,'packages/core/package.json'),'utf8')).exports
+  const clientExports=JSON.parse(await readFile(join(repository,'packages/client-ui/package.json'),'utf8')).exports
+  const clientAliases=Object.entries(clientExports).filter(([key])=>key!=='.').sort(([a],[b])=>Number(a.includes('*'))-Number(b.includes('*'))||b.length-a.length).map(([key,value])=>{
+    const target=typeof value==='string'?value:value.browser??value.types
+    const name='@agentmux/client-ui'+key.slice(1)
+    return {find:new RegExp('^'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace('\\*','(.+)')+'$'),replacement:join(repository,'packages/client-ui',target.replace('*','$1'))}
+  })
   const aliases=[...Object.entries(coreExports).map(([key,value])=>({find:new RegExp('^'+(key==='.'?'@agentmux/core':'@agentmux/core'+key.slice(1))+'$'),replacement:join(repository,'packages/core',value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))})),
     {find:/^@agentmux\/layout$/,replacement:join(repository,'packages/layout/src/index.ts')},
-    {find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(repository,'packages/client-ui/src/styles/$1')},
-    {find:/^@agentmux\/client-ui\/styles.css$/,replacement:join(repository,'packages/client-ui/src/styles/index.css')},
-    {find:/^@agentmux\/client-ui\/components\/(.+)$/,replacement:join(repository,'packages/client-ui/src/components/$1.tsx')},
-    {find:/^@agentmux\/client-ui\/platform$/,replacement:join(repository,'packages/client-ui/src/platform.tsx')},
-    {find:/^@agentmux\/client-ui\/terminal\/(.+)$/,replacement:join(repository,'packages/client-ui/src/terminal/$1.ts')},
-    {find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(repository,'packages/client-ui/src/lib/$1.ts')},
+    ...clientAliases,
     {find:/^@agentmux\/client-ui$/,replacement:join(repository,'packages/client-ui/src/index.ts')},
     ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
   const consumed={}
-  await build({configFile:false,root:desktop,logLevel:'error',resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-react-classic',enforce:'pre',transform(code,id){if(id.startsWith(repository+'/')&&!id.includes('/node_modules/')&&!id.includes('/.tmp/'))consumed[id.slice(repository.length+1)]=hash(code);return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
+  await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-react-classic',enforce:'pre',transform(code,id){if(id.startsWith(repository+'/')&&!id.includes('/node_modules/')&&!id.includes('/.tmp/'))consumed[id.slice(repository.length+1)]=hash(code);return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
   const css=(await readdir(temporary)).find(n=>n.endsWith('.css'));assert.ok(css)
   await writeFile(join(temporary,'index.html'),`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="./${css}"></head><body><div id="root"></div><script type="module" src="./renderer.mjs"></script></body></html>`)
   await writeFile(join(temporary,'main.mjs'),main)

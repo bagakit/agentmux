@@ -3,6 +3,7 @@ import React from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../../../src/shared/contracts'
 import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
+import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -19,19 +20,22 @@ const config: AppConfig = {
 /** Explicit private native-page facts, through the real Pane and shared recovery components. */
 export function recoveryContextCase(kind: string): React.ReactNode {
   const id = `private-${kind}`
+  const runtimeEnded = kind.startsWith('context-runtime-')
   const indexed = kind === 'context-indexed'
   const providerId = indexed ? 'codex' : 'claude'
   const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
     id, kind: 'agent', providerId, executorId: 'reviewer', hostId: 'farm', workspacePath: _hygiene_fixturePath("private/project"),
     promptSubmissionPredecessor: null, agentSessionUpdatedAt: 1, label: 'Session recovery review',
-    createdAt: 1, updatedAt: Date.now(), latestOutputBytes: 0, processState: 'exited',
-    status: { state: 'exited', source: 'run-process', observedAt: 1 },
+    createdAt: 1, updatedAt: Date.now(), latestOutputBytes: 0, processState: runtimeEnded ? 'interrupted' : 'exited',
+    ...(runtimeEnded ? { interruptionReason: 'daemon_restart', runUnobserved: kind === 'context-runtime-unknown',
+      nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'private-original-conversation' } } : {}),
+    status: { state: runtimeEnded ? 'disconnected' : 'exited', source: 'run-process', observedAt: 1 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'farm', agentSessionId: id, run: { runId: 'private-retained-run' } }
   }
   const unknown = kind === 'context-unknown', failed = kind === 'context-failed'
   const empty = kind === 'context-empty', long = kind === 'context-long'
-  const restore = kind.startsWith('context-restore') || failed || long
+  const restore = kind.startsWith('context-restore') || failed || long || runtimeEnded
   const timestamp = Date.now() - 17 * 60_000
   const recap = 'The restore path now keeps the original session and unsent draft intact. Next, verify the narrow layout and the archived Mote fallback before publishing the change.'
   api.sessions.historySources = async () => unknown ? [] : [{ agentSessionId: id, hostId: 'farm', state: 'active',
@@ -52,7 +56,11 @@ export function recoveryContextCase(kind: string): React.ReactNode {
   useAppStore.setState({ config: { ...config, executors: { reviewer: { ...config.executors.reviewer!, providerId } } },
     sessions: restore ? [session] : [], pendingAgentLaunches: {}, recoveryCandidates: [],
     timelines: {}, agentNames: { [id]: 'Session recovery review' }, agentComposerDrafts: { [id]: 'Keep this unsent draft.' },
-    activeWorkspaceId: 'workspace', tabs: { view: tab }, layouts: { workspace: createWorkspaceLayout('group', ['view']) } })
+    activeWorkspaceId: 'workspace', tabs: { view: tab }, layouts: { workspace: createWorkspaceLayout('group', ['view']) },
+    loading: false, runtimeEndpointWarnings: [], runtimeOwnershipWarnings: [], displacedAgentSessionIds: [],
+    notificationEvents: [], noticeReadReceipts: {}, environmentWarning: undefined, workbenchSaveWarning: null,
+    nameSaveUnconfirmed: null, nameEditFailure: null, error: null, errorNoticeContext: null, desktopNavigationNotice: null })
   return <DesktopClientUiProvider><SessionPane key={kind} sessionId={id} surfaceKind="agent" visible interactiveResize={false}
-    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'group', tabId: 'view', regionId: 'region' }} /></DesktopClientUiProvider>
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'group', tabId: 'view', regionId: 'region' }} />
+    {kind === 'context-runtime-notification' ? <div style={{ position: 'fixed', bottom: 8, right: 12 }}><GlobalSystemNotices /></div> : null}</DesktopClientUiProvider>
 }
