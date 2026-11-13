@@ -6,6 +6,9 @@ enum NativeSelectionCompletionAction: String, Sendable { case capture, edit }
 struct NativeSelectionChoice: Sendable {
     let rectangle: CGRect
     let completionAction: NativeSelectionCompletionAction
+    /// The quick-mark tool the editor should start with; nil for a direct
+    /// capture and for opening the full editor without a preselected tool.
+    let editTool: String?
     let pixels: NativeSelectionPixels
 }
 

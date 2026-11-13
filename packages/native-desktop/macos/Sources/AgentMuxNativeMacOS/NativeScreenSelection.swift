@@ -269,13 +269,13 @@ final class NativeScreenSelection: NSView {
 /// or completion. Weak canvas references avoid a controller/window/view cycle.
 @MainActor
 fileprivate final class NativeSelectionCoordinator: NSObject {
-    private struct QuickMark { let tool: String; let label: String; let symbol: String; let key: String }
+    private struct QuickMark { let tool: String; let label: String; let symbol: String; let key: String; let keyCode: UInt16 }
     private static let quickMarks = [
-        QuickMark(tool: "rect", label: "Rectangle", symbol: "rectangle", key: "R"),
-        QuickMark(tool: "arrow", label: "Arrow", symbol: "arrow.up.right", key: "A"),
-        QuickMark(tool: "note", label: "Numbered note", symbol: "1.circle", key: "N"),
-        QuickMark(tool: "pixelate", label: "Pixelate", symbol: "checkerboard.rectangle", key: "M"),
-        QuickMark(tool: "text", label: "Text", symbol: "textformat", key: "T"),
+        QuickMark(tool: "rect", label: "Rectangle", symbol: "rectangle", key: "R", keyCode: 15),
+        QuickMark(tool: "arrow", label: "Arrow", symbol: "arrow.up.right", key: "A", keyCode: 0),
+        QuickMark(tool: "note", label: "Numbered note", symbol: "1.circle", key: "N", keyCode: 45),
+        QuickMark(tool: "pixelate", label: "Pixelate", symbol: "checkerboard.rectangle", key: "M", keyCode: 46),
+        QuickMark(tool: "text", label: "Text", symbol: "textformat", key: "T", keyCode: 17),
     ]
     private(set) var selection: NativeSelectionState
     let initialPoint: NSPoint
@@ -385,15 +385,15 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         complete(action: .edit)
     }
     @objc private func mark(_ sender: NSButton) {
-        guard allowEditing, markButtons.contains(where: { $0 === sender }) else { return }
-        complete(action: .edit)
+        guard allowEditing, let index = markButtons.firstIndex(where: { $0 === sender }) else { return }
+        complete(action: .edit, tool: Self.quickMarks[index].tool)
     }
     @objc private func toggleMarks() { marksTrayOpen.toggle(); refresh() }
-    private func complete(action: NativeSelectionCompletionAction) {
+    private func complete(action: NativeSelectionCompletionAction, tool: String? = nil) {
         guard selection.canConfirm, let rect = selection.rectangle, let pixels else { return }
         let quartz = NativeCaptureGeometry.quartzRect(appKitRect: rect, primaryDisplayTop: primaryTop)
         guard pixels.issue(in: quartz) == nil else { return }
-        finish(.success(NativeSelectionChoice(rectangle: quartz, completionAction: action, pixels: pixels)))
+        finish(.success(NativeSelectionChoice(rectangle: quartz, completionAction: action, editTool: action == .edit ? tool : nil, pixels: pixels)))
     }
     @objc fileprivate func cancel() { finish(.success(nil)) }
     @objc fileprivate func displayConfigurationChanged() {
@@ -446,6 +446,13 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
     func pointerUp(_ point: NSPoint) { pointerLocation = point; selection.pointerUp(point); refresh() }
     func handleKey(_ event: NSEvent) -> Bool {
         let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        let plain = event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+        if allowEditing, plain, let mark = Self.quickMarks.first(where: { $0.keyCode == event.keyCode }) {
+            // A quick-mark key is consumed even before a selection exists, so
+            // it can never fall through to another responder as a shortcut.
+            if confirmButton.isEnabled { complete(action: .edit, tool: mark.tool) }
+            return true
+        }
         switch event.keyCode {
         case 53: cancel()
         case 36, 76: confirm()

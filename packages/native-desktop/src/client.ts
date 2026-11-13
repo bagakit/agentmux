@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { pngBytes, pngFromBytes, type NativePng } from './image.js'
 import { decodeResponse, isNativeMutation, NATIVE_PROTOCOL_VERSION, NATIVE_PROVIDER,
   type CaptureParams, type CaptureResult, type Json, type JsonObject,
-  type NativeMethod, type NativeOperation, type NativeResponse } from './protocol.js'
+  type NativeMethod, type NativeOperation, type NativeResponse, CAPTURE_EDIT_TOOLS } from './protocol.js'
 
 const MAX_FRAME_BYTES = 26 * 1024 * 1024
 const RESULT_CACHE_BYTES = 32 * 1024 * 1024
@@ -283,6 +283,10 @@ export class NativeDesktop {
       }
     } else if (result.completionAction !== undefined) {
       throw invalid('Capture returned a completion intent outside the original editable selection')
+    }
+    if (result.editTool !== undefined && (result.state !== 'captured' || !allowsEditing || result.completionAction !== 'edit'
+      || !(CAPTURE_EDIT_TOOLS as readonly unknown[]).includes(result.editTool))) {
+      throw invalid('Capture returned a start tool outside an editable selection opened for editing')
     }
     if (result.state === 'captured') {
       const screenshot = result.screenshot

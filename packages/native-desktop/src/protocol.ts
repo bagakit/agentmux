@@ -35,6 +35,8 @@ export interface NativeOperation {
   resultAvailability?: 'retained' | 'expired'
   result?: Json
 }
+export const CAPTURE_EDIT_TOOLS = ['rect', 'arrow', 'note', 'pixelate', 'text'] as const
+export type CaptureEditTool = typeof CAPTURE_EDIT_TOOLS[number]
 export type CaptureParams =
   | { mode: 'selection'; allowEditing?: boolean }
   | { mode: 'display'; displayId: number }
@@ -47,6 +49,8 @@ export interface CaptureResult {
   selectionRect?: { x: number; y: number; width: number; height: number }
   /** Host opt-in selection intent; no editing or output delivery happens in Native. */
   completionAction?: 'capture' | 'edit'
+  /** Quick-mark tool the editor starts with; only on an editable selection whose intent is `edit`. */
+  editTool?: CaptureEditTool
   error?: NativeErrorData
 }
 

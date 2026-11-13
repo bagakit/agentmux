@@ -29,6 +29,7 @@ enum NativeDesktopOperations {
                     var result: [String: Any] = ["state": "captured", "screenshot": try png(frozen.image, scale: frozen.scale),
                         "engine": frozen.engine, "selectionRect": renderRect(selection.rectangle)]
                     if allowEditing { result["completionAction"] = selection.completionAction.rawValue }
+                    if allowEditing, selection.completionAction == .edit, let tool = selection.editTool { result["editTool"] = tool }
                     return result
                 }
             } else if mode == "rect" {
