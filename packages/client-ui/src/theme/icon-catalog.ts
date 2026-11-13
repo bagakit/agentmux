@@ -396,6 +396,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'layout.collapse': { label: 'Collapse', glyph: 'minimize' },
   'object.connection': { label: 'Connection details', glyph: 'link-2' },
   'object.network': { label: 'Network and devices', glyph: 'devices-network' },
+  'object.network-wifi': { label: 'Wi-Fi network', glyph: 'wifi' },
+  'object.network-wired': { label: 'Wired network', glyph: 'ethernet-port' },
   'object.mailbox': { label: 'Communication record', glyph: 'message-history' },
   'navigation.survey': { label: 'Survey', glyph: 'survey-prism' },
   'action.import': { label: 'Import file', glyph: 'folder-open' },
