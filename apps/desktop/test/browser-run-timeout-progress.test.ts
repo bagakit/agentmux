@@ -60,3 +60,42 @@ describe('A page wait ends before the program does', () => {
     await expect(dispatch(() => 60_000)('waitForLoad', [150])).rejects.toThrow('Timed out after 150ms waiting for the page to finish loading.')
   })
 })
+
+describe('js() ends before the program does', () => {
+  function jsDispatch(evaluate: (params: Record<string, unknown>) => Promise<unknown>, remainingMillis?: () => number) {
+    const sent: string[] = []
+    const session = {
+      sendCommand: vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
+        sent.push(method)
+        return method === 'Runtime.evaluate' ? await evaluate(params) : {}
+      }),
+      frames: new Map(), endedReason: null, frameDiscoveryFailure: null, observe: () => () => {}, detach: () => {}
+    } as unknown as BrowserPageTransport
+    const dispatch = createBrowserPageDispatch({
+      session, pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId: 'nav-1' }),
+      gotoUrl: async () => {}, captureScreenshot: async () => ({}), readLedger: async () => null, writeLedger: async () => {}, note: () => {},
+      ...(remainingMillis ? { remainingMillis } : {})
+    })
+    return { dispatch, sent, session }
+  }
+
+  it('stops a promise that never settles, terminates the page script, and says its effect is unknown', async () => {
+    const { dispatch, sent } = jsDispatch(() => new Promise(() => {}), () => 1_700)
+    const started = Date.now()
+    await expect(dispatch('js', ['new Promise(() => {})'])).rejects.toThrow(/js\(\) was stopped after \d+ms because this program's time is almost up\. Its effect on the page is unknown/)
+    expect(Date.now() - started).toBeLessThan(700)
+    expect(sent).toEqual(['Runtime.evaluate', 'Runtime.terminateExecution'])
+  })
+
+  it('passes the same budget to Chromium so a synchronous loop is cut too', async () => {
+    let seen: Record<string, unknown> = {}
+    const { dispatch } = jsDispatch(async params => { seen = params; return { exceptionDetails: { text: 'Execution was terminated' } } }, () => 1_700)
+    await expect(dispatch('js', ['for(;;){}'])).rejects.toThrow(/was stopped after/)
+    expect(seen.timeout).toBe(200)
+  })
+
+  it('returns the value unchanged when there is no program budget or time to spare', async () => {
+    expect(await jsDispatch(async () => ({ result: { value: 4 } }))['dispatch']('js', ['2+2'])).toBe(4)
+    expect(await jsDispatch(async () => ({ result: { value: 4 } }), () => 60_000)['dispatch']('js', ['2+2'])).toBe(4)
+  })
+})
