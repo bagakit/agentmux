@@ -99,6 +99,11 @@ const fakeElectron = vi.hoisted(() => {
       return this
     }
     once(event: string, listener: (...args: unknown[]) => void): this { return this.on(event, listener) }
+    // Native child handling registers its window listeners ahead of the others.
+    prependListener(event: string, listener: (...args: unknown[]) => void): this {
+      this.listeners.set(event, [listener, ...(this.listeners.get(event) ?? [])])
+      return this
+    }
     // 真正摘掉监听器，避免假件掩盖原生输入与录制监听的泄漏。
     removeListener(event: string, listener: (...args: unknown[]) => void): this {
       this.listeners.set(event, (this.listeners.get(event) ?? []).filter((item) => item !== listener))
