@@ -8,11 +8,14 @@ import { sealReferenceDeliveryProof } from './lib/a2a-reference-proof.mjs'
 
 const journal = ['packages/core/test/a2a-reference-delivery.test.ts']
 const native = ['packages/core/test/a2a-reference-native.test.ts']
+const args = process.argv.slice(2)
+assert.ok(args.length === 0 || args.length === 2 && args[0] === '--prepared-artifact' && !args[1].startsWith('--'), 'Choose one explicit prepared artifact or the source-build candidate')
+const preparedArtifact = args.length ? resolve(args[1]) : undefined
 
 // The Runtime fixture uses an explicit verification Provider, not a simulated
 // kernel. The actual Codex adapter and model adoption have their own native gate.
 const compiled = await runA2aProof({
-  name: 'a2a-reference-delivery', freezeTests: true,
+  name: 'a2a-reference-delivery', freezeTests: true, preparedArtifact,
   frozenSupport: ['test/fixture-values.mjs', 'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'], tests: [...journal, ...native],
   environment: ({ label, evidence, dist, url }) => ({ AGENTMUX_TEST_REFERENCE_FACTS: join(evidence, label + '-native-facts.jsonl'), AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
   sourceInputs: ['packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
@@ -23,6 +26,8 @@ const compiled = await runA2aProof({
     'packages/core/src/generated/agentmux-guides.ts', 'packages/core/src/generated/agentmux-guides-index.ts',
     'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/types.ts',
     'packages/core/scripts/verify-a2a-reference-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
+    ...(preparedArtifact ? ['apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/package-identity.mjs',
+      'apps/desktop/scripts/runtime-application-payload.mjs', 'apps/desktop/scripts/macos-application-brand.mjs'] : []),
     'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'],
   callers: [
     { path: 'packages/core/src/agentmux-cli-commands.ts', symbol: "command('agent.send'" },

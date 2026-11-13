@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { launchPrivateA2aProof } from './lib/a2a-private-model-proof.mjs'
-import { referenceProofSha as sha, verifyReferenceDeliveryProof } from './lib/a2a-reference-proof.mjs'
+import { referenceProofSha as sha, verifyReferenceDeliveryProof, assertJoinedReferenceCandidate, assertReferenceProductCandidate } from './lib/a2a-reference-proof.mjs'
 
 const sourceInputs = ['packages/core/bin/amux', 'packages/core/bin/agentmux-hook.js', ...[
   'index', 'client', 'agent-capability', 'agent-global-message-queue', 'agent-message-journal', 'agent-message-query',
@@ -13,16 +13,20 @@ const sourceInputs = ['packages/core/bin/amux', 'packages/core/bin/agentmux-hook
   'agent-session-identity', 'agent-session-registry', 'agent-session-store', 'prompt-submission', 'prompt-submission-record',
   'public-rpc', 'public-rpc-client', 'public-rpc-server', 'public-rpc-service', 'rpc-native-codec', 'runtime-paths',
   'providers/codex', 'providers/codex-native-input', 'providers/codex-native-rpc', 'providers/codex-managed-run',
-  'providers/codex-managed-frontend', 'providers/codex-session-status', 'providers/codex-prompt-execution-evidence'
+  'providers/codex-managed-frontend', 'providers/codex-session-status', 'providers/codex-prompt-execution-evidence',
+  'providers/codex-native-queue', 'providers/app-server-native-session', 'providers/codex-native-record-role',
+  'agent-native-process', 'agent-native-process-linux', 'native-input-adoption'
 ].map(name => `packages/core/src/${name}.ts`),
   'packages/core/scripts/verify-a2a-reference-agent-flow.mjs', 'packages/core/scripts/lib/a2a-private-model-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
+  'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/package-identity.mjs',
+  'apps/desktop/scripts/runtime-application-payload.mjs', 'apps/desktop/scripts/macos-application-brand.mjs',
   'packages/core/scripts/fixtures/a2a-reference-agent/coordinator.mjs',
   ...['peer', 'process', 'native-evidence'].map(name => `packages/core/scripts/fixtures/a2a-agent-behavior/${name}.mjs`)]
 
 const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2)
 assert.ok(args.length === 0 || args.length === 1 && args[0] === '--prepare-only')
 const prepareOnly = args.length === 1, json = async path => JSON.parse(await readFile(path, 'utf8'))
-async function readingProof() {
+async function readingProof(delivery) {
   // The bare owning command validates retained tests, loaded source, product bytes
   // and the independent image review. It does not prepare or rerun the scene.
   const result = await promisify(execFile)(process.execPath, [join(root, 'apps/desktop/scripts/verify-a2a-reference-reading.mjs')], { cwd: root, maxBuffer: 1024 * 1024 })
@@ -32,40 +36,29 @@ async function readingProof() {
   const receipt = JSON.parse(receiptBytes), productBytes = await readFile(receipt.product.path)
   assert.equal(sha(productBytes), receipt.product.sha256)
   const product = JSON.parse(productBytes), reviewBytes = await readFile(product.reviewPath)
-  return { index, receipt, product, productSHA256: sha(productBytes), reviewSHA256: sha(reviewBytes) }
+  let fixedCoreSources
+  if (product.preparation.kind === 'prepared-artifact') {
+    // Immutable source provenance is distinct from compiler-loaded events.
+    const paths = [...new Set([...sourceInputs, ...Object.keys(delivery.sources)].filter(path => /^packages\/core\/(?:src\/|guides\/|bin\/)/u.test(path)))]
+    fixedCoreSources = Object.fromEntries(await Promise.all(paths.map(async path => {
+      const result = await promisify(execFile)('git', ['show', product.preparation.identity.sourceCommit + ':' + path], { cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024 })
+      return [path, sha(result.stdout)]
+    })))
+  }
+  return { index, receipt, product, fixedCoreSources, productSHA256: sha(productBytes), reviewSHA256: sha(reviewBytes) }
 }
 
-/** Joined evidence binds executable bytes and original source facts, never Git ancestry alone. */
-function assertJoinedReferenceCandidate({ delivery, product, model }) {
-  assert.equal(model.passed, true); assert.equal(model.frozenCandidate.compiledSnapshot, true)
-  assert.deepEqual(model.compiledBefore, model.compiledAfter)
-  const expectedJs = Object.keys(delivery.compiled).map(file => 'packages/core/dist/' + file).sort()
-  assert.deepEqual(Object.keys(model.compiledBefore).sort(), expectedJs, 'One exact model executable graph')
-  assert.deepEqual(Object.keys(product.compiled).filter(file => file.startsWith('packages/core/dist/') && file.endsWith('.js')).sort(), expectedJs, 'One exact Desktop Core executable graph')
-  const sharedSources = Object.keys(delivery.sources).filter(path => path in model.sourceBefore)
-  assert.ok(sharedSources.length >= 20)
-  for (const path of sharedSources) assert.equal(model.sourceBefore[path], delivery.sources[path], 'Model original source candidate: ' + path)
-  for (const [file, digest] of Object.entries(delivery.compiled)) {
-    assert.equal(model.compiledBefore['packages/core/dist/' + file], digest, 'Model actual executable candidate: ' + file)
-    assert.equal(product.compiled['packages/core/dist/' + file], digest, 'Desktop actual Core executable candidate: ' + file)
-  }
-  const productSources = Object.keys(delivery.sources).filter(path => path in product.sources)
-  assert.ok(productSources.length >= 15)
-  for (const path of productSources) assert.equal(product.sources[path], delivery.sources[path], 'Desktop original source candidate: ' + path)
-  const modelProductSources = Object.keys(model.sourceBefore).filter(path => path in product.sources)
-  assert.ok(modelProductSources.length >= 30)
-  for (const path of modelProductSources) assert.equal(product.sources[path], model.sourceBefore[path], 'One original model and Desktop source: ' + path)
-  return { sharedModelProductSources: modelProductSources, sharedModelSources: sharedSources, sharedProductSources: productSources, executableFiles: Object.keys(delivery.compiled).length }
-}
 
 const delivery = prepareOnly ? null : await verifyReferenceDeliveryProof({ root })
-const reading = prepareOnly ? null : await readingProof()
+const reading = prepareOnly ? null : await readingProof(delivery)
+if (!prepareOnly) assertReferenceProductCandidate({ delivery, product: reading.product })
 const modelResult = await launchPrivateA2aProof({
   repository: root, sourceInputs,
   coordinatorEntry: join(import.meta.dirname, 'fixtures/a2a-reference-agent/coordinator.mjs'),
   freezeCandidate: true, name: 'a2a-reference-agent-flow', schema: 'agentmux.a2a-reference-agent-launcher.v1',
   scenario: 'idle-reference-native-discovery', model: process.env.AGENTMUX_A2A_REFERENCE_MODEL || 'gpt-6.1-sol',
-  prepareOnly, privatePrefix: 'amr-', requiredFlags: ['--no-daemon', 'app-server', '--remote']
+  prepareOnly, privatePrefix: 'amr-', requiredFlags: ['--no-daemon'],
+  preparedArtifact: reading?.product.preparation.kind === 'prepared-artifact' ? reading.product.preparation.input.path : undefined
 })
 
 if (!prepareOnly) {
@@ -74,13 +67,21 @@ if (!prepareOnly) {
   assert.equal(actual.passed, true); assert.equal(actual.finiteSample, true); assert.equal(actual.completeFeatureCoverage, false)
   assert.equal(model.cleanup.privateRootRemoved, true); assert.deepEqual(model.cleanup.errors, [])
   assert.equal(model.redaction.credentialValueFound, false)
-  const finalDelivery = await verifyReferenceDeliveryProof({ root }), finalReading = await readingProof()
+  const finalDelivery = await verifyReferenceDeliveryProof({ root }), finalReading = await readingProof(delivery)
   assert.equal(finalDelivery.sha256, delivery.sha256); assert.deepEqual(finalReading.index, reading.index)
-  const candidate = assertJoinedReferenceCandidate({ delivery, product: reading.product, model })
+  let modelPreparation
+  if (model.preparation) {
+    const bytes = await readFile(model.preparation.path); assert.equal(sha(bytes), model.preparation.sha256)
+    modelPreparation = JSON.parse(bytes)
+    const { verifyA2aPreparedArtifact } = await import('../../../apps/desktop/scripts/lib/a2a-prepared-artifact.mjs')
+    await verifyA2aPreparedArtifact(modelPreparation, { root, artifact: 'origin' })
+  }
+  const joinedInputs = { delivery, product: reading.product, model, modelPreparation, fixedCoreSources: reading.fixedCoreSources }
+  const candidate = assertJoinedReferenceCandidate(joinedInputs)
   const changedSource = structuredClone(model); changedSource.sourceBefore['packages/core/src/client.ts'] = '0'.repeat(64)
-  assert.throws(() => assertJoinedReferenceCandidate({ delivery, product: reading.product, model: changedSource }))
+  assert.throws(() => assertJoinedReferenceCandidate({ ...joinedInputs, model: changedSource }))
   const oldModel = structuredClone(model); oldModel.compiledBefore['packages/core/dist/client.js'] = '0'.repeat(64); oldModel.compiledAfter['packages/core/dist/client.js'] = '0'.repeat(64)
-  assert.throws(() => assertJoinedReferenceCandidate({ delivery, product: reading.product, model: oldModel }))
+  assert.throws(() => assertJoinedReferenceCandidate({ ...joinedInputs, model: oldModel }))
   await assert.rejects(verifyReferenceDeliveryProof({ root, index: { path: delivery.artifactIndex, sha256: '0'.repeat(64) } }))
   const joined = join(dirname(modelResult.receipt), 'joined.json')
   await writeFile(joined, JSON.stringify({ schema: 'agentmux.a2a-reference-joined-proof.v1', passed: true, finiteModelSample: true,

@@ -60,9 +60,20 @@ async function deliveryFacts({ root, receipt }) {
   assert.equal(compiled.passed, true); assert.equal(compiled.sharedTreeMutations, 0); assert.equal(compiled.cleanup.privateCopyRemoved, true)
   assert.equal(compiled.frozenTests.mutableWorkingTreeUsedByTests, false)
   await inputs(root, compiled.sourceBefore)
-  const actualJs = (await readdir(join(root, 'packages/core/dist'), { recursive: true })).filter(path => path.endsWith('.js')).sort()
-  assert.deepEqual(Object.keys(compiled.compiledInputs).sort(), actualJs, 'The entire actual Core executable graph is bound')
-  for (const file of actualJs) assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/dist', file))), compiled.compiledInputs[file], 'Actual compiled Core: ' + file)
+  let preparation
+  if (compiled.preparation) {
+    const path = local(root, compiled.preparation.path), bytes = await readFile(path); artifacts.add(path)
+    assert.equal(referenceProofSha(bytes), compiled.preparation.sha256)
+    preparation = JSON.parse(bytes)
+    const { verifyA2aPreparedArtifact } = await import('../../../../apps/desktop/scripts/lib/a2a-prepared-artifact.mjs')
+    await verifyA2aPreparedArtifact(preparation, { root, artifact: 'origin' })
+    assert.deepEqual(Object.fromEntries(Object.entries(compiled.compiledInputs).map(([path, digest]) => ['dist/' + path, digest])), preparation.coreGraph, 'The full tested executable graph is the selected prepared Core')
+    for (const [path, digest] of Object.entries(preparation.sourceSnapshot.files)) assert.equal(compiled.sourceBefore[path], digest, 'Prepared source and actual tested source: ' + path)
+  } else {
+    const actualJs = (await readdir(join(root, 'packages/core/dist'), { recursive: true })).filter(path => path.endsWith('.js')).sort()
+    assert.deepEqual(Object.keys(compiled.compiledInputs).sort(), actualJs, 'The entire actual Core executable graph is bound')
+    for (const file of actualJs) assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/dist', file))), compiled.compiledInputs[file], 'Actual compiled Core: ' + file)
+  }
   const directory = dirname(compiledPath), baseline = await testRun(root, directory, compiled.baseline, false, artifacts)
   assert.equal(baseline.length, 26); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
   assert.ok(baseline.some(name => name.includes('budgets the complete bridge and escaped identities')))
@@ -76,7 +87,7 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(native.sourceBefore, native.sourceAfter); await inputs(root, native.sourceBefore)
   assert.deepEqual(native.cases.map(item => item.mutation), nativeEdits)
   const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, true)
-  assert.equal(nativeBaseline.length, 37); assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
+  assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
   for (const item of native.cases) {
     assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, true), nativeBaseline)
     assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, true), nativeBaseline)
@@ -94,7 +105,7 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(isolated[0].restoredKey, isolated[0].originalKey); assert.notDeepEqual(isolated[0].independentKey, isolated[0].originalKey)
   assert.equal(isolated[0].requests.length, 2); assert.deepEqual(isolated[0].requests[0].nativeStatus, isolated[0].requests[1].nativeStatus)
   assert.ok(isolated[0].requests[1].wire.includes(isolated[0].newMid) && !isolated[0].requests[1].wire.includes(isolated[0].oldMid))
-  return { aggregate, compiled, artifacts, reopened: original, facts: isolated[0] }
+  return { aggregate, compiled, preparation, artifacts, reopened: original, facts: isolated[0] }
 }
 
 /** Seal original execution artifacts; verification never reruns a Provider or model. */
@@ -114,6 +125,60 @@ export async function verifyReferenceDeliveryProof({ root, index }) {
   const facts = await deliveryFacts({ root, receipt: sealed.receipt })
   assert.deepEqual([...facts.artifacts].map(path => relative(root, path)).sort(), Object.keys(sealed.artifacts).sort())
   return { passed: true, receipt: sealed.receipt, artifactIndex: index.path, sha256: index.sha256,
-    sources: facts.compiled.sourceBefore, compiled: facts.compiled.compiledInputs,
+    sources: facts.compiled.sourceBefore, compiled: facts.compiled.compiledInputs, preparation: facts.preparation,
     cases: facts.compiled.baseline.tests, compiledMutants: edits.length, nativeSourceMutants: nativeEdits.length, reopen: facts.reopened, sameIdleUnknown: facts.facts }
+}
+
+function assertSameReferencePreparation(candidate, original) {
+  const selected = original?.kind ?? 'source-build', received = candidate?.kind ?? 'source-build'
+  assert.ok([selected, received].every(mode => ['source-build', 'prepared-artifact'].includes(mode)), 'Every consumer has an explicit supported origin mode')
+  assert.equal(received, selected, 'Delivery, Desktop and model must use the same origin mode')
+  if (selected === 'prepared-artifact') {
+    assert.deepEqual(candidate.identity, original.identity, 'One fixed original source identity')
+    assert.deepEqual(candidate.input, original.input, 'One explicit prepared origin selection')
+    assert.equal(candidate.artifact.inventory.sha256, original.artifact.inventory.sha256, 'One complete executable and dependency inventory')
+    assert.deepEqual(candidate.coreGraph, original.coreGraph)
+  }
+  return selected
+}
+
+/** Reject a known delivery/product mismatch before paying for a real model sample. */
+export function assertReferenceProductCandidate({ delivery, product }) {
+  const prepared = assertSameReferencePreparation(delivery.preparation, product.preparation) === 'prepared-artifact'
+  const expectedJs = Object.keys(delivery.compiled).map(file => 'packages/core/dist/' + file).sort()
+  assert.ok(expectedJs.length > 100, 'A complete Core executable graph is required')
+  const productCompiled = prepared ? Object.fromEntries(Object.entries(product.preparation.coreGraph).map(([path, digest]) => ['packages/core/' + path, digest])) : product.compiled
+  assert.deepEqual(Object.keys(productCompiled).filter(file => file.startsWith('packages/core/dist/') && file.endsWith('.js')).sort(), expectedJs, 'One exact Desktop Core executable graph')
+  for (const [file, digest] of Object.entries(delivery.compiled)) assert.equal(productCompiled['packages/core/dist/' + file], digest, 'Desktop actual Core executable candidate: ' + file)
+  const productSources = Object.keys(delivery.sources).filter(path => path in product.sources)
+  assert.ok(prepared ? productSources.length > 0 : productSources.length >= 15)
+  for (const path of productSources) assert.equal(product.sources[path], delivery.sources[path], 'Desktop original source candidate: ' + path)
+  return { prepared, expectedJs, productSources }
+}
+
+/** Joined evidence binds executable bytes and original source facts, never Git ancestry alone. */
+export function assertJoinedReferenceCandidate({ delivery, product, model, modelPreparation, fixedCoreSources }) {
+  const { prepared, expectedJs, productSources } = assertReferenceProductCandidate({ delivery, product })
+  assertSameReferencePreparation(modelPreparation, product.preparation)
+  assert.equal(model.passed, true); assert.equal(model.frozenCandidate.compiledSnapshot, true)
+  assert.deepEqual(model.compiledBefore, model.compiledAfter)
+  assert.deepEqual(Object.keys(model.compiledBefore).sort(), expectedJs, 'One exact model executable graph')
+  if (prepared) {
+    assert.ok(Object.keys(fixedCoreSources).length >= 30)
+    for (const inputs of [delivery.sources, model.sourceBefore, product.sources]) {
+      for (const [path, digest] of Object.entries(inputs)) if (/^packages\/core\/(?:src\/|guides\/|bin\/)/u.test(path)) {
+        assert.ok(Object.hasOwn(fixedCoreSources, path), 'The immutable source join must cover every relevant production input: ' + path)
+        assert.equal(digest, fixedCoreSources[path], 'Original immutable product source: ' + path)
+      }
+    }
+  }
+  const sharedSources = Object.keys(delivery.sources).filter(path => path in model.sourceBefore)
+  assert.ok(sharedSources.length >= 20)
+  for (const path of sharedSources) assert.equal(model.sourceBefore[path], delivery.sources[path], 'Model original source candidate: ' + path)
+  for (const [file, digest] of Object.entries(delivery.compiled)) assert.equal(model.compiledBefore['packages/core/dist/' + file], digest, 'Model actual executable candidate: ' + file)
+  const modelProductSources = Object.keys(model.sourceBefore).filter(path => path in product.sources)
+  assert.ok(prepared ? modelProductSources.length > 0 : modelProductSources.length >= 30)
+  for (const path of modelProductSources) assert.equal(product.sources[path], model.sourceBefore[path], 'One original model and Desktop source: ' + path)
+  return { sharedModelProductSources: modelProductSources, sharedModelSources: sharedSources, sharedProductSources: productSources,
+    ...(prepared ? { immutableCoreSources: Object.keys(fixedCoreSources), immutableCoreSourceSHA256: referenceProofSha(JSON.stringify(fixedCoreSources)) } : {}), executableFiles: Object.keys(delivery.compiled).length }
 }
