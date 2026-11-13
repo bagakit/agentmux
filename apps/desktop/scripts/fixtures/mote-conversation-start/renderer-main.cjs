@@ -46,8 +46,8 @@ app.whenReady().then(async () => {
       const space = 'document.querySelector("[data-mote-space]")'
       const portrait = await read(`(()=>{const n=${space}.querySelector('.mote-start__portrait'),r=n.getBoundingClientRect();return{x:r.right-10,y:r.top+30}})()`)
       win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(portrait.x), y: Math.round(portrait.y) }); await settle()
-      result.motion = await read(`(()=>{const n=${space}.querySelector('.mote-start .mote-identity-motion');return{visible:n?.dataset.moteVisible,gaze:n?.dataset.moteGaze,x:n?.style.getPropertyValue('--mote-gaze-x'),background:getComputedStyle(${space}.querySelector('.mote-start__aura')).animationPlayState}})()`)
-      assert.equal(result.motion.visible, 'on'); assert.equal(result.motion.gaze, 'near'); assert.equal(result.motion.background, 'running')
+      result.motion = await read(`(()=>{const n=${space}.querySelector('.mote-start .mote-identity-motion');return{visible:n?.dataset.moteVisible,gaze:n?.dataset.moteGaze,x:n?.style.getPropertyValue('--mote-gaze-x'),background:getComputedStyle(${space}.querySelector('.mote-start__aura')).animationIterationCount}})()`)
+      assert.equal(result.motion.visible, 'on'); assert.equal(result.motion.gaze, 'near'); assert.equal(result.motion.background, '1')
       await capture('10-space-welcome-pointer', space)
       win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
       await read('window.moteStartCapture.theme(true)'); await settle()
