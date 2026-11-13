@@ -14,8 +14,13 @@
 .md-outline__entry:hover, .md-outline__entry:focus-visible { background:var(--surface-3); color:var(--text); }
 
 /* Document tools share one sticky row: reading layout and Contents. */
-.md-document-tools { position:sticky; top:0; z-index:2; display:flex; justify-content:flex-end; align-items:center; gap:var(--sp-2); align-self:stretch; min-width:0; pointer-events:none; font-family:var(--font-sans); font-size:var(--fs-meta); }
-.md-document-tools > * { pointer-events:auto; border-radius:var(--radius-sm); background:var(--bg); box-shadow:0 0 0 var(--sp-2) var(--bg); }
+/* The tools take no room in the reading column: a zero-height sticky row whose controls hang into the right
+   gutter where the page has one, so prose, badges and the hero are never covered or cut. */
+.md-document-tools { position:sticky; top:0; z-index:2; height:0; display:flex; justify-content:flex-end; align-items:flex-start; gap:var(--sp-2); align-self:stretch; min-width:0; pointer-events:none; font-family:var(--font-sans); font-size:var(--fs-meta); }
+.md-document-tools > * { pointer-events:auto; }
+/* Where the gutter is too narrow, the controls overlap the first line; a halo in the page surface colour keeps
+   their edge clean instead of cutting a patch out of the content. */
+.md-document-tools > .md-reading, .md-document-tools > .md-outline { border-radius:var(--radius-sm); box-shadow:0 0 0 var(--sp-1) var(--surface-0); }
 .md-reading { position:relative; display:flex; }
 .md-reading__trigger { width:28px; justify-content:center; padding:0; color:var(--text-2); }
 .md-reading__popover { width:min(264px, calc(100vw - var(--sp-8))); }
