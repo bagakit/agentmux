@@ -366,8 +366,9 @@ describe('a stalled workface save in the actual Store', () => {
       expect(useAppStore.getState().workbenchSaveWarning).toContain('have not reached storage')
       expect(incidents.mock.calls.map(([report]) => report.kind)).toEqual(['workface-save-failed'])
       offline = false
-      // Fire the backoff retry, then let the real file write and its acknowledgement settle.
-      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 8)
+      // Fire only the first backoff retry, then let the real file write settle in real time: later fake
+      // watchdog ticks would outrun it and treat its reply as overdue.
+      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 2)
       vi.useRealTimers()
       await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toContain('second'))
       await vi.waitFor(() => expect(useAppStore.getState().workbenchSaveWarning).toBeNull())

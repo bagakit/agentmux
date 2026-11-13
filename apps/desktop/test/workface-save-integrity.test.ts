@@ -340,11 +340,54 @@ describe('a stalled or failing background save is visible while the user works',
     await expect.poll(() => warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' }))
     // Storage comes back. No user edit happens; the background retry saves the Tab.
     offline = false
-    for (let step = 0; step < 4; step++) await clock.advance(SAVE_STALL_AFTER_MS * 8)
+    // Reach the first backoff retry only, then let the real file write settle in real time.
+    await clock.advance(SAVE_STALL_AFTER_MS * 8)
     await expect.poll(async () => (await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
-    expect(recovered).toBe(1)
+    // Recovery is confirmed once the save's own reply settles, just after the file holds the Tab.
+    await expect.poll(() => recovered).toBe(1)
     expect(persistence.saveObservation).toMatchObject({ stalled: false, pendingSince: null, lastFailureCode: null })
     expect(clock.pending()).toBe(0)
+    persistence.dispose()
+  })
+
+  it('stops waiting for a reply that never comes and saves through the next attempt', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), warnings: unknown[] = []
+    let commits = 0
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(), onChange: listener => store.subscribe(listener),
+      commit: input => ++commits === 1 ? new Promise(() => {}) : store.commit(input) }, error => warnings.push(error), clock)
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await expect.poll(() => commits).toBe(1)
+    // The bound announces the stall and gives up on the silent reply; the next check saves for real.
+    await clock.advance(SAVE_STALL_AFTER_MS)
+    await clock.advance(SAVE_STALL_AFTER_MS * 2)
+    // Wait for the retry the watchdog started, not for a time budget a loaded runner can exceed.
+    await persistence.flush()
+    expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
+    expect(persistence.pendingChanges).toBe(false)
+    expect(warnings.map(warning => (warning as { code?: string }).code)).toEqual(['SPATIAL_SAVE_STALLED'])
+    persistence.dispose()
+  })
+
+  it('recognises a silent write that did land as agreement, not as a conflict', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), warnings: unknown[] = []
+    let commits = 0
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(), onChange: listener => store.subscribe(listener),
+      commit: async input => { if (++commits > 1) return store.commit(input); await store.commit(input); return new Promise(() => {}) } },
+    error => warnings.push(error), clock)
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await expect.poll(async () => (await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
+    await clock.advance(SAVE_STALL_AFTER_MS)
+    await clock.advance(SAVE_STALL_AFTER_MS * 2)
+    await persistence.flush()
+    expect(persistence.pendingChanges).toBe(false)
+    expect(warnings.map(warning => (warning as { code?: string }).code)).toEqual(['SPATIAL_SAVE_STALLED'])
+    expect(persistence.conflicts).toEqual([])
     persistence.dispose()
   })
 
