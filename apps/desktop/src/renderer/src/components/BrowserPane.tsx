@@ -95,6 +95,7 @@ import { browserProfiles, useBrowserProfiles } from '../lib/browser-profiles'
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -1374,7 +1375,7 @@ function BrowserPaneContent({
                 onHistoryChange={() => setHistoryRevision(value => value + 1)}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionOpenExternalIcon size={16} /></button>
+              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionSubmitIcon size={16} /></button>
             </form>
             {tab.mode === 'private' ? <p className="browser-private-notice" role="status"><strong>{tab.privateSessionEnded ? 'Temporary data has ended' : 'Private browsing'}</strong><span>Website data stays in this session and ends when you close this page. It does not hide your network identity. Explicit saves, downloads and Agent operation records are retained normally.</span></p> : null}
           </BrowserStartPage> : <div className={`browser-empty${tab.mode === 'private' ? ' browser-empty--private' : ''}`}><ThemeObjectBrowserIcon size={25} /><strong>{tab.mode === 'private' ? tab.privateSessionEnded ? 'Temporary data has ended' : 'Private browsing' : 'New browser tab'}</strong><span>{tab.mode === 'private' ? 'This is a new private session. Website data ends when you close it. Your network identity is not hidden; explicit saves, downloads and Agent operation records are retained normally.' : 'Search or enter an address above to begin.'}</span></div>
