@@ -49,7 +49,10 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     } else {
       await openCard(0, 'Fork current conversation…')
       const destination = 'document.querySelector("[data-current-fork-review] [data-destination=right]")'
-      await wait(`Boolean(${destination})`); await click(destination)
+      await wait(`Boolean(${destination})`)
+      // Expanding the real review resizes and collision-shifts its Radix menu.
+      // Let its positioning paint before dispatching coordinates to the button.
+      await painted(); await click(destination)
       await wait('!document.querySelector("[data-current-fork-review]") && !document.querySelector(".focus-context-menu[role=menu]")', 'Submitted fork releases the original menu')
     }
     await wait(`takeoverProbe.operations.facts().pending.some(item=>item.kind==='creation')`)
