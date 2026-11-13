@@ -62,9 +62,9 @@ afterEach(async () => {
 describe('real format preview pane', () => {
   it('reads only when visible, confirms native dimensions on decode, keeps small Fit at 100%, and releases the Blob on hide', async () => {
     const { file } = seed('diagram.png')
-    await render(<FilePreviewPane surface={file} visible={false} />); expect(api.files.readPreview).not.toHaveBeenCalled()
-    await render(<FilePreviewPane surface={file} />)
-    expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png')
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />); expect(api.files.readPreview).not.toHaveBeenCalled()
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
+    expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png', undefined)
     expect(container.querySelector('button[aria-label="Zoom out"]')?.getAttribute('title')).toBe('Zoom out (-)')
     expect(container.querySelector('button[aria-label="Zoom in"]')?.getAttribute('title')).toBe('Zoom in (+)')
     const image = container.querySelector('img')!
@@ -79,13 +79,13 @@ describe('real format preview pane', () => {
     expect(container.textContent).toContain('80 × 60 · 3 B'); expect(image.style.width).toBe('80px')
     await click('Zoom in'); expect(container.querySelector('output')?.textContent).toBe('125%'); expect(image.style.width).toBe('100px')
     expect(useAppStore.getState().documents).toEqual({})
-    await render(<FilePreviewPane surface={file} visible={false} />); expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:fixture-1'); expect(container.querySelector('img')).toBeNull()
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />); expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:fixture-1'); expect(container.querySelector('img')).toBeNull()
   })
   it('discards late bytes across A → B → A and does not re-read for unrelated Session output', async () => {
     const pending: Array<(value: ReturnType<typeof ready>) => void> = []
     vi.mocked(api.files.readPreview).mockImplementation(() => new Promise(resolve => pending.push(resolve)))
     let commits = 0
-    const node = (path: string) => <Profiler id="preview" onRender={() => commits++}><FilePreviewPane surface={surface(path)} /></Profiler>
+    const node = (path: string) => <Profiler id="preview" onRender={() => commits++}><FilePreviewPane tabId="test-file-tab" surface={surface(path)} /></Profiler>
     seed('a.png'); await render(node('a.png')); await render(node('b.png')); await render(node('a.png'))
     expect(pending).toHaveLength(3)
     await act(async () => { pending[0]!(ready('old-a')); pending[1]!(ready('old-b')) }); expect(createUrl).not.toHaveBeenCalled()
@@ -98,7 +98,7 @@ describe('real format preview pane', () => {
     const seen: Array<{ path: string; src: string | null }> = []
     function CommitWitness({ path }: { path: string }) {
       useLayoutEffect(() => { seen.push({ path, src: container.querySelector('img')?.getAttribute('src') ?? null }) })
-      return <FilePreviewPane surface={surface(path)} />
+      return <FilePreviewPane tabId="test-file-tab" surface={surface(path)} />
     }
     seed('a.png'); await render(<CommitWitness path="a.png" />); expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:fixture-1')
     await render(<CommitWitness path="b.png" />)
@@ -107,7 +107,7 @@ describe('real format preview pane', () => {
   it('states real read and decoder failures and routes external actions through the existing exact workspace API', async () => {
     const { file } = seed('broken.png')
     const open = vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined), reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
-    await render(<FilePreviewPane surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     await act(async () => container.querySelector('img')!.dispatchEvent(new Event('error')))
     expect(container.textContent).toContain('Image could not be decoded'); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('error')
     await click('Open file in system application'); expect(open).toHaveBeenCalledExactlyOnceWith('workspace', 'broken.png')
@@ -119,19 +119,19 @@ describe('real format preview pane', () => {
     const open = vi.spyOn(api.files, 'openMediaStream').mockImplementation(async () => ({ status: 'ready', id: `lease-${kind}`, url: `http://127.0.0.1:1/lease-${kind}/clip`, kind, mimeType: kind === 'audio' ? 'audio/mpeg' : 'video/mp4', byteLength: 55_314_157 }))
     const release = vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
     const { file } = seed(`clip.${kind === 'audio' ? 'mp3' : 'mp4'}`)
-    await render(<FilePreviewPane surface={file} visible={false} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />)
     expect(open).not.toHaveBeenCalled()
-    await render(<FilePreviewPane surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     expect(open).toHaveBeenCalledExactlyOnceWith('workspace', file.path)
     expect(api.files.readPreview).not.toHaveBeenCalled(); expect(createUrl).not.toHaveBeenCalled()
     const player = container.querySelector(kind)!
     expect(player).not.toBeNull(); expect(player.getAttribute('src')).toBe(`http://127.0.0.1:1/lease-${kind}/clip`)
     expect(player.hasAttribute('controls')).toBe(false); expect(player.hasAttribute('autoplay')).toBe(false)
     expect(container.querySelector(`[role="group"][aria-label="${kind === 'audio' ? 'Audio' : 'Video'} player: ${file.path}"]`)).not.toBeNull()
-    await render(<FilePreviewPane surface={file} visible={false} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />)
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1); expect(player.hasAttribute('src')).toBe(false)
     expect(release).toHaveBeenCalledExactlyOnceWith(`lease-${kind}`)
-    await render(<FilePreviewPane surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     expect(open).toHaveBeenCalledTimes(2)
   })
   it('a hidden media File comes back paused where it was, with its volume and speed; another File starts fresh', async () => {
@@ -145,18 +145,18 @@ describe('real format preview pane', () => {
     Object.defineProperty(HTMLMediaElement.prototype, 'duration', { configurable: true, get: () => 7_200 })
     const at = (element: HTMLMediaElement, time: number) => { let value = time; Object.defineProperty(element, 'currentTime', { configurable: true, get: () => value, set: next => { value = next } }) }
     try {
-      await render(<FilePreviewPane surface={file} />)
+      await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
       const first = container.querySelector('video')!
       at(first, 4_800); first.volume = 0.4; first.playbackRate = 1.5
-      await render(<FilePreviewPane surface={file} visible={false} />)
-      await render(<FilePreviewPane surface={file} />)
+      await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />)
+      await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
       const again = container.querySelector('video')!
       expect(again).not.toBe(first)
       at(again, 0)
       await act(async () => { again.dispatchEvent(new Event('loadedmetadata')) })
       expect(again.currentTime).toBe(4_800); expect(again.volume).toBe(0.4); expect(again.playbackRate).toBe(1.5)
       expect(play).not.toHaveBeenCalled()
-      await render(<FilePreviewPane surface={surface('other.mp4')} />)
+      await render(<FilePreviewPane tabId="test-file-tab" surface={surface('other.mp4')} />)
       const other = container.querySelector('video')!
       at(other, 0)
       await act(async () => { other.dispatchEvent(new Event('loadedmetadata')) })
@@ -169,7 +169,7 @@ describe('real format preview pane', () => {
     vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-quiet', url: 'http://127.0.0.1:1/lease-quiet/clip.mp4', kind: 'video', mimeType: 'video/mp4', byteLength: 3 })
     vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
     const { file } = seed('clip.mp4')
-    await render(<FilePreviewPane surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     const workspaces = useAppStore.getState().config!.workspaces, find = vi.spyOn(workspaces, 'find')
     await act(async () => { for (let index = 0; index < 20; index++) useAppStore.setState({ lastError: `unrelated ${index}` }) })
     expect(find).not.toHaveBeenCalled()
@@ -219,22 +219,22 @@ describe('real format preview pane', () => {
     const release = vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
     const answer = (path: string, id: string) => act(async () => { pending.get(path)!({ status: 'ready', id, url: `http://127.0.0.1:1/${id}/${path}`, kind: 'video', mimeType: 'video/mp4', byteLength: 3 }) })
     const { file } = seed('slow.mp4'); seed('next.mp4')
-    await render(<FilePreviewPane surface={file} />)
-    await render(<FilePreviewPane surface={file} visible={false} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} visible={false} />)
     await answer('slow.mp4', 'late-hidden')
     expect(release).toHaveBeenCalledExactlyOnceWith('late-hidden')
     expect(container.querySelector('video')).toBeNull()
-    await render(<FilePreviewPane surface={file} />)
-    await render(<FilePreviewPane surface={surface('next.mp4')} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={surface('next.mp4')} />)
     await answer('slow.mp4', 'late-retargeted'); await answer('next.mp4', 'current')
-    await render(<FilePreviewPane surface={surface('next.mp4')} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={surface('next.mp4')} />)
     expect(release).toHaveBeenCalledWith('late-retargeted')
     expect(container.querySelector('video')?.getAttribute('src')).toBe('http://127.0.0.1:1/current/next.mp4')
   })
   it('a media file the lease owner cannot open states that reason with Retry, and Retry opens a new lease', async () => {
     const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'deleted', message: 'This file no longer exists.' })
     const { file } = seed('gone.mp4')
-    await render(<FilePreviewPane surface={file} />)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('File was deleted')
     await click('Retry'); expect(open).toHaveBeenCalledTimes(2)
   })
@@ -510,7 +510,7 @@ it('rejects bytes and releases URLs across a same-ID root/Host replacement, incl
   const configB = { ...configA, workspaces: configA.workspaces.map(workspace => workspace.id === 'workspace' ? { ...workspace, path: _hygiene_fixturePath("different-root"), hostId: 'remote-host' } : workspace) }
   const pending: Array<(value: ReturnType<typeof ready>) => void> = []
   vi.mocked(api.files.readPreview).mockImplementation(() => new Promise(resolve => pending.push(resolve)))
-  await render(<FilePreviewPane surface={file} />)
+  await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
   await act(async () => { useAppStore.setState({ config: configB }); useAppStore.setState({ config: configA }) })
   expect(pending).toHaveLength(2)
   await act(async () => pending[0]!(ready('stale-original-root')))
@@ -555,7 +555,7 @@ it('reads Markdown images only near the viewport, releases them offscreen, and r
   expect(api.files.readPreview).not.toHaveBeenCalled()
   expect(observers).toHaveLength(1)
   await act(async () => observers[0]!([{ isIntersecting: true }]))
-  expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png')
+  expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png', undefined)
   const image = container.querySelector('img')!
   expect(image).not.toBeNull()
   vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({ height: 320 } as DOMRect)
@@ -579,7 +579,7 @@ it('keeps media readiness when a cached native load arrives before passive effec
     Object.defineProperty(player, 'duration', { value: 2 })
     player.dispatchEvent(new Event('loadedmetadata'))
     player.dispatchEvent(new Event('loadeddata'))
-  }}><FilePreviewPane surface={file} /></Profiler>)
+  }}><FilePreviewPane tabId="test-file-tab" surface={file} /></Profiler>)
   expect(delivered).toBe(true)
   expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
   expect(container.textContent).toContain('0:02 · 3 B')
