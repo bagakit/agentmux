@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { FileHandle } from 'node:fs/promises'
 import { workspaceFileExtension, workspaceFilePreviewFormat } from '../shared/workspace-file-preview.js'
 import { WORKSPACE_MEDIA_PLAYLIST_EXTENSION, type WorkspaceMediaStreamFact, type WorkspaceMediaStreamOpenResult } from '../shared/workspace-media-stream.js'
+import { LoopbackListener } from './loopback-listener.js'
 import { previewRelativePath, previewRequestPath, previewUrlPath, sameWorkspaceResource } from './preview-paths.js'
 import type { WorkspaceFiles, WorkspaceMediaHandle } from './workspace-files.js'
 
@@ -130,9 +131,8 @@ function errorCode(error: unknown): string {
 /** Visible-view playback leases. Main owns every byte; a released or failed lease records why. */
 export class WorkspaceMediaStreams {
   private readonly leases = new Map<string, Lease>()
-  private server: Server | null = null
-  private origin: string | null = null
-  private starting: Promise<string> | null = null
+  private readonly listener = new LoopbackListener((request, response) => { void this.respond(request, response) },
+    () => Object.assign(new Error('The media playback listener is unavailable. Reopen the file to retry.'), { code: 'WORKSPACE_MEDIA_LISTENER_UNAVAILABLE' }))
   private disposed = false
   private generation = 0
 
@@ -166,7 +166,7 @@ export class WorkspaceMediaStreams {
     const lease: Lease = media && fileKind ? { ...base, kind: fileKind, media }
       : { ...base, kind: 'playlist', referenced: new Set([path]), served: new Map() }
     try {
-      const origin = await this.start()
+      const origin = await this.listener.start()
       if (this.disposed || generation !== this.generation || !this.workspaceMatches(lease)) throw Object.assign(new Error('Media playback was released before it started. Reopen the file to retry.'), { code: 'WORKSPACE_MEDIA_RELEASED' })
       const id = randomBytes(32).toString('base64url')
       this.leases.set(id, lease)
@@ -202,47 +202,11 @@ export class WorkspaceMediaStreams {
   async dispose(): Promise<void> {
     this.disposed = true
     this.releaseAll()
-    try { await this.starting } catch { /* A concurrent start observes disposal and closes its listener. */ }
-    const server = this.server
-    this.server = null
-    this.origin = null
-    if (!server) return
-    await new Promise<void>((resolve, reject) => {
-      server.close(error => {
-        if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(error)
-        else resolve()
-      })
-      server.closeAllConnections()
-    })
+    await this.listener.close()
   }
 
   private workspaceMatches(lease: Lease): boolean {
     return sameWorkspaceResource(lease.workspace, this.currentWorkspace(lease.workspace.id))
-  }
-
-  private async start(): Promise<string> {
-    if (this.origin) return this.origin
-    if (this.starting) return await this.starting
-    const server = createServer((request, response) => { void this.respond(request, response) })
-    this.server = server
-    this.starting = new Promise<string>((resolve, reject) => {
-      server.once('error', error => {
-        if (this.server === server) { this.server = null; this.origin = null }
-        server.close()
-        reject(error)
-      })
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address()
-        if (this.disposed || !address || typeof address === 'string') {
-          server.close()
-          reject(Object.assign(new Error('The media playback listener is unavailable. Reopen the file to retry.'), { code: 'WORKSPACE_MEDIA_LISTENER_UNAVAILABLE' }))
-          return
-        }
-        this.origin = `http://127.0.0.1:${address.port}`
-        resolve(this.origin)
-      })
-    })
-    try { return await this.starting } finally { this.starting = null }
   }
 
   private async respond(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -262,7 +226,7 @@ export class WorkspaceMediaStreams {
       const id = match?.[1], lease = id ? this.leases.get(id) : undefined
       // A media element never sends Origin; a page script or a rebinding host does.
       const destination = request.headers['sec-fetch-dest']
-      if (!match || !id || !lease || request.headers.host !== this.origin?.slice('http://'.length) ||
+      if (!match || !id || !lease || request.headers.host !== this.listener.host ||
         request.headers.origin !== undefined || (destination !== undefined && destination !== 'audio' && destination !== 'video')) {
         fail(404, 'Media resource not found.')
         return

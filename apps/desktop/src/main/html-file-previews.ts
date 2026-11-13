@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { posix } from 'node:path'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
+import { LoopbackListener } from './loopback-listener.js'
 import { previewRelativePath, previewRequestPath, previewUrlPath, sameWorkspaceResource } from './preview-paths.js'
 
 type Preview = { workspace: WorkspaceRecord; path: string; content: Buffer; reads: Set<AbortController> }
@@ -27,9 +28,8 @@ const previewCsp = "sandbox allow-scripts; default-src 'none'; script-src 'unsaf
 /** Visible editor-owned draft snapshots, with assets read only through the existing file owner. */
 export class HtmlFilePreviews {
   private readonly previews = new Map<string, Preview>()
-  private server: Server | null = null
-  private origin: string | null = null
-  private starting: Promise<string> | null = null
+  private readonly listener = new LoopbackListener((request, response) => { void this.respond(request, response) },
+    () => new Error('HTML preview listener is unavailable. Reopen preview to retry.'))
   private disposed = false
   private generation = 0
 
@@ -43,7 +43,7 @@ export class HtmlFilePreviews {
     if (!this.workspaceMatches(preview)) throw new Error('The preview Workspace resource changed. Reopen preview to retry.')
     if (Buffer.byteLength(content, 'utf8') > WORKSPACE_FILE_MAX_BYTES) throw new Error('HTML preview exceeds the 16 MiB document budget. The original source is still available.')
     preview.content = Buffer.from(content, 'utf8')
-    const origin = await this.start()
+    const origin = await this.listener.start()
     if (this.disposed || generation !== this.generation) throw new Error('HTML preview was released. Reopen preview to retry.')
     if (!this.workspaceMatches(preview)) throw new Error('The preview Workspace resource changed. Reopen preview to retry.')
     const id = randomBytes(32).toString('base64url')
@@ -66,18 +66,7 @@ export class HtmlFilePreviews {
   async dispose(): Promise<void> {
     this.disposed = true
     this.releaseAll()
-    try { await this.starting } catch { /* A concurrent start observes disposal and closes its listener. */ }
-    const server = this.server
-    this.server = null
-    this.origin = null
-    if (!server) return
-    await new Promise<void>((resolve, reject) => {
-      server.close(error => {
-        if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(error)
-        else resolve()
-      })
-      server.closeAllConnections()
-    })
+    await this.listener.close()
   }
 
   private workspaceMatches(preview: Preview): boolean {
@@ -88,30 +77,6 @@ export class HtmlFilePreviews {
     return !this.disposed && this.previews.get(id) === preview && this.workspaceMatches(preview)
   }
 
-  private async start(): Promise<string> {
-    if (this.origin) return this.origin
-    if (this.starting) return await this.starting
-    const server = createServer((request, response) => { void this.respond(request, response) })
-    this.server = server
-    this.starting = new Promise<string>((resolve, reject) => {
-      server.once('error', error => {
-        if (this.server === server) { this.server = null; this.origin = null }
-        server.close()
-        reject(error)
-      })
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address()
-        if (this.disposed || !address || typeof address === 'string') {
-          server.close()
-          reject(new Error('HTML preview listener is unavailable. Reopen preview to retry.'))
-          return
-        }
-        this.origin = `http://127.0.0.1:${address.port}`
-        resolve(this.origin)
-      })
-    })
-    try { return await this.starting } finally { this.starting = null }
-  }
 
   private async respond(request: IncomingMessage, response: ServerResponse): Promise<void> {
     response.setHeader('Cache-Control', 'no-store')
@@ -132,7 +97,7 @@ export class HtmlFilePreviews {
     }
     const match = /^\/([A-Za-z0-9_-]+)\/(.*)$/.exec((request.url ?? '').split('?')[0]!)
     const id = match?.[1], preview = id ? this.previews.get(id) : undefined
-    if (!match || !id || !preview || request.headers.host !== this.origin?.slice('http://'.length)) {
+    if (!match || !id || !preview || request.headers.host !== this.listener.host) {
       fail(404, 'Preview resource not found.')
       return
     }
