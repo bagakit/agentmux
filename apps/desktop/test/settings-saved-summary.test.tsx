@@ -20,7 +20,7 @@ function controls(kind: Kind) {
   const group = dom.container.querySelector<HTMLElement>('.settings-group')!
   expect(group).not.toBeNull()
   expect(group.isConnected).toBe(true)
-  expect(group.querySelector('header > span')!.textContent).toBe(kind === 'copy' ? 'Home directory in copied paths' : 'Agent automation')
+  expect(group.querySelector('header > span')!.textContent).toBe(kind === 'copy' ? 'Project path display and copying' : 'Agent automation')
   const input = group.querySelector<HTMLInputElement>('input[type="checkbox"]')!
   const summary = group.querySelector<HTMLElement>('header > small')!
   expect(input.isConnected).toBe(true)

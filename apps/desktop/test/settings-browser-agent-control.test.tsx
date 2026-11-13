@@ -53,7 +53,7 @@ async function settled() {
 it('mounts the Browser use contribution and previews an unsaved draft through the shared effects without a Browser operation', async () => {
   const group = settingsNavGroups('').find(group => group.id === 'browser-use')!
   expect(group.title).toBe('Browser use')
-  expect(group.items.map(item => item.id)).toEqual(['browser', 'browser-agent-control'])
+  expect(group.items.map(item => item.id)).toEqual(['browser', 'browser-profiles', 'capsule', 'browser-agent-control'])
   const operate = vi.spyOn(api.browser, 'runScript')
   await dom.render(<SettingsPanel onClose={() => {}} />)
   await dom.click('[data-settings-overview] [data-settings-section="browser-agent-control"]')
