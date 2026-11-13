@@ -204,7 +204,10 @@ export class CaptureSurface {
     if (action === 'pin') {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')
       // The pin opens on the selection at the image's own logical size.
-      return await this.ports.pin(params.image!, params.operationId, { ...source.rect, width: params.image!.width / source.scale, height: params.image!.height / source.scale })
+      const pinned = await this.ports.pin(params.image!, params.operationId, { ...source.rect, width: params.image!.width / source.scale, height: params.image!.height / source.scale })
+      // A pin is a final output: the open surface would show the same selection beside it. A failed or unconfirmed pin keeps the surface and its status.
+      if (pinned.recordedOperation?.state === 'completed') active.end({ state: 'completed' })
+      return pinned
     }
     if (action !== 'finish') throw new Error('The screenshot overlay request is invalid.')
     if (active.finishing) return { status: 'failed', message: 'The previous copy is still in progress. Cancel remains available.' } satisfies SystemScreenshotEditorFinish
