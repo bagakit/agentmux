@@ -54,7 +54,7 @@ if (args.includes('app-server')) {
         // Availability is a level, unlike the one-shot turn faults below. Core
         // may probe the same actor repeatedly before committing an input intent.
         const available = !existsSync(controlPath) || JSON.parse(readFileSync(controlPath, 'utf8')).effect !== 'unavailable'
-        const thread = { id: nativeId, sessionId: nativeId, canAcceptDirectInput: available }
+        const thread = { id: nativeId, sessionId: nativeId, canAcceptDirectInput: available, status: { type: 'idle' } }
         if (request.method === 'thread/read') return reply({ thread })
         return reply({ thread, cwd: request.params.cwd, approvalPolicy: request.params.approvalPolicy ?? 'on-request',
           model: request.params.model ?? 'private-model', sandbox: { type: request.params.sandbox === 'read-only' ? 'readOnly'
