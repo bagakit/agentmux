@@ -107,7 +107,29 @@ async function decode(dataUrl: string) {
   decodedCoverContext.drawImage(await decode(coveredPng.dataUrl), 0, 0)
   check(decodedCoverContext.getImageData(32, 25, 8, 8).data.every((byte, index) => byte === [17, 24, 39, 255][index % 4]),
     'processed PNG must contain actual opaque cover pixels')
+  const brush: ScreenshotShape = { id: 'brush', kind: 'pixelate-brush', color: '#000', width: 18, blockSize: 10,
+    points: [{ x: 20, y: 20 }, { x: 120, y: 20 }, { x: 120, y: 80 }] }
+  const brushed = canvas(160, 100), brushedContext = brushed.getContext('2d')!
+  brushedContext.drawImage(base, 0, 0); drawScreenshotShapes(brushedContext, [brush])
+  const brushInside = brushedContext.getImageData(24, 20, 1, 1).data, brushOutside = brushedContext.getImageData(20, 45, 80, 30).data
+  check(brushInside.some((byte, index) => byte !== context.getImageData(24, 20, 1, 1).data[index]), 'brush pixelation must change actual corridor pixels')
+  const originalOutside = context.getImageData(20, 45, 80, 30).data
+  check(brushOutside.every((byte, index) => byte === originalOutside[index]), 'brush pixelation must preserve the empty corridor bounding box')
+  const brushedPng = await composeScreenshot({ image: base, shapes: [brush], displayWidth: 160, displayHeight: 100, outputScale: 1 })
+  const brushExport = canvas(160, 100), brushExportContext = brushExport.getContext('2d')!
+  brushExportContext.drawImage(await decode(brushedPng.dataUrl), 0, 0)
+  const brushPreviewPixels = brushedContext.getImageData(0, 0, 160, 100).data
+  check(brushExportContext.getImageData(0, 0, 160, 100).data.every((byte, index) => byte === brushPreviewPixels[index]), 'brush preview and actual exported PNG must share the same processed pixels')
+  const brushView: ImageViewport = { width: 160, height: 100, dpr: 1, imageWidth: 160, imageHeight: 100, view: { scale: 1, x: 0, y: 0 } }
+  renderCommittedLayer(committed, [brush], brushView, base)
+  renderScreenshotScene(scene, committed, { ...crossing, points: [{ x: 10, y: 20 }, { x: 150, y: 20 }] }, brushView, [brush])
+  check(scene.getContext('2d')!.getImageData(30, 20, 10, 1).data.every((byte, index) => byte === committed.getContext('2d')!.getImageData(30, 20, 10, 1).data[index]),
+    'live ink must not reveal or repaint committed brush pixels')
+  const multiline = canvas(160, 100), multilineContext = multiline.getContext('2d')!
+  drawScreenshotShapes(multilineContext, [{ id: 'multiline', kind: 'text', color: '#ef4444', fontSize: 20, at: { x: 10, y: 8 }, text: 'First\nSecond' }])
+  check(multilineContext.getImageData(8, 32, 110, 25).data.some((byte, index) => index % 4 === 3 && byte > 200), 'multiline text must paint its actual second line')
   return { passed: true, cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
     'cover-note-filtering', 'fractional-cover-opacity', 'live-ink-mask-protection', 'viewport-bounded-high-zoom', 'tiny-pixelate-sample-bounds', 'actual-resized-ink', 'processed-PNG-cover-opacity'],
-    pixelCount: a.length / 4, viewportAllocation: { width: scene.width, height: scene.height, scale: highZoom.view.scale }, png: coveredPng }
+    enhancements: ['brush-corridor-pixels', 'brush-preview-PNG-equality', 'live-brush-mask-protection', 'multiline-raster'],
+    pixelCount: a.length / 4, viewportAllocation: { width: scene.width, height: scene.height, scale: highZoom.view.scale }, png: brushedPng }
 })().catch(error => ({ passed: false, failure: String(error) }))

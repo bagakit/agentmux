@@ -56,7 +56,7 @@ await writeFile(${JSON.stringify(join(compiled, 'receipt.json'))}, JSON.stringif
   })
   const receipt = JSON.parse(await readFile(join(compiled, 'receipt.json'), 'utf8').catch(error => { throw new Error('Model child produced no receipt: ' + JSON.stringify(result), { cause: error }) }))
   if (mutation) { assert.equal(result.code, 1, JSON.stringify(receipt)); assert.equal(receipt.passed, false); assert.match(receipt.failure, mutation.failure) }
-  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14) }
+  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14); assert.equal(receipt.enhancements.length, 4) }
   if (receipt.png) { await writeFile(join(output, label + '.png'), Buffer.from(receipt.png.dataUrl.split(',')[1], 'base64')); delete receipt.png }
   await writeFile(join(output, label + '.json'), JSON.stringify({ ...receipt, process: result }, null, 2))
   evidence.cases.push({ label, result: mutation ? 'RED' : 'GREEN' }); console.log(label + ': ' + (mutation ? 'expected RED' : 'GREEN'))
@@ -68,8 +68,10 @@ try {
     await run('pixelation-omitted', { file: 'drawing-renderer.ts', find: "case 'pixelate': drawPixelate(context, shape); break", replace: "case 'pixelate': break", failure: /pixelate must change/ })
     await run('move-omitted', { file: 'drawing-model.ts', find: 'const move = (at: ScreenshotPoint) => ({ x: at.x + dx, y: at.y + dy })', replace: 'const move = (at: ScreenshotPoint) => at', failure: /move must preserve/ })
     await run('cover-omitted', { file: 'drawing-renderer.ts', find: "case 'cover': drawCover(context, shape); break", replace: "case 'cover': break", failure: /fractional cover must be opaque/ })
-    await run('masked-note-filter-omitted', { file: 'drawing-model.ts', find: 'return !masks.some(mask => intersectRect(shapeBounds(shape), normalizeRect(mask.from, mask.to)))', replace: 'return true', failure: /cover output must omit masked note data/ })
-    await run('mask-protection-omitted', { file: 'canvas-render.ts', find: "if (inProgress && inProgress.kind !== 'pixelate' && inProgress.kind !== 'cover' && masks.length)", replace: 'if (false)', failure: /live ink must not replace processed cover/ })
+    await run('masked-note-filter-omitted', { file: 'drawing-model.ts', find: 'return !masks.some(mask => maskIntersectsRect(mask, shapeBounds(shape)))', replace: 'return true', failure: /cover output must omit masked note data/ })
+    await run('mask-protection-omitted', { file: 'canvas-render.ts', find: 'if (inProgress && !isScreenshotMask(inProgress) && masks.length)', replace: 'if (false)', failure: /live ink must not replace processed cover/ })
+    await run('brush-clip-omitted', { file: 'drawing-renderer.ts', find: 'clipPixelateBrush(context, shape)', replace: 'void shape', failure: /brush pixelation must preserve the empty corridor/ })
+    await run('multiline-raster-omitted', { file: 'drawing-renderer.ts', find: 'shape.at.y + index * shape.fontSize * SCREENSHOT_TEXT_LINE_HEIGHT', replace: 'shape.at.y', failure: /multiline text must paint its actual second line/ })
     await run('viewport-allocation-magnified', { file: 'canvas-render.ts', find: 'Math.round(viewport.width * dpr)', replace: 'Math.round(viewport.width * dpr * viewport.view.scale)', failure: /viewport allocation must use visible area/ })
     await run('restored-source')
   }
