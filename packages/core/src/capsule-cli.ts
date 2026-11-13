@@ -40,12 +40,25 @@ const inputs = {
   'capsule.interaction.reply': '{capsuleId,interactionId,operationId,expectedRevision,answer}',
 } satisfies Record<CapsuleMethod, string>
 
+// Shared by every Capsule action. Each action adds only what its own caller needs.
+const COMMON = 'IDs are exact original identities from Capsule discovery. After an unknown result keep the original operationId and read capsule operation inspect; never replay or create a replacement. Read amux capsule --skill before acting.'
+
+const notes: Partial<Record<CapsuleMethod, string>> = {
+  'capsule.create': 'target is the recipient of page questions, fixed at creation; omitted means you, the authenticated calling Agent. Managed pages keep a copy; path pages follow their external directory, and relative entry paths stay inside it. Source metadata is a declaration, never authorship or permission.',
+  'capsule.update': 'Creation defaults and contentRoot affect only new pages; target cannot change.',
+  'capsule.config.update': 'New defaults and contentRoot affect only new pages.',
+  'capsule.open': 'A returned Browser, Tab and Region confirm presentation only, not Agent delivery.',
+  'capsule.interaction.request': 'Ask before you share the page link. The confirmed answer arrives as your next input in an <amux:capsule-answer> envelope.',
+  'capsule.interaction.inspect': 'Saving an answer, submitting it and the Agent adopting it are separate results.',
+  'capsule.interaction.reply': 'Only the trusted App sends a person\'s confirmed answer. Agents and pages are refused.',
+}
+
 /** The package owns methods and strict payloads; the CLI only selects a JSON carrier. */
 export const AGENTMUX_CAPSULE_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [...(Object.keys(CAPSULE_METHODS) as CapsuleMethod[]).map(method => {
   const optional = method === 'capsule.ls' || method === 'capsule.config.inspect'
   return { method, usage: optional ? '[--input <FILE|->]' : '--input <FILE|->',
     summary: descriptions[method], flags: { '--input': 'data' as const },
-    details: `JSON input: ${inputs[method]}. IDs are exact original identities from Capsule discovery. Relative entry paths stay inside the selected content root. Managed pages retain a copy; path pages follow their external directory. New creation defaults and contentRoot affect only new pages. Source metadata supplied by a producer is a declaration, never authenticated authorship or permission. Saving, service availability, Browser presentation, answer persistence and Agent delivery are separate results. A managed Agent or page cannot certify Human input; use trusted App chrome for answers. Keep the original operationId after an unknown result and read capsule operation inspect; do not replay or create a replacement. Missing Browser or input capabilities do not stop healthy Agents or delete pages. Read amux capsule --skill and this action’s --help before acting.`,
+    details: `JSON input: ${inputs[method]}. ${notes[method] ? notes[method] + ' ' : ''}${COMMON}`,
     parse: async (args: string[]) => {
       if (!args.length && optional) return parseCapsuleRpcParams(method, {}) as unknown as Record<string, unknown>
       if (args.length !== 2 || args[0] !== '--input') throw new AgentMuxError('Capsule commands accept exactly --input <FILE|->.', 'INVALID_CLI_ARGUMENT')
