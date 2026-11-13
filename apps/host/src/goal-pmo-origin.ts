@@ -2,9 +2,11 @@
 export type GoalPmoIntent = { goalId: string; creationOperationId?: string }
 export type GoalPmoReceipt = { tabId: string; agentSessionId: string | null }
 
-export async function goalPmoOperation(intent: GoalPmoIntent, kind: 'create' | 'discussion'): Promise<string> {
+export async function goalPmoOperation(intent: GoalPmoIntent, kind: 'create' | 'discussion' | 'discussion-create'): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([kind, intent.goalId, intent.creationOperationId])))
-  return `goal_pmo_${kind}_${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+  // A later explicit discussion uses the same Core business-source entry, but
+  // can never attest the original Goal creation, even with the same request ID.
+  return `goal_pmo_${kind === 'discussion-create' ? 'create' : kind}_${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
 }
 export function assertGoalPmoIntent(value: GoalPmoIntent): void {
   if (!value || Object.keys(value).some(key => key !== 'goalId' && key !== 'creationOperationId') ||

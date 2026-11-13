@@ -1023,17 +1023,18 @@ export class DemandStore {
     }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null }, options.operationId)
   }
 
-  /** Freeze this new Goal's first discussion request before any Core creation. */
+  /** Atomically reserve the first explicit discussion source before any Core creation. */
   async prepareDiscussion(id: string, operationId: string, input: DemandDiscussionIntent, expectedUpdatedAt: number): Promise<DemandReceipt> {
     const intent = parseDemandDiscussionIntent(input)
     return this.mutate('discussion-prepare', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
-      if (demand.discussionOperationId !== operationId) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal discussion operation is unconfirmed. Existing workfaces are retained.')
+      if (demand.discussionOperationId !== undefined && demand.discussionOperationId !== operationId) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal discussion operation is unconfirmed. Existing workfaces are retained.')
       if (demand.discussionIntent) {
         if (JSON.stringify(demand.discussionIntent) !== JSON.stringify(intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal discussion request is frozen. Inspect that same request.')
         return { unchanged: demand }
       }
       if (demand.updatedAt !== expectedUpdatedAt) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed before preparing its original discussion.')
+      demand.discussionOperationId = operationId
       demand.discussionIntent = intent; demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, operationId)

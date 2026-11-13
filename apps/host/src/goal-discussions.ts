@@ -6,6 +6,8 @@ import { deriveObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
 import type { Demand, DemandStore, DemandDiscussionIntent } from '@agentmux/demand'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
+import { isDemandStoreError } from '@agentmux/demand'
+import { goalPmoOperation } from './goal-pmo-origin.js'
 import { goalProjectContext, goalProjectContextText } from './goal-project-context.js'
 import type { ProjectWorkspace } from './workspace-projects.js'
 import { globalGoalPatrolPrompt } from '@agentmux/core/goal-patrol'
@@ -115,16 +117,24 @@ export function createHostGoalDiscussions(options: {
         throw new AgentMuxError('The original Goal discussion request belongs to another mode. Keep its same operation and original input.', 'CONTROL_REQUEST_CONFLICT')
       return goal.discussionIntent
     }
-    if (!goal.discussionOperationId) return unavailable('The original Goal has no confirmed Host discussion provenance; no replacement was created.')
+    const operationId = goal.discussionOperationId ?? await goalPmoOperation({ goalId: goal.id, creationOperationId: request.requestId }, 'discussion-create')
     const source = await primaryMote(request.executorId)
     const body = request.mode === 'open' ? undefined : discussionTask(goal, request.mode)
-    const note = [goalRoleGuidance({ role: 'manager', goalId: goal.id, source: { kind: 'goal-pmo-launch', operationId: goal.discussionOperationId } }),
+    const note = [goalRoleGuidance({ role: 'manager', goalId: goal.id, source: { kind: 'goal-pmo-launch', operationId } }),
       body, await projectContext(goal), `Original Goal facts:\n${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: goal.grounding })}`].filter(Boolean).join('\n\n')
     const value: DemandDiscussionIntent = { requestOperationId: request.requestId, mode: request.mode, ...source, agentMuxNote: note,
       ...(context.caller ? { callerAgentSessionId: context.caller.agentSessionId } : {}),
       ...(request.mode === 'open' ? {} : { prompt: discussionPrompt(goal, request.mode) }) }
     await current(context)
-    return (await options.demands.prepareDiscussion(goal.id, goal.discussionOperationId, value, goal.updatedAt)).demand.discussionIntent!
+    try { return (await options.demands.prepareDiscussion(goal.id, operationId, value, goal.updatedAt)).demand.discussionIntent! }
+    catch (error) {
+      if (!isDemandStoreError(error) || error.code !== 'INVALID_INPUT' || error.phase !== 'validate') throw error
+      const winner = await saved(goal.id)
+      if (winner.updatedAt === goal.updatedAt || !winner.discussionOperationId || !winner.discussionIntent) throw error
+      // A concurrent first request owns the source. Read its frozen intent;
+      // never overwrite it or create from this loser's proposed operation.
+      return intent(winner, request, context)
+    }
   }
   const taskContext = async (goal: Demand, mode: TaskMode) => [discussionTask(goal, mode), await projectContext(goal)].join('\n\n')
   return {
@@ -175,6 +185,19 @@ export function createHostGoalDiscussions(options: {
       const original = goal.discussionIntent || !binding ? await intent(goal, request, context) : undefined
       goal = await saved(goal.id)
       if (!binding) {
+        // Another caller/profile can contribute a retained binding while the
+        // Demand source is reserved. The earlier absence is not a creation lease.
+        state = await options.spatial.read()
+        if (!state) return unavailable('The original Core spatial document is unavailable before discussion creation.')
+        binding = readGoalDiscussionBinding(state.graph, goal.id)
+        if (binding) {
+          const created = goal.discussionOperationId && spatialAgentOpenRecord(state.graph, goal.discussionOperationId)
+          if (!created || binding.recipient.kind !== 'agent' || binding.tabId !== created.address.tabId || binding.regionId !== created.address.regionId ||
+              binding.recipient.hostId !== created.execution.hostId || binding.recipient.agentSessionId !== created.agentSessionId)
+            return unavailable('A retained discussion was contributed while this source was being prepared. Inspect both original sources; no replacement was created.')
+        }
+      }
+      if (!binding) {
         const operationId = goal.discussionOperationId!
         const opened = await options.call('agent.open', { content: { kind: 'new-agent', executorId: original!.executorId, ...(original!.prompt === undefined ? {} : { prompt: original!.prompt }) },
           destination: { spaceId: original!.spaceId, zoneId: original!.zoneId, newTab: true }, focus: false, operationId }, context)
@@ -199,12 +222,14 @@ export function createHostGoalDiscussions(options: {
         return { operation: request.operation, demand: projectHostGoal(goal), receipt: receipt() }
       }
       const recipient = binding.recipient
-      if (original?.prompt && goal.creationOrigin && request.requestId === original.requestOperationId) {
+      if (original?.prompt && request.requestId === original.requestOperationId) {
         const created = await options.runtime.agentCreation(recipient.hostId, recipient.agentSessionId)
         const creation = created.kind === 'agent' ? created.creation : undefined
         if (created.kind !== 'agent' || creation?.createOperationId !== goal.discussionOperationId || !creation?.createdRun)
           return unavailable('The original discussion creation input and Run are unconfirmed.')
-        await options.confirmParticipation({ goalId: goal.id, ...(!goal.creationOrigin.requesterParticipationId ? { creationOperationId: goal.creationOrigin.operationId } : {}), hostId: recipient.hostId,
+        const originalGoalCreation = goal.creationOrigin && !goal.creationOrigin.requesterParticipationId &&
+          goal.discussionOperationId === await goalPmoOperation({ goalId: goal.id, creationOperationId: goal.creationOrigin.operationId }, 'create')
+        await options.confirmParticipation({ goalId: goal.id, ...(originalGoalCreation ? { creationOperationId: goal.creationOrigin!.operationId } : {}), hostId: recipient.hostId,
           agentSessionId: recipient.agentSessionId, expectedRun: creation.createdRun, evidence: 'creation-input', operationId: goal.discussionOperationId! }, context)
       }
       if (request.mode !== 'open' && request.requestId !== original?.requestOperationId) {
