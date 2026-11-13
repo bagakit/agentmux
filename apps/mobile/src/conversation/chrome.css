@@ -61,6 +61,9 @@
 .mobile-app .mobile-conversation__reading { display: flex; flex-direction: column; }
 .mobile-app .mobile-conversation__reading > :first-child { margin-top: auto; }
 .mobile-app .mobile-conversation__reading > .mobile-reading-action:first-child + * { margin-top: 0; }
+/* A Mote discussion wraps the same thread; it fills the reader and rests its content on the composer. */
+.mobile-app .mobile-conversation__reading > .mote-conversation { flex: 1 0 auto; display: flex; flex-direction: column; }
+.mobile-app .mobile-conversation__reading > .mote-conversation > :first-child { margin-top: auto; }
 .mobile-app .mobile-conversation .conversation-native-thread { padding: var(--sp-3) var(--mobile-gutter) var(--sp-4); }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { margin-block: var(--sp-3); padding: 0; border-radius: 0; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] { grid-template-columns: 28px minmax(0, 1fr); column-gap: var(--sp-4); }
@@ -83,3 +86,19 @@
 /* Composer tools stay legible: secondary ink at rest, full ink when pressed. */
 .mobile-app .mobile-conversation .composer-tool { color: var(--text-2); }
 .mobile-app .mobile-conversation .composer-tool:active:not(:disabled) { color: var(--text); background: var(--mobile-group-press); }
+/* The person's own bubble needs no name: right alignment already says who spoke. Copy and details
+ * stay in the head row, which collapses to a quiet trailing strip. */
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__head .log-turn__who { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* With the name hidden, copy and details become a compact footer under the text, so they never
+ * cover the person's words; the 44px targets overlap the bubble padding instead of adding a row. */
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] { grid-template-rows: auto auto auto; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__body { grid-row: 1; margin-top: 0; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__meta { grid-row: 2; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__head { grid-row: 3; justify-self: end; min-height: 0; margin: 0 -10px -12px 0; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__head .log-turn__identity { display: none; }
+
+/* The Mote source chip and the conversation view toggle follow the same quiet chrome. */
+.mobile-app .mobile-mote-source-status { margin: 4px var(--mobile-gutter) 0; }
+.mobile-app .mobile-mote-source-status > summary { min-height: 36px; padding: 0 10px; border-radius: 999px; background: var(--mobile-attention-wash); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
+.mobile-app .mobile-session-toolbar .mobile-icon-button[aria-pressed='true'] { color: var(--text); background: transparent; }
+.mobile-app .mobile-conversation .conversation-native-thread .conversation-coverage { padding-inline: 0; }
