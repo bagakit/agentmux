@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname } from 'node:path'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { build, type Plugin } from 'vite'
 import ts from 'typescript'
@@ -62,7 +63,10 @@ export async function runBookRestart(){
     record(driverPath,await readFile(driverPath,'utf8'))
     // Core stays external, through the real public ESM entry. Bind the exact
     // compiled owner bytes too; a renderer-only source map did not cover them.
-    const coreEntry=fileURLToPath(import.meta.resolve('@agentmux/core'))
+    // Vitest's module transform has no import.meta.resolve; Node's own ESM resolver answers from the driver's directory.
+    const resolved=spawnSync(process.execPath,['--input-type=module','-e',"process.stdout.write(import.meta.resolve('@agentmux/core'))"],{cwd:buildRoot,encoding:'utf8'})
+    if(resolved.status!==0)throw new Error('Node could not resolve the public Core entry: '+resolved.stderr)
+    const coreEntry=fileURLToPath(resolved.stdout)
     const externalCorePaths=[coreEntry,...['client.js','execution-host.js','spatial-state.js'].map(path=>join(dirname(coreEntry),path))]
     const externalCore:Record<string,{path:string;sha256:string}>={}
     for(const path of externalCorePaths){const source=await readFile(path,'utf8');record(path,source);externalCore[relative(dirname(coreEntry),path)]={path,sha256:createHash('sha256').update(source).digest('hex')}}
