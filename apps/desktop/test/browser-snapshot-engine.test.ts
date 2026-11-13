@@ -258,6 +258,23 @@ describe('页面快照：AX 树走查', () => {
     })
     expect(result.nodes.find((node) => node.backendNodeId === 20)?.role).toBe('text input')
   })
+
+  it('date、time、color 字段整体拿一个 ref，不拆成年、月、日分段', async () => {
+    // Chromium 报的就是这棵形状：Date 节点下挂 spinbutton 分段和一个弹出选择器的按钮。
+    const result = await snapshot({
+      nodes: [
+        { nodeId: '1', role: { value: 'RootWebArea' }, name: { value: 'r' }, childIds: ['2', '6', '7'] },
+        { nodeId: '2', role: { value: 'Date' }, name: { value: 'When' }, backendDOMNodeId: 20, childIds: ['3', '4', '5'] },
+        { nodeId: '3', role: { value: 'spinbutton' }, name: { value: 'Year' }, backendDOMNodeId: 21 },
+        { nodeId: '4', role: { value: 'spinbutton' }, name: { value: 'Month' }, backendDOMNodeId: 22 },
+        { nodeId: '5', role: { value: 'button' }, name: { value: 'Show date picker' }, backendDOMNodeId: 23 },
+        { nodeId: '6', role: { value: 'InputTime' }, name: { value: 'At' }, backendDOMNodeId: 30 },
+        { nodeId: '7', role: { value: 'ColorWell' }, name: { value: 'Tint' }, backendDOMNodeId: 40 }
+      ]
+    })
+    const withRef = result.nodes.filter((node) => node.ref).map((node) => `${node.role}:${node.name}`)
+    expect(withRef).toEqual(['date input:When', 'time input:At', 'color input:Tint'])
+  })
 })
 
 describe('页面快照：可点元素提升', () => {
