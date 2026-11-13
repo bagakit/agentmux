@@ -35,13 +35,13 @@ const results = []
 async function run(name, mutant, expectedOracle) {
   const output = resolve(evidence, name)
   await mkdir(output, { recursive: true })
-  const args = ['exec', 'vitest', 'run', '--config', config, fixture,
+  const args = ['node_modules/vitest/vitest.mjs', 'run', '--config', config, fixture,
     '--maxWorkers=1', '--reporter=json', '--outputFile', resolve(output, 'vitest.json')]
   const env = { ...process.env, pnpm_config_verify_deps_before_run: 'false',
     AGENTMUX_HOST_LIVENESS_EVIDENCE: output, AGENTMUX_HOST_LIVENESS_MUTANT: mutant }
   let exitCode = 0, stdout = '', stderr = ''
   try {
-    const value = await command('pnpm', args, { cwd: root, env, timeout: 120_000, maxBuffer: 20 * 1024 * 1024 })
+    const value = await command(process.execPath, args, { cwd: root, env, timeout: 120_000, maxBuffer: 20 * 1024 * 1024 })
     stdout = value.stdout; stderr = value.stderr
   } catch (error) {
     exitCode = typeof error.code === 'number' ? error.code : -1
@@ -87,7 +87,7 @@ async function run(name, mutant, expectedOracle) {
     assert.ok(owning.reports.every(value => value.passed), `${name}: all nonempty behavior cases must pass`)
     const matrices = owning.reports.filter(value => value.case === 'inactive-liveness')
     assert.equal(matrices.length, 6)
-    assert.ok(matrices.every(value => value.positive.hostSessionPredicateVisits > 0), `${name}: active positive work must be nonempty`)
+    assert.ok(matrices.every(value => value.positive.hostSessionIndexVisits > 0), `${name}: active positive work must be nonempty`)
     assert.equal(owning.reports.filter(value => value.case.startsWith('main-guard-')).length, 2)
   }
   results.push({ name, mutant, exitCode, collectedTests: report.numTotalTests, oracle,

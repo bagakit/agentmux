@@ -1,3 +1,5 @@
+import { settingsScratchTopics, settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
+import { selectSettingsHost } from './helpers/settings-host-ui'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -20,8 +22,6 @@ import { saveRuntimeConfig } from '../src/main/runtime-config-transaction'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig } from '../src/shared/contracts'
-import type { ScratchTopics } from '../src/main/scratch-topics'
-import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -31,21 +31,25 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 // RuntimeController.prepare/assertConfigurable and the transaction stay actual source.
 const ipc = vi.hoisted(() => ({ directory: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>() }))
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => ipc.directory || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() }, app: { getAppPath: () => process.cwd() + '/apps/desktop', on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => ipc.directory || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { constructor(_options: { execute: (request: AgentMuxControlRequest) => Promise<AgentMuxControlResult> }) {} async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', async () => ({ BrowserViewManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserViews }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 
+// Source observations require the owning transform; the ordinary suite still runs Main guards.
+// Run: node node_modules/vitest/vitest.mjs run --config apps/desktop/scripts/fixtures/settings-host-liveness/vitest.config.mts
+const sourceTest = it.skipIf(process.env.AGENTMUX_HOST_LIVENESS_SOURCE_OBSERVATION !== '1')
 const mode = process.env.AGENTMUX_HOST_LIVENESS_MUTANT ?? 'baseline'
 const target = resolve(process.env.AGENTMUX_HOST_LIVENESS_EVIDENCE ?? resolve(process.cwd(), ".bagakit/design/settings-followups-fixture/host-liveness-evidence/direct"))
 type Event = { sequence: number; window: string; kind: string; id: string; facts?: Record<string, unknown> }
@@ -72,7 +76,7 @@ function observations() {
       return { window: name, notifications: collected.filter(event => event.kind === 'notify').length,
         hostRenders: collected.filter(event => event.kind === 'render' && event.id === 'HostSettingsPane').length,
         hostFieldRenders: collected.filter(event => event.kind === 'render' && event.id === 'HostConnectionFields').length,
-        hostCommits: commits.length, hostSessionPredicateVisits: visits.get(name) ?? 0,
+        hostCommits: commits.length, hostSessionIndexVisits: visits.get(name) ?? 0,
         hostActualDurationsMs: commits.map(event => event.facts!.actualDuration),
         settingsRenders: collected.filter(event => event.kind === 'render' && event.id === 'SettingsPanel').length,
         settingsSubtreeCommits: collected.filter(event => event.kind === 'commit' && event.id === 'SettingsPanel').length,
@@ -100,10 +104,11 @@ const dom = composerDOM(), reports: unknown[] = []
 let owner: ConfigOwner, directory: string
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'agentmux-host-liveness-ui-'))
+  await prepareSettingsIpcDirectory(directory)
   const disk = new ConfigStore(join(directory, 'config.json'))
   let current = await disk.save(structuredClone(DEFAULT_CONFIG))
   const runtime = { prepare: vi.fn(async () => ({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })),
-    commit: vi.fn(), discard: vi.fn(async () => {}) } as unknown as RuntimeController
+    validatePreparation: vi.fn(), commit: vi.fn(), discard: vi.fn(async () => {}) } as unknown as RuntimeController
   owner = new ConfigOwner({ read: () => current,
     save: next => saveRuntimeConfig({ runtime, configWriter: disk, next: disk.validate(next) }),
     publish: saved => { current = saved; useAppStore.setState({ config: saved }) } })
@@ -136,11 +141,11 @@ async function configure(hostCount: number, sessionCount: number) {
 function field(card: Element, name: string) {
   const labels = [...card.querySelectorAll<HTMLLabelElement>('label')]
   expect(labels.length).toBeGreaterThan(0)
-  const found = labels.find(label => label.querySelector('span')?.textContent === name)
+  const found = labels.find(label => label.querySelector('span')?.textContent?.startsWith(name))
   expect(found).toBeDefined()
   return found!.querySelector<HTMLInputElement>('input')!
 }
-it.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
+sourceTest.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
   'inactive liveness H=%i N=%i has zero hidden work and latest related facts on return', async (hostCount, sessionCount) => {
     const observation = observations(); await configure(hostCount, sessionCount)
     const unsubscribe = useAppStore.subscribe(observation.notify)
@@ -148,9 +153,11 @@ it.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
       await dom.render(<SettingsPanel initialSection="hosts" onClose={close} />)
       const hostPane = dom.container.querySelector<HTMLElement>('[data-settings-pane="hosts"]')!
       expect(hostPane).not.toBeNull()
+      await selectSettingsHost(dom.container, 'configured-0')
+      expect(hostPane.querySelectorAll('[data-host-disclosure]')).toHaveLength(hostCount)
       const cards = hostPane.querySelectorAll<HTMLElement>('.host-settings-card')
-      expect(cards).toHaveLength(hostCount)
-      const input = field(cards[1]!, 'Label')
+      expect(cards).toHaveLength(1)
+      const input = field(cards[0]!, 'Name')
       await fill(input, 'Authored host draft')
       await dom.click('[data-settings-target="general"]')
       expect(hostPane.hidden).toBe(true)
@@ -175,13 +182,13 @@ it.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
       for (const window of windows) {
         expect(window.notifications).toBe(6)
         expect(window.hostRenders).toBe(0); expect(window.hostCommits).toBe(0)
-        expect(window.hostFieldRenders).toBe(0); expect(window.hostSessionPredicateVisits).toBe(0)
+        expect(window.hostFieldRenders).toBe(0); expect(window.hostSessionIndexVisits).toBe(0)
       }
       expect(useAppStore.getState().config).toBe(config)
-      expect(input.isConnected).toBe(true); expect(field(cards[1]!, 'Label')).toBe(input)
+      expect(input.isConnected).toBe(true); expect(field(cards[0]!, 'Name')).toBe(input)
       expect(input.value).toBe('Authored host draft')
       expect(dom.container.querySelector<HTMLElement>('.settings-page')!.dataset.settingsPage).toBe('general')
-      expect(hostPane.querySelector<HTMLButtonElement>('.settings-pane-actions button')!.disabled).toBe(false)
+      expect(hostPane.querySelector<HTMLButtonElement>('[data-settings-save-bar] > button')!.disabled).toBe(false)
       observation.setWindow('related-facts-while-hidden')
       const related = { ...config!.hosts[1]!, label: 'Authored host draft' }
       await act(async () => useAppStore.setState({
@@ -193,8 +200,8 @@ it.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
       observation.setWindow('reactivation')
       await dom.click('[data-settings-target="hosts"]')
       expect(hostPane.hidden).toBe(false)
-      const relatedCard = hostPane.querySelectorAll<HTMLElement>('.host-settings-card')[1]!
-      expect(relatedCard.querySelector(':scope > .field-hint')!.textContent).toContain('1 running session')
+      const relatedCard = hostPane.querySelector<HTMLElement>('.host-settings-card')!
+      expect(relatedCard.querySelector(':scope > .field-hint')!.textContent).toContain('1 Session reference')
       expect(relatedCard.querySelector<HTMLButtonElement>('.icon-button--danger')!.disabled).toBe(true)
       expect(relatedCard.querySelector('.check-pill')!.textContent).toContain('Testing')
       observation.setWindow('active-related-positive')
@@ -206,34 +213,36 @@ it.each([[4, 8], [4, 128], [4, 512], [2, 128], [8, 128], [24, 128]])(
       const positive = observation.summary('active-related-positive')
       expect(positive.notifications).toBe(1)
       expect(positive.hostRenders).toBeGreaterThan(0); expect(positive.hostCommits).toBeGreaterThan(0)
-      expect(positive.hostSessionPredicateVisits).toBe(hostCount * sessionCount * positive.hostRenders)
-      expect(positive.hostSessionPredicateVisits).toBeGreaterThan(0)
-      expect(relatedCard.querySelector(':scope > .field-hint')!.textContent).toContain('2 running sessions')
+      expect(positive.hostSessionIndexVisits).toBe(sessionCount)
+      expect(positive.hostSessionIndexVisits).toBeGreaterThan(0)
+      expect(relatedCard.querySelector(':scope > .field-hint')!.textContent).toContain('2 Session references')
       expect(relatedCard.querySelector('.check-pill')!.textContent).toContain('Ready')
-      expect(field(relatedCard, 'Label')).toBe(input); expect(input.value).toBe('Authored host draft')
+      expect(field(relatedCard, 'Name')).toBe(input); expect(input.value).toBe('Authored host draft')
       expect(api.config.save).not.toHaveBeenCalled()
       Object.assign(report, { positive, latestOnReturn: true, draftNodeRetained: true }); report.passed = true
     } finally { unsubscribe() }
   })
 
-it('hidden config baseline consumes clean publication while dirty node and expected remain', async () => {
+sourceTest('hidden config baseline consumes clean publication while dirty node and expected remain', async () => {
   const observation = observations(); await configure(4, 8)
   await dom.render(<SettingsPanel initialSection="hosts" onClose={close} />)
   const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="hosts"]')!
-  const cards = pane.querySelectorAll<HTMLElement>('.host-settings-card')
-  const dirty = field(cards[1]!, 'Label'), clean = field(cards[1]!, 'Hostname'), neighbor = field(cards[2]!, 'Label')
+  await selectSettingsHost(dom.container, 'configured-0')
+  const card = pane.querySelector<HTMLElement>('.host-settings-card')!
+  const dirty = field(card, 'Name'), clean = field(card, 'Host or SSH alias')
   await fill(dirty, 'Authored dirty label'); await dom.click('[data-settings-target="general"]')
   observation.setWindow('legal-config-publication')
   const previous = owner.current
   await act(async () => owner.edit(previous, { ...previous, hosts: previous.hosts.map(host => host.id === 'configured-0'
     ? { ...host, hostname: 'published.invalid' } : host.id === 'configured-1' ? { ...host, label: 'Published neighbor' } : host) }))
-  expect(pane.hidden).toBe(true); expect(dirty.isConnected).toBe(true); expect(neighbor.isConnected).toBe(true)
+  expect(pane.hidden).toBe(true); expect(dirty.isConnected).toBe(true)
   expect(dirty.value).toBe('Authored dirty label')
-  expect(clean.value).toBe('published.invalid'); expect(neighbor.value).toBe('Published neighbor')
+  expect(clean.value).toBe('published.invalid')
+  expect(pane.querySelector('[data-host-disclosure="configured-1"]')!.textContent).toContain('Published neighbor')
   expect(dom.container.querySelector<HTMLElement>('.settings-page')!.dataset.settingsPage).toBe('general')
   await dom.click('[data-settings-target="hosts"]')
-  expect(field(pane.querySelectorAll('.host-settings-card')[1]!, 'Label')).toBe(dirty)
-  const save = pane.querySelector<HTMLButtonElement>('.settings-pane-actions button')!
+  expect(field(pane.querySelector('.host-settings-card')!, 'Name')).toBe(dirty)
+  const save = pane.querySelector<HTMLButtonElement>('[data-settings-save-bar] > button')!
   expect(save.disabled).toBe(false)
   await act(async () => save.click())
   expect(api.config.save).toHaveBeenCalledTimes(1)
@@ -248,18 +257,20 @@ it('hidden config baseline consumes clean publication while dirty node and expec
 
 it.each(['change', 'delete'] as const)('registered Main owner rejects referenced Host %s using actual prepare guard', async operation => {
   ipc.directory = await mkdtemp(join(tmpdir(), 'agentmux-host-liveness-main-'))
+  await prepareSettingsIpcDirectory(ipc.directory)
   const disk = new ConfigStore(join(ipc.directory, 'config.json'))
   const protectedHost = { id: 'ssh-protected', kind: 'ssh' as const, label: 'Protected', hostname: 'private.invalid' }
   const config = await disk.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, protectedHost], workspaces: [] })
   vi.spyOn(disk, 'get').mockResolvedValue(config)
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const facts = [{ runId: 'healthy-run', state: 'running', pid: 123, workspacePath: _hygiene_fixturePath("private-fixture") }]
   const client = { connect: vi.fn(async () => {}), listRuns: vi.fn(async () => facts),
     stopAgent: vi.fn(), stopRun: vi.fn(), dispose: vi.fn() }
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), async () => client as never)
+  const startup = await runtime.prepare(config)
   // Protocol facts only; the real guard must execute and reject before preparation/save.
   const internals = runtime as unknown as { hosts: Map<string, unknown>; hostSignatures: Map<string, string> }
-  internals.hosts.set(protectedHost.id, { client, executionHost: { kind: 'local', repoPath: _hygiene_fixturePath("private-fixture") } })
-  internals.hostSignatures = new Map(config.hosts.map(host => [host.id, JSON.stringify(host)]))
+  internals.hosts.set(protectedHost.id, startup.hosts.find(host => host.id === protectedHost.id)!)
+  internals.hostSignatures = startup.hostSignatures
   const prepare = vi.spyOn(runtime, 'prepare')
   const guard = vi.spyOn(runtime as unknown as { assertConfigurable(next: ReadonlyMap<string, string>): Promise<void> }, 'assertConfigurable')
   const commit = vi.spyOn(runtime, 'commit')
@@ -271,9 +282,9 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
   const sender = Object.assign(new EventEmitter(), { id: 992, isDestroyed: () => false, mainFrame: { framesInSubtree: [] },
     send: (channel: string, value: unknown) => { if (channel === CONFIG_CHANGED_CHANNEL) publications.push(value as AppConfig) } })
   ipc.handlers.clear()
-  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: disk, runtime, progressLoops: progress, scratchTopics: {} as ScratchTopics,
-    workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+  const dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    configStore: disk, runtime, progressLoops: progress, scratchTopics: settingsScratchTopics(),
+    workspaceFiles: settingsWorkspaceFiles() })
   try {
     // Registration prepares the unchanged fixture once. Measure only the later edit.
     expect(prepare).toHaveBeenCalledTimes(1); expect(guard).toHaveBeenCalledTimes(1)
@@ -283,7 +294,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
     expect(handler).toBeTypeOf('function')
     const before = await readFile(disk.filePath, 'utf8'), expected = structuredClone(config)
     const next = { ...config, hosts: operation === 'delete' ? [config.hosts[0]!] : config.hosts.map(host =>
-      host.id === protectedHost.id ? { ...host, label: 'Changed while referenced' } : host) }
+      host.id === protectedHost.id ? { ...host, hostname: 'changed.invalid' } : host) }
     expect(facts).toHaveLength(1)
     await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, next, expected).then(result => unwrapSessionInputOperationResult(result as never))).rejects.toThrow('Stop sessions on ssh-protected')
     expect(prepare).toHaveBeenCalledTimes(1); expect(guard).toHaveBeenCalledTimes(1)
@@ -297,6 +308,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
       configBytesPreserved: true, expected, commitCalls: commit.mock.calls.length, publicationCount: publications.length })
   } finally {
     await dispose(); await progress.stop(); internals.hosts.clear(); await runtime.dispose()
+    await Promise.all(startup.hosts.map(host => host.executionHost.dispose()))
     await rm(ipc.directory, { recursive: true, force: true }); ipc.directory = ''
   }
 })
