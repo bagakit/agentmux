@@ -93,6 +93,23 @@ describe('pointing marks in the shared annotation model', () => {
     expect(createCalloutShape('z', '#000', { x: 0, y: 0 }, { x: 1, y: 1 }, 1).zoom).toBe(1.5)
   })
 
+  it('places a default bubble inside the image or selection: right, else left, else below or above, else clamped', () => {
+    const at = (from: [number, number], to: [number, number], zoom: number, bounds: { x: number; y: number; width: number; height: number }) =>
+      createCalloutShape('b', '#ef4444', { x: from[0], y: from[1] }, { x: to[0], y: to[1] }, zoom, undefined, bounds).at
+    const image = { x: 0, y: 0, width: 200, height: 100 }
+    expect(at([20, 20], [40, 30], 2, image), 'right of the source when it fits').toEqual({ x: 56, y: 20 })
+    expect(at([170, 20], [190, 30], 2, image), 'flips left when the right side has no room').toEqual({ x: 114, y: 20 })
+    expect(at([30, 20], [70, 30], 2, { x: 0, y: 0, width: 100, height: 200 }), 'goes below when neither side fits').toEqual({ x: 10, y: 46 })
+    expect(at([30, 40], [70, 50], 2, { x: 0, y: 0, width: 100, height: 60 }), 'goes above when below has no room').toEqual({ x: 10, y: 4 })
+    expect(at([20, 20], [40, 30], 4, { x: 0, y: 0, width: 200, height: 50 }), 'a bubble taller than the space keeps its side and is clamped').toEqual({ x: 56, y: 10 })
+    const tight = { x: 0, y: 0, width: 100, height: 40 }, clamped = createCalloutShape('c', '#ef4444', { x: 30, y: 10 }, { x: 70, y: 20 }, 2, undefined, tight)
+    const bubble = calloutBubble(clamped)
+    expect(clamped.at, 'clamps inside when no side fits').toEqual({ x: 10, y: 20 })
+    expect(bubble.x >= tight.x && bubble.y >= tight.y && bubble.x + bubble.width <= tight.width && bubble.y + bubble.height <= tight.height).toBe(true)
+    expect(at([250, 120], [270, 130], 2, { x: 100, y: 100, width: 200, height: 100 }), 'a capture selection is its own bounds').toEqual({ x: 194, y: 120 })
+    expect(createCalloutShape('k', '#ef4444', { x: 0, y: 0 }, { x: 10, y: 10 }, 2, { x: 500, y: 500 }, image).at, 'an explicit position is kept').toEqual({ x: 500, y: 500 })
+  })
+
   it('hits, moves and scales a callout as one mark across its source, leader and bubble', () => {
     expect(hitTestShape([callout], { x: 120, y: 20 }, 0)?.id, 'the bubble interior').toBe(callout.id)
     expect(hitTestShape([callout], { x: 20, y: 25 }, 1)?.id, 'the source frame').toBe(callout.id)

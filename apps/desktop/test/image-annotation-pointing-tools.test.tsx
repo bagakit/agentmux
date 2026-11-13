@@ -111,6 +111,14 @@ describe('pointing-mark entry points in the mounted editor', () => {
     expect((await shapes())[0], 'dragging the source frame moves the whole mark').toMatchObject({ from: { x: 30, y: 30 }, to: { x: 90, y: 70 }, at: { x: 136, y: 110 } })
   })
 
+  it('flips a magnifier bubble drawn near the image edge to the side that keeps it inside the image', async () => {
+    const { drag, click, shapes } = await mount()
+    await click('Magnifier'); await drag([350, 20], [380, 40])
+    const drawn = (await shapes())[0] as CalloutShape, bubble = calloutBubble(drawn)
+    expect(drawn.at, 'the bubble flips left of a source at the right edge').toEqual({ x: 259, y: 20 })
+    expect(bubble.x + bubble.width).toBeLessThanOrEqual(image.width)
+  })
+
   it('changes a selected pointing mark through its strength control as one Undo step, else sets the next one', async () => {
     const blur: ScreenshotShape = { id: 'blur', kind: 'blur', color: '#111827', radius: 12, from: { x: 20, y: 20 }, to: { x: 80, y: 60 } }
     const spotlight: ScreenshotShape = { id: 'spot', kind: 'spotlight', color: '#ffffff', dim: 0.6, from: { x: 100, y: 20 }, to: { x: 160, y: 60 } }
