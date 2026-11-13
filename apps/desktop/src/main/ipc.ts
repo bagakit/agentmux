@@ -1921,6 +1921,8 @@ export async function registerIpc(args: {
     pauseUserProgress(session, 'Paused because you stopped the Agent.')
     return await sessionStopReply(() => args.runtime.stopSession(session, operationId))
   })
+  handle('sessions:inspectStop', async (session: AgentSessionControl, operationId: string) =>
+    await sessionObservationResult(() => args.runtime.inspectSessionStop(session, operationId)))
   handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
     if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {
       throw Object.assign(new Error('The displayed app-link choice is required.'), { code: 'INVALID_SETTING_VALUE' })

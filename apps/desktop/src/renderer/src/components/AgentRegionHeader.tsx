@@ -1,3 +1,4 @@
+import { AgentOperationFeedback } from './AgentOperationFeedback'
 import { RegionCurrentDemand } from './RegionCurrentDemand'
 import { AgentConnections } from './AgentConnections'
 import { useAppStore } from '../store'
@@ -126,6 +127,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     aria-label={`${sessionKind === 'agent' ? 'Agent' : 'Terminal'} ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; ${sessionKind === 'agent' ? 'Session' : 'Terminal'} ${sessionId}; Host ${executionHost.label}`}>
     <strong className="agent-region-header__name" title={name}>{name}</strong>
     <HostBadge host={executionHost} />
+    {connectorSession?.kind === 'agent' ? <AgentOperationFeedback compact subject={{ hostId: connectorSession.control.hostId, agentSessionId: connectorSession.control.agentSessionId, regionId }} /> : null}
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
     {!readOnly && connectorSession?.kind === 'agent' ? <AgentConnections session={connectorSession} regionId={regionId} visible={active} /> : null}

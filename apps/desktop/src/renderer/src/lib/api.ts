@@ -1257,6 +1257,7 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(session)
     },
     restart: async () => { throw new Error('Restart requires the connected original Host. No Session or Run was changed.') },
+    inspectStop: async () => { throw new Error('Stop inspection requires the original Host. No Stop request was sent.') },
     interrupt: async () => {},
     resize: async (_attachmentId, cols, rows) => ({ cols, rows }),
     controlContinuity: async () => { throw new Error('Recovery controls require the original native Host. This preview does not change a recovery intent.') },
@@ -1674,6 +1675,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       replay: (...args) => preload.sessions.replay(...args).then(unwrapSessionObservationResult),
       restart: (...args) => preload.sessions.restart(...args).then(unwrapSessionObservationResult),
       stop: (...args) => preload.sessions.stop(...args).then(unwrapSessionStopReply),
+      inspectStop: (...args) => preload.sessions.inspectStop(...args).then(unwrapSessionObservationResult),
       controlContinuity: (...args) => preload.sessions.controlContinuity(...args).then(unwrapSessionObservationResult),
       write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       paste: (...args) => preload.sessions.paste(...args).then(result => { unwrapSessionInputWriteResult(result) }),

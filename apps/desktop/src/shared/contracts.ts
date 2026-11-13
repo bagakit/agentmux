@@ -2084,6 +2084,8 @@ export type AgentMuxDesktopApi = {
      * `operationId` continues that same Stop. A Terminal Stop has no receipt and no operation id.
      */
     stop(session: SessionControl, operationId?: string): Promise<import('@agentmux/core').AgentMuxAgentStopReceipt | undefined>
+    /** Read the original Stop receipt without reconnecting or repeating its side effect. */
+    inspectStop(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxAgentStopInspection>
     /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
     onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void
   }
@@ -2269,9 +2271,10 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
     recover(...args: Parameters<AgentMuxDesktopApi['sessions']['recover']>): Promise<import('./session-recovery-result').SessionRecoveryOperationReply>
     stop(...args: Parameters<AgentMuxDesktopApi['sessions']['stop']>): Promise<import('./session-stop-result').SessionStopReply>
+    inspectStop(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectStop']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectStop']>>>>
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
     attach(...args: Parameters<AgentMuxDesktopApi['sessions']['attach']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['attach']>>>>
     refreshAttachment(...args: Parameters<AgentMuxDesktopApi['sessions']['refreshAttachment']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['refreshAttachment']>>>>

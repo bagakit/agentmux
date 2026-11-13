@@ -1,6 +1,8 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxAgentStopReceipt } from '@agentmux/core'
 import type { AgentSessionControl } from '../../../shared/contracts'
+import { useAppStore } from '../store'
+import { agentOperationKey } from './agent-operation'
 
 /**
  * One user Stop intent: the exact Run it names and the operation id Core records for it. "Continue
@@ -43,26 +45,48 @@ export type SessionStopOutcome =
   | { status: 'unconfirmed'; message: string; action: string; operationId?: string; stage?: string }
 
 /**
- * Stops sent but not confirmed, by exact host/Session/Run. Retrying the same Run (closing its View
- * again, or Stop from another entry) resends this intent, so Core continues that Stop and the id the
- * user was shown stays the one inspect reads. Entries leave on Core's receipt or when Core says the
- * Run is stale; a different Run never matches.
+ * Retained original intent lives in the same durable client projection used by cards and Regions.
+ * A restored reference is unconfirmed, never permission to replay it. An explicit Stop for the
+ * same exact Host/Session/Run retains that operation; a different Run is a different intent.
  */
-const unconfirmedStops = new Map<string, SessionStopIntent>()
-const runKey = (control: AgentSessionControl) => JSON.stringify([control.hostId, control.agentSessionId, control.run.runId])
-
 export function sessionStopIntentFor(control: AgentSessionControl): SessionStopIntent {
-  return unconfirmedStops.get(runKey(control)) ?? mintSessionStopIntent(control)
+  return unconfirmedStopFor(control) ?? mintSessionStopIntent(control)
 }
-export function retainUnconfirmedStop(intent: SessionStopIntent): void { unconfirmedStops.set(runKey(intent.control), intent) }
+export function retainUnconfirmedStop(intent: SessionStopIntent): void {
+  const operation = { kind: 'stop' as const, operationId: intent.operationId,
+    control: { ...intent.control, run: { ...intent.control.run } },
+    subject: { hostId: intent.control.hostId, agentSessionId: intent.control.agentSessionId },
+    phase: 'pending' as const, startedAt: Date.now() }
+  const key = agentOperationKey(operation)
+  useAppStore.setState(state => state.agentOperations[key] ? state : {
+    agentOperations: { ...state.agentOperations, [key]: operation }
+  })
+}
 export function settleSessionStop(intent: SessionStopIntent): void {
-  if (unconfirmedStops.get(runKey(intent.control))?.operationId === intent.operationId) unconfirmedStops.delete(runKey(intent.control))
+  const key = agentOperationKey({ kind: 'stop', operationId: intent.operationId,
+    subject: { hostId: intent.control.hostId, agentSessionId: intent.control.agentSessionId } })
+  useAppStore.setState(state => {
+    const held = state.agentOperations[key]
+    if (held?.kind !== 'stop' || held.control.agentSessionId !== intent.control.agentSessionId ||
+      held.control.run.runId !== intent.control.run.runId) return state
+    const { [key]: _settled, ...agentOperations } = state.agentOperations
+    return { agentOperations }
+  })
 }
 
 /** The original failure, with the operation the user can continue and inspect. */
 export function sessionStopFailure(error: unknown, intent: SessionStopIntent): Error {
   const source = error instanceof Error ? error : new Error(String(error))
   const stage = sessionStopFailedStage(source), code = sessionStopErrorCode(source)
+  const key = agentOperationKey({ kind: 'stop', operationId: intent.operationId,
+    subject: { hostId: intent.control.hostId, agentSessionId: intent.control.agentSessionId } })
+  useAppStore.setState(state => {
+    const held = state.agentOperations[key]
+    if (held?.kind !== 'stop' || held.control.agentSessionId !== intent.control.agentSessionId ||
+      held.control.run.runId !== intent.control.run.runId || held.phase === 'succeeded') return state
+    const message = `${stage ? `Failed stage: ${stage}` : 'Stop result unconfirmed'}${code ? ` (${code})` : ''}. ${source.message}`
+    return { agentOperations: { ...state.agentOperations, [key]: { ...held, phase: 'unconfirmed', canContinue: false, message } } }
+  })
   return Object.assign(new Error(`${source.message} Stop ${intent.operationId}${stage ? ` failed at ${stage}` : ''} is kept; ` +
     `stopping this Run again continues it. Inspect it with: ${sessionStopInspectCommand(intent)}`),
   { ...(code ? { code } : {}), cause: source, operationId: intent.operationId, ...(stage ? { stage } : {}) })
@@ -70,5 +94,9 @@ export function sessionStopFailure(error: unknown, intent: SessionStopIntent): E
 
 /** The unconfirmed Stop already sent for this exact Run, without minting one. */
 export function unconfirmedStopFor(control: AgentSessionControl): SessionStopIntent | undefined {
-  return unconfirmedStops.get(runKey(control))
+  const operation = Object.values(useAppStore.getState().agentOperations).find(operation => operation.kind === 'stop' &&
+    operation.control.hostId === control.hostId && operation.control.agentSessionId === control.agentSessionId &&
+    operation.control.run.runId === control.run.runId &&
+    (operation.phase === 'pending' || operation.phase === 'unconfirmed' || operation.phase === 'partial'))
+  return operation?.kind === 'stop' ? { control: operation.control, operationId: operation.operationId } : undefined
 }

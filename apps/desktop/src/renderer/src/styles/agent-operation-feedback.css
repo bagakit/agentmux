@@ -1,0 +1,38 @@
+/* One operation surface for the existing Agent card and its Region entry. */
+.focus-context-card:has(> .agent-operation-feedback) { position: relative; isolation: isolate; border-radius: var(--radius-sm); }
+.agent-operation-feedback { --operation-accent: var(--success); display: flex; align-items: start; flex-wrap: wrap; gap: var(--sp-2); padding: 0 var(--sp-2) var(--sp-1); font-size: var(--fs-meta); }
+.agent-operation-feedback[data-kind='stop'] { --operation-accent: var(--red); }
+.agent-operation-feedback[data-kind='fork'] { --operation-accent: var(--blue); }
+.agent-operation-feedback[data-phase='failed'], .agent-operation-feedback[data-phase='partial'], .agent-operation-feedback[data-phase='unconfirmed'] { --operation-accent: var(--amber); }
+.agent-operation-feedback__motion { position: absolute; inset: 0; z-index: 2; overflow: hidden; border-radius: inherit; contain: strict; pointer-events: none; }
+.agent-operation-feedback__motion::before { content: ''; position: absolute; inset: 0; border: 1px solid color-mix(in srgb, var(--operation-accent) 30%, transparent); border-radius: inherit; }
+.agent-operation-feedback[data-phase='pending'] .agent-operation-feedback__motion::after { content: ''; position: absolute; top: 0; bottom: 0; width: 25%; transform: translateX(-150%) skewX(-20deg); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--operation-accent) 8%, transparent), transparent); animation: agent-operation-enter var(--dur-exit) var(--ease-enter) 1; }
+.agent-operation-feedback__veil { position: absolute; inset: 0; opacity: 0; background: repeating-linear-gradient(125deg, transparent 0 9px, var(--operation-accent) 9px 10px); mask-image: linear-gradient(90deg, transparent 8%, #000); }
+.agent-operation-feedback[data-kind='stop'][data-phase='pending'] .agent-operation-feedback__veil { opacity: .055; }
+.agent-operation-feedback__trail { position: absolute; inset: 1px; border-radius: inherit; }
+.agent-operation-feedback__trail::before, .agent-operation-feedback__trail::after { content: ''; position: absolute; offset-path: inset(0 round var(--radius-sm)); offset-anchor: right center; animation: agent-operation-orbit calc(var(--dur-sweep) * 1.4) linear infinite; animation-delay: var(--operation-phase); animation-play-state: paused; }
+.agent-operation-feedback__trail::before { width: 64px; height: 1px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--operation-accent) 35%, transparent) 45%, var(--operation-accent)); }
+.agent-operation-feedback__trail::after { width: 2px; height: 2px; border-radius: 50%; background: var(--operation-accent); box-shadow: 0 0 4px color-mix(in srgb, var(--operation-accent) 55%, transparent); }
+.agent-operation-feedback[data-motion-active='true'] .agent-operation-feedback__trail::before,
+.agent-operation-feedback[data-motion-active='true'] .agent-operation-feedback__trail::after { animation-play-state: running; will-change: offset-distance; }
+.agent-operation-feedback:not([data-motion-active='true']) .agent-operation-feedback__motion::after { animation-play-state: paused; }
+.agent-operation-feedback:not([data-phase='pending']) .agent-operation-feedback__trail { display: none; }
+.agent-operation-feedback__item { position: relative; z-index: 3; min-width: 0; max-width: 100%; }
+.agent-operation-feedback__label { color: var(--operation-accent); cursor: pointer; list-style: none; white-space: nowrap; }
+.agent-operation-feedback__label::-webkit-details-marker { display: none; }
+.agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { color: var(--success); animation: agent-operation-settle var(--dur-exit) ease-out 1; }
+.agent-operation-feedback__label::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: var(--sp-1); border: 1px solid currentColor; border-radius: 1px; vertical-align: 1px; }
+.agent-operation-feedback__detail { color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
+.agent-operation-feedback__detail p { margin: var(--sp-1) 0; }
+.agent-operation-feedback__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.agent-operation-feedback__actions button { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.agent-operation-feedback--compact { position: relative; align-items: center; padding: 0; pointer-events: auto; }
+.agent-operation-feedback--compact .agent-operation-feedback__item[open] .agent-operation-feedback__detail { position: absolute; top: 100%; right: 0; min-width: 240px; max-width: min(360px, 80vw); padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); z-index: var(--z-popover, 20); box-shadow: var(--shadow-overlay); }
+@keyframes agent-operation-orbit { to { offset-distance: 100%; } }
+@keyframes agent-operation-enter { to { transform: translateX(500%) skewX(-20deg); } }
+@keyframes agent-operation-settle { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-operation-feedback__trail { display: none; }
+  .agent-operation-feedback[data-phase='pending'] .agent-operation-feedback__motion::after { animation: none; }
+  .agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { animation-duration: 0s; }
+}

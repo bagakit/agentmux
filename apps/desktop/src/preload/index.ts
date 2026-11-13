@@ -688,6 +688,7 @@ const api: AgentMuxPreloadApi = {
     // 唯一带超时的那条：等 Runtime 收尾必须有上限，否则一次没回执的握手会把关闭按钮永久锁死。
     // 理由与取值见 shared/session-stop-timeout.ts。
     stop: (session: SessionControl, operationId?: string) => withStopTimeout(ipcRenderer.invoke('sessions:stop', session, operationId)),
+    inspectStop: (session: AgentSessionControl, operationId: string) => ipcRenderer.invoke('sessions:inspectStop', session, operationId),
     onEvent(listener: (event: RuntimeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeEvent): void => listener(value)
       ipcRenderer.on(SESSION_EVENT_CHANNEL, wrapped)

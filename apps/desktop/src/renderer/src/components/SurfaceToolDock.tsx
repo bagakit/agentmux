@@ -170,13 +170,13 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
             {!selecting ? <WorkspaceCollaboration /> : null}
             {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="去 Focus 中查看" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
             {selecting ? <>
-              <button type="button" aria-label="Select visible Agents" title="Select visible Agents" disabled={close.busy} onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
-              <button type="button" aria-label="Clear selection" title="Clear selection" disabled={close.busy} onClick={() => setSelected(new Set())}><SemanticIcon name="action.clear-list" size={15} /></button>
+              <button type="button" aria-label="Select visible Agents" title="Select visible Agents" onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
+              <button type="button" aria-label="Clear selection" title="Clear selection" onClick={() => setSelected(new Set())}><SemanticIcon name="action.clear-list" size={15} /></button>
               <span className="workspace-agents-tool__action-divider" aria-hidden="true" />
-              <button type="button" aria-label="Copy titles + Agent links" title="Copy titles + Agent links" disabled={!chosen.length || close.busy} onClick={() => { void copySelected() }}><SemanticIcon name="action.copy" size={15} /></button>
-              <button type="button" className="workspace-agents-tool__close" aria-label="Close Agents" title="Close Agents · Review current Runs before stopping" disabled={!chosen.length || close.busy} onClick={() => close.requestClose(chosen)}><SemanticIcon name="action.stop" size={15} /></button>
+              <button type="button" aria-label="Copy titles + Agent links" title="Copy titles + Agent links" disabled={!chosen.length} onClick={() => { void copySelected() }}><SemanticIcon name="action.copy" size={15} /></button>
+              <button type="button" className="workspace-agents-tool__close" aria-label="Close Agents" title="Close Agents · Review current Runs before stopping" disabled={!chosen.length} onClick={() => close.requestClose(chosen)}><SemanticIcon name="action.stop" size={15} /></button>
             </> : null}
-            <button type="button" aria-label={selecting ? 'Done selecting' : 'Select Agents'} title={selecting ? 'Done selecting' : 'Select Agents'} aria-pressed={selecting} disabled={close.busy} onClick={() => { setSelecting(value => !value); setSelected(new Set()) }}><SemanticIcon name={selecting ? 'action.close' : 'object.criteria'} size={15} /></button>
+            <button type="button" aria-label={selecting ? 'Done selecting' : 'Select Agents'} title={selecting ? 'Done selecting' : 'Select Agents'} aria-pressed={selecting} onClick={() => { setSelecting(value => !value); setSelected(new Set()) }}><SemanticIcon name={selecting ? 'action.close' : 'object.criteria'} size={15} /></button>
           </div>
         </header>
         <div className="workspace-agents-tool__filters" role="group" aria-label="Filter Agents by state">
@@ -200,7 +200,7 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
           <SortableContext items={visible.map(workspaceAgentOrderKey)} strategy={verticalListSortingStrategy}>
             <div className="workspace-agent-list" aria-label="Space Agents">
               {visible.map(context => <WorkspaceAgentRow key={workspaceAgentOrderKey(context)} context={context} onOpen={onOpen}
-                selected={selected.has(workspaceAgentOrderKey(context))} selecting={selecting} disabled={saving || close.busy} onToggle={toggle}
+                selected={selected.has(workspaceAgentOrderKey(context))} selecting={selecting} disabled={saving} onToggle={toggle}
                 goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))} identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} />)}
             </div>
           </SortableContext>
@@ -208,7 +208,7 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
         {count > 0 && visible.length === 0 ? <p className="workspace-agents-tool__empty">No Agents in this state.</p> : null}
         {close.results.length ? <section className="workspace-agents-tool__results" aria-label="Agent close results" role="status">
           <header><strong>Close results</strong><button type="button" onClick={close.clearResults}>Dismiss</button></header>
-          {close.results.map(result => <p key={JSON.stringify([result.target.control.hostId, result.target.control.agentSessionId])} data-completed={result.completed}><strong>{result.target.name}</strong>
+          {close.results.map(result => <p key={JSON.stringify([result.target.control.hostId, result.target.control.agentSessionId, result.target.control.run.runId, result.target.operationId])} data-completed={result.completed}><strong>{result.target.name}</strong>
             <small>{result.target.control.hostId} · {result.target.control.agentSessionId} · Run {result.target.control.run.runId}</small><span>{result.message}</span></p>)}
         </section> : null}
       </div>

@@ -2326,6 +2326,15 @@ export class RuntimeController {
     })
   }
 
+  /** Read the exact original Stop without preparing Native or changing its lifecycle. */
+  async inspectSessionStop(control: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxAgentStopInspection> {
+    // Core reads its durable Stop rows. Native preparation, attachment changes and
+    // lifecycle dispatch are not prerequisites for observing this original operation.
+    return await this.configuredClient(control.hostId).inspectAgentStop({
+      agentSessionId: control.agentSessionId, expectedRun: control.run, operationId
+    })
+  }
+
   /**
    * An Agent Stop answers with Core's receipt. The caller's `operationId` is the Stop's identity, so
    * an explicit retry with the same id continues that Stop and `amux agent stop inspect

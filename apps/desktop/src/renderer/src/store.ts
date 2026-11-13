@@ -1,3 +1,5 @@
+import type { AgentOperationReferences } from './lib/agent-operation'
+import { restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
@@ -991,6 +993,7 @@ export type AppState = GitReadingActions & {
   dissolveProjectGroup(groupId: string): Promise<AgentMuxSpatialSave>
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
+  agentOperations: AgentOperationReferences
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
   goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
@@ -3918,6 +3921,7 @@ type PersistedAppState = {
   projectGroups?: AgentMuxProjectGroupFact[]
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
+  agentOperations: AgentOperationReferences
   goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
   goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
@@ -4198,6 +4202,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     projectGroups: coreSpatialReady ? undefined : state.projectGroups,
     spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
+    agentOperations: state.agentOperations,
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalFiniteStartIntents: state.goalFiniteStartIntents,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
@@ -5318,6 +5323,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   projectGroups: [],
   spaceZoneBindings: {},
   spatialRequests: {},
+  agentOperations: {},
   goalAgentSelectionDrafts: {},
   goalFiniteStartIntents: {},
   goalAgentCreationDrafts: {},
@@ -13011,6 +13017,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.documents = Object.fromEntries(Object.entries(state.documents).map(([key, document]) => [key, document.noteEditing?.attempt?.phase === 'sending'
       ? { ...document, noteEditing: { ...document.noteEditing, attempt: { ...document.noteEditing.attempt, phase: 'unknown' as const } } } : document]))
+    state.agentOperations = restoredAgentOperations(state.agentOperations)
     state.noticeReadReceipts = normalizeNotificationReadReceipts(state.noticeReadReceipts)
     // Old Chromium reads never overwrite acknowledged names or clear tombstones.
     if (current.nameAuthorityRevision > 0) {
