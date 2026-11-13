@@ -26,5 +26,5 @@ export const deviceList: AgentMuxRpcResult<'device.ls'> = {
   mobileAccess: { state: 'unavailable', message: 'Controlled connection observation. Existing Sessions remain available.' }
 }
 export const deviceInvitation: AgentMuxRpcResult<'device.link'> = { hostId: deviceList.hostId, url: 'http://192.168.1.20:8443/#offer=controlled-preview',
-  pageUrl: 'http://192.168.1.20:8443/', relay: { endpoint: '192.168.1.20:8443', useTls: false },
+  pageUrl: 'http://192.168.1.20:8443/', candidates: [], relay: { endpoint: '192.168.1.20:8443', useTls: false },
   mobileAccess: { state: 'connected', message: 'Controlled connection observation.', origin: 'http://192.168.1.20:8443' } }

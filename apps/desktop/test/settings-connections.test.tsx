@@ -1,7 +1,7 @@
 import { DocumentationTestOwner } from './helpers/documentation-owner'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, HostConfig, HostCheckResult, SshHostConfig } from '../src/shared/contracts'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -320,14 +320,20 @@ describe('Conversation Channels settings', () => {
     expect(leaf.isConnected).toBe(true); expect(leaf.dataset.resourceRow).toBe('local')
     expect((await api.config.get()).workspaces.map(workspace => workspace.id)).toEqual(['project-c'])
     const last = config.hosts.find(host => host.id === J)!
-    await dom.render(<HostSettingsPane config={{ ...config, hosts: [last], workspaces: [] }} active={true} onSave={async () => {}} />)
+    function SoleHost() {
+      const [current, setCurrent] = useState<AppConfig>({ ...config, hosts: [config.hosts[0]!, last], workspaces: [] })
+      return <HostSettingsPane config={current} active={true} onSave={async (hosts, workspaces) => setCurrent({ ...current, hosts, workspaces })} />
+    }
+    await dom.render(<SoleHost />)
     await showList(); await select(last.id)
     const lastRemove = pane().querySelector<HTMLButtonElement>('[aria-label="Remove Development"]')!
     lastRemove.focus(); expect(document.activeElement).toBe(lastRemove)
     await dom.click('[aria-label="Remove Development"]')
     await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Remove Host"]')!.click())
-    expect(pane().querySelectorAll('[data-resource-editor]')).toHaveLength(0)
-    // Sole-SSH props exercise a component empty state, not a valid Main configuration or native focus.
+    expect(pane().querySelectorAll('[data-resource-editor]')).toHaveLength(1)
+    expect(editor().dataset.resourceEditor).toBe('local')
+    expect(pane().querySelectorAll('[data-host-disclosure]')).toHaveLength(1)
+    expect(pane().querySelector('[aria-label="Remove Development"]')).toBeNull()
     expect(search().isConnected).toBe(true)
   })
 })

@@ -122,7 +122,8 @@ describe('Editor font settings on the real UI, durable owner, public scalar and 
     expect(typography()).toBe('20:30')
     expect(widget.updateOptions).toHaveBeenLastCalledWith({ fontSize: 20, lineHeight: 30 })
     expect(save().disabled).toBe(true)
-    await dom.click('[data-settings-pane="appearance"] button.small-button'); await commit(f)
+    const reset = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="appearance"] button')].find(node => node.textContent === 'Reset editor size')!
+    expect(reset).toBeDefined(); await act(async () => reset.click()); await commit(f)
     expect(Object.hasOwn((await f.disk()).appearance, 'editorFontSize')).toBe(false)
     expect((await f.disk()).appearance).toEqual(initialAppearance)
     expect(f.uiSave.mock.calls[1]![1].appearance.editorFontSize).toBe(20)
