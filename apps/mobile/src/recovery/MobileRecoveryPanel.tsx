@@ -1,6 +1,6 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
-import { getDeviceWorkface, type DeviceWorkface } from './device-workface'
+import { getDeviceWorkface, MAX_BACKUP_BYTES, type DeviceWorkface } from './device-workface'
 import './recovery.css'
 
 export function MobileRecoveryPanel({ onRestored = () => location.reload(), exportFile }: {
@@ -39,7 +39,7 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
     if (!file) return
     setNoticeGeneration(value => value + 1)
     try {
-      if (file.size > 2 * 1024 * 1024) throw new Error('File is too large')
+      if (file.size > MAX_BACKUP_BYTES) throw new Error('File is too large')
       const value = getDeviceWorkface().parseBackup(await file.text())
       if (active !== epoch.current) return
       setCandidate(value)

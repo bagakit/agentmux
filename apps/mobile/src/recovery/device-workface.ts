@@ -72,6 +72,8 @@ type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
 const MAX_BYTES = 2 * 1024 * 1024
+/** A backup is its saved record plus a small envelope and, in earlier exports, indentation. */
+export const MAX_BACKUP_BYTES = 2 * MAX_BYTES
 const MAX_ENTRIES = 256
 export class DeviceHostMismatchError extends Error {}
 export class DeviceWorkfaceRecordChangedError extends Error {}
@@ -778,13 +780,16 @@ export class DeviceWorkfaceStore {
   }
   exportBackup(): string {
     this.refresh()
-    return JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: this.value }, null, 2)
+    return JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: this.value })
   }
+  /** Accepts every workface this device can save: the limit applies to the record, as in write(). */
   parseBackup(bytes: string): DeviceWorkface {
-    if (new TextEncoder().encode(bytes).byteLength > MAX_BYTES) throw invalid()
+    if (new TextEncoder().encode(bytes).byteLength > MAX_BACKUP_BYTES) throw invalid()
     const backup = record(JSON.parse(bytes), ['schema', 'workface'])
     if (backup.schema !== 'agentmux.mobile-workface.v1') throw invalid()
-    return parseDeviceWorkface(backup.workface)
+    const workface = parseDeviceWorkface(backup.workface)
+    if (new TextEncoder().encode(JSON.stringify(workface)).byteLength > MAX_BYTES) throw invalid()
+    return workface
   }
   replaceBackup(next: DeviceWorkface): Promise<void> {
     this.writeRevision++
