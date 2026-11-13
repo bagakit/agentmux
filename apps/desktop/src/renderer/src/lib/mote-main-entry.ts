@@ -24,15 +24,19 @@ export function useMoteMainEntry({ scope, entryToken, active }: { scope:MoteWork
   useEffect(() => {
     if (!key) return
     if (admission.current?.key !== key) admission.current = { key, cancelled:false, started:false }
+    const events = ['pointerdown','keydown','input'] as const
+    const detach = () => { for (const event of events) document.removeEventListener(event,cancel,true) }
     const cancel = () => {
       const original = admission.current
-      if (original?.key === key && !original.started) {
-        original.cancelled = true
-        setState({ status:'settled', issue:null })
-      }
+      if (original?.key !== key || original.started) return
+      // The first interaction is the whole answer. Staying attached would render this owner again
+      // from a capture listener on every later keystroke, before React handles that keystroke, and
+      // that render writes a controlled field's old value back over the character just typed.
+      original.cancelled = true; detach()
+      setState({ status:'settled', issue:null })
     }
-    for (const event of ['pointerdown','keydown','input']) document.addEventListener(event,cancel,true)
-    return () => { for (const event of ['pointerdown','keydown','input']) document.removeEventListener(event,cancel,true) }
+    for (const event of events) document.addEventListener(event,cancel,true)
+    return detach
   }, [key])
   const observe = useCallback(async (key:string, request:MoteDialogueRecoveryRequest, inspect:boolean) => {
     if (latest.current !== key || !inspect && admission.current?.cancelled) return
