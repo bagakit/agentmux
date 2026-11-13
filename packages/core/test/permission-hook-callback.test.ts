@@ -14,7 +14,7 @@ async function fixture() {
   let delivered!: () => void
   const observed = new Promise<void>(resolve => { delivered = resolve })
   const server = new AgentHookServer(event => { events.push(event); if (event.permissionCallback) delivered(); return { permissionCallbackAccepted: true } }, 0,
-    undefined, (provider, event) => provider === 'codex' && event === 'PermissionRequest',
+    undefined, (provider, event) => provider === 'codex' && event === 'PermissionRequest' ? 'permission' : undefined,
     (_session, _run, receiptId, decided) => { closed.push({ receiptId, decided }) })
   servers.push(server); await server.start()
   const binding = server.createBinding('session', 'codex'); await binding.bindRun('run')
@@ -70,7 +70,7 @@ it('the original peer disconnect only closes that callback and cannot silently a
 })
 
 it('an owner which did not adopt the original callback immediately abstains', async () => {
-  const server = new AgentHookServer(() => {}, 0, undefined, () => true)
+  const server = new AgentHookServer(() => {}, 0, undefined, () => 'permission')
   servers.push(server); await server.start()
   const binding = server.createBinding('unadopted', 'codex'); await binding.bindRun('run')
   const response = await fetch(binding.endpoint.url, { method: 'POST', headers: { authorization: `Bearer ${binding.endpoint.token}` },
@@ -83,7 +83,7 @@ it('an owner which did not adopt the original callback immediately abstains', as
 
 it('a candidate on a Provider without a decision declaration stays an ordinary observation', async () => {
   const events: NativeHookEnvelope[] = []
-  const server = new AgentHookServer(event => { events.push(event) }, 0, undefined, () => false)
+  const server = new AgentHookServer(event => { events.push(event) }, 0, undefined, () => undefined)
   servers.push(server); await server.start()
   const binding = server.createBinding('observer', 'claude'); await binding.bindRun('run')
   const body = JSON.stringify({ receiptId: 'willing-only', eventName: 'PermissionRequest', decision: true, payload: {} })
@@ -136,7 +136,7 @@ it('the original managed worker offers stdout for an exact custom Provider event
   let observed!: (event: NativeHookEnvelope) => void
   const arrived = new Promise<NativeHookEnvelope>(resolve => { observed = resolve })
   const server = new AgentHookServer(event => { observed(event); return { permissionCallbackAccepted: true } }, 0,
-    undefined, (_provider, event) => event === 'ApproveExecution')
+    undefined, (_provider, event) => event === 'ApproveExecution' ? 'permission' : undefined)
   servers.push(server); await server.start()
   const binding = server.createBinding('custom-owner', 'custom'); await binding.bindRun('custom-run')
   const env = { ...process.env, AGENTMUX_ENV: '1', AGENTMUX_HOOK_URL: binding.endpoint.url,

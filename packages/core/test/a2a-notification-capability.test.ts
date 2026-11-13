@@ -72,7 +72,7 @@ it('explains the missing built-in Grok idle notification transport while preserv
   expect(h.providers.get('grok').prepareNativeInput).toBeUndefined()
   await h.send('original-grok-message'); await retained(h, 'original-grok-message')
   expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('automatic idle-only Inbox notifications'), evidence: expect.objectContaining({ run: h.original.run }) }))
+    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('next turn end'), evidence: expect.objectContaining({ run: h.original.run }) }))
   expect(h.diagnostics()[0]?.message).toContain('healthy manual input')
   expect(h.diagnostics()[0]?.message).toContain('explicitly notify')
   const ack = await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.original.run, source: 'user', data: 'Existing draft' })
@@ -108,7 +108,7 @@ it.each([true, false])('checks the actual native input contribution before waiti
   h.providers.replace(withoutNativeInput(provider))
   await h.send('missing-implementation'); await retained(h, 'missing-implementation')
   expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('idle-only') }))
+    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('no automatic Inbox notification path') }))
 })
 
 it('does not invent unsupported transport from an absent catalog field when the native input contribution exists', async () => {
