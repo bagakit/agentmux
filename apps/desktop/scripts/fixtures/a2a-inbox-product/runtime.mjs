@@ -31,6 +31,44 @@ export function retainPrivateA2aInspector(diagnostic) {
   return new Promise(() => { setInterval(() => {}, 60_000) })
 }
 
+/** Private text-port recorder; never fabricates a native transport receipt or writes the OS clipboard. */
+export function installPrivateA2aNativeClipboard({ native, ui, prototype, record, persist }) {
+  if (native !== ui || Object.getPrototypeOf(native) !== prototype) throw new Error('The original macOS NativeDesktop UI owner is required')
+  for (const name of ['writeClipboardText', 'readClipboardText', 'request']) if (typeof native[name] !== 'function') throw new Error('Original native clipboard port is unavailable: ' + name)
+  const other = ['captureScreenshot', 'readClipboardImage', 'writeClipboardImage', 'inspectOperation', 'dispose'].map(name => [name, native[name]])
+  const request = native.request, guard = { port: 'NativeDesktop.writeClipboardText', destination: 'private-recorder', sequence: 0, reads: [], writes: [], blockedRequests: [], delegatedRequests: [] }
+  native.writeClipboardText = async text => {
+    if (typeof text !== 'string') throw new Error('The original clipboard text must remain a string')
+    const value = { text, sequence: ++guard.sequence, port: guard.port, destination: guard.destination, byteLength: Buffer.byteLength(text) }
+    guard.writes.push(value); persist(guard); record(value)
+  }
+  native.readClipboardText = async () => {
+    guard.reads.push({ port: 'NativeDesktop.readClipboardText' }); persist(guard)
+    throw new Error('Unexpected native clipboard read blocked by the private proof')
+  }
+  native.request = function(method, ...args) {
+    if (method === 'clipboardRead' || method === 'clipboardWrite') {
+      guard.blockedRequests.push({ method, params: args[0] }); persist(guard)
+      return Promise.reject(new Error('Unexpected native clipboard transport request blocked by the private proof'))
+    }
+    guard.delegatedRequests.push({ method }); persist(guard)
+    return request.apply(this, [method, ...args])
+  }
+  if (Object.getPrototypeOf(native) !== prototype || other.some(([name, value]) => native[name] !== value)) throw new Error('Unrelated native capabilities must retain their original owner')
+  persist(guard)
+  return { sameOriginalOwner: true, sameOriginalPrototype: true, preservedMethods: other.map(([name]) => name),
+    port: guard.port, destination: guard.destination, requestFence: ['clipboardRead', 'clipboardWrite'] }
+}
+
+/** A Copy must reach this attempt's original text port, including when two bodies are identical. */
+export function assertPrivateA2aClipboardWrite(value, text, after) {
+  assert.ok(Number.isSafeInteger(after) && after >= 0)
+  assert.equal(value?.sequence, after + 1, 'Copy requires a new private native text-port write')
+  assert.equal(value.text, text); assert.equal(value.byteLength, Buffer.byteLength(text))
+  assert.equal(value.port, 'NativeDesktop.writeClipboardText'); assert.equal(value.destination, 'private-recorder')
+  return value
+}
+
 /** Own only the current private product lifecycle, Inspector isolation and exact cleanup. */
 export async function runPrivateA2aProductScenario(scenario) {
 const root = process.env.AGENTMUX_A2A_PROOF_BUILD, evidence = resolve(process.argv[2])
@@ -163,13 +201,13 @@ async function launch(label) {
   assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId), 'Only the original pre-home boundary permits isolation')
   const clipboardGuardPath = join(evidence, 'clipboard-guard-' + label + '.json')
   const windowGuardPath = join(evidence, 'window-guard-' + label + '.json')
+  const electronGuardPath = join(evidence, 'electron-clipboard-guard-' + label + '.json')
   const homeExpression = `(()=>{
     app.setActivationPolicy('prohibited');
     const originalHome=app.getPath('home');
     app.setPath('home',${JSON.stringify(process.env.HOME)});app.setPath('userData',${JSON.stringify(userData)});
-    const guard={reads:[],writes:[]};const save=()=>writeFileSync(${JSON.stringify(clipboardGuardPath)},JSON.stringify(guard));
-    clipboard.writeText=(text,...rest)=>{guard.writes.push({text,rest});save();writeFileSync(${JSON.stringify(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD)},JSON.stringify({text,port:'electron.clipboard.writeText'}))};
-    clipboard.readText=(...args)=>{guard.reads.push(args);save();throw new Error('Unexpected clipboard read in the private product proof')};save();
+    const guard={reads:[],writes:[]};const save=()=>writeFileSync(${JSON.stringify(electronGuardPath)},JSON.stringify(guard));
+    for(const method of ['readText','readImage','writeText','writeImage'])clipboard[method]=(...args)=>{guard[method.startsWith('read')?'reads':'writes'].push({method});save();throw new Error('Unexpected Electron clipboard bypass blocked by the private proof')};save();
     const geometry=windowConstructorGeometry;windowConstructorGeometry=(...args)=>({...geometry(...args),show:false,focusable:false});
     return{originalHome,home:app.getPath('home'),userData:app.getPath('userData'),activationPolicy:'prohibited'}
   })()`
@@ -186,8 +224,22 @@ async function launch(label) {
   })
   assert.equal(placements.length, 1, 'One original workbench assignment determines the private presentation target')
   const placement = placements[0]
+  const nativeAnchors = lines.flatMap((line, index) => line.trim() === 'const electronUiOwner = {' ? [index] : [])
+  assert.equal(nativeAnchors.length, 1, 'The exact initialized native clipboard owner boundary is required')
+  assert.ok(nativeAnchors[0] > anchors[0] && nativeAnchors[0] < placement.line)
+  const nativeBreakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: nativeAnchors[0] })
   const windowBreakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: placement.line })
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId }); await main.call('Debugger.resume')
+  const nativePause = await waitFor('original initialized NativeDesktop owner', () => main.pauses.shift())
+  assert.ok(nativePause.hitBreakpoints?.includes(nativeBreakpoint.breakpointId))
+  const nativeExpression = `(${installPrivateA2aNativeClipboard.toString()})({native:getNativeDesktopOwner(),ui:getDesktopNativeUiOwner(),prototype:NativeDesktop.prototype,
+    record:value=>writeFileSync(${JSON.stringify(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD)},JSON.stringify(value)),
+    persist:guard=>writeFileSync(${JSON.stringify(clipboardGuardPath)},JSON.stringify(guard))})`
+  const nativeIsolation = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: nativePause.callFrames[0].callFrameId,
+    expression: nativeExpression, returnByValue: true })
+  assert.equal(nativeIsolation.exceptionDetails, undefined)
+  assert.equal(nativeIsolation.result.value.sameOriginalOwner, true); assert.equal(nativeIsolation.result.value.sameOriginalPrototype, true)
+  await main.call('Debugger.removeBreakpoint', { breakpointId: nativeBreakpoint.breakpointId }); await main.call('Debugger.resume')
   const windowPause = await waitFor('original private workbench construction', () => main.pauses.shift())
   assert.ok(windowPause.hitBreakpoints?.includes(windowBreakpoint.breakpointId))
   const windowExpression = `(()=>{const target=${placement.binding};const guard={id:target.id,focusable:target.isFocusable(),visibleBefore:target.isVisible(),focusedBefore:target.isFocused(),primary:app.hasSingleInstanceLock(),calls:[]};
@@ -214,7 +266,10 @@ async function launch(label) {
   const isolation = { label, pid: child.pid, originalHome, home, nativeHome, userData, catalog, endpoint,
     presentationOverlay: { mainSHA256: sha(await readFile(mainPath)), homeExpressionSHA256: sha(homeExpression), windowExpressionSHA256: sha(windowExpression),
       activationPolicy: isolated.result.value.activationPolicy, window: windowIsolation.result.value,
-      clipboardGuardPath, windowGuardPath, windowBreakpoint: { id: windowBreakpoint.breakpointId, lineNumber: placement.line },
+      clipboardGuardPath, electronGuardPath, nativeClipboard: { installation: nativeIsolation.result.value, expressionSHA256: sha(nativeExpression),
+        breakpoint: { id: nativeBreakpoint.breakpointId, url: pathToFileURL(mainPath).href, lineNumber: nativeAnchors[0] },
+        pause: { hitBreakpoints: nativePause.hitBreakpoints, location: nativePause.callFrames[0].location } },
+      windowGuardPath, windowBreakpoint: { id: windowBreakpoint.breakpointId, lineNumber: placement.line },
       windowPause: { hitBreakpoints: windowPause.hitBreakpoints, location: windowPause.callFrames[0].location } },
     breakpoint: { id: breakpoint.breakpointId, url: pathToFileURL(mainPath).href, lineNumber: anchors[0] },
     pauses: homePauses.map(event => ({ reason: event.reason, hitBreakpoints: event.hitBreakpoints,
@@ -295,7 +350,11 @@ finally {
   for (const launch of facts.homeIsolation.launches) {
     try {
       const clipboard = JSON.parse(await readFile(launch.presentationOverlay.clipboardGuardPath, 'utf8'))
-      assert.deepEqual(clipboard.reads, [], 'The private product never reads the user clipboard')
+      assert.deepEqual(clipboard.reads, [], 'The private product makes no native clipboard text read')
+      assert.deepEqual(clipboard.blockedRequests, [], 'No native clipboard transport bypass was attempted')
+      const electron = JSON.parse(await readFile(launch.presentationOverlay.electronGuardPath, 'utf8'))
+      assert.deepEqual(electron, { reads: [], writes: [] }, 'No Electron clipboard bypass was attempted')
+      launch.presentationOverlay.electronClipboard = electron
       launch.presentationOverlay.clipboard = clipboard
       launch.presentationOverlay.windowAfter = JSON.parse(await readFile(launch.presentationOverlay.windowGuardPath, 'utf8'))
       assert.equal(launch.presentationOverlay.windowAfter.focused, false)

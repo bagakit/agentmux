@@ -1,12 +1,31 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { runPrivateA2aProductScenario } from '../a2a-inbox-product/runtime.mjs'
+import { runPrivateA2aProductScenario, assertPrivateA2aClipboardWrite } from '../a2a-inbox-product/runtime.mjs'
 import { assertA2aReferenceUserReading } from '../../lib/a2a-inbox-product-proof.mjs'
 
 await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, coreRoot, executable, workspace, nativeHome, controls,
   cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects }) => {
-  if (process.argv.includes('--isolation-only')) { facts.isolationOnly = true; return }
+  const clipboard = async () => {
+    try { return JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')) }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  }
+  const copy = async (label, text, action) => {
+    const before = JSON.parse(await readFile(first.isolation.presentationOverlay.clipboardGuardPath, 'utf8')).sequence
+    await action()
+    return await waitFor(label, async () => {
+      const value = await clipboard()
+      if (!value || value.sequence === before) return null
+      return { ...assertPrivateA2aClipboardWrite(value, text, before), beforeSequence: before }
+    })
+  }
+  if (process.argv.includes('--isolation-only')) {
+    const text = 'Private native text-port isolation ' + randomUUID()
+    const copied = await copy('isolated original preload/Main/native text port', text, () =>
+      first.cdp.evaluate(`(async()=>{await window.agentmux.ui.writeClipboardText(${JSON.stringify(text)});return{completed:true}})()`))
+    facts.isolationOnly = true; facts.clipboardIsolation = { text, copied, boundary: 'Original preload/Main and NativeDesktop text port; private recorder replaces only the OS text write. No native helper write or OS clipboard success is claimed.' }
+    return
+  }
   facts.reading = { boundary: 'Actual public CLI → product Host/Core → qualified native and captured notice → Main/preload → production Conversation and Mailbox. Synthetic authenticated native actor, no model or vendor idle-race claim. Complete resource boundaries are separately exercised by the source-bound owning component tests; these App frames exercise qualified original Inbox reading with an independent notification wire.' }
   for (const label of ['Author', 'Recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
@@ -77,20 +96,15 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   assert.equal(rendered.notificationId, key.submissionId); assert.equal(rendered.originals, 1); assert.equal(rendered.primarySystemCards, 0)
   assert.deepEqual(rendered.original, { messageId, role: 'agent', relation: 'other-agent', direction: 'incoming', senderId: author.agentSessionId, body, decodedReferences: 0 })
   assert.equal(rendered.detailsInitiallyOpen, false)
-  await activate(first.cdp, `${originalCard}.querySelector('[aria-label="Copy message"]')`)
-  const copiedConversationBody = await waitFor('exact original message Copy in Conversation', async () => {
-    try { const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === body ? value : null }
-    catch (error) { if (error.code === 'ENOENT') return null; throw error }
-  })
+  const copiedConversationBody = await copy('exact original message Copy in Conversation', body, () =>
+    activate(first.cdp, `${originalCard}.querySelector('[aria-label="Copy message"]')`))
   const conversationBodyCopyFeedback = await waitFor('original message Copy feedback in Conversation', () => first.cdp.evaluate(`${originalCard}.querySelector('.log-turn__actions')?.dataset.copyState==='copied'`))
   const details = `${notification}.querySelector('.conversation-a2a-notice__details')`
   await activate(first.cdp, `${details}.querySelector('summary')`)
   await waitFor('notification details retain the original complete wire', () => first.cdp.evaluate(`Boolean(${details}.querySelector('[aria-label="Copy notification protocol"]'))`))
   await first.cdp.evaluate(`${details}.querySelector('[aria-label="Copy notification protocol"]').scrollIntoView({block:'center'})`)
-  await activate(first.cdp, `${details}.querySelector('[aria-label="Copy notification protocol"]')`)
-  const copiedWire = await waitFor('exact original notification Copy through production IPC', async () => {
-    const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === wire ? value : null
-  })
+  const copiedWire = await copy('exact original notification Copy through production IPC', wire, () =>
+    activate(first.cdp, `${details}.querySelector('[aria-label="Copy notification protocol"]')`))
   const wireCopyFeedback = await waitFor('original notification Copy feedback', () => first.cdp.evaluate(`${details}.querySelector('[aria-label="Copy notification protocol"]')?.dataset.copyState==='copied'`))
   const noticeContributions = conversation.items.find(entry => entry.kind === 'item' && entry.item.records.some(record =>
     record.original.kind === 'captured' && record.original.item.a2aNotificationId === key.submissionId)).item.records
@@ -157,10 +171,8 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   await waitFor('original body remains literal in Inbox', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__detail .log-turn__body')?.textContent.includes('authored-example-message')`))
   const inbox = await first.cdp.evaluate(`(()=>{const p=${base}.querySelector('.composer-mailbox__detail');return{text:p.textContent,decodedReferenceLists:p.querySelectorAll('.log-turn__references').length}})()`)
   assert.equal(inbox.decodedReferenceLists, 0); assert.ok(inbox.text.includes('authored-example-message'))
-  await activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Copy message"]')`)
-  const copiedBody = await waitFor('original authored body Copy', async () => {
-    const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === body ? value : null
-  })
+  const copiedBody = await copy('original authored body Copy', body, () =>
+    activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Copy message"]')`))
   const bodyCopyFeedback = await waitFor('original body Copy feedback', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__detail .log-turn__actions')?.dataset.copyState==='copied'`))
   await activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Message details"]')`)
   inbox.facts = await waitFor('original Inbox notification provenance', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__record-facts')?.textContent`))

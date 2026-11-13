@@ -125,6 +125,7 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
 const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', hostServiceSource]
+const nativeClipboardSources = ['apps/desktop/src/main/native-desktop-owner.ts', 'apps/desktop/src/main/native-desktop-ipc.ts', 'packages/native-desktop/src/client.ts']
 const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
@@ -232,13 +233,9 @@ export async function runA2aReferenceReadingProductProof({ root, evidence, prepa
     const anchor = 'const window = new BrowserWindow({\n      ...windowConstructorGeometry(persistedGeometry),', placement = '    workbenchWindow = window'
     assert.equal(original.split(anchor).length, 2); assert.equal(original.split(placement).length, 2)
     const clipboardPath = join(evidence, 'clipboard.json')
-    const clipboardPort = `import { clipboard as privateA2aClipboard } from 'electron';
-import { writeFileSync as recordPrivateA2aClipboard } from 'node:fs';
-privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringify(clipboardPath)}, JSON.stringify({ text, at: Date.now(), port: 'electron.clipboard.writeText' }));
-`
-    const privateInput = clipboardPort + original.replace(anchor, anchor + '\n      show: false, focusable: false,').replace(placement,
+    const privateInput = original.replace(anchor, anchor + '\n      show: false, focusable: false,').replace(placement,
       `    window.show = () => window.showInactive()\n    window.focus = () => {}\n    window.showInactive()\n${placement}`)
-    product.windowOverlay = { owner: 'apps/desktop/src/main/index.ts', raw: a2aProofSha(original), compilerInput: a2aProofSha(privateInput), scope: 'Private nonactivating BrowserWindow presentation and the unique OS clipboard.writeText port; no user clipboard access, no input/semantic/IPC logic replaced'  }
+    product.windowOverlay = { owner: 'apps/desktop/src/main/index.ts', raw: a2aProofSha(original), compilerInput: a2aProofSha(privateInput), scope: 'Private nonactivating BrowserWindow presentation only; native clipboard isolation is applied separately to the original initialized owner through Inspector; no input/semantic/IPC logic replaced'  }
     const loadedPath = join(evidence, 'loaded.json'), compilerInputsPath = join(evidence, 'compiler-inputs.json'), configPath = join(privateRoot, 'apps/desktop/a2a-proof.vite.config.mjs')
     await writeFile(configPath, `import actual from './electron.vite.config.ts';import{readFile,writeFile}from'node:fs/promises';import{createHash}from'node:crypto';import{relative}from'node:path';const root=${JSON.stringify(privateRoot)},loaded={},compilerInputs={};const plugin=()=>({name:'a2a-actual-product-input',enforce:'pre',async load(id){if(id.startsWith(root+'/')&&!id.includes('/node_modules/')&&!id.includes('?')){try{loaded[relative(root,id)]=createHash('sha256').update(await readFile(id)).digest('hex');compilerInputs[relative(root,id)]=loaded[relative(root,id)]}catch{}}if(id===root+'/apps/desktop/src/main/index.ts'){compilerInputs[relative(root,id)]=${JSON.stringify(a2aProofSha(privateInput))};return ${JSON.stringify(privateInput)}}},async closeBundle(){await writeFile(${JSON.stringify(loadedPath)},JSON.stringify(loaded,null,2));await writeFile(${JSON.stringify(compilerInputsPath)},JSON.stringify(compilerInputs,null,2))}});export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key,{...value,plugins:[plugin(),...(value.plugins??[])]}]));`)
     await command('desktop-build', process.execPath, [join(root, 'apps/desktop/node_modules/electron-vite/bin/electron-vite.js'), 'build', '--config', configPath], join(privateRoot, 'apps/desktop'))
@@ -294,7 +291,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
   let failure
   try {
     const { prepareA2aArtifact, verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
-    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...new Set([...requiredLoaded, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts', hostServiceSource, ...Object.keys(testInputs)])] })
+    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...new Set([...requiredLoaded, ...nativeClipboardSources, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts', hostServiceSource, ...Object.keys(testInputs)])] })
     product.sourceCommit = product.preparation.identity.sourceCommit; product.sources = product.preparation.sourceSnapshot.files
     product.execution = product.preparation.execution
     if (!isolationOnly) assert.ok(Object.keys(testInputs).length > 0, 'Actual owning-test production inputs are required')
@@ -325,6 +322,13 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     product.workerOutcome = outcome
     Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
     assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
+    if (isolationOnly) {
+      assert.equal(product.isolationOnly, true); assert.equal(product.clipboardIsolation.copied.sequence, 1)
+      assert.equal(product.clipboardIsolation.copied.text, product.clipboardIsolation.text)
+      assert.equal(product.clipboardIsolation.copied.port, 'NativeDesktop.writeClipboardText')
+      assert.equal(product.clipboardIsolation.copied.destination, 'private-recorder')
+      assert.equal(product.homeIsolation.launches[0].presentationOverlay.clipboard.writes.length, 1)
+    }
     await verifyA2aPreparedArtifact(product.preparation, { root })
     for (const [path, digest] of Object.entries(product.fixtures)) assert.equal(a2aProofSha(await readFile(join(privateRoot, path))), digest, 'Actual post-run proof fixture: ' + path)
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
@@ -355,7 +359,7 @@ async function verifyProductBuild(product, { root }) {
     retainedExecution = await verifyA2aPreparedArtifact(product.preparation, { root, artifact: 'origin' })
     assert.equal(product.sourceCommit, product.preparation.identity.sourceCommit)
     assert.deepEqual(product.execution, product.preparation.execution)
-    for (const path of requiredLoaded) assert.equal(product.sources[path], product.preparation.sourceSnapshot.files[path], 'Fixed product source: ' + path)
+    for (const path of [...requiredLoaded, ...nativeClipboardSources]) assert.equal(product.sources[path], product.preparation.sourceSnapshot.files[path], 'Fixed product source: ' + path)
   } else {
     assert.equal(product.preparation.kind, 'source-build')
     assert.ok(Object.keys(product.sources).length > 100)
@@ -393,9 +397,16 @@ async function verifyProductBuild(product, { root }) {
     const overlay = launch.presentationOverlay
     assert.equal(overlay.activationPolicy, 'prohibited')
     assert.equal(overlay.mainSHA256, a2aProofSha(await readFile(retainedExecution.mainEntry)))
-    for (const digest of [overlay.homeExpressionSHA256, overlay.windowExpressionSHA256]) assert.match(digest, /^[a-f0-9]{64}$/u)
+    for (const digest of [overlay.homeExpressionSHA256, overlay.windowExpressionSHA256, overlay.nativeClipboard.expressionSHA256]) assert.match(digest, /^[a-f0-9]{64}$/u)
     assert.equal(overlay.window.focusable, false); assert.equal(overlay.window.focusedBefore, false); assert.equal(overlay.window.primary, true)
     assert.equal(overlay.windowAfter.focused, false); assert.deepEqual(overlay.clipboard.reads, [])
+    assert.deepEqual(overlay.clipboard.blockedRequests, []); assert.deepEqual(overlay.electronClipboard, { reads: [], writes: [] })
+    assert.equal(overlay.nativeClipboard.installation.sameOriginalOwner, true); assert.equal(overlay.nativeClipboard.installation.sameOriginalPrototype, true)
+    assert.equal(overlay.nativeClipboard.installation.port, 'NativeDesktop.writeClipboardText'); assert.equal(overlay.nativeClipboard.installation.destination, 'private-recorder')
+    assert.deepEqual(overlay.nativeClipboard.installation.requestFence, ['clipboardRead', 'clipboardWrite'])
+    assert.ok(overlay.nativeClipboard.pause.hitBreakpoints.includes(overlay.nativeClipboard.breakpoint.id))
+    assert.equal(overlay.nativeClipboard.breakpoint.url, pathToFileURL(product.execution.mainEntry).href)
+    assert.ok(overlay.nativeClipboard.breakpoint.lineNumber > launch.breakpoint.lineNumber && overlay.nativeClipboard.breakpoint.lineNumber < overlay.windowBreakpoint.lineNumber)
     assert.ok(overlay.windowPause.hitBreakpoints.includes(overlay.windowBreakpoint.id))
     assert.ok(launch.pauses.at(-1).hitBreakpoints.includes(launch.breakpoint.id)); assert.equal(launch.breakpoint.url, pathToFileURL(product.execution.mainEntry).href)
     assert.ok(Number.isInteger(launch.pid) && launch.pid > 0)
@@ -461,9 +472,13 @@ export async function verifyA2aReferenceReadingProductProof(product, { root, tes
   assert.deepEqual(r.rendered.original, { messageId: r.messageId, role: 'agent', relation: 'other-agent', direction: 'incoming',
     senderId: r.author.agentSessionId, body: envelope.body, decodedReferences: 0 })
   assert.deepEqual(r.originalRecords, noticeUnits[0].item.records.map(record => ({ id: record.id, kind: record.original.kind, original: record.original.item })))
-  for (const [copy, text] of [[r.copiedWire, r.wire], [r.copiedBody, envelope.body], [r.copiedConversationBody, envelope.body]]) {
-    assert.equal(copy.text, text); assert.equal(copy.port, 'electron.clipboard.writeText')
+  const copies = [[r.copiedConversationBody, envelope.body], [r.copiedWire, r.wire], [r.copiedBody, envelope.body]]
+  for (const [index, [copy, text]] of copies.entries()) {
+    assert.equal(copy.text, text); assert.equal(copy.port, 'NativeDesktop.writeClipboardText'); assert.equal(copy.destination, 'private-recorder')
+    assert.equal(copy.byteLength, Buffer.byteLength(text)); assert.equal(copy.beforeSequence, index); assert.equal(copy.sequence, index + 1)
   }
+  assert.deepEqual(product.homeIsolation.launches[0].presentationOverlay.clipboard.writes,
+    copies.map(([{ beforeSequence, ...value }]) => value), 'Every Copy reaches the original native text port exactly once')
   assert.equal(r.wireCopyFeedback, true); assert.equal(r.bodyCopyFeedback, true); assert.equal(r.conversationBodyCopyFeedback, true)
   assert.equal(r.inbox.decodedReferenceLists, 0); assert.ok(r.inbox.facts.includes('Notification submitted')); assert.ok(r.outbox.facts.includes('Notification submitted'))
   assert.ok(r.inbox.facts.includes(r.messageId)); assert.ok(r.outbox.facts.includes(r.messageId))
