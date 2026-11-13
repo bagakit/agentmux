@@ -33,7 +33,7 @@ export function createGoalAutomationPause(options: {
         if (!same(prior.target, input)) throw new AgentMuxError('The original automatic pause operation changed its target.', 'CONTROL_REQUEST_CONFLICT')
         return await prior.result
       }
-      const receipt: AgentAutomationPauseReceipt = { ...input, status: 'unknown', pausedLoopIds: [], deferredLoopIds: [], disabledIntentIds: [], issues: [] }
+      const receipt: AgentAutomationPauseReceipt = { ...input, status: 'unknown', pausedLoopIds: [], disabledIntentIds: [], issues: [] }
       const result = Promise.resolve().then(async () => {
         const assertTargetSync = () => {
           const session = options.client.agentSession(input.agentSessionId)
@@ -55,9 +55,8 @@ export function createGoalAutomationPause(options: {
         options.cancel({ kind: 'agent', ...target, run: input.expectedRun })
         options.progress.cancelTarget(target)
         const originalContext = { ...context, assertCurrent: assertTarget }
-        // A Mote's standing heartbeat keeps the main role available: this input moves its current occurrence
-        // one interval later instead of pausing it, so no manual resume is needed.
-        const standing = options.progress.list(target).filter(loop => loop.status === 'active' && loop.managedSource)
+        // A Mote's standing heartbeat already skips each tick while this input is occupied, and
+        // the contract keeps the main role available; pausing it would wait for a manual resume.
         const loops = options.progress.list(target).filter(loop => loop.status !== 'stopped' && !loop.managedSource)
         const intents: string[] = []
         let afterIntentId: string | undefined
@@ -68,13 +67,6 @@ export function createGoalAutomationPause(options: {
           afterIntentId = page.nextIntentId ?? undefined
         } while (afterIntentId)
         const effects = await Promise.allSettled([
-          options.progress.deferManaged(standing.map(loop => loop.loopId), 'Your input moved this heartbeat to one interval later; it stays on.',
-            { prepare: assertTarget, assertCurrent: assertTargetSync }).then(results => {
-              for (const result of results) {
-                if (result.status === 'fulfilled') receipt.deferredLoopIds.push(result.value.loopId)
-                else receipt.issues.push({ stage: 'defer-standing-heartbeat', message: result.reason instanceof Error ? result.reason.message : String(result.reason) })
-              }
-            }),
           options.progress.pauseMany(loops.map(loop => loop.loopId), 'Paused for your explicit input intent. Resume the original arrangement explicitly.', originalContext,
             { prepare: assertTarget, assertCurrent: assertTargetSync }).then(results => {
               for (const result of results) {

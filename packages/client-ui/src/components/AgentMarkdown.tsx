@@ -176,8 +176,6 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       const Tag = node.tag
       return <Tag key={key} className={`md-${node.tag}`} {...(node.title ? { title: node.title } : {})}><Inline nodes={node.children} context={context} /></Tag>
     }
-    // A link inside a link label (Markdown label with an HTML <a>) is only its text: one control, one destination.
-    if (context.inLink) return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
     const target = resolveLink(node, context)
@@ -240,18 +238,10 @@ function MarkdownHtmlTable({ node, context, path }: { node: Extract<BlockNode, {
   const viewport = useVisibleWork<HTMLTableElement>(context.visible && !context.readOnly)
   const reading = useHorizontalReading<HTMLDivElement>(viewport.visible, node)
   const head = node.rows.filter(row => row.head), body = node.rows.filter(row => !row.head)
-  // Layout cards read authored percentages as proportions: when every cell of a row names one and they
-  // sum to less than 100 (33% x 3), the row fills the column. Anything else keeps the author's widths.
-  const share = (row: (typeof node.rows)[number], cell: (typeof row.cells)[number]) => {
-    const percents = row.cells.map(entry => entry.width?.endsWith('%') ? Number.parseFloat(entry.width) : NaN)
-    const total = percents.reduce((sum, value) => sum + value, 0)
-    if (!node.layout || !cell.width?.endsWith('%') || !(total > 0 && total < 100)) return cell.width
-    return `${(Number.parseFloat(cell.width) / total * 100).toFixed(3)}%`
-  }
   const row = (entry: (typeof node.rows)[number], rowIndex: number, section: string) => <tr key={rowIndex}>{entry.cells.map((cell, index) => {
     const Cell = cell.header ? 'th' : 'td'
     return <Cell key={index} className="md-html-cell" {...(cell.align ? { 'data-align': cell.align } : {})} {...(cell.valign ? { 'data-valign': cell.valign } : {})}
-      {...(cell.colspan ? { colSpan: cell.colspan } : {})} {...(cell.rowspan ? { rowSpan: cell.rowspan } : {})} style={cell.width ? { width: share(entry, cell) } : undefined}>
+      {...(cell.colspan ? { colSpan: cell.colspan } : {})} {...(cell.rowspan ? { rowSpan: cell.rowspan } : {})} style={cell.width ? { width: cell.width } : undefined}>
       {cell.children.map((child, childIndex) => <Block key={childIndex} node={child} context={context} path={`${path}:${section}:${rowIndex}:${index}:${childIndex}`} />)}
     </Cell>
   })}</tr>

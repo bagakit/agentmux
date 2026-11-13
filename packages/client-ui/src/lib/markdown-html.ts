@@ -23,29 +23,27 @@ const PARENT: Record<string, ReadonlySet<string>> = {
   caption: new Set(['table']), summary: new Set(['details']), source: new Set(['picture'])
 }
 /** Raw-text elements switch the tokenizer exactly as the HTML parser would. */
-/** A Map, so tag names such as `constructor` never resolve to an inherited object property. */
-const RAW_TEXT = new Map<string, number>([
-  ['script', TokenizerMode.SCRIPT_DATA], ['style', TokenizerMode.RAWTEXT], ['xmp', TokenizerMode.RAWTEXT], ['iframe', TokenizerMode.RAWTEXT],
-  ['noembed', TokenizerMode.RAWTEXT], ['noframes', TokenizerMode.RAWTEXT], ['noscript', TokenizerMode.RAWTEXT],
-  ['textarea', TokenizerMode.RCDATA], ['title', TokenizerMode.RCDATA], ['plaintext', TokenizerMode.PLAINTEXT]
-])
+const RAW_TEXT: Record<string, number> = {
+  script: TokenizerMode.SCRIPT_DATA, style: TokenizerMode.RAWTEXT, xmp: TokenizerMode.RAWTEXT, iframe: TokenizerMode.RAWTEXT,
+  noembed: TokenizerMode.RAWTEXT, noframes: TokenizerMode.RAWTEXT, noscript: TokenizerMode.RAWTEXT,
+  textarea: TokenizerMode.RCDATA, title: TokenizerMode.RCDATA, plaintext: TokenizerMode.PLAINTEXT
+}
 
-type HtmlAttributes = Readonly<Record<string, string>>
-type HtmlToken =
+export type HtmlAttributes = Readonly<Record<string, string>>
+export type HtmlToken =
   | { kind: 'open'; name: string; attrs: HtmlAttributes; selfClosing: boolean; source: string }
   | { kind: 'close'; name: string; source: string }
   | { kind: 'text'; text: string; source: string }
   | { kind: 'comment'; source: string }
-  /** Anything the subset cannot represent: its original characters stay readable. `rawText` marks an
-   *  unclosed raw-text start tag, whose body may continue in a later sibling node. */
-  | { kind: 'literal'; source: string; rawText?: string }
+  /** Anything the subset cannot represent: its original characters stay readable. */
+  | { kind: 'literal'; source: string }
 
 /**
  * Tokenize one remark `html` value. Text is decoded once by the HTML rules and
  * every character of the source is covered by exactly one token, so input the
  * subset cannot represent is shown as written instead of disappearing.
  */
-function tokenizeHtml(source: string): HtmlToken[] {
+export function tokenizeHtml(source: string): HtmlToken[] {
   const tokens: HtmlToken[] = []
   let cursor = 0, rawText: string | null = null, rawStart = 0
   const emit = (token: HtmlToken, start: number, end: number) => {
@@ -65,13 +63,10 @@ function tokenizeHtml(source: string): HtmlToken[] {
     onStartTag(token) {
       if (rawText !== null) return
       const [start, end] = span(token.location), raw = source.slice(start, end), name = token.tagName
-      const rawMode = RAW_TEXT.get(name)
-      if (rawMode !== undefined) {
-        // A raw-text body is not markup, so the whole element stays literal source. Only an element
-        // whose end tag follows is one; an unclosed start tag is just visible text, never a swallow.
-        if (!rawTextEnd(source, name, end)) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }
+      if (RAW_TEXT[name] !== undefined) {
+        // The body is not markup; the whole element stays literal source.
         rawText = name; rawStart = start
-        tokenizer.state = rawMode
+        tokenizer.state = RAW_TEXT[name]!
         return
       }
       if (!BLOCK.has(name) && !INLINE.has(name)) { emit({ kind: 'literal', source: raw }, start, end); return }
@@ -116,13 +111,8 @@ function tokenizeHtml(source: string): HtmlToken[] {
   return tokens
 }
 
-/** Whether the end tag of a raw-text element occurs after `from`. */
-function rawTextEnd(source: string, name: string, from: number): boolean {
-  return new RegExp(`</${name}[\\t\\n\\f\\r />]`, 'iu').test(source.slice(from) + ' ')
-}
-
 /** Non-negative integers (pixels) or percentages; anything else is dropped. */
-function htmlLength(value: string | undefined): string | undefined {
+export function htmlLength(value: string | undefined): string | undefined {
   const match = /^(\d{1,5}(?:\.\d{1,3})?)(%|px)?$/u.exec(value?.trim() ?? '')
   if (!match) return undefined
   const amount = Number(match[1])
@@ -130,12 +120,12 @@ function htmlLength(value: string | undefined): string | undefined {
   return amount > 0 && Number.isInteger(amount) ? `${amount}px` : undefined
 }
 
-function htmlAlign(value: string | undefined): HtmlAlign | undefined {
+export function htmlAlign(value: string | undefined): HtmlAlign | undefined {
   const normalized = value?.trim().toLowerCase()
   return normalized === 'left' || normalized === 'center' || normalized === 'right' || normalized === 'justify' ? normalized : undefined
 }
 
-function htmlVerticalAlign(value: string | undefined): HtmlVerticalAlign | undefined {
+export function htmlVerticalAlign(value: string | undefined): HtmlVerticalAlign | undefined {
   const normalized = value?.trim().toLowerCase()
   return normalized === 'top' || normalized === 'middle' || normalized === 'bottom' ? normalized : undefined
 }
@@ -148,72 +138,67 @@ function htmlSpan(value: string | undefined): number | undefined {
 }
 
 /** GitHub's `<picture>` theming is the only media query README authors rely on. */
-function htmlColorScheme(value: string | undefined): 'dark' | 'light' | undefined {
+export function htmlColorScheme(value: string | undefined): 'dark' | 'light' | undefined {
   const match = /^\s*\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)\s*$/iu.exec(value ?? '')
   return match ? match[1]!.toLowerCase() as 'dark' | 'light' : undefined
 }
 
 /** The first `srcset` candidate is the address; descriptors only choose density. */
-function htmlSrcsetFirst(value: string | undefined): string | undefined {
+export function htmlSrcsetFirst(value: string | undefined): string | undefined {
   return value?.trim().split(/,\s+/u)[0]?.trim().split(/\s+/u)[0] || undefined
 }
 
 /** The original projection owner keeps headings, anchors, footnotes and alerts. */
 export type HtmlProjection = {
+  blocks(nodes: RootContent[], atRoot: boolean): BlockNode[]
   inlines(nodes: PhrasingContent[]): InlineNode[]
-  /** `outline: false` builds a heading that is flattened into a line: no outline entry and no anchor. */
-  heading(level: number, children: InlineNode[], align: HtmlAlign | undefined, outline: boolean): BlockNode
-  /** Block projection for Markdown nested in HTML; `outline: false` when the result is flattened into a line. */
-  blocks(nodes: RootContent[], atRoot: boolean, outline?: boolean): BlockNode[]
+  heading(level: number, children: InlineNode[], align: HtmlAlign | undefined): BlockNode
   sourceOf: HtmlSourceOf
 }
 
 type Element = { t: 'el'; name: string; attrs: HtmlAttributes; open: string; close: string | null; children: Item[] }
 type Item = Element | { t: 'text'; text: string } | { t: 'literal'; source: string } | { t: 'node'; node: RootContent | PhrasingContent; atRoot: boolean }
 
+/** One element tree over mixed HTML tokens and Markdown nodes, without repairing unclosed structure. */
 /** Original source of a Markdown node, so a raw-text body spanning several nodes stays exactly as written. */
-type HtmlSourceOf = (node: RootContent | PhrasingContent) => string
-/** A sibling run: Markdown or html nodes (html carries its tokens, tokenized once), or a raw-text body as written. */
-type Run = { kind: 'node'; node: RootContent | PhrasingContent; tokens?: HtmlToken[] } | { kind: 'raw'; source: string }
+export type HtmlSourceOf = (node: RootContent | PhrasingContent) => string
 
 /**
  * remark splits `<script>…</script>` inside a paragraph into separate html nodes. A raw-text body
- * continues across them until its own end tag, exactly as one HTML string would be tokenized; a start
- * tag whose end tag never follows is only visible text.
+ * continues across them until its own end tag, exactly as one HTML string would be tokenized.
  */
-function rawTextRuns(nodes: readonly (RootContent | PhrasingContent)[], sourceOf: HtmlSourceOf): Run[] {
-  const out: Run[] = []
+function rawTextRuns(nodes: readonly (RootContent | PhrasingContent)[], sourceOf: HtmlSourceOf): (RootContent | PhrasingContent | { type: 'raw'; value: string })[] {
+  const out: (RootContent | PhrasingContent | { type: 'raw'; value: string })[] = []
   let open: { name: string; source: string } | null = null
-  /** Only a later sibling html node with the matching end tag makes the start tag an element. */
-  const closedLater = (index: number, name: string) => nodes.slice(index + 1).some(node => node.type === 'html' && rawTextEnd(node.value, name, 0))
-  for (const [index, node] of nodes.entries()) {
+  for (const node of nodes) {
     if (open) {
       const text = node.type === 'html' ? node.value : sourceOf(node)
       const end = node.type === 'html' ? new RegExp(`</${open.name}[\\t\\n\\f\\r />]`, 'iu').exec(text + ' ') : null
       if (!end) { open.source += text; continue }
       const close = text.indexOf('>', end.index)
       const stop = close === -1 ? text.length : close + 1
-      out.push({ kind: 'raw', source: open.source + text.slice(0, stop) })
+      out.push({ type: 'raw', value: open.source + text.slice(0, stop) })
       open = null
-      if (stop < text.length) out.push({ kind: 'node', node: { ...node, value: text.slice(stop) } as RootContent })
+      if (stop < text.length) out.push({ ...node, value: text.slice(stop) } as RootContent)
       continue
     }
-    if (node.type !== 'html') { out.push({ kind: 'node', node }); continue }
-    const tokens = tokenizeHtml(node.value), last = tokens.at(-1)
-    // The tokenizer marks an unclosed raw-text start tag; when it ends this node and a later node closes it, the body continues.
-    if (last?.kind === 'literal' && last.rawText && closedLater(index, last.rawText)) {
-      const before = tokens.slice(0, -1)
-      if (before.length) out.push({ kind: 'node', node: { ...node, value: node.value.slice(0, node.value.length - last.source.length) }, tokens: before })
-      open = { name: last.rawText, source: last.source }
-      continue
+    if (node.type === 'html') {
+      const tokens = tokenizeHtml(node.value), last = tokens.at(-1)
+      const start = last?.kind === 'literal' ? /^<([a-z]+)/iu.exec(last.source)?.[1]?.toLowerCase() : undefined
+      // A raw-text start tag whose end tag is not in this node: the body continues in later nodes.
+      if (start && RAW_TEXT[start] !== undefined && !new RegExp(`</${start}`, 'iu').test(last!.source)) {
+        const before = node.value.slice(0, node.value.length - last!.source.length)
+        if (before) out.push({ ...node, value: before })
+        open = { name: start, source: last!.source }
+        continue
+      }
     }
-    out.push({ kind: 'node', node, tokens })
+    out.push(node)
   }
-  if (open) out.push({ kind: 'raw', source: open.source })
+  if (open) out.push({ type: 'raw', value: open.source })
   return out
 }
 
-/** One element tree over mixed HTML tokens and Markdown nodes, without repairing unclosed structure. */
 function buildTree(nodes: readonly (RootContent | PhrasingContent)[], markdownClosesParagraph: boolean, sourceOf: HtmlSourceOf): Element {
   const root: Element = { t: 'el', name: '#root', attrs: {}, open: '', close: '', children: [] }
   const stack: Element[] = [root]
@@ -226,16 +211,9 @@ function buildTree(nodes: readonly (RootContent | PhrasingContent)[], markdownCl
       if (stops.has(element.name) || !OPTIONAL_END.has(element.name)) return
     }
   }
-  // Each <a> implicitly ended by a following <a> leaves one end tag that browsers ignore.
-  let impliedAnchorEnds = 0
   const paragraph = new Set(['p']), lists = new Set(['ul', 'ol']), definitions = new Set(['dl']), cells = new Set(['td', 'th'])
   const rows = new Set(['tr']), sections = new Set(['thead', 'tbody', 'tfoot']), tables = new Set(['table'])
   const implyEnds = (name: string) => {
-    // HTML never nests links: a new <a> ends the open one, so one click has one destination.
-    if (name === 'a') {
-      const index = stack.map(element => element.name).lastIndexOf('a')
-      if (index > 0) { for (const implied of stack.splice(index)) implied.close ??= ''; impliedAnchorEnds++ }
-    }
     if (CLOSES_PARAGRAPH.has(name)) closeOpen(paragraph, new Set())
     if (name === 'li') closeOpen(new Set(['li']), lists)
     if (name === 'dt' || name === 'dd') closeOpen(new Set(['dt', 'dd']), definitions)
@@ -243,15 +221,14 @@ function buildTree(nodes: readonly (RootContent | PhrasingContent)[], markdownCl
     if (name === 'tr') closeOpen(rows, new Set([...sections, ...tables]))
     if (sections.has(name)) closeOpen(sections, tables)
   }
-  for (const run of rawTextRuns(nodes, sourceOf)) {
-    if (run.kind === 'raw') { top().children.push({ t: 'literal', source: run.source }); continue }
-    const node = run.node
+  for (const node of rawTextRuns(nodes, sourceOf)) {
+    if (node.type === 'raw') { top().children.push({ t: 'literal', source: node.value }); continue }
     if (node.type !== 'html') {
       if (markdownClosesParagraph) closeOpen(paragraph, new Set())
       top().children.push({ t: 'node', node, atRoot: stack.length === 1 })
       continue
     }
-    for (const token of run.tokens ?? tokenizeHtml(node.value)) {
+    for (const token of tokenizeHtml(node.value)) {
       if (token.kind === 'comment') continue // GitHub never shows HTML comments.
       if (token.kind === 'text') { top().children.push({ t: 'text', text: token.text }); continue }
       if (token.kind === 'literal') { top().children.push({ t: 'literal', source: token.source }); continue }
@@ -271,8 +248,7 @@ function buildTree(nodes: readonly (RootContent | PhrasingContent)[], markdownCl
         const closed = stack.splice(found)
         for (const implied of closed.slice(1)) implied.close ??= ''
         closed[0]!.close = token.source
-      } else if (token.name === 'a' && impliedAnchorEnds > 0) impliedAnchorEnds--
-      else if (token.name !== 'p') top().children.push({ t: 'literal', source: token.source })
+      } else if (token.name !== 'p') top().children.push({ t: 'literal', source: token.source })
       // A stray `</p>` is an empty paragraph in HTML: nothing to read.
     }
   }
@@ -290,12 +266,6 @@ const elementNamed = (item: Item, names: ReadonlySet<string> | string): Element 
 const visibleTags = (element: Element): Item[] => [{ t: 'literal', source: element.open }, ...element.children,
   ...(element.close ? [{ t: 'literal' as const, source: element.close }] : [])]
 
-/** A link label's own text: nested links give up their destination and keep their children. */
-function unlink(nodes: readonly InlineNode[]): InlineNode[] {
-  return mergeText(nodes.flatMap(node => node.kind === 'link' ? unlink(node.children)
-    : 'children' in node ? [{ ...node, children: unlink(node.children) } as InlineNode] : [node]))
-}
-
 function plainText(nodes: readonly InlineNode[]): string {
   return nodes.map(node => 'text' in node ? node.text : 'children' in node ? plainText(node.children) : node.kind === 'image' ? node.alt : node.kind === 'break' ? '\n' : '').join('')
 }
@@ -310,25 +280,20 @@ function mergeText(nodes: InlineNode[]): InlineNode[] {
   // A hard break owns its line end; the source newline after it is not a second break.
   for (let index = 1; index < out.length; index++) {
     const node = out[index]!
-    if (out[index - 1]!.kind === 'break' && node.kind === 'text') out[index] = { kind: 'text', text: trimStartHtml(node.text) }
+    if (out[index - 1]!.kind === 'break' && node.kind === 'text') out[index] = { kind: 'text', text: node.text.replace(/^[\t\n\f\r ]+/u, '') }
   }
   return out.filter(node => node.kind !== 'text' || node.text)
 }
 
-/** HTML whitespace only (not NBSP); a linear scan, because an end-anchored regex backtracks on long inner runs. */
-const isHtmlSpace = (code: number) => code === 9 || code === 10 || code === 12 || code === 13 || code === 32
-function trimStartHtml(text: string): string { let start = 0; while (start < text.length && isHtmlSpace(text.charCodeAt(start))) start++; return text.slice(start) }
-function trimEndHtml(text: string): string { let end = text.length; while (end > 0 && isHtmlSpace(text.charCodeAt(end - 1))) end--; return text.slice(0, end) }
-
 function trimInline(nodes: InlineNode[]): InlineNode[] {
   const out = [...nodes]
   while (out[0]?.kind === 'text') {
-    const text = trimStartHtml(out[0].text)
+    const text = out[0].text.replace(/^[\t\n\f\r ]+/u, '')
     if (text) { out[0] = { kind: 'text', text }; break }
     out.shift()
   }
   while (out.at(-1)?.kind === 'text') {
-    const last = out.at(-1) as Extract<InlineNode, { kind: 'text' }>, text = trimEndHtml(last.text)
+    const last = out.at(-1) as Extract<InlineNode, { kind: 'text' }>, text = last.text.replace(/[\t\n\f\r ]+$/u, '')
     if (text) { out[out.length - 1] = { kind: 'text', text }; break }
     out.pop()
   }
@@ -356,15 +321,12 @@ function pictureFrom(element: Element): Extract<InlineNode, { kind: 'image' }> |
 }
 
 function createMapper(projection: HtmlProjection) {
-  /** Above zero while block content is being flattened into a line: headings there are text, not document structure. */
-  let inlineDepth = 0
-  const asLine = <T,>(build: () => T): T => { inlineDepth++; try { return build() } finally { inlineDepth-- } }
   function inline(items: readonly Item[]): InlineNode[] {
     const out: InlineNode[] = []
     for (const item of items) {
       if (item.t === 'text') out.push({ kind: 'text', text: item.text.replace(/[\t\n\f\r ]+/gu, ' ') })
       else if (item.t === 'literal') out.push({ kind: 'text', text: item.source })
-      else if (item.t === 'node') out.push(...(isBlockNode(item.node) ? flatten(projection.blocks([item.node as RootContent], false, false))
+      else if (item.t === 'node') out.push(...(isBlockNode(item.node) ? flatten(projection.blocks([item.node as RootContent], false))
         : projection.inlines([item.node as PhrasingContent])))
       else out.push(...inlineElement(item))
     }
@@ -383,8 +345,7 @@ function createMapper(projection: HtmlProjection) {
       return content.length ? [{ kind: 'html-mark', tag, ...((tag === 'abbr' || tag === 'dfn') && title ? { title } : {}), children: content }] : []
     }
     if (name === 'a') {
-      // HTML never nests links: an autolink or Markdown link in the label is only its text.
-      const href = element.attrs.href?.trim(), content = unlink(children())
+      const href = element.attrs.href?.trim(), content = children()
       return href && content.length ? [{ kind: 'link', href, children: content }] : content
     }
     if (name === 'img') { const image = imageFrom(element.attrs); return image ? [image] : inline(visibleTags(element)) }
@@ -392,7 +353,7 @@ function createMapper(projection: HtmlProjection) {
     if (name === 'br') return [{ kind: 'break' } as const]
     if (name === 'wbr') return []
     if (name === 'span' || name === 'time') return children()
-    return flatten(asLine(() => blockElement(element)))
+    return flatten(blockElement(element))
   }
   /** Preformatted text keeps the author's exact characters; nested markup contributes only its text. */
   function exactText(items: readonly Item[]): string {
@@ -455,7 +416,7 @@ function createMapper(projection: HtmlProjection) {
         return children.length ? [{ kind: 'paragraph', ...(align ? { align } : {}), children }] : []
       }
       case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
-        return [projection.heading(Number(element.name[1]), trimInline(inline(element.children)), align, inlineDepth === 0)]
+        return [projection.heading(Number(element.name[1]), trimInline(inline(element.children)), align)]
       case 'blockquote': {
         const children = blocks(element.children)
         return children.length ? [{ kind: 'quote', children }] : []
@@ -549,20 +510,6 @@ const isBlockNode = (node: RootContent | PhrasingContent) => !PHRASING.has(node.
 
 /** Block siblings that contain HTML: Markdown between the tags stays Markdown. */
 export function htmlBlocks(nodes: readonly RootContent[], projection: HtmlProjection): BlockNode[] {
-  // A CommonMark type-1 HTML block that opens with an unclosed raw-text tag (<script>, <style>, <textarea>,
-  // <pre>) runs to the end of the document. Its characters are not markup, so they stay readable as written,
-  // line breaks included, instead of being reflowed into one paragraph.
-  const opensRawBlock = (node: RootContent) => {
-    if (node.type !== 'html') return false
-    const first = tokenizeHtml(node.value).find(token => token.kind !== 'text' || token.text.trim())
-    return first?.kind === 'literal' && Boolean(first.rawText) && node.value.trimStart().startsWith(first.source) && /\n[\t ]*\n/u.test(node.value)
-  }
-  const index = nodes.findIndex(opensRawBlock)
-  if (index >= 0) {
-    const raw = nodes[index] as Extract<RootContent, { type: 'html' }>
-    return [...(index ? htmlBlocks(nodes.slice(0, index), projection) : []), { kind: 'code', language: null, text: raw.value },
-      ...(index + 1 < nodes.length ? htmlBlocks(nodes.slice(index + 1), projection) : [])]
-  }
   return createMapper(projection).blocks(buildTree(nodes, true, projection.sourceOf).children)
 }
 

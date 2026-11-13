@@ -65,13 +65,11 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     if (receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.admission === null) {
       const wait = receipt.control.waiting
       const owned = receipt.observation === 'owned'
-      const starting = wait?.reason === 'native-session-starting'
-      return { kind: 'saved-waiting', title: !owned && (wait?.phase === 'runtime' || wait?.phase === 'session') ? '已保存 · 等待确认' : wait?.phase === 'runtime' ? '已保存 · 等待连接' : starting ? '已保存 · 等待启动' : wait?.phase === 'session' ? '已保存 · 等待恢复' : '已保存 · 等待确认',
+      return { kind: 'saved-waiting', title: !owned && (wait?.phase === 'runtime' || wait?.phase === 'session') ? '已保存 · 等待确认' : wait?.phase === 'runtime' ? '已保存 · 等待连接' : wait?.phase === 'session' ? '已保存 · 等待恢复' : '已保存 · 等待确认',
         state: !owned && (wait?.phase === 'runtime' || wait?.phase === 'session') ? '原消息由 Core 保存；当前等待尚未接回，需要继续确认原输入。'
           : wait?.phase === 'observer' ? '本次观察已结束，原消息仍由 Core 保存。'
           : wait?.phase === 'authorization' ? '原消息已保存；需要原作者的当前授权才能继续确认。'
           : wait?.phase === 'runtime' ? '原消息已保存；原 Runtime 连接恢复后继续确认这条消息。'
-          : starting ? '原消息由 Core 保存；Agent 完成启动后自动继续首次投递。'
           : wait?.phase === 'session' ? '原消息由 Core 保存；原 Session 语义恢复后自动继续首次投递。'
           : '原消息已保存，输入环境尚未确认。完整原因保留在详情中。',
         action: owned && (wait?.wake === 'runtime-restored' || wait?.wake === 'session-restored') ? '可停止这一代等待。' : '可继续确认原环境，或停止这一代等待。' }

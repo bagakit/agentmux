@@ -216,7 +216,7 @@ export async function startNewConversation(source: RecoverySource, executorId: s
   if (result.operation !== 'agent.open') throw new Error('Creation returned another operation; its result is unknown. Check the original request.')
   return { requestId, report: result, kind: result.outcome === 'opened' ? 'confirmed' : 'unknown', message: result.outcome === 'opened'
     ? 'A new conversation started beside the original. The original Session is kept.'
-    : `The new conversation is unconfirmed. ${result.issues.map(item => item.message).join(' ')}` }
+    : result.issues.map(item => item.message).join(' ') || 'Core has not confirmed the new Session yet.' }
 }
 
 export async function analyzeWithRecoveryMote(source: RecoverySource, target: RecoveryMoteTarget,

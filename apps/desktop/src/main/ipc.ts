@@ -1577,11 +1577,11 @@ export async function registerIpc(args: {
     const result = spatialIntent ? await args.runtime.launchAgent(input, config, spatialIntent, executionBindings) : await args.runtime.launchAgent(input, config, undefined, executionBindings)
     try {
       const issue = await confirmGoalDiscussionLauncherLaunch(capturedLauncher, result, { spatial: spatialState, agent: originalDiscussionAgent })
-      if (issue) result.placementIssue = { scope: 'goal-discussion', message: issue }
+      if (issue) result.placementIssue = issue
     }
-    catch (error) { result.placementIssue = { scope: 'goal-discussion', message: 'The original discussion binding is unconfirmed: ' + (error instanceof Error ? error.message : String(error)) } }
-    const position = await attachLauncherAgentPosition(input, result, capturedLauncher, config.workspaces, spatialState)
-    if (position) result.placementIssue = { scope: 'launcher-position', message: position }
+    catch (error) { result.placementIssue = 'The original discussion binding is unconfirmed: ' + (error instanceof Error ? error.message : String(error)) }
+    const placementIssue = await attachLauncherAgentPosition(input, result, capturedLauncher, config.workspaces, spatialState)
+    if (placementIssue) result.placementIssue = placementIssue
     if (!result.placementIssue) delete result.placementIssue
     const creation = result.creation
     if (goalPmo && creation && result.created.agentSessionId === input.agentSessionId && creation.createOperationId === input.createOperationId && creation.initialPrompt === 'confirmed') {

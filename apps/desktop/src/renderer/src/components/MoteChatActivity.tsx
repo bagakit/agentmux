@@ -27,7 +27,6 @@ function intakeLabel(row: MoteChatDiagnosisIntake): { title: string; detail: str
               : input.runtime?.target === 'original' && input.runtime.state === 'interrupted' ? 'The original conversation was interrupted. This message is kept with its original Run.'
                 : input.waiting?.reason === 'original-target-changed' ? 'The original input target changed; the saved message has not been redirected.'
                   : input.waiting?.phase === 'runtime' ? 'Waiting for the original Runtime connection to return.'
-                  : input.waiting?.reason === 'native-session-starting' ? 'Waiting for the Agent to finish starting; the message then goes out once.'
                 : input.waiting?.phase === 'authorization' ? 'The original sender’s permission needs confirmation.'
                   : input.waiting?.phase === 'observer' || input.receiptObservation === 'rejoin-needed' ? 'The original input is saved, but its waiting observer is not attached.'
                     : 'The original input environment is not confirmed yet.'

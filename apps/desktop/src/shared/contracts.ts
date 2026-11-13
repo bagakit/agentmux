@@ -1183,13 +1183,9 @@ export type AgentSessionRecoveryCandidate = {
   run: AgentMuxRunRef
 }
 
-/**
- * A placement step after creation that is unconfirmed. `launcher-position` is the created Agent's own Region;
- * `goal-discussion` is a Goal's discussion binding. Neither revokes the actual Core creation or input receipt.
- */
-export type AgentPlacementIssue = { scope: 'launcher-position' | 'goal-discussion'; message: string }
 export type AgentLaunchResult = {
-  placementIssue?: AgentPlacementIssue
+  /** A local placement failure never revokes the actual Core creation or input receipt. */
+  placementIssue?: string
   /** One public Core creation receipt; missing display reads never revoke it. */
   created: AgentMuxAgentSession
   creation?: NonNullable<AgentMuxAgentSession['creation']>

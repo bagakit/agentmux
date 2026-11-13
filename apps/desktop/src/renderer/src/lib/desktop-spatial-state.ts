@@ -1,5 +1,6 @@
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
-import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
+import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict } from './spatial-merge';
+export { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
@@ -206,8 +207,6 @@ export class SpatialConflictError extends Error {
     super(`Another writer changed ${conflicts.length === 1 ? 'one workface item' : conflicts.length + ' workface items'} you also edited (${conflicts.map(conflict => conflict.key).join(', ')}). Their saved version is kept and every other change was saved; edit the item again to apply yours.`);
   }
 }
-const withConflicts = (merge: SpatialMerge, earlier: readonly SpatialConflict[]): SpatialMerge =>
-  earlier.length ? { graph: merge.graph, conflicts: [...earlier, ...merge.conflicts] } : merge;
 /** A save re-merges against a newer revision this many times before reporting it as unconfirmed. */
 const STALE_REVISION_ATTEMPTS = 3;
 /**
@@ -226,16 +225,6 @@ const defaultSaveClock: SpatialSaveClock = { now: () => Date.now(), setTimeout: 
   clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) };
 export type SpatialSaveObservation = { pendingSince: number | null; lastConfirmedAt: number | null; stalled: boolean;
   lastFailureCode: string | null; conflicts: number };
-/**
- * A storage reply still missing when the watchdog finds it older than the stall bound is treated as lost: the
- * write may or may not have landed, exactly like a lost acknowledgement, so the next attempt re-reads and merges
- * against it, and Core's revision check keeps a late write from replacing anything newer. Waiting longer would
- * only hold every later save and checkpoint behind it. The stall notice already says the save has not answered.
- */
-export class SpatialReplyOverdueError extends Error {
-  readonly code = 'SPATIAL_REPLY_OVERDUE';
-  constructor() { super('Workface storage did not answer this save. The changes stay on screen and are retried.'); }
-}
 /** Workface changes have stayed unconfirmed past the bound. The original work stays visible and retried. */
 export class SpatialSaveStalledError extends Error {
   readonly code = 'SPATIAL_SAVE_STALLED';
@@ -271,12 +260,8 @@ export class DesktopSpatialPersistence {
   private apply: ((state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void) | null = null;
   private acknowledgeName: ((state: AgentMuxSpatialState) => void) | undefined;
   private unsubscribe: (() => void) | null = null;
-  private readonly warn: (error: unknown) => void;
-  constructor(private readonly port: DesktopSpatialPort, warn: (error: unknown) => void,
-    private readonly clock: SpatialSaveClock = defaultSaveClock) {
-    // A replaced owner's late save outcome belongs to nobody; the next owner re-captures the workbench.
-    this.warn = error => { if (!this.disposed) warn(error); };
-  }
+  constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void,
+    private readonly clock: SpatialSaveClock = defaultSaveClock) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
   /** Read-only observation: equal graphs cannot settle an in-flight or unknown write. */
   get pendingChanges(): boolean { return !!(this.startup || this.pending || this.saving || this.unconfirmed); }
@@ -301,24 +286,9 @@ export class DesktopSpatialPersistence {
     if (this.watchdog !== null || this.disposed) return;
     this.watchdog = this.clock.setTimeout(() => { this.watchdog = null; this.check(); }, delay);
   }
-  // The storage reply this save is waiting for. The watchdog stops waiting for an overdue one; the
-  // request itself is never cancelled.
-  private reply: { since: number; abandon: (error: Error) => void } | null = null;
-  private awaitReply<T>(request: Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const reply = { since: this.clock.now(), abandon: reject };
-      this.reply = reply;
-      request.then(resolve, reject).finally(() => { if (this.reply === reply) this.reply = null; });
-    });
-  }
   private check(): void {
     if (!this.pendingChanges || this.pendingSince === null) return;
-    if (this.saving) {
-      this.arm(SAVE_STALL_AFTER_MS);
-      this.reportStall();
-      if (this.reply && this.clock.now() - this.reply.since >= SAVE_STALL_AFTER_MS) this.reply.abandon(new SpatialReplyOverdueError());
-      return;
-    }
+    if (this.saving) { this.arm(SAVE_STALL_AFTER_MS); return this.reportStall(); }
     // Nothing is in flight: the last attempt failed or nothing has retried it yet. Retry with backoff.
     this.reportStall();
     this.arm(Math.min(SAVE_RETRY_MAX_MS, SAVE_STALL_AFTER_MS * 2 ** Math.min(this.failures, 4)));
@@ -336,7 +306,7 @@ export class DesktopSpatialPersistence {
     if (this.pendingChanges) return;
     this.pendingSince = null;
     if (this.watchdog !== null) { this.clock.clearTimeout(this.watchdog); this.watchdog = null; }
-    if (this.stalled) { this.stalled = false; if (!this.disposed) this.onRecovered?.(); }
+    if (this.stalled) { this.stalled = false; this.onRecovered?.(); }
   }
   private failed(error: unknown): void {
     this.failures++;
@@ -457,41 +427,7 @@ export class DesktopSpatialPersistence {
     this.pending = { graph, baseline: this.pending?.baseline ?? this.applied ?? this.state! };
     this.markPending();
     // Coalesce synchronous structural changes; this never opens a resource or Run.
-    // An overdue reply is the stall this owner has already announced, not a second failure.
-    queueMicrotask(() => { void this.flush().catch(error => { if (!(error instanceof SpatialReplyOverdueError)) this.warn(error); }); });
-  }
-  /**
-   * Merge `local` onto the current document and commit it. Another writer may commit between the read and
-   * the commit; a refused stale revision is merged again against the newer document, a bounded number of
-   * times, before the failure is reported. The attempted graph is recorded as the unconfirmed intermediate,
-   * so the next pass is exact both when another writer won the race (Core applied nothing) and when our
-   * write landed and only its reply was lost: a value already present on the remote side counts as agreement.
-   */
-  private async commitMerged(local: AgentMuxSpatialGraph, baseline: AgentMuxSpatialState, removals: ReadonlySet<string>,
-    groupRemovals: ReadonlySet<string>): Promise<{ next: AgentMuxSpatialState; merged: SpatialMerge }> {
-    let remote = await this.awaitReply(this.port.read());
-    for (let attempt = 1; ; attempt++) {
-      if (!remote) throw new Error('The durable spatial document is unavailable. Pending work is retained.');
-      const uncertain = this.unconfirmed;
-      // A lost ACK may have saved the attempted graph. Carry the later input delta onto it, keeping unrelated
-      // observed data; equal values permit a merge but never prove who applied the write. A later local edit
-      // the attempted graph had already changed elsewhere is a conflict like any other.
-      const carried = uncertain && reconcileSpatialGraphs(uncertain.input, local, uncertain.graph);
-      const merged = uncertain && carried ? withConflicts(reconcileSpatialGraphs(uncertain.baseline.graph, carried.graph, remote.graph, uncertain.graph), carried.conflicts)
-        : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
-      try {
-        const next = await this.awaitReply(this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
-          ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) }));
-        return { next, merged };
-      } catch (error) {
-        this.unconfirmed = { baseline: remote, input: local, graph: merged.graph };
-        // Only a document that has moved on is worth merging again right away; anything else is reported, and
-        // the next successful read supplies the baseline. An unconfirmed projection is never applied.
-        const newer = attempt < STALE_REVISION_ATTEMPTS ? await this.awaitReply(this.port.read()).catch(() => null) : null;
-        if (!newer || newer.revision <= remote.revision) throw error;
-        remote = newer;
-      }
-    }
+    queueMicrotask(() => { void this.flush().catch(this.warn); });
   }
   async flush(): Promise<void> {
     if (this.saving) {
@@ -506,23 +442,60 @@ export class DesktopSpatialPersistence {
       const pending = this.pending, local = pending.graph, baseline = pending.baseline;
       const removals = new Set(this.removed);
       const groupRemovals = new Set(this.removedProjectGroups);
-      const { next, merged } = await this.commitMerged(local, baseline, removals, groupRemovals);
+      // Another writer may commit between this read and the commit; a refused stale revision is
+      // merged again against the newer document a bounded number of times before it is reported.
+      let remote: AgentMuxSpatialState | null = null, merged: ReturnType<typeof reconcileSpatialGraphs> | null = null, next: AgentMuxSpatialState | null = null;
+      let observed: AgentMuxSpatialState | null = null;
+      for (let attempt = 0; attempt < STALE_REVISION_ATTEMPTS && !next; attempt++) {
+        remote = observed ?? await this.port.read();
+        observed = null;
+        if (!remote)
+          throw new Error('The durable spatial document is unavailable. Pending work is retained.');
+        const uncertain = this.unconfirmed;
+        // A lost ACK may have saved the intermediate edit. Carry the subsequent
+        // input delta onto that attempted graph, retaining unrelated observed data.
+        // Equal values permit a merge; they never prove who applied the write.
+        // Each key merges on its own: a conflict keeps the committed remote value for that
+        // key and is retained by name, while every other change is still committed.
+        merged = uncertain ? reconcileSpatialGraphs(uncertain.baseline.graph,
+          reconcileSpatialGraphs(uncertain.input, local, uncertain.graph).graph, remote.graph, uncertain.graph)
+          : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
+        try {
+          next = await this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
+            ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
+        } catch (error) {
+          // When the document has moved on, merge again against that newer revision right away. The
+          // attempted graph is recorded as the unconfirmed intermediate, so the next pass is exact both
+          // when another writer won the race (Core applied nothing) and when our write landed and only
+          // its reply was lost: a value already present on the remote side counts as agreement.
+          this.unconfirmed = { baseline: remote, input: local, graph: merged.graph };
+          if (attempt + 1 < STALE_REVISION_ATTEMPTS) {
+            observed = await this.port.read().catch(() => null);
+            if (observed && observed.revision > remote.revision) continue;
+            observed = null;
+          }
+          // Each successful read supplies the next baseline, including after
+          // repeated lost replies. Do not apply an unconfirmed projection.
+          throw error;
+        }
+      }
+      if (!next || !merged) throw new Error('The durable spatial document kept changing during this save. Pending work is retained.');
       this.unconfirmed = null;
       this.state = next;
-      // Later local edits were made against our in-flight graph. Preserve the remote changes accepted by
-      // that write, without treating our own ACK as a conflict; a later edit to a key another writer changed
-      // meanwhile is reported with this save's conflicts.
-      const later = this.pending !== pending && this.pending ? reconcileSpatialGraphs(local, this.pending.graph, next.graph) : null;
-      this.retain(later ? [...merged.conflicts, ...later.conflicts] : merged.conflicts);
+      this.retain(merged.conflicts);
       for (const id of removals)
         this.removed.delete(id);
       for (const id of groupRemovals) this.removedProjectGroups.delete(id);
-      if (later) this.pending = { baseline: next, graph: later.graph };
-      else if (this.pending === pending) {
+      if (this.pending === pending) {
         this.pending = null;
-        // `local` is the baseline the UI already shows. A conflicting key then applies the
-        // committed value, so the next capture starts from what Core holds.
+        // `local` is the baseline the UI already shows. A retained conflict then applies the
+        // committed value for that key, so the next capture starts from what Core holds.
         this.publish(next, local);
+      }
+      else if (this.pending) {
+        // Later local edits were made against our in-flight graph. Preserve the
+        // remote changes accepted by that write, without treating our own ACK as a conflict.
+        this.pending = { baseline: next, graph: reconcileSpatialGraphs(local, this.pending.graph, next.graph).graph };
       }
     })();
     try {

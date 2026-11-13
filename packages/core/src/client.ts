@@ -225,7 +225,6 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
 // A native conversation reports its start within the composer readiness window; past it the start is unknown.
 const NATIVE_SESSION_START_WAIT_MS = 120_000
-const NATIVE_STARTED_BINDING_SOURCES: ReadonlySet<NonNullable<AgentMuxStoredAgentSession['nativeBinding']>['source']> = new Set(['native-hook', 'process-witness', 'user-confirmed'])
 // A local event annotation, never serialized or retained as another Session fact owner.
 const localSessionObservation = Symbol('local-session-observation')
 type LocalSessionObservation = 'terminalOutputChannel' | 'terminalCapability'
@@ -1017,13 +1016,10 @@ export class AgentMuxClient {
         const session = event.session, ids = this.inputWaitingByRecipient.get(session.agentSessionId)
         if (!ids) return
         // Status/token publications do not read the journal or reschedule input.
-        // The current Run's first Hook or source observation releases an input held for its native start.
         const target = JSON.stringify([session.run, session.providerId, session.executorId,
           session.nativeHandle, session.nativeBinding?.source, session.nativeBinding?.run,
           session.continuity && [session.continuity.operationId, session.continuity.kind, session.continuity.previousRun,
-            session.continuity.newRun, session.continuity.nativeTarget],
-          Boolean(session.hookReceipt && sameRun(session.hookReceipt.run, session.run)),
-          Boolean(session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run))])
+            session.continuity.newRun, session.continuity.nativeTarget]])
         let requested = false
         for (const id of ids) {
           const value = this.inputWaitingContexts.get(id)
@@ -6744,8 +6740,7 @@ export class AgentMuxClient {
     if (!this.hookBindings.has(session.run.runId) || boundAt === undefined || Date.now() - boundAt > NATIVE_SESSION_START_WAIT_MS) return false
     if (session.hookReceipt && sameRun(session.hookReceipt.run, session.run)) return false
     if (session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run)) return false
-    // Only a binding this Run observed after it started counts; a resume writes its chosen target before any Hook.
-    return !(session.nativeBinding && sameRun(session.nativeBinding.run, session.run) && NATIVE_STARTED_BINDING_SOURCES.has(session.nativeBinding.source))
+    return !(session.nativeBinding && sameRun(session.nativeBinding.run, session.run) && session.nativeBinding.source !== 'semantic-resume-target')
   }
 
   private activateHookBinding(runId: string, binding: AgentHookBinding): void {

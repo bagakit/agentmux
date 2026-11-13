@@ -5,17 +5,11 @@ import { SemanticIcon } from '../theme/icons.js'
 export type MarkdownReadingWidth = 'standard' | 'wide' | 'full'
 export type MarkdownReadingTypeface = 'sans' | 'serif'
 export type MarkdownReadingLayoutValue = { width: MarkdownReadingWidth; typeface: MarkdownReadingTypeface; fontSize: number }
-/** One reader choice, never a whole layout: the Host applies it to the value it saves at that time, so quick choices compose. */
-export type MarkdownReadingLayoutChange =
-  | { kind: 'width'; width: MarkdownReadingWidth }
-  | { kind: 'typeface'; typeface: MarkdownReadingTypeface }
-  | { kind: 'font-size-step'; step: 1 | -1 }
-  | { kind: 'font-size-reset' }
-/** The Host owns persistence; this control only reports the reader's choice. */
+/** The Host owns persistence; this control only reports the reader's next choice. */
 export type MarkdownReadingLayout = {
   value: MarkdownReadingLayoutValue
   fontSizes: { min: number; max: number; default: number }
-  onChange(change: MarkdownReadingLayoutChange): void
+  onChange(next: MarkdownReadingLayoutValue): void
 }
 
 const WIDTHS: { id: MarkdownReadingWidth; label: string }[] = [{ id: 'standard', label: 'Standard' }, { id: 'wide', label: 'Wide' }, { id: 'full', label: 'Full' }]
@@ -43,6 +37,7 @@ function Segmented<T extends string>({ label, options, value, onChange, sample }
 export function MarkdownReadingLayoutControl({ layout }: { layout: MarkdownReadingLayout }) {
   const [open, setOpen] = useState(false)
   const { value, fontSizes } = layout
+  const change = (next: Partial<MarkdownReadingLayoutValue>) => layout.onChange({ ...value, ...next })
   return <div className="md-reading"><Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild>
       <button type="button" className="md-outline__trigger md-reading__trigger" aria-label="Reading layout" title="Reading layout">
@@ -55,17 +50,17 @@ export function MarkdownReadingLayoutControl({ layout }: { layout: MarkdownReadi
         <Dialog.Close asChild><button type="button" className="md-outline__close" aria-label="Close reading layout"><SemanticIcon name="action.close" size={13} aria-hidden="true" /></button></Dialog.Close>
       </div>
       <div className="md-reading__body">
-        <Segmented label="Width" options={WIDTHS} value={value.width} onChange={width => layout.onChange({ kind: 'width', width })} />
-        <Segmented label="Typeface" options={TYPEFACES} value={value.typeface} onChange={typeface => layout.onChange({ kind: 'typeface', typeface })} sample />
+        <Segmented label="Width" options={WIDTHS} value={value.width} onChange={width => change({ width })} />
+        <Segmented label="Typeface" options={TYPEFACES} value={value.typeface} onChange={typeface => change({ typeface })} sample />
         <div className="md-reading__group" role="group" aria-label="Text size">
           <span className="md-reading__label">Size</span>
           <div className="md-reading__stepper">
             <button type="button" className="md-reading__step" aria-label="Smaller text" disabled={value.fontSize <= fontSizes.min}
-              onClick={() => layout.onChange({ kind: 'font-size-step', step: -1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="down">A</span></button>
+              onClick={() => change({ fontSize: value.fontSize - 1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="down">A</span></button>
             <button type="button" className="md-reading__size" aria-label={`Text size ${value.fontSize} pixels, reset to ${fontSizes.default}`}
-              title="Reset text size" onClick={() => layout.onChange({ kind: 'font-size-reset' })}>{value.fontSize}px</button>
+              title="Reset text size" onClick={() => change({ fontSize: fontSizes.default })}>{value.fontSize}px</button>
             <button type="button" className="md-reading__step" aria-label="Larger text" disabled={value.fontSize >= fontSizes.max}
-              onClick={() => layout.onChange({ kind: 'font-size-step', step: 1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="up">A</span></button>
+              onClick={() => change({ fontSize: value.fontSize + 1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="up">A</span></button>
           </div>
         </div>
       </div>

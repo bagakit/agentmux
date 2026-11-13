@@ -1,4 +1,9 @@
 .session-recovery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+/* On a surface the recovery buttons join its one action row, so they wrap as one line of controls. */
+.surface-state__actions > .session-recovery-actions { display: contents; }
+/* Feedback for the row's action sits on its own line, after every button, so the row never splits. */
+.session-recovery-actions__notice { order: 1; flex: 0 0 100%; min-width: 0; }
+.session-recovery-actions__notice > .service-window { margin: 0; }
 .session-recovery-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); padding: var(--sp-6); overflow-y: auto; }
 .session-recovery-dialog h2 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; line-height: 1.4; }
 .session-recovery-dialog > p { margin: var(--sp-4) 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }

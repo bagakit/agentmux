@@ -154,6 +154,6 @@ function StartNewConversation({ source, executorId }: { source: RecoverySource; 
     <button type="button" className="primary-button" disabled={busy} aria-busy={busy} onClick={() => void start()}>
       <ThemeActionCreateConversationIcon size={12} /> {busy ? 'Starting…' : 'Start a new conversation here'}
     </button>
-    {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'New conversation unconfirmed', mode: issue, restore: 'Press it again to check the same request; nothing is resent.' } }} /> : null}
+    {issue ? <div className="session-recovery-actions__notice"><ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'New conversation unconfirmed', mode: issue, restore: 'Press it again to check the same request; nothing is resent.' } }} /></div> : null}
   </>
 }

@@ -123,7 +123,7 @@ export function classifyContinuityFailure(
       // the one action that works; the original Session stays readable beside the new one.
       return {
         title: 'No conversation to continue',
-        reason: 'AgentMux holds no conversation for this Session to continue. Its Tab, history and draft are kept.',
+        reason: 'The original Tab, history and draft stay. A new conversation opens beside it with the same Agent.',
         remedy: { kind: 'start-new' },
         actionLabel: 'Start a new conversation here'
       }
