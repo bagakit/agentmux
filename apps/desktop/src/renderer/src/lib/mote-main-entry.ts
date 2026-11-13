@@ -6,7 +6,18 @@ import { useAppStore } from '../store'
 import { api } from './api'
 import { agentSessionPresentationIndex } from './session-presentation'
 
-type EntryState = { status:'idle'|'reading'|'recovering'|'unconfirmed'|'settled'; issue:string|null }
+/** `unavailable` is Core's own result that this Main has nothing to resume; a new round is the way forward. */
+type EntryState = { status:'idle'|'reading'|'recovering'|'unconfirmed'|'unavailable'|'settled'; issue:string|null }
+/** Core's reason that the exact Main cannot be resumed, in words that name the way forward. */
+export function moteMainUnavailableIssue(reason: string): string {
+  switch (reason) {
+    case 'native-handle-unavailable': return '主 Agent 已退出，且没有留下可接续的原生对话，无法原样恢复。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
+    case 'provider-resume-unsupported': return '这个主 Agent 的 Provider 不支持恢复原对话。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
+    case 'provider-unavailable': return '这台 Host 上找不到主 Agent 的 Provider。装好后可再次打开以恢复；原对话和草稿都在。'
+    case 'unknown-session': return 'Core 已不认识这个主 Agent 的 Session。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
+    default: return `主 Agent 无法恢复（${reason}）。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。`
+  }
+}
 /** One explicit UI entry consumes the original Core owner. This token grants no Core authority. */
 export function useMoteMainEntry({ scope, entryToken, active }: { scope:MoteWorkfaceScope|null; entryToken?:string|undefined; active:boolean }) {
   const dialogue = useMoteDialogueView(), main = dialogue?.page?.main, target = dialogue?.target
@@ -54,9 +65,11 @@ export function useMoteMainEntry({ scope, entryToken, active }: { scope:MoteWork
       if (latest.current !== key) return
       if (op) retained.current = { key, request:{ ...request, ...op.moteMainEntry, expectedRun:op.previousRun, operationId:op.operationId } }
       const settled = op && (op.kind === 'resumed' || op.kind === 'reattachable')
-      setState({ status:settled ? 'settled' : 'unconfirmed', issue:settled ? null : op
-        ? `原恢复操作 ${op.operationId} 尚未确认（${op.reason}）；保留原对话，可核对同一操作。`
-        : '原恢复操作尚未读到；保留原对话和输入，不重复启动。' })
+      setState(settled ? { status:'settled', issue:null }
+        : op?.kind === 'unavailable' ? { status:'unavailable', issue:moteMainUnavailableIssue(op.reason) }
+        : { status:'unconfirmed', issue:op
+          ? `原恢复操作 ${op.operationId} 尚未确认（${op.reason}）；保留原对话，可核对同一操作。`
+          : '原恢复操作尚未读到；保留原对话和输入，不重复启动。' })
       if (settled) await useAppStore.getState().refreshSession(request.reference.sessionId)
     } catch (error) {
       if (latest.current === key) setState({ status:'unconfirmed', issue:error instanceof Error ? error.message : String(error) })
