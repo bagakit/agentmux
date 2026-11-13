@@ -723,12 +723,19 @@ export async function readOriginalMoteConfiguration(path: string): Promise<unkno
   if (!isAbsolute(path)) throw new Error('The original absolute Mote configuration path is unavailable.')
   return JSON.parse(await readFile(path, 'utf8'))
 }
-/** The Mote, Topic and legacy Scratch roots this Host creates under the one local Scratch workspace. */
-export async function moteOwnedWorkspaceRoots(path: string): Promise<readonly string[]> {
+/**
+ * Whether `workspacePath` is exactly one Mote or Topic home of the one local Scratch workspace, as
+ * its directory-identity owner confirms it; a retained alias of that home counts. A Provider is
+ * pre-trusted only there. A folder nested in a home, a user Project and every other folder keep
+ * their native folder-trust prompt. The bare legacy Scratch root is deliberately not a home: it is
+ * the general no-Project workspace, and AgentMux cannot vouch for the arbitrary user and Agent
+ * folders (clones, drafts, downloads) that live in it.
+ */
+export async function moteOwnedWorkspaceHome(path: string, workspacePath: string): Promise<boolean> {
   const raw = await readOriginalMoteConfiguration(path) as { workspaces?: unknown }
-  const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is { id: string; hostId: string; path: string } =>
+  const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is ScratchWorkspace =>
     !!value && typeof value === 'object' && value.id === SCRATCH_WORKSPACE_ID && value.hostId === 'local' && typeof value.path === 'string') : []
-  return scratch.length === 1 ? Object.values(scratchTopicStorageRoots(scratch[0]!.path)) : []
+  return scratch.length === 1 && await new ScratchTopics().readForDirectory(scratch[0]!, workspacePath) !== null
 }
 /** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */
 export async function readConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {

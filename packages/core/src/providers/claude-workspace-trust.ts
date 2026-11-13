@@ -1,21 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readFile, realpath, rename, rmdir, stat, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rmdir, stat, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../agent-provider.js'
 
 /**
  * Claude asks "Is this a project you trust?" on its first start in an untrusted folder. The
  * cursor rests on "No, exit", so the first Enter AgentMux types ends the Run before any native
- * conversation exists. AgentMux pre-trusts only directories it owns (the Mote and Topic homes),
- * through the same record Claude writes when a person accepts that dialog.
+ * conversation exists. AgentMux pre-trusts only the exact home the Host confirmed for this launch
+ * (a Mote or Topic home), through the same record Claude writes when a person accepts that dialog.
  *
  * Facts read from the shipped Claude Code bundle, not guessed:
  * - The global file is `$CLAUDE_CONFIG_DIR` (else `$HOME`) / `.claude<suffix>.json`; a non-empty
  *   legacy `<config dir>/.config.json` wins when present.
- * - A folder is trusted when `projects[<NFC path>].hasTrustDialogAccepted === true` for it or,
- *   outside git, for any ancestor. Inside an untrusted git repository only that repository root
- *   counts, so trusting an owned root never extends to a foreign repository placed beneath it.
+ * - A folder is trusted when `projects[<key>].hasTrustDialogAccepted === true` for its git root, or
+ *   for it or an ancestor up to that git root (any ancestor outside git). Trusting exactly the home
+ *   covers its own folders but never a foreign repository nested in it: Claude stops that walk at
+ *   the nested repository's root and keeps asking.
  * - Claude serializes writes with a `mkdir <file>.lock` lock (proper-lockfile, stale after 10 s)
  *   and rebuilds `projects` by merging per key, so one key changed under that lock survives.
  */
@@ -46,19 +47,6 @@ export async function claudeGlobalConfigPath(env: Readonly<Record<string, string
 
 function trusted(config: ClaudeConfig, key: string): boolean {
   return config.projects?.[key]?.hasTrustDialogAccepted === true
-}
-
-function inside(child: string, root: string): boolean {
-  return child === root || child.startsWith(root.endsWith(sep) ? root : root + sep)
-}
-
-/** The nearest directory between `workspace` and `root` (inclusive) that holds a `.git` entry. */
-async function nearestRepository(workspace: string, root: string): Promise<string | null> {
-  for (let current = workspace; inside(current, root); current = dirname(current)) {
-    try { await lstat(join(current, '.git')); return current } catch { /* not a repository root */ }
-    if (current === root || dirname(current) === current) return null
-  }
-  return null
 }
 
 async function readConfig(path: string): Promise<ClaudeConfig | null> {
@@ -99,23 +87,11 @@ async function writeAtomically(path: string, content: string, mode: number): Pro
 }
 
 /**
- * Record Claude folder trust for the AgentMux-owned root that contains `workspacePath`, or for the
- * workspace itself when it is a git repository inside that root. Never trusts anything outside
- * `ownedRoot`, never creates the configuration file, and changes only that one project entry.
+ * Record Claude folder trust for `workspacePath`, a home the Host confirmed as AgentMux's own.
+ * Never creates the configuration file and changes only that one project entry.
  */
 export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt> {
-  const root = resolve(context.ownedRoot), workspace = resolve(context.workspacePath)
-  if (!inside(workspace, root)) return { status: 'not-applicable', trustKey: null, configPath: null, code: 'WORKSPACE_NOT_OWNED' }
-  // A symlinked workspace is trusted under its spelled path; the owned root must not escape through one.
-  const [realRoot, realWorkspace] = await Promise.all([realpath(root), realpath(workspace)])
-  if (!inside(realWorkspace, realRoot)) return { status: 'not-applicable', trustKey: null, configPath: null, code: 'WORKSPACE_NOT_OWNED' }
-  const repository = await nearestRepository(workspace, root)
-  // Only the owned root or one home directly under it is AgentMux's to vouch for. A repository
-  // placed deeper (a cloned dependency, a reference checkout) is foreign: Claude keeps asking.
-  if (repository && repository !== root && dirname(repository) !== root) {
-    return { status: 'not-applicable', trustKey: null, configPath: null, code: 'WORKSPACE_FOREIGN_REPOSITORY' }
-  }
-  const trustKey = claudeTrustKey(repository ?? root)
+  const trustKey = claudeTrustKey(context.workspacePath)
   const configPath = await claudeGlobalConfigPath(context.env)
   try {
     const before = await readConfig(configPath)

@@ -11,7 +11,7 @@ import { createHostSpatialAgentControl } from './spatial-agent-control.js'
 import { createHostGoals } from './goals.js'
 import { projectWorkspaces } from './workspace-projects.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
-import { moteOwnedWorkspaceRoots, readConfiguredExecutor } from './mote-resources.js'
+import { moteOwnedWorkspaceHome, readConfiguredExecutor } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
@@ -288,7 +288,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
-      ...(configurationPath ? { ownedWorkspaceRoots: () => moteOwnedWorkspaceRoots(configurationPath) } : {}),
+      ...(configurationPath ? { ownedWorkspaceHome: (workspacePath: string) => moteOwnedWorkspaceHome(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,

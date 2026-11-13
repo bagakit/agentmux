@@ -63,7 +63,7 @@ import type { AgentMuxRunStorageObservation } from './run-storage-observation.js
 
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding
@@ -511,10 +511,12 @@ export type AgentMuxClientOptions = {
    */
   hookInstaller?: AgentManagedHookInstaller
   /**
-   * Directories this Host itself creates and owns (Mote and Topic homes). A Provider that asks for
-   * folder trust is pre-trusted only inside them; user Projects keep their native prompt.
+   * Whether this exact launch cwd is a home the Host itself creates and owns (a Mote or Topic
+   * home, or an alias of one). A Provider that asks for folder trust is pre-trusted only there;
+   * user Projects and every other folder keep their native prompt. A throw means the Host could
+   * not confirm it: Core publishes a notice and the launch continues.
    */
-  ownedWorkspaceRoots?: () => Promise<readonly string[]>
+  ownedWorkspaceHome?: (workspacePath: string) => Promise<boolean>
 }
 
 export type AgentMuxAgentRuntimeStatus = {
@@ -831,7 +833,7 @@ export class AgentMuxClient {
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
   private readonly hookInstaller: AgentManagedHookInstaller
-  private readonly ownedWorkspaceRoots: () => Promise<readonly string[]>
+  private readonly ownedWorkspaceHome: (workspacePath: string) => Promise<boolean>
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
   private unsubscribeConnectionLost: (() => void) | null = null
@@ -1088,7 +1090,7 @@ export class AgentMuxClient {
     )
     this.hookInstaller = options.hookInstaller
       ?? new AgentManagedHookInstaller(join(defaultCtxmuxStateDirectory(), 'hooks'))
-    this.ownedWorkspaceRoots = options.ownedWorkspaceRoots ?? (async () => [])
+    this.ownedWorkspaceHome = options.ownedWorkspaceHome ?? (async () => false)
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: async (agentSessionId, event, evidence) => {
@@ -5738,18 +5740,18 @@ export class AgentMuxClient {
     if (!provider.prepareOwnedWorkspaceTrust) return
     const target = resolve(workspacePath)
     try {
-      const ownedRoot = (await this.ownedWorkspaceRoots()).map(root => resolve(root))
-        .find(root => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep))
-      if (!ownedRoot) return
-      const receipt = await provider.prepareOwnedWorkspaceTrust({ ownedRoot, workspacePath: target, env })
+      // The Host's directory-identity owner decides; Core never infers a home from a path prefix.
+      if (!await this.ownedWorkspaceHome(target)) return
+      const receipt = await provider.prepareOwnedWorkspaceTrust({ workspacePath: target, env })
       if (receipt.status !== 'unconfirmed') return
       this.publisher.publish({ type: 'agent-error', agentSessionId, code: receipt.code,
         message: `${provider.label} folder trust for this AgentMux home is unconfirmed, so it may ask whether to trust the folder. ` +
           `Answer that prompt in the terminal; the Agent launch continues. ${receipt.issue ?? ''}`.trim(),
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     } catch (error) {
+      // Whether this cwd is a home may itself be what failed, so the notice does not claim it is one.
       this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED',
-        message: `${provider.label} folder trust for this AgentMux home is unconfirmed; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
+        message: `${provider.label} folder trust for this workspace is unconfirmed, so it may ask whether to trust the folder; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     }
   }
