@@ -2089,6 +2089,7 @@ export async function registerIpc(args: {
     return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() }
   }))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
+  handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
   handleWithEvent('browser:updateProfile', (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) =>
     ipcResult(() => browserProfiles.updateProfile(profileId, edit, expectedRevision)))
   handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))

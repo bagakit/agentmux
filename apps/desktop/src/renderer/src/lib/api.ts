@@ -1468,6 +1468,7 @@ const mockApi: AgentMuxDesktopApi = {
     recordInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     removeInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     clearInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    copyProfile: async () => { throw new Error('Copying Browser Profile settings requires the desktop app.') },
     createProfile: async (label) => {
       const profile: BrowserProfileSummary = {
         id: mintObjectId(),

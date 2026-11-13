@@ -2137,6 +2137,7 @@ export type AgentMuxDesktopApi = {
     /** Moves only which Profile new Browsers use; it edits no Profile, so it names no revision. */
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
+    copyProfile(profileId: string, label: string, expectedRevision: number): Promise<BrowserProfileSummary>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>

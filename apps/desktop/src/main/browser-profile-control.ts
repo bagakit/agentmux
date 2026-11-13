@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'updateProfile' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -68,6 +68,11 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     case 'browser.profile.create': {
       const profile = await owned(() => ports.profiles.createProfile(request.label))
       return { operation: request.operation, revision: ports.profiles.listRevision(), profile }
+    }
+    case 'browser.profile.copy': {
+      existing(ports, request.profileId)
+      const profile = await owned(() => ports.profiles.copyProfile(request.profileId, request.label, request.expectedRevision))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), sourceProfileId: request.profileId, profile }
     }
     case 'browser.profile.update': {
       existing(ports, request.profileId)

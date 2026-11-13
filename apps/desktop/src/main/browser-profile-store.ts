@@ -277,6 +277,28 @@ export class BrowserProfileStore {
     })
   }
 
+  /** Copy saved configuration into a new identity in the same atomic metadata write. */
+  copyProfile(profileId: string, label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+    return this.enqueue(async () => {
+      const validatedProfileId = profileIdSchema.parse(profileId), validatedLabel = validateBrowserProfileLabel(label)
+      // An exact-source copy must not initialize a substitute identity if its original file is missing.
+      const metadata = metadataSchema.parse(JSON.parse(await readFile(this.path, 'utf8')))
+      this.assertRevision(metadata, expectedRevision)
+      const original = metadata.profiles.find(profile => profile.id === validatedProfileId)
+      if (!original) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
+      // Deliberately list configuration fields; import history, approvals and native application
+      // observations do not become authority for the new Profile.
+      const profile: BrowserProfileRecord = { id: this.createUnusedProfileId(metadata), label: validatedLabel, createdAt: Date.now(), source: null,
+        ...(original.hue === undefined ? {} : { hue: original.hue }),
+        ...(original.notes === undefined ? {} : { notes: original.notes }),
+        ...(original.network === undefined ? {} : { network: structuredClone(original.network) }),
+        ...(original.environment === undefined ? {} : { environment: structuredClone(original.environment) }),
+        ...(original.agentAccess === false ? { agentAccess: false as const } : {}) }
+      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile] })
+      return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
+    })
+  }
+
   /**
    * Removes a Profile from the list and records it as deleted in the same write, before any of its
    * site data is touched. A failed write leaves the Profile and its data as they were; a failed clear

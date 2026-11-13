@@ -211,6 +211,16 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     })())
   }
 
+  /** Copy only saved settings. A new native session is prepared when a Browser actually opens it. */
+  async copyProfile(profileId: string, label: string, expectedRevision: number): Promise<BrowserProfileSummary> {
+    this.resolvePartition(profileId)
+    return await this.trackMutation((async () => {
+      const { snapshot, profile } = await this.store.copyProfile(profileId, label, expectedRevision)
+      this.adopt(snapshot)
+      return cloneProfile(profile)
+    })())
+  }
+
   async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void> {
     if (
       approval?.kind !== 'user-confirmed' ||

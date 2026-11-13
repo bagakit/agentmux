@@ -21,7 +21,7 @@ export function unwrapIpcResult<T>(result: IpcResult<T>): T {
 }
 
 /** The Profile GUI methods whose Main handlers return an IpcResult; reads and writes alike. */
-export const BROWSER_PROFILE_RESULT_METHODS = ['listProfiles', 'readProfiles', 'updateProfile', 'setDefaultProfile', 'createProfile',
+export const BROWSER_PROFILE_RESULT_METHODS = ['listProfiles', 'readProfiles', 'updateProfile', 'setDefaultProfile', 'createProfile', 'copyProfile',
   'deleteProfile', 'listProfileSites', 'clearProfileSite', 'checkProfileExit', 'readProfileProxySignIn', 'setProfileProxySignIn', 'detectProfileImportSources', 'importProfile'] as const
 export type BrowserProfileResultMethod = typeof BROWSER_PROFILE_RESULT_METHODS[number]
 
