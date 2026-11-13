@@ -5,7 +5,8 @@ import { relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations: Record<string, [string, string, string]> = {
-  'drop-terminal-caret': ['apps/desktop/src/renderer/src/components/SessionPane.tsx', 'useAppStore.getState().requestRegionCaretFocus(linkOrigin.regionId)', 'void 0 /* missing explicit caret handoff */'],
+  'drop-terminal-caret': ['apps/desktop/src/renderer/src/store.ts', "get().requestRegionCaretFocus(regionId, { reveal: 'latest' })", 'void 0 /* missing explicit caret handoff */'],
+  'caret-ignores-run': ['apps/desktop/src/renderer/src/store.ts', "get().sessions).get(sessionId)?.processState === 'running'", 'get().sessions).get(sessionId)?.processState !== undefined'],
   'draft-as-submitted': ['packages/client-ui/src/components/AgentAsyncQuestionCard.tsx', '答案草稿（尚未提交）', '答案已提交'],
   'always-unread': ['packages/client-ui/src/lib/conversation-sources.ts', "${unreadTarget ? '对应的原始记录尚未读到。'", "${true ? '对应的原始记录尚未读到。'"],
   'search-captures-terminal-intent': ['apps/desktop/src/renderer/src/components/TerminalView.tsx', "request.target === 'terminal' ? null : searchInputRef.current", 'searchInputRef.current'],

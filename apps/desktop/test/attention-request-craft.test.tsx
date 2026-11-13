@@ -120,6 +120,19 @@ it('attention craft uses the header when native confirmation prevents card decis
   expect(useAppStore.getState().regionCaretFocus).toMatchObject({ regionId: landed, target: 'terminal', reveal: 'latest' })
 })
 
+it('attention craft Open terminal on a Session that is not running opens its view without a caret nothing can take', async () => {
+  // Same gate as the Session's own card: a Run that is not running shows its restore surface, not a terminal.
+  const session = { ...pending(), processState: 'exited' as const, interactionResponseUnavailableReason: 'The original native response is still being checked.' }
+  useAppStore.setState({ sessions: [session], regionCaretFocus: null })
+  const select = vi.spyOn(useAppStore.getState(), 'selectSession')
+  await dom.render(<AttentionRequestPanel sessionId={session.id} onClose={() => {}} />)
+  await dom.click('.agent-interaction__native-terminal')
+  expect(select).toHaveBeenCalledExactlyOnceWith(session.id)
+  expect(useAppStore.getState().viewModes[session.id]).toBe('terminal')
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  expect(useAppStore.getState().sessions[0]).toMatchObject({ pendingInteraction: session.pendingInteraction })
+})
+
 it('attention craft preserves existing panel focus when a replacement request arrives', async () => {
   useAppStore.setState({ sessions: [pending()] })
   await dom.render(<AttentionRequestPanel sessionId="agent-1" onClose={() => {}} />)
