@@ -1,4 +1,4 @@
-import { normalizeRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { constrainedEndpoint, normalizeRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
 
 export type SelectionHandleId = 'nw' | 'ne' | 'se' | 'sw' | 'from' | 'to'
 export type SelectionHandle = { id: SelectionHandleId; point: ScreenshotPoint }
@@ -33,8 +33,9 @@ export function hitSelectionHandle(shape: ScreenshotShape, point: ScreenshotPoin
 /** Apply each drag sample to the gesture's original shape. Opposite coordinates
  * stay fixed across corner cross-over, and from/to retain their original roles
  * (notably the numbered note anchor) without changing IDs or style. */
-export function resizeShapeFromHandle(original: ScreenshotShape, handle: SelectionHandleId, point: ScreenshotPoint): ScreenshotShape {
+export function resizeShapeFromHandle(original: ScreenshotShape, handle: SelectionHandleId, point: ScreenshotPoint, constrained = false): ScreenshotShape {
   if (original.kind === 'arrow') {
+    if (constrained) point = constrainedEndpoint('arrow', handle === 'from' ? original.to : original.from, point)
     if (handle === 'from') return { ...original, from: { ...point } }
     if (handle === 'to') return { ...original, to: { ...point } }
     return original
@@ -44,6 +45,10 @@ export function resizeShapeFromHandle(original: ScreenshotShape, handle: Selecti
   const from = { ...original.from }, to = { ...original.to }
   const left = handle === 'nw' || handle === 'sw'
   const top = handle === 'nw' || handle === 'ne'
+  if (constrained && (original.kind === 'rect' || original.kind === 'ellipse')) {
+    const box = normalizeRect(original.from, original.to)
+    point = constrainedEndpoint(original.kind, { x: box.x + (left ? box.width : 0), y: box.y + (top ? box.height : 0) }, point)
+  }
   if (left === (original.from.x <= original.to.x)) from.x = point.x
   else to.x = point.x
   if (top === (original.from.y <= original.to.y)) from.y = point.y

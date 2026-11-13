@@ -104,10 +104,11 @@ function shape(value: unknown): ScreenshotShape {
   if (!id || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) invalid('Annotation IDs must be nonempty and colors must be opaque hexadecimal colors.')
   const common = { id, color }
   const fields = ['kind', 'id', 'color']
-  if (kind === 'pen' || kind === 'highlight') {
-    record(value, [...fields, 'points', 'width'])
+  if (kind === 'pen' || kind === 'highlight' || kind === 'pixelate-brush') {
+    record(value, [...fields, 'points', 'width', ...(kind === 'pixelate-brush' ? ['blockSize'] : [])])
     if (!Array.isArray(base.points) || !base.points.length) invalid('A stroke must contain its original points.')
-    return { ...common, kind, points: base.points.map(point), width: positive(base.width) }
+    const stroke = { ...common, points: base.points.map(point), width: positive(base.width) }
+    return kind === 'pixelate-brush' ? { ...stroke, kind, blockSize: positive(base.blockSize) } : { ...stroke, kind }
   }
   if (kind === 'text') {
     record(value, [...fields, 'at', 'text', 'fontSize'])

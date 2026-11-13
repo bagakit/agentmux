@@ -6,6 +6,9 @@ import {
   highlightWidth,
   normalizeRect,
   HIGHLIGHT_ALPHA,
+  SCREENSHOT_TEXT_LINE_HEIGHT,
+  screenshotTextLines,
+  shapeBounds,
   type ArrowShape,
   type EllipseShape,
   type HighlightShape,
@@ -13,6 +16,7 @@ import {
   type RectShape,
   type NoteShape,
   type PixelateShape,
+  type PixelateBrushShape,
   type CoverShape,
   type ScreenshotShape,
   type TextShape
@@ -36,6 +40,12 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
       case 'text': drawText(context, shape); break
       case 'note': drawNote(context, shape); break
       case 'pixelate': drawPixelate(context, shape); break
+      case 'pixelate-brush': {
+        clipPixelateBrush(context, shape)
+        const rect = shapeBounds(shape)
+        drawPixelate(context, { ...shape, kind: 'pixelate', from: { x: rect.x, y: rect.y }, to: { x: rect.x + rect.width, y: rect.y + rect.height } })
+        break
+      }
       case 'cover': drawCover(context, shape); break
     }
   } finally { context.restore() }
@@ -123,8 +133,27 @@ function drawText(context: CanvasRenderingContext2D, shape: TextShape): void {
   context.strokeStyle = shape.color.toLowerCase() === '#ffffff'
     ? 'rgba(0,0,0,0.65)'
     : 'rgba(255,255,255,0.85)'
-  context.strokeText(shape.text, shape.at.x, shape.at.y)
-  context.fillText(shape.text, shape.at.x, shape.at.y)
+  screenshotTextLines(shape.text).forEach((line, index) => {
+    const y = shape.at.y + index * shape.fontSize * SCREENSHOT_TEXT_LINE_HEIGHT
+    context.strokeText(line, shape.at.x, y)
+    context.fillText(line, shape.at.x, y)
+  })
+}
+
+/** The same corridor clips final pixels and restores committed preview masks. */
+export function clipPixelateBrush(context: CanvasRenderingContext2D, shape: PixelateBrushShape): void {
+  const radius = shape.width / 2
+  context.beginPath()
+  shape.points.forEach((point, index) => {
+    context.moveTo(point.x + radius, point.y); context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    if (!index) return
+    const previous = shape.points[index - 1]!, dx = point.x - previous.x, dy = point.y - previous.y, length = Math.hypot(dx, dy)
+    if (!length) return
+    const x = -dy / length * radius, y = dx / length * radius
+    context.moveTo(previous.x + x, previous.y + y); context.lineTo(previous.x - x, previous.y - y)
+    context.lineTo(point.x - x, point.y - y); context.lineTo(point.x + x, point.y + y); context.closePath()
+  })
+  context.clip()
 }
 
 function drawNote(context: CanvasRenderingContext2D, shape: NoteShape): void {

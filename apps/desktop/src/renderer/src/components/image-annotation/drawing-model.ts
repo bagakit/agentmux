@@ -15,9 +15,11 @@ export type TextShape = ShapeBase & { kind: 'text'; at: ScreenshotPoint; text: s
 export type NoteTemplate = 'observation' | 'expected' | 'request'
 export type NoteShape = ShapeBase & { kind: 'note'; from: ScreenshotPoint; to: ScreenshotPoint; width: number; radius: number; number: number; note: string; template?: NoteTemplate }
 export type PixelateShape = ShapeBase & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
+export type PixelateBrushShape = ShapeBase & { kind: 'pixelate-brush'; points: ScreenshotPoint[]; width: number; blockSize: number }
 export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | CoverShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape
+export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
 export const DEFAULT_SCREENSHOT_COLOR: string = SCREENSHOT_COLORS[0]
@@ -26,7 +28,24 @@ export const DEFAULT_SCREENSHOT_WIDTH = 4
 export const SCREENSHOT_FONT_SIZES = [14, 18, 24, 32, 48] as const
 export const DEFAULT_SCREENSHOT_FONT_SIZE = 18
 export const HIGHLIGHT_ALPHA = 0.35
+export const SCREENSHOT_TEXT_LINE_HEIGHT = 1.2
 const HIGHLIGHT_WIDTH_MULTIPLIER = 4
+
+export function screenshotTextLines(text: string): string[] { return text.split(/\r\n|\r|\n/) }
+export function isScreenshotMask(shape: ScreenshotShape): shape is ScreenshotMask {
+  return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'
+}
+
+/** Constraints affect original-image geometry, never the fitted viewport. */
+export function constrainedEndpoint(kind: 'rect' | 'ellipse' | 'arrow', from: ScreenshotPoint, to: ScreenshotPoint): ScreenshotPoint {
+  const dx = to.x - from.x, dy = to.y - from.y
+  if (kind === 'arrow') {
+    const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4, distance = Math.hypot(dx, dy)
+    return { x: from.x + Math.cos(angle) * distance, y: from.y + Math.sin(angle) * distance }
+  }
+  const side = Math.max(Math.abs(dx), Math.abs(dy))
+  return { x: from.x + (dx < 0 ? -side : side), y: from.y + (dy < 0 ? -side : side) }
+}
 
 type ScreenshotSnapshot = {
   shapes: ScreenshotShape[]
@@ -104,6 +123,8 @@ function scalePoint(point: ScreenshotPoint, scale: number): ScreenshotPoint {
 
 export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotShape {
   switch (shape.kind) {
+    case 'pixelate-brush':
+      return { ...shape, width: shape.width * scale, blockSize: shape.blockSize * scale, points: shape.points.map(point => scalePoint(point, scale)) }
     case 'pen':
     case 'highlight':
       return { ...shape, width: shape.width * scale, points: shape.points.map((point) => scalePoint(point, scale)) }
@@ -124,14 +145,18 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
 
 export function moveShape(shape: ScreenshotShape, dx: number, dy: number): ScreenshotShape {
   const move = (at: ScreenshotPoint) => ({ x: at.x + dx, y: at.y + dy })
-  if (shape.kind === 'pen' || shape.kind === 'highlight') return { ...shape, points: shape.points.map(move) }
+  if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') return { ...shape, points: shape.points.map(move) }
   if (shape.kind === 'text') return { ...shape, at: move(shape.at) }
   return { ...shape, from: move(shape.from), to: move(shape.to) }
 }
 
 export function shapeBounds(shape: ScreenshotShape, textWidth?: (shape: TextShape) => number): NormalizedRect {
-  if (shape.kind === 'text') return { x: shape.at.x, y: shape.at.y, width: textWidth?.(shape) ?? shape.text.length * shape.fontSize * 0.65, height: shape.fontSize * 1.2 }
-  if (shape.kind === 'pen' || shape.kind === 'highlight') {
+  if (shape.kind === 'text') {
+    const lines = screenshotTextLines(shape.text)
+    return { x: shape.at.x, y: shape.at.y, width: textWidth?.(shape) ?? lines.reduce((longest, line) => Math.max(longest, line.length), 0) * shape.fontSize * 0.65,
+      height: shape.fontSize * SCREENSHOT_TEXT_LINE_HEIGHT * lines.length }
+  }
+  if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {
     if (!shape.points.length) return { x: 0, y: 0, width: 0, height: 0 }
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
     for (const point of shape.points) { left = Math.min(left, point.x); top = Math.min(top, point.y); right = Math.max(right, point.x); bottom = Math.max(bottom, point.y) }
@@ -157,13 +182,35 @@ export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedR
 /** Both PNG and textual handoff consume this list. A cropped-away number or a
  * masked note must not survive solely as textual context. Masks paint last. */
 export function screenshotOutputShapes(shapes: readonly ScreenshotShape[], crop?: NormalizedRect | null): ScreenshotShape[] {
-  const masks = shapes.filter((shape): shape is PixelateShape | CoverShape => shape.kind === 'pixelate' || shape.kind === 'cover')
+  const masks = shapes.filter(isScreenshotMask)
   const visible = shapes.filter(shape => {
     if (shape.kind !== 'note') return true
     if (crop && (shape.from.x < crop.x || shape.from.x >= crop.x + crop.width || shape.from.y < crop.y || shape.from.y >= crop.y + crop.height)) return false
-    return !masks.some(mask => intersectRect(shapeBounds(shape), normalizeRect(mask.from, mask.to)))
+    return !masks.some(mask => maskIntersectsRect(mask, shapeBounds(shape)))
   })
-  return [...visible.filter(shape => shape.kind !== 'pixelate' && shape.kind !== 'cover'), ...masks]
+  return [...visible.filter(shape => !isScreenshotMask(shape)), ...masks]
+}
+
+/** A brush hides only its painted corridor, not everything in its bounding box. */
+export function maskIntersectsRect(mask: ScreenshotMask, rect: NormalizedRect): boolean {
+  if (mask.kind !== 'pixelate-brush') return intersectRect(rect, normalizeRect(mask.from, mask.to)) !== null
+  const radius = mask.width / 2
+  const pointDistance = (point: ScreenshotPoint) => Math.hypot(Math.max(rect.x - point.x, 0, point.x - rect.x - rect.width),
+    Math.max(rect.y - point.y, 0, point.y - rect.y - rect.height))
+  const corners = [{ x: rect.x, y: rect.y }, { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x, y: rect.y + rect.height }, { x: rect.x + rect.width, y: rect.y + rect.height }]
+  return mask.points.some((to, index) => {
+    const from = mask.points[Math.max(0, index - 1)]!
+    if (pointDistance(from) <= radius || pointDistance(to) <= radius) return true
+    let near = 0, far = 1
+    for (const [start, delta, min, max] of [[from.x, to.x - from.x, rect.x, rect.x + rect.width],
+      [from.y, to.y - from.y, rect.y, rect.y + rect.height]] as const) {
+      if (!delta) { if (start < min || start > max) far = -1; continue }
+      const a = (min - start) / delta, b = (max - start) / delta
+      near = Math.max(near, Math.min(a, b)); far = Math.min(far, Math.max(a, b))
+    }
+    return near <= far || corners.some(corner => distanceToSegment(corner, from, to) <= radius)
+  })
 }
 
 export function distanceToSegment(point: ScreenshotPoint, from: ScreenshotPoint, to: ScreenshotPoint): number {
@@ -202,7 +249,7 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
   textWidth?: (shape: TextShape) => number): ScreenshotShape | null {
   for (let index = shapes.length - 1; index >= 0; index--) {
     const shape = shapes[index]!
-    if (shape.kind === 'pen' || shape.kind === 'highlight') {
+    if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {
       const reach = tolerance + (shape.kind === 'highlight' ? highlightWidth(shape.width) : shape.width) / 2
       if (shape.points.some((at, i) => distanceToSegment(point, shape.points[Math.max(0, i - 1)]!, at) <= reach)) return shape
       continue

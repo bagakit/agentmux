@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
 import { clampScreenshotScale } from './geometry'
-import { drawScreenshotShapes } from './drawing-renderer'
-import { normalizeRect, type ScreenshotShape } from './drawing-model'
+import { clipPixelateBrush, drawScreenshotShapes } from './drawing-renderer'
+import { isScreenshotMask, shapeBounds, type ScreenshotShape } from './drawing-model'
 import type { ImageViewport } from './view'
 
 function prepare(canvas: HTMLCanvasElement, viewport: ImageViewport): CanvasRenderingContext2D | null {
@@ -50,17 +50,22 @@ export function renderScreenshotScene(target: HTMLCanvasElement, committed: HTML
     } finally { context.restore() }
   }
   // Restore already processed mask pixels instead of resampling pixelation on each frame.
-  if (inProgress && inProgress.kind !== 'pixelate' && inProgress.kind !== 'cover' && masks.length) {
+  if (inProgress && !isScreenshotMask(inProgress) && masks.length) {
     const { view } = viewport, dpr = clampScreenshotScale(viewport.dpr)
     context.setTransform(1, 0, 0, 1, 0, 0)
     for (const mask of masks) {
-      if (mask.kind !== 'pixelate' && mask.kind !== 'cover') continue
-      const rect = normalizeRect(mask.from, mask.to)
+      if (!isScreenshotMask(mask)) continue
+      const rect = shapeBounds(mask)
       const x = Math.max(0, Math.floor((view.x + rect.x * view.scale) * dpr))
       const y = Math.max(0, Math.floor((view.y + rect.y * view.scale) * dpr))
       const right = Math.min(target.width, Math.ceil((view.x + (rect.x + rect.width) * view.scale) * dpr))
       const bottom = Math.min(target.height, Math.ceil((view.y + (rect.y + rect.height) * view.scale) * dpr))
-      if (right > x && bottom > y) context.drawImage(committed, x, y, right - x, bottom - y, x, y, right - x, bottom - y)
+      if (right > x && bottom > y) {
+        context.save()
+        if (mask.kind === 'pixelate-brush') { applyView(context, viewport); clipPixelateBrush(context, mask); context.setTransform(1, 0, 0, 1, 0, 0) }
+        context.drawImage(committed, x, y, right - x, bottom - y, x, y, right - x, bottom - y)
+        context.restore()
+      }
     }
     applyView(context, viewport)
   }
