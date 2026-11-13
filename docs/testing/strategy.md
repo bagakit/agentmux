@@ -2,7 +2,7 @@
 
 ## 权威边界
 
-AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Agent-first 空间命令与 selector 合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)，产品约束见[交互 SSOT](../design/agentmux-desktop-interaction.md)。本文拥有验证分层、任务验收与公开 oracle，不是当前候选的通过报告。命令来源是[根 package scripts](../../package.json)与 [Desktop package scripts](../../apps/desktop/package.json)，随包版本唯一取自 [vendor manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)。
+AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Agent-first 空间命令的操作见[按对象操作桌面](../guides/agentmux-cli-object-control.md)（准确 selector 与参数以 `amux space --help` 为准），产品约束见[交互 SSOT](../design/agentmux-desktop-interaction.md)。本文拥有验证分层、任务验收与公开 oracle，不是当前候选的通过报告。命令来源是[根 package scripts](../../package.json)与 [Desktop package scripts](../../apps/desktop/package.json)，随包版本唯一取自 [vendor manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)。
 
 Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Tool、Permission、Reply 或 Worker Done 证据。
 
@@ -72,7 +72,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Darwin endpoint bound | 默认 Unix endpoint 按 runtime-paths.ts 的稳定短 namespace 构造，并与 durable state 分离；绝对路径 override 仍需验证平台 socket 长度边界。Native package/LaunchServices oracle 使用真实随包 ctxmuxd。 |
 | bounded Consumer publication | 公共类型表达同步 callback 合同；运行时违规消费者获得可观察诊断与恢复入口，异常或永久 pending Promise 不阻断其他消费者和生命周期，永久 pending Promise 不保留 Client/Publisher。正常消费者不因无关观察者增加而失去事件；不建立隐式无界队列，也不在“忙碌期”静默漏掉仍注册 listener 的 lifecycle/permission 事件。需要异步处理的 Consumer 在同步 callback 内复制到自己的有界队列；需要无损字节流则使用独立 Attachment/Replay |
 | bounded Hook/ACP ingress | 在途队列与 body 边界按真实内存、协议和处理成本验证；背压明确区分未受理与已受理但回执未知，排队时间纳入 sender 等待与重试验证，重试保原 receipt 且不重复提交。stable binding identity 与随机 bearer 分离，公共 Session/View 不含二者；bound callback 接受 AbortSignal，旧 owner 真正 settle 后同 token 才恢复 admission，其他 binding 不受牵连；取消只作用于本次排队或执行中的 Store write，不能中止同 Agent Session 的前序 lifecycle/readiness 持久化；close/stop 排空已接收 delivery |
-| daemon activation ownership | readiness 与 public handshake 确认服务，owner.json 记录启动归属。[CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 中 receipt 保存失败不能终止兼容 daemon 或其健康 Run；归属不明应告知并限制清理。测试隔离进程的 cleanup 须证明精确 owner，不得外推为对用户 daemon 的强杀授权。 |
+| daemon activation ownership | readiness 与 public handshake 确认服务，按准确 Runtime 身份与 artifact 寻址的 owner receipt（[`ctxmuxOwnerReceiptPath`](../../packages/core/src/runtime-paths.ts)）记录启动归属。[CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 中 receipt 保存失败不能终止兼容 daemon 或其健康 Run；归属不明应告知并限制清理。测试隔离进程的 cleanup 须证明精确 owner，不得外推为对用户 daemon 的强杀授权。 |
 
 主 Oracle：`packages/core/test/package-consumer.integration.test.ts` 与 `packages/core/test/fixtures/packed-consumer.mjs`。
 
