@@ -7,7 +7,8 @@ import { decodeHostedValue, encodeHostedValue, hostedTransfer } from '../src/hos
 import { decodePreparedRun } from '../src/prepared-run.js'
 import { parsePreparedTerminal } from '../src/terminal-preparation.js'
 import type { AgentMuxHostedBootstrap, AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
-import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxRunAttachment, AgentMuxTerminalCreateInput } from '../src/types.js'
+import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxRunAttachment } from '../src/types.js'
+import type { AgentMuxTerminalCreateInput } from '../src/client.js'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
