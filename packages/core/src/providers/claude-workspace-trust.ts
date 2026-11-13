@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, rmdir, stat, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, realpath, rename, rmdir, stat, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../agent-provider.js'
@@ -11,6 +11,9 @@ import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../
  * (a Mote or Topic home), through the same record Claude writes when a person accepts that dialog.
  *
  * Facts read from the shipped Claude Code bundle, not guessed:
+ * - Claude's startup directory is `realpathSync(process.cwd())` in NFC, and a PTY child's cwd is
+ *   already the physical path. Trust is looked up by that real path, never by an alias the launch
+ *   spelled, so the key here is the real path too.
  * - The global file is `$CLAUDE_CONFIG_DIR` (else `$HOME`) / `.claude<suffix>.json`; a non-empty
  *   legacy `<config dir>/.config.json` wins when present.
  * - A folder is trusted when `projects[<key>].hasTrustDialogAccepted === true` for its git root, or
@@ -27,9 +30,9 @@ const LOCK_POLL_MS = 25
 
 type ClaudeConfig = Record<string, unknown> & { projects?: Record<string, Record<string, unknown>> }
 
-/** The path Claude records for a folder: absolute, normalized and NFC, without symlink resolution. */
-export function claudeTrustKey(directory: string): string {
-  return resolve(directory).normalize('NFC')
+/** The key Claude records for a folder it starts in: the physical path, normalized to NFC. */
+export async function claudeTrustKey(directory: string): Promise<string> {
+  return (await realpath(resolve(directory))).normalize('NFC')
 }
 
 /** Mirror Claude's own choice of its global configuration file. */
@@ -91,9 +94,10 @@ async function writeAtomically(path: string, content: string, mode: number): Pro
  * Never creates the configuration file and changes only that one project entry.
  */
 export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt> {
-  const trustKey = claudeTrustKey(context.workspacePath)
-  const configPath = await claudeGlobalConfigPath(context.env)
+  let trustKey: string | null = null, configPath: string | null = null
   try {
+    trustKey = await claudeTrustKey(context.workspacePath)
+    configPath = await claudeGlobalConfigPath(context.env)
     const before = await readConfig(configPath)
     // Claude creates and owns a missing configuration during its own onboarding.
     if (!before) return { status: 'unconfirmed', trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }
