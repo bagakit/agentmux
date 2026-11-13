@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, open, readFile, readdir, rm, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { ctxmuxOwnerReceiptPath } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
@@ -29,7 +30,9 @@ export type RemoteCoreCurrentObservation =
       native: { instanceId: string; buildId: string; protocolVersion: number } }
   | { state: 'unavailable'; observedAt: number; code: string; detail: string }
 export type RemoteCoreUpgradeCheck = {
-  input: RemoteCoreUpgradeHost; current: RemoteCoreCurrentObservation; candidate: RemoteCoreUpgradeCandidate; eligible: boolean; detail: string
+  input: RemoteCoreUpgradeHost; current: RemoteCoreCurrentObservation; candidate: RemoteCoreUpgradeCandidate | null; eligible: boolean; detail: string
+  /** A local candidate failure never hides the current owner or an original operation. */
+  candidateUnavailable?: { code: string; detail: string }
   reason: 'ready' | 'up-to-date' | 'runtime-update-required' | 'unverified'
   expected?: RemoteCoreUpgradeExpected
   latestOperation?: RemoteCoreUpgradeReceipt
@@ -169,7 +172,11 @@ export class RemoteCoreUpgradeManager {
       ownerProtocolVersion: artifact.ownerProtocolVersion, requiredNativeProtocolVersion: artifact.requiredNativeProtocolVersion }
   }
   async check(input: RemoteCoreUpgradeHost): Promise<RemoteCoreUpgradeCheck> {
-    const captured = structuredClone(input), artifact = await this.artifact(), candidate = this.candidateSummary(artifact)
+    const captured = structuredClone(input)
+    let artifact: PortableCoreArtifact | undefined, candidateUnavailable: RemoteCoreUpgradeCheck['candidateUnavailable']
+    try { artifact = await this.artifact() }
+    catch (error) { candidateUnavailable = { code: error instanceof AgentMuxError ? error.code : 'CORE_ARTIFACT_UNAVAILABLE', detail: errorText(error) } }
+    const candidate = artifact ? this.candidateSummary(artifact) : null
     let observed: Observed | undefined
     let current: RemoteCoreCurrentObservation
     try {
@@ -184,12 +191,13 @@ export class RemoteCoreUpgradeManager {
       current = { state: 'unavailable', observedAt: Date.now(), code: error instanceof AgentMuxError ? error.code : 'CORE_OBSERVATION_UNAVAILABLE', detail: errorText(error) }
     }
     const latestOperation = await this.latest(captured)
-    const base = { input: captured, candidate, current, ...(latestOperation ? { latestOperation } : {}) }
+    const base = { input: captured, candidate, ...(candidateUnavailable ? { candidateUnavailable } : {}), current, ...(latestOperation ? { latestOperation } : {}) }
     if (latestOperation?.status === 'unknown' || latestOperation?.status === 'running') return { ...base, eligible: false, reason: 'unverified',
       detail: '此前的升级结果尚未确认。请复查原操作；不会再次停止或启动 Core。' }
     const scoped = await this.unconfirmedInScope(captured)
     if (scoped) return { ...base, eligible: false, reason: 'unverified', latestOperation: scoped,
       detail: `同一 Core 的连接 ${scoped.input.id} 有未确认的维护操作 ${scoped.operationId}。请复查该原操作；不会再次停止或启动 Core。` }
+    if (!artifact || !candidate) return { ...base, eligible: false, reason: 'unverified', detail: 'The local upgrade candidate is unavailable. Current Core and original operation observations are retained.' }
     if (!observed) return { ...base, eligible: false, reason: 'unverified', detail: current.state === 'unavailable' ? current.detail : 'The original Core could not be observed.' }
     if (observed.launch.deploymentDigest === candidate.digest) return { ...base, eligible: false, reason: 'up-to-date', detail: 'The original Core already runs this exact bundled deployment.' }
     try {
@@ -266,10 +274,16 @@ export class RemoteCoreUpgradeManager {
     }
     if (input.kind === 'ssh' && input.transport !== 'tailcat' && retained.receipt.status === 'unknown' && retained.observed && retained.releaseDirectory && retained.receipt.remoteCommand && retained.receipt.input.kind === 'ssh') {
       try {
-        const next = await this.observe({ ...retained.receipt.input, remoteCommand: retained.receipt.remoteCommand })
+        if (!retained.observed.nativeRuntime || retained.receipt.candidate &&
+            retained.receipt.candidate.requiredNativeProtocolVersion !== retained.observed.nativeRuntime.protocolGeneration) {
+          throw new AgentMuxError('The original candidate and Native contract are unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+        }
+        // Reconcile this original transaction with its retained Native contract,
+        // not the current App's SDK or a newly assembled local candidate.
+        const next = await this.observe({ ...retained.receipt.input, remoteCommand: retained.receipt.remoteCommand }, false)
         this.verify(retained.observed, next, retained.receipt.expected.candidateDigest)
         if (!retained.nativeRuns) throw new AgentMuxError('The original Native inventory is unknown.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-        this.verifyRuns(retained.nativeRuns, await this.nativeRuns(retained.receipt.input, retained.observed.launch, retained.releaseDirectory, retained.receipt.expected.nativeInstanceId))
+        this.verifyRuns(retained.nativeRuns, await this.nativeRuns(retained.receipt.input, retained.observed.launch, retained.releaseDirectory, retained.receipt.expected.nativeInstanceId, retained.observed.nativeRuntime.protocolGeneration))
         retained.receipt.status = 'completed'; retained.receipt.stage = 'completed'; retained.receipt.detail = '已复查原操作：新 Core 已运行，原 Runtime 和 Session/Run 绑定保留。'
         await this.save(retained)
       } catch { /* Read-only observation cannot turn uncertainty into a replay. */ }
@@ -331,7 +345,7 @@ export class RemoteCoreUpgradeManager {
       value.receipt.stage = 'staged'; value.receipt.detail = '候选已核验，正在重新核对原服务。'; await this.save(value)
       const current = await this.observe(input)
       if (JSON.stringify(this.expected(input, artifact, current)) !== JSON.stringify(expected) || current.launch.nativeSha256 !== observed.launch.nativeSha256 || current.launch.deploymentDigest !== observed.launch.deploymentDigest) throw new AgentMuxError('The original owner or software changed while staging; no owner was stopped.', 'CONFIG_CONFLICT')
-      value.nativeRuns = await this.nativeRuns(input, observed.launch, stage.releaseDirectory, expected.nativeInstanceId)
+      value.nativeRuns = await this.nativeRuns(input, observed.launch, stage.releaseDirectory, expected.nativeInstanceId, artifact.requiredNativeProtocolVersion)
       value.receipt.stage = 'stopping'; value.receipt.detail = '正在停止原 Core 服务；Agent Run 保留。'; await this.save(value)
       mutation = true
       const response = parseRemoteCoreMaintenanceShutdown(await this.program(input, current.launch.node, ['-e', READ_CORE_MAINTENANCE], {
@@ -354,7 +368,7 @@ export class RemoteCoreUpgradeManager {
       }
       if (!next) throw new AgentMuxError(`新 Core 的启动结果尚未确认：${errorText(last)}`, 'CORE_UPGRADE_RESPONSE_UNKNOWN')
       this.verify(observed, next, artifact.digest)
-      this.verifyRuns(value.nativeRuns, await this.nativeRuns(target, next.launch, stage.releaseDirectory, expected.nativeInstanceId))
+      this.verifyRuns(value.nativeRuns, await this.nativeRuns(target, next.launch, stage.releaseDirectory, expected.nativeInstanceId, artifact.requiredNativeProtocolVersion))
       value.receipt.status = 'completed'; value.receipt.stage = 'completed'; value.receipt.detail = 'Core 已升级，原 Runtime、Session 和运行进程已保留。'
     } catch (error) {
       if (!admitted) throw error
@@ -369,7 +383,8 @@ export class RemoteCoreUpgradeManager {
   private verify(previous: Observed, next: Observed, digest: string): void {
     if (next.launch.deploymentDigest !== digest || next.owner.runtimeId !== previous.owner.runtimeId || next.owner.ownerInstanceId === previous.owner.ownerInstanceId ||
         next.owner.ctxmux.instanceId !== previous.owner.ctxmux.instanceId || next.launch.nativeProcessId !== previous.launch.nativeProcessId ||
-        next.launch.nativeStartTicks !== previous.launch.nativeStartTicks || next.launch.nativeSha256 !== previous.launch.nativeSha256) {
+        next.launch.nativeStartTicks !== previous.launch.nativeStartTicks || next.launch.nativeSha256 !== previous.launch.nativeSha256 ||
+        !isDeepStrictEqual(next.nativeRuntime, previous.nativeRuntime)) {
       throw new AgentMuxError('The new Core did not retain the original Runtime or candidate identity.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     }
     for (const session of previous.bootstrap.sessions) {
@@ -378,10 +393,10 @@ export class RemoteCoreUpgradeManager {
     }
     this.verifyRuns(previous.runs, next.runs)
   }
-  private async nativeRuns(input: RemoteCoreUpgradeHost, launch: Launch, releaseDirectory: string, instanceId: string): Promise<RemoteCoreUpgradeNativeRun[]> {
+  private async nativeRuns(input: RemoteCoreUpgradeHost, launch: Launch, releaseDirectory: string, instanceId: string, protocolVersion: number): Promise<RemoteCoreUpgradeNativeRun[]> {
     const result = await this.program<{ instanceId: string; protocolVersion: number; runs: RemoteCoreUpgradeNativeRun[] }>(input, launch.node, ['-e', NATIVE_RUN_INVENTORY], {
       releaseDirectory, socketPath: join(launch.runtimeDirectory, 'ctxmux.sock'), instanceId })
-    if (result.instanceId !== instanceId || result.protocolVersion !== (await this.artifact()).requiredNativeProtocolVersion || !Array.isArray(result.runs)) throw new AgentMuxError('The original Native inventory is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+    if (result.instanceId !== instanceId || result.protocolVersion !== protocolVersion || !Array.isArray(result.runs)) throw new AgentMuxError('The original Native inventory is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     for (const run of result.runs) if (typeof run.runId !== 'string' || !run.runId ||
       !['running', 'exited', 'interrupted'].includes(run.state) || run.pid !== null && (!Number.isSafeInteger(run.pid) || run.pid < 1) ||
       !Number.isSafeInteger(run.outputBytes) || run.outputBytes < 0 || run.inputBytes !== null && (!Number.isSafeInteger(run.inputBytes) || run.inputBytes < 0)) {

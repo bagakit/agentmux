@@ -131,20 +131,29 @@ export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgrade
     ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }) }
 }
 export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCheck {
-  const p = record(value, ['input', 'current', 'candidate', 'eligible', 'reason', 'detail', 'expected', 'latestOperation'])
+  const p = record(value, ['input', 'current', 'candidate', 'candidateUnavailable', 'eligible', 'reason', 'detail', 'expected', 'latestOperation'])
   if (typeof p.eligible !== 'boolean' || p.eligible !== (p.expected !== undefined)) throw new AgentMuxError('Upgrade eligibility does not match its checked admission.', 'CONTROL_PROTOCOL_ERROR')
   if (!['ready', 'up-to-date', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
-  const serving = current(p.current), target = candidate(p.candidate), input = host(p.input)
+  const serving = current(p.current), target = p.candidate === null ? null : candidate(p.candidate), input = host(p.input)
+  let candidateUnavailable: RemoteCoreUpgradeCheck['candidateUnavailable']
+  if (p.candidateUnavailable !== undefined) {
+    const failure = record(p.candidateUnavailable, ['code', 'detail'])
+    candidateUnavailable = { code: text(failure.code), detail: text(failure.detail) }
+  }
+  if (target === null ? !candidateUnavailable || p.eligible || p.expected !== undefined || p.reason !== 'unverified' : candidateUnavailable !== undefined) {
+    throw new AgentMuxError('Candidate availability does not match its upgrade admission.', 'CONTROL_PROTOCOL_ERROR')
+  }
   if (serving.state === 'available' && input.kind === 'ssh' && input.runtimeId && serving.runtimeId !== input.runtimeId ||
-      p.reason === 'up-to-date' && (serving.state !== 'available' || serving.deploymentDigest !== target.digest)) throw new AgentMuxError('Current Core belongs to another update target.', 'CONTROL_PROTOCOL_ERROR')
+      p.reason === 'up-to-date' && (serving.state !== 'available' || !target || serving.deploymentDigest !== target.digest)) throw new AgentMuxError('Current Core belongs to another update target.', 'CONTROL_PROTOCOL_ERROR')
   if (p.expected !== undefined) {
     const admission = parseRemoteCoreUpgradeExpected(p.expected)
-    if (serving.state !== 'available' || admission.candidateDigest !== target.digest || admission.runtimeId !== serving.runtimeId ||
+    if (serving.state !== 'available' || !target || admission.candidateDigest !== target.digest || admission.runtimeId !== serving.runtimeId ||
         admission.ownerInstanceId !== serving.ownerInstanceId || admission.processId !== serving.processId || admission.nativeInstanceId !== serving.native.instanceId) {
       throw new AgentMuxError('Upgrade candidate or current owner differs from checked admission.', 'CONTROL_PROTOCOL_ERROR')
     }
   }
   return { input, current: serving, candidate: target, eligible: p.eligible, reason: p.reason as RemoteCoreUpgradeCheck['reason'], detail: text(p.detail),
+    ...(candidateUnavailable === undefined ? {} : { candidateUnavailable }),
     ...(p.expected === undefined ? {} : { expected: parseRemoteCoreUpgradeExpected(p.expected) }),
     ...(p.latestOperation === undefined ? {} : { latestOperation: parseRemoteCoreUpgradeReceipt(p.latestOperation) }) }
 }
