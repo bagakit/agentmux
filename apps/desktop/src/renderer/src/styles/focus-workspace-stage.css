@@ -1,0 +1,6 @@
+/* The in-place layer for a Focus card's derived action; the surface inside keeps its own centered layout. */
+.global-session-workspace:has(> .focus-workspace-stage), .global-focus-surface:has(> .focus-workspace-stage) { position: relative; }
+.focus-workspace-stage { position: absolute; z-index: 6; inset: 0; display: flex; }
+.focus-workspace-stage[data-host='focus'] { inset: 0 0 0 auto; width: var(--focus-workspace-width, calc(61.8% - 6px)); border-left: 1px solid var(--line); }
+.focus-workspace-stage > .session-takeover { inset: 0; }
+@media (max-width: 760px) { .focus-workspace-stage[data-host='focus'] { inset: auto 0 0 0; width: 100%; height: 72%; border-left: 0; border-top: 1px solid var(--line); } }

@@ -643,6 +643,21 @@ export function SessionPane({
   const onTakeOver = takeOverAt(mailboxOrigin)
   const learnAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && takeoverOriginal?.hostId && origin.tabId && origin.regionId
     ? (trigger?: HTMLButtonElement) => setLearningSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null, open: true }) : undefined
+  // A Focus card hands its derived action to this exact Region; only a matching Session and Run opens it here.
+  const derivedRequest = useAppStore(state => {
+    const request = state.regionDerivedActionRequest
+    return request && request.regionId === linkOrigin.regionId && request.tabId === mailboxOrigin.tabId ? request : null
+  })
+  useEffect(() => {
+    if (!derivedRequest || !visible) return
+    useAppStore.getState().clearRegionDerivedAction(derivedRequest.nonce)
+    if (session?.kind !== 'agent' || session.id !== derivedRequest.sessionId || session.control.run.runId !== derivedRequest.runId) {
+      useAppStore.getState().reportError(new Error('The original Agent or Run in this Region changed. Its work is kept; reopen the Agent menu to review its current source.'), { kind: 'indeterminate' })
+      return
+    }
+    const open = derivedRequest.actionId === 'pass-on-experience' ? learnAt(mailboxOrigin) : takeOverAt(mailboxOrigin)
+    open?.()
+  }, [derivedRequest?.nonce, visible])
   const takeoverAt = (origin: OpenHttpLinkOrigin, active: boolean, displayId: string | null = null) => <>{learningSelection?.key === takeoverKey && learningSelection.displayId === displayId &&
     JSON.stringify(learningSelection.origin) === JSON.stringify(origin) && takeoverOriginal?.hostId ? <SessionLearningSurface key={takeoverKey} active={active && learningSelection.open}
       source={{ hostId: takeoverOriginal.hostId, agentSessionId: sessionId }} label={agentInputIdentity ?? userName ?? tabName ?? session?.label ?? sessionId}

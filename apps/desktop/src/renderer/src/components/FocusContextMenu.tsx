@@ -8,7 +8,9 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { createRegionCopyModel, regionCopyLinkActions, RegionMenuEntryView } from './RegionContextMenu'
-import { AgentSessionActionSurface, AgentSessionReadingSurface } from './AgentSessionReadingSurface'
+import { AgentSessionReadingSurface } from './AgentSessionReadingSurface'
+import { SessionLearningSurface } from './SessionLearningSurface'
+import { FocusWorkspaceStage } from './FocusWorkspaceStage'
 import { SessionTakeoverSurface } from './SessionTakeoverSurface'
 import { useAgentCurrentForkControls } from './AgentCurrentForkControls'
 import type { TakeoverSource } from '../lib/session-takeover'
@@ -66,12 +68,24 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const forkOrigin = location?.reference ? { workspaceId: location.reference.displayWorkspaceId, tabGroupId: location.reference.groupId,
     tabId: location.reference.tabId, regionId: location.reference.regionId, sessionId: context.id } : { sessionId: context.id }
   const forkAt = useAgentCurrentForkControls({ session: session ?? null, linkOrigin: forkOrigin, readOnly: false, sessionSource: !location?.reference })
+  /** With one confirmed location the action opens in its own Region; only placeless cards ask where. */
+  function openInRegion(actionId: 'take-over' | 'pass-on-experience'): boolean {
+    const state = useAppStore.getState(), reference = location?.reference
+    const current = agentMenuSession(state.sessions, context)
+    if (!reference || !current || !context.control) return false
+    try { requireFocusAgentMenuLocation(state, context, reference) } catch { return false }
+    actionOwnsFocus.current = true
+    if (!state.focusExecutionSession(context.id, reference)) return true
+    state.requestRegionDerivedAction({ tabId: reference.tabId, regionId: reference.regionId, sessionId: current.id, runId: current.control.run.runId, actionId })
+    return true
+  }
   function openTakeover() {
     const current = agentMenuSession(useAppStore.getState().sessions, context)
     if (!current || !context.control || !agentMenuRunMatches(current, context.control)) {
       useAppStore.getState().reportError(new Error('The original Agent or Run changed. Reopen this Agent menu to review its current source.'), { kind: 'indeterminate', ...(context.control ? { subject: context.control } : {}) })
       return
     }
+    if (openInRegion('take-over')) return
     actionOwnsFocus.current = true
     setTakeover({ kind: 'session', hostId: current.control.hostId, agentSessionId: current.control.agentSessionId, presentationSessionId: current.id,
       expectedRun: { ...current.control.run }, cwd: current.workspacePath, label: context.name, executorId: current.executorId,
@@ -79,6 +93,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   }
   function openReading(mode: 'history' | 'learn') {
     if (!context.control) return
+    if (mode === 'learn' && openInRegion('pass-on-experience')) return
     actionOwnsFocus.current = true
     setReading({ mode, source: { hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }, label: context.name })
   }
@@ -144,8 +159,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         </WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
-  </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}{connector.dialog}{reading ? <AgentSessionReadingSurface {...reading} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}
-    {takeover ? <AgentSessionActionSurface title="Take over" description={`${takeover.label} · ${takeover.hostId}`} returnTrigger={origin.current} onClose={() => setTakeover(null)}>
-      <SessionTakeoverSurface source={takeover} active onClose={() => setTakeover(null)} />
-    </AgentSessionActionSurface> : null}</> : null}</>
+  </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}{connector.dialog}{reading?.mode === 'history' ? <AgentSessionReadingSurface source={reading.source} label={reading.label} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}
+    {reading?.mode === 'learn' ? <FocusWorkspaceStage><SessionLearningSurface source={reading.source} label={reading.label} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setReading(null)} /></FocusWorkspaceStage> : null}
+    {takeover ? <FocusWorkspaceStage><SessionTakeoverSurface source={takeover} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setTakeover(null)} /></FocusWorkspaceStage> : null}</> : null}</>
 }

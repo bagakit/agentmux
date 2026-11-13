@@ -3,12 +3,11 @@ import { useCallback, type ReactNode } from 'react'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ActivityView } from './ActivityView'
-import { SessionLearningSurface } from './SessionLearningSurface'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/agent-session-action-surface.css'
 
-/** Explicit action host; the original reader and learning controllers own their data. */
-export function AgentSessionActionSurface({ title, description, returnTrigger, onClose, children }: {
+/** Explicit reading host; the original conversation reader owns its data. */
+function AgentSessionActionSurface({ title, description, returnTrigger, onClose, children }: {
   title: string; description: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void; children: ReactNode
 }) {
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
@@ -26,15 +25,13 @@ export function AgentSessionActionSurface({ title, description, returnTrigger, o
   </Dialog.Root>
 }
 
-export function AgentSessionReadingSurface({ source, label, mode, returnTrigger, onClose }: {
-  source: SessionHistoryReference; label: string; mode: 'history' | 'learn'; returnTrigger?: HTMLElement | null | undefined; onClose(): void
+export function AgentSessionReadingSurface({ source, label, returnTrigger, onClose }: {
+  source: SessionHistoryReference; label: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void
 }) {
   const readResource = useCallback((input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource(source, input), [source.hostId, source.agentSessionId])
-  return <AgentSessionActionSurface title={mode === 'history' ? 'Conversation history' : 'Pass on experience'}
-    description={`${label} · ${source.hostId}`} returnTrigger={returnTrigger} onClose={onClose}>
-    {mode === 'history' ? <ActivityView sessionId={source.agentSessionId} executionHostId={source.hostId} capability="complete-events"
+  return <AgentSessionActionSurface title="Conversation history" description={`${label} · ${source.hostId}`} returnTrigger={returnTrigger} onClose={onClose}>
+    <ActivityView sessionId={source.agentSessionId} executionHostId={source.hostId} capability="complete-events"
       conversationReading={{ reference: source, identity: JSON.stringify([source.hostId, source.agentSessionId]), enabled: true, opened: true, readCaptured: true }}
       readPastedImage={path => api.ui.readPastedImage(path)} readHistoryResource={readResource} />
-      : <SessionLearningSurface source={source} label={label} active onClose={onClose} />}
   </AgentSessionActionSurface>
 }
