@@ -19,7 +19,7 @@ export const collaborationProductMutations = [
   { name: 'unchanged-context-cache', file: 'components/AgentCollaborationMap.tsx', before: 'if (old && old.session === session && old.name === name && old.workspace === workspace && old.topicId === topicId)', after: 'if (false)', assertion: 'consumes retained incremental facts in the real Map without redecoding status or rebuilding unchanged cards' },
   { name: 'incremental-facts-consumer', file: 'components/AgentCollaborationMap.tsx', before: 'const project = useMemo(createCollaborationProjector, [])', after: 'const project = createCollaborationProjector()', assertion: 'consumes retained incremental facts in the real Map without redecoding status or rebuilding unchanged cards' },
   { name: 'visible-relation-filter', file: 'lib/agent-collaboration.ts', before: 'kinds.has(relation.kind) &&', after: 'true &&', assertion: 'relation controls filter the actual canvas and inspector without changing input or Session state' },
-  { name: 'catalogue-retirement-time', file: 'components/AgentCollaborationMap.tsx', before: "...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance", after: 'provenance', assertion: 'opens the shared reader for a retired map point without inventing a live Session or control' }
+  { name: 'catalogue-retirement-time', file: 'lib/agent-collaboration.ts', before: "...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance", after: 'provenance', assertion: 'opens the shared reader for a retired map point without inventing a live Session or control' }
 ] as const
 const selected = process.env.AGENTMUX_COLLABORATION_PRODUCT_MUTATION
 const mutation = collaborationProductMutations.find(item => item.name === selected)

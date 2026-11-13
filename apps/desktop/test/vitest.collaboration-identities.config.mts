@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
 export const identityMutations = [
-  { name: 'retained-provider', file: 'renderer/src/lib/use-collaboration-identities.ts', before: 'providerId: source.history.providerId', after: 'providerId: source.history.executorId' },
+  { name: 'retained-provider', file: 'renderer/src/lib/agent-collaboration.ts', before: 'providerId: source.history.providerId', after: 'providerId: source.history.executorId' },
   { name: 'exact-store-selector', file: 'main/runtime-controller.ts', before: 'host.client.sessionHistorySources({ agentSessionId: reference.agentSessionId })', after: 'host.client.sessionHistorySources()' },
   { name: 'original-owner', file: 'main/runtime-controller.ts', before: 'hostId === reference.hostId)', after: "hostId === 'another-owner')" },
   { name: 'ipc-consumer', file: 'main/ipc.ts', before: 'args.runtime.sessionHistorySource(reference)', after: 'args.runtime.sessionHistorySources()' },
@@ -18,7 +18,7 @@ export const identityMutations = [
   { name: 'returned-session', file: 'main/runtime-controller.ts', before: 'sources.some(source => source.agentSessionId !== reference.agentSessionId)', after: 'false' },
   { name: 'demand-scope-churn', file: 'renderer/src/lib/use-collaboration-identities.ts', before: 'const current = () => enabled && currentOwner.current === ownerToken', after: 'const current = () => active' },
   { name: 'retained-creation', file: 'renderer/src/lib/agent-collaboration.ts', before: 'for (const source of retained)', after: 'for (const source of [])' },
-  { name: 'late-retirement-time', file: 'renderer/src/lib/use-collaboration-identities.ts', before: "...(source.retiredAt ? { retiredAt: source.retiredAt } : {}),", after: '' }
+  { name: 'late-retirement-time', file: 'renderer/src/lib/agent-collaboration.ts', before: "...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance", after: 'provenance' }
 ] as const
 const selected = process.env.AGENTMUX_MAP_IDENTITY_MUTATION, mutation = identityMutations.find(item => item.name === selected)
 if (selected && !mutation) throw Error('Unknown identity mutation')
