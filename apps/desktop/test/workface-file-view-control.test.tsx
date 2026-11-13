@@ -93,6 +93,13 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(await view()).toMatchObject({ effectiveMode: 'preview', outcome: 'read', content: { status: 'unconfirmed' } })
     expect(useAppStore.getState().documents[documentKey('resource', path)]).toBe(original)
   })
+  it('keeps an HLS playlist an editable text File: source, diff and a playing preview through the real CLI', async () => {
+    await arrange('live/stream.m3u8')
+    const facts = await view()
+    expect(facts).toMatchObject({ supportedModes: ['source', 'diff', 'preview'], data: 'text' })
+    await act(async () => { expect(await view('source')).toMatchObject({ effectiveMode: 'source', outcome: 'changed' }) })
+    await act(async () => { expect(await view('diff')).toMatchObject({ effectiveMode: 'diff' }) })
+  })
   it('changes both occurrences of one Region while another Region of the same dirty TextDoc remains source', async () => {
     await arrange(); useAppStore.getState().updateDocument(currentId, '# Unsaved original text\n\nStill one TextDoc', currentRegion); await mount()
     expect(canvases()).toEqual(['source', 'source', 'source']); const before = protectedFacts()

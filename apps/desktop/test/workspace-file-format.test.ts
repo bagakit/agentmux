@@ -30,6 +30,8 @@ describe('lightweight File format capabilities', () => {
     expect(workspaceFileFormat('a.svg').defaultMode).toBe('preview')
     expect(workspaceFileFormat('a.html')).toMatchObject({ defaultMode: 'edit', browserPreview: true, previewConfirmation: 'renderer' })
     expect(workspaceFileFormat('unknown.ts')).toMatchObject({ sourcePreview: null, sourceEditable: true, defaultMode: 'edit' })
+    // A playlist plays in preview but stays editable text, so its source and diff never disappear.
+    expect(workspaceFileFormat('live/index.M3U8')).toMatchObject({ sourcePreview: 'playlist', sourceEditable: true, defaultMode: 'preview', media: null })
     expect(detectLanguage('unknown.ts')).toBe('typescript')
   })
   it('declares exact formatting and explicit build capabilities without loading engines', () => {

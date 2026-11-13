@@ -134,6 +134,19 @@ describe('real format preview pane', () => {
     await render(<FilePreviewPane surface={file} />)
     expect(open).toHaveBeenCalledTimes(2)
   })
+  it('an HLS playlist is source text whose preview plays it through a playback lease', async () => {
+    const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-list', url: 'http://127.0.0.1:1/lease-list/live/index.m3u8', kind: 'playlist', mimeType: 'application/vnd.apple.mpegurl', byteLength: 154 })
+    vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
+    const { file, id } = seed('live/index.m3u8', '#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg0.ts\n')
+    await render(<FileSurfaceView tabId={id} surface={file} />)
+    // The preview and its player load lazily; wait for the player, as a person waits for the picture.
+    for (let attempt = 0; attempt < 20 && !container.querySelector('video'); attempt++) await render(<FileSurfaceView tabId={id} surface={file} />)
+    expect(open).toHaveBeenCalledExactlyOnceWith('workspace', 'live/index.m3u8')
+    expect(container.querySelector('video')?.getAttribute('src')).toBe('http://127.0.0.1:1/lease-list/live/index.m3u8')
+    await click('Show source')
+    expect(container.querySelector('textarea')?.value).toContain('#EXT-X-TARGETDURATION:2')
+    expect(container.querySelector('video')).toBeNull()
+  })
   it('a media file the lease owner cannot open states that reason with Retry, and Retry opens a new lease', async () => {
     const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'deleted', message: 'This file no longer exists.' })
     const { file } = seed('gone.mp4')
