@@ -218,7 +218,8 @@ it('counts actual file kinds for the fixed parent and passes the unchanged renam
   expect(rename.title).toBe('src/original.ts → src/renamed.ts')
   expect(rename.querySelector('.git-workbench__file-name')?.textContent).toBe('renamed.ts')
   expect(rename.querySelector('small')?.textContent).toBe('src/')
-  expect(rename.querySelector('.git-workbench__file-origin')?.textContent).toBe('src/original.ts → src/renamed.ts')
+  // The old path stays on the row: a path filter can match a rename by it alone.
+  expect(rename.querySelector('.git-workbench__file-origin')?.textContent).toBe('from src/original.ts')
   await act(async () => rename.click())
   expect(onSelectFile).toHaveBeenCalledExactlyOnceWith(result.entries[4])
   expect(onSelectFile.mock.calls[0]![0]).toBe(result.entries[4])
