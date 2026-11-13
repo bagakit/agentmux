@@ -37,6 +37,13 @@ function parse(argv) {
   return options
 }
 
+/** Release identity of a clean checkout; an edited tree has no commit to name. */
+async function sourceRelease() {
+  const git = async args => (await exec('git', args, { cwd: packageRoot })).stdout.trim()
+  const dirty = await git(['status', '--porcelain', '--untracked-files=normal'])
+  return dirty ? { sourceCommit: null } : { sourceCommit: await git(['rev-parse', 'HEAD']), sourceTree: await git(['rev-parse', 'HEAD^{tree}']) }
+}
+
 async function nodeArchive(supplied, scratch) {
   let bytes
   if (supplied) bytes = await readFile(supplied)
@@ -52,17 +59,20 @@ async function nodeArchive(supplied, scratch) {
 }
 
 /** The Core release, its bundled Node and installer, as one directory tree. */
-export async function buildLinuxRelease({ out, nodeArchive: supplied, artifactPackageRoot = packageRoot }) {
+export async function buildLinuxRelease({ out, nodeArchive: supplied, release = null }) {
   const { createPortableCoreArtifact } = await import(new URL('../../dist/portable-core-artifact.js', import.meta.url).href)
   const programs = await import(new URL('../../dist/remote-core-upgrade-programs.js', import.meta.url).href)
-  const version = JSON.parse(await readFile(join(artifactPackageRoot, 'package.json'), 'utf8')).version
+  const { materializeRuntimeCore } = await import(new URL('../../../../scripts/package-dependencies.mjs', import.meta.url).href)
+  const version = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')).version
   const name = `agentmux-core-${version}-linux-x64`
   // Assemble beside the output: one filesystem, and outside per-user temp folders
   // that endpoint scanners inspect file by file.
   await mkdir(out, { recursive: true })
   const scratch = await mkdtemp(join(out, '.assembling-'))
   try {
-    const artifact = await createPortableCoreArtifact(join(scratch, 'artifact'), artifactPackageRoot)
+    // The same runtime Core the App bundles: one owner decides which dependency files ship.
+    const runtime = await materializeRuntimeCore(resolve(packageRoot, '../..'), join(scratch, 'runtime-core'), release ?? await sourceRelease())
+    const artifact = await createPortableCoreArtifact(join(scratch, 'artifact'), runtime)
     const root = join(scratch, name)
     await mkdir(join(root, 'core'), { recursive: true })
     await rename(artifact.archivePath, join(root, 'core', 'core.tar.gz'))
