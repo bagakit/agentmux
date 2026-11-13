@@ -66,8 +66,9 @@ it('recovers the original frontend operation from retained Core facts after the 
     admittedAt: _tailFixtureEpoch(0, 0, 1), observedAt: _tailFixtureEpoch(0, 0, 2), rechecks: 0, kind: 'pending' as const, reason: 'operation-unconfirmed',
     evidence: { kind: 'run-running' as const, observedAt: _tailFixtureEpoch(0, 0, 2) },
     frontendReconnect: { previousFrontendId: frontend.frontendId, outputAfterByte: 100 } }
+  const { frontendReconnect: _frontendReconnect, ...later } = original
   const view = { ...session, terminalFrontend: frontend, continuityOperations: { [original.operationId]: original },
-    continuity: { ...original, operationId: 'later-observation', frontendReconnect: undefined } }
+    continuity: { ...later, operationId: 'later-observation' } }
   expect(originalFrontendRecovery(structuredClone(view))?.operationId).toBe('original-reconnect')
   expect(originalFrontendRecovery({ ...view, terminalFrontend: { ...frontend, frontendId: 'next-frontend' } })).toBeUndefined()
   expect(originalFrontendRecovery({ ...view, control: { ...session.control, run: { runId: 'later-run' } } })).toBeUndefined()
@@ -80,7 +81,7 @@ it('retains unknown restart operations while allowing a new explicit intent afte
     reason: 'restart-startup-failed', errorCode: 'AGENT_TERMINAL_HANDSHAKE_FAILED',
     evidence: { kind: 'agent-session-store' as const } }
   expect(originalSessionRestart({ ...session, continuityOperations: { [original.operationId]: original } })).toBeUndefined()
-  const unknown = { ...original, errorCode: undefined }
+  const { errorCode: _errorCode, ...unknown } = original
   expect(originalSessionRestart({ ...session, continuityOperations: { [unknown.operationId]: unknown } })?.operationId).toBe(original.operationId)
 })
 
@@ -89,8 +90,9 @@ it('uses the retained original restart when an older current pointer has the sam
   const original = { operationId: 'original-restart', agentSessionId: session.id, trigger: 'manual' as const,
     action: 'restart' as const, policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, previousRun: session.control.run,
     admittedAt: _tailFixtureEpoch(0, 0, 1), observedAt: _tailFixtureEpoch(0, 0, 2), rechecks: 0, kind: 'starting' as const,
-    reason: 'restart-stopping', evidence: { kind: 'run-unknown' as const, observedAt: _tailFixtureEpoch(0, 0, 2) } }
-  const stale = { ...original, action: undefined, kind: 'reattachable' as const, reason: 'reattachable' }
+    reason: 'restart-stopping', evidence: { kind: 'run-unknown' as const, observedAt: _tailFixtureEpoch(0, 0, 2), message: 'Original fixture Run observation unavailable' } }
+  const { action: _action, ...previous } = original
+  const stale = { ...previous, kind: 'reattachable' as const, reason: 'reattachable' }
   const view = { ...session, continuityOperations: { [original.operationId]: original }, continuity: stale }
   expect(originalSessionRestart(view)).toEqual(original)
   expect(originalSessionRestart({ ...view, continuity: { ...stale, operationId: 'other-observation' } })).toEqual(original)
