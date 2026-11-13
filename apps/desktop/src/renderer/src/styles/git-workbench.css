@@ -55,7 +55,7 @@
 .git-workbench__change--added { color: var(--green-text); }
 .git-workbench__change--deleted { color: var(--red-text); }
 .git-workbench__warning { color: var(--text-3); overflow-wrap: anywhere; }
-.git-workbench__files button { height: 100%; align-items: center; }
+.git-workbench__files button { height: 100%; align-items: center; padding: 0 var(--sp-2); }
 .git-workbench__file-path { flex-wrap: nowrap; overflow: hidden; }
 .git-workbench__file-name, .git-workbench__file-path small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-workbench__files .git-workbench__file-origin { display: none; }

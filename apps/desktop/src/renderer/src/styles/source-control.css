@@ -183,7 +183,7 @@
 .branch-comparison__summary span { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .branch-comparison__files { flex: none; }
 .branch-comparison__file { width: 100%; height: 100%; }
-.branch-comparison__file { display: flex; align-items: center; gap: var(--sp-2); text-align: left; color: var(--text); background: transparent; border: 0; border-radius: var(--radius-sm); padding: var(--sp-2); cursor: pointer; }
+.branch-comparison__file { display: flex; align-items: center; gap: var(--sp-2); text-align: left; color: var(--text); background: transparent; border: 0; border-radius: var(--radius-sm); padding: 0 var(--sp-2); cursor: pointer; }
 .branch-comparison__file:hover { background: var(--surface-2); }
 .branch-comparison__file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-comparison__file small { color: var(--text-3); }
