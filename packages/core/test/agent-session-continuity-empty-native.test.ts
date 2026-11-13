@@ -1,5 +1,8 @@
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { expect, it, vi } from 'vitest'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { cleanups, core, fixture } from './helpers/prepared-resume-fixture.js'
@@ -48,6 +51,152 @@ it.each(['startup', 'manual', 'input'] as const)('answers a %s recovery of an en
   expect(stored?.continuityOperations?.['empty-' + trigger]).not.toHaveProperty('supervision')
   expect(stored?.continuityOperations?.['empty-' + trigger]).not.toHaveProperty('nextActionAt')
   expect(await f.correlation()).toBeUndefined()
+  noNewStartOrInput(f)
+})
+
+it('converges equal startup observations without metadata writes or duplicate publication', async () => {
+  const f = await emptyEndedSession()
+  const first = await continuity(f, 'first-startup', 'startup'), saved = await f.store.readMetadata(f.previous.agentSessionId)
+  const writes = vi.spyOn(f.store, 'compareAndSwapMetadata'), events = vi.spyOn(f.inner, 'publishSession')
+  const status = vi.spyOn(f.inner.kernel, 'status')
+  for (let index = 0; index < 5; index++) {
+    const result = await continuity(f, 'fresh-startup-' + index, 'startup')
+    expect(result).toMatchObject({ kind: 'unavailable', reason: 'native-conversation-absent', continuity: first.continuity })
+    expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(saved)
+  }
+  expect(Object.keys(saved!.continuityOperations!)).toEqual(['first-startup'])
+  expect(Object.keys(saved!.continuityExecutors!)).toEqual(['first-startup'])
+  expect(writes).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled()
+  expect(status.mock.calls.filter(args => args[0] === f.previous.run.runId).length).toBeGreaterThanOrEqual(5)
+  noNewStartOrInput(f)
+})
+
+it('converges startup observations across distinct real Core owner processes', async () => {
+  const f = await emptyEndedSession()
+  const first = await continuity(f, 'process-original', 'startup'), saved = await f.store.readMetadata(f.previous.agentSessionId)
+  const providerCatalog = f.client.providers.get(f.provider.id).catalog
+  await f.client.dispose()
+  const worker = process.env.AGENTMUX_TEST_EMPTY_NATIVE_OBSERVATION_WORKER
+  expect(worker, 'Run the source proof driver so the current Core worker is compiled.').toBeTruthy()
+  const outputs = []
+  for (const operationId of ['process-second', 'process-third']) {
+    const { stdout } = await promisify(execFile)(process.execPath, [worker!, JSON.stringify({ storePath: join(f.root, 'sessions.sqlite'),
+      providerCatalog, agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId })], { env: process.env, timeout: 30_000 })
+    const output = JSON.parse(stdout.trim().split('\n').at(-1)!)
+    expect(output.result).toMatchObject({ kind: 'unavailable', reason: 'native-conversation-absent', continuity: first.continuity })
+    expect(output.stored).toEqual(saved); expect(output.counters).toEqual({ start: 0, input: 0, stop: 0 })
+    expect(output.pid).not.toBe(process.pid); outputs.push(output)
+  }
+  expect(outputs[0].pid).not.toBe(outputs[1].pid)
+  expect(process.env.AGENTMUX_TEST_EMPTY_NATIVE_OBSERVATION_RECEIPT).toBeTruthy()
+  await writeFile(process.env.AGENTMUX_TEST_EMPTY_NATIVE_OBSERVATION_RECEIPT!, JSON.stringify({
+    pids: outputs.map(output => output.pid), originalReceipt: first.continuity!.operationId,
+    operationCounts: outputs.map(output => Object.keys(output.stored.continuityOperations).length),
+    executorCounts: outputs.map(output => Object.keys(output.stored.continuityExecutors).length),
+    counters: outputs.map(output => output.counters), metadataUnchanged: true
+  }))
+})
+
+it('converges the first concurrent startup observations from independent Core owners', async () => {
+  const f = await emptyEndedSession(), other = await f.reader()
+  managedChannel({ ...f, ...other })
+  const [a, b] = await Promise.all([continuity(f, 'owner-a', 'startup'), other.client.ensureAgentContinuity({
+    agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'owner-b', trigger: 'startup' })])
+  expect(a).toMatchObject({ kind: 'unavailable', reason: 'native-conversation-absent' })
+  expect(b.continuity).toEqual(a.continuity)
+  const saved = await f.store.readMetadata(f.previous.agentSessionId)
+  expect(Object.keys(saved!.continuityOperations!)).toEqual([a.continuity!.operationId])
+  expect(Object.keys(saved!.continuityExecutors!)).toEqual([a.continuity!.operationId])
+  noNewStartOrInput(f); expect(other.start).not.toHaveBeenCalled(); expect(other.inputCount()).toBe(0)
+})
+
+it('keeps explicit manual and input identities between equal startup observations', async () => {
+  const f = await emptyEndedSession(), first = await continuity(f, 'automatic-original', 'startup')
+  const manual = await continuity(f, 'explicit-manual', 'manual')
+  expect(manual.continuity?.operationId).toBe('explicit-manual')
+  const input = await continuity(f, 'authored-input', 'input', { input: { submissionId: 'authored-body', prompt: 'Keep this exact new draft.' } })
+  expect(input.continuity).toMatchObject({ operationId: 'authored-input', launchInput: { input: { prompt: 'Keep this exact new draft.' } } })
+  const before = await f.store.readMetadata(f.previous.agentSessionId)
+  const again = await continuity(f, 'automatic-after-input', 'startup')
+  expect(again.continuity).toEqual(first.continuity)
+  expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(before)
+  expect(Object.keys(before!.continuityOperations!)).toEqual(['automatic-original', 'explicit-manual', 'authored-input'])
+  noNewStartOrInput(f)
+})
+
+it('retains changed startup policy rather than aliasing an older observation', async () => {
+  const f = await emptyEndedSession()
+  await continuity(f, 'policy-original', 'startup')
+  const changed = await continuity(f, 'policy-changed', 'startup', { policy: { activeRecovery: 'manual' } })
+  expect(changed.continuity?.operationId).toBe('policy-changed')
+  const before = await f.store.readMetadata(f.previous.agentSessionId)
+  expect((await continuity(f, 'policy-equal', 'startup', { policy: { activeRecovery: 'manual' } })).continuity).toEqual(changed.continuity)
+  expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(before)
+  expect(Object.keys(before!.continuityOperations!)).toHaveLength(2)
+  noNewStartOrInput(f)
+})
+
+it('converges equal SDK execution options while preserving a changed execution source', async () => {
+  const f = await emptyEndedSession(), options = { commandOverride: process.execPath, args: ['original'], env: { PRIVATE_SETTING: 'one' } }
+  const first = await continuity(f, 'sdk-original', 'startup', options)
+  expect((await continuity(f, 'sdk-equal', 'startup', options)).continuity).toEqual(first.continuity)
+  const changed = await continuity(f, 'sdk-changed', 'startup', { ...options, env: { PRIVATE_SETTING: 'two' } })
+  expect(changed.continuity?.operationId).toBe('sdk-changed')
+  const saved = await f.store.readMetadata(f.previous.agentSessionId)
+  expect(Object.keys(saved!.continuityExecutors!)).toEqual(['sdk-original', 'sdk-changed'])
+  noNewStartOrInput(f)
+})
+
+it('rechecks current native evidence before reusing an older startup observation', async () => {
+  const f = await emptyEndedSession()
+  await continuity(f, 'old-absence', 'startup')
+  const update = f.inner.updateExactAgentSession.bind(f.inner)
+  let changed = false
+  f.inner.updateExactAgentSession = async (...args: Parameters<typeof update>) => {
+    if (!changed) {
+      changed = true
+      await f.inner.registry.update(f.previous.agentSessionId, f.previous.run, (value: AgentMuxStoredAgentSession) => ({ ...value,
+        nativeHandle: f.previous.nativeHandle, updatedAt: value.updatedAt + 1 }))
+    }
+    return await update(...args)
+  }
+  const result = await continuity(f, 'current-observation', 'startup')
+  expect(result).toMatchObject({ kind: 'pending', reason: 'idle-unknown', continuity: { operationId: 'current-observation' } })
+  expect((await f.store.readMetadata(f.previous.agentSessionId))!.nativeHandle).toEqual(f.previous.nativeHandle)
+  noNewStartOrInput(f)
+})
+
+it('keeps Runtime unknown after an old startup absence instead of returning cached certainty', async () => {
+  const f = await emptyEndedSession()
+  await continuity(f, 'old-absence', 'startup')
+  vi.spyOn(f.inner.kernel, 'status').mockRejectedValue(new Error('Private Runtime observation unavailable'))
+  const result = await continuity(f, 'unknown-observation', 'startup')
+  expect(result).toMatchObject({ kind: 'pending', reason: 'runtime-unverified', continuity: { operationId: 'unknown-observation' } })
+  noNewStartOrInput(f)
+})
+
+it('checks a revoked standing source even after an old startup absence', async () => {
+  const f = await emptyEndedSession()
+  await continuity(f, 'old-absence', 'startup')
+  await expect(continuity(f, 'revoked-observation', 'startup', { standingIntent: { intentId: 'missing', operationId: 'revoked', sourceId: 'source', revision: 'revoked' } }))
+    .rejects.toMatchObject({ code: 'AGENT_STANDING_INTENT_CHANGED' })
+  noNewStartOrInput(f)
+})
+
+it('does not confirm reuse when the original observation Store fence failed', async () => {
+  const f = await emptyEndedSession()
+  await continuity(f, 'old-absence', 'startup')
+  const update = f.inner.updateExactAgentSession.bind(f.inner)
+  f.inner.updateExactAgentSession = async (...args: Parameters<typeof update>) => {
+    // Run the actual updater selection, then reject the unconfirmed Store fence.
+    args[2](f.inner.registry.get(f.previous.agentSessionId))
+    throw new core.AgentMuxError('Private Store fence unavailable.', 'PRIVATE_STORE_FENCE_UNAVAILABLE')
+  }
+  const result = await continuity(f, 'unconfirmed-observation', 'startup')
+  expect(result.continuity).toMatchObject({ operationId: 'unconfirmed-observation' })
+  expect(result.continuity?.error).toContain('receipt persistence is unconfirmed')
+  f.inner.updateExactAgentSession = update
+  expect(Object.keys((await f.store.readMetadata(f.previous.agentSessionId))!.continuityOperations!)).toEqual(['old-absence'])
   noNewStartOrInput(f)
 })
 
@@ -231,6 +380,10 @@ it('reports the dedicated reason through the public empty-text resume, Hosted cl
   const reader = await core.connectHostedAgentMux({ rpc }); cleanups.push(() => reader.dispose())
   await expect(reader.ensureAgentContinuity({ agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'hosted-empty', trigger: 'manual' }))
     .resolves.toMatchObject({ kind: 'unavailable', reason: 'native-conversation-absent' })
+  const startup = await reader.ensureAgentContinuity({ agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'hosted-startup-original', trigger: 'startup' })
+  const beforeRepeat = await f.store.readMetadata(f.previous.agentSessionId)
+  expect((await reader.ensureAgentContinuity({ agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'hosted-startup-next', trigger: 'startup' })).continuity).toEqual(startup.continuity)
+  expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(beforeRepeat)
   // The compiled CLI is the real consumer: resume refuses with the reason, inspect reads it back.
   const env = objectCliEnvironment(f.root)
   const resume = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', 'cli-empty'], env)

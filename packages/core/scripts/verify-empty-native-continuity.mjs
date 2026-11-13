@@ -1,6 +1,7 @@
 // Run the "no native conversation to continue" cases unmutated, then once per loaded mutant.
 // The unmutated run must pass every case; each mutant must fail its designated case.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire, isBuiltin } from 'node:module'
@@ -9,8 +10,13 @@ import { dirname, join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
 const { build } = require('esbuild')
 const config = 'packages/core/test/agent-session-continuity-empty-native.mutation.config.mts'
+const focused = process.argv.includes('--startup-observation')
+assert.ok(process.argv.slice(2).every(arg => arg === '--startup-observation'), 'Unknown proof option')
 const variants = [
   { name: 'candidate' },
+  { name: 'startup-no-reuse', target: 'converges equal startup observations without metadata writes' },
+  { name: 'startup-explicit-merged', target: 'keeps explicit manual and input identities' },
+  { name: 'startup-fence-unconfirmed', target: 'does not confirm reuse when the original observation Store fence failed' },
   { name: 'admission-before-fact', target: 'answers a startup recovery' },
   { name: 'fact-skips-authorization', target: 'still refuses a revoked standing source' },
   { name: 'ignore-candidates', target: 'keeps native candidates awaiting selection' },
@@ -26,11 +32,17 @@ const variants = [
   { name: 'public-pending', target: 'reports the dedicated reason through the public' }
 ]
 // Every case, including the compiled CLI one, must run unmutated: a skipped case proves nothing.
-const CASES = 28
+const CASES = 38
 const output = join(root, 'packages/core/.tmp/empty-native-continuity')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-'))
-const receipt = { schema: 'agentmux.empty-native-continuity-proof.v1', passed: false, results: [] }
+const receipt = { schema: 'agentmux.empty-native-continuity-proof.v1', passed: false, focused, sources: {}, results: [] }
+const sources = ['packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts',
+  'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/test/agent-session-continuity-empty-native.test.ts',
+  'packages/core/test/fixtures/empty-native-observation-worker.ts', 'packages/core/test/agent-session-continuity-empty-native.mutation.config.mts',
+  'packages/core/scripts/verify-empty-native-continuity.mjs']
+const hash = bytes => createHash('sha256').update(bytes).digest('hex')
+for (const path of sources) receipt.sources[path] = hash(await readFile(join(root, path)))
 const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2))
 // A private compiled CLI from this checkout's source; the candidate run drives it as the real consumer.
 const alias = {}
@@ -48,7 +60,7 @@ const cli = join(attempt, 'cli')
 await mkdir(join(cli, 'bin'), { recursive: true }); await mkdir(join(cli, 'dist'), { recursive: true })
 await writeFile(join(cli, 'package.json'), '{"type":"module"}')
 await copyFile(join(root, 'packages/core/bin/amux'), join(cli, 'bin/amux'))
-await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(cli, 'dist/agentmux.js'), bundle: true, platform: 'node', format: 'esm',
+const buildOptions = { bundle: true, platform: 'node', format: 'esm',
   target: 'node24', packages: 'external', alias, logLevel: 'warning', plugins: [{ name: 'existing-dependencies', setup(plugin) {
     // External dependencies resolve through their own package exports, as the installed CLI loads them.
     plugin.onResolve({ filter: /^[^./]/ }, async args => {
@@ -66,14 +78,21 @@ await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfil
       }
       return { path: resolver.resolve(args.path), external: true }
     })
-  } }] })
-for (const variant of variants) {
+  } }] }
+await build({ ...buildOptions, entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(cli, 'dist/agentmux.js') })
+const worker = join(cli, 'dist/observation-owner.js')
+await build({ ...buildOptions, entryPoints: [join(root, 'packages/core/test/fixtures/empty-native-observation-worker.ts')], outfile: worker })
+const selected = focused ? variants.filter(variant => ['candidate', 'startup-no-reuse', 'startup-explicit-merged', 'startup-fence-unconfirmed',
+  'stale-absence-at-commit', 'stale-absence-fence-retained'].includes(variant.name)) : variants
+for (const variant of selected) {
   const report = join(attempt, variant.name + '.json'), loaded = join(attempt, variant.name + '.loaded.ndjson')
   const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile=' + report]
+  if (focused && variant.target) args.push('-t', variant.target)
   const result = await new Promise((yes, no) => {
     const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
       // The private CLI is unmutated; mutants are loaded in-process, so only the public-pending one reaches it.
       env: { ...process.env, AMX_EMPTY_NATIVE_LOADED: loaded, AGENTMUX_TEST_OBJECT_CLI: join(cli, 'bin/amux'),
+        AGENTMUX_TEST_EMPTY_NATIVE_OBSERVATION_WORKER: worker, AGENTMUX_TEST_EMPTY_NATIVE_OBSERVATION_RECEIPT: join(attempt, 'owner-processes.json'),
         ...(variant.name === 'candidate' ? {} : { AMX_EMPTY_NATIVE_MUTATION: variant.name }) } })
     let text = ''; child.stdout.on('data', d => { text += d }); child.stderr.on('data', d => { text += d })
     child.once('error', no); child.once('close', code => yes({ code, text }))
@@ -91,6 +110,9 @@ for (const variant of variants) {
     assert.ok(result.code === 1 && failed.some(name => name.includes(variant.target)), 'Loaded mutation did not fail its designated case: ' + variant.name)
   }
 }
+receipt.processRestart = JSON.parse(await readFile(join(attempt, 'owner-processes.json'), 'utf8'))
+assert.equal(new Set(receipt.processRestart.pids).size, 2)
+for (const path of sources) assert.equal(hash(await readFile(join(root, path))), receipt.sources[path], 'Proof source changed: ' + path)
 receipt.compiledCli = join(cli, 'dist/agentmux.js'); await rm(cli, { recursive: true, force: true })
 receipt.passed = true; await save()
 console.log('Empty-native continuity proof passed: ' + join(attempt, 'receipt.json'))

@@ -12,6 +12,12 @@ const policy = 'packages/core/src/agent-session-recovery/continuity-policy.ts'
 const supervisor = 'packages/core/src/agent-session-recovery/supervisor.ts'
 const service = 'packages/core/src/public-rpc-service.ts'
 export const mutations: Record<string, Array<[string, string, string]>> = {
+  'startup-no-reuse': [[attempt, "            if (!prior && !latest && input.trigger === 'startup' && !receipt.standingIntent &&",
+    "            if (false && !prior && !latest && input.trigger === 'startup' && !receipt.standingIntent &&"]],
+  'startup-explicit-merged': [[attempt, "            if (!prior && !latest && input.trigger === 'startup' && !receipt.standingIntent &&",
+    '            if (!prior && !latest && !receipt.standingIntent &&']],
+  'startup-fence-unconfirmed': [[attempt, '      } catch (error) {\n        reusedObservation = undefined\n',
+    '      } catch (error) {\n']],
   // Old ordering: automatic admission parks the empty Session as idle-unknown again.
   'admission-before-fact': [[attempt, '} else if (!nativeConversationAbsent) admission = agentContinuityAdmission(', '} else admission = agentContinuityAdmission(']],
   // The fact short-circuits authorization: a revoked standing source is no longer refused.
