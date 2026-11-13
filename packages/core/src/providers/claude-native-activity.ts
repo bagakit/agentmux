@@ -8,7 +8,9 @@ import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../t
 /**
  * A main tool call that Claude asked the person about has ended. Claude emits no classic Hook
  * when such a call is declined; this observation carries that exact call's own tool_use_id.
- * It ends the request only and never states an answer, an approval or tool success.
+ * It ends the request only and never states an answer, an approval or tool success. It travels in
+ * the ordered native observation stream; an unconfirmed end is kept, sent again ahead of later
+ * observations, and shown as a delivery gap until Core confirms it.
  */
 export const CLAUDE_ASKED_TOOL_END_EVENT = 'AgentMuxAskedToolEnded'
 
@@ -115,6 +117,7 @@ let deliveryGapThrough = 0
 let pending = 0
 let overflowReported = false
 let delivery = Promise.resolve()
+const ASKED_END = ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}
 
 async function captureActor($) {
   if (actorCaptured) return
@@ -125,6 +128,17 @@ async function captureActor($) {
   else return 'unavailable'
 }
 
+// The authenticated runner exits after Core has decided; stderr or a nonzero exit means unconfirmed.
+async function send($, payload) {
+  const result = await $.process.run(
+    ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+    { stdin: JSON.stringify(payload),
+      env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
+      timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+  )
+  return result.exitCode === 0 && !result.stderr
+}
+
 async function deliver($, eventName, event, sourceSequence) {
   const identityUnavailable = eventName === 'AgentMuxActivityUnavailable' && event.reason === 'source-identity-unavailable'
   if (!initialSessionId && !identityUnavailable) return
@@ -132,33 +146,41 @@ async function deliver($, eventName, event, sourceSequence) {
     const current = await $.session.id()
     if (current !== initialSessionId) sourceChanged = true
   }
-  if (eventName === 'turn.start' && sourceSequence > deliveryGapThrough) deliveryGapThrough = 0
-  const unavailable = identityUnavailable || sourceChanged || deliveryGapThrough > 0
-  const payload = {
-    hook_event_name: unavailable ? 'AgentMuxActivityUnavailable' : eventName,
-    ...(initialSessionId ? { session_id: initialSessionId } : {}),
-    sourceId,
-    sequence: sourceSequence,
-    ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
-      turnId: event.turnId,
-      ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
-      ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted } : {})
-    })
+  // Ends reserved at or before this position go first, each with its exact call identity. An end that
+  // is still unconfirmed keeps the gap open, so the next turn.start cannot clear it.
+  let confirmed = true
+  if (!sourceChanged) {
+    const due = [...askedCalls].filter(([, call]) => call.end !== undefined && call.end <= sourceSequence).sort(([, a], [, b]) => a.end - b.end)
+    for (const [id, call] of due) {
+      if (await send($, { hook_event_name: ASKED_END, session_id: initialSessionId, tool_use_id: id, tool_name: call.tool })) askedCalls.delete(id)
+      else confirmed = false
+    }
   }
-  const result = await $.process.run(
-    ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
-    { stdin: JSON.stringify(payload),
-      env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
-      timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
-  )
-  if (result.exitCode !== 0 || result.stderr) {
+  if (eventName !== ASKED_END) {
+    if (confirmed && eventName === 'turn.start' && sourceSequence > deliveryGapThrough) deliveryGapThrough = 0
+    const unavailable = identityUnavailable || sourceChanged || deliveryGapThrough > 0
+    const payload = {
+      hook_event_name: unavailable ? 'AgentMuxActivityUnavailable' : eventName,
+      ...(initialSessionId ? { session_id: initialSessionId } : {}),
+      sourceId,
+      sequence: sourceSequence,
+      ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
+        turnId: event.turnId,
+        ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
+        ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted } : {})
+      })
+    }
+    if (!await send($, payload)) confirmed = false
+  }
+  if (!confirmed) {
     deliveryGapThrough = Math.max(deliveryGapThrough, sourceSequence)
     await $.ui.log('AgentMux activity observation delivery unconfirmed; the Agent remains available.', { to: 'debug' })
   }
 }
 
 // Calls Claude asked the person about in this session, keyed by the native tool_use_id.
-// Each entry: { tool, input, identified }; identified once its classic ask carries the id.
+// Each entry: { tool, input, identified, end }; identified once its classic ask carries the id, end
+// the reserved position of its exact end. An entry stays until Core confirms that end.
 const askedCalls = new Map()
 
 // A stable rendering of tool arguments, independent of property insertion order.
@@ -196,32 +218,18 @@ async function askTurnEndNotice($, turnId) {
   }
 }
 
-async function reportAskedEnd($, toolUseId, toolName) {
-  try {
-    const result = await $.process.run(
-      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
-      { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}, session_id: initialSessionId,
-          tool_use_id: toolUseId, ...(toolName ? { tool_name: toolName } : {}) }),
-        env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
-        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
-    )
-    if (result.exitCode !== 0 || result.stderr) await $.ui.log('AgentMux could not report a finished request; its card stays until confirmed.', { to: 'debug' })
-  } catch {
-    try { await $.ui.log('AgentMux could not report a finished request; its card stays until confirmed.', { to: 'debug' }) } catch {}
-  }
-}
-
 function observe($, eventName, event) {
   const sourceSequence = ++sequence
   // An unavailable ingress cannot retain an unbounded promise chain. A dropped observation
   // invalidates earlier queued ends too; only a later native start can establish activity again.
+  // An asked end dropped here keeps its position and goes ahead of the next delivered observation.
   if (pending >= 32) {
     deliveryGapThrough = sourceSequence
     if (!overflowReported) {
       overflowReported = true
       try { $.ui.log('AgentMux activity observation queue full; current activity remains unconfirmed.', { to: 'debug' }) } catch {}
     }
-    return
+    return sourceSequence
   }
   pending += 1
   // Reserve order before any await, including concurrent child endings. Delivery failure does not
@@ -230,6 +238,7 @@ function observe($, eventName, event) {
     deliveryGapThrough = Math.max(deliveryGapThrough, sourceSequence)
     try { await $.ui.log('AgentMux activity observer unavailable; the Agent remains available.', { to: 'debug' }) } catch {}
   }).finally(() => { pending -= 1; if (pending === 0) overflowReported = false })
+  return sourceSequence
 }
 
 export function register(on) {
@@ -278,7 +287,7 @@ export function register(on) {
   on('classic.PermissionRequest', ($, event, next) => {
     if (sourceChanged || event?.agent_id !== undefined || event?.tool_use_id !== undefined) return next(event)
     const input = canonical(event?.tool_input)
-    const matches = [...askedCalls].filter(([, call]) => !call.identified && call.tool === event?.tool_name && call.input === input)
+    const matches = [...askedCalls].filter(([, call]) => !call.identified && call.end === undefined && call.tool === event?.tool_name && call.input === input)
     if (matches.length !== 1) return next(event)
     matches[0][1].identified = true
     return next({ ...event, tool_use_id: matches[0][0] })
@@ -287,9 +296,10 @@ export function register(on) {
     const id = event?.tool_use_id, call = typeof id === 'string' ? askedCalls.get(id) : undefined
     try { return await next(event) }
     finally {
-      if (call && askedCalls.delete(id) && initialSessionId && !sourceChanged) {
-        // Delivery uses the authenticated runner; the native result is never inspected or altered.
-        void reportAskedEnd($, id, call.tool)
+      // Each asked call ends once; the native result is never inspected or altered.
+      if (call && call.end === undefined && askedCalls.get(id) === call) {
+        if (initialSessionId && !sourceChanged) call.end = observe($, ASKED_END, {})
+        else askedCalls.delete(id)
       }
     }
   })
