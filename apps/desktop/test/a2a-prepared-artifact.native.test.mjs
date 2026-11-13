@@ -61,8 +61,9 @@ test('prepared execution uses the exact Git snapshot and complete copied Core, p
   assert.equal(prepared.artifact.inventory.files['Contents/MacOS/AgentMux'].mode, 0o755)
   assert.equal(prepared.artifact.inventory.files['Contents/Resources/app/node_modules/@agentmux/core/dist/internal-link.js'].target, 'unit-0.js')
   await verifyA2aPreparedArtifact(prepared, { root })
+  await verifyA2aPreparedArtifact(prepared, { root, artifact: 'origin' })
   await writeFile(join(prepared.execution.coreRoot, 'dist/unit-100.js'), 'changed compiled behavior\n')
-  await assert.rejects(verifyA2aPreparedArtifact(prepared, { root }), { name: 'AssertionError', message: /execution graph stayed unchanged/u })
+  await assert.rejects(verifyA2aPreparedArtifact(prepared, { root }), { name: 'AssertionError', message: /artifact graph stayed unchanged/u })
 }))
 
 test('wrong Core identity is refused before copying or launching any candidate', async () => temporary(async root => {
@@ -80,4 +81,15 @@ test('verification rejects a truncated Core join, promoted build outcome and cha
   await assert.rejects(verifyA2aPreparedArtifact(promoted, { root }), { name: 'AssertionError' })
   await writeFile(join(root, 'build.log'), 'changed original build record\n')
   await assert.rejects(verifyA2aPreparedArtifact(prepared, { root }), { name: 'AssertionError', message: /provenance changed/u })
+}))
+
+
+test('retained-origin verification survives execution cleanup and still refuses changed sealed bytes', async () => temporary(async root => {
+  const prepared = await prepareA2aArtifact(await fixture(root))
+  await rm(prepared.artifact.applicationBundle, { recursive: true })
+  await assert.rejects(verifyA2aPreparedArtifact(prepared, { root }), { code: 'ENOENT' })
+  const selected = await verifyA2aPreparedArtifact(prepared, { root, artifact: 'origin' })
+  assert.equal(selected.applicationBundle, prepared.origin.applicationBundle)
+  await writeFile(join(selected.coreRoot, 'dist/unit-100.js'), 'changed sealed origin\n')
+  await assert.rejects(verifyA2aPreparedArtifact(prepared, { root, artifact: 'origin' }), { name: 'AssertionError', message: /artifact graph stayed unchanged/u })
 }))
