@@ -109,10 +109,18 @@ const NETWORK_IDLE_QUIET_MS = 500
  * 写的，AgentMux 用的是窗口级 `WebContentsView`，**不能照搬**（不是漏抄）。
  */
 const RESTORE_FOCUS_SNIPPET = `
+  // A field inside an open shadow root reports its host as document.activeElement; the focused element
+  // is the deepest shadowRoot.activeElement. Both the check and the restore read that one answer.
+  const focusedElement = () => {
+    let focused = document.activeElement
+    while (focused && focused.shadowRoot && focused.shadowRoot.activeElement) focused = focused.shadowRoot.activeElement
+    return focused
+  }
+  const holdsFocus = (acted) => { const focused = focusedElement(); return focused === acted || (!!focused && acted.contains(focused)) }
   const restoreFocus = (acted, previous) => {
     if (previous === acted) return
-    if (document.activeElement !== acted) return
-    if (previous instanceof HTMLElement) previous.focus()
+    if (!holdsFocus(acted)) return
+    if (previous instanceof HTMLElement || previous instanceof SVGElement) previous.focus()
     else if (acted instanceof HTMLElement) acted.blur()
   }`
 
@@ -156,7 +164,7 @@ const POINTER_ON_DECLARATION = `function () {
  * native End key is sent for them afterwards. A target that cannot take text is refused before
  * anything is typed.
  */
-const PREPARE_TEXT_DECLARATION = `function (replace) {
+const PREPARE_TEXT_DECLARATION = `function (replace) {${RESTORE_FOCUS_SNIPPET}
   const self = this;
   if (!(self instanceof HTMLElement)) return { ok: false, reason: 'is not an element' };
   const editable = self.isContentEditable;
@@ -172,9 +180,10 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
   if (!editable && !field) return { ok: false, reason: 'is not a text field or editable element' };
   // :disabled also covers a field inside a disabled fieldset, which .disabled does not.
   if (field && (self.matches(':disabled') || self.readOnly)) return { ok: false, reason: self.matches(':disabled') ? 'is disabled' : 'is read-only' };
-  const previous = document.activeElement;
+  const previous = focusedElement();
   self.focus();
-  if (document.activeElement !== self && !(editable && self.contains(document.activeElement))) return { ok: false, reason: 'did not take focus' };
+  // An inert field (behind a modal dialog) or a hidden one does not take focus.
+  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
   const before = editable ? self.textContent ?? '' : self.value;
   let caret = 'set';
   if (editable) {
@@ -204,7 +213,9 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
  * - A select takes one option, named by its value or its visible label. When the text names two
  *   different options (one by value, another by label) or several by label, it is refused with the
  *   candidates, never resolved by a guess.
- * - The field must take focus, which a covered, inert or hidden field does not.
+ * - The field must take focus, which an inert field (behind a modal dialog) or a hidden one does not. A
+ *   field covered by another element still takes focus and takes its value, as it would from a person
+ *   tabbing to it. Focus inside an open shadow root counts.
  *
  * The value then goes through the element's own setter, and input and change follow as a person's pick
  * would fire them. Returns what the setter left (`taken`, which differs from `wanted` only where the
@@ -242,9 +253,9 @@ const SET_PICKER_VALUE_DECLARATION = `function (value) {${RESTORE_FOCUS_SNIPPET}
       return { ok: false, reason: 'does not take ' + quoted + ' as a ' + self.type + '; write it like ' + (examples[self.type] ?? 'the field shows') };
     }
   }
-  const previous = document.activeElement;
+  const previous = focusedElement();
   self.focus();
-  if (document.activeElement !== self) return { ok: false, reason: 'did not take focus, so it is covered, inert or hidden' };
+  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
   const before = self.value;
   if (index >= 0) Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex').set.call(self, index);
   else Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(self, next);
@@ -299,12 +310,12 @@ export function nativeKeyFor(key: string): { key: string; code: string; keyCode:
 }
 
 /** Focus the target for a native key press and remember who had focus; refused when it cannot take focus. */
-const FOCUS_FOR_KEY_DECLARATION = `function () {
+const FOCUS_FOR_KEY_DECLARATION = `function () {${RESTORE_FOCUS_SNIPPET}
   const self = this instanceof HTMLElement || this instanceof SVGElement ? this : null;
   if (!self) return { ok: false, reason: 'is not an element that can take keyboard input' };
-  const previous = document.activeElement;
+  const previous = focusedElement();
   self.focus();
-  if (document.activeElement !== self && !self.contains(document.activeElement)) return { ok: false, reason: 'did not take focus' };
+  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
   globalThis.__agentMuxTextFocus = previous;
   return { ok: true };
 }`
