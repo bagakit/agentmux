@@ -273,7 +273,7 @@ import { executeSettingsResourcesControl } from './settings-resources-control.js
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from './browser-profile-control.js'
 import { createBrowserProfileNetworkControl } from './browser-profile-network-control.js'
-import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
+import { APP_LINK_SCHEME_CHOICES, BROWSER_FIND_MAX_LENGTH, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertAppDocumentSender, isAppDocumentSender } from './ipc-sender-trust.js'
@@ -2058,6 +2058,20 @@ export async function registerIpc(args: {
     const capsuleId = browsers.capsuleId(id)
     return capsuleId ? await browsers.reloadCapsule(id, await capsuleClient.call('capsule.inspect', { capsuleId }))
       : await browsers.reload(id)
+  })
+  handle('browser:findInPage', async (id: unknown, text: unknown, request: unknown) => {
+    const forward = request && typeof request === 'object' ? Reflect.get(request, 'forward') : undefined
+    const newSession = request && typeof request === 'object' ? Reflect.get(request, 'newSession') : undefined
+    if (typeof id !== 'string' || !id || typeof text !== 'string' || !text || text.length > BROWSER_FIND_MAX_LENGTH ||
+      typeof forward !== 'boolean' || typeof newSession !== 'boolean') {
+      throw new TypeError(`Find in page needs one Browser id, a query of at most ${BROWSER_FIND_MAX_LENGTH} characters and a direction.`)
+    }
+    return await browsers.findInPage(id, text, { forward, newSession })
+  })
+  handle('browser:stopFindInPage', async (id: string, request: unknown) => {
+    const focusPage = request && typeof request === 'object' ? Reflect.get(request, 'focusPage') : undefined
+    if (typeof focusPage !== 'boolean') throw new TypeError('Stopping find in page needs to say whether focus returns to the page.')
+    browsers.stopFindInPage(id, { focusPage })
   })
   handleWithEvent('browser:getRecoveryPreview', async (event, id: string): Promise<BrowserRecoveryPreviewReadResult> => {
     try {

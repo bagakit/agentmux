@@ -33,6 +33,8 @@ import {
   type BrowserScreenshotCapture,
   type BrowserScriptRunReport,
   type BrowserSnapshot,
+  type BrowserFindInPageRequest,
+  type BrowserFindInPageResult,
   type BrowserViewport,
   type BrowserOperator,
   type BrowserActivityState
@@ -416,6 +418,7 @@ const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 // wait after its request budget; the loading page and its navigation remain available.
 const BROWSER_INITIAL_DOCUMENT_OBSERVATION_MS = 30_000
 export const BROWSER_PAGE_MEMORY_SETTLE_MS = 1_000
+export const BROWSER_FIND_RESULT_TIMEOUT_MS = 5_000
 const BROWSER_MARKER_MAX_COUNT = 50
 const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
 
@@ -502,6 +505,7 @@ export class BrowserViewManager {
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
   private readonly inputScales = new WeakMap<WebContents, number>()
+  private readonly pendingFinds = new WeakMap<WebContents, () => void>()
   /** Optional App appearance projection; the receiver rechecks the original native document. */
   capsuleDocumentReady: ((browserId: string) => void) | undefined
   /** Current password-free issue from the sole Profile proxy-auth owner. */
@@ -2129,6 +2133,45 @@ export class BrowserViewManager {
     entry.error = null
     entry.view.webContents.reload()
     return this.snapshot(entry)
+  }
+
+  /** Chromium's own find on this Browser's current document; the query never enters history, records or logs. */
+  async findInPage(id: string, text: string, request: BrowserFindInPageRequest): Promise<BrowserFindInPageResult> {
+    const entry = this.require(id)
+    this.requireHumanInput(entry)
+    const contents = entry.view.webContents, navigationId = entry.navigationId
+    // Chromium may never finalize a request that a newer query replaced; settle it here so waits do not pile up.
+    this.pendingFinds.get(contents)?.()
+    let requestId: number | undefined
+    return await new Promise<BrowserFindInPageResult>((resolve, reject) => {
+      const settle = () => {
+        clearTimeout(timer)
+        contents.off('found-in-page', found)
+        if (this.pendingFinds.get(contents) === supersede) this.pendingFinds.delete(contents)
+      }
+      const supersede = () => { settle(); resolve({ status: 'unconfirmed', navigationId }) }
+      const found = (_event: unknown, result: Electron.Result) => {
+        if (result.requestId !== requestId || !result.finalUpdate) return
+        settle()
+        resolve({ status: 'found', navigationId, activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches })
+      }
+      const timer = setTimeout(supersede, BROWSER_FIND_RESULT_TIMEOUT_MS)
+      timer.unref?.()
+      contents.on('found-in-page', found)
+      this.pendingFinds.set(contents, supersede)
+      try { requestId = contents.findInPage(text, { forward: request.forward, findNext: request.newSession, matchCase: false }) }
+      catch (error) { settle(); reject(error) }
+    })
+  }
+
+  /** End this Browser's find session and clear its highlight; closing the find row also returns focus to the page. */
+  stopFindInPage(id: string, request: { focusPage: boolean }): void {
+    const entry = this.require(id)
+    this.requireHumanInput(entry)
+    const contents = entry.view.webContents
+    this.pendingFinds.get(contents)?.()
+    contents.stopFindInPage('clearSelection')
+    if (request.focusPage) contents.focus()
   }
 
   /** Refresh the policy of this exact container without changing its Browser, route or partition. */

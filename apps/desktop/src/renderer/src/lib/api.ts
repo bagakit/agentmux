@@ -1432,6 +1432,8 @@ const mockApi: AgentMuxDesktopApi = {
       mockBrowsers.set(id, browser)
       return structuredClone(browser)
     },
+    findInPage: async (id) => ({ status: 'found', navigationId: requireMockBrowser(id).navigationId, activeMatchOrdinal: 0, matches: 0 }),
+    stopFindInPage: async (id) => { requireMockBrowser(id) },
     switchProfile: async (id, profileId) => {
       if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) {
         throw new Error(`Unknown Browser Profile: ${profileId}`)

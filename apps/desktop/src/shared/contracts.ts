@@ -1227,7 +1227,7 @@ export type SessionRestartResult = Omit<import('@agentmux/core/agent-session-rec
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
   | { kind: 'terminal-pending'; recovery: Extract<import('@agentmux/core').AgentMuxTerminalRecoveryResult, { kind: 'pending' }> }
-  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
+  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot; advisory?: string }
   | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }>
 
 export type HostCheckResult = {
@@ -1268,6 +1268,13 @@ export type DesktopControlCancellation = {
 export const CONTROL_REQUEST_CHANNEL = 'agentmux:control-request'
 export const CONTROL_CANCEL_CHANNEL = 'agentmux:control-cancel'
 export const CONTROL_RESPONSE_CHANNEL = 'control:response'
+
+export const BROWSER_FIND_MAX_LENGTH = 1_000
+export type BrowserFindInPageRequest = { forward: boolean; newSession: boolean }
+/** One Chromium find on the exact document it ran against; unconfirmed when no final result arrived. */
+export type BrowserFindInPageResult =
+  | { status: 'found'; navigationId: string; activeMatchOrdinal: number; matches: number }
+  | { status: 'unconfirmed'; navigationId: string }
 
 export type BrowserSnapshot = {
   id: string
@@ -2141,6 +2148,8 @@ export type AgentMuxDesktopApi = {
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
     reload(id: string): Promise<BrowserSnapshot>
+    findInPage(id: string, text: string, request: BrowserFindInPageRequest): Promise<BrowserFindInPageResult>
+    stopFindInPage(id: string, request: { focusPage: boolean }): Promise<void>
     switchProfile(id: string, profileId: string): Promise<BrowserSnapshot>
     listProfiles(): Promise<BrowserProfileSummary[]>
     /** The same list with the revision Main committed; edits must name this revision. */
