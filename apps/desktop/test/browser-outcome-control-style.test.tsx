@@ -2,11 +2,12 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it } from 'vitest'
 import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
+import { allStyles } from './helpers/styles'
 import type { BrowserOutcomeEvaluation } from '../src/shared/browser-outcome-criteria'
 
 // Actual production component + complete product stylesheet in Chromium. These local layout
@@ -29,12 +30,11 @@ it('gives both real outcome actions the existing compact Mint controls, hits and
     })) })))
   const directory = await mkdtemp(join(tmpdir(), 'amux-outcome-controls-'))
   try {
-    const entry = resolve('apps/desktop/src/renderer/src/styles/index.css')
-    const imports = [...(await readFile(entry, 'utf8')).matchAll(/@import '\.\/([^']+)';/g)]
-    expect(imports.length).toBeGreaterThan(0)
-    const styles = await Promise.all(imports.map(match => readFile(join(dirname(entry), match[1]!), 'utf8')))
+    // The whole product stylesheet through the shared reader: nested and package imports (the palette) included.
+    const styles = allStyles()
+    expect(styles).toContain('--green-bg:'); expect(styles).toContain('.browser-rsi-button')
     await writeFile(join(directory, 'cases.json'), JSON.stringify(cases))
-    await writeFile(join(directory, 'page.html'), `<!doctype html><style>${styles.join('\n')}</style>
+    await writeFile(join(directory, 'page.html'), `<!doctype html><style>${styles}</style>
       <section class="browser-surface"><div class="browser-toolbar"></div><div class="browser-body"><div class="browser-stage"></div><aside class="browser-trace-rail"></aside></div></section>`)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ type: 'module', main: 'main.mjs' }))
     await writeFile(join(directory, 'main.mjs'), String.raw`
@@ -116,6 +116,8 @@ app.whenReady().then(async()=>{
         ['passed', reason], ['not-met', notMetReason], ['unavailable', unavailableReason]
       ])
       expect(result.outcome.conditions[0].rules.length).toBeGreaterThan(0)
+      // The palette resolves: neutral and warning are two real, different colours, so the equalities below can fail.
+      expect(result.buttons[0].tokens.neutral).not.toBe(result.buttons[0].tokens.warning)
       expect(result.outcome.conditions[0].color).toBe(result.buttons[0].tokens.neutral)
       expect(result.outcome.conditions[0].rules.map((rule: { color: string }) => rule.color)).toEqual(['var(--text-2)'])
       expect(result.outcome.conditions.slice(1).map((condition: { color: string }) => condition.color)).toEqual([result.buttons[0].tokens.warning, result.buttons[0].tokens.warning])
