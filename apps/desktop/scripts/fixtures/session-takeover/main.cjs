@@ -23,7 +23,7 @@ async function painted() {
     const animations=document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime));
     await Promise.all(animations.map(a=>a.finished.catch(()=>{})));await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
     if(!document.getAnimations().some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime)))return true
-  }})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Finite animations did not settle')),4000)})])}finally{clearTimeout(timer)}})()`)
+  }})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Finite animations did not settle: '+JSON.stringify(document.getAnimations().map(a=>({name:a.animationName,state:a.playState,time:a.currentTime,timing:a.effect?.getComputedTiming(),target:a.effect?.target?.className}))))),4000)})])}finally{clearTimeout(timer)}})()`)
 }
 async function point(expression) {
   return evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Actual target is missing: '+${JSON.stringify(expression)});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
@@ -132,7 +132,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('takeover:spatial-commit', (_event, value) => spatial.commit(value))
     ipcMain.handle('takeover:flush', async () => { await win.webContents.session.flushStorageData(); return true })
     win = new BrowserWindow({ width: 940, height: 740, show: false, frame: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.cjs') } })
+      webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs') } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) errors.push(message) })
     await win.loadFile(html, qualification === 'agent-operations' ? { query: { agentOperations: '1' } } : undefined)
     win.webContents.debugger.attach('1.3')
