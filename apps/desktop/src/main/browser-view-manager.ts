@@ -336,6 +336,12 @@ function restorableHistory(history: BrowserHistory | undefined, url: string): Br
   catch { return undefined }
 }
 
+/** Whether the document still offers this icon among Blink's candidates: its icon links, else an http(s) origin's /favicon.ico. */
+function offersFaviconScript(url: string): string {
+  return `(() => { const links = Array.from(document.querySelectorAll('link[rel~="icon" i]'), link => link.href);
+    return (links.length ? links : /^https?:$/.test(location.protocol) ? [location.origin + '/favicon.ico'] : []).includes(${JSON.stringify(url)}) })()`
+}
+
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
   id: string
@@ -4743,7 +4749,6 @@ export class BrowserViewManager {
       document.resolve()
     })
     contents.on('did-start-navigation', (details) => {
-      if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
       if (details.isMainFrame && !details.isSameDocument && entry.pendingSwitch?.view === view && entry.pendingSwitch.token === entry.switchRevision) {
         this.sitePermissions?.cancel(entry.id, contents)
         entry.pendingSwitch.navigationId = mintObjectId()
@@ -5240,22 +5245,25 @@ export class BrowserViewManager {
     if (!keepImage) entry.faviconDataUrl = undefined
   }
 
-  /** Chromium may omit an unchanged icon event on reload. Revalidate its earlier report in this document. */
+  /**
+   * Chromium reports icons again only when they change, so a reload or another address that keeps them sends nothing.
+   * Revalidate the earlier document's report against this one.
+   */
   private async refreshFaviconAfterLoad(entry: BrowserEntry, view: WebContentsView): Promise<void> {
     const reported = this.faviconUrls.get(view), navigationId = entry.navigationId
-    if (!this.owns(entry, view) || !reported?.urls[0] || reported.documentUrl !== view.webContents.getURL() || reported.navigationId === navigationId) return
+    if (!this.owns(entry, view) || !reported?.urls[0] || reported.navigationId === navigationId) return
     let url: string
     try { url = new URL(reported.urls[0], reported.documentUrl).href } catch { return }
     let timer: ReturnType<typeof setTimeout> | undefined
     let confirmed = false
     try {
       confirmed = await Promise.race([
-        view.webContents.executeJavaScript(`Array.from(document.querySelectorAll('link[rel~="icon" i]')).some(link => link.href === ${JSON.stringify(url)})`),
+        view.webContents.executeJavaScript(offersFaviconScript(url)),
         new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), BROWSER_FAVICON_TIMEOUT_MS) })
       ]) === true
     } catch { /* Optional artwork remains generic when the current declaration cannot be observed. */ }
     finally { if (timer) clearTimeout(timer) }
-    if (!this.owns(entry, view) || entry.navigationId !== navigationId || this.faviconUrls.get(view) !== reported || reported.documentUrl !== view.webContents.getURL()) return
+    if (!this.owns(entry, view) || entry.navigationId !== navigationId || this.faviconUrls.get(view) !== reported) return
     if (!confirmed) { this.faviconUrls.delete(view); this.clearFavicon(entry); this.emit(entry); return }
     this.updateFavicon(entry, view)
   }
