@@ -451,9 +451,9 @@ export class NativeJsonlHistoryReader {
   /** After an in-place rewrite of this same physical source, position the
    * changes read just after the newest record that is still byte-identical to
    * one the caller consumed. Anchors are the caller's newest consumed records as
-   * Provider ID plus the sha256 of the record's exact physical bytes. One bounded
-   * backward scan from the old cut; only the Provider's cheap ID is computed.
-   * The anchors are the newest consumed records, so the first record the scan
+   * Provider ID plus the sha256 of the record's exact physical bytes. One backward
+   * scan from the old cut over this source's own prefix, under the read's ordinary
+   * time budget; only the Provider's cheap ID is computed. The anchors are the newest consumed records, so the first record the scan
    * meets with a consumed ID decides: identical bytes resume after it, different
    * bytes mean new content took an identity the caller already published, and the
    * read is refused with the original cut kept. */
@@ -477,10 +477,7 @@ export class NativeJsonlHistoryReader {
     const original = { position: this.position, lastRecordEnd: this.lastRecordEnd }
     this.position = end
     try {
-      for (let scanned = 0, bytes = 0; scanned < REWRITE_ANCHOR_MAX_RECORDS && bytes <= REWRITE_ANCHOR_MAX_BYTES; scanned++) {
-        const record = await this.readPrevious()
-        if (!record) break
-        bytes += record.end - record.start
+      for (let record = await this.readPrevious(); record; record = await this.readPrevious()) {
         const id = identify(record.value, record.start), wanted = id === null ? undefined : digests.get(id)
         if (!wanted) continue
         if (!wanted.has(await this.recordDigest(record))) return failure('REWRITTEN', 'The rewritten source reuses a consumed record identity for different content. The original cut is retained.')
@@ -490,14 +487,17 @@ export class NativeJsonlHistoryReader {
         return
       }
     } finally { this.position = original.position; this.lastRecordEnd = original.lastRecordEnd }
-    return failure('REWRITTEN', 'No original consumed record remains in the rewritten source within its bounded search.')
+    return failure('REWRITTEN', 'No original consumed record remains in the rewritten source.')
   }
 
-  /** sha256 of one record's exact physical bytes, excluding its newline: stable across reads. */
+  /** sha256 of one record's exact physical bytes, excluding its newline: stable across reads.
+   * Hashed in bounded reads, because one record can exceed a single physical read. */
   async recordDigest(record: Pick<NativeJsonlHistoryRecord, 'start' | 'end'>): Promise<string> {
-    const length = record.end - record.start
-    const bytes = await this.read(record.start, length)
-    return createHash('sha256').update(bytes[bytes.length - 1] === 10 ? bytes.subarray(0, -1) : bytes).digest('hex')
+    const hash = createHash('sha256')
+    let end = record.end
+    if (end > record.start && (await this.read(end - 1, 1))[0] === 10) end--
+    for (let at = record.start; at < end; at += RECORD_DIGEST_READ_BYTES) hash.update(await this.read(at, Math.min(RECORD_DIGEST_READ_BYTES, end - at)))
+    return hash.digest('hex')
   }
 
   /** Apply a second opaque cut at this same original physical owner. */
@@ -584,9 +584,8 @@ export class NativeJsonlHistoryReader {
 }
 
 export const NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES = 64 * 1024
-/** Bounds of one rewrite re-anchor scan: a resumed interrupted turn, not a full history. */
-const REWRITE_ANCHOR_MAX_RECORDS = 4096
-const REWRITE_ANCHOR_MAX_BYTES = 32 * 1024 * 1024
+/** One digest read; a record larger than this is hashed across several reads. */
+const RECORD_DIGEST_READ_BYTES = 1024 * 1024
 
 /** Physical append iteration is shared; the original Provider alone interprets each row. */
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
