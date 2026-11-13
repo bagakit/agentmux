@@ -16,14 +16,16 @@ type Dependencies = {
   submit(notification: AgentMuxMessageNotification): Promise<void>
   inputAbsent(key: AgentPromptInputKey): Promise<boolean>
   unavailable(agentSessionId: string | undefined, error: unknown, run?: AgentMuxAgentSession['run']): void
-  /** Answer the exact original turn-end callback once with this frozen wire. */
-  answerTurnEnd?(callback: TurnEndCallback, wire: string): Promise<'written' | 'unknown' | 'closed'>
+  /** Answer the exact original turn-end callback once with this Provider output. */
+  answerTurnEnd?(callback: TurnEndCallback, output: Readonly<Record<string, unknown>>): Promise<'written' | 'unknown' | 'closed'>
   /** Release the exact original turn-end callback without a decision; the native turn ends unchanged. */
   abstainTurnEnd?(callback: TurnEndCallback): void
 }
 
+type TurnEndDecision = NonNullable<AgentNativeHookSpecification['turnEndDecision']>
+
 /** One authenticated native turn-end callback of an exact Run's main session. */
-export type TurnEndCallback = { session: AgentMuxAgentSession; nativeTurnId: string; hookReceiptId: string }
+export type TurnEndCallback = { session: AgentMuxAgentSession; nativeTurnId: string; hookReceiptId: string; decision: TurnEndDecision }
 
 /** Event-driven wakeups over the original journal, never an input or message owner. */
 export class AgentMuxMessageNotifications {
@@ -143,13 +145,13 @@ export class AgentMuxMessageNotifications {
    * one native turn, carries a notice; the decision itself runs outside the Hook lane.
    */
   adoptTurnEnd(input: { session: AgentMuxAgentSession; receipt: AgentMuxAgentSession['hookReceipt']; receiptId: string
-    decision: NonNullable<AgentNativeHookSpecification['turnEndDecision']>; payload: Readonly<Record<string, unknown>> }): boolean {
+    decision: TurnEndDecision; payload: Readonly<Record<string, unknown>> }): boolean {
     const { session, receipt, receiptId, decision } = input, handle = session.nativeHandle
     if (this.disposed || receipt?.id !== receiptId || !sameRun(receipt.run, session.run) || receipt.subject?.kind !== 'main' ||
         handle?.kind !== 'provider' || receipt.subject.nativeSessionId !== handle.sessionId) return false
     const turn = decision.readTurn(input.payload)
     if (!turn?.firstStop) return false
-    void this.decideTurnEnd({ session, nativeTurnId: turn.nativeTurnId, hookReceiptId: receiptId })
+    void this.decideTurnEnd({ session, nativeTurnId: turn.nativeTurnId, hookReceiptId: receiptId, decision })
       .catch(error => this.deps.unavailable(session.agentSessionId, error, session.run))
     return true
   }
@@ -174,16 +176,41 @@ export class AgentMuxMessageNotifications {
     finally { if (!notice) this.deps.abstainTurnEnd?.(callback) }
     if (!notice) return
     let written: 'written' | 'unknown' | 'closed'
-    try { written = await this.deps.answerTurnEnd!(callback, notice.wire) } catch { written = 'unknown' }
+    try { written = await this.deps.answerTurnEnd!(callback, callback.decision.output(notice.wire, notice.notificationId)) } catch { written = 'unknown' }
     try {
       // Written is the original connection's complete response, the same strength as an accepted
-      // input byte; it never claims that the model read the notice.
+      // input byte; it never claims that the model read the notice. A native queue reports its own
+      // admission later, so a written answer there stays pending until that report or stays unknown.
+      if (written === 'written' && callback.decision.admission) return
       if (written === 'written') await this.deps.queue.recordNotificationResult(notice.notificationId, 'submitted')
       else if (written === 'closed') await this.deps.queue.recordNotificationResult(notice.notificationId, 'not-applied',
         'The original turn-end callback closed before this notice was written. The Inbox is retained for the next turn end or an explicit notification.')
       else await this.deps.queue.recordNotificationResult(notice.notificationId, 'unconfirmed',
         'The original turn-end response delivery is unknown. Its notice is retained and will not be resent.')
     } catch (error) { this.deps.unavailable(agentSessionId, error, session.run) }
+  }
+
+  /**
+   * The native queue's own report for a notice this owner handed to it at a turn end. Only the
+   * exact Run's main native session may report, and only for a pending turn-end notice of that
+   * Run; a drop is a confirmed whole refusal and returns its references to awaiting notification.
+   */
+  async admitTurnEnd(input: { session: AgentMuxAgentSession; receipt: AgentMuxAgentSession['hookReceipt']; receiptId: string
+    decision: TurnEndDecision; payload: Readonly<Record<string, unknown>> }): Promise<void> {
+    const { session, receipt, receiptId, decision } = input, handle = session.nativeHandle
+    if (this.disposed || !decision.admission || receipt?.id !== receiptId || !sameRun(receipt.run, session.run) || receipt.subject?.kind !== 'main' ||
+        handle?.kind !== 'provider' || receipt.subject.nativeSessionId !== handle.sessionId) return
+    const report = decision.admission.read(input.payload)
+    if (!report) return
+    const notice = await this.deps.queue.readNotification(report.notificationId)
+    if (!notice?.turnEnd || notice.state !== 'pending' || notice.key.agentSessionId !== session.agentSessionId ||
+        !sameRun(notice.key.expectedRun, session.run)) return
+    if (report.admitted) await this.deps.queue.recordNotificationResult(notice.notificationId, 'submitted')
+    else {
+      await this.deps.queue.recordNotificationResult(notice.notificationId, 'not-applied',
+        `The native idle queue dropped this notice (${report.reason}). The Inbox is retained for the next turn end or an explicit notification.`)
+      this.changed(session.agentSessionId)
+    }
   }
 
   async dispose(): Promise<void> {

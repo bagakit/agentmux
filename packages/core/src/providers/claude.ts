@@ -10,6 +10,9 @@ import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivity,
   claudeNativeActivityMutations,
+  CLAUDE_TURN_END_DECISION,
+  CLAUDE_TURN_END_EVENT,
+  CLAUDE_NOTICE_ADMISSION_EVENT,
   claudeNativeObservationFailure,
   claudeNativeTurnIdentity,
   withClaudeNativeActivity
@@ -75,6 +78,7 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     StopFailure: 'turn-end',
   },
   usageFinalizationEvents: ['Stop', 'StopFailure'],
+  turnEndDecision: CLAUDE_TURN_END_DECISION,
   observationFailure: claudeNativeObservationFailure,
   currentActivity: claudeNativeActivity,
   nativeTurnIdKeys: ['turnId'],
@@ -93,6 +97,8 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     { events: ['turn.complete'], state: 'error', lifecycleEvent: 'turn-end',
       matches: payload => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload)?.state === 'idle' },
     { events: ['turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
+    // An Inbox notice ask and its native queue report carry no activity: they leave semantic state as it was.
+    { events: [CLAUDE_TURN_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT], state: 'unknown', lifecycleEvent: null },
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },
     // Stop 与 SubagentStop 是 Claude Code 的决策前回调（可被其它 hook 否决或追加 context 继续），

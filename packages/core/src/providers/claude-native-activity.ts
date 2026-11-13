@@ -12,6 +12,36 @@ import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../t
  */
 export const CLAUDE_ASKED_TOOL_END_EVENT = 'AgentMuxAskedToolEnded'
 
+/** The managed module asks Core at each genuinely answered main turn end whether a notice is waiting. */
+export const CLAUDE_TURN_END_EVENT = 'AgentMuxTurnEnd'
+/** The managed module reports what Claude's own idle prompt queue did with a handed notice. */
+export const CLAUDE_NOTICE_ADMISSION_EVENT = 'AgentMuxNoticeAdmission'
+
+/**
+ * Claude's turn-end decision. The module asks once per answered main turn; Core answers with the
+ * frozen notice, which the module hands to Claude's own idle queue ($.prompt.submit). That queue runs
+ * it as its own next turn once idle, after user input already queued, and never touches the draft.
+ */
+export const CLAUDE_TURN_END_DECISION: NonNullable<import('../hook-normalizer.js').AgentNativeHookSpecification['turnEndDecision']> = {
+  eventName: CLAUDE_TURN_END_EVENT,
+  readTurn(payload) {
+    const nativeTurnId = payload.turnId
+    if (typeof nativeTurnId !== 'string' || !nativeTurnId.trim() || payload.agent_id !== undefined || payload.reason !== 'answer') return undefined
+    return { nativeTurnId, firstStop: true }
+  },
+  output: (notice, notificationId) => ({ agentmuxNotice: { notificationId, text: notice } }),
+  admission: {
+    eventName: CLAUDE_NOTICE_ADMISSION_EVENT,
+    read(payload) {
+      const id = payload.notificationId
+      if (typeof id !== 'string' || !id.trim()) return undefined
+      if (payload.entered === true) return { notificationId: id, admitted: true }
+      return typeof payload.dropped === 'string' && payload.dropped.trim()
+        ? { notificationId: id, admitted: false, reason: payload.dropped.slice(0, 300) } : undefined
+    }
+  }
+}
+
 function observationIdentity(payload: Readonly<Record<string, unknown>>) {
   if (typeof payload.session_id !== 'string' || !payload.session_id.trim() ||
       typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
@@ -73,7 +103,8 @@ export function claudeNativeActivityDirectory(): string {
  * payload addition is the asked call's own tool_use_id on Claude's classic ask, which omits it.
  */
 export function claudeNativeActivitySource(): string {
-  return `// AgentMux managed native activity observer. Generated; makes no input, answer or approval decision.
+  return `// AgentMux managed native activity observer. Generated; makes no answer or approval decision, and queues
+// only the Inbox notices Core hands it at a turn end, through Claude's own idle prompt queue.
 const { mintObjectId } = ${identityRuntimeSource}
 const sourceId = mintObjectId()
 let sequence = 0
@@ -137,6 +168,34 @@ function canonical(value) {
   return JSON.stringify(value ?? null)
 }
 
+// One notice ask per answered main turn. Core answers with a notice only when references are
+// waiting; the module hands it to Claude's own idle queue and reports what that queue did with it.
+async function askTurnEndNotice($, turnId) {
+  try {
+    const asked = await $.process.run(
+      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+      { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_TURN_END_EVENT)}, session_id: initialSessionId, turnId, reason: 'answer' }),
+        env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
+        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+    )
+    let notice
+    try { notice = JSON.parse(asked.stdout || '{}').agentmuxNotice } catch {}
+    if (!notice || typeof notice.notificationId !== 'string' || typeof notice.text !== 'string' || !notice.text) return
+    let result
+    try { result = await $.prompt.submit({ text: notice.text }) }
+    catch (error) { result = { drop: 'the native queue refused this prompt: ' + String(error && error.message || error).slice(0, 200) } }
+    await $.process.run(
+      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+      { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_NOTICE_ADMISSION_EVENT)}, session_id: initialSessionId,
+          notificationId: notice.notificationId, ...(typeof result?.drop === 'string' ? { dropped: result.drop } : { entered: true }) }),
+        env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
+        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+    )
+  } catch {
+    try { await $.ui.log('AgentMux could not confirm an Inbox notice; the original messages stay in the Inbox.', { to: 'debug' }) } catch {}
+  }
+}
+
 async function reportAskedEnd($, toolUseId, toolName) {
   try {
     const result = await $.process.run(
@@ -196,6 +255,10 @@ export function register(on) {
   })
   on('turn.complete', ($, event, next) => {
     observe($, 'turn.complete', event)
+    // Only an answered main turn of the original session asks; the queue runs a notice as its own next turn.
+    if (event?.agentId === undefined && event?.reason === 'answer' && typeof event?.turnId === 'string' && initialSessionId && !sourceChanged) {
+      void askTurnEndNotice($, event.turnId)
+    }
     return next(event)
   })
   // Classic Hooks report no end for a declined asked call. Only calls this session asked about
@@ -239,7 +302,7 @@ export function claudeNativeActivityMutations(): AgentManagedHookMutation[] {
   return [
     { path: join(directory, '.claude-plugin', 'plugin.json'), mode: 0o600,
       content: `${JSON.stringify({ name: 'agentmux-native-activity', version: '1.0.0',
-        description: 'Observe native turn activity without input or completion decisions.',
+        description: 'Observe native turn activity and queue AgentMux Inbox notices through the native idle queue.',
         author: { name: 'AgentMux' } }, null, 2)}\n` },
     { path: join(directory, 'hooks', 'hooks.json'), mode: 0o600,
       content: `${JSON.stringify({ modules: ['./register.js'] }, null, 2)}\n` },

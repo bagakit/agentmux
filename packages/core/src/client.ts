@@ -1039,6 +1039,8 @@ export class AgentMuxClient {
         }
         // Adoption follows the receipt owner. The decision itself runs outside this lane.
         if (event.turnEndCallback) return { turnEndCallbackAccepted: this.adoptTurnEndDecision(event) }
+        // A native queue's report is recorded within this receipt's own owner work, so its acknowledgement means recorded.
+        await this.acceptTurnEndAdmission(event)
       },
       undefined,
       {
@@ -1212,12 +1214,8 @@ export class AgentMuxClient {
         finally { if (notice.moteObservation) await this.moteInputs.revisit(notice.moteObservation.id) }
       },
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
-      answerTurnEnd: async (callback, wire) => {
-        const contribution = this.providers.get(callback.session.providerId).hook.turnEndDecision
-        if (!contribution) { this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'); return 'closed' }
-        return await this.hookServer.respondTurnEnd(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId,
-          structuredClone(contribution.output(wire)) as Record<string, unknown>)
-      },
+      answerTurnEnd: async (callback, output) => await this.hookServer.respondTurnEnd(callback.session.agentSessionId,
+        callback.session.run.runId, callback.hookReceiptId, structuredClone(output) as Record<string, unknown>),
       abstainTurnEnd: callback => this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'),
       unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
         ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',
@@ -7734,6 +7732,22 @@ export class AgentMuxClient {
     if (!session || !decision || session.agentSessionId !== event.agentSessionId || session.providerId !== event.providerId) return false
     return this.messageNotifications.adoptTurnEnd({ session: this.projectSession(session), receipt: session.hookReceipt,
       receiptId: event.receiptId, decision, payload: event.payload ?? {} })
+  }
+
+  /** A native queue's own admission report for a turn-end notice goes to the notification owner, which alone records it. */
+  private async acceptTurnEndAdmission(event: NativeHookEnvelope): Promise<void> {
+    const session = this.registry.findByRun(runRef(event.runId))
+    const provider = session ? this.providers.get(session.providerId) : undefined, decision = provider?.hook.turnEndDecision
+    if (!session || !provider || !decision?.admission || session.agentSessionId !== event.agentSessionId || session.providerId !== event.providerId ||
+        resolveHookEventName(event.eventName, event.payload ?? {}, provider.hook.eventNameSource) !== decision.admission.eventName) return
+    try {
+      await this.messageNotifications.admitTurnEnd({ session: this.projectSession(session), receipt: session.hookReceipt,
+        receiptId: event.receiptId, decision, payload: event.payload ?? {} })
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'A2A_NOTIFICATION_UNCONFIRMED',
+        message: `The native queue's Inbox notice report could not be recorded. The original messages and healthy manual input are retained. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+    }
   }
 
   private async closePermissionHook(agentSessionId: string, runId: string, receiptId: string, decided: boolean): Promise<void> {
