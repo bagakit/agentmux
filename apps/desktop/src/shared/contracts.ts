@@ -1319,6 +1319,7 @@ export type BrowserSnapshot = {
   appLinkPrompt: { url: string; scheme: string } | null
   /** Main-owned original native certificate callback; never persisted or Agent-approved. */
   certificateRequest?: import('@agentmux/core').AgentMuxBrowserCertificateRequest | null
+  sitePermissions?: import('./browser-site-permissions.js').BrowserSitePermissionState
   /** Latest bounded Browser operation projection; transient while the native page is live. */
   activity?: BrowserActivityState
   /** Explicit human recording or recovered durable draft; recovery never starts capture. */
@@ -2217,6 +2218,9 @@ export type AgentMuxDesktopApi = {
      */
     answerAppLink(id: string, allow: boolean, remember: boolean): Promise<BrowserSnapshot>
     answerCertificate(id: string, input: { requestId: string; navigationId: string; fingerprint: string; allow: boolean }): Promise<BrowserSnapshot>
+    answerSitePermission(id: string, input: import('./browser-site-permissions.js').BrowserSitePermissionAnswer): Promise<BrowserSnapshot>
+    forgetSitePermission(id: string, input: Pick<import('./browser-site-permissions.js').BrowserSitePermissionDecision, 'origin' | 'embeddingOrigin' | 'permission'>): Promise<BrowserSnapshot>
+    retrySitePermissions(id: string): Promise<BrowserSnapshot>
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>

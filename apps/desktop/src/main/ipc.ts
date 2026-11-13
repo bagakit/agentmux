@@ -228,6 +228,7 @@ import { createBrowserProfileUsage } from './browser-profile-usage.js'
 import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
 import { createBrowserProfileExitCheck } from './browser-profile-exit-check.js'
 import { createBrowserProfileProxyAuth } from './browser-profile-proxy-auth.js'
+import { BrowserSitePermissions } from './browser-site-permissions.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
@@ -543,6 +544,7 @@ export async function registerIpc(args: {
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime))
+  browsers.sitePermissions = new BrowserSitePermissions(join(app.getPath('userData'), 'browser-site-permissions.json'), id => browsers.refreshSitePermissions(id))
   browsers.profileProxySignInIssue = profileId => profileProxyAuth.issue(profileId)
   const releaseRetiredBrowserAgents = releaseBrowserAgentsOnRetirement(args.runtime, browsers)
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
@@ -2251,6 +2253,9 @@ export async function registerIpc(args: {
   handleWithEvent('browser:answerAppLink', async (event, id: string, allow: boolean, remember: boolean) => {
     return await browsers.answerAppLink(id, allow, remember)
   })
+  handleWithEvent('browser:answerSitePermission', (_event, id: string, input: Parameters<BrowserViewManager['answerSitePermission']>[1]) => browsers.answerSitePermission(id, input))
+  handleWithEvent('browser:forgetSitePermission', (_event, id: string, input: Parameters<BrowserViewManager['forgetSitePermission']>[1]) => browsers.forgetSitePermission(id, input))
+  handleWithEvent('browser:retrySitePermissions', (_event, id: string) => browsers.retrySitePermissions(id))
   handleWithEvent('browser:answerCertificate', (event, id: string, input: Parameters<BrowserViewManager['answerCertificate']>[1]) => {
     return browsers.answerCertificate(id, input)
   })

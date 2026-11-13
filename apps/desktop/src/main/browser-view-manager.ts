@@ -64,6 +64,8 @@ import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from 
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
+import { BrowserSitePermissions, browserPermissionOrigin, type BrowserPermissionContext } from './browser-site-permissions.js'
+import type { BrowserSitePermission, BrowserSitePermissionAnswer, BrowserSitePermissionDecision, BrowserSitePermissionState } from '../shared/browser-site-permissions.js'
 import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
@@ -360,6 +362,8 @@ type BrowserRestoreInput = {
 }
 
 type PendingProfileSwitch = {
+  browserId: string
+  navigationId: string
   token: number
   profileId: string
   view: WebContentsView
@@ -440,6 +444,59 @@ export function normalizeBrowserUrl(value: string): string {
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
   onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
+  sitePermissions: BrowserSitePermissions | undefined
+  refreshSitePermissions(id: string): void {
+    const entry = this.entries.get(id)
+    if (!entry) return
+    const profile = entry.storage.profileId
+    for (const candidate of this.entries.values()) if (candidate === entry || profile && candidate.storage.profileId === profile) this.emit(candidate)
+  }
+  private permissionSource(contents: WebContents) {
+    const entry = this.entriesByContents.get(contents)
+    if (!entry || !this.owns(entry, entry.view) || contents.isDestroyed()) return null
+    const candidate = entry.pendingSwitch?.contents === contents && entry.pendingSwitch.token === entry.switchRevision && !entry.pendingSwitch.released
+      ? entry.pendingSwitch : undefined
+    if (contents !== entry.view.webContents && !candidate) return null
+    return { entry, candidate }
+  }
+  private permissionContext(contents: WebContents, requestingOrigin?: string): BrowserPermissionContext | null {
+    const source = this.permissionSource(contents)
+    if (!source) return null
+    const { entry, candidate } = source
+    const view = candidate?.view ?? entry.view, navigationId = candidate?.navigationId ?? entry.navigationId
+    const profileId = candidate?.profileId ?? entry.storage.profileId
+    const embeddingOrigin = browserPermissionOrigin(contents.getURL())
+    const origin = browserPermissionOrigin(requestingOrigin ?? contents.getURL())
+    if (!embeddingOrigin || !origin) return null
+    return { browserId: entry.id, navigationId, profileId, origin, embeddingOrigin, owner: contents,
+      current: () => !contents.isDestroyed() && browserPermissionOrigin(contents.getURL()) === embeddingOrigin &&
+        (this.owns(entry, view) && entry.navigationId === navigationId && entry.storage.profileId === profileId ||
+          !!candidate && this.owns(entry, entry.view) && entry.pendingSwitch === candidate && entry.switchRevision === candidate.token && !candidate.released) }
+  }
+  private sitePermissionState(entry: BrowserEntry): BrowserSitePermissionState | undefined {
+    const owner = this.sitePermissions
+    if (!owner) return undefined
+    const context = this.permissionContext(entry.view.webContents)
+    return context ? owner.state(context) : owner.unavailableState(entry.view.webContents)
+  }
+  async answerSitePermission(id: string, input: BrowserSitePermissionAnswer): Promise<BrowserSnapshot> {
+    this.require(id)
+    if (!this.sitePermissions) throw new Error('The original Browser site permission service is unavailable. Its page is kept.')
+    await this.sitePermissions.answer(id, input)
+    return this.snapshot(this.require(id))
+  }
+  async forgetSitePermission(id: string, input: Pick<BrowserSitePermissionDecision, 'origin' | 'embeddingOrigin' | 'permission'>): Promise<BrowserSnapshot> {
+    const entry = this.require(id), context = this.permissionContext(entry.view.webContents)
+    if (!this.sitePermissions || !context) throw new Error('The original site permission scope is unconfirmed. Keep the page and inspect it again.')
+    await this.sitePermissions.forget(context, input)
+    return this.snapshot(this.require(id))
+  }
+  async retrySitePermissions(id: string): Promise<BrowserSnapshot> {
+    this.require(id)
+    if (!this.sitePermissions) throw new Error('The original site permission service is unavailable.')
+    await this.sitePermissions.retryRead()
+    return this.snapshot(this.require(id))
+  }
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
@@ -532,6 +589,7 @@ export class BrowserViewManager {
     const url = available ? contents.getURL() : ''
     const objectLink = this.objectLink(entry, url)
     const profile = this.profileRef(entry.storage)
+    const sitePermissions = this.sitePermissionState(entry)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
     const environmentWarning = this.profileEnvironmentWarning(entry.storage)
     const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, !available
@@ -541,6 +599,7 @@ export class BrowserViewManager {
       ...(entry.source ? { openedFrom: entry.source } : {}),
       control: this.controlState(entry),
       certificateRequest: entry.certificateDecision?.request ?? null,
+      ...(sitePermissions ? { sitePermissions } : {}),
       url, ...(objectLink ? { objectLink } : {}), title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -2127,6 +2186,8 @@ export class BrowserViewManager {
     let rejectCancellation!: (error: Error) => void
     const cancellation = new Promise<never>((_resolve, reject) => { rejectCancellation = reject })
     const pending: PendingProfileSwitch = {
+      browserId: id,
+      navigationId: mintObjectId(),
       token: ++entry.switchRevision,
       profileId,
       view: candidate,
@@ -2177,6 +2238,7 @@ export class BrowserViewManager {
       // This explicit Profile commit replaces the old native source. A pending
       // Close of that source cannot become authority to remove the new page.
       entry.nativeChild?.closing?.settle(false)
+      this.sitePermissions?.cancel(entry.id, authoritativeView.webContents)
       entry.view = candidate
       this.clearNativeChildWarning(entry, 'placementWarning')
       entry.controlFeedback = candidateControlFeedback
@@ -2187,7 +2249,7 @@ export class BrowserViewManager {
       entry.initialDocument = null
       entry.storage = { mode: 'normal', profileId, partition }
       entry.requestedUrl = candidate.webContents.getURL() || url
-      entry.navigationId = mintObjectId()
+      entry.navigationId = pending.navigationId
       entry.committedNavigationId = null
       entry.selectionOperation = null
       entry.selectionRevision += 1
@@ -4240,6 +4302,7 @@ export class BrowserViewManager {
     try { this.retryClosingViews(previousClosures.filter(owner => !privateClosures.has(owner.id))) } catch (error) { cleanupErrors.push(error) }
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
+    this.sitePermissions?.dispose()
     for (const session of this.capsuleResponseSessions) {
       session.webRequest.onBeforeRequest(null)
       session.webRequest.onResponseStarted(null)
@@ -4412,7 +4475,12 @@ export class BrowserViewManager {
     })
     contents.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
+      if (details.isMainFrame && !details.isSameDocument && entry.pendingSwitch?.view === view && entry.pendingSwitch.token === entry.switchRevision) {
+        this.sitePermissions?.cancel(entry.id, contents)
+        entry.pendingSwitch.navigationId = mintObjectId()
+      }
       if (!details.isMainFrame || !this.owns(entry, view)) return
+      if (!details.isSameDocument) this.sitePermissions?.cancel(entry.id, contents)
       entry.certificateDecision?.settle(false)
       this.cancelRecoveryPreview(entry)
       let requestedUrl: string
@@ -4450,6 +4518,7 @@ export class BrowserViewManager {
       entry.requestedUrl = requestedUrl
       const previousNavigationId = entry.navigationId
       entry.navigationId = mintObjectId()
+      if (details.isSameDocument) this.sitePermissions?.rebind(entry.id, contents, origin => this.permissionContext(contents, origin))
       entry.appLinkRequest = null
       entry.appLinkPrompt = null
       entry.committedNavigationId = null
@@ -4529,6 +4598,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.on('render-process-gone', (_event, details) => {
+      this.sitePermissions?.cancel(entry.id, contents)
       if (!this.owns(entry, view)) return
       entry.certificateDecision?.settle(false)
       entry.committedNavigationId = null
@@ -4540,6 +4610,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      this.sitePermissions?.cancel(entry.id, contents)
       if (entry.view === view) entry.certificateDecision?.settle(false)
       this.entriesByContents.delete(contents)
       if (entry.view === view) entry.nativeChild?.closing?.settle(true)
@@ -4679,6 +4750,27 @@ export class BrowserViewManager {
           const entry = this.entriesByContents.get(contents)
           return !!entry && this.owns(entry, entry.view) && entry.view.webContents === contents
         },
+        ownsSiteContents: contents => this.permissionSource(contents) !== null,
+        checkSitePermission: (contents, permission, origin, details) => {
+          const context = this.permissionContext(contents, details.securityOrigin ?? origin)
+          const permissions: BrowserSitePermission[] = permission === 'media' ? details.mediaType === 'video' ? ['camera'] : details.mediaType === 'audio' ? ['microphone'] : []
+            : permission === 'geolocation' || permission === 'notifications' ? [permission] : []
+          return !!context && (this.sitePermissions?.check(context, permissions) ?? false)
+        },
+        requestSitePermission: (contents, permission, details, callback) => {
+          const context = this.permissionContext(contents, (details as Electron.MediaAccessPermissionRequest).securityOrigin ?? details.requestingUrl)
+          const mediaTypes = (details as Electron.MediaAccessPermissionRequest).mediaTypes
+          const permissions: BrowserSitePermission[] = permission === 'media' && Array.isArray(mediaTypes)
+            ? mediaTypes.flatMap(type => type === 'video' ? ['camera' as const] : type === 'audio' ? ['microphone' as const] : [])
+            : permission === 'geolocation' || permission === 'notifications' ? [permission] : []
+          if (!context || permissions.length === 0 || !this.sitePermissions) {
+            const entry = this.entriesByContents.get(contents)
+            if (entry) this.sitePermissions?.unavailable(entry.id, contents, 'This site permission or its original origin is not supported. The page and its other capabilities remain available.')
+            callback(false)
+            return
+          }
+          this.sitePermissions.request(context, permissions, callback)
+        },
         resolveHidOwner: resolveOwner
       })
       const releaseAccounts = registerBrowserWebAuthnAccounts(session, resolveOwner)
@@ -4760,6 +4852,7 @@ export class BrowserViewManager {
 
   private releasePendingSwitch(pending: PendingProfileSwitch): void {
     if (pending.released) return
+    this.sitePermissions?.cancel(pending.browserId, pending.contents)
     const errors: unknown[] = []
     if (pending.attached) {
       try {
@@ -4918,6 +5011,7 @@ export class BrowserViewManager {
     const currentWarnings = entry.agentWarning
       ? appendWarning(entry.activity.warning ?? persistenceWarning, entry.agentWarning)
       : entry.activity.warning ?? persistenceWarning
+    const sitePermissions = this.sitePermissionState(entry)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
     const profileWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage)].filter(Boolean).join('\n')
     const warning = this.closingWarning(entry.id, profileWarnings ? appendWarning(currentWarnings, profileWarnings) : currentWarnings || undefined)
@@ -4946,6 +5040,7 @@ export class BrowserViewManager {
       ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
       certificateRequest: entry.certificateDecision?.request ?? null,
+      ...(sitePermissions ? { sitePermissions } : {}),
       activity: warning
         ? { ...entry.activity, warning }
         : entry.activity
