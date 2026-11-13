@@ -1,4 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
@@ -26,6 +27,7 @@ const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 /** Identity hues a person can pick: teal through rose, well clear of the hues that mean
  *  success, attention, failure or a person. Lime and yellow-green read as success, so none here. */
 export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
+const HUE_NAMES: Readonly<Record<number, string>> = { 180: 'Teal', 248: 'Indigo', 266: 'Violet', 284: 'Purple', 302: 'Orchid', 320: 'Magenta', 338: 'Rose' }
 
 type Use = { browserId: string; tabId: string; title: string; url: string; state: 'open' | 'saved' }
 
@@ -161,6 +163,15 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
   const [saved, setSaved] = useState(false)
   const [confirm, setConfirm] = useState<'delete' | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
+  const markButton = useRef<HTMLButtonElement>(null)
+  const moreButton = useRef<HTMLButtonElement>(null)
+  const huesGroup = useRef<HTMLDivElement>(null)
+  const cancelDelete = useRef<HTMLButtonElement>(null)
+  // Opening the color picker or the delete confirmation moves focus into it; closing returns it.
+  useEffect(() => { if (hues) huesGroup.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus() }, [hues])
+  useEffect(() => { if (confirm) cancelDelete.current?.focus() }, [confirm])
+  const closeHues = () => { setHues(false); markButton.current?.focus() }
+  const closeConfirm = () => { setConfirm(null); moreButton.current?.focus() }
   useEffect(() => { if (naming) { nameInput.current?.focus(); nameInput.current?.select() } }, [naming])
   useEffect(() => { if (!naming) setName(profile.label) }, [profile.label])
   useEffect(() => { if (!noting) setNotes(profile.notes ?? '') }, [profile.notes])
@@ -194,7 +205,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
   return (
     <article className="browser-profile-editor" aria-label={profile.label}>
       <header className="browser-profile-editor__identity">
-        <button type="button" className="browser-profile-editor__mark" aria-label={`Color for ${profile.label}`} aria-expanded={hues}
+        <button ref={markButton} type="button" className="browser-profile-editor__mark" aria-label={`Color for ${profile.label}`} aria-expanded={hues}
           onClick={() => setHues(value => !value)}><ProfileMark profile={profile} size="large" /></button>
         <div className="browser-profile-editor__who">
           {naming ? <TextInput ref={nameInput} aria-label="Profile name" value={name} maxLength={128}
@@ -205,7 +216,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
         </div>
         <button type="button" className="primary-button browser-profile-editor__open" onClick={onOpen}>Open Browser</button>
         <Menu.Root>
-          <Menu.Trigger asChild><button type="button" className="icon-button" aria-label={`More for ${profile.label}`}><ThemeActionMoreIcon size={14} /></button></Menu.Trigger>
+          <Menu.Trigger asChild><button ref={moreButton} type="button" className="icon-button" aria-label={`More for ${profile.label}`}><ThemeActionMoreIcon size={14} /></button></Menu.Trigger>
           <DocumentOverlayPortal component={Menu.Portal}>
             <Menu.Content className="tab-context-menu" align="end" collisionPadding={8}>
               <Menu.Item className="tab-context-menu__item" disabled={profile.isDefault} onSelect={() => void run('default', () => api.browser.setDefaultProfile(profile.id))}>
@@ -221,12 +232,23 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
         </Menu.Root>
       </header>
 
-      {hues ? <div className="browser-profile-editor__hues" role="radiogroup" aria-label="Profile color">
-        {PROFILE_HUES.map(hue => <button key={hue} type="button" role="radio" aria-checked={profileHue(profile) === hue} aria-label={`Hue ${hue}`}
-          style={{ '--profile-hue': hue } as CSSProperties} onClick={() => { setHues(false); if (profileHue(profile) !== hue) void commit({ hue }) }} />)}
-        <button type="button" className="browser-profile-editor__auto" aria-checked={profile.hue === undefined} role="radio"
-          onClick={() => { setHues(false); if (profile.hue !== undefined) void commit({ hue: null }) }}>Automatic</button>
-      </div> : null}
+      {/* Arrow keys move between colors and Enter picks one: each pick is a saved edit, so moving never saves. */}
+      {hues ? <RovingFocus.Root asChild orientation="horizontal" loop>
+        <div ref={huesGroup} className="browser-profile-editor__hues" role="radiogroup" aria-label={`Color for ${profile.label}`}
+          onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeHues() } }}>
+          {PROFILE_HUES.map(hue => {
+            const checked = profile.hue === hue
+            return <RovingFocus.Item key={hue} asChild active={checked}>
+              <button type="button" role="radio" aria-checked={checked} aria-label={HUE_NAMES[hue] ?? `Hue ${hue}`} title={HUE_NAMES[hue]}
+                style={{ '--profile-hue': hue } as CSSProperties} onClick={() => { closeHues(); if (!checked) void commit({ hue }) }} />
+            </RovingFocus.Item>
+          })}
+          <RovingFocus.Item asChild active={profile.hue === undefined}>
+            <button type="button" className="browser-profile-editor__auto" aria-checked={profile.hue === undefined} role="radio"
+              title="A color picked from the Profile itself" onClick={() => { closeHues(); if (profile.hue !== undefined) void commit({ hue: null }) }}>Automatic</button>
+          </RovingFocus.Item>
+        </div>
+      </RovingFocus.Root> : null}
 
       {noting ? <textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus rows={2} maxLength={2000} value={notes}
           onChange={event => setNotes(event.target.value)} onBlur={() => void finishNotes()}
@@ -252,10 +274,11 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
         <p className="browser-profile-editor__quiet">{profile.source.browserLabel} · {profile.source.profileLabel}: {profile.source.importedCookies} cookies, {profile.source.skippedCookies} skipped</p>
       </section> : null}
 
-      {confirm === 'delete' ? <div className="browser-profile-editor__confirm" role="alertdialog" aria-label={`Delete ${profile.label}`}>
+      {confirm === 'delete' ? <div className="browser-profile-editor__confirm" role="alertdialog" aria-label={`Delete ${profile.label}`}
+        onKeyDown={event => { if (event.key === 'Escape' && busy !== 'delete') { event.preventDefault(); event.stopPropagation(); closeConfirm() } }}>
         <p>Delete <strong>{profile.label}</strong>? Its sign-ins, cookies, site data and address history are removed for good.</p>
         <div>
-          <button type="button" className="small-button" onClick={() => setConfirm(null)}>Cancel</button>
+          <button ref={cancelDelete} type="button" className="small-button" onClick={closeConfirm}>Cancel</button>
           <button type="button" className="danger-button" disabled={busy !== null} onClick={() => void run('delete', () => api.browser.deleteProfile(profile.id,
             { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id })).then(ok => { if (ok) onDeleted(); else setConfirm(null) })}>
             {busy === 'delete' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}Delete {profile.label}
