@@ -111,9 +111,25 @@ export function replaceShape(doc: ScreenshotDocument, shape: ScreenshotShape): S
     ? setShapes(doc, doc.shapes.map(item => item.id === shape.id ? shape : item)) : doc
 }
 
+/** Removing a numbered note closes the gap; Undo restores the earlier numbers from history. */
 export function removeShapes(doc: ScreenshotDocument, ids: ReadonlySet<string>): ScreenshotDocument {
   const shapes = doc.shapes.filter(shape => !ids.has(shape.id))
-  return shapes.length === doc.shapes.length ? doc : setShapes(doc, shapes)
+  return shapes.length === doc.shapes.length ? doc : setShapes(doc, renumberNotes(shapes))
+}
+
+/** Numbers notes 1..n in their current number order (ties by id) without moving
+ * them in paint order; unchanged shapes keep their identity. */
+export function renumberNotes(shapes: readonly ScreenshotShape[]): ScreenshotShape[] {
+  const order = shapes.filter((shape): shape is NoteShape => shape.kind === 'note')
+    .sort((a, b) => a.number - b.number || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const numbers = new Map(order.map((note, index) => [note.id, index + 1]))
+  return shapes.map(shape => shape.kind === 'note' && shape.number !== numbers.get(shape.id) ? { ...shape, number: numbers.get(shape.id)! } : shape)
+}
+
+/** The number for a new note. An original saved with gaps still never gets a duplicate. */
+export function nextNoteNumber(shapes: readonly ScreenshotShape[]): number {
+  const notes = shapes.filter(shape => shape.kind === 'note')
+  return Math.max(notes.length, ...notes.map(note => note.number)) + 1
 }
 
 export function commitShape(doc: ScreenshotDocument, shape: ScreenshotShape): ScreenshotDocument {
