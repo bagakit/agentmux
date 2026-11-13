@@ -294,3 +294,15 @@ it('marks a page that waits for the person and never reports an unreadable list 
   expect(chip().textContent).not.toContain('Needs your answer')
   expect(chip().title).toContain('Unconfirmed')
 })
+
+it('does not ask the person to answer a question that has no recipient Agent', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  inspect.mockImplementation((async (method: string, params: any) => method === 'capsule.interaction.ls'
+    ? { interactions: [{ capsuleId: params.capsuleId, interactionId: 'unbound', question: 'Which icon?', draft: '', revision: 1, status: 'pending' }], issues: [] }
+    : originalRead(method, params)) as never)
+  await render(`![Icon candidates](${first})`)
+  const chip = () => container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!
+  await vi.waitFor(() => expect(chip().dataset.attention).toBe('none'))
+  expect(chip().textContent).not.toContain('Needs your answer')
+})

@@ -197,13 +197,17 @@ try {
   report.referenceSyntax = { isolated: 'ordinary-bare', injected: 'ordinary-markdown-in-sentence', literalCreated: report.created.length }
   await focusReader()
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))})`)
-  // Sample the same card before and after its page connects: the first connection must not move the reading position.
-  await until('!!document.querySelector(".conversation-capsule__placeholder, .browser-stage")', 'The real Capsule card must mount its page area')
-  const connecting = await facts()
   await until('!!document.querySelector(".browser-stage")', 'The real Capsule consumer must mount its original Stage before capture')
   report.initialLayout = await facts(); assertCardLayout(report.initialLayout)
-  report.heightReceipt = { placeholder: connecting.placeholderHeight ?? null, page: report.initialLayout.presentationHeight }
-  if (report.heightReceipt.placeholder !== null) assert.ok(Math.abs(report.heightReceipt.placeholder - report.heightReceipt.page) <= 1, 'The connecting placeholder and the loaded page share one height')
+  // The same card outside the reading window shows its placeholder; it must keep the page area's height so reading does not jump.
+  await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))},false)`)
+  await until('!!document.querySelector(".conversation-capsule__placeholder")', 'A card outside the reading window shows its placeholder')
+  const resting = await facts()
+  report.heightReceipt = { placeholder: resting.placeholderHeight ?? null, page: report.initialLayout.presentationHeight }
+  assert.ok(typeof report.heightReceipt.placeholder === 'number' && report.heightReceipt.placeholder > 0, 'The placeholder height must be measured')
+  assert.ok(Math.abs(report.heightReceipt.placeholder - report.heightReceipt.page) <= 1, 'The placeholder and the loaded page share one height')
+  await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))})`)
+  await until('conversationCapsuleProbe.facts().ready', 'The card reconnects its original page when it returns to the reading window')
   const verifyStyles = async (capsuleId: string) => { if (phase === 'green' && cssProofPath) {
     // The answer panel otherwise pushes the diagram below the real visible-work boundary.
     if (await evaluate(`Boolean(document.querySelector('[aria-label="Page questions"][aria-expanded="true"]'))`)) {
@@ -426,6 +430,7 @@ try {
   const unboundRequest = (await owner.call('capsule.interaction.ls', { capsuleId: unbound.record.capsuleId })).interactions[0]!
   assert.equal(unboundRequest.target, undefined, 'The no-recipient form must consume a genuinely unbound original owner record')
   assert.equal(report.noRecipient.questions[0].confirmDisabled, true, 'A missing original recipient disables only this explicit confirmation')
+  assert.equal(report.noRecipient.layout.questionChip.includes('Needs your answer'), false, 'A question no Agent can receive does not ask the person for an answer')
   assert.equal(report.replySubmissions.length, 1, 'Displaying an unbound request must not submit any input')
   await writeFile(join(evidence!, `${phase}-no-recipient.png`), (await win.webContents.capturePage()).toPNG())
   await captureAnswer('no-recipient')
