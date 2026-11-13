@@ -7,6 +7,7 @@ import AgentMuxNativeMacOSCore
 // scope, cancellation and error handling remain the production source.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
+    static func activeDisplayBounds() -> [CGRect] { [CGRect(x: 0, y: 0, width: 1000, height: 800), CGRect(x: 1000, y: -200, width: 800, height: 600)] }
     static func clipboardWrite(_ params: [String: JSONValue]) throws -> [String: Any] {
         ControlledIO.shared.copied(format: params["format"]?.string, value: params["data"]?.string)
         return ["state": "written"]
@@ -46,10 +47,10 @@ private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Owners
     try NativeSelectionCaptureLease().withCapture(operation)
 }
 private enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false,
+    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
-        ControlledIO.shared.selectorCall()
+        ControlledIO.shared.selectorCall(initialRect: initialRect)
         try copyColor("#1A2B3C")
         let pixels = try load(NativeSelectionLoading())
         let forced = ControlledIO.shared.takeChoice()
@@ -78,7 +79,9 @@ private final class ControlledIO: @unchecked Sendable {
     private var choice: (action: NativeSelectionCompletionAction, tool: String?)?
     func force(_ action: NativeSelectionCompletionAction, tool: String?) { lock.lock(); choice = (action, tool); lock.unlock() }
     func takeChoice() -> (action: NativeSelectionCompletionAction, tool: String?)? { lock.lock(); defer { choice = nil; lock.unlock() }; return choice }
-    func selectorCall() { lock.lock(); selectors += 1; lock.unlock() }
+    private var seeds: [CGRect?] = []
+    func selectorCall(initialRect: CGRect? = nil) { lock.lock(); selectors += 1; seeds.append(initialRect); lock.unlock() }
+    func lastSeed() -> CGRect? { lock.lock(); defer { lock.unlock() }; return seeds.last ?? nil }
     func selectorCount() -> Int { lock.lock(); defer { lock.unlock() }; return selectors }
     func pixelCall() -> Int { lock.lock(); defer { lock.unlock() }; pixels += 1; return pixels }
     func pixelCount() -> Int { lock.lock(); defer { lock.unlock() }; return pixels }
@@ -124,6 +127,24 @@ private struct SelectionCaptureConsumerChecks {
         check("production explicit false remains a pure capture", disabled["state"] as? String == "captured" && disabled["completionAction"] == nil)
         let invalid = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .string("true")])
         check("production malformed editing flag is not inferred from text", invalid["state"] as? String == "failed" && (invalid["error"] as? [String: String])?["code"] == "invalid_argument")
+        let rectValue: (Double, Double, Double, Double) -> JSONValue = { x, y, width, height in
+            .object(["x": .number(x), "y": .number(y), "width": .number(width), "height": .number(height)])
+        }
+        let calls = io.selectorCount()
+        let seeded = NativeDesktopOperations.capture(["mode": .string("selection"), "initialRect": rectValue(1100, -150, 320, 180)])
+        check("production initialRect reaches the selector unchanged on a secondary display", seeded["state"] as? String == "captured" && io.lastSeed() == CGRect(x: 1100, y: -150, width: 320, height: 180))
+        for (name, params) in [
+            ("initialRect off every display", ["mode": .string("selection"), "initialRect": rectValue(5000, 5000, 10, 10)]),
+            ("zero-width initialRect", ["mode": .string("selection"), "initialRect": rectValue(10, 10, 0, 10)]),
+            ("non-finite initialRect", ["mode": .string("selection"), "initialRect": rectValue(.infinity, 10, 10, 10)]),
+            ("incomplete initialRect", ["mode": .string("selection"), "initialRect": .object(["x": .number(1), "y": .number(1), "width": .number(5)])]),
+            ("initialRect outside selection mode", ["mode": .string("display"), "displayId": .number(1), "initialRect": rectValue(10, 10, 10, 10)]),
+        ] as [(String, [String: JSONValue])] {
+            let rejected = NativeDesktopOperations.capture(params)
+            check("production rejects \(name) before opening a selector", rejected["state"] as? String == "failed"
+                && (rejected["error"] as? [String: String])?["code"] == "invalid_argument")
+        }
+        check("production invalid initialRect never opens a selector", io.selectorCount() == calls + 1)
         check("production color-copy callback reaches the existing text clipboard owner with the exact sampled HEX", io.validColorCopies())
         let report: [String: Any] = ["tests": cases.count, "cases": cases, "failures": failures, "boundary": "Exact production capture methods; controlled selector and pixel IO"]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])

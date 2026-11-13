@@ -296,14 +296,21 @@ async function exercise(directory, capture) {
     verify((await host.completion(3)).state === 'cancelled', 'Real Cancel button must cancel an existing selection')
     await host.request('begin')
     await host.request('key', { keyCode: 36 })
+    await host.request('click', { point: point(offset.x + 200, offset.y + 200), clickCount: 2 })
     await delay(40)
-    verify(host.completions.length === 3, 'Empty selection cannot confirm')
+    verify(host.completions.length === 3, 'Empty selection cannot confirm by Return or double click')
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 280, offset.y + 340))
     const redrawn = { x: offset.x + screen.width * 0.6, y: offset.y + screen.height * 0.6, width: 100, height: 90 }
     await drag(point(redrawn.x, redrawn.y), point(redrawn.x + redrawn.width, redrawn.y + redrawn.height))
-    await host.request('key', { keyCode: 36 })
-    const redrawResult = await host.completion(4)
-    verify(redrawResult.state === 'confirmed' && Math.abs(redrawResult.rect.width - redrawn.width) < 0.01 && Math.abs(redrawResult.rect.height - redrawn.height) < 0.01, 'Outside drag redraws and Return confirms the new selection')
+    const outsideRight = await host.request('click', { point: point(offset.x + 20, offset.y + 20), button: 'right' })
+    verify(outsideRight.rectangle === null && outsideRight.completions === 3 && outsideRight.surfaces.every(surface => !surface.toolbarVisible), 'A right click outside the selection clears it without cancelling')
+    await drag(point(redrawn.x, redrawn.y), point(redrawn.x + redrawn.width, redrawn.y + redrawn.height))
+    const insideRight = await host.request('click', { point: point(redrawn.x + 30, redrawn.y + 30), button: 'right' })
+    verify(insideRight.rectangle !== null && insideRight.completions === 3, 'A right click inside the selection keeps it')
+    await host.request('click', { point: point(redrawn.x + redrawn.width / 2, redrawn.y + redrawn.height / 2), clickCount: 2 })
+    // A surviving gesture mutant never completes; report that as the assertion.
+    const redrawResult = await host.completion(4).catch(() => ({ state: 'missing', rect: {} }))
+    verify(redrawResult.state === 'confirmed' && Math.abs(redrawResult.rect.width - redrawn.width) < 0.01 && Math.abs(redrawResult.rect.height - redrawn.height) < 0.01, 'Outside drag redraws and a double click inside confirms the new selection')
     verify(redrawResult.completionAction === undefined, 'Pure capture completion does not leak a host editing intent')
     await host.request('begin', { allowEditing: true })
     await host.request('key', { keyCode: 14 })
@@ -410,6 +417,18 @@ async function exercise(directory, capture) {
         await confirmGlobal(expected)
       }
     }
+    const seedQuartz = { x: screen.x + 120, y: 140, width: 260, height: 150 }
+    await host.request('begin', { initialRect: seedQuartz })
+    const seededView = await host.request('inspect')
+    const seededLocal = { x: seedQuartz.x - begin.window.x, y: screen.y + screen.height - seedQuartz.y - seedQuartz.height - begin.window.y, width: seedQuartz.width, height: seedQuartz.height }
+    verify(sameRect(seededView.rectangle, { ...seededLocal, x: seededLocal.x + begin.window.x, y: seededLocal.y + begin.window.y }) && seededView.canConfirm && seededView.toolbar.width > 0, 'A host initialRect seeds a resting, confirmable selection in AppKit points')
+    await host.request('key', { keyCode: 36 })
+    const seededResult = await host.completion(++count)
+    verify(seededResult.state === 'confirmed' && sameRect(seededResult.rect, seedQuartz), 'Confirming a seeded selection returns the same Quartz rectangle')
+    await host.request('begin')
+    await host.request('click', { point: point(offset.x + 50, offset.y + 50), button: 'right' })
+    const rightCancel = await host.completion(++count).catch(() => null)
+    verify(rightCancel?.state === 'cancelled', 'A right click with no selection cancels the request')
     await host.request('begin')
     await host.request('displayChange')
     const configurationChange = await host.completion(++count)
@@ -471,6 +490,13 @@ const mutations = [
   { name: 'mark-key-opt-in', path: view, before: 'if allowEditing, plain, let mark = Self.quickMarks.first', after: 'if plain, let mark = Self.quickMarks.first' },
   { name: 'capture-carries-tool', path: view, before: 'editTool: action == .edit ? tool : nil', after: 'editTool: tool ?? "rect"' },
   { name: 'consumer-capture-tool', path: operationsSource, before: 'if allowEditing, selection.completionAction == .edit, let tool = selection.editTool', after: 'if allowEditing, let tool = selection.editTool' },
+  { name: 'double-click-confirm', path: view, before: 'coordinator.confirmFromGesture()', after: 'coordinator.pointerDown(point)' },
+  { name: 'right-click-clears', path: view, before: '        selection.clear()\n        refresh()', after: '        refresh()' },
+  { name: 'right-click-cancels-empty', path: view, before: 'guard let rect = selection.rectangle else { cancel(); return }', after: 'guard let rect = selection.rectangle else { return }' },
+  { name: 'seed-flip', path: view, before: 'coordinator.seed(NativeCaptureGeometry.quartzRect(appKitRect: initialRect, primaryDisplayTop: primary.frame.maxY))', after: 'coordinator.seed(initialRect)' },
+  { name: 'seed-clamps', path: state, before: 'let clipped = rect.standardized.intersection(bounds)', after: 'let clipped = rect.standardized' },
+  { name: 'consumer-seed-forwarded', path: operationsSource, before: 'NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect,', after: 'NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: nil,' },
+  { name: 'consumer-seed-on-display', path: operationsSource, before: 'guard activeDisplayBounds().contains(where: { $0.intersects(rect) }) else {', after: 'guard true else {' },
   { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
   { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbarFrame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
   { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },

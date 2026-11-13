@@ -53,7 +53,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--interactive") { begin(id: 0) }
     }
 
-    private func begin(id: Int, allowEditing: Bool = false, holdPixels: Bool = false) {
+    private func begin(id: Int, allowEditing: Bool = false, holdPixels: Bool = false, initialRect: CGRect? = nil) {
         let pixels: NativeSelectionPixels
         do { pixels = try previewPixels() }
         catch { emit(["id": id, "ok": false, "message": String(describing: error)]); return }
@@ -61,7 +61,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         heldPixels = release
         let copies = colorCopies, producers = pixelProducers
         DispatchQueue.global().async { [weak self] in
-            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing, copyColor: { try copies.write($0) }) { _ in
+            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, copyColor: { try copies.write($0) }) { _ in
                 producers.begin()
                 defer { producers.end() }
                 release?.wait()
@@ -112,7 +112,14 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         let id = value["id"] as? Int ?? -1
         do {
             let method = value["method"] as? String ?? ""
-            if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true); return }
+            if method == "begin" {
+                var seed: CGRect?
+                if let raw = value["initialRect"] as? [String: Double], let x = raw["x"], let y = raw["y"], let width = raw["width"], let height = raw["height"] {
+                    seed = CGRect(x: x, y: y, width: width, height: height)
+                }
+                begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true, initialRect: seed)
+                return
+            }
             if method == "releasePixels" { heldPixels?.signal(); heldPixels = nil; emit(observation(id: id)); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
             if method == "failColorCopy" { colorCopies.failNext(); emit(observation(id: id)); return }
@@ -167,6 +174,26 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                     case .leftMouseDown: recipient.mouseDown(with: event)
                     case .leftMouseDragged: recipient.mouseDragged(with: event)
                     default: recipient.mouseUp(with: event)
+                    }
+                }
+            } else if method == "click" {
+                // Direct AppKit dispatch of a real click sequence on the
+                // hit-tested view; clickCount follows the requested button.
+                let location = try point(value["point"])
+                let secondary = value["button"] as? String == "right"
+                let clicks = secondary ? 1 : max(1, value["clickCount"] as? Int ?? 1)
+                guard let recipient = view.hitTest(view.convert(location, from: nil)) else { throw PreviewFailure("No actual AppKit hit-test recipient") }
+                for click in 1...clicks {
+                    let types: [NSEvent.EventType] = secondary ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp]
+                    for type in types {
+                        guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: click, pressure: 1) else { throw PreviewFailure("Could not create mouse event") }
+                        switch type {
+                        case .leftMouseDown: recipient.mouseDown(with: event)
+                        case .leftMouseUp: recipient.mouseUp(with: event)
+                        case .rightMouseDown: recipient.rightMouseDown(with: event)
+                        default: recipient.rightMouseUp(with: event)
+                        }
                     }
                 }
             } else if method == "release" {

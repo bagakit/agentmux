@@ -6,6 +6,7 @@ import AgentMuxNativeMacOSCore
 // methods are inserted. Only the external OS producer and chooser are controlled.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
+    static func activeDisplayBounds() -> [CGRect] { [CGRect(x: 0, y: 0, width: 1000, height: 800)] }
     /* PRODUCTION_FROZEN_METHODS */
     /* PRODUCTION_RECTANGLE_METHODS */
     /* PRODUCTION_PERMISSION_QUERY */
@@ -38,7 +39,7 @@ private func nativeErrorPayload(_ error: Error) -> [String: String] {
 private enum NativeSelectionCompletionAction: String { case capture, edit }
 private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; let pixels: NativeSelectionPixels }
 private enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false,
+    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledPixels.shared.selected()

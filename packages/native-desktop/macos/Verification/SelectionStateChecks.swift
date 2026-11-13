@@ -52,6 +52,15 @@ private struct SelectionStateChecks {
         let topDimension = NativeSelectionState.dimensionPanelFrame(size: CGSize(width: 130, height: 28), selection: top,
             toolbar: CGRect(x: 12, y: top.minY - 52, width: 480, height: 40), screen: screen)
         check("top edge dimensions stay within the actual screen", screen.contains(topDimension))
+        var seeded = NativeSelectionState(bounds: bounds)
+        seeded.seed(CGRect(x: 400, y: 380, width: 300, height: 200))
+        check("seed clips a proposal to the selectable bounds", seeded.rectangle == CGRect(x: 400, y: 380, width: 100, height: 40) && seeded.canConfirm)
+        seeded.seed(CGRect(x: 900, y: 900, width: 20, height: 20))
+        check("seed outside the bounds leaves no selection", seeded.rectangle == nil)
+        var cleared = drawn(CGPoint(x: 10, y: 10), CGPoint(x: 90, y: 70))
+        cleared.pointerDown(CGPoint(x: 40, y: 40))
+        cleared.clear()
+        check("clear drops the selection and its gesture", cleared.rectangle == nil && !cleared.isInteracting)
         let report: [String: Any] = ["tests": names.count, "failures": failures, "cases": names]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), let text = String(data: data, encoding: .utf8) { print(text) }
         if names.isEmpty || !failures.isEmpty { exit(1) }
