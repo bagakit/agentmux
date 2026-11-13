@@ -11,6 +11,7 @@ import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from '..
 export type BookReport = { results: Record<string, { checks: number; failure?: string; facts?: Record<string, unknown> }>; actualBrowser: string; isolation: Record<string, string>; failure?: string }
 const packageRoot = resolve(import.meta.dirname, '../..')
 const changes = {
+  'comic-case': ['src/books/vendor/foliate/comic-book.js', 'name.toLowerCase().endsWith(ext)', 'name.endsWith(ext)'],
   security: ['src/books/security.ts', 'export function sanitizeBookDocument(doc: Document): void {', 'export function sanitizeBookDocument(doc: Document): void { return;'],
   release: ['src/books/resources.ts', '    URL.revokeObjectURL(url)', '    void url'],
   'read-all': ['src/books/archive.ts', 'const entries = (await reader.getEntries()).filter(entry => !entry.directory)', 'await source.read(0, source.size, signal); const entries = (await reader.getEntries()).filter(entry => !entry.directory)'],

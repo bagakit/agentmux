@@ -197,8 +197,11 @@ export async function runBookContracts() {
       check(activeURLs.has(second.querySelector('link')!.getAttribute('href')!), 'The book stylesheet survives an earlier section release')
     })
     await run('cbz', async (check, keep) => {
-      const reader = keep(await openBook(source(await zip({ 'page10.png': png, 'page2.png': png, 'note.txt': 'ignored' })).value, { name: 'sample.cbz', format: 'cbz' }))
-      check(reader.layout === 'pre-paginated' && reader.sections.map(section => section.id).join('|') === 'page2.png|page10.png', 'Actual CBZ images use natural page order')
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+      canvas.getContext('2d')!.fillRect(0,0,1,1)
+      const jpeg = new Uint8Array(await (await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/jpeg'))).arrayBuffer())
+      const reader = keep(await openBook(source(await zip({ 'page10.PNG': png, 'page2.JpEg': jpeg, 'note.txt': 'ignored' })).value, { name: 'sample.cbz', format: 'cbz' }))
+      check(reader.layout === 'pre-paginated' && reader.sections.map(section => section.id).join('|') === 'page2.JpEg|page10.PNG', 'Actual CBZ images use natural page order')
       const first = await reader.sections[0]!.load(), doc = await page(first), image = doc.querySelector('img')!.getAttribute('src')!
       check(activeURLs.has(image) && Boolean(doc.querySelector('meta[http-equiv]')), 'CBZ uses an owned image and an inert document')
       const decoded = new Image(); decoded.src = image; await decoded.decode()
