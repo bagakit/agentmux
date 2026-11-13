@@ -45,7 +45,7 @@ app.whenReady().then(async () => {
         await until(`window.remoteUpgradePreview.calls.filter(call=>call==="check").length === ${before + 1}`)
         if (mode === 'refusal') await capture('checking-' + width)
         await read('window.remoteUpgradePreview.releaseCheck()')
-        const status = mode === 'refusal' ? 'Automatic upgrade unavailable' : mode === 'ready' ? 'Ready to upgrade' : 'Upgrade result unconfirmed'
+        const status = mode === 'refusal' ? 'Automatic upgrade unavailable' : mode === 'ready' ? 'Ready for review' : 'Original upgrade needs checking'
         await until(`document.querySelector("[data-host-upgrade]")?.innerText.includes(${JSON.stringify(status)})`)
         assert.equal(await read('document.querySelector(".host-upgrade__details").open'), false)
         assert.equal(await read('document.querySelector("[data-host-upgrade]").scrollWidth <= document.querySelector("[data-host-upgrade]").clientWidth + 1'), true)
@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
           if (mode === 'refusal') {
             await click('[data-copy-upgrade-diagnostics]')
             await until('document.querySelector(".host-upgrade__copy-feedback")?.innerText.includes("Diagnostics copied")')
-            assert.match(await read('window.remoteUpgradePreview.copied.at(-1)'), /Required Runtime protocol: 22/)
+            assert.match(await read('window.remoteUpgradePreview.copied.at(-1)'), /Required Native protocol: 22/)
             assert.equal(await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length'), before + 1)
             await read('document.querySelector(".host-upgrade__details > summary").click()')
             await capture('diagnostics-copied-' + width)

@@ -21,15 +21,16 @@ api.config.save = async (next, expected) => {
   await new Promise<void>((resolve, reject) => { saveResult = failure => failure ? reject(new Error('Save unavailable. Your draft is retained.')) : resolve() })
   return originalSave(next, expected)
 }
-const candidate = { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), protocolVersion: 22 }
+const candidate = { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22 }
+const current = { state: 'available' as const, observedAt: 1700000000000, version: '0.1.0', sourceCommit: 'd'.repeat(40), deploymentDigest: 'e'.repeat(64), ownerProtocolVersion: 1, runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100, native: { instanceId: 'native-owner', buildId: 'native-build', protocolVersion: 22 } }
 const expected = { targetDigest: 'c'.repeat(64), runtimeId: host.runtimeId, ownerInstanceId: 'original-owner', processId: 100, startTicks: '123', candidateDigest: candidate.digest, nativeInstanceId: 'native-owner', nativeProcessId: 101, nativeStartTicks: '456' }
 let finishCheck: (() => void) | undefined, holdCheck = false
-api.hosts.upgradeCheck = async input => { calls.push({ method: 'hosts.upgradeCheck', input }); if (holdCheck) await new Promise<void>(resolve => { finishCheck = resolve }); return { input, eligible: true, reason: 'ready', candidate, expected } }
+api.hosts.upgradeCheck = async input => { calls.push({ method: 'hosts.upgradeCheck', input }); if (holdCheck) await new Promise<void>(resolve => { finishCheck = resolve }); return { input, current, eligible: true, reason: 'ready', candidate, expected, detail: 'Original owner is qualified' } }
 let finishUpgrade: (() => void) | undefined
 api.hosts.upgrade = async (input, expected, operationId) => {
   calls.push({ method: 'hosts.upgrade', input, expected, operationId })
   await new Promise<void>(resolve => { finishUpgrade = resolve })
-  return { input, expected, operationId, status: 'completed', stage: 'completed', updatedAt: fixtureEpoch(2) }
+  return { input, expected, operationId, status: 'completed', stage: 'completed', candidate, detail: 'Original deployment completed', connectionAdoption: {state:'connected',readAt:fixtureEpoch(2)}, updatedAt: fixtureEpoch(2) }
 }
 api.ui.requestStorageFlush = async () => {}
 api.ui.writeClipboardText = async text => { calls.push({ method: 'clipboard', text }) }

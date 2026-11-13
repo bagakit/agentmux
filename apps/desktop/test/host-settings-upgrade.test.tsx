@@ -1,4 +1,4 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -7,368 +7,240 @@ import type { SshHostConfig } from '../src/shared/contracts'
 import { HostUpgradePanel } from '../src/renderer/src/components/settings/HostUpgradePanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 const dom = composerDOM()
 const host: SshHostConfig = { id: 'build', kind: 'ssh', label: 'Build server', hostname: 'build.invalid',
-  runtimeId: 'original-runtime', remoteCommand: _hygiene_fixturePath("opt/original/agentmux"), remoteSocketPath: _hygiene_fixturePath("srv/original/control.sock") }
-const candidateDigest = 'a'.repeat(64)
+  runtimeId: 'original-runtime', remoteCommand: fixturePath('opt/original/agentmux'), remoteSocketPath: fixturePath('srv/original/control.sock') }
 const check: RemoteCoreUpgradeCheck = { input: host, eligible: true, reason: 'ready', detail: 'Original owner is qualified',
-  candidate: { digest: candidateDigest, sourceCommit: 'b'.repeat(40), protocolVersion: 22 },
-  expected: { targetDigest: 'c'.repeat(64), runtimeId: 'original-runtime', ownerInstanceId: 'original-owner',
-    processId: 100, startTicks: '123', candidateDigest, nativeInstanceId: 'native-owner', nativeProcessId: 101, nativeStartTicks: '456' } }
-const refusal = (detail = 'The current Runtime cannot be safely updated; original Runs were preserved.'): RemoteCoreUpgradeCheck => ({
-  input: host, candidate: check.candidate, eligible: false, reason: 'runtime-update-required', detail })
-const receipt = (status: RemoteCoreUpgradeReceipt['status']): RemoteCoreUpgradeReceipt => ({ input: host,
+  current: { state: 'available', observedAt: 1700000000000, version: '0.1.0', sourceCommit: 'd'.repeat(40), deploymentDigest: 'e'.repeat(64),
+    ownerProtocolVersion: 1, runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100,
+    native: { instanceId: 'native-owner', buildId: 'native-build', protocolVersion: 25 } },
+  candidate: { digest: 'a'.repeat(64), version: '0.1.0', sourceCommit: 'b'.repeat(40), ownerProtocolVersion: 2, requiredNativeProtocolVersion: 25 },
+  expected: { targetDigest: 'c'.repeat(64), runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100,
+    startTicks: '123', candidateDigest: 'a'.repeat(64), nativeInstanceId: 'native-owner', nativeProcessId: 101, nativeStartTicks: '456' } }
+const receipt = (status: RemoteCoreUpgradeReceipt['status'] = 'unknown'): RemoteCoreUpgradeReceipt => ({ input: host,
   operationId: 'original-operation', expected: check.expected!, status, stage: status === 'completed' ? 'completed' : 'verifying',
-  detail: status === 'completed' ? 'Core updated and exact connection verified' : 'Original upgrade receipt is unconfirmed',
-  ...(status === 'completed' ? { remoteCommand: host.remoteCommand! } : {}), updatedAt: 1 })
-let checkCall: ReturnType<typeof vi.spyOn>, upgradeCall: ReturnType<typeof vi.spyOn>, inspectCall: ReturnType<typeof vi.spyOn>
+  detail: 'Original service result', updatedAt: 1700000001000,
+  ...(status === 'completed' ? { remoteCommand: host.remoteCommand, connectionAdoption: { state: 'pending-confirmation' as const, readAt: 1700000002000 } } : {}) })
+let checkCall: ReturnType<typeof vi.spyOn>, upgradeCall: ReturnType<typeof vi.spyOn>, inspectCall: ReturnType<typeof vi.spyOn>, reconnectCall: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   checkCall = vi.spyOn(api.hosts, 'upgradeCheck').mockResolvedValue(check)
-  upgradeCall = vi.spyOn(api.hosts, 'upgrade').mockImplementation(async (input, expected, operationId) => ({ ...receipt('completed'), input, expected, operationId }))
+  upgradeCall = vi.spyOn(api.hosts, 'upgrade').mockImplementation(async (input, expected, operationId) => ({ ...receipt('completed'), input, expected, operationId,
+    candidate: check.candidate, connectionAdoption: { state: 'connected', readAt: 1700000003000 } }))
   inspectCall = vi.spyOn(api.hosts, 'upgradeInspect').mockResolvedValue(receipt('completed'))
+  reconnectCall = vi.spyOn(api.hosts, 'upgradeReconnect').mockResolvedValue({ ...receipt('completed'), connectionAdoption: { state: 'connected', readAt: 1700000003000 } })
 })
 const render = (draft = host, committed: SshHostConfig | undefined = host, active = true) => dom.render(<HostUpgradePanel host={draft} committed={committed} active={active} />)
-const click = () => dom.click('[data-upgrade-action]')
-it('checks automatically, then one explicit click rechecks and pins the owner before upgrading', async () => {
-  await render(); expect(dom.container.querySelector('[data-semantic-icon="action.upgrade-host"]')).not.toBeNull(); await click()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(checkCall.mock.calls.every(([input]) => input.hostname === host.hostname)).toBe(true)
-  expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.stringMatching(/^[a-f0-9-]{36}$/))
-  expect(inspectCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Upgrade complete')
-})
-it('displays a qualified refusal without invoking upgrade or stopping a service', async () => {
-  checkCall.mockResolvedValue(refusal())
+const action = () => dom.click('[data-upgrade-action]')
+const review = async () => { await action(); expect(dom.container.querySelector('[aria-label="Review upgrade"]')).not.toBeNull() }
+const confirm = () => dom.click('[data-upgrade-confirm]')
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+
+it('automatically reads exact versions without deployment and shows same-version source differences above closed technical details', async () => {
   await render()
   expect(checkCall).toHaveBeenCalledExactlyOnceWith(host)
   expect(upgradeCall).not.toHaveBeenCalled()
+  const facts = dom.container.querySelector('[aria-label="Current and target Core versions"]')!
+  expect(facts.closest('details')).toBeNull()
+  expect(facts.textContent).toContain('0.1.0Source dddddddddd')
+  expect(facts.textContent).toContain('0.1.0Source bbbbbbbbbb')
+  expect(dom.container.querySelector('.host-upgrade__read-time time')?.getAttribute('datetime')).toBe(new Date(check.current.observedAt).toISOString())
+  expect(dom.container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+  expect(dom.container.textContent).toContain('Core owner API protocol · deployed / app1 / 2')
+  expect(dom.container.textContent).toContain('Native protocol · current / required25 / 25')
+})
+it('review and cancel do not upgrade; final confirmation submits only the frozen reviewed tuple with no fresh check', async () => {
+  await render(); await review()
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[aria-label="Review upgrade"]')!.textContent).toContain('Source bbbbbbbbbb')
+  await dom.click('[data-upgrade-cancel]')
+  expect(upgradeCall).not.toHaveBeenCalled()
+  await review()
+  checkCall.mockResolvedValue({ ...check, candidate: { ...check.candidate, digest: 'f'.repeat(64) }, expected: { ...check.expected!, candidateDigest: 'f'.repeat(64) } })
+  await confirm()
+  expect(checkCall).toHaveBeenCalledTimes(1)
+  expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.any(String))
+  expect(dom.container.textContent).toContain('Deployment completed')
+  expect(dom.container.textContent).toContain('Connection verified at')
+})
+it('does not borrow a reviewed target when the same-ID saved route changes', async () => {
+  await render(); await review()
+  const changed = { ...host, hostname: 'other.invalid' }
+  checkCall.mockImplementation(async input => ({ ...check, input }))
+  await render(changed, changed)
+  expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
+  expect(upgradeCall).not.toHaveBeenCalled()
+  await render(); await review()
+  await confirm(); expect(upgradeCall.mock.calls[0]![0]).toEqual(host)
+})
+it('preserves the original admitted ID after a lost response and inspects it without replay', async () => {
+  upgradeCall.mockRejectedValue(new Error('Lost result after admission'))
+  await render(); await review(); await confirm()
+  const operationId = upgradeCall.mock.calls[0]![2]
+  expect(dom.container.textContent).toContain('Original upgrade result unconfirmed')
+  await action()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, operationId)
+  expect(upgradeCall).toHaveBeenCalledTimes(1)
+  expect(reconnectCall).not.toHaveBeenCalled()
+})
+it('same-tick double confirmation admits one operation and preserves its exact ID for inspection', async () => {
+  const pending = deferred<RemoteCoreUpgradeReceipt>()
+  upgradeCall.mockReturnValue(pending.promise)
+  await render(); await review()
+  const button = dom.container.querySelector<HTMLButtonElement>('[data-upgrade-confirm]')!
+  await act(async () => { button.click(); button.click() })
+  expect(upgradeCall).toHaveBeenCalledTimes(1)
+  const operationId = upgradeCall.mock.calls[0]![2]
+  expect(dom.container.textContent).toContain('Upgrading Core')
+  await act(async () => pending.resolve({ ...receipt(), operationId }))
+  await action()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, operationId)
+})
+it('retains unknown history separately from the current app candidate and only queries the original operation', async () => {
+  const old = { ...receipt(), expected: { ...check.expected!, candidateDigest: 'f'.repeat(64) } }
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', latestOperation: old })
+  await render()
+  expect(dom.container.textContent).toContain('Original upgrade needs checking')
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).toContain('Source bbbbbbbbbb')
+  expect(dom.container.textContent).toContain('Original upgrade candidate versionUnknown')
+  expect(dom.container.textContent).toContain('f'.repeat(64))
+  await action()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(checkCall).toHaveBeenCalledTimes(1)
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(reconnectCall).not.toHaveBeenCalled()
+  expect(dom.container.textContent).toContain('Deployment completed')
+  expect(dom.container.textContent).toContain('connection to it is not confirmed')
+})
+it('completed deployment stays completed while connection adoption is separate and explicit', async () => {
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'up-to-date', expected: undefined, latestOperation: receipt('completed') })
+  reconnectCall.mockResolvedValue({ ...receipt('completed'), connectionAdoption: { state: 'unconfirmed', readAt: 1700000004000, detail: 'Route adoption not confirmed' } })
+  await render()
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Reconnect to updated Core')
+  expect(reconnectCall).not.toHaveBeenCalled()
+  await action()
+  expect(reconnectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(inspectCall).not.toHaveBeenCalled()
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.container.textContent).toContain('Deployment completed')
+  expect(dom.container.textContent).toContain('Connection: unconfirmed')
+})
+it('preserves unknown operation through a saved command change and draft round trip', async () => {
+  checkCall.mockResolvedValue({ ...check, latestOperation: { ...receipt(), remoteCommand: fixturePath('srv/releases/new/core') } })
+  await render()
+  const adopted = { ...host, remoteCommand: fixturePath('srv/releases/new/core') }
+  await render(adopted, adopted)
+  const draft = { ...adopted, hostname: 'draft.invalid' }
+  await render(draft, adopted)
+  expect(dom.container.textContent).not.toContain('Original upgrade result unconfirmed')
+  await render(adopted, adopted); await action()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(upgradeCall).not.toHaveBeenCalled()
+})
+it('a late check updates only its original route and does not replace the selected target', async () => {
+  const pending = deferred<RemoteCoreUpgradeCheck>()
+  checkCall.mockReturnValueOnce(pending.promise).mockImplementation(async input => ({ ...check, input, candidate: { ...check.candidate, version: '0.2.0' } }))
+  await render()
+  const other = { ...host, hostname: 'other.invalid' }
+  await render(other, other)
+  await act(async () => pending.resolve(check))
+  expect(checkCall).toHaveBeenCalledTimes(2)
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).toContain('0.2.0')
+  expect(upgradeCall).not.toHaveBeenCalled()
+})
+it('keeps missing version facts unknown without inventing versions from protocol or digests', async () => {
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', current: { state: 'unavailable', observedAt: 1700000000000, code: 'CONTROL_UNAVAILABLE', detail: 'Owner read unavailable' },
+    candidate: { ...check.candidate, version: null, sourceCommit: null } })
+  await render()
+  expect(dom.container.querySelector('[data-upgrade-current-version]')!.textContent).toBe('UnknownSource unknown')
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).toBe('UnknownContent aaaaaaaaaaaa')
+  expect(dom.container.textContent).not.toContain('0.1.0')
+  expect(upgradeCall).not.toHaveBeenCalled()
+})
+it('scopes read failure to this update check, keeps prior facts, and permits a read-only retry', async () => {
+  await render()
+  checkCall.mockRejectedValueOnce(new Error('Original observation unavailable'))
+  await dom.click('[data-upgrade-refresh]')
+  expect(dom.container.textContent).toContain('Upgrade check unconfirmed')
+  expect(dom.container.textContent).toContain('Existing work remains available')
+  expect(dom.container.textContent).toContain('Original observation unavailable')
+  expect(dom.container.querySelector('[data-upgrade-current-version]')!.textContent).toContain('0.1.0')
+  expect(upgradeCall).not.toHaveBeenCalled()
+})
+it('does not deploy an up-to-date candidate or perform an unsupported Native update', async () => {
+  checkCall.mockResolvedValueOnce({ ...check, eligible: false, reason: 'up-to-date', expected: undefined })
+  await render(); expect(dom.container.textContent).toContain('Up to date'); await action()
+  expect(upgradeCall).not.toHaveBeenCalled()
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'runtime-update-required', expected: undefined })
+  await dom.click('[data-upgrade-refresh]')
   expect(dom.container.textContent).toContain('Automatic upgrade unavailable')
-  expect(dom.container.textContent).toContain('original Runs were preserved')
-})
-it('Recheck availability only rechecks eligibility; a new qualified result still waits for an explicit upgrade', async () => {
-  checkCall.mockResolvedValueOnce(refusal()).mockResolvedValue(check)
-  await render()
-  expect(dom.container.textContent).toContain('Recheck availability')
-  await click()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Upgrade and reconnect')
-  await click()
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-})
-it('reconciles a retained unknown operation instead of admitting another upgrade', async () => {
-  checkCall.mockResolvedValue({ input: host, candidate: check.candidate, eligible: false, reason: 'unverified',
-    detail: 'Core update requires reconciliation', latestOperation: receipt('unknown') })
-  await render()
-  expect(inspectCall).not.toHaveBeenCalled()
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Check original result')
-  expect(dom.container.querySelector('.field-hint')!.textContent).toContain('previous update result is not confirmed')
-  await click()
-  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Upgrade complete')
-})
-it('shows the original receipt stage and update time outside technical details without deriving completion or replaying the operation', async () => {
-  const updatedAt = _historyFixtureEpoch(1, 0, 0)
-  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', latestOperation: { ...receipt('unknown'), stage: 'starting', updatedAt } })
-  await render()
-  const summary = () => dom.container.querySelector<HTMLElement>('[aria-label="Original update receipt"]')!
-  expect(summary()).not.toBeNull()
-  expect(summary().closest('details')).toBeNull()
-  expect(dom.container.querySelector<HTMLDetailsElement>('.host-upgrade__details')!.open).toBe(false)
-  expect(summary().querySelector('[data-upgrade-stage="starting"]')?.textContent).toBe('Starting the updated Core')
-  expect(summary().querySelector('time')?.dateTime).toBe(new Date(updatedAt).toISOString())
-  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
-  expect(summary().textContent).not.toContain('%')
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-  inspectCall.mockResolvedValue({ ...receipt('unknown'), stage: 'completed', updatedAt: updatedAt + 7000 })
-  await click()
-  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
-  expect(summary().querySelector('[data-upgrade-stage="completed"]')?.textContent).toBe('Verification completed')
-  expect(summary().querySelector('time')?.dateTime).toBe(new Date(updatedAt + 7000).toISOString())
-  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
-  expect(dom.container.textContent).not.toContain('Upgrade complete')
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(checkCall).toHaveBeenCalledTimes(1)
-})
-it('retains the admitted operation after a lost response and never retries the deployment', async () => {
-  upgradeCall.mockRejectedValue(new Error('Connection lost after admission'))
-  await render(); await click()
-  const operationId = upgradeCall.mock.calls[0]![2]
-  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
-  await click()
-  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, operationId)
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-})
-it('retains the original unknown operation after Main saved its new command but reconnection failed', async () => {
-  const next = { ...host, remoteCommand: _hygiene_fixturePath("srv/original/core-releases/verified/bin/agentmux-public") }
-  inspectCall.mockResolvedValue({ ...receipt('completed'), remoteCommand: next.remoteCommand })
-  upgradeCall.mockImplementation(async (input, expected, operationId) => ({ ...receipt('unknown'), input, expected, operationId,
-    remoteCommand: next.remoteCommand, detail: 'Core updated; the original connection still needs verification.' }))
-  await render(); await click()
-  const operationId = upgradeCall.mock.calls[0]![2]
-  await render(next, next)
-  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
-  expect(dom.container.textContent).toContain('Check original result')
-  expect(dom.container.querySelector('.host-upgrade__diagnostic-message')!.textContent).toContain('the original connection still needs verification')
-  await click()
-  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, operationId)
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-  expect(dom.container.textContent).toContain('Upgrade complete')
-  const changed = { ...next, hostname: 'another.invalid' }
-  await render(changed, changed)
-  expect(dom.container.textContent).not.toContain('the original connection still needs verification')
-})
-it('keeps a running original operation visible while its staged command has not been saved', async () => {
-  checkCall.mockResolvedValue({ input: host, candidate: check.candidate, eligible: false, reason: 'unverified',
-    detail: 'The original operation is still running', latestOperation: { ...receipt('running'),
-      remoteCommand: _hygiene_fixturePath("srv/original/core-releases/staged/bin/agentmux-public") } })
-  await render()
-  expect(inspectCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
-  expect(dom.container.textContent).toContain('Check original result')
-  await click()
-  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(dom.container.textContent).toContain('supported Native Runtime update')
   expect(upgradeCall).not.toHaveBeenCalled()
 })
-it('does not use a late eligibility result after a draft or same-ID saved connection changed', async () => {
-  let resolve!: (value: RemoteCoreUpgradeCheck) => void
-  checkCall.mockReturnValueOnce(new Promise<RemoteCoreUpgradeCheck>(done => { resolve = done }))
-  const changed = { ...host, hostname: 'another.invalid' }
-  checkCall.mockResolvedValue({ ...check, input: changed, detail: 'Replacement is qualified' })
-  await render()
-  await render(changed, changed)
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  await act(async () => resolve(check))
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(checkCall.mock.calls[1]![0]).toEqual(changed)
-  expect(dom.container.textContent).toContain('Replacement is qualified')
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).not.toContain('Original owner is qualified')
-  expect(dom.container.textContent).not.toContain('Upgrade complete')
-})
-it('requires the selected connection to be saved and leaves other capabilities available', async () => {
-  await render({ ...host, hostname: 'authored.invalid' }, host)
-  expect(dom.container.querySelector<HTMLButtonElement>('[data-host-upgrade] button')!.disabled).toBe(true)
-  expect(dom.container.textContent).toContain('Save this connection before upgrading')
+it('hidden or unsaved routes do not check and only the update action is unavailable', async () => {
+  await render(host, host, false); expect(checkCall).not.toHaveBeenCalled()
+  const draft = { ...host, hostname: 'draft.invalid' }
+  await render(draft, host)
+  expect(dom.container.querySelector<HTMLButtonElement>('[data-upgrade-action]')!.disabled).toBe(true)
   expect(checkCall).not.toHaveBeenCalled()
+  await render(); expect(checkCall).toHaveBeenCalledExactlyOnceWith(host)
+  expect(upgradeCall).not.toHaveBeenCalled()
+})
+it('in-progress headings name the current action without changing deployment or last-reported facts', async () => {
+  const pending = deferred<RemoteCoreUpgradeReceipt | null>()
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', expected: undefined, latestOperation: receipt() })
+  inspectCall.mockReturnValue(pending.promise)
+  await render(); await action()
+  expect(dom.container.querySelector('[role=status]')!.textContent).toBe('Checking original result')
+  expect(dom.container.textContent).toContain('Last reported stage')
+  await act(async () => pending.resolve(receipt('completed')))
+  const reconnecting = deferred<RemoteCoreUpgradeReceipt | null>()
+  reconnectCall.mockReturnValue(reconnecting.promise); await action()
+  expect(dom.container.querySelector('[role=status]')!.textContent).toBe('Reconnecting to updated Core')
+  expect(dom.container.textContent).toContain('Deployment completed')
+  await act(async () => reconnecting.resolve({ ...receipt('completed'), connectionAdoption: { state: 'connected', readAt: 1700000005000 } }))
+})
+it('copy diagnostics preserves original identity, distinguishes protocols and excludes private connection configuration', async () => {
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const privateHost = { ...host, identityFile: fixturePath('private/client-key'), remoteCommand: 'private-command-token' }
+  checkCall.mockImplementation(async input => ({ ...check, input, latestOperation: { ...receipt(), input } }))
+  await render(privateHost, privateHost); await dom.click('[data-copy-upgrade-diagnostics]')
+  const text = clipboard.mock.calls[0]![0]
+  expect(text).toContain('Operation: original-operation')
+  expect(text).toContain('App Core owner API protocol: 2')
+  expect(text).toContain('Required Native protocol: 25')
+  expect(text).toContain('Deployed Core source: '+ 'd'.repeat(40))
+  expect(text).toContain('Deployed content digest: '+ 'e'.repeat(64))
+  expect(text).not.toContain(privateHost.identityFile)
+  expect(text).not.toContain(privateHost.remoteCommand)
+  expect(inspectCall).not.toHaveBeenCalled()
   expect(upgradeCall).not.toHaveBeenCalled()
 })
 
-it('automatically shows pending and qualified states without admitting any deployment', async () => {
-  let resolve!: (value: RemoteCoreUpgradeCheck) => void
-  checkCall.mockReturnValueOnce(new Promise<RemoteCoreUpgradeCheck>(done => { resolve = done }))
+it('keeps deployed and bundled versions independent and names a different original Host before reconnecting it', async () => {
+  const original = { ...host, id: 'original-alias', label: 'Original service alias' }
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', expected: undefined, current: { ...check.current, state: 'available', version: '0.0.9' } as RemoteCoreUpgradeCheck['current'],
+    latestOperation: { ...receipt('completed'), input: original } })
   await render()
-  expect(checkCall).toHaveBeenCalledExactlyOnceWith(host)
-  expect(dom.container.textContent).toContain('Checking upgrade')
+  expect(dom.container.querySelector('[data-upgrade-current-version]')!.textContent).toContain('0.0.9')
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).toContain('0.1.0')
+  expect(dom.container.textContent).toContain('Original Host: Original service alias (original-alias)')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Reconnect Original service alias')
+  await action()
+  expect(reconnectCall).toHaveBeenCalledExactlyOnceWith(original, 'original-operation')
   expect(upgradeCall).not.toHaveBeenCalled()
-  await act(async () => resolve(check))
-  expect(dom.container.textContent).toContain('Ready to upgrade')
-  expect(dom.container.textContent).not.toContain('New version')
-  expect(upgradeCall).not.toHaveBeenCalled()
+})
+
+it('a completed older update awaiting adoption does not block review of a newly qualified candidate', async () => {
+  const older = { ...receipt('completed'), expected: { ...check.expected!, candidateDigest: 'f'.repeat(64) }, candidate: { ...check.candidate, digest: 'f'.repeat(64), version: '0.0.9' } }
+  checkCall.mockResolvedValue({ ...check, latestOperation: older })
+  await render()
+  expect(dom.container.querySelector('[role=status]')!.textContent).toBe('Ready for review')
+  expect(dom.container.querySelector('[data-upgrade-reconnect]')!.textContent).toContain('Reconnect original update')
+  await review(); await confirm()
+  expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.any(String))
+  expect(reconnectCall).not.toHaveBeenCalled()
   expect(inspectCall).not.toHaveBeenCalled()
-})
-it('deduplicates the same route across rerenders and label edits, and checks again on reentry', async () => {
-  await render()
-  await render({ ...host })
-  await render({ ...host, label: 'New name' }, { ...host, label: 'New name' })
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  await render(host, host, false)
-  await render()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(upgradeCall).not.toHaveBeenCalled()
-})
-it('does not check hidden or unsaved targets and checks the exact route only when visible and saved', async () => {
-  const changed = { ...host, hostname: 'new.invalid' }
-  await render(host, host, false)
-  await render(changed, changed, false)
-  await render(changed, host)
-  expect(checkCall).not.toHaveBeenCalled()
-  await render(changed, changed)
-  expect(checkCall).toHaveBeenCalledExactlyOnceWith(changed)
-  expect(upgradeCall).not.toHaveBeenCalled()
-})
-it('keeps a failed automatic observation unknown without a retry loop or an automatic deployment', async () => {
-  checkCall.mockRejectedValueOnce(new Error('SSH observation timed out')).mockResolvedValue(check)
-  await render()
-  await render({ ...host })
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(dom.container.textContent).toContain('Upgrade check unconfirmed')
-  expect(dom.container.textContent).toContain('SSH observation timed out')
-  expect(dom.container.textContent).toContain('Recheck availability')
-  await click()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-})
-it('does not start another check after an in-flight observation finishes in a hidden editor', async () => {
-  let resolve!: (value: RemoteCoreUpgradeCheck) => void
-  checkCall.mockReturnValueOnce(new Promise<RemoteCoreUpgradeCheck>(done => { resolve = done }))
-  await render()
-  const changed = { ...host, hostname: 'next.invalid' }
-  await render(changed, changed, false)
-  await act(async () => resolve(check))
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-})
-it('keeps a completed original receipt through the saved command update without launching another check', async () => {
-  const next = { ...host, remoteCommand: _hygiene_fixturePath("srv/original/core-releases/verified/bin/agentmux-public") }
-  upgradeCall.mockImplementation(async (input, expected, operationId) => ({ ...receipt('completed'), input, expected, operationId, remoteCommand: next.remoteCommand }))
-  await render(); await click()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  await render(next, next)
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(dom.container.textContent).toContain('Upgrade complete')
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-})
-it('keeps an admitted failure visible rather than replacing it with an automatic check', async () => {
-  upgradeCall.mockImplementation(async (input, expected, operationId) => ({ ...receipt('failed'), input, expected, operationId,
-    detail: 'The original update failed; original Runs remain available', remoteCommand: _hygiene_fixturePath("srv/original/core-releases/staged/bin/agentmux-public") }))
-  await render(); await click()
-  await render({ ...host })
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(dom.container.textContent).toContain('Upgrade not completed')
-  expect(dom.container.textContent).toContain('original Runs remain available')
-})
-it('joins the original in-flight check when reentering the same connection', async () => {
-  let resolve!: (value: RemoteCoreUpgradeCheck) => void
-  checkCall.mockReturnValueOnce(new Promise<RemoteCoreUpgradeCheck>(done => { resolve = done }))
-  await render()
-  await render(host, host, false)
-  await render()
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  await act(async () => resolve(check))
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(dom.container.textContent).toContain('Ready to upgrade')
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-})
-it('keeps the terminal receipt in its current entry, but checks new facts on an explicit reentry', async () => {
-  await render(); await click()
-  expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(dom.container.textContent).toContain('Upgrade complete')
-  await render(host, host, false)
-  await render()
-  expect(checkCall).toHaveBeenCalledTimes(3)
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-  expect(inspectCall).not.toHaveBeenCalled()
-  expect(dom.container.textContent).toContain('Ready to upgrade')
-})
-it('retains an unknown original operation across reentry without another automatic check or inspection', async () => {
-  checkCall.mockResolvedValue({ input: host, candidate: check.candidate, eligible: false, reason: 'unverified',
-    detail: 'Original result remains unknown', latestOperation: receipt('unknown') })
-  await render()
-  await render(host, host, false)
-  await render()
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-  await click()
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(inspectCall).toHaveBeenCalledTimes(1)
-  expect(dom.container.textContent).toContain('Upgrade complete')
-})
-it('explains an unavailable runtime update before its closed technical details and offers explicit diagnostics', async () => {
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  checkCall.mockResolvedValue(refusal('远端 Runtime 为协议 21，本机候选为协议 22。原 Agent 已保留。'))
-  const keyed = { ...host, identityFile: _hygiene_fixturePath("private/key"), remoteCommand: 'do-not-copy-private-command' }
-  await render(keyed, keyed)
-  const details = dom.container.querySelector<HTMLDetailsElement>('.host-upgrade__details')!
-  expect(details.open).toBe(false)
-  expect(dom.container.querySelector('.host-upgrade__description')!.textContent).toContain('cannot safely perform')
-  expect(dom.container.querySelector('.host-upgrade__next-step')!.textContent).toContain('whoever maintains this host')
-  expect(dom.container.textContent).toContain('Required Runtime protocol')
-  expect(dom.container.textContent).not.toContain('Runtime update required')
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Recheck availability')
-  expect(clipboard).not.toHaveBeenCalled()
-  await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(clipboard).toHaveBeenCalledTimes(1)
-  const copied = clipboard.mock.calls[0]![0]
-  expect(copied).toContain('Build server (build)')
-  expect(copied).toContain('远端 Runtime 为协议 21')
-  expect(copied).toContain(check.candidate.sourceCommit)
-  expect(copied).toContain(check.candidate.digest)
-  expect(copied).toContain('Required Runtime protocol: 22')
-  expect(copied).not.toContain(keyed.identityFile)
-  expect(copied).not.toContain(keyed.remoteCommand)
-  expect(dom.container.querySelector('.host-upgrade__copy-feedback')!.textContent).toContain('Diagnostics copied')
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(upgradeCall).not.toHaveBeenCalled()
-  expect(inspectCall).not.toHaveBeenCalled()
-})
-it('keeps the original maintenance result on a failed clipboard write and reports success only after a successful retry', async () => {
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard denied')).mockResolvedValue(undefined)
-  checkCall.mockResolvedValue(refusal())
-  await render(); await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(dom.container.querySelector('[role=alert]')!.textContent).toContain('Clipboard denied')
-  expect(dom.container.textContent).toContain('Automatic upgrade unavailable')
-  expect(dom.container.querySelector('.host-upgrade__copy-feedback')!.textContent).not.toContain('Diagnostics copied')
-  await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(clipboard).toHaveBeenCalledTimes(2)
-  expect(dom.container.querySelector('[role=alert]')).toBeNull()
-  expect(dom.container.querySelector('.host-upgrade__copy-feedback')!.textContent).toContain('Diagnostics copied')
-  expect(checkCall).toHaveBeenCalledTimes(1)
-  expect(upgradeCall).not.toHaveBeenCalled()
-})
-it('does not borrow a late copied confirmation after the saved route changed', async () => {
-  let finish!: () => void
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockReturnValue(new Promise<void>(resolve => { finish = resolve }))
-  checkCall.mockImplementation(async input => ({ ...refusal(), input }))
-  await render(); await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(dom.container.querySelector('[data-copy-upgrade-diagnostics]')!.textContent).toContain('Copying')
-  const changed = { ...host, identityFile: _hygiene_fixturePath("different-key") }
-  await render(changed, changed)
-  await act(async () => finish())
-  expect(clipboard).toHaveBeenCalledTimes(1)
-  expect(dom.container.querySelector('.host-upgrade__copy-feedback')).toBeNull()
-  expect(dom.container.querySelector('[data-copy-upgrade-diagnostics]')!.textContent).toContain('Copy diagnostics')
-})
-it('copies an unknown original operation without inspecting or replacing it and offers only original-result checking', async () => {
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', latestOperation: receipt('unknown') })
-  await render(); await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(clipboard.mock.calls[0]![0]).toContain('Operation: original-operation')
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Check original result')
-  expect(dom.container.textContent).not.toContain('whoever maintains this host')
-  expect(inspectCall).not.toHaveBeenCalled()
-  expect(upgradeCall).not.toHaveBeenCalled()
-})
-it('offers a fresh availability check after completion instead of repeating the upgrade', async () => {
-  await render(); await click()
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Recheck availability')
-  await click()
-  expect(checkCall).toHaveBeenCalledTimes(3)
-  expect(upgradeCall).toHaveBeenCalledTimes(1)
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Upgrade and reconnect')
-})
-it('reports an unknown Core source consistently in readable diagnostics and the copied payload', async () => {
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  const blocked = refusal()
-  checkCall.mockResolvedValue({ ...blocked, candidate: { ...blocked.candidate, sourceCommit: null } })
-  await render()
-  expect(dom.container.querySelector('.host-upgrade__facts code')!.textContent).toBe('Unknown')
-  await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(clipboard.mock.calls[0]![0]).toContain('App Core source: Unknown')
-  expect(clipboard.mock.calls[0]![0]).not.toContain('App Core source: null')
-})
-it('does not let an old copied result replace a newer copy still in progress', async () => {
-  const pending: Array<() => void> = []
-  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockImplementation(() => new Promise<void>(resolve => { pending.push(resolve) }))
-  checkCall.mockImplementation(async input => ({ ...refusal(), input }))
-  await render(); await dom.click('[data-copy-upgrade-diagnostics]')
-  const changed = { ...host, identityFile: _hygiene_fixturePath("different-key") }
-  await render(changed, changed); await dom.click('[data-copy-upgrade-diagnostics]')
-  expect(clipboard).toHaveBeenCalledTimes(2)
-  await act(async () => pending[0]!())
-  expect(dom.container.querySelector('[data-copy-upgrade-diagnostics]')!.textContent).toContain('Copying')
-  expect(dom.container.querySelector<HTMLButtonElement>('[data-copy-upgrade-diagnostics]')!.disabled).toBe(true)
-  await act(async () => pending[1]!())
-  expect(dom.container.querySelector('.host-upgrade__copy-feedback')!.textContent).toContain('Diagnostics copied')
-  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
+  expect(dom.container.textContent).toContain('Last read before upgrade')
 })

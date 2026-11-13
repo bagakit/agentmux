@@ -42,9 +42,9 @@ async function compile(hostMutation = false) {
     const file = id.split('?')[0]
     if (file.startsWith(root + '/') && !file.includes('/node_modules/')) buildInputs.set(path.relative(root, file), sha(await fs.readFile(file)))
     if (hostMutation && file === path.join(root, hostOwner)) {
-      const from = "(busy ? pendingPrimary.current : check?.eligible && !needsRecheck) ? 'primary-button' : 'small-button'"
+      const from = "state?.busy === 'upgrading' || ready && !unresolved ? 'primary-button' : 'small-button'"
       assert.ok(source.includes(from), 'Host owner mutation must bind the actual consumer'); changed++
-      return source.replace(from, "check?.eligible && !needsRecheck && !busy ? 'primary-button' : 'small-button'")
+      return source.replace(from, "ready && !busy && !unresolved ? 'primary-button' : 'small-button'")
     }
   } }], css: { postcss: { plugins: [{ postcssPlugin: 'actual-settings-action-css', async Once(node) {
     const files = new Set(); node.walk(child => { if (child.source?.input.file) files.add(child.source.input.file) })
@@ -86,7 +86,7 @@ try {
     assert.equal(count, 1, 'Mutation must alter the original emitted settings owner exactly once')
     try { await run(variant, expectedFailure) } finally { for (const [file, original] of originals) await fs.writeFile(file, original) }
   }
-  await compile(true); await run('upgrade-role', 'Pending precheck keeps primary role')
+  await compile(true); await run('upgrade-role', 'Pending upgrade keeps primary role')
   receipt.passed = true
 } catch (error) { receipt.error = { name: error.name, message: error.message, stack: error.stack } }
 finally {

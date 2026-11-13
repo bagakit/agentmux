@@ -25,18 +25,19 @@ useAppStore.setState({ config, loading: false, sessions: [], sessionSnapshots: {
 const calls: string[] = []
 const copied: string[] = []
 let mode: 'refusal' | 'ready' | 'unknown' = 'refusal'
-const candidate = { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), protocolVersion: 22 }
+const candidate = { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22 }
+const current = { state: 'available' as const, observedAt: 1700000000000, version: '0.1.0', sourceCommit: 'd'.repeat(40), deploymentDigest: 'e'.repeat(64), ownerProtocolVersion: 1, runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100, native: { instanceId: 'native-owner', buildId: 'native-build', protocolVersion: 22 } }
 const expected = { targetDigest: 'c'.repeat(64), runtimeId: 'original-runtime', ownerInstanceId: 'original-owner',
   processId: 100, startTicks: '123', candidateDigest: candidate.digest, nativeInstanceId: 'native-owner', nativeProcessId: 101, nativeStartTicks: '456' }
 let releaseCheck: (() => void) | undefined
 Object.assign(api.hosts, {
   upgradeCheck: async (input: unknown) => {
     calls.push('check'); await new Promise<void>(done => { releaseCheck = done })
-    return mode === 'ready' ? { input, eligible: true, reason: 'ready', candidate, expected, detail: 'The original owner is qualified for a Core deployment.' } : mode === 'unknown' ?
-      { input, eligible: false, reason: 'unverified', candidate, detail: 'The original operation needs reconciliation.', latestOperation: { input, expected,
+    return mode === 'ready' ? { input, current, eligible: true, reason: 'ready', candidate, expected, detail: 'The original owner is qualified for a Core deployment.' } : mode === 'unknown' ?
+      { input, current, eligible: false, reason: 'unverified', candidate, detail: 'The original operation needs reconciliation.', latestOperation: { input, expected,
         operationId: '6f801593-fbda-44a7-9130-43723b979b73', status: 'unknown', stage: 'verifying', updatedAt: 1,
         detail: 'The staged Core was observed, but reconnection to the exact original owner could not be confirmed. No replacement update was started.' } } :
-      { input, eligible: false, reason: 'runtime-update-required', candidate,
+      { input, current: { ...current, native: { ...current.native, protocolVersion: 21 } }, eligible: false, reason: 'runtime-update-required', candidate,
         detail: '远端 Runtime 为协议 21，本机候选为协议 22。当前没有经验证的无损 Runtime 升级入口，暂不能执行此升级；原 Agent 和运行进程已保留。' }
   },
   upgrade: async () => { throw new Error('The controlled preview never upgrades a service') },
