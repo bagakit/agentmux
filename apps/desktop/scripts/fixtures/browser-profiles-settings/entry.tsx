@@ -1,10 +1,11 @@
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
+import { BrowserPane } from '../../../src/renderer/src/components/BrowserPane'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab, workbenchSurfaces } from '../../../src/renderer/src/lib/workbench-tabs'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 
@@ -26,12 +27,36 @@ const tab = (id: string, title: string, profileId: string, deferred: boolean) =>
   return created
 }
 // Agents on globally, so the Profile switch shows its own effect; one Profile keeps Agents out.
-config.browser = { ...config.browser, agentAutomation: true }
+config.browser = { ...config.browser, agentAutomation: true, exitCheckUrl: 'https://exit.example.test/' }
 await api.browser.updateProfile(client.id, { agentAccess: false }, (await api.browser.readProfiles()).revision)
-useAppStore.setState({ config, loading: false, tabs: {
-  a: tab('b-launch', 'Launch board', client.id, false), b: tab('b-notes', 'Release notes', client.id, true), c: tab('b-inbox', 'Inbox', personal.id, false)
-} as never })
+const tabs = [tab('b-launch', 'Launch board', client.id, false), tab('b-notes', 'Release notes', client.id, true), tab('b-inbox', 'Inbox', personal.id, false)]
+useAppStore.setState({ config, loading: false, tabs: Object.fromEntries(tabs.map(item => [item.id, item])) as never })
 mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 const root = createRoot(document.getElementById('root')!)
-flushSync(() => root.render(<DesktopClientUiProvider><SettingsPanel initialSection="browser-profiles" onClose={() => {}} /></DesktopClientUiProvider>))
-Object.assign(window, { profilesVisual: { appearance: (mode: 'dark' | 'light') => updateThemeSelection({ ...config.appearance, appAppearance: mode }), client: client.id } })
+const readProxySignIn = api.browser.readProfileProxySignIn
+const setProxySignIn = api.browser.setProfileProxySignIn
+const settings = () => flushSync(() => root.render(<DesktopClientUiProvider><SettingsPanel initialSection="browser-profiles" onClose={() => {}} /></DesktopClientUiProvider>))
+function BrowserScene() {
+  const original = useAppStore(state => state.tabs['b-launch'])!
+  const browser = workbenchSurfaces(original).find(surface => surface.kind === 'browser')!
+  return <DesktopClientUiProvider><main style={{ width: '100%', height: '100%' }}><BrowserPane tab={browser as never} visible /></main></DesktopClientUiProvider>
+}
+settings()
+Object.assign(window, { profilesVisual: {
+  appearance: (mode: 'dark' | 'light') => updateThemeSelection({ ...config.appearance, appAppearance: mode }),
+  client: client.id,
+  settings,
+  signInReadFailure() {
+    api.browser.readProfileProxySignIn = async () => { throw new Error('The system keychain could not be read.') }
+    settings()
+  },
+  restoreSignInRead() { api.browser.readProfileProxySignIn = readProxySignIn },
+  partialProxyReconnect() {
+    api.browser.setProfileProxySignIn = async (...args) => { await setProxySignIn(...args); return { reconnected: false } }
+  },
+  async browser() {
+    const snapshot = await api.browser.create('b-launch', 'about:blank', workspaceId, client.id)
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: snapshot })
+    flushSync(() => root.render(<BrowserScene />))
+  }
+} })
