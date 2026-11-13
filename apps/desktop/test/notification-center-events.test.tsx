@@ -82,6 +82,8 @@ it('event metadata: repeat receipt time and observations render without restarti
   expect(rows()[0]!.querySelector('time')!.textContent).toMatch(/received/i)
   const detail = rows()[0]!.querySelector('.notification-item__original')!.textContent!
   for (const value of ['desktop-notifications', 'duration-presentation', 'desktop', new Date(firstTime).toISOString(), new Date(lastTime).toISOString()]) expect(detail).toContain(value)
+  // The message leads; source, key, object and receipt times follow it.
+  expect(rows()[0]!.querySelector('.notification-item__provenance')?.nextElementSibling?.textContent).toBe('Copy details')
   expect(unread()).toBe(0)
   expect(useAppStore.getState().notificationEvents[0]).toMatchObject({ firstObservedAt: firstTime, lastObservedAt: lastTime, occurrences: 2 })
 })
