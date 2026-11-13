@@ -1,7 +1,7 @@
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt } from '@agentmux/core'
 import type { SshHostConfig } from '../src/shared/contracts'
 import { HostUpgradePanel } from '../src/renderer/src/components/settings/HostUpgradePanel'
@@ -341,4 +341,83 @@ it.each([['inspect','throw'],['inspect','null'],['reconnect','throw'],['reconnec
   expect(checkCall).toHaveBeenCalledTimes(1)
   expect(upgradeCall).not.toHaveBeenCalled()
   expect(dom.draft()).toBe('Keep my draft')
+})
+
+describe('Native replacement review', () => {
+  const ending = [{ runId: 'run-a', agentSessionId: 'agent-a' }, { runId: 'run-b', agentSessionId: 'agent-b' }, { runId: 'run-c', agentSessionId: null }]
+  const replacementCheck = (runs = ending): RemoteCoreUpgradeCheck & { candidate: NonNullable<RemoteCoreUpgradeCheck['candidate']> } => ({ ...check, reason: 'native-replacement',
+    current: { ...check.current, native: { ...(check.current as Extract<RemoteCoreUpgradeCheck['current'], { state: 'available' }>).native, protocolVersion: 22 } } as RemoteCoreUpgradeCheck['current'],
+    nativeReplacement: { ending: runs, stateBytes: 4096 }, expected: { ...check.expected!, nativeReplacement: { endingRunIds: runs.map(run => run.runId) } } })
+
+  it('names the reason, what ends and what is kept, and confirms with a danger button that counts the processes', async () => {
+    checkCall.mockResolvedValue(replacementCheck())
+    await render()
+    expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Ready for review · Native Runtime restart')
+    expect(dom.container.textContent).toContain('This upgrade also restarts the Native Runtime. Review what ends before confirming.')
+    await review()
+    const block = dom.container.querySelector('[data-upgrade-native-replacement]')!
+    expect(block.textContent).toContain('The Native Runtime on Build server speaks protocol 22 and this app needs protocol 25, so it restarts with the new version.')
+    expect(block.querySelector('[data-upgrade-ending]')!.textContent).toBe('2 in Agent Sessions, 1 in a terminal')
+    expect(block.textContent).toContain('Sessions with their history and output, and the Runtime identity')
+    expect(block.textContent).toContain('A copy of the Native state is saved on Build server before the restart.')
+    const confirmButton = block.querySelector<HTMLButtonElement>('[data-upgrade-confirm]')!
+    expect(confirmButton.className).toBe('danger-button')
+    expect(confirmButton.textContent).toBe('Upgrade and end 3 processes')
+    // Cancel comes first and holds focus; the confirm button is not the default action.
+    expect(block.querySelector('.host-upgrade__actions')!.firstElementChild).toBe(block.querySelector('[data-upgrade-cancel]'))
+    expect(document.activeElement).toBe(block.querySelector('[data-upgrade-cancel]'))
+    expect(upgradeCall).not.toHaveBeenCalled()
+  })
+
+  it('Escape and Cancel leave the reviewed replacement without upgrading', async () => {
+    checkCall.mockResolvedValue(replacementCheck())
+    await render(); await review()
+    await act(async () => { dom.container.querySelector('[data-upgrade-native-replacement]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(dom.container.querySelector('[data-upgrade-native-replacement]')).toBeNull()
+    await review(); await dom.click('[data-upgrade-cancel]')
+    expect(dom.container.querySelector('[data-upgrade-native-replacement]')).toBeNull()
+    expect(upgradeCall).not.toHaveBeenCalled()
+  })
+
+  it('says nothing ends when no process runs and confirms with the primary button', async () => {
+    checkCall.mockResolvedValue(replacementCheck([]))
+    await render(); await review()
+    const block = dom.container.querySelector('[data-upgrade-native-replacement]')!
+    expect(block.querySelector('[data-upgrade-ending]')!.textContent).toBe('No processes are running on Build server, so nothing ends. Sessions, their history and the Runtime identity are kept.')
+    expect(block.querySelector('.host-upgrade__observation')).toBeNull()
+    const confirmButton = block.querySelector<HTMLButtonElement>('[data-upgrade-confirm]')!
+    expect(confirmButton.className).toBe('primary-button')
+    expect(confirmButton.textContent).toBe('Upgrade Core and Native Runtime')
+  })
+
+  it('confirms exactly the reviewed admission, shows the replacement in progress and how to continue ended Sessions', async () => {
+    const reviewed = replacementCheck(), pending = deferred<RemoteCoreUpgradeReceipt>()
+    checkCall.mockResolvedValue(reviewed)
+    upgradeCall.mockImplementation(async () => await pending.promise)
+    await render(); await review()
+    checkCall.mockResolvedValue(replacementCheck([ending[0]!]))
+    await confirm()
+    expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, reviewed.expected, expect.any(String))
+    expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Upgrading Core and Native Runtime')
+    expect(dom.container.textContent).toContain('Saving a copy of the Native state, restarting the Native Runtime and starting the updated Core.')
+    expect(dom.container.textContent).toContain('Original upgrade is in progress')
+    expect(dom.container.textContent).not.toContain('Check this original operation before starting another upgrade.')
+    const operationId = upgradeCall.mock.calls[0]![2] as string
+    await act(async () => pending.resolve({ ...receipt('completed'), operationId, expected: reviewed.expected!, candidate: reviewed.candidate,
+      connectionAdoption: { state: 'connected', readAt: 1700000003000 },
+      nativeReplacement: { stateCopy: fixturePath('srv/original/state/core-releases/copy.native-state'), endedRunIds: ['run-a', 'run-b', 'run-c'], survivingProcessIds: [] } }))
+    expect(dom.container.querySelector('[data-upgrade-ended-runs]')!.textContent).toBe(
+      'The Native Runtime was replaced and 3 running processes ended. Open an ended Session and choose Restore original to continue it; a terminal starts a new shell when you open it.')
+    expect(dom.container.querySelector('.host-upgrade__details')!.textContent).toContain('Native state copy')
+  })
+
+  it('shows the replacement stage of an unknown original operation and only offers to check it', async () => {
+    const reviewed = replacementCheck()
+    checkCall.mockResolvedValue({ ...reviewed, eligible: false, reason: 'unverified', expected: undefined, nativeReplacement: undefined,
+      latestOperation: { ...receipt('unknown'), expected: reviewed.expected!, stage: 'replacing-native' } })
+    await render()
+    expect(dom.container.querySelector('[data-upgrade-stage]')!.textContent).toBe('Replacing the Native Runtime')
+    expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check original result')
+    expect(dom.container.querySelector('[data-upgrade-native-replacement]')).toBeNull()
+  })
 })
