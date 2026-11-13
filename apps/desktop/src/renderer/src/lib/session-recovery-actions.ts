@@ -200,17 +200,28 @@ export async function startNewConversation(source: RecoverySource, executorId: s
   if (original) return original
   assertSource(source, current)
   const state = useAppStore.getState()
-  if (!state.config?.executors[executorId]) throw new Error('The original Agent configuration is no longer saved. Choose another Agent with Take over; this Session is kept.')
-  const scratch = state.config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  const session = state.sessions.find(item => item.id === source.agentSessionId)
+  if (session?.kind !== 'agent' || session.executorId !== executorId) throw new Error('The original execution configuration is unconfirmed. Re-read this Session; its work and draft are kept.')
+  const scratch = state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? [])
   const location = catalog.locations.find(item => item.tabId === source.tabId && item.regionId === source.regionId &&
     item.displayWorkspaceId === source.displayWorkspaceId && (!source.groupId || item.groupId === source.groupId))
   if (!location?.zoneId) throw new Error('The original Project placement is unconfirmed. Its Session and work remain; re-read the same Project before starting a new conversation.')
+  const zones = catalog.zones.filter(zone => zone.hostId === session.control.hostId && zone.directoryPath === session.workspacePath)
+  const zone = zones.find(item => item.zoneId === location.zoneId) ?? (zones.length === 1 ? zones[0] : undefined)
+  if (!zone) throw new Error('The original execution location is unconfirmed. Re-read its Project; the original Session and draft are kept.')
+  const ownsExecution = () => {
+    const latest = useAppStore.getState().sessions.find(item => item.id === source.agentSessionId)
+    return current() && ownsRecoverySource(source) && latest?.kind === 'agent' && latest.executorId === executorId &&
+      latest.control.hostId === session.control.hostId && latest.workspacePath === session.workspacePath
+  }
+  // The source Session supplies execution; its current display only places the new Tab.
+  // The original Host's launch owner validates its Executor, including remote-only templates.
   const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: true,
-    destination: { ...(location.spaceId ? { spaceId: location.spaceId } : {}), zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId,
+    destination: { zoneId: zone.zoneId, displayWorkspaceId: location.displayWorkspaceId,
       groupId: location.groupId, newTab: true },
     content: { kind: 'new-agent', executorId }
-  }, undefined, { besideTabId: source.tabId, authorize: () => current() && ownsRecoverySource(source), recovery: {
+  }, undefined, { besideTabId: source.tabId, authorize: ownsExecution, recovery: {
     hostId: source.hostId, agentSessionId: source.agentSessionId, tabId: source.tabId, regionId: source.regionId, mode: 'start-new', executorId
   } })
   if (result.operation !== 'agent.open') throw new Error('Creation returned another operation; its result is unknown. Check the original request.')
