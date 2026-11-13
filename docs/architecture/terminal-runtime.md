@@ -165,6 +165,10 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | [terminal-theme.ts](../../apps/desktop/src/renderer/src/lib/terminal-theme.ts)、shared palette |
 | App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | 同一 theme 文件的边界说明 |
 
+Core 的普通 Tool Hook 由 [`AgentMuxClient`](../../packages/core/src/client.ts) 在原 Registry 更新队列中先计算准确 current→next，再判断单条历史贡献是否可与回执合并。只有没有 outcome、活动边界、待 flush、交互或 continuity 变更的稳态贡献才调用 [`AgentSessionStore.compareAndSwapMetadataWithTimeline`](../../packages/core/src/agent-session-store.ts)。Registry 复用原 CAS、身份与 durability owner，Session 与历史提交结果分别返回；首次 handover 和复杂贡献仍沿原路径。
+
+FileStore 在原 timeline 顺序、writer 和 SQLite 事务中保存 metadata，用内部 SAVEPOINT 隔离可选历史。只有原 writer 确认 COMMIT 从未尝试、整事务已回滚且 handle／lease 已释放时，才可按原 expected/next 做 metadata-only CAS；未知 COMMIT 和提交后 sync 失败不会重写。Memory Store 同步 stage 受影响的 metadata、输入记录及一条历史版本后再修改原 maps。必需 metadata 错误保真实类型与原因，历史错误仅作辅助明细；准备阶段独有的错误不会触发本次回执的未确认保存状态。保存承诺以[本地持久化合同](../design/behavior/persistence.md#保存合同)为准。
+
 Desktop 的 `RuntimeController.snapshot` 分别读取 Runtime membership 与 Session Timeline。
 单个 Timeline 无法读取时，已确认的同 Host 成员与 Run 事实仍发布；失败只附在原
 `SessionSnapshot.timelineObservation`，携带该 Session 的 Run 与具体原因。Renderer 成员对齐
