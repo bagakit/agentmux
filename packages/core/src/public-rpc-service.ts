@@ -1435,7 +1435,9 @@ export class AgentMuxRpcService {
       }
       const input = parseAgentStopIdentity(params)
       // A Stop's Session is either still active or already retired; both are this owner's history sources.
-      const owners = (await Promise.all((await this.clients()).map(async entry => ({ ...entry, sources: await entry.client.sessionHistorySources() }))))
+      // An exact point read per Host: the owner probe never reads unrelated Sessions or retirement history.
+      const owners = (await Promise.all((await this.clients()).map(async entry => ({ ...entry,
+        sources: await entry.client.sessionHistorySources({ agentSessionId: input.agentSessionId, ...(context.signal ? { signal: context.signal } : {}) }) }))))
         .filter(entry => entry.sources.some(source => source.agentSessionId === input.agentSessionId && source.hostId === (entry.client.forwardRpc ? 'local' : entry.hostId)))
       if (owners.length !== 1) throw new AgentMuxError('The exact Session does not have one confirmed Host owner.', owners.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
       const client = owners[0]!.client
