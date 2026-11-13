@@ -30,7 +30,7 @@ import { MoteDialogueViewProvider } from '../src/renderer/src/lib/mote-dialogue-
 import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
-import { moteMainBindingInput, pendingMoteMainCreation } from '../../../packages/core/src/spatial-agent-open-contract'
+import { moteMainBindingDefaults, moteMainBindingInput, pendingMoteMainCreation } from '../../../packages/core/src/spatial-agent-open-contract'
 import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
@@ -41,6 +41,8 @@ import { parseMoteDialogueParams, parseMoteDialogueResult } from '../../../packa
 
 
 vi.mock('electron', () => ({ app: { isPackaged: false }, nativeImage: {} }))
+// The Host and its test Runtime must consume one actual Core module identity.
+vi.mock('@agentmux/core', () => import('../../../packages/core/src/index'))
 const initialize = useAppStore.getState().initialize
 const cleanups: Array<() => Promise<unknown> | unknown> = []
 beforeEach(async () => {
@@ -50,7 +52,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(initialMain = false) {
-  const h = await creationInputOwner(); cleanups.push(h.close)
+  const h = await creationInputOwner(true); cleanups.push(h.close)
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-main-actions-'))); cleanups.push(() => rm(root, { recursive: true, force: true }))
   const workspace = { id: '__scratch__', hostId: 'local', path: join(root, 'scratch'), name: 'Original Scratch', kind: 'directory' as const }
   await mkdir(workspace.path)
@@ -58,7 +60,7 @@ async function fixture(initialMain = false) {
   const path = join(topic.physicalDirectoryPath!, 'MOTE.md'), spaceId = directoryIdentity('local', topic.identityDirectoryPath!), zoneId = homeZoneId(spaceId)
   const old = { hostId: 'local', sessionId: 'source', displayWorkspaceId: '__scratch__', groupId: 'original-group', tabId: 'old-tab', regionId: 'old-region' }
   const notes = '\n# Original cooperation notes\nKeep all my commitments.\n'
-  await writeFile(path, serializeMoteQuickMode('', { executorId: 'saved', ...(initialMain ? { conversation: old } : {}) }) + notes)
+  await writeFile(path, serializeMoteQuickMode('', { executorId: 'saved', conversationRevision: 'initial-mote-role', ...(initialMain ? { conversation: old } : {}) }) + notes)
   const graph = { spaces: [{ spaceId, kind: 'mote' as const, topicId: topic.id, name: 'Original Mote', hostId: 'local', directoryPath: topic.physicalDirectoryPath!, projectId: null }],
     zones: [{ zoneId, kind: 'home' as const, workspaceId: workspace.id, hostId: 'local', directoryPath: topic.physicalDirectoryPath!, branch: null }], bindings: [{ spaceId, zoneId }],
     tabs: [{ tabId: 'old-tab', workspaceId: workspace.id, zoneId, name: null, regionIds: ['old-region'] }],
@@ -70,7 +72,7 @@ async function fixture(initialMain = false) {
   await writeFile(configurationPath, JSON.stringify({ workspaces: [workspace], executors: { saved: { label: 'Saved default', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } } }))
   const content = createHostContent({ configurationPath, spatial }), main = createHostMoteMainReader({ configurationPath, spatial, files: content.files! })
   const dialogue = createHostMoteDialogue({ main, spatial, store: new MoteDialogueStore(join(root, 'dialogue.sqlite')), clientForHost: () => h.client })
-  const quick = new HostMoteQuickPreferences({ main, files: content.files!, recordMainSource: dialogue.recordMainSource,
+  const quick = new HostMoteQuickPreferences({ main, files: content.files!, prepareMainSource: dialogue.prepareMainSource, recordMainSource: dialogue.recordMainSource,
     catalog: async () => spatialCatalog((await spatial.read())!.graph), executors: async () => [{ id: 'saved', name: 'Saved default', providerId: 'codex' }] })
   const creator = createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => ({ client: h.client }) as never })
   const serviceOptions = { coreClients: h.coreClients, spatialState: spatial, spatialAgentControl: creator, moteDialogue: dialogue, moteQuickPreferences: quick }
@@ -99,29 +101,34 @@ async function fixture(initialMain = false) {
     const configure = vi.fn(), created = vi.fn(), openCreated = vi.fn()
     const node = () => <MoteDialogueViewProvider scope={scope} active={props.active ?? true}><MoteMainActions scope={scope} active={props.active ?? true} entryToken={props.entryToken} onConfigure={configure} onCreated={created} onOpenCreated={openCreated} /></MoteDialogueViewProvider>
     await act(async () => { root.render(node()) }); cleanups.push(async () => { await act(async () => root.unmount()); element.remove() })
-    return { element, configure, created, openCreated, remount: async () => { await act(async () => { root.render(null) }); await act(async () => { root.render(node()) }) } }
+    const text = () => element.textContent + [...element.querySelectorAll('[aria-controls]')].map(node => document.getElementById(node.getAttribute('aria-controls')!)?.textContent ?? '').join('')
+    return { element, text, configure, created, openCreated, remount: async () => { await act(async () => { root.render(null) }); await act(async () => { root.render(node()) }) } }
   }
   return { h, root, service, configurationPath, serviceOptions, spatial, scope, target, path, old, notes, call, read, save, link, open, quick, dialogue, render }
 }
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 15000 }) }
 async function click(element: HTMLElement, label: string) {
-  const button = [...element.querySelectorAll('button')].find(item => item.textContent === label); expect(button, label).toBeDefined()
+  const roots = [element, ...[...element.querySelectorAll('[aria-controls]')].map(node => document.getElementById(node.getAttribute('aria-controls')!)).filter((node): node is HTMLElement => node !== null)]
+  const button = roots.flatMap(root => [...root.querySelectorAll('button')]).find(item => item.textContent === label); expect(button, label).toBeDefined()
+  await wait(() => expect(button!.disabled).toBe(false))
   await act(async () => button!.click())
 }
 it('actual Main action component reads without creating on hover/background and requires the MOTE configured default', async () => {
   const f = await fixture(), view = await f.render()
-  await wait(() => expect(view.element.textContent).toContain('Create Main Agent'))
+  await wait(() => expect(view.text()).toContain('开始对话'))
   expect(f.open).not.toHaveBeenCalled(); expect(f.h.started).toHaveLength(0)
   await writeFile(f.path, serializeMoteQuickMode('', {}))
   const missing = await readMoteMainAction(f.scope)
-  expect(missing.issue).toContain('Choose a default Executor'); expect(missing.executor).toBeNull()
-  await expect(createMoteMain(f.scope, missing)).rejects.toThrow('Choose a default Executor')
+  expect(missing.issue).toContain('先在设置中选择此 Mote 的默认执行器'); expect(missing.executor).toBeNull()
+  await expect(createMoteMain(f.scope, missing)).rejects.toThrow('先在设置中选择此 Mote 的默认执行器')
   expect(f.h.started).toHaveLength(0)
-  await click(view.element, 'Configure default Executor'); expect(view.configure).toHaveBeenCalledOnce()
+  await click(view.element, '设置默认执行器'); expect(view.configure).toHaveBeenCalledOnce()
 })
 it('explicit unbound Discussion creates through original Core and binds exact original receipts, preserving old members and unsent work', async () => {
   const f = await fixture(), before = (await f.spatial.read())!, view = await f.render({ entryToken: 'human-open-1' })
-  await wait(() => expect(view.element.textContent).toContain('binding confirmed'))
+  expect(f.open).not.toHaveBeenCalled(); await click(view.element, '开始对话')
+  await wait(() => expect(view.created).toHaveBeenCalledOnce()); await click(view.element, '主 Agent')
+  await wait(() => expect(view.text()).toContain('绑定已确认'))
   const reading = await readMoteMainAction(f.scope), reference = reading.dialogue.main.current!
   expect(reference).toMatchObject({ hostId: 'local' }); expect(reference.sessionId).not.toBe('source')
   expect(f.open).toHaveBeenCalledTimes(1); expect(f.open.mock.calls[0]![0].content).toEqual({ kind: 'new-agent', executorId: 'saved' })
@@ -133,7 +140,8 @@ it('explicit unbound Discussion creates through original Core and binds exact or
   expect(await readFile(f.path, 'utf8')).toContain(f.notes)
   expect(view.created).toHaveBeenCalledWith(reference); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
   expect(Object.values(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.moteMainCreationReferences)).toEqual([{ target: f.target, operationId: f.open.mock.calls[0]![0].operationId }])
-  await view.remount(); await wait(() => expect(view.element.textContent).toContain('binding confirmed'))
+  await view.remount(); await wait(() => expect(view.element.querySelector('.mote-main-actions__trigger')).not.toBeNull()); await click(view.element, '主 Agent')
+  await wait(() => expect(view.text()).toContain('绑定已确认'))
   expect(f.open).toHaveBeenCalledTimes(1); expect(f.h.started).toHaveLength(1)
 })
 it('A to B rotation keeps the exact old Main source and Core Run, without moving later user selection', async () => {
@@ -152,7 +160,8 @@ it('a lost original creation reply survives remount and only inspection, before 
   const f = await fixture(), nativeOpen = f.open.getMockImplementation()!
   f.open.mockImplementationOnce(async input => { await nativeOpen(input); throw new Error('Original transport ACK lost') })
   const view = await f.render({ entryToken: 'open-lost-reply' })
-  await wait(() => expect(view.element.textContent).toContain('Original creation unconfirmed'))
+  await wait(() => expect(view.text()).toContain('开始对话')); await click(view.element, '开始对话')
+  await wait(() => expect(view.text()).toContain('Original creation unconfirmed'))
   expect(f.h.started).toHaveLength(1); expect(f.save).not.toHaveBeenCalled()
   const reference = Object.values(useAppStore.getState().moteMainCreationReferences)[0]!
   const encoded = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!)
@@ -161,10 +170,11 @@ it('a lost original creation reply survives remount and only inspection, before 
   await useAppStore.persist.rehydrate()
   expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]).toEqual(reference)
   await view.remount()
-  await wait(() => expect(view.element.textContent).toContain('Creation: confirmed'))
+  await wait(() => expect(view.text()).toContain('创建：已确认'))
   expect(f.open).toHaveBeenCalledTimes(1); expect(f.h.started).toHaveLength(1); expect(f.save).not.toHaveBeenCalled()
-  await click(view.element, 'Continue original setup')
-  await wait(() => expect(view.element.textContent).toContain('binding confirmed'))
+  await click(view.element, '继续原开始请求')
+  await wait(() => expect(view.created).toHaveBeenCalledOnce()); await click(view.element, '主 Agent')
+  await wait(() => expect(view.text()).toContain('绑定已确认'))
   expect(f.open).toHaveBeenCalledTimes(1); expect(f.h.started).toHaveLength(1); expect(f.save).toHaveBeenCalledTimes(1)
 })
 it('unknown old-source ACK is inspected on its original operation, without relinking or rebinding from a read', async () => {
@@ -205,15 +215,26 @@ it('a later role generation wins CAS; the newly created B and earlier source A r
 })
 it('a saved role remains confirmed when the original post-save source journal is unavailable', async () => {
   const f = await fixture(true)
-  vi.spyOn(f.dialogue, 'recordMainSource').mockRejectedValue(new Error('Source journal unavailable after File save'))
+  const recordSource = f.dialogue.recordMainSource
+  const recording = vi.spyOn(f.dialogue, 'recordMainSource').mockRejectedValue(new Error('Source journal unavailable after File save'))
+  const link = f.link.getMockImplementation()!
+  f.link.mockImplementation(input => input.operationId.endsWith(':bind') ? Promise.reject(new Error('Source journal unavailable after File save')) : link(input))
   // The real writer is configured with this port; only its source append is unavailable.
   const ports = (f.quick as unknown as { ports: { recordMainSource: typeof f.dialogue.recordMainSource } }).ports
   ports.recordMainSource = f.dialogue.recordMainSource
   const value = await createMoteMain(f.scope, await readMoteMainAction(f.scope))
-  expect(value.binding).toBe('confirmed'); expect(value.issue).toContain('Settings were saved')
+  expect(value.binding).toBe('confirmed'); expect(value.issue).toContain('Source journal unavailable after File save')
   expect(value.source).toBe('confirmed')
   const source = await f.call('space.mote.dialogue.read', { target: f.target, operationId: value.operationId + ':source' })
   expect(source.links).toMatchObject([{ kind: 'main', reference: f.old }]); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+  recording.mockRestore(); ports.recordMainSource = recordSource; f.link.mockImplementation(link)
+  const recovered = await continueMoteMainAction(f.scope, value.operationId)
+  expect(recovered).toMatchObject({ binding: 'confirmed', reference: value.reference })
+  expect(recovered.issue).toBe(recovered.record?.moteMainFollowUps?.bindingReceipt?.message)
+  expect((await f.call('space.mote.dialogue.read', { target: f.target, operationId: value.operationId + ':bind' })).links).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'main', reference: value.reference })
+  ]))
+  expect(f.h.started).toHaveLength(1); expect(f.save).toHaveBeenCalledOnce()
 })
 it('two original clients share one atomic creation admission and each follow-up is claimed only once', async () => {
   const f = await fixture(), reading = await readMoteMainAction(f.scope)
@@ -282,7 +303,9 @@ it('another client with no pointer inherits the unbound original creation across
   configuration.executors.replacement = { ...configuration.executors.saved, label: 'New configured default' }
   await writeFile(f.configurationPath, JSON.stringify(configuration))
   ;(f.quick as any).ports.executors = async () => [{ id: 'saved', name: 'Saved default', providerId: 'codex' }, { id: 'replacement', name: 'New configured default', providerId: 'codex' }]
-  await writeFile(f.path, serializeMoteQuickMode(await readFile(f.path, 'utf8'), { executorId: 'replacement' }) + '\nUnrelated notes changed by the person.\n')
+  const current = parseMoteQuickMode(await readFile(f.path, 'utf8'))
+  if (current.status !== 'valid') throw new Error('The original role generation must be readable')
+  await writeFile(f.path, serializeMoteQuickMode(await readFile(f.path, 'utf8'), { ...current.defaults, executorId: 'replacement' }) + '\nUnrelated notes changed by the person.\n')
   const second = await readMoteMainAction(f.scope)
   expect(second.operationId).not.toBe(initial.operationId); expect(second.pendingOperationId).toBe(initial.operationId)
   expect(second.executor?.id).toBe('replacement')
@@ -292,29 +315,31 @@ it('another client with no pointer inherits the unbound original creation across
     moteMain: { target: f.target, baseline: moteMainBaseline(baseline), expectedRoleRevision: second.dialogue.main.roleRevision, sourceOperationId: second.operationId + ':source', bindOperationId: second.operationId + ':bind' } }))
     .rejects.toMatchObject({ code: 'MOTE_MAIN_CREATION_PENDING', detail: JSON.stringify({ operationId: initial.operationId, target: f.target }) })
   const view = await f.render({ entryToken: 'second-client-explicit-open' })
-  await wait(() => expect(view.element.textContent).toContain(initial.operationId))
+  await wait(() => expect(view.text()).toContain(initial.operationId))
   expect(f.h.started).toHaveLength(1); expect(f.open).toHaveBeenCalledTimes(1); expect(f.save).not.toHaveBeenCalled()
   const oldAgent = spatialAgentOpenRecord((await f.spatial.read())!.graph, initial.operationId)!.agentSessionId
-  await click(view.element, 'Continue original setup')
-  await wait(() => expect(view.element.textContent).toContain('Main binding: refused'))
+  await click(view.element, '继续原开始请求')
+  await wait(() => expect(view.text()).toContain('主角色绑定：未接受'))
   expect((await f.h.client.inspectAgentCreation(oldAgent)).kind).toBe('agent')
   expect(view.openCreated).not.toHaveBeenCalled()
-  await click(view.element, 'Open created Agent')
+  await click(view.element, '打开已创建的 Agent')
   expect(view.openCreated).toHaveBeenCalledWith(expect.objectContaining({hostId:'local',sessionId:oldAgent}))
   expect(f.h.started).toHaveLength(1)
-  await click(view.element, 'Create Main Agent')
+  await click(view.element, '开始对话')
   await wait(() => expect(view.created).toHaveBeenCalledOnce())
   expect(f.h.started).toHaveLength(2)
   expect(view.created.mock.calls[0]![0].sessionId).not.toBe(oldAgent)
   expect(Object.values(originalRef)[0]!.operationId).toBe(initial.operationId)
   expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 })
-it('the same mounted component can rotate immediately after its first automatic Main without a manual reread', async () => {
+it('the same mounted component can rotate after its first explicit Main without a manual reread', async () => {
   const f = await fixture(), view = await f.render({ entryToken: 'same-mount-open' })
+  await wait(() => expect(view.text()).toContain('开始对话')); await click(view.element, '开始对话')
   await wait(() => expect(view.created).toHaveBeenCalledOnce())
   const first = view.created.mock.calls[0]![0], run = (await f.h.client.inspectAgentCreation(first.sessionId)).run
-  await wait(() => expect([...view.element.querySelectorAll('button')].find(item => item.textContent === 'New Main Agent')?.disabled).toBe(false))
-  await click(view.element, 'New Main Agent')
+  await click(view.element, '主 Agent')
+  await wait(() => expect(document.querySelector<HTMLButtonElement>('.mote-main-actions__menu button')?.disabled).toBe(false))
+  await click(view.element, '开始新一轮对话')
   await wait(() => expect(view.created).toHaveBeenCalledTimes(2))
   const next = view.created.mock.calls[1]![0]
   expect(next.sessionId).not.toBe(first.sessionId); expect(f.open).toHaveBeenCalledTimes(2); expect(f.h.started).toHaveLength(2)
@@ -346,6 +371,7 @@ it('the original Desktop spatial and Session subscriptions expose the created B 
   const dispose = await initialize(); cleanups.push(dispose!)
   await wait(() => expect(snapshotCompleted).toBeGreaterThan(0))
   const view = await f.render({ entryToken: 'live-original-desktop-owner' })
+  await wait(() => expect(view.text()).toContain('开始对话')); await click(view.element, '开始对话')
   await wait(() => expect(view.created).toHaveBeenCalledOnce())
   const reference = view.created.mock.calls[0]![0]
   await wait(() => {
@@ -359,17 +385,17 @@ it('the original Desktop spatial and Session subscriptions expose the created B 
   expect(subscribed).toHaveBeenCalledOnce(); expect(delivered.length).toBeGreaterThan(0)
   expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 })
-it('later human reading or input cancels only the late automatic Main navigation, while original creation and binding finish', async () => {
+it('later human reading or input keeps the explicit Main landing while original creation and binding finish', async () => {
   const f = await fixture(), start = f.h.inner.kernel.start.getMockImplementation()!
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   f.h.inner.kernel.start.mockImplementationOnce(async (input: any) => { await gate; return start(input) })
   const view = await f.render({ entryToken: 'late-human-open' })
+  await wait(() => expect(view.text()).toContain('开始对话')); await click(view.element, '开始对话')
   await wait(() => expect(f.h.inner.kernel.start).toHaveBeenCalledOnce())
   await act(async () => { document.dispatchEvent(new Event('wheel', { bubbles: true })); release() })
-  await wait(() => expect(view.element.textContent).toContain('binding confirmed'))
-  await wait(() => expect(view.element.querySelector('[aria-label="Main Agent actions"]')?.getAttribute('aria-busy')).toBe('false'))
-  expect(view.created).not.toHaveBeenCalled()
+  await wait(() => expect(view.created).toHaveBeenCalledOnce())
+  await wait(() => expect(view.element.querySelector('[aria-label="主 Agent 操作"]')?.getAttribute('aria-busy')).toBe('false'))
   expect((await readMoteMainAction(f.scope)).dialogue.main.current?.sessionId).toBeTruthy()
   expect(f.h.started).toHaveLength(1); expect(f.save).toHaveBeenCalledTimes(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 })
@@ -419,7 +445,8 @@ it('independent actual CLI preferences save settles only its complete original b
   const saved=await endpoint.cli(['space','mote','preferences','save','--input','-'],binding)
   expect(saved.status).toBe('saved')
   const graph=(await f.spatial.read())!.graph,record=spatialAgentOpenRecord(graph,admission.record.requestId)!
-  expect(record.moteMainFollowUps?.bindingReceipt).toMatchObject({operationId:binding.operationId,status:'saved',source:{defaults:binding.values}})
+  expect(saved.source.defaults).toMatchObject(moteMainBindingDefaults(record))
+  expect(record.moteMainFollowUps?.bindingReceipt).toMatchObject({operationId:binding.operationId,status:'saved',source:{defaults:moteMainBindingDefaults(record)}})
   expect(pendingMoteMainCreation(graph,f.target)).toBeNull()
   expect(await endpoint.hosted.forwardRpc!('space.mote.dialogue.setup.inspect',admission.input)).toMatchObject({binding:'confirmed'})
   expect(f.h.started).toHaveLength(1);expect(f.save).toHaveBeenCalledOnce()
@@ -459,8 +486,9 @@ it('public setup routes the original admission Host independently from resource 
   expect(forwarded).toEqual([{method:'space.mote.dialogue.setup.advance',params:{...input,creation:{...input.creation,hostId:'local'}}}])
   expect(value.record?.moteMain?.target).toEqual(admission.input.target);expect(value.reference?.hostId).toBe('local');expect(decoy).not.toHaveBeenCalled();expect(f.h.started).toHaveLength(1)
 })
-it('a native File result remains confirmed when admission retention fails; inspect is pure and explicit original reconciliation releases it',async()=>{
+it.each([false,true])('a native File result remains confirmed when admission retention fails; inspect is pure and explicit original reconciliation releases it (repair source=%s)',async repairSource=>{
   const f=await fixture(), admission=await originalAdmission(f), retain=vi.spyOn(f.spatial,'recordMoteMainBindingResult').mockRejectedValue(Error('Original metadata disk unavailable'))
+  if(repairSource) (f.quick as unknown as {ports:{recordMainSource:typeof f.dialogue.recordMainSource}}).ports.recordMainSource=async()=>{throw Error('Original source journal temporarily unavailable')}
   const value=await f.call('space.mote.dialogue.setup.advance',admission.input)
   expect(value).toMatchObject({binding:'confirmed',bindingReceipt:{status:'saved'},record:{moteMainFollowUps:{bindStarted:true}}})
   expect(value.issue).toContain('retention is unconfirmed');expect(value.record.moteMainFollowUps.bindingReceipt).toBeUndefined()
