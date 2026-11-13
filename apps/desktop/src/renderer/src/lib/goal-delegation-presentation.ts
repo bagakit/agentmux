@@ -55,10 +55,15 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
 
 /** Pending owner responsibilities precede general Goal proposal text. */
 export function goalDelegationNextStep(goal: Parameters<typeof goalDelegationRows>[0]): string | null {
+  return goalDelegationNextRow(goal)?.next ?? null
+}
+
+/** The same priority as the visible next step, keeping the row state for reading projections. */
+export function goalDelegationNextRow(goal: Parameters<typeof goalDelegationRows>[0]): GoalDelegationRow | null {
   const rows = goalDelegationRows(goal)
   for (const state of ['report', 'question', 'exited', 'collected', 'unknown', 'working'] as const) {
     const row = rows.find(item => item.state === state)
-    if (row) return row.next
+    if (row) return row
   }
   return null
 }

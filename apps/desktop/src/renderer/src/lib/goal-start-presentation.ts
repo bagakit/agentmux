@@ -28,10 +28,15 @@ export function goalStartRows(goal: Pick<DemandRecord, 'dispatches' | 'startObse
 }
 
 export function goalStartNextStep(goal: Parameters<typeof goalStartRows>[0]): string | null {
+  return goalStartNextRow(goal)?.next ?? null
+}
+
+/** The same priority as the visible next step, keeping the row state for reading projections. */
+export function goalStartNextRow(goal: Parameters<typeof goalStartRows>[0]): GoalStartRow | null {
   const rows = goalStartRows(goal)
   for (const state of ['review', 'continuation', 'unknown', 'working'] as const) {
     const row = rows.find(item => item.state === state)
-    if (row) return row.next
+    if (row) return row
   }
   return null
 }
