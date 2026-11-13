@@ -1,3 +1,4 @@
+import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote-dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
@@ -406,6 +407,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentProgressMethod(method)) return parseAgentProgressResult(method, value, parseAgentProgressParams(method, params)) as unknown as Record<string, unknown>
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
+    if (isImageMethod(method)) return parseImageResult(method, value, parseImageParams(method, params)) as unknown as Record<string, unknown>
     if (isNativeDesktopMethod(method)) return parseNativeDesktopResult(method, value, parseNativeDesktopParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,

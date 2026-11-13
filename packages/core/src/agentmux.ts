@@ -49,6 +49,10 @@ let outputAbandoned = false
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
+  if (method.startsWith('image.')) {
+    const operation = body.recordedOperation as { state: string } | null
+    if (body.state === 'unknown' || operation && operation.state !== 'completed') return true
+  }
   if (method.startsWith('native.')) {
     if (body.state === 'unknown' || body.error !== undefined) return true
     const native = body.result as Record<string, unknown> | undefined

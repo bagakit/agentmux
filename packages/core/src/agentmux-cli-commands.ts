@@ -1,3 +1,4 @@
+import { AGENTMUX_IMAGE_CLI_COMMANDS } from './image-cli.js'
 import { parseMoteMainCreationIntent } from './spatial-agent-open-contract.js'
 import { parseMoteDialogueParams } from './mote-dialogue.js'
 import { parseCreationContinueParams } from './agent-creation-continue.js'
@@ -219,6 +220,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     } })),
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   ...AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS,
+  ...AGENTMUX_IMAGE_CLI_COMMANDS,
   empty('runtime.owner.identity', 'Read the selected semantic Runtime identity and current owner instance through the original typed owner. This does not confirm native receiver health or grant management authority.'),
   command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
     { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),

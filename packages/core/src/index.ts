@@ -213,3 +213,6 @@ export { AgentExecutionCoordinator, AgentExecutionBindingService } from './agent
 export type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'
 export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input.js'
 export type { AgentInputMoteBinding, AgentInputMoteResolver, MoteInputInspection, MoteInputObservation, MoteInputSubmissionReference } from './mote-input.js'
+
+export * from './public-rpc-image.js'
+export { parsePngImage, pngImageDimensions } from './png-image.js'

@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { pngImageDimensions as pngPayload, parsePngImage as png } from './png-image.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import type { NativeDesktopPayloadMap } from './native-desktop-types.js'
 export type * from './native-desktop-types.js'
@@ -176,22 +177,6 @@ function boundedArray(value: unknown, code: string): unknown[] {
 }
 function matchesTarget(actual: Record<string, unknown>, expected: NativeDesktopAppTarget, code: string): void {
   if (actual.pid !== expected.pid || actual.processStartedAt !== expected.processStartedAt) invalid('Native result belongs to another OS process.', code)
-}
-function pngPayload(data: unknown, code: string): { width: number; height: number } {
-  text(data, code)
-  if (data.length > 24 * 1024 * 1024 || data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) invalid('Native PNG exceeds its image contract.', code)
-  const bytes = Buffer.from(data, 'base64')
-  if (bytes.length < 33 || bytes.length > 18 * 1024 * 1024 || bytes.toString('base64') !== data ||
-      bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || bytes.readUInt32BE(8) !== 13 || bytes.toString('ascii', 12, 16) !== 'IHDR') invalid('Native payload is not a canonical bounded PNG.', code)
-  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20)
-  if (!width || !height || width > 16384 || height > 16384 || width * height > 32 * 1024 * 1024) invalid('Native PNG dimensions exceed its image contract.', code)
-  return { width, height }
-}
-function png(value: unknown, code: string): void {
-  const p = rpcRecord(value, ['data', 'format', 'width', 'height', 'scale'], code)
-  const size = pngPayload(p.data, code)
-  integer(p.width, code); integer(p.height, code); number(p.scale, code, true)
-  if (p.format !== 'png' || size.width !== p.width || size.height !== p.height) invalid('Native PNG bytes do not match their dimensions.', code)
 }
 
 export function parseNativeDesktopResult<M extends NativeDesktopMethod>(method: M, value: unknown, input: NativeDesktopParamsMap[M]): NativeDesktopReply {

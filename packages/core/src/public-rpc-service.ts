@@ -1,3 +1,4 @@
+import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
@@ -215,6 +216,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   goalControl?(request: AgentMuxControlRequest, context?: AgentMuxNameContext,
     originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
+  images?: AgentMuxRpcImageOwner
   spatialState?: AgentMuxSpatialStateStore
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
@@ -411,7 +413,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -710,6 +712,23 @@ export class AgentMuxRpcService {
       else throw new AgentMuxError('The original Host mobile asset owner is unavailable.', 'CONTROL_UNAVAILABLE')
       if (context.principal?.kind === 'device') result = { ...result, clients: result.clients.filter(item => item.producer.devicePrincipalId === context.principal!.id) }
       return parseMobileAssetsResult(method, result, typed) as AgentMuxRpcResult<M>
+    }
+    if (isImageMethod(method)) {
+      const caller = await this.authenticated(context)
+      const input = parseImageParams(method, params)
+      const actor: ImageActor | null = caller ? { kind: 'agent', id: caller.agentSessionId }
+        : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal as ImageActor : null
+      if (!actor || !actor.id.trim()) throw new AgentMuxError('Image operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      if (caller && caller.hostId !== input.hostId) throw new AgentMuxError('Image operations require the authenticated Agent’s exact Host.', 'CONTROL_PERMISSION_DENIED')
+      const ownerContext: ImageCallContext = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (caller) await this.authenticated(context)
+      } }
+      await ownerContext.assertCurrent!()
+      if (!this.ports.images && !this.ports.forwardControl) throw new AgentMuxError('The original Host image presentation owner is unavailable. Existing images, Agents and page capture remain available.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.images ? await this.ports.images.call(method, input, ownerContext)
+        : await this.ports.forwardControl!<ImageMethod>(method, input, context)
+      return parseImageResult(method, result, input, actor) as AgentMuxRpcResult<M>
     }
     if (isNativeDesktopMethod(method)) {
       const caller = await this.authenticated(context)
