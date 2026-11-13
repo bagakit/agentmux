@@ -1,10 +1,11 @@
 const { fixtureFileUrl: _reshape_fixtureFileUrl } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureFileUrl: _hygiene_fixtureFileUrl, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
+import { createBrowserProfileProxyAuth } from '../src/main/browser-profile-proxy-auth.js'
 
 function png(width = 2, height = 3): Buffer {
   const value = Buffer.alloc(33)
@@ -2937,6 +2938,90 @@ describe('Browser Profile reference on targets', () => {
     expect(rows.unlabelled).not.toHaveProperty('profile')
     expect(rows.unlabelled).toMatchObject({ mode: 'normal', status: 'ready' })
     manager.dispose()
+  })
+
+  it('projects the original proxy issue to idle Browser snapshots and actual public targets without changing page health or history', async () => {
+    const f = fakeWindow()
+    let label = 'Northwind client'
+    const manager = labelledManager(f.window, { ...labelled, listProfiles: () => [{ id: 'default', label: 'Personal' }, { id: 'work', label }] })
+    const root = mkdtempSync(join(tmpdir(), 'amx-proxy-notice-')); privateLedgerRoots.push(root)
+    const path = join(root, 'proxy-sign-ins.json'), sentinel = 'proxy-notice-sentinel'
+    let workSession: unknown
+    let proxy: { host: string; port: number } | null = { host: 'proxy.example.test', port: 3128 }
+    const auth = createBrowserProfileProxyAuth({
+      path,
+      crypto: { available: () => true, encrypt: text => Buffer.from(text.split('').reverse().join('')), decrypt: bytes => bytes.toString().split('').reverse().join('') },
+      profileOfSession: target => target === workSession ? 'work' : null,
+      proxyOf: id => id === 'work' ? proxy : null,
+      report: id => manager.refreshProfileProxySignIn(id)
+    })
+    manager.profileProxySignInIssue = id => auth.issue(id)
+    await manager.create('work-one', 'https://example.invalid/first', 'workspace-a', 'work')
+    const first = f.children.at(-1)!
+    workSession = first.webContents.session
+    await manager.create('work-two', 'https://example.invalid/second', 'workspace-a', 'work')
+    await manager.create('personal', 'https://example.invalid/kept', 'workspace-a')
+    const before = manager.target('work-one')!
+    const entry = (manager as any).entries.get('work-one')
+    entry.activity.warning = 'The original service warning is kept.'
+    entry.agentWarning = 'The original association warning is kept.'
+    const challenge = { isProxy: true, host: 'proxy.example.test', port: 3128 }, callback = vi.fn()
+    const updates = () => f.sent.filter((event): event is Extract<BrowserEvent, { type: 'updated' }> => event.type === 'updated')
+    const latest = () => updates().findLast(event => event.browser.id === 'work-one')!.browser
+    const socketPath = join(root, 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], async execute(request) {
+      if (request.operation !== 'browser.targets') throw new Error('Unexpected Browser request')
+      return { operation: request.operation, targets: manager.targets(), coverage: 'complete' }
+    } })
+    await server.start()
+    try {
+      f.sent.length = 0
+      writeFileSync(path, `{ "password": "${sentinel}"`)
+      expect(await auth.answer(first.webContents as never, challenge, callback)).toBe(false)
+      expect(updates().map(event => event.browser.id)).toEqual(['work-one', 'work-two'])
+      expect(latest().activity).toMatchObject({ operation: null, control: 'human' })
+      expect(latest().activity!.warning).toContain('could not be read')
+      expect(latest().activity!.warning).toContain('original service warning')
+      expect(latest().activity!.warning).toContain('original association warning')
+      expect(latest().activity!.warning).toContain('Settings → Browser Profiles → Northwind client → Proxy sign-in')
+      expect(latest().activity!.warning).not.toContain(sentinel)
+      expect(latest().error).toBeNull()
+      expect(entry.activity).toEqual({ operation: null, control: 'human', warning: 'The original service warning is kept.' })
+      expect(manager.target('personal')!.warning).toBeUndefined()
+
+      writeFileSync(path, JSON.stringify({ version: 1, profiles: {} }))
+      await auth.clear('work')
+      expect(latest().activity!.warning).not.toContain('Proxy sign-in')
+      expect(await auth.answer(first.webContents as never, challenge, callback)).toBe(false)
+      expect(latest().activity!.warning).toContain('asks for a sign-in')
+      await auth.set('work', { username: 'alice', password: sentinel })
+      expect(latest().activity!.warning).not.toContain('Proxy sign-in')
+      await auth.answer(first.webContents as never, challenge, callback)
+      await auth.answer(first.webContents as never, challenge, callback)
+      expect(await auth.answer(first.webContents as never, challenge, callback)).toBe(false)
+      expect(latest().activity!.warning).toContain('proxy refused')
+
+      const result = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'targets'], objectCliEnvironment(root))
+      expect(result.code, result.stderr).toBe(0)
+      const target = JSON.parse(result.stdout).result.targets.find((row: { id: string }) => row.id === before.id)
+      expect(target.warning).toContain('proxy refused')
+      expect(target.warning).toContain('original association warning')
+      expect(target).toMatchObject({ id: before.id, navigationId: before.navigationId, status: before.status, control: before.control, capabilities: before.capabilities })
+      expect(first.webContents.isDestroyed()).toBe(false)
+
+      label = 'Renamed client'
+      await auth.forgetExcept(new Set(['work']))
+      expect(latest().activity!.warning).toContain('Profile “Renamed client”')
+      expect(manager.target('work-one')!.warning).toContain('Profile “Renamed client”')
+      proxy = null
+      f.sent.length = 0
+      await auth.forgetExcept(new Set())
+      expect(updates().map(event => event.browser.id)).toEqual(['work-one', 'work-two'])
+      expect(latest().activity!.warning).not.toContain('Proxy sign-in')
+      expect(latest().activity!.warning).toContain('original service warning')
+      expect(manager.target('work-one')!.warning).toBe('The original association warning is kept.')
+      expect(entry.activity.operation).toBeNull()
+    } finally { await server.stop(); manager.dispose() }
   })
 })
 

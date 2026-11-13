@@ -16,7 +16,9 @@ async function setup(options: { available?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-proxy-auth-')); roots.push(root)
   const path = join(root, 'browser-profile-proxy-auth.json')
   const work = { id: 'work-session' }, other = { id: 'other-session' }
+  const proxies = new Map([['p-work', { host: 'gw.corp.test', port: 3128 }]])
   const reports: Array<[string, string | null]> = []
+  const report = vi.fn((profileId: string, reason: string | null) => { reports.push([profileId, reason]) })
   const decrypt = vi.fn((data: Buffer) => Buffer.from(data.toString('utf8').split('').reverse().join(''), 'utf8').toString('utf8').replace(/^enc:/, ''))
   // A reversible stand-in for the keychain; the real cipher is Electron safeStorage.
   const encrypt = vi.fn((text: string) => Buffer.from(('enc:' + text).split('').reverse().join(''), 'utf8'))
@@ -28,11 +30,11 @@ async function setup(options: { available?: boolean } = {}) {
     },
     path,
     profileOfSession: session => session === work ? 'p-work' : null,
-    proxyOf: profileId => profileId === 'p-work' ? { host: 'gw.corp.test', port: 3128 } : null,
-    report: (profileId, reason) => { reports.push([profileId, reason]) }
+    proxyOf: profileId => proxies.get(profileId) ?? null,
+    report
   })
   const contents = (session: unknown) => ({ session, isDestroyed: () => false }) as never
-  return { auth, path, work, other, reports, encrypt, decrypt, contents }
+  return { auth, path, work, other, reports, report, proxies, encrypt, decrypt, contents }
 }
 
 describe('Profile proxy sign-in', () => {
@@ -169,5 +171,87 @@ describe('Profile proxy sign-in', () => {
     expect(await auth.username('p-kept')).toBe('kept')
     await auth.set('p-work', { username: 'alice', password: SENTINEL })
     expect(await auth.username('p-work')).toBe('alice')
+  })
+
+  it('keeps the refusal as an owner fact until an explicit new save or clear, not a handed-off password', async () => {
+    const { auth, work, reports, contents } = await setup()
+    const challenge = { isProxy: true, host: 'gw.corp.test', port: 3128 }, callback = vi.fn()
+    await auth.set('p-work', { username: 'alice', password: SENTINEL })
+    await auth.answer(contents(work), challenge, callback)
+    await auth.answer(contents(work), challenge, callback)
+    expect(await auth.answer(contents(work), challenge, callback)).toBe(false)
+    const refused = auth.issue('p-work')
+    expect(refused).toContain('proxy refused')
+    expect(await auth.answer(contents(work), challenge, callback, true)).toBe(true)
+    expect(auth.issue('p-work'), 'passing credentials to Chromium is not a successful authentication receipt').toBe(refused)
+    expect(auth.issue('p-lab')).toBeNull()
+    await auth.set('p-work', { username: 'alice', password: 'new-password' })
+    expect(auth.issue('p-work')).toBeNull()
+    expect(reports.at(-1)).toEqual(['p-work', null])
+    await auth.clear('p-work')
+    await auth.answer(contents(work), challenge, callback)
+    expect(auth.issue('p-work')).toContain('asks for a sign-in')
+    await auth.clear('p-work')
+    expect(auth.issue('p-work')).toBeNull()
+  })
+
+  it('never attributes an old challenge to a replacement route, or revives an old issue after a route change', async () => {
+    const { auth, work, proxies, reports, contents } = await setup()
+    const challenge = { isProxy: true, host: 'gw.corp.test', port: 3128 }
+    const pending = auth.answer(contents(work), challenge, vi.fn())
+    proxies.set('p-work', { host: 'other.corp.test', port: 8443 })
+    await pending
+    expect(auth.issue('p-work')).toBeNull()
+    expect(reports).toEqual([])
+    await auth.answer(contents(work), { isProxy: true, host: 'other.corp.test', port: 8443 }, vi.fn())
+    expect(auth.issue('p-work')).toContain('asks for a sign-in')
+    proxies.set('p-work', { host: 'gw.corp.test', port: 3128 })
+    expect(auth.issue('p-work')).toBeNull()
+    await auth.forgetExcept(new Set(['p-work']))
+    proxies.set('p-work', { host: 'other.corp.test', port: 8443 })
+    expect(auth.issue('p-work')).toBeNull()
+    await auth.answer(contents(work), { isProxy: true, host: 'other.corp.test', port: 8443 }, vi.fn())
+    proxies.delete('p-work')
+    await auth.forgetExcept(new Set())
+    expect(auth.issue('p-work')).toBeNull()
+    expect(reports.at(-1)).toEqual(['p-work', null])
+  })
+
+  it('retains only a non-secret issue for unreadable storage or a keychain refusal', async () => {
+    const unreadable = await setup()
+    await writeFile(unreadable.path, `{ "password": "${SENTINEL}"`)
+    await expect(unreadable.auth.username('p-work')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
+    expect(unreadable.auth.issue('p-work')).toContain('could not be read')
+    expect(unreadable.auth.issue('p-work')).not.toContain(SENTINEL)
+    await writeFile(unreadable.path, JSON.stringify({ version: 1, profiles: {} }))
+    expect(await unreadable.auth.username('p-work')).toBeNull()
+    expect(unreadable.auth.issue('p-work'), 'a successful read resolves only the original storage failure').toBeNull()
+
+    const locked = await setup()
+    await locked.auth.set('p-work', { username: 'alice', password: SENTINEL })
+    locked.decrypt.mockImplementationOnce(() => { throw new Error(SENTINEL) })
+    const callback = vi.fn()
+    expect(await locked.auth.answer(locked.contents(locked.work), { isProxy: true, host: 'gw.corp.test', port: 3128 }, callback)).toBe(false)
+    expect(callback).not.toHaveBeenCalled()
+    expect(locked.auth.issue('p-work')).toContain('keychain')
+    expect(locked.auth.issue('p-work')).not.toContain(SENTINEL)
+    expect(await locked.auth.username('p-work')).toBe('alice')
+    expect(locked.auth.issue('p-work'), 'reading a user name does not prove that its password works').toContain('keychain')
+  })
+
+  it('keeps the owner readable and the confirmed save successful when an auxiliary display notification fails', async () => {
+    const { auth, path, work, report, contents } = await setup()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    report.mockImplementationOnce(() => { throw new Error(SENTINEL) })
+    await expect(auth.answer(contents(work), { isProxy: true, host: 'gw.corp.test', port: 3128 }, vi.fn())).resolves.toBe(false)
+    expect(auth.issue('p-work')).toContain('asks for a sign-in')
+    report.mockImplementationOnce(() => { throw new Error(SENTINEL) })
+    await expect(auth.set('p-work', { username: 'alice', password: SENTINEL })).resolves.toBeUndefined()
+    expect(auth.issue('p-work')).toBeNull()
+    expect(await auth.username('p-work')).toBe('alice')
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles['p-work'].username).toBe('alice')
+    expect(warning).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledWith('The proxy sign-in notice delivery is unconfirmed. Read the original Profile owner for its current issue; confirmed credential saves remain valid.')
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(SENTINEL)
   })
 })
