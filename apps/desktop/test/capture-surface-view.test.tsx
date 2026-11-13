@@ -19,6 +19,7 @@ const excludedImage: BrowserPng = { ...image, dataUrl: 'data:image/png;base64,iV
 const remembered = { x: 600, y: 200, width: 400, height: 200 }
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let paintId = 0, paints = new Map<number, FrameRequestCallback>()
+const windowOutline = vi.fn()
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -26,7 +27,8 @@ beforeEach(() => {
   paintId = 0; paints = new Map()
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { paints.set(++paintId, callback); return paintId })
   vi.stubGlobal('cancelAnimationFrame', (id: number) => { paints.delete(id) })
-  const context = new Proxy({ measureText: () => ({ width: 20 }) }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {}, set: () => true })
+  windowOutline.mockClear()
+  const context = new Proxy({ measureText: () => ({ width: 20 }), strokeRect: windowOutline, getImageData: () => ({ data: new Uint8ClampedArray([255, 0, 0, 255]) }) }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {}, set: () => true })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
   compose.mockResolvedValue(image); raster.renderCommittedLayer.mockClear(); raster.renderScreenshotScene.mockClear()
   node = document.createElement('div'); document.body.append(node); root = createClientUiRoot(node)
@@ -37,7 +39,7 @@ async function paint() {
   await act(async () => { const pending = [...paints.values()]; paints.clear(); for (const callback of pending) callback(16) })
 }
 
-async function mount(owned: boolean, background: CaptureBackground = 'included', loaded = true, notice?: string, issue = false) {
+async function mount(owned: boolean, background: CaptureBackground = 'included', loaded = true, notice?: string, issue = false, initialCrop: typeof remembered | null = remembered) {
   const stopAutomaticLoad = (event: Event) => event.stopImmediatePropagation()
   if (!loaded) node.addEventListener('load', stopAutomaticLoad, true)
   let listener: ((event: CaptureSurfaceEvent) => void) | undefined
@@ -49,7 +51,7 @@ async function mount(owned: boolean, background: CaptureBackground = 'included',
     attachToDraft: false, expandable: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, background, backgrounds: {
       included: { image: initialImage, windows: [{ x: 0, y: 0, width: 800, height: 500 }], capturedAt: 1, engine: 'included-engine' },
       excluded: { image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' }
-    }, initialCrop: remembered, ...(notice ? { notice } : {}) }
+    }, ...(initialCrop ? { initialCrop } : {}), ...(notice ? { notice } : {}) }
   if (issue) input.backgrounds[background] = { capturedAt: 1, issue: 'The requested background was not captured.' }
   await act(async () => root.render(<CaptureSurfaceView key={Math.random()} input={input} api={api} />))
   await act(async () => { await Promise.resolve() })
@@ -128,7 +130,7 @@ it('an unavailable requested background keeps its issue until the person explici
   expect(node.textContent).toContain('The requested background was not captured.')
   const button = [...node.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Use background including AgentMux')!
   await act(async () => button.click())
-  expect(api.switchBackground).toHaveBeenCalledExactlyOnceWith('original-request')
+  expect(api.switchBackground).toHaveBeenCalledExactlyOnceWith('original-request', 'included')
   expect(node.querySelector('img'), 'the explicit request still waits for its original Main receipt').toBeNull()
   await send({ kind: 'background', background: 'included' })
   expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
@@ -152,4 +154,92 @@ it('a background change keeps the same editor, moved selection and undo while re
   await key('z', { metaKey: true })
   await key('Enter')
   expect(api.finish, 'undo still reaches the selection change made before the background switch').toHaveBeenLastCalledWith('original-request', 'excluded', image, remembered)
+})
+
+
+it('plain Tab predecodes one explicit target, ignores rapid repeats and follows the Main-announced background', async () => {
+  const { api, key, send, input } = await mount(true)
+  let release!: () => void
+  const decode = vi.spyOn(HTMLImageElement.prototype, 'decode').mockImplementation(() => new Promise<void>(resolve => { release = resolve }))
+  await act(async () => {
+    const canvas = node.querySelector('canvas')!
+    for (let index = 0; index < 2; index++) canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+  })
+  expect(decode, 'rapid Tab cannot start duplicate target decodes').toHaveBeenCalledOnce()
+  expect(api.switchBackground, 'the current healthy frame remains until the target is decoded').not.toHaveBeenCalled()
+  expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
+  await act(async () => release())
+  expect(api.switchBackground).toHaveBeenCalledExactlyOnceWith('original-request', 'excluded')
+  decode.mockResolvedValue()
+  await send({ kind: 'background', background: 'excluded' })
+  await key('Tab')
+  expect(api.switchBackground).toHaveBeenLastCalledWith('original-request', 'included')
+})
+
+it('modified Tab and text-editing Tab keep their original focus navigation', async () => {
+  const { api, key } = await mount(true)
+  for (const modifiers of [{ shiftKey: true }, { metaKey: true }, { ctrlKey: true }, { altKey: true }]) await key('Tab', modifiers)
+  for (const html of ['<input />', '<textarea></textarea>', '<div contenteditable="true"><span>editing</span></div>']) {
+    const box = document.createElement('div'); box.innerHTML = html; node.append(box)
+    const target = box.querySelector('span') ?? box.firstElementChild!
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    await act(async () => target.dispatchEvent(tab))
+    expect(tab.defaultPrevented, 'editing Tab is not owned by the screenshot host').toBe(false)
+    box.remove()
+  }
+  expect(api.switchBackground).not.toHaveBeenCalled()
+})
+
+it('a missing target and a locked peer keep their current frame when Tab is pressed', async () => {
+  const { api, key, input, send } = await mount(true)
+  input.backgrounds.excluded = { capturedAt: 2, issue: 'The hidden background is unavailable.' }
+  await key('Tab')
+  expect(api.switchBackground, 'an unavailable target is never recaptured or substituted').not.toHaveBeenCalled()
+  expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
+  expect(node.textContent).toContain('The hidden background is unavailable.')
+  input.backgrounds.excluded = { image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' }
+  await send({ kind: 'locked' })
+  await key('Tab')
+  expect(api.switchBackground, 'a peer cannot change the owning display background').not.toHaveBeenCalled()
+})
+
+it('a target decode failure keeps the current pixels, selection and available Cancel', async () => {
+  const { api, key, input } = await mount(true)
+  vi.spyOn(HTMLImageElement.prototype, 'decode').mockRejectedValue(new Error('Target PNG decode failed'))
+  await key('Tab')
+  expect(api.switchBackground).not.toHaveBeenCalled()
+  expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
+  expect(node.textContent).toContain('Target PNG decode failed')
+  await key('Enter')
+  expect(api.finish).toHaveBeenCalledWith('original-request', 'included', image, remembered)
+  await key('Escape')
+  expect(api.cancel).toHaveBeenCalledExactlyOnceWith('original-request')
+})
+
+
+it('Tab cannot change the frame while the original PNG output is being composed', async () => {
+  const { api, key } = await mount(true)
+  let release!: (image: BrowserPng) => void
+  compose.mockImplementationOnce(() => new Promise<BrowserPng>(resolve => { release = resolve }))
+  await key('Enter')
+  expect(compose).toHaveBeenCalledOnce()
+  await key('Tab')
+  expect(api.switchBackground, 'the in-flight output retains its original frame').not.toHaveBeenCalled()
+  await act(async () => release(image))
+  expect(api.finish).toHaveBeenCalledExactlyOnceWith('original-request', 'included', image, remembered)
+})
+
+
+it('switching sources drops the old window highlight and sampled RGB without another pointer move', async () => {
+  const { send } = await mount(true, 'included', true, undefined, false, null)
+  await act(async () => node.querySelector('canvas')!.dispatchEvent(new MouseEvent('pointermove', { clientX: 100, clientY: 100, bubbles: true })))
+  await paint()
+  expect(node.querySelector('.image-annotation-editor__loupe')?.textContent).toContain('#FF0000')
+  expect(windowOutline, 'the included window is lit under the stationary pointer').toHaveBeenCalled()
+  windowOutline.mockClear()
+  await send({ kind: 'background', background: 'excluded' })
+  await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
+  await paint()
+  expect(node.querySelector('.image-annotation-editor__loupe'), 'old source RGB is not presented as a new source sample').toBeNull()
+  expect(windowOutline, 'the old window geometry is not painted over the new frozen source').not.toHaveBeenCalled()
 })

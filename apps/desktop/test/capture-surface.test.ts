@@ -496,7 +496,7 @@ it('a failed requested exposure preserves the original mode and offers the other
   const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load')
   expect(input.background, 'a failed source never silently replaces the requested exposure').toBe('included')
   expect(await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'select', { requestId: input.requestId })).toBe(false)
-  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'switch-background', { requestId: input.requestId })
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'switch-background', { requestId: input.requestId, background: 'excluded' })
   expect(window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'background', background: 'excluded' })
   expect(input.backgrounds.included).toMatchObject({ issue: 'first exposure denied' })
   expect(input.backgrounds.excluded.image).toBeDefined()
@@ -536,7 +536,58 @@ it('a locked issue display cannot replace the selected display background', asyn
   ports.native.mockReturnValue({ captureDisplays: vi.fn().mockResolvedValueOnce(captured).mockResolvedValueOnce(frames()) })
   const { overlays } = await opened(session(), 34)
   await overlays[0]!.call('select')
-  await overlays[1]!.call('switch-background')
+  await overlays[1]!.call('switch-background', { background: 'excluded' })
   expect(overlays[1]!.window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'notice' }))
   expect(overlays[0]!.window.webContents.send).not.toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'background' }))
+})
+
+it('the selected display switches only to the named frozen background without recapturing or changing opacity', async () => {
+  const first = frames(), second = frames(); second.capturedAt += 50
+  second.displays = second.displays.map(frame => ({ ...frame, engine: 'excluded-engine', windows: [] }))
+  const host = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => .65, setOpacity: vi.fn() }
+  electron.workbench = [host]
+  const captureDisplays = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+  ports.native.mockReturnValue({ captureDisplays })
+  const { overlays, session: value } = await opened(session(), 34)
+  await overlays[0]!.call('select')
+  await overlays[0]!.call('switch-background', { background: 'included' })
+  expect(overlays[0]!.window.webContents.send).toHaveBeenLastCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'background', background: 'included' })
+  await overlays[0]!.call('switch-background', { background: 'excluded' })
+  for (const overlay of overlays) expect(overlay.window.webContents.send).toHaveBeenLastCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'background', background: 'excluded' })
+  expect(captureDisplays, 'switching consumes the two original exposures').toHaveBeenCalledTimes(2)
+  expect(host.setOpacity, 'switching never changes the window stack or transparency').toHaveBeenCalledExactlyOnceWith(0)
+  await expect(overlays[0]!.call('finish', { background: 'excluded', image: result, selection })).resolves.toEqual({ status: 'completed' })
+  expect(value.complete).toHaveBeenCalledWith(result, expect.objectContaining({ capturedAt: second.capturedAt }), 'excluded-engine')
+})
+
+it('a missing target background keeps the selected display finishable on its original source', async () => {
+  const first = frames(), second = frames()
+  second.displays[0] = { ...second.displays[0]!, issue: 'excluded display unavailable', png: undefined, engine: undefined } as never
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const captureDisplays = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+  ports.native.mockReturnValue({ captureDisplays })
+  const { overlays } = await opened(session(), 34)
+  await overlays[0]!.call('select')
+  await overlays[0]!.call('switch-background', { background: 'excluded' })
+  expect(overlays[0]!.window.webContents.send).toHaveBeenLastCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'notice', message: 'excluded display unavailable' })
+  expect(captureDisplays).toHaveBeenCalledTimes(2)
+  await expect(overlays[0]!.call('finish', { image: result, selection })).resolves.toEqual({ status: 'completed' })
+})
+
+it('an in-flight primary output keeps its original background until completion', async () => {
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const { overlays } = await opened(session({ complete: async () => held }))
+  await overlays[0]!.call('select')
+  const output = overlays[0]!.call('finish', { image: result, selection })
+  await overlays[0]!.call('switch-background', { background: 'excluded' })
+  expect(overlays[0]!.window.webContents.send).toHaveBeenLastCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'notice', message: expect.stringContaining('output is still in progress') }))
+  release(); await expect(output).resolves.toEqual({ status: 'completed' })
+})
+
+it('an invalid background choice refuses only that request and keeps the current capture healthy', async () => {
+  const { overlays } = await opened()
+  await expect(overlays[0]!.call('switch-background', { background: 'unknown' })).rejects.toThrow('exact frozen screenshot background')
+  await overlays[0]!.call('select')
+  await expect(overlays[0]!.call('finish', { image: result, selection })).resolves.toEqual({ status: 'completed' })
 })

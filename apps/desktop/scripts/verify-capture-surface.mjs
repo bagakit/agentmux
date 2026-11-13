@@ -48,9 +48,9 @@ try {
   receipt.native = JSON.parse(await readFile(join(out, 'native.json'), 'utf8'))
   assert.equal(result.code, 0, JSON.stringify(receipt.native.failure) + result.log)
   assert.equal(receipt.native.passed, true)
-  assert.equal(receipt.native.cases.length, 8, 'all initial backgrounds, compositions, cancellation and expansion must actually execute')
-  assert.equal(receipt.native.screenshots.length, 5)
-  assert.equal(receipt.native.grabs.length, 8)
+  assert.equal(receipt.native.cases.length, 11, 'all initial backgrounds, compositions, Tab/geometry/history, cancellation and expansion must actually execute')
+  assert.equal(receipt.native.screenshots.length, 8)
+  assert.equal(receipt.native.grabs.length, 10)
   for (const [file, hash] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
   receipt.passed = true
 } finally {

@@ -10,7 +10,7 @@ import type { BrowserPng } from '../../../src/shared/contracts'
 const out = process.env.AGENTMUX_CAPTURE_SURFACE_OUT!
 app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
-const receipt: any = { passed: false, boundary: 'Production CaptureSurface, isolated preload, Renderer, shared editor and PNG composition in real Electron. Only native screen pixels/window geometry and clipboard/pin sinks are controlled; no OS screen recording, user clipboard, physical multi-monitor/TCC, packaging or installation proof.', cases: [], screenshots: [], timings: [], grabs: [] }
+const receipt: any = { passed: false, boundary: 'Production CaptureSurface, isolated preload, Renderer, shared editor and PNG composition in real Electron. Only native screen pixels/window geometry and clipboard/pin sinks are controlled; no OS screen recording, user clipboard, physical multi-monitor/TCC, packaging or installation proof.', cases: [], screenshots: [], timings: [], grabs: [], opacityChanges: [] }
 const displays = [{ id: 1, bounds: { x: 0, y: 0, width: 960, height: 640 }, scaleFactor: 1, displayFrequency: 60 },
   { id: 7, bounds: { x: 960, y: 0, width: 800, height: 600 }, scaleFactor: 1, displayFrequency: 60 }]
 let surface: CaptureSurface, editor: SystemScreenshotEditor, host: BrowserWindow, current: BrowserWindow
@@ -53,6 +53,18 @@ async function drag(x: number, y: number, width: number, height: number) {
   await mouse('mouseMoved', a.x, a.y); await mouse('mousePressed', a.x, a.y, 1)
   for (let step = 1; step <= 8; step++) await mouse('mouseMoved', a.x + (b.x-a.x)*step/8, a.y + (b.y-a.y)*step/8, 1)
   await mouse('mouseReleased', b.x, b.y); await settle()
+}
+async function clickPoint(x: number, y: number) {
+  const point = await sourcePoint(x, y)
+  await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1); await mouse('mouseReleased', point.x, point.y); await settle()
+}
+async function switchedTo(background: CaptureBackground) {
+  await key('Tab', 'Tab', 9)
+  await waitFor('the other already frozen source is displayed', async () => await evaluate(`document.querySelector('img')?.src===${JSON.stringify(sources.get(background + ':1')!.dataUrl)}`))
+  await settle()
+}
+async function sceneMarkPixels(): Promise<number> {
+  return await evaluate(`(()=>{const c=document.querySelector('canvas'),p=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let count=0;for(let i=0;i<p.length;i+=4)if(p[i]>180&&p[i+1]<130&&p[i+2]<130&&p[i+3]>245)count++;return count})()`)
 }
 async function shot(name: string) {
   process.stdout.write('capture-proof: '+name+'\n')
@@ -116,6 +128,8 @@ async function run() {
   await sourceImages()
   host = new BrowserWindow({ width: 640, height: 460, show: true, webPreferences: { sandbox: true, contextIsolation: true } })
   await host.loadURL('data:text/html,<body style="font:18px -apple-system;padding:32px;background:%231b2630;color:%23e4edf3"><h2>AgentMux test workbench</h2><p>Original window opacity: 65%</p>')
+  const setHostOpacity = host.setOpacity.bind(host)
+  host.setOpacity = value => { receipt.opacityChanges.push({ value, observedMs: performance.now() }); setHostOpacity(value) }
   host.setOpacity(0.65)
   surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
     const background: CaptureBackground = includeHostWindows ? 'included' : 'excluded', capturedAt = Date.now()
@@ -134,6 +148,26 @@ async function run() {
   for (const background of ['included', 'excluded'] as const) {
     const { outcome, overlays } = await open(background)
     await shot('opened-' + background)
+    if (background === 'included') {
+      const grabs = receipt.grabs.length, opacities = receipt.opacityChanges.length
+      const point = await sourcePoint(500, 350)
+      await mouse('mouseMoved', point.x, point.y)
+      await clickPoint(500, 350)
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Selection size"]')?.textContent`), '350 × 230 px', 'the included window geometry supplies the clicked selection')
+      await key('z', 'KeyZ', 90, 4); await settle()
+      assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')`), null, 'undo restores the empty selection before testing the other geometry')
+      await mouse('mouseMoved', point.x + 1, point.y); await shot('window-highlight-included')
+      await switchedTo('excluded')
+      // No mouse movement after Tab: stale highlighted geometry or RGB cannot be cleared by a new hover event.
+      assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__loupe')`), null, 'Tab clears the old source sample while the pointer stays still')
+      await shot('window-highlight-excluded')
+      await clickPoint(500, 350)
+      assert.equal(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')`), null, 'the excluded background has no AgentMux window to select at that point')
+      await switchedTo('included')
+      assert.equal(receipt.grabs.length, grabs, 'geometry switches only consume the already frozen frames')
+      assert.equal(receipt.opacityChanges.length, opacities, 'geometry switches never move or refade the host')
+      receipt.cases.push({ label: 'tab-switches-accurate-window-geometry-without-recapture', grabs, opacityChanges: opacities })
+    }
     if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
     assert.ok(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`), 'actual drag created a crop: '+JSON.stringify(await evaluate('window.captureEvents')))
     await click('Rectangle'); await drag(180, 300, 230, 40)
@@ -154,6 +188,36 @@ async function run() {
     await writeFile(join(out, 'composed-' + background + '.png'), bitmap.toPNG())
     receipt.cases.push({ label: 'composed-' + background, size: bitmap.getSize(), markedPixels: marked, source: delivered.source, engine: delivered.engine })
   }
+  const switching = await open('included')
+  await evaluate(`window.originalCaptureCanvas=document.querySelector('canvas')`)
+  const grabCount = receipt.grabs.length, opacityCount = receipt.opacityChanges.length
+  await click('Rectangle'); await drag(180, 300, 230, 40)
+  const marksBefore = await sceneMarkPixels()
+  assert.ok(marksBefore > 900, 'the actual mark exists before Tab')
+  await switchedTo('excluded')
+  assert.equal(await evaluate(`window.originalCaptureCanvas===document.querySelector('canvas')`), true, 'Tab preserves the same editor canvas and document')
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Selection size"]')?.textContent`), '690 × 380 px', 'Tab preserves the original selection')
+  const marksAfter = await sceneMarkPixels()
+  assert.ok(marksAfter >= marksBefore * .95, 'Tab preserves the existing annotation pixels')
+  await key('z', 'KeyZ', 90, 4); await settle()
+  const undone = await sceneMarkPixels()
+  assert.ok(undone < marksAfter / 4, 'Undo still removes the mark created before Tab')
+  await key('Z', 'KeyZ', 90, 4 | 8); await settle()
+  const redone = await sceneMarkPixels()
+  assert.ok(redone >= marksAfter * .95, 'Redo restores the same mark after Tab')
+  assert.equal(receipt.grabs.length, grabCount, 'Tab/Undo/Redo never ask Native for another frame')
+  assert.equal(receipt.opacityChanges.length, opacityCount, 'Tab/Undo/Redo never alter the host opacity')
+  await shot('tab-excluded-edit-history')
+  await click('Done'); assert.deepEqual(await switching.outcome, { state: 'completed' })
+  const switchedOutput = deliveries.at(-1), switchedBitmap = nativeImage.createFromDataURL(switchedOutput.image.dataUrl), switchedPixels = switchedBitmap.toBitmap()
+  assert.equal(switchedOutput.engine, 'controlled-excluded')
+  assert.equal(switchedOutput.source.capturedAt, receipt.grabs.at(-1).capturedAt)
+  assert.deepEqual(switchedOutput.source.rect, { x: 130, y: 178, width: 690, height: 380 })
+  const sample = (322 * switchedBitmap.getSize().width + 470) * 4
+  assert.ok(switchedPixels[sample] > 245 && switchedPixels[sample + 1] > 245 && switchedPixels[sample + 2] > 245, 'the final PNG uses excluded pixels where the included image had the AgentMux panel')
+  assert.equal(host.getOpacity(), .65)
+  receipt.cases.push({ label: 'actual-tab-keeps-crop-mark-undo-redo-and-copies-excluded-pixels', marksBefore, marksAfter, undone, redone, source: switchedOutput.source, engine: switchedOutput.engine })
+
   const cancelled = await open('excluded')
   await key('Escape', 'Escape', 27)
   assert.deepEqual(await cancelled.outcome, { state: 'cancelled' })
@@ -188,7 +252,7 @@ async function run() {
   receipt.cases.push({ label: 'actual-command-e-production-window-editor-preserves-rectangle-and-crop' })
   surface.dispose(); editor.dispose(); host.destroy()
   assert.equal(BrowserWindow.getAllWindows().length, 0)
-  assert.equal(receipt.timings.length, 4)
+  assert.equal(receipt.timings.length, 5)
   assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => typeof value==='number'&&value>=0)))
   receipt.passed = true
 }
