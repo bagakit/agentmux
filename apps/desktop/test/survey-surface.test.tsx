@@ -1027,6 +1027,13 @@ it('keeps research capture cancellable when Topic discovery is unknown without c
   expect(useAppStore.getState().mainSurface).toBe('survey'); healthy()
 })
 
+it('marks Save to Recall as a capture rather than leaving the app, also when only its icon shows', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+  const save = document.querySelector<HTMLButtonElement>('[aria-label="Save to Recall"]')
+  expect(save, 'A chosen page offers Save to Recall').not.toBeNull()
+  expect(save!.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('action.collect-sources')
+})
+
 it('keeps the live sidebar width and original work surface when its original save owner reports a host failure', async () => {
   await realNameOwner()
   const dispose = () => {}
