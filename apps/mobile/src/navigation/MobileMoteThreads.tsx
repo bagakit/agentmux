@@ -25,8 +25,9 @@ export function MobileMoteThreads({ client, dialogue, team, issue, visible, curr
   return <section className="mobile-mote-threads" aria-label="Mote Threads">
     <MoteWorkThreads page={dialogue.page} issue={dialogue.issue} loading={dialogue.loading} visible={visible} readWork={readWork}
       memberName={source => team?.members.find(member => member.hostId === source.origin.hostId && member.sessionId === source.origin.recipientSessionId)?.name ?? source.origin.recipientSessionId}
-      onRefresh={onRefresh} onOlder={() => { void dialogue.older() }} onOpenWork={onWork} />
-    <MobileMoteTeamPanel team={members} issue={issue} currentSessionId={currentSessionId} currentHostId={currentHostId} membersOnly
-      onRefresh={onRefresh} onOpen={onOpen} onMain={onMain} onWork={(id, identity, member) => onOpen(id, identity, member)} onConfigure={onConfigure} />
+      onRefresh={onRefresh} onOlder={() => { void dialogue.older() }} onOpenWork={onWork}
+      members={{ count: members ? members.members.length : null, attention: Boolean(members?.members.some(member => member.request)),
+        content: <MobileMoteTeamPanel team={members} issue={issue} currentSessionId={currentSessionId} currentHostId={currentHostId} membersOnly
+          onRefresh={onRefresh} onOpen={onOpen} onMain={onMain} onWork={(id, identity, member) => onOpen(id, identity, member)} onConfigure={onConfigure} /> }} />
   </section>
 }

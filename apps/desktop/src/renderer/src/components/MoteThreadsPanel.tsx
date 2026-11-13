@@ -30,7 +30,8 @@ export function MoteThreadsPanel({ scope, active, onSelect }: {
   return <div className="mote-threads-panel" hidden={!active}>
     <MoteWorkThreads page={dialogue.page} issue={dialogue.issue} loading={dialogue.loading} visible={active} readWork={readWork}
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
-      onRefresh={dialogue.refresh} onOlder={() => void dialogue.older()} onOpenWork={source => {
+      onRefresh={dialogue.refresh} onOlder={() => void dialogue.older()}
+      members={{ count: null, content: <MoteCooperation scope={scope} active={active} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
         const original = dialogue.target && moteMembers(workbenchSelectionCatalog(useAppStore.getState()), dialogue.target.spaceId)
           .find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)
         if (original?.locations.length === 1) onSelect(original.locations[0]!)
@@ -42,6 +43,5 @@ export function MoteThreadsPanel({ scope, active, onSelect }: {
       {locations.map((reference, index) => <button type="button" key={JSON.stringify(reference)} onClick={() => { if (onSelect(reference)) setLocations([]) }}>位置 {index + 1} · {reference.displayWorkspaceId}</button>)}
       <button type="button" onClick={() => setLocations([])}>取消</button>
     </div> : null}
-    <MoteCooperation scope={scope} active={active} presentation="threads" onSelect={onSelect} />
   </div>
 }

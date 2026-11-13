@@ -59,3 +59,5 @@
   .pmo-teams-topic-floating .composer:has(.composer-tools[data-mode='collapsed']) { display: block; }
   .pmo-teams-topic-floating .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar { display: flex; }
 }
+/* The shared Threads toolbar blends with the floating panel it sits on. */
+.pmo-teams-topic-floating { --mote-threads-surface: var(--surface-1); }

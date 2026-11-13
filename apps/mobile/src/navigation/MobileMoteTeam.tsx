@@ -76,7 +76,7 @@ export function MobileMoteTeamPanel({ team, issue, currentSessionId, currentHost
     {!membersOnly && (team?.main ? <button type="button" className="mobile-mote-main-action" aria-label={team.main.confirmed ? '回到主对话' : '打开上次主对话'} onClick={onMain}><SemanticIcon name="object.conversation" size={17} /><span><strong>{team.main.confirmed ? '回到主对话' : '打开上次主对话'}</strong><small>{team.main.confirmed ? team.members.find(member => member.sessionId === team.main!.reference.sessionId && member.hostId === team.main!.reference.hostId)?.name ?? '原主 Agent' : '原保存引用 · 当前角色待核对'}</small></span><SemanticIcon name="navigation.disclosure" size={14} /></button>
       : <button type="button" className="mobile-mote-main-action" aria-label="核对主 Agent" onClick={onConfigure}><SemanticIcon name="object.conversation" size={17} /><span><strong>核对主 Agent</strong><small>原成员与会话保留</small></span></button>)}
     {needsYou.length > 0 && <section className="mobile-mote-team-section"><h3>需要你 <span>{needsYou.length}</span></h3><ul>{needsYou.map(member => renderMember(member, true))}</ul></section>}
-    <section className="mobile-mote-team-section"><h3>{membersOnly ? '其他 Agent 的原对话' : '团队在做什么'}</h3><ul>{team?.members.map(member => renderMember(member))}</ul>
+    <section className="mobile-mote-team-section">{membersOnly ? null : <h3>团队在做什么</h3>}<ul>{team?.members.map(member => renderMember(member))}</ul>
       {team && !team.members.length && <p className="mobile-mote-team-empty">尚未确认成员绑定。原对话仍可继续。</p>}
       {!team && <p className="mobile-mote-team-empty">正在核对原团队。原对话与草稿保留。</p>}
     </section>

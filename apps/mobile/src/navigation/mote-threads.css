@@ -18,7 +18,7 @@
 .mobile-mote-setup h3 { margin: 0 0 6px; font-size: 14px; }
 .mobile-mote-setup p { color: var(--text-2); font-size: 13px; line-height: 1.5; }
 .mobile-mote-setup button { margin: 0 8px 4px 0; font: inherit; font-size: 13px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 0 10px; background: var(--surface-1); color: var(--text-0); }
-.mobile-app { --mote-thread-control-height: 44px; --mote-thread-input-font: 16px; }
+.mobile-app { --mote-thread-control-height: 44px; --mote-thread-input-font: 16px; --mote-threads-surface: var(--surface-0); }
 
 .mobile-header.mobile-header--session .mobile-session-toolbar .mobile-session-title { display: block; -webkit-line-clamp: unset; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mobile-header .mobile-session-identity { min-width: 0; }
