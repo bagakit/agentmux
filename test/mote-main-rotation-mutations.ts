@@ -1,6 +1,14 @@
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 export const mainRotationVariants: Record<string, { file: string; before: string; after: string; test: string }> = {
+  'source-read-clears-upstream-issue': { file:'packages/core/src/public-rpc-service.ts',
+    before:"}catch(error){result.issue=[result.issue,'The original saved role source remains unconfirmed: '+String(error)].filter(Boolean).join('\\n')}",
+    after:"if(sources.sourceStatus==='read')result.issue=null }catch(error){result.issue=[result.issue,'The original saved role source remains unconfirmed: '+String(error)].filter(Boolean).join('\\n')}",
+    test:'a native File result remains confirmed when admission retention fails' },
+  'source-link-clears-upstream-issue': { file:'packages/core/src/public-rpc-service.ts',
+    before:"await resourceCall('space.mote.dialogue.link',{target:intent.target,operationId:intent.bindOperationId,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,source:{kind:'main'}})",
+    after:"await resourceCall('space.mote.dialogue.link',{target:intent.target,operationId:intent.bindOperationId,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,source:{kind:'main'}});result.issue=null",
+    test:'a native File result remains confirmed when admission retention fails' },
   'setup-source-evidence': { file:'packages/core/src/mote-main-setup.ts', before:"observed = {kind:'source',operationId:saved.operationId,file:saved.file,reference:saved.reference,roleRevision:saved.roleRevision}", after:"observed = {kind:'preferences',source:{resource:saved.file.resource,documentRevision:saved.file.revision,defaults:expected}}", test:'original source evidence after a later Main' },
   'setup-retention-truth': { file:'packages/core/src/public-rpc-service.ts', before:'The original preference result is retained; Main admission retention is unconfirmed: ', after:'The original save succeeded independently of admission retention: ', test:'unknown or refused native preference results' },
   'setup-admission-route': { file:'packages/core/src/public-rpc-service.ts', before:'scope.hostId === input.creation.hostId', after:'scope.hostId === input.target.expectedResource.hostId', test:'routes the original admission Host independently' },
@@ -14,7 +22,8 @@ export const mainRotationVariants: Record<string, { file: string; before: string
   'stale-mounted-baseline': { file: 'apps/desktop/src/renderer/src/components/MoteMainActions.tsx',
     before: 'if (lifetime.current === token) setReading(fresh)', after: 'if (false) setReading(fresh)', test: 'same mounted component can rotate' },
   'late-navigation': { file: 'apps/desktop/src/renderer/src/components/MoteMainActions.tsx',
-    before: 'activity.current === activityAtStart && ', after: '', test: 'later human reading or input' },
+    before: 'if (lifetime.current === token && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(value.reference))',
+    after: 'if (false)', test: 'later human reading or input' },
   'desktop-live-spatial': { file: 'apps/desktop/src/renderer/src/store.ts',
     before: 'const offRemote=spatial.connect(apply, applyNameAcknowledgement)', after: 'const offRemote=spatial.connect(()=>{}, applyNameAcknowledgement)', test: 'original Desktop spatial and Session subscriptions' },
   'desktop-live-session': { file: 'apps/desktop/src/main/runtime-controller.ts',
