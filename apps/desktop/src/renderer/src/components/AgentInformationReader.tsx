@@ -39,7 +39,7 @@ const CloseIcon = semanticIconComponent('action.close')
 const DragIcon = semanticIconComponent('action.drag')
 const ResizeIcon = semanticIconComponent('layout.resize-window')
 const ResetIcon = semanticIconComponent('action.reset-view')
-const OpenIcon = semanticIconComponent('action.open-external')
+const SpaceIcon = semanticIconComponent('navigation.space')
 const PinIcon = semanticIconComponent('action.pin')
 
 function moveReadingHost(host: HTMLElement, destination: HTMLElement, before: Element | null = null) {
@@ -456,7 +456,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         if (original?.control.hostId === context.hostId && (context.kind !== 'agent' || original.kind === 'agent' && original.control.agentSessionId === request.control?.agentSessionId)) {
           request.openWorkface(); agentInformationPreview.dismiss(request.token)
         } else showMetadata('source')
-      }}><OpenIcon size={13} aria-hidden="true" /></button>
+      }}><SpaceIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
       {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}>
         <ResizeIcon size={14} aria-hidden="true" />
