@@ -81,3 +81,15 @@ it('the actual workbench finds shared Toolkit mappings and current drawings, com
   expect(review().buildPacket().history).toEqual(beforeHistory)
   expect(localStorage.getItem('agentmux.icon-review.v1')).toBe(stored)
 }, 20000)
+
+it('finds native mask consumers in every stylesheet under the scanned roots, including nested Mobile styles', async () => {
+  const catalog = await createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS, AUTHORED_ICON_GLYPH_IDS })
+  const nativeFiles = (id: string) => catalog.roles.find((role: { id: string }) => role.id === id)!.sources
+    .filter((ref: { kind: string }) => ref.kind === 'native').map((ref: { file: string }) => ref.file)
+  // Only Mobile styles draw the connection masks; nested presence masks live one directory down.
+  expect(nativeFiles('status.connection-connected')).toEqual(['apps/mobile/src/mobile.css'])
+  expect(nativeFiles('status.presence-working')).toContain('apps/mobile/src/conversation/conversation.css')
+  for (const role of catalog.roles) for (const ref of role.sources.filter((ref: { kind: string }) => ref.kind === 'native')) {
+    expect(sourceRoots.some((root: string) => ref.file.startsWith(root + '/')), ref.file).toBe(true)
+  }
+})
