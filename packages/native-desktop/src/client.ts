@@ -297,7 +297,7 @@ export class NativeDesktop {
 
   /** Every active display's frozen pixels, one grab each, for a host capture surface. */
   async captureDisplays(): Promise<NativeDisplayFrames> {
-    const raw = await this.request('captureDisplays')
+    const raw = await this.request('captureDisplays', {}, { timeoutMs: 120_000 })
     const invalid = (message: string) => new NativeRequestError('invalid_display_frames', message)
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.state !== 'captured' || !Number.isFinite(raw.capturedAt)
       || !Array.isArray(raw.displays) || raw.displays.length === 0) throw invalid('Native display capture did not return its frames')
