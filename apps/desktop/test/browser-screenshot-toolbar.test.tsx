@@ -146,9 +146,10 @@ it('keeps completion actions and relevant parameters outside the independent can
   expect(getComputedStyle(editor).display).toBe('flex')
   expect(getComputedStyle(editor).flexDirection).toBe('column')
   expect(getComputedStyle(toolbar).position).toBe('relative')
-  expect(getComputedStyle(toolbar).flexWrap).toBe('wrap')
+  // One tool row keeps the drawing area; narrow editors reach every tool through the compact picker.
+  expect(getComputedStyle(toolbar).flexWrap).toBe('nowrap')
   expect(properties.closest('.image-annotation-editor__canvas-area')).toBeNull()
-  expect(getComputedStyle(tools).display).toBe('contents')
+  expect(getComputedStyle(tools).display).toBe('flex')
   expect(getComputedStyle(colors).flexShrink).toBe('0')
   expect(getComputedStyle(colors).maxWidth).toBe('100%')
   expect(getComputedStyle(colors).flexWrap).toBe('wrap')
@@ -171,7 +172,8 @@ it('keeps Cancel available while image encoding or clipboard acknowledgement is 
   const { editor, props } = await mount(true)
   const controls = [...editor.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select')]
   expect(controls.length).toBeGreaterThan(SCREENSHOT_COLORS.length)
-  const available = ['Cancel', 'Pan', 'Fit image', 'Actual image size', 'Zoom in', 'Zoom out'].map(name => button(editor, name))
+  // The compact Markup tool trigger stays enabled so its busy menu can still reach Pan.
+  const available = ['Cancel', 'Pan', 'Markup tool', 'Fit image', 'Actual image size', 'Zoom in', 'Zoom out'].map(name => button(editor, name))
   expect(controls.filter(control => !available.includes(control as HTMLButtonElement)).map(control => control.disabled))
     .toEqual(Array(controls.length - available.length).fill(true))
   expect(available.map(control => control.disabled)).toEqual(available.map(() => false))
