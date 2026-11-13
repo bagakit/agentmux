@@ -112,14 +112,15 @@ describe('GitService history through actual private Git', () => {
     await expect(f.service.history('repo', {}, f.config)).rejects.toThrow()
   }, 20_000)
 
-  it('reports reference metadata overflow and executor errors rather than a partial All or empty history', async () => {
+  it('reads every reference of a large repository, and reports executor errors rather than a partial All or empty history', async () => {
     const f = await repository()
     const original = f.host.run.bind(f.host)
     vi.spyOn(f.host, 'run').mockImplementation(async (command, args, options) => {
       if (args.includes('for-each-ref')) return { exitCode: 0, stdout: Array.from({ length: 2001 }, (_, i) => `refs/heads/b${i}\0commit\0${f.seed}\0\0`).join('\n'), stderr: '' }
       return original(command, args, options)
     })
-    await expect(f.service.history('repo', {}, f.config)).rejects.toThrow('2000-ref limit')
+    const large = ready(await f.service.history('repo', {}, f.config))
+    expect(large.snapshot.refs.filter(ref => ref.kind === 'local')).toHaveLength(2001); expect(large.snapshot.roots).toContain(f.seed)
     vi.mocked(f.host.run).mockImplementation(async (command, args, options) => {
       if (args.includes('log')) throw new Error('private timeout')
       return original(command, args, options)

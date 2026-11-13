@@ -145,12 +145,14 @@ describe('Git comparison bounded failures at the ExecutionHost boundary', () => 
     await expect(new GitService(() => host).branchDiff('repo', { snapshot, file: { path: 'x.txt', origPath: null } }, configuration(_hygiene_fixturePath("private-repo")))).rejects.toThrow(/missing blob object/)
   })
 
-  it('rejects oversized lists and malformed NUL records, preserving genuine warnings', async () => {
+  it('rejects malformed NUL records, keeps every file of a long list, and preserves genuine warnings', async () => {
     const input = { baseBranch: 'base', targetBranch: 'target', mode: 'merge-base' } as const
-    for (const output of ['M\0x.txt', 'R100\0old.txt\0', Array.from({ length: 1_001 }, (_, index) => `A\0${index}.txt\0`).join('')]) {
+    for (const output of ['M\0x.txt', 'R100\0old.txt\0']) {
       const host = fakeHost(() => ({ stdout: output }))
-      await expect(new GitService(() => host).compareBranches('repo', input, configuration(_hygiene_fixturePath("private-repo")))).rejects.toThrow(/incomplete|1000-file/)
+      await expect(new GitService(() => host).compareBranches('repo', input, configuration(_hygiene_fixturePath("private-repo")))).rejects.toThrow(/incomplete/)
     }
+    const long = fakeHost(() => ({ stdout: Array.from({ length: 1_001 }, (_, index) => `A\0${index}.txt\0`).join('') }))
+    expect(ready(await new GitService(() => long).compareBranches('repo', input, configuration(_hygiene_fixturePath("private-repo")))).entries).toHaveLength(1_001)
     const host = fakeHost(() => ({ stdout: 'M\0x.txt\0', stderr: 'warning: read https://secret@example.invalid/info' }))
     const result = ready(await new GitService(() => host).compareBranches('repo', input, configuration(_hygiene_fixturePath("private-repo"))))
     expect(result.entries).toEqual([{ path: 'x.txt', origPath: null, change: 'modified' }]); expect(result.warnings).toEqual(['warning: read https://***@example.invalid/info'])

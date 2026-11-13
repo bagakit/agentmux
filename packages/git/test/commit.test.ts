@@ -218,7 +218,7 @@ describe('neutral immutable commit reading through actual private Git', () => {
     await expect(repo.commitDetails({ oid: later })).rejects.toThrow('bad object')
   })
 
-  it('bounds large text and file lists while retaining ordinary multi-file reads', async () => {
+  it('bounds large text while retaining ordinary multi-file reads', async () => {
     const f = await fixture()
     await writeFile(join(f.path, 'large.txt'), 'x'.repeat(2 * 1024 * 1024 + 100))
     await Promise.all(Array.from({ length: 80 }, (_, i) => writeFile(join(f.path, `normal-${i}.txt`), `normal ${i}\n`)))
@@ -226,9 +226,6 @@ describe('neutral immutable commit reading through actual private Git', () => {
     expect(details.entries).toHaveLength(81)
     expect((await f.repo.commitDiff(descriptor(details, 'large.txt'))).new).toEqual({ present: true, binary: true })
     expect((await f.repo.commitDiff(descriptor(details, 'normal-79.txt'))).new).toEqual({ present: true, binary: false, text: 'normal 79\n' })
-    await Promise.all(Array.from({ length: 1001 }, (_, i) => writeFile(join(f.path, `overflow-${i}.txt`), `${i}\n`)))
-    const overflow = await f.commit('Overflow list')
-    await expect(f.repo.commitDetails({ oid: overflow })).rejects.toThrow('1000')
   }, 20_000)
 
   it('has a nonempty capability owner with no Core, Desktop, Electron or React imports', async () => {
@@ -254,4 +251,45 @@ describe('neutral immutable commit reading through actual private Git', () => {
     expect(await createRunnerWorktreeReader({ run: async () => { throw Object.assign(new Error('bounded'), { code: 'COMMAND_OUTPUT_LIMIT' }) } })(path)).toEqual({ present: true, oversized: true })
     await expect(createRunnerWorktreeReader({ run: async () => ({ exitCode: 0, stdout: '%invalid', stderr: '' }) })(path)).rejects.toThrow('invalid file bytes')
   })
+})
+
+describe('Git reads whose size grows with an ordinary repository', () => {
+  it('reads every file of a commit and a branch comparison that change more than a thousand files', async () => {
+    const f = await fixture()
+    await writeFile(join(f.path, 'seed.txt'), 'seed\n')
+    const base = await f.commit('Seed')
+    await Promise.all(Array.from({ length: 1001 }, (_, i) => writeFile(join(f.path, `bulk-${i}.txt`), `${i}\n`)))
+    const bulk = await f.commit('Bulk rename of icons')
+    const details = ready(await f.repo.commitDetails({ oid: bulk }))
+    expect(details.entries).toHaveLength(1001)
+    expect(details.entries.find(entry => entry.path === 'bulk-1000.txt')).toEqual({ path: 'bulk-1000.txt', origPath: null, change: 'added' })
+    expect((await f.repo.commitDiff(descriptor(details, 'bulk-1000.txt'))).new).toEqual({ present: true, binary: false, text: '1000\n' })
+    await f.git('branch', 'base', base)
+    const compared = await f.repo.compareBranches({ baseBranch: 'base', targetBranch: 'main', mode: 'two-point' })
+    expect(compared.kind).toBe('ready')
+    if (compared.kind !== 'ready') throw new Error('Expected an actual comparison')
+    expect(compared.entries).toHaveLength(1001)
+  }, 40_000)
+
+  it('reads the selected branch history and the whole history when the repository has thousands of references', async () => {
+    const f = await fixture()
+    await writeFile(join(f.path, 'first.txt'), 'first\n')
+    const first = await f.commit('First')
+    await writeFile(join(f.path, 'next.txt'), 'next\n')
+    const tip = await f.commit('Tip')
+    const updates = Array.from({ length: 2001 }, (_, i) => `create refs/heads/topic-${i} ${first}`).join('\n') + '\n'
+    expect((await runner.run('git', ['-C', f.path, 'update-ref', '--stdin'], { input: updates })).exitCode).toBe(0)
+    const selected = await f.repo.history({ ref: 'refs/heads/main', limit: 10 })
+    expect(selected.kind).toBe('ready')
+    if (selected.kind !== 'ready') throw new Error('Expected actual history')
+    expect(selected.snapshot.roots).toEqual([tip])
+    expect(selected.commits.map(commit => commit.oid)).toEqual([tip, first])
+    const all = await f.repo.history({ limit: 10 })
+    expect(all.kind).toBe('ready')
+    if (all.kind !== 'ready') throw new Error('Expected actual history')
+    expect(all.commits.map(commit => commit.oid)).toEqual([tip, first])
+    expect(all.snapshot.refs.filter(ref => ref.name.startsWith('refs/heads/topic-'))).toHaveLength(2001)
+    const next = await f.repo.history({ cursor: { snapshot: all.snapshot, offset: 1 }, limit: 10 })
+    expect(next.kind === 'ready' && next.commits.map(commit => commit.oid)).toEqual([first])
+  }, 40_000)
 })
