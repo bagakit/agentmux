@@ -136,7 +136,7 @@ function renderInventory() {
   const directory=['gallery','matrix'].includes(mode);
   if(!directory&&$('#inspector').open)$('#inspector').close();
   if(directory&&!mobile()&&!$('#inspector').open)$('#inspector').show();
-  $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;$('.theme-preview-tools').hidden=mode==='brand';
+  $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;$('.theme-preview-tools').hidden=mode==='brand';$('#mobile-drafts').hidden=mode==='brand';
   $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote';
   if(!directory){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
   window.history.replaceState(null,'','#'+mode);
@@ -171,20 +171,22 @@ function renderBrand() {
   const focus=realms.find(realm=>realm.id===brandRealm), needle=query.trim().toLowerCase();
   const painted=realms.filter(realm=>!realm.heroes.banner.borrowed).length;
   $('#result-count').textContent=`${realms.length} 个境 · ${painted} 个已有大图 · 其余借原境`;
-  const heroCard=(realm,surface)=>{const hero=realm.heroes[surface];
-    return `<figure class="brand-hero brand-hero--${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy"><figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>${hero.borrowed?'<span class="brand-hero__lineage">借原境 · 祖先的画</span>':''}</figure>`;};
+  // Each card is cropped the way its product surface crops the same art. Launch and the Settings
+  // strip carry the colophon; the Launcher is a work entry and shows none, as in the product.
+  const heroCard=(realm,surface,place,colophon)=>{const hero=realm.heroes[surface];
+    return `<figure class="brand-hero brand-hero--${place}" data-surface="${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy">${colophon?`<figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>`:''}${hero.borrowed?'<span class="brand-hero__lineage">借原境 · 祖先的画</span>':''}</figure>`;};
   const commons=ThemeBridge.brandCommons().map(({group,items})=>({group,items:items.filter(item=>!needle||[item.id,item.title,item.file].join(' ').toLowerCase().includes(needle))})).filter(({items})=>items.length);
   const avatars=ThemeBridge.brandAvatars().filter(item=>!needle||[item.id,item.title,item.series].join(' ').toLowerCase().includes(needle));
   const marks=ThemeBridge.providerMarks().filter(item=>!needle||[item.id,item.label].join(' ').toLowerCase().includes(needle));
   $('#inventory-content').innerHTML=`<div class="brand-space">
-    <section class="brand-intro"><p class="eyebrow">ONE DRAGON · FIVE REALMS</p><h2>同一条龙，五个境。</h2>
+    <section class="brand-intro"><h2>同一条龙，五个境</h2>
       <p>每个 App 图标是龙在一个境里的肖像。大图跟随所选的境；还没画到的境借原境的画，题款写明画属于哪个境。工坊插画属于所有境，从不切换。</p></section>
     <section class="brand-realms" aria-label="五个境">
-      <div class="brand-realm-tabs" role="tablist" aria-label="选择境">${realms.map(realm=>`<button role="tab" type="button" data-brand-realm="${realm.id}" aria-selected="${realm.id===brandRealm}" tabindex="${realm.id===brandRealm?0:-1}"><img src="${escape(realm.icon)}" alt="" width="40" height="40"><span><strong>${escape(realm.label)}</strong><small>${escape(realm.realm)}</small></span>${realm.isDefault?'<em>默认</em>':''}</button>`).join('')}</div>
+      <div class="brand-realm-tabs" role="tablist" aria-label="选择境">${realms.map(realm=>`<button role="tab" type="button" data-brand-realm="${realm.id}" aria-selected="${realm.id===brandRealm}" tabindex="${realm.id===brandRealm?0:-1}"><img src="${escape(realm.icon)}" alt="" width="40" height="40"><span><strong>${escape(realm.label)}</strong><small>${escape(realm.realm.split(' · ').pop())}</small></span>${realm.isDefault?'<em>默认</em>':''}</button>`).join('')}</div>
       ${focus?`<article class="brand-realm" data-realm="${focus.id}" role="tabpanel">
         <div class="brand-realm__portrait"><img src="${escape(focus.icon)}" alt="${escape(focus.label)} App 图标" width="128" height="128"><div class="brand-realm__sizes" aria-label="实际尺寸">${[16,32,64].map(size=>`<span><img src="${escape(focus.icon)}" alt="" width="${size}" height="${size}"><small>${size}</small></span>`).join('')}</div>
           <h3>${escape(focus.label)}</h3><p>${escape(focus.material)}</p>${focus.isOrigin?'<p class="brand-realm__note">所有境的祖先，唯一画齐大图的境。</p>':''}</div>
-        <div class="brand-realm__heroes"><div><h4>启动 Launch</h4>${heroCard(focus,'launch')}</div><div><h4>Launcher · Settings 概览</h4>${heroCard(focus,'banner')}</div></div>
+        <div class="brand-realm__heroes"><div><h4>启动</h4>${heroCard(focus,'launch','launch',true)}</div><div class="brand-realm__banner"><div><h4>Launcher 背景</h4>${heroCard(focus,'banner','launcher',false)}</div><div><h4>Settings 概览</h4>${heroCard(focus,'banner','overview',true)}</div></div></div>
       </article>`:''}
     </section>
     <section class="brand-commons" aria-label="工坊插画"><header><h3>工坊 · 所有境共用</h3><p>所有境的 Agent 与 Mote 在这里相遇工作。插画不随所选的境切换，也不加题款。</p></header>
