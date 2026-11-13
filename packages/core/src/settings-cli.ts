@@ -1,106 +1,100 @@
 import { AgentMuxError } from './errors.js'
 import { readControlJsonInput } from './cli-json-input.js'
 
-export interface SettingsCliCommand { method: string; params: Record<string, unknown> }
 const invalid = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
 const input = (path: string) => readControlJsonInput(path, 'Settings')
 
 /** Parse carriers only. Resource fields, CAS and save semantics belong to the service. */
-export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCliCommand> {
+export async function parseSettingsCommand(args: readonly string[]): Promise<Record<string, unknown>> {
   const [resource, action, id] = args
   if (resource === 'inspect' && args.length <= 2) {
     if (action?.startsWith('-')) invalid('settings inspect accepts a target, not options.')
-    return { method: 'settings.inspect', params: action === undefined ? {} : { target: action } }
+    return action === undefined ? {} : { target: action }
   }
   if (resource === 'set' && (args.length === 3 || args.length === 5 && args[3] === '--operation-id')) {
     if (!action?.trim() || action.startsWith('-')) invalid('A setting key is required.')
     if (args.length === 5 && !args[4]?.trim()) invalid('The original operation ID is required.')
-    return { method: 'settings.set', params: { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) } }
+    return { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) }
   }
   if (resource === 'executors' || resource === 'prompts' || resource === 'themes' || resource === 'derived-actions') {
-    const method = `settings.${resource}.${action}`
     if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
-      return { method, params: { hostId: args[3], refresh: true } }
+      return { hostId: args[3], refresh: true }
     }
     if (resource === 'executors' && action === 'register' && args.length === 7 && id?.length && args[3] === '--host' && args[4]?.length && args[5] === '--input') {
-      return { method, params: { executorId: id, hostId: args[4], input: await input(args[6]!) } }
+      return { executorId: id, hostId: args[4], input: await input(args[6]!) }
     }
-    if (action === 'ls' && args.length === 2) return { method, params: {} }
+    if (action === 'ls' && args.length === 2) return {}
     if (resource === 'prompts' && action === 'inspect' && args.length === 4 && id === '--keyword') {
       if (!args[3]?.length) invalid('An exact Prompt keyword is required.')
-      return { method, params: { keyword: args[3] } }
+      return { keyword: args[3] }
     }
     if (!(resource === 'themes' && action === 'delete' && typeof id === 'string') && !id?.length) invalid('An exact resource ID is required.')
     if (resource === 'executors' && action === 'refresh' && args.length === 5 && args[3] === '--host' && args[4]?.length) {
-      return { method, params: { executorId: id, hostId: args[4] } }
+      return { executorId: id, hostId: args[4] }
     }
-    if (action === 'inspect' && args.length === 3) return { method, params: { id } }
-    if (resource !== 'themes' && action === 'delete' && args.length === 3) return { method, params: { id } }
+    if (action === 'inspect' && args.length === 3) return { id }
+    if (resource !== 'themes' && action === 'delete' && args.length === 3) return { id }
     if (!['create', 'update', 'delete'].includes(action ?? '') || args.length !== 5 || args[3] !== '--input') invalid('Use create/update/delete <id> --input <file|->.')
     const value = await input(args[4]!)
-    if (action === 'create') return { method, params: { id, value } }
-    return { method, params: { id, input: value } }
+    if (action === 'create') return { id, value }
+    return { id, input: value }
   }
   if (resource === 'applications') {
-    const method = `settings.applications.${action}`
-    if (action === 'ls' && (args.length === 2 || args.length === 4 && id === '--host' && args[3]?.length)) return { method, params: args.length === 2 ? {} : { hostId: args[3] } }
+    if (action === 'ls' && (args.length === 2 || args.length === 4 && id === '--host' && args[3]?.length)) return args.length === 2 ? {} : { hostId: args[3] }
     if (action === 'configure' && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!); if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Application configuration requires profile and expectedRevision.')
       if (Object.keys(body as object).some(key => !['profile','expectedRevision'].includes(key))) invalid('Application configuration accepts only profile and expectedRevision.')
-      return { method, params: { ...body as Record<string,unknown>, profileId: id } }
+      return { ...body as Record<string,unknown>, profileId: id }
     }
-    if ((action === 'delete' || action === 'plan') && args.length === 5 && id?.length && args[3] === '--revision' && args[4]?.length) return { method, params: { profileId: id, expectedRevision: args[4] } }
-    if (action === 'apply' && args.length === 7 && id?.length && args[3] === '--plan' && args[4]?.length && args[5] === '--operation-id' && args[6]?.length) return { method, params: { profileId: id, planId: args[4], operationId: args[6] } }
-    if (action === 'operation' && args.length === 3 && id?.length) return { method, params: { operationId: id } }
+    if ((action === 'delete' || action === 'plan') && args.length === 5 && id?.length && args[3] === '--revision' && args[4]?.length) return { profileId: id, expectedRevision: args[4] }
+    if (action === 'apply' && args.length === 7 && id?.length && args[3] === '--plan' && args[4]?.length && args[5] === '--operation-id' && args[6]?.length) return { profileId: id, planId: args[4], operationId: args[6] }
+    if (action === 'operation' && args.length === 3 && id?.length) return { operationId: id }
     return invalid('Use settings applications --help for exact configuration, plan, apply and original operation query commands.')
   }
   if (resource === 'hosts') {
     if (action === 'update' && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!)
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['expected', 'candidate'].includes(key))) invalid('Host update input requires complete expected and candidate Host records.')
-      return { method: 'settings.hosts.update', params: { ...body as Record<string, unknown>, id } }
+      return { ...body as Record<string, unknown>, id }
     }
     if ((action === 'inspect' || action === 'network' || action === 'home') && args.length === 4 && id === '--host' && args[3]?.length) {
-      return { method: `settings.hosts.${action}`, params: { hostId: args[3] } }
+      return { hostId: args[3] }
     }
     if (action === 'trusted-sources' && args.length === 4 && id === '--host' && args[3]?.length) {
-      return { method: 'settings.hosts.trusted-sources', params: { hostId: args[3] } }
+      return { hostId: args[3] }
     }
     if (action === 'trust-source' && args.length === 6 && id === '--host' && args[3]?.length && args[4] === '--input') {
-      return { method: 'settings.hosts.trust-source', params: { hostId: args[3], input: await input(args[5]!) } }
+      return { hostId: args[3], input: await input(args[5]!) }
     }
-    if (action === 'ls' && args.length === 2) return { method: 'settings.hosts.ls', params: {} }
-    if (action === 'test' && args.length === 3 && id?.length) return { method: 'settings.hosts.test', params: { id } }
-    if (action === 'test' && args.length === 4 && id === '--input') return { method: 'settings.hosts.test', params: { input: await input(args[3]!) } }
-    if (action === 'install-check' && args.length === 3 && id?.length) return { method: 'settings.hosts.install-check', params: { id } }
+    if (action === 'ls' && args.length === 2) return {}
+    if (action === 'test' && args.length === 3 && id?.length) return { id }
+    if (action === 'test' && args.length === 4 && id === '--input') return { input: await input(args[3]!) }
+    if (action === 'install-check' && args.length === 3 && id?.length) return { id }
     if (action === 'install' && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!)
       if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Install input requires expected and operationId.')
-      return { method: 'settings.hosts.install', params: { ...body as Record<string, unknown>, id } }
+      return { ...body as Record<string, unknown>, id }
     }
-    if (action === 'install-inspect' && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) return { method: 'settings.hosts.install-inspect', params: { id, operationId: args[4] } }
-    if (action === 'upgrade-check' && args.length === 3 && id?.length) return { method: 'settings.hosts.upgrade-check', params: { id } }
-    if (action === 'upgrade-check' && args.length === 4 && id === '--input') return { method: 'settings.hosts.upgrade-check', params: { input: await input(args[3]!) } }
+    if (action === 'install-inspect' && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) return { id, operationId: args[4] }
+    if (action === 'upgrade-check' && args.length === 3 && id?.length) return { id }
+    if (action === 'upgrade-check' && args.length === 4 && id === '--input') return { input: await input(args[3]!) }
     if (action === 'upgrade' && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!)
       if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Upgrade input requires expected and operationId.')
-      return { method: 'settings.hosts.upgrade', params: { ...body as Record<string, unknown>, id } }
+      return { ...body as Record<string, unknown>, id }
     }
     if ((action === 'upgrade-inspect' || action === 'upgrade-reconnect') && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) {
-      return { method: `settings.hosts.${action}`, params: { id, operationId: args[4] } }
+      return { id, operationId: args[4] }
     }
   }
   if (resource === 'workspaces' && action === 'register' && args.length === 4 && id === '--input') {
-    return { method: 'settings.workspaces.register', params: { input: await input(args[3]!) } }
-  }
-  if (resource === 'browser-default' && args.length === 2 && (action === 'inspect' || action === 'open-settings')) {
-    return { method: `settings.browser-default.${action}`, params: {} }
+    return { input: await input(args[3]!) }
   }
   if (resource === 'browser-links') {
-    if (action === 'ls' && args.length === 2) return { method: 'settings.browser-links.ls', params: {} }
+    if (action === 'ls' && args.length === 2) return {}
     // A lone positional value is data, including an empty scheme or --help.
-    if (action === 'forget' && args.length === 3) return { method: 'settings.browser-links.forget', params: { input: { scheme: id } } }
-    if (action === 'forget' && args.length === 4 && id === '--input') return { method: 'settings.browser-links.forget', params: { input: await input(args[3]!) } }
+    if (action === 'forget' && args.length === 3) return { input: { scheme: id } }
+    if (action === 'forget' && args.length === 4 && id === '--input') return { input: await input(args[3]!) }
   }
   return invalid('Unsupported settings command. Run amux settings --help.')
 }

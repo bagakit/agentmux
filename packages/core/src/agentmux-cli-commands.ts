@@ -198,7 +198,7 @@ function inspectTarget(f: Flags): Record<string, unknown> {
 function settings(method: string, usage: string, summary: string, positionalData = 0): AgentMuxCliCommand {
   const prefix = method.split('.').slice(1)
   return { method, usage, summary, positionalData, details: SAVE_NOTICE,
-    parse: async args => (await parseSettingsCommand([...prefix, ...args])).params }
+    parse: args => parseSettingsCommand([...prefix, ...args]) }
 }
 function toolkit(action: string, usage: string, summary: string, positionalData = 1): AgentMuxCliCommand {
   return { method: `toolkit.${action}`, usage, summary, positionalData,
