@@ -1,4 +1,5 @@
 @import '../src/styles/tokens.css';
+@import '../src/styles/context-menu.css';
 @import '@agentmux/client-ui/styles/theme-transition.css';
 @import '@agentmux/client-ui/styles/semantic-icons.css';
 @import '@agentmux/client-ui/input/styles.css';
@@ -11,7 +12,9 @@ body { font-family: var(--font-sans); font-size: var(--fs-body); background: var
 .system-screenshot-editor__error { flex: none; padding: var(--sp-4) var(--sp-5); background: var(--surface-1); color: var(--text); border-top: 1px solid var(--line); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .system-screenshot-editor__error span { color: var(--text-3); }
 .screenshot-editor-startup { padding: var(--sp-6); line-height: 1.5; overflow-wrap: anywhere; }
-
+.system-screenshot-editor__recovery { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: var(--surface-1); border-top: 1px solid var(--line); font-size: var(--fs-meta); }
+.system-screenshot-editor__recovery span { flex: 1; min-width: 0; }
+.system-screenshot-editor__recovery button { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; background: var(--surface-2); color: var(--text); }
 .screenshot-source { height: 100%; display: flex; flex-direction: column; gap: 16px; padding: 20px; }
 .screenshot-source header { display: flex; align-items: flex-start; gap: 12px; }
 .screenshot-source header > div { flex: 1; min-width: 0; }

@@ -1,0 +1,52 @@
+/* Shared menu surface for workbench and independent image windows. */
+.tab-context-menu {
+  min-width: 176px;
+  z-index: var(--layer-popover);
+  pointer-events: auto;
+  max-height: var(--radix-context-menu-content-available-height);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding:var(--sp-2);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  /* Surface fill plus elevation carries the layer; a border would be a second, competing edge. */
+  background: var(--surface-2);
+  box-shadow: var(--elev-3), var(--hl-strong), 0 0 0 1px var(--scrim-2);
+  transform-origin: var(--radix-popper-transform-origin, 50% 0);
+}
+/* Growing from the pointer says the menu was summoned by that click, rather than dropped on top of
+   the UI. The origin comes from Radix, so it is correct on every side and after a collision flip.
+   Scoped to the OPEN state deliberately: Radix keeps an animated node mounted while it waits for an
+   `animationend` that a close would have to fire. An unscoped entry animation makes the node look
+   animated on close too, so that event never arrives and the menu stays in the DOM forever. */
+.tab-context-menu[data-state='open'] {
+  animation: menu-in var(--dur-enter) var(--ease-enter);
+}
+
+.tab-context-menu__item {
+  display: flex;
+  align-items: center;
+  gap:var(--sp-4);
+  min-height: 26px;
+  padding:var(--sp-1) var(--sp-4);
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-size: var(--fs-body);
+  font-weight: 450;
+  line-height: 18px;
+  letter-spacing: -0.005em;
+  user-select: none;
+  transition: color 90ms ease, background 90ms ease;
+}
+.tab-context-menu__item > svg { flex: 0 0 auto; color: var(--text-3); transition: color 90ms ease; }
+/* A long branch name or deep move-target path must not wrap a row to two lines and break the rhythm. */
+.tab-context-menu__item > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-context-menu__item[data-highlighted], .tab-context-menu__item:hover:where(:not([data-disabled])) { color: var(--text); background: var(--wash-2); }
+.tab-context-menu__item[data-highlighted] > svg, .tab-context-menu__item:hover:where(:not([data-disabled])) > svg { color: var(--green); }
+.tab-context-menu__item[data-disabled] { opacity: .35; }
+.tab-context-menu__item kbd { margin-left:auto; color: var(--text-3); font: 10px/1.2 var(--font-mono); }
+
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
+}

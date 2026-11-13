@@ -202,7 +202,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (!active) return
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target && 'nodeType' in event.target && event.target !== document.body ? event.target as Node : document.activeElement
-      if (!target || !editorRef.current?.contains(target) || isImeOwnedKeyboardEvent(event)) return
+      if (event.defaultPrevented || !target || !editorRef.current?.contains(target) || isImeOwnedKeyboardEvent(event)) return
       if (event.key === 'Escape') {
         event.preventDefault()
         if (textDraftRef.current) finishText('', true)

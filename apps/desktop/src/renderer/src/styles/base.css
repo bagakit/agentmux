@@ -60,10 +60,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 /* Source Control: the content slot's bottom half switches between Branches and Changes. */
 .content-slot-source-control { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
 .content-slot-source-control .branches-panel, .content-slot-source-control .changes-panel { flex: 1; min-height: 0; }
-@keyframes menu-in {
-  from { opacity: 0; transform: scale(.96); }
-  to { opacity: 1; transform: scale(1); }
-}
+
 .eyebrow { color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .85; }
 .icon-rotate-90 { transform: rotate(90deg); transition: transform var(--dur-fast) ease; }
 .animate-fade-in { animation: fadeIn var(--dur-enter) ease; }
