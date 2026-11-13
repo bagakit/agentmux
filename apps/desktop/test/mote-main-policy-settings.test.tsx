@@ -214,6 +214,8 @@ it('Desktop retains invalid raw idle draft on close/reopen and isolates another 
 
 it('Desktop saves unrelated edits without installing a policy and displays an unconfirmed source honestly', async () => {
   const f = await original(), v = await desktop(f)
+  const description = () => document.querySelector('.mote-quick-mode-dialog [id^="radix-"][id$="-description"], .mote-quick-mode-dialog .mote-behavior-header p')?.textContent
+  expect(description()).toContain('Saved settings loaded'); expect(description()).not.toContain('ready')
   expect(document.body.textContent).toContain('No rollover policy is configured')
   await moteClick(document.querySelector<HTMLInputElement>('[aria-label="Enable automatic Mote maintenance"]')!)
   await moteClick(button(document.body, 'Save')); await waitFor(() => expect(v.close, document.body.textContent ?? '').toHaveBeenCalled())
@@ -221,6 +223,7 @@ it('Desktop saves unrelated edits without installing a policy and displays an un
   await v.render(null)
   f.publicRead.mockRejectedValue(new Error('Original configuration source unavailable'))
   await v.render(v.component()); await waitFor(() => expect(document.body.textContent).toContain('The saved rollover policy is unconfirmed'))
+  expect(description()).toContain('Saved settings unconfirmed')
   expect(button(document.body, 'Save').disabled).toBe(true); noAgentOperation()
 })
 
