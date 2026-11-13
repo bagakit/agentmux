@@ -8,15 +8,20 @@ import { conversationPresentationKey, projectConversationRecordSequence, type Co
 import { useConversationReadingSelection } from './use-conversation-reading-selection.js'
 
 export type ConversationPresentationFrame = { records: readonly ConversationRecord[]; originalRecords: readonly ConversationRecord[] }
-type Placement = { version: string; parent: string | undefined }
+/** Exact detail state remounts with its original versions; rendering and focus protection share this identity. */
+export function conversationDeferredMountKey(record: ConversationRecord): string | undefined {
+  return record.deferred ? JSON.stringify([record.executionHostId, record.sourceHostId,
+    record.deferred.records.map(source => [source.id, source.revision])]) : undefined
+}
+type Placement = { version: string; parent: string | undefined; mount?: string | undefined }
 const version = (record: ConversationRecord): string => JSON.stringify([
   conversationRecordId({ agentSessionId: record.agentSessionId, ...(record.sourceHostId ? { hostId: record.sourceHostId } : {}), source: record.source }),
   record.role, record.event?.revision ?? conversationRevision(record.original.item), record.records?.map(original => [original.id, original.revision])
 ])
 function placements(frame: ConversationPresentationFrame, sequence: ConversationSequence): Map<string, Placement> {
-  const result = new Map(frame.records.map(record => {
+  const result = new Map<string, Placement>(frame.records.map(record => {
     const key = conversationPresentationKey(record)
-    return [key, { version: version(record), parent: sequence.groups.get(key) }] as const
+    return [key, { version: version(record), parent: sequence.groups.get(key), mount: conversationDeferredMountKey(record) }] as const
   }))
   const anchor = (key: string, parent?: string) => result.set(JSON.stringify(['anchor', key]), { version: key, parent })
   for (const row of sequence.rows) {
@@ -51,13 +56,13 @@ function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Plac
   if (range || focused && focused !== document?.body && root?.contains(focused)) {
     for (const node of root?.querySelectorAll<HTMLElement>('[data-conversation-layout-key]') ?? []) {
       const key = node.dataset.conversationLayoutKey!, prior = previous.get(key), next = incoming.get(key)
-      if (prior && next && prior.version === next.version && prior.parent === next.parent) continue
+      if (prior && next && prior.version === next.version && prior.parent === next.parent && prior.mount === next.mount) continue
       const protectedNode = readingNode(node) ?? node
       try { if (range?.intersectsNode(protectedNode)) return 'selection' } catch { return 'selection' }
-      // A new version keeps the same keyed node mounted, so focus inside it survives the
-      // frame. Hold only when the focused node would be removed or move to another parent;
-      // otherwise a click on a running turn's controls would freeze every later update.
-      if (focused && focused !== document?.body && protectedNode.contains(focused) && (!next || prior?.parent !== next.parent)) return 'focus'
+      // Ordinary same-node updates retain focus. Exact deferred detail state has a
+      // versioned mount key: replacing it removes its controls even in the same parent.
+      if (focused && focused !== document?.body && protectedNode.contains(focused) &&
+        (!next || prior?.parent !== next.parent || prior?.mount !== next.mount)) return 'focus'
     }
   }
   const anchor = preserveAnchor ? currentAnchor(root) : null

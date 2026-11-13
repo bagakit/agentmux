@@ -9,7 +9,7 @@ import type { ConversationReadingGeometry } from '../lib/conversation-body-work.
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
 import { ConversationOriginalRecords, ConversationOriginalRecordContent } from './ConversationOriginalRecords.js'
-import { useConversationRecordLayout, type ConversationPresentationPort } from '../lib/use-conversation-record-layout.js'
+import { conversationDeferredMountKey, useConversationRecordLayout, type ConversationPresentationPort } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import { conversationRecordTurnOutcome, type ConversationRecord } from '../lib/conversation-records.js'
 import { ConversationTurnFailure } from './ConversationTurnFailure.js'
@@ -196,7 +196,7 @@ export const ConversationView = memo(function ConversationView({
     </ConversationTurnFailure> : renderRecordBody(record, wrapBody, disclosure)
   }
   const renderRecordBody: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'deferred'
-    ? <DeferredConversationProcess key={JSON.stringify([record.executionHostId, record.sourceHostId, record.deferred!.records.map(source => [source.id, source.revision])])}
+    ? <DeferredConversationProcess key={conversationDeferredMountKey(record)}
         record={record} {...(readProcessDetail ? { readDetail: readProcessDetail } : {})} active={reading.active !== false}
         located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source) || record.deferred!.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)} {...(disclosure ? { disclosure } : {})}
         renderDetail={snapshot => {
