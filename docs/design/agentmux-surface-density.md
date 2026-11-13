@@ -13,6 +13,7 @@
 | 读者问题 | 唯一正文 |
 | --- | --- |
 | 主题 token、尺度、控件、样式归属及视觉验收 | [全局视觉、尺度与样式 Owner](presentation/shared-rules.md) |
+| 品牌：龙的五个境、大图与题款、共用工坊、IP 形象与品牌出现的位置 | [品牌架构](presentation/brand-identity.md) |
 | Mote／Work／Know 导航分组、对象层次、Tab／Region 几何和 Launcher 密度 | [空间与布局的呈现](presentation/spaces-and-layout.md) |
 | Survey 浏览起点与 Zone 工作面 | [Survey 的 Zone 工作面与液体玻璃](presentation/spaces-and-layout.md#survey-的-zone-工作面与液体玻璃) |
 | Recall 目录、书写和来源层级 | [Recall 的目录、阅读与来源](presentation/spaces-and-layout.md#recall-的目录阅读与来源) |

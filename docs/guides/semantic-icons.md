@@ -2,7 +2,7 @@
 
 本指南面向开发受控 UI 的作者。产品约束归[语义图标呈现 SSOT](../design/presentation/shared-rules.md#语义图标密度与性能)，本文说明当前实现入口与操作步骤。Provider、项目等身份资产沿原身份 owner，不当作通用图标替换。
 
-App 品牌使用共享 `BrandIcon`，由宿主注入已保存的 `appearance.appIcon`；候选预览显式传入目录 ID。不要在业务页导入单份品牌 PNG、从主题推断品牌或借用 `ProjectIcon`。源图、派生位图与宿主适配的具体边界见[职责地图](../architecture/system-ownership.md#从哪一层接入)；品牌选择独立于本页的语义主题图标。
+App 品牌图标、大图与插画不属于语义图标：结构见[品牌架构](../design/presentation/brand-identity.md)，增改素材见[品牌素材指南](brand-assets.md)。界面中显示 App 图标使用共享 `BrandIcon`，由宿主注入已保存的 `appearance.appIcon`，不要在业务页导入单份品牌 PNG、从主题推断品牌或借用 `ProjectIcon`。
 
 ## 在设置中定制
 
