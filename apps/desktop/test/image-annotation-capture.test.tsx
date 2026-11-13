@@ -20,18 +20,22 @@ let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 // Every fill the editor paints on its own canvas, with the fill style it used.
 let fills: Array<{ style: string; rect: number[] }>, sampled: number[], reads = 0, measures = 0
+// Every outline the editor strokes on its own canvas, with its stroke style and alpha.
+let strokes: Array<{ style: string; alpha: number; rect: number[] }>, reducedMotion = false
 class RecordingContext {
-  fillStyle = ''; strokeStyle = ''; lineWidth = 1; font = ''; imageSmoothingEnabled = true
+  fillStyle = ''; strokeStyle = ''; lineWidth = 1; font = ''; imageSmoothingEnabled = true; globalAlpha = 1
   fillRect(...rect: number[]) { fills.push({ style: String(this.fillStyle), rect }) }
+  strokeRect(...rect: number[]) { strokes.push({ style: String(this.strokeStyle), alpha: this.globalAlpha, rect }) }
   getImageData() { reads++; return { data: Uint8ClampedArray.from([...sampled, 255]) } }
   measureText(text: string) { return { width: text.length * 7 } }
-  save() {} restore() {} setLineDash() {} strokeRect() {} beginPath() {} arc() {} fill() {} stroke() {} drawImage() {} clearRect() {} moveTo() {} lineTo() {}
+  save() {} restore() {} setLineDash() {} beginPath() {} arc() {} fill() {} stroke() {} drawImage() {} clearRect() {} moveTo() {} lineTo() {}
 }
 function box(width: number, height: number): DOMRect { return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON() {} } }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  frames = new Map(); nextFrame = 0; fills = []; sampled = [18, 52, 86]; reads = 0; measures = 0; layout = FRAME
+  frames = new Map(); nextFrame = 0; fills = []; strokes = []; sampled = [18, 52, 86]; reads = 0; measures = 0; layout = FRAME; reducedMotion = false
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' && reducedMotion, media: query }))
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { const id = ++nextFrame; frames.set(id, callback); return id })
   vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
   // The overlay fills one display; the toolbar and size chip report their laid-out widths.
@@ -45,13 +49,15 @@ beforeEach(() => {
   node = document.createElement('div'); document.body.append(node); root = createClientUiRoot(node)
 })
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function frame() { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(16)) }) }
+// Each flushed frame is one 16 ms display frame later than the last.
+let clock = 0
+async function frame() { await act(async () => { const pending = [...frames.values()]; frames.clear(); clock += 16; pending.forEach(callback => callback(clock)) }) }
 function button(scope: ParentNode, name: string): HTMLButtonElement {
   const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === name)
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
-async function mount(origin?: { x: number; y: number }) {
-  const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}),
+async function mount(origin?: { x: number; y: number }, windows?: Array<{ x: number; y: number; width: number; height: number }>) {
+  const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}), ...(windows ? { windows } : {}),
     onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onExpand: vi.fn(), onCopyColor: vi.fn(), onSelect: vi.fn() }
   const instance = Math.random()
   // The host's lock for this display arrives later than the editor mounts, as another display's claim does.
@@ -61,10 +67,10 @@ async function mount(origin?: { x: number; y: number }) {
   canvas.setPointerCapture = vi.fn()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load'))); await frame()
   // Pointer coordinates are frame points; the display's top-left is 0, 0.
-  const send = (type: string, [x, y]: [number, number], buttons = 1) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons, clientX: x, clientY: y }))
+  const send = (type: string, [x, y]: [number, number], buttons = 1, metaKey = false) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons, clientX: x, clientY: y, metaKey }))
   const press = async (at: [number, number]) => { await act(async () => { send('pointerdown', at) }) }
-  const move = async (to: [number, number], buttons = 1) => { await act(async () => { send('pointermove', to, buttons) }); await frame() }
-  const release = async (at: [number, number]) => { await act(async () => { send('pointerup', at, 0) }); await frame() }
+  const move = async (to: [number, number], buttons = 1, metaKey = false) => { await act(async () => { send('pointermove', to, buttons, metaKey) }); await frame() }
+  const release = async (at: [number, number], metaKey = false) => { await act(async () => { send('pointerup', at, 0, metaKey) }); await frame() }
   const drag = async (from: [number, number], to: [number, number]) => { await press(from); await move(to); await release(to) }
   const key = async (key: string, init: KeyboardEventInit = {}) => {
     await act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })) }); await frame()
@@ -361,6 +367,94 @@ describe('capture image annotation', () => {
     await drag([300, 420], [500, 480])
     const chip = editor.querySelector<HTMLElement>('[aria-label="Selection size"]')!
     expect([bar()!.dataset.side, bar()!.style.top, chip.style.top], 'actual chip leaves the side the bar takes').toEqual(['above', '376px', '424px'])
+  })
+
+  // Two windows in image pixels, front to back: a small one over part of a large one that runs past the frame.
+  const FRONT = { x: 400, y: 300, width: 400, height: 200 }, BACK = { x: 200, y: 100, width: 1600, height: 600 }
+  const ACCENT = '#3b82f6'
+  const outlines = () => strokes.filter(stroke => stroke.style === ACCENT)
+  const guides = () => fills.filter(fill => fill.style === ACCENT).map(fill => fill.rect)
+
+  it('lights the topmost window under the pointer before a selection, fading in over 90 ms', async () => {
+    const { move, canvas } = await mount(undefined, [FRONT, BACK])
+    strokes = []; await move([300, 200], 0)
+    // A 1 point accent outline just inside the window: half a point is one image pixel at 2x.
+    expect(outlines().at(-1), 'the front window lights first where both contain the pointer').toMatchObject({ rect: [401, 301, 398, 198] })
+    expect(outlines().at(-1)!.alpha, 'its first frame begins the fade').toBe(0)
+    expect(frames.size, 'the fade asks for its next frame').toBe(1)
+    for (let step = 0; step < 6; step++) await frame()
+    expect(outlines().at(-1)!.alpha, 'after 90 ms the highlight is whole').toBe(1)
+    expect(frames.size, 'a whole highlight requests no more frames').toBe(0)
+    expect(fills.some(fill => fill.style === 'rgba(59, 130, 246, .12)' && fill.rect.join() === '400,300,400,200'), 'the faint fill covers the window').toBe(true)
+    strokes = []; await move([150, 100], 0)
+    expect(outlines().at(-1), 'outside the front window the back one lights').toMatchObject({ rect: [201, 101, 1598, 598] })
+    strokes = []; await move([50, 20], 0)
+    expect(outlines(), 'off every window nothing is lit').toEqual([])
+    const painted = raster.scene.mock.calls.length
+    await move([60, 25], 0); await move([70, 30], 0)
+    expect(raster.scene.mock.calls.length, 'moves that light no other window repaint nothing').toBe(painted)
+    await move([300, 200], 0); strokes = []
+    await act(async () => { canvas.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: null })) }); await frame()
+    expect(outlines(), 'leaving the frame clears the highlight').toEqual([])
+    reducedMotion = true
+    const reduced = await mount(undefined, [FRONT, BACK])
+    strokes = []; await reduced.move([300, 200], 0)
+    expect([outlines().at(-1)!.alpha, frames.size], 'reduced motion shows the highlight whole with no fade frames').toEqual([1, 0])
+  })
+
+  it('a click without travel selects the window under it, clipped to the frame, and claims it', async () => {
+    const { press, release, move, key, props, bar } = await mount(undefined, [FRONT, BACK])
+    await move([300, 200], 0); await press([300, 200]); await move([301, 201]); await release([301, 201])
+    expect(props.onSelect, 'a window click claims the selection').toHaveBeenCalledOnce()
+    await key('Enter')
+    expect(props.onComplete.mock.lastCall![0].crop, 'the crop is the front window').toEqual(FRONT)
+    expect(bar(), 'the toolbar shows on the window selection').not.toBeNull()
+    const back = await mount(undefined, [FRONT, BACK])
+    await back.press([150, 100]); await back.release([150, 100]); await back.key('Enter')
+    expect(back.props.onComplete.mock.lastCall![0].crop, 'the back window is clipped to the frame').toEqual({ x: 200, y: 100, width: 1400, height: 600 })
+    const off = await mount(undefined, [FRONT, BACK])
+    await off.press([50, 20]); await off.release([50, 20])
+    expect([off.bar(), off.props.onSelect.mock.calls.length], 'a click off every window selects nothing').toEqual([null, 0])
+    await off.drag([210, 160], [290, 190]); await off.key('Enter')
+    expect(off.props.onComplete.mock.lastCall![0].crop, 'a drag still makes a free selection').toEqual({ x: 420, y: 320, width: 160, height: 60 })
+  })
+
+  it('snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', async () => {
+    const { press, move, release, key, props } = await mount(undefined, [FRONT, BACK])
+    // The front window's right edge is frame point 400; 405 is 5 points away, 407 is 7.
+    await press([100, 50]); await move([405, 245])
+    expect(guides(), 'one vertical guide runs across the frame at the engaged edge').toContainEqual([799, 0, 2, 1000])
+    expect(guides(), 'and a horizontal one at the front window bottom').toContainEqual([0, 499, 1600, 2])
+    fills = []; await release([405, 245])
+    expect(guides(), 'the guides disappear on release').toEqual([])
+    await key('Enter')
+    expect(props.onComplete.mock.lastCall![0].crop, 'the corner landed on the front window corner').toEqual({ x: 200, y: 100, width: 600, height: 400 })
+    const far = await mount(undefined, [FRONT, BACK])
+    await far.press([20, 20]); fills = []; await far.move([407, 243])
+    expect(guides(), 'beyond 6 points no guide shows').toEqual([])
+    await far.release([407, 243]); await far.key('Enter')
+    expect(far.props.onComplete.mock.lastCall![0].crop, 'beyond 6 points the corner follows the pointer').toEqual({ x: 40, y: 40, width: 774, height: 446 })
+  })
+
+  it('snaps a moved selection and drawn and moved marks, and holding Command suspends it', async () => {
+    const { press, move, release, key, drag, bar, props } = await mount(undefined, [FRONT])
+    const last = async () => { await key('Enter'); return props.onComplete.mock.lastCall![0] }
+    await drag([100, 50], [300, 100])
+    // Moved right by 97 points, the selection's edges sit 3 points short of the front window's left and right edges.
+    await drag([200, 75], [297, 75])
+    expect((await last()).crop, 'a moved selection lands on the window edges').toEqual({ x: 400, y: 100, width: 400, height: 100 })
+    await act(async () => button(bar()!, 'Rectangle').click()); await frame()
+    // A rectangle's end 4 points short of the selection's right edge lands on it.
+    await drag([240, 60], [396, 90])
+    expect((await last()).shapes.at(-1), 'a drawn region mark lands on the selection edge').toMatchObject({ kind: 'rect', from: { x: 480, y: 120 }, to: { x: 800, y: 180 } })
+    // Command held: 4 points from the selection's right edge and 3 from the first rectangle's centre, the end stays put.
+    await press([250, 72]); await move([396, 78], 1, true); await release([396, 78], true)
+    expect((await last()).shapes.at(-1), 'with Command held a drawn mark follows the pointer exactly').toMatchObject({ kind: 'rect', from: { x: 500, y: 144 }, to: { x: 792, y: 156 } })
+    // Moved left by 9 points from its bottom edge, its left edge sits 1 point from the first rectangle's left edge.
+    await drag([323, 78], [314, 78])
+    expect((await last()).shapes.at(-1), 'a moved mark lands on another mark edge').toMatchObject({ kind: 'rect', from: { x: 480, y: 144 }, to: { x: 772, y: 156 } })
+    await press([313, 78]); await move([315, 78], 1, true); await release([315, 78], true)
+    expect((await last()).shapes.at(-1), 'with Command held a moved mark follows the pointer').toMatchObject({ from: { x: 484, y: 144 }, to: { x: 776, y: 156 } })
   })
 
   it('moving a selection forces no layout of the toolbar or size chip', async () => {
