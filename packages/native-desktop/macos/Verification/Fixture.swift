@@ -81,8 +81,12 @@ private final class Fixture: NSObject, NSApplicationDelegate {
     }
 }
 
-let application = NSApplication.shared
-application.setActivationPolicy(.regular)
-private let fixture = Fixture()
-application.delegate = fixture
-application.run()
+// Top-level code runs on the main thread; the fixture and AppKit need the main actor.
+MainActor.assumeIsolated {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.regular)
+    let fixture = Fixture()
+    application.delegate = fixture
+    // The delegate reference is weak, so the run loop must keep the fixture alive.
+    withExtendedLifetime(fixture) { application.run() }
+}
