@@ -25,7 +25,8 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   showThread?(reference: WorkbenchProjectionSelection): boolean
   showOriginalWorkface?(): void
   showConversation?(): void
-  startRollover?(input: MoteRolloverStart): void
+  /** Accepts this surface's navigation only; creation and input keep their original receipts. */
+  startRollover?(input: MoteRolloverStart): boolean
   selectTab(tabId: string, groupId: string): void
   selectReference(reference: WorkbenchProjectionSelection): boolean
 }) | null>(null)

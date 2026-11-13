@@ -123,15 +123,35 @@ export function AgentSessionComposer({
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const rolloverHandled = useRef<string | null>(null)
   const rollovers = queuedEntries.filter(entry => !entry.archived && entry.mainRollover)
+  const rolloverSurface = useRef<HTMLDetailsElement>(null)
+  // The existing pending popup must clear the original continuation controls,
+  // just as it already clears an interaction card in this workface.
+  const deliveryLayout = useMemo<PendingDeliveryLayout | undefined>(() => pendingLayout ? {
+    ...pendingLayout,
+    readOverlapTop(popup) {
+      const original = pendingLayout.readOverlapTop(popup), surface = rolloverSurface.current
+      if (!surface?.isConnected || surface.closest('[hidden], [inert]')) return original
+      const rect = surface.getBoundingClientRect()
+      return popup.left < rect.right && popup.right > rect.left && popup.top < rect.bottom && popup.bottom > rect.top
+        ? Math.min(original ?? rect.top, rect.top) : original
+    },
+    subscribe(onChange) {
+      const stop = pendingLayout.subscribe(onChange), resize = new ResizeObserver(onChange)
+      if (rolloverSurface.current) resize.observe(rolloverSurface.current)
+      return () => { stop(); resize.disconnect() }
+    }
+  } : undefined, [pendingLayout, rollovers.length > 0])
+  const memberInput = motePresentation.moteInputIntent === 'member' || Boolean(moteWorkface?.memberIntent)
   const openRollover = (entry: AgentSteerQueueEntry) => {
     if (!entry.mainRollover || !moteWorkface?.startRollover) return
-    rolloverHandled.current = entry.operationId
-    moteWorkface.startRollover({ sessionId, decision: entry.mainRollover, query: { operationId: entry.operationId, prompt: entry.text,
+    const accepted = moteWorkface.startRollover({ sessionId, decision: entry.mainRollover, query: { operationId: entry.operationId, prompt: entry.text,
       ...(entry.sourceChannel ? { sourceChannel: entry.sourceChannel } : {}), ...(entry.inputImages ? { inputImages: [...entry.inputImages] } : {}) } })
+    if (accepted) { rolloverHandled.current = entry.operationId; feedback.dismiss() }
+    else feedback.report('这条输入属于原 Mote，当前页面未接纳。原问题和操作已保留；返回所属 Mote 后继续。')
   }
   useEffect(() => {
-    if (visible && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
-  }, [visible, queuedEntries, moteWorkface?.startRollover])
+    if (visible && !memberInput && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
+  }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
@@ -278,7 +298,7 @@ export function AgentSessionComposer({
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
-    <SessionMailbox pendingLayout={pendingLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+    <SessionMailbox pendingLayout={deliveryLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
@@ -337,7 +357,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{rollovers.length > 1 && moteWorkface?.startRollover ? <details><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <button key={entry.operationId} type="button" onClick={() => openRollover(entry)}>{entry.text.slice(0, 80)} · 接到新对话</button>)}</details> : null}</>} mailbox={mailbox}
+    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}

@@ -345,7 +345,7 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   const layout = current.layouts[SCRATCH_WORKSPACE_ID]
   const resolvedTopicId = pmoTeamsTopicFloatingTargetTopicId(next, current.tabs)
   const resolvedTabId = pmoTeamsTopicFloatingTargetTabId(next, current.tabs, layout, current.agentFocus.pmo.sessionId)
-  const isOpening = !tabId && !suppliedReference || !previous.open || resolvedTopicId !== pmoTeamsTopicFloatingTargetTopicId(previous, current.tabs) ||
+  const isOpening = !tabId && !suppliedReference || !previous.open || Boolean((tabId || suppliedReference) && previous.conversationIntent !== 'member') || resolvedTopicId !== pmoTeamsTopicFloatingTargetTopicId(previous, current.tabs) ||
     resolvedTabId !== pmoTeamsTopicFloatingTargetTabId(previous, current.tabs, layout, current.agentFocus.pmo.sessionId) ||
     Boolean(suppliedReference && (!previous.reference || !sameWorkbenchProjectionSelection(suppliedReference, previous.reference)))
   if (isOpening) {

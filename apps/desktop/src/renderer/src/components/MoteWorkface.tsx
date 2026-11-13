@@ -69,8 +69,9 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     setLocal({ owner, section: 'discussion', member: false, original: false, start: true })
   }
   const startRollover = useCallback((rollover: MoteRolloverStart) => {
-    if (JSON.stringify(rollover.decision.target) !== JSON.stringify(dialogue?.target)) return
+    if (JSON.stringify(rollover.decision.target) !== JSON.stringify(dialogue?.target)) return false
     setLocal({ owner, section: 'discussion', member: false, original: false, start: true, rollover })
+    return true
   }, [owner, dialogue?.target])
   function openMain(next: import('@agentmux/core/mote-preferences').MoteDefaultConversation) {
     if (!scope || !confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) || !selectReference(next, 'main')) return
