@@ -8,6 +8,7 @@ import { GOAL_GROUP_LABELS, GoalStageMark, type GoalGroup } from '../lib/goal-gr
 import { DEMAND_STATUS_LABELS, type DemandProjection, type DemandStatus } from '../lib/global-demand-board'
 import { useAppStore } from '../store'
 import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
+import { GoalPlanRing } from './GoalPlanGraph'
 import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -39,7 +40,7 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <GoalStageMark stage={stage} />
-    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalResponsibilitySummary demand={demand} compact /></div>
+    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts"><GoalPlanRing demand={demand} />{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalResponsibilitySummary demand={demand} compact /></div>
     {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
   </div>
 }
