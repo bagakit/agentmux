@@ -84,8 +84,9 @@ import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
-import {DesktopSpatialPersistence,SpatialConflictError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
+import {DesktopSpatialPersistence,SpatialConflictError,SpatialSaveStalledError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
+import { workfaceSaveRecorder } from './lib/workface-save-diagnostics'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
@@ -5663,12 +5664,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if(api.spatial) {
         // A conflict is a confirmed save that kept another writer's value for named items; it is not an
         // unconfirmed save. It gets its own notice per conflicting key set, so it never blocks Quit.
-        const spatialOwner = new DesktopSpatialPersistence(api.spatial,error=>error instanceof SpatialConflictError
-          ? get().reportError(error,{kind:'process-degraded',summary:'Another writer changed workface items you also edited. Every other change was saved.',
+        const saveDiagnostics = workfaceSaveRecorder()
+        const spatialOwner: DesktopSpatialPersistence = new DesktopSpatialPersistence(api.spatial,error=>{
+          if (error instanceof SpatialConflictError) return get().reportError(error,{kind:'process-degraded',summary:'Another writer changed workface items you also edited. Every other change was saved.',
             event:{source:'workface-save-conflict',key:error.conflicts.map(conflict=>conflict.key).join('\n')}})
-          : get().reportWorkbenchSaveFailure(error))
+          if (error instanceof SpatialSaveStalledError) saveDiagnostics.stalled(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
+          get().reportWorkbenchSaveFailure(error)
+        })
         // A stall uses the existing unconfirmed-save warning and Retry; recovery clears only that warning.
         spatialOwner.onRecovered = () => {
+          saveDiagnostics.recovered(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
           if (coreSpatialPersistence === spatialOwner && get().workbenchSaveWarningOwner === 'workbench')
             useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
         }
