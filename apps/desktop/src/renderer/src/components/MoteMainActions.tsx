@@ -11,7 +11,6 @@ import { createMoteMain, continueMoteMainAction, inspectMoteMainAction, readMote
   type MoteMainActionReading, type MoteMainActionResult } from '../lib/mote-main-action'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { useWorkbenchDocument } from '../lib/workbench-document'
 
 const STAGE: Record<string, string> = { confirmed: '已确认', unconfirmed: '待核对', refused: '未接受', 'not-needed': '无需' }
 
@@ -25,15 +24,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   onQueryResult?: ((result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) => void) | undefined
   onResult?: ((result: MoteMainActionResult, mayNavigate: () => boolean) => void) | undefined
 }) {
-  const model = useMoteDialogueView(), ownerDocument = useWorkbenchDocument()
-  const activity = useRef(0)
-  useEffect(() => {
-    const changed = () => { activity.current++ }
-    const events = ['pointerdown','keydown','input','wheel'] as const
-    for (const event of events) ownerDocument.addEventListener(event, changed, { capture: true, passive: true })
-    ownerDocument.defaultView?.addEventListener('blur', changed)
-    return () => { for (const event of events) ownerDocument.removeEventListener(event, changed, true); ownerDocument.defaultView?.removeEventListener('blur', changed) }
-  }, [ownerDocument])
+  const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [busy, setBusy] = useState(false), [generation, setGeneration] = useState(0)
   const identity = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings))
@@ -52,14 +43,13 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     const token = {}; lifetime.current = token
     setReading(null); setResult(null); setIssue(null); setBusy(false)
     if (!active) return
-    const readActivity = activity.current
     void readMoteMainAction(scope).then(async source => {
       if (lifetime.current !== token) return
       setReading(source); setIssue(source.issue)
       const retained = useAppStore.getState().moteMainCreationReferences[identity]
       if (retained || source.pendingOperationId || source.pendingStarts.length === 1) {
         const prior = await inspectMoteMainAction(scope, source.pendingOperationId ?? (source.pendingStarts.length === 1 ? source.pendingStarts[0]! : retained!.operationId))
-        if (lifetime.current === token) { setResult(prior); onResult?.(prior, () => lifetime.current === token && activity.current === readActivity) }
+        if (lifetime.current === token) { setResult(prior); onResult?.(prior, () => lifetime.current === token) }
         return
       }
     }).catch(cause => { if (lifetime.current === token) setIssue(presentError(cause)) })
@@ -84,13 +74,14 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   }, [menuOpen, menuTrigger, menuPanel])
   async function run(operation: () => Promise<MoteMainActionResult>, token = lifetime.current, navigate = false, query?: MoteMainDeferredInput) {
     if (flight.current) return
-    const activityAtStart = activity.current
     flight.current = true; setBusy(true); setIssue(null)
     try {
       const value = await operation()
       if (lifetime.current !== token) return
       setResult(value); setIssue(value.issue)
-      const mayNavigate = () => lifetime.current === token && activity.current === activityAtStart
+      // Landing belongs to this view's lifetime: leaving this Mote's Discussion ends it, and the host guards its
+      // own draft edits. Reading, scrolling, clicking elsewhere or switching apps while waiting does not cancel it.
+      const mayNavigate = () => lifetime.current === token
       onResult?.(value, mayNavigate)
       if (query) onQueryResult?.(value, query, mayNavigate)
       if (value.binding === 'confirmed') {
@@ -98,11 +89,12 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
         const fresh = await readMoteMainAction(scope)
         if (lifetime.current === token) setReading(fresh)
         if (navigate && value.reference && onCreated) {
-          if (lifetime.current === token && activity.current === activityAtStart && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(value.reference)) onCreated(value.reference)
+          if (lifetime.current === token && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(value.reference)) onCreated(value.reference)
         }
       }
     } catch (cause) { if (lifetime.current === token) setIssue(presentError(cause)) }
-    finally { flight.current = false; if (lifetime.current === token) setBusy(false) }
+    // The flight is over whichever view lifetime is current: a remount during it must not keep busy forever.
+    finally { flight.current = false; setBusy(false) }
   }
   if (!active) return null
   const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : [])])]
