@@ -205,6 +205,23 @@ describe('workspace media stream leases', () => {
     expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
   })
 
+  it('a reader that leaves before its bytes start is not kept by the lease', async () => {
+    const f = await fixture(), opened = await ready(f)
+    const lease = (f.streams as unknown as { leases: Map<string, { responses: Set<unknown>; media: { current(): Promise<string> } }> }).leases.get(opened.id)!
+    const real = lease.media.current.bind(lease.media)
+    let entered!: () => void, proceed!: () => void
+    const inside = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { proceed = resolve })
+    lease.media.current = async () => { entered(); await gate; return await real() }
+    const req = request(new URL(opened.url), () => {})
+    req.on('error', () => {}); req.end()
+    await inside
+    req.destroy()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    proceed()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(lease.responses.size).toBe(0)
+  })
+
   it('reports a deleted file as deleted', async () => {
     const f = await fixture()
     const deleted = await ready(f)
