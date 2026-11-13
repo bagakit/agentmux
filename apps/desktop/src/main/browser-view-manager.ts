@@ -56,6 +56,7 @@ import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
+import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
@@ -407,6 +408,8 @@ export class BrowserViewManager {
   onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
+  /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
+  private readonly inputScales = new WeakMap<WebContents, number>()
   /** Optional App appearance projection; the receiver rechecks the original native document. */
   capsuleDocumentReady: ((browserId: string) => void) | undefined
   /** Facts from real embedded page owners; external tabs never enter this registry. */
@@ -3219,6 +3222,8 @@ export class BrowserViewManager {
     const dispatch = createBrowserPageDispatch({
       session,
       beforeAction,
+      beginNativeInput: () => this.beginAgentInput(entry, observingView),
+      inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
       ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before download.')
@@ -3999,6 +4004,8 @@ export class BrowserViewManager {
       origin: () => view.getBounds()
     })
     contents.on('input-event', (_event, input) => {
+      // Main's own Agent input is trusted and emits this event too. Only its receipt says who sent it.
+      if (isOwnDispatch(contents, input)) return
       if (!BROWSER_PASSIVE_INPUT_TYPES.has(input.type)) this.markResourceRisk(entry, view, 'document-used')
       if (this.owns(entry, view) && !this.agentOwnsInput(entry) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
@@ -4491,6 +4498,7 @@ export class BrowserViewManager {
     const size = browserViewportSize(viewport)
     if (size === null) {
       contents.disableDeviceEmulation()
+      this.inputScales.delete(contents)
       return
     }
     // Desktop emulation includes page zoom in its layout size. Compensate locally:
@@ -4513,6 +4521,28 @@ export class BrowserViewManager {
       viewSize,
       scale
     })
+    // `Input.*` coordinates are in the emulated view's units: desktop layout already includes page zoom,
+    // a mobile layout does not. Recorded here so dispatch uses what was applied, not a second derivation.
+    this.inputScales.set(contents, size.screenPosition === 'desktop' ? scale : scale / zoom)
+  }
+
+  /**
+   * Opens Main's own-dispatch receipt for one Agent native input on the exact page it targets.
+   *
+   * A pending element picker belongs to a person. It accepts trusted clicks and would both swallow
+   * the Agent's click and report it as the person's choice, so it is retired before input is sent,
+   * exactly as an explicit cancel does. If the in-page removal cannot be confirmed the click still
+   * goes ahead: selectElement refuses any answer once its operation was retired here, and a healthy
+   * page is not blocked by a picker cleanup.
+   */
+  private async beginAgentInput(entry: BrowserEntry, view: WebContentsView): Promise<BrowserOwnDispatch> {
+    if (this.owns(entry, view) && entry.selectionOperation !== null) {
+      entry.selectionOperation = null
+      const revision = ++entry.selectionRevision
+      await view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_SELECTION_WORLD_ID,
+        [{ code: buildCancelBrowserElementSelectionScript(revision) }]).catch(() => {})
+    }
+    return beginOwnDispatch(view.webContents)
   }
 
   private clearFavicon(entry: BrowserEntry, keepImage = false): void {
@@ -4750,6 +4780,8 @@ export class BrowserViewManager {
         try { this.emit(entry) } catch { /* Native completion remains authoritative if projection is unavailable. */ }
       }
     }))
+    // No own-dispatch check here: Main sends Agent input to the page's WebContents, never to its shield,
+    // so everything this listener sees is a person's. Asking with the page's receipt would drop it.
     shield.contents.on('input-event', (_event, input) => {
       if (this.inputSurfaces.get(page) !== surface || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)

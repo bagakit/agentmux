@@ -16,6 +16,8 @@ import type { BrowserResultArtifactReference, BrowserResultContext, BrowserResul
 import { extractBrowserStructuredOutput, parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
+import type { BrowserCdpSender } from './browser-page-snapshot.js'
+import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -66,6 +68,14 @@ export type BrowserPageContext = {
   structuredOutput?: { source(): BrowserResultContext; isCurrent(navigationId: string): boolean }
   uploads?: { store: BrowserUploads; context: () => Omit<BrowserUploadContext, 'target'> }
   downloads?: { store: BrowserDownloads; context: () => BrowserDownloadContext; signal: AbortSignal }
+  /**
+   * Begins one action's native input on the original page under Main's own-dispatch receipt.
+   * Main's input consumers ask that receipt, not `isTrusted`, who sent an input (browser-own-dispatch.ts).
+   * Absent (a shared external tab) means the commands are sent without a Main receipt.
+   */
+  beginNativeInput?(): Promise<BrowserOwnDispatch>
+  /** Page CSS pixels → `Input.*` coordinates under the execution Viewport Main actually applied. Absent means 1. */
+  inputScale?(): number
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
@@ -97,6 +107,55 @@ const RESTORE_FOCUS_SNIPPET = `
     if (previous instanceof HTMLElement) previous.focus()
     else if (acted instanceof HTMLElement) acted.blur()
   }`
+
+/**
+ * Scroll before reading geometry. `instant`, because a page with `scroll-behavior: smooth` would still
+ * be moving the box when its quad is read, and the press would land where the element used to be.
+ */
+const SCROLL_INTO_VIEW = 'function () { this.scrollIntoView({block: "center", inline: "center", behavior: "instant"}) }'
+
+/** Isolated world for the geometry checks, so page scripts cannot patch `contains`, `labels` or `matches`. */
+export const BROWSER_NATIVE_INPUT_WORLD = 'agentmux-native-input'
+
+/**
+ * Is the topmost node at the click point this target? It counts when it is the target, inside it
+ * (crossing shadow roots) or inside one of its labels: a label click activates its control, which is
+ * how a styled checkbox hidden behind its label is normally clicked.
+ */
+const OWNS_HIT_DECLARATION = `function (hit) {
+  const self = this instanceof Element ? this : this.parentElement;
+  if (!(self instanceof Element)) return false;
+  const owners = [self, ...(self.labels ? Array.from(self.labels) : [])];
+  for (let node = hit; node; node = node.parentNode || node.host) if (owners.includes(node)) return true;
+  return false;
+}`
+
+/**
+ * Did Main's own pointer move land on this element? `:hover` is Chromium's hit-test result after the
+ * acknowledged move. It is false when the move was routed somewhere else, which is how an inaccurate
+ * conversion into top-level coordinates is caught before anything is pressed.
+ */
+const POINTER_ON_DECLARATION = `function () {
+  const self = this instanceof Element ? this : this.parentElement;
+  return self instanceof Element && self.matches(':hover');
+}`
+
+/** Center of the first content quad with area. Inline boxes that wrap lines have several quads. */
+function quadCenter(quads: unknown): { x: number; y: number } | null {
+  if (!Array.isArray(quads)) return null
+  for (const quad of quads) {
+    if (!Array.isArray(quad) || quad.length !== 8 || !quad.every((value) => typeof value === 'number' && Number.isFinite(value))) continue
+    const q = quad as number[]
+    let doubled = 0
+    for (let index = 0; index < 4; index += 1) {
+      const next = (index + 1) % 4
+      doubled += q[index * 2]! * q[next * 2 + 1]! - q[next * 2]! * q[index * 2 + 1]!
+    }
+    if (Math.abs(doubled) < 1e-6) continue
+    return { x: (q[0]! + q[2]! + q[4]! + q[6]!) / 4, y: (q[1]! + q[3]! + q[5]! + q[7]!) / 4 }
+  }
+  return null
+}
 
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string') throw new TypeError(`${name} must be a string, got ${typeof value}`)
@@ -314,8 +373,8 @@ export function createBrowserPageDispatch(
     return await handleIn(fresh, heal.node.ref)
   }
 
-  /** 在一个句柄上跑一小段函数。动作全部走这条路——不是坐标，不是键鼠合成。 */
-  async function callOn(scope: BrowserPageActionScope | undefined, ref: string, declaration: string, extra: unknown[] = [], feedback?: { scroll: string; action: string } | 'observe'): Promise<unknown> {
+  /** Resolves the ref, records its semantic target and passes the first dispatch guard. Every action starts here. */
+  async function actionTarget(scope: BrowserPageActionScope | undefined, ref: string) {
     const { objectId, send, node, navigationId } = await handleFor(ref)
     const actionFeedback = scope?.feedback ?? context.actionFeedback
     const beforeAction = scope?.beforeAction ?? context.beforeAction
@@ -332,6 +391,142 @@ export function createBrowserPageDispatch(
       recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length })
     }
     guard()
+    return { objectId, send, node, guard, actionFeedback }
+  }
+
+  /** A failure that happened before any input reached the page; local recovery may retry it after a new snapshot. */
+  function notDispatched(message: string): BrowserLocalRecoveryFailure {
+    return new BrowserLocalRecoveryFailure(message, 'locator-changed', 'not-dispatched')
+  }
+
+  /**
+   * Where a native press on this target lands, in top-level `Input.*` coordinates, after proving the
+   * target is the topmost node at that point.
+   *
+   * Nothing is sent to the page here. A target without a box, one covered by another element, or one
+   * in a frame whose position in the top-level page cannot be established is refused before input.
+   */
+  async function nativePoint(ref: string, send: BrowserCdpSender, objectId: string, node: BrowserPageNode, world: number) {
+    const quads = await read<{ quads?: unknown }>(send, 'DOM.getContentQuads', { objectId })
+    const local = quadCenter(quads.value?.quads)
+    if (!local) throw notDispatched(`${ref} has no visible box to click${quads.reason}. Nothing was pressed; inspect the page or take a new snapshot().`)
+    const x = Math.round(local.x), y = Math.round(local.y)
+    const located = await read<{ backendNodeId?: number; frameId?: string }>(send, 'DOM.getNodeForLocation',
+      { x, y, includeUserAgentShadowDOM: false, ignorePointerEventsNone: false })
+    const hit = located.value
+    if (!hit?.backendNodeId) throw notDispatched(`The element at the center of ${ref} could not be checked${located.reason}, so whether it is covered is unknown. ` +
+      'Nothing was pressed; retry after a new snapshot().')
+    const covered = notDispatched(`${ref} is not the topmost element at its center: another element covers it, or its position could not be confirmed. ` +
+      'Nothing was pressed; close what covers it or take a new snapshot().')
+    if (hit.frameId && node.frameId && hit.frameId !== node.frameId) throw covered
+    const resolved = await send('DOM.resolveNode', { backendNodeId: hit.backendNodeId, executionContextId: world })
+      .catch(() => null) as { object?: { objectId?: string } } | null
+    const hitObject = resolved?.object?.objectId
+    if (!hitObject) throw covered
+    try {
+      const owned = await inWorld(send, objectId, OWNS_HIT_DECLARATION, [{ objectId: hitObject }])
+      if (owned !== true) throw covered
+    } finally { await send('Runtime.releaseObject', { objectId: hitObject }).catch(() => {}) }
+    if (!node.sessionId) return { x, y }
+    // Out-of-process frame: its quads are in its own document. Add the frame owner's content origin in
+    // the top-level document, and prove that origin is what the top-level hit test sees at the sum.
+    const owner = await read<{ backendNodeId?: number }>(session.sendCommand, 'DOM.getFrameOwner', { frameId: node.frameId })
+    const ownerId = owner.value?.backendNodeId
+    const box = ownerId === undefined ? owner
+      : await read<{ model?: { content?: number[] } }>(session.sendCommand, 'DOM.getBoxModel', { backendNodeId: ownerId })
+    const origin = (box.value as { model?: { content?: number[] } } | undefined)?.model?.content
+    const unconverted = (reason: string) => notDispatched(`The position of the frame holding ${ref} in the top-level page could not be established${reason}, ` +
+      'so a native press could land on the wrong element. Nothing was pressed; use an element of the top-level document or inspect the frame.')
+    if (!origin || origin.length < 2 || !Number.isFinite(origin[0]) || !Number.isFinite(origin[1])) throw unconverted(box.reason)
+    const top = { x: Math.round(x + origin[0]!), y: Math.round(y + origin[1]!) }
+    const topHit = await read<{ backendNodeId?: number }>(session.sendCommand, 'DOM.getNodeForLocation',
+      { ...top, includeUserAgentShadowDOM: false, ignorePointerEventsNone: false })
+    if (topHit.value?.backendNodeId !== ownerId) throw unconverted(topHit.reason)
+    return top
+  }
+
+  /**
+   * One read-only geometry command. A refusal or protocol error is returned as its reason, so a
+   * not-dispatched failure names what actually stopped it (for example a shared tab that does not
+   * allow the method) instead of a generic "could not be confirmed".
+   */
+  async function read<T>(sender: BrowserCdpSender, method: string, params: Record<string, unknown>): Promise<{ value?: T; reason: string }> {
+    try { return { value: await sender(method, params) as T, reason: '' } }
+    catch (error) {
+      // Protocol or bridge text, one line and bounded, so it cannot fake a new log record.
+      const text = (error instanceof Error ? error.message : String(error)).replace(/\p{White_Space}+/gu, ' ').trim().slice(0, 300)
+      return { reason: ` (${method}: ${text || 'no message'})` }
+    }
+  }
+
+  /** Run a declaration on a handle that lives in the native-input isolated world. Page text never becomes a fact here. */
+  async function inWorld(send: BrowserCdpSender, objectId: string, functionDeclaration: string, args: unknown[] = []): Promise<unknown> {
+    const response = await send('Runtime.callFunctionOn', { objectId, functionDeclaration, arguments: args, returnByValue: true })
+      .catch(() => null) as { result?: { value?: unknown }; exceptionDetails?: unknown } | null
+    return response && !response.exceptionDetails ? response.result?.value : undefined
+  }
+
+  /**
+   * A trusted native left click at the target's box: mouseMoved, mousePressed, mouseReleased with
+   * clickCount 1, sent on the top-level page. No trajectory, no delays.
+   *
+   * Order is the same as every other action: guard, scroll, guard, target feedback, guard. Then the
+   * geometry is proven, Main's own-dispatch bracket opens, the move is sent, and the press is sent
+   * only when the pointer is confirmed on the target. The page answers clicks itself, so there is no
+   * exceptionDetails to read; the receipt is the acknowledged release.
+   */
+  async function nativeClick(scope: BrowserPageActionScope | undefined, ref: string): Promise<undefined> {
+    const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
+    const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: SCROLL_INTO_VIEW,
+      awaitPromise: true, returnByValue: true }) as { exceptionDetails?: { text?: string } }
+    if (prepared.exceptionDetails) throw new Error(`The page threw while preparing ${ref}: ${pageAuthoredText(prepared.exceptionDetails.text)}`)
+    guard()
+    if (actionFeedback) {
+      await actionFeedback(node, send)
+      // Display work can yield to real takeover, navigation or stop. Recheck before the original action.
+      guard()
+    }
+    if (!node.frameId) throw notDispatched(`The document holding ${ref} has no frame identity, so its click point cannot be checked. Nothing was pressed; take a new snapshot().`)
+    const world = await send('Page.createIsolatedWorld', { frameId: node.frameId, worldName: BROWSER_NATIVE_INPUT_WORLD })
+      .catch(() => null) as { executionContextId?: number } | null
+    if (!Number.isInteger(world?.executionContextId)) throw notDispatched(`The document holding ${ref} could not be inspected for its click point. Nothing was pressed; retry after a new snapshot().`)
+    const isolated = await send('DOM.resolveNode', { backendNodeId: node.backendNodeId, executionContextId: world!.executionContextId })
+      .catch(() => null) as { object?: { objectId?: string } } | null
+    const target = isolated?.object?.objectId
+    if (!target) throw notDispatched(`${ref} could not be inspected for its click point. Nothing was pressed; take a new snapshot().`)
+    try {
+      const point = await nativePoint(ref, send, target, node, world!.executionContextId!)
+      const scale = context.inputScale?.() ?? 1
+      const x = point.x * scale, y = point.y * scale
+      guard()
+      const native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+      const mouse = (params: Record<string, unknown>) => native.input(() => session.sendCommand('Input.dispatchMouseEvent', params))
+      try {
+        // Beginning can yield (it first retires a person's pending element picker).
+        guard()
+        await mouse({ type: 'mouseMoved', x, y, button: 'none', buttons: 0 })
+        if (await inWorld(send, target, POINTER_ON_DECLARATION) !== true) {
+          throw notDispatched(`The pointer did not land on ${ref}, so it was not pressed. Inspect the page or take a new snapshot().`)
+        }
+        guard()
+        await mouse({ type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
+        try {
+          await mouse({ type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 })
+        } catch (error) {
+          throw new Error(`${ref} was pressed but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
+            'The click may or may not have happened; inspect the page before acting again.')
+        }
+      } finally { native.end() }
+    } finally { await send('Runtime.releaseObject', { objectId: target }).catch(() => {}) }
+    // This is an observation of the original acknowledged dispatch, including a
+    // download trigger. Its animation cannot delay or replace the action result.
+    try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
+    return undefined
+  }
+
+  /** 在一个句柄上跑一小段函数。click 以外的动作暂时还走这条路。 */
+  async function callOn(scope: BrowserPageActionScope | undefined, ref: string, declaration: string, extra: unknown[] = [], feedback?: { scroll: string; action: string } | 'observe'): Promise<unknown> {
+    const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
     if (actionFeedback && feedback !== 'observe') {
       if (feedback) {
         const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: feedback.scroll,
@@ -449,8 +644,7 @@ export function createBrowserPageDispatch(
             (input.maxBytes !== undefined && typeof input.maxBytes !== 'number')) throw new TypeError('Download budgets must be numbers.')
         const ref = requireString(args[0], 'ref')
         const receipt = await waitForBrowserDownload(context.downloads.store, context.downloads.context(),
-          async () => await callOn(scope, ref, 'function () { this.scrollIntoView({block: "center"}); this.click() }', [],
-            { scroll: 'function () { this.scrollIntoView({block: "center"}) }', action: 'function () { this.click() }' }),
+          async () => await nativeClick(scope, ref),
           { path: requireString(input.path, 'path'), signal: context.downloads.signal,
             ...(typeof input.timeoutMs === 'number' ? { timeoutMs: input.timeoutMs } : {}),
             ...(typeof input.maxBytes === 'number' ? { maxBytes: input.maxBytes } : {}) })
@@ -528,14 +722,9 @@ export function createBrowserPageDispatch(
 
       // ── 动作（全部按 ref） ─────────────────────────────────────────────
       case 'click':
-        // scrollIntoView 在前：视口外的元素 click() 仍然生效，但后续快照与截图会对不上 Agent
-        // 看到的东西。滚进来让"程序做的"和"人能看见的"是同一件事。
-        return await callOn(
-          scope,
-          requireString(args[0], 'ref'),
-          'function () { this.scrollIntoView({block: "center"}); this.click() }', [],
-          { scroll: 'function () { this.scrollIntoView({block: "center"}) }', action: 'function () { this.click() }' }
-        )
+        // A trusted native press at the element's box, not `this.click()`: pages that ignore
+        // synthetic events (isTrusted=false) then behave as they do for a person.
+        return await nativeClick(scope, requireString(args[0], 'ref'))
       case 'fillInput':
         // 派 input + change 两个事件：只设 value 的话，React/Vue 的受控输入完全看不见这次修改，
         // 表现为"填了但提交的是空的"（MEMORY「受控输入可静默变只读」是同一族的坑）。

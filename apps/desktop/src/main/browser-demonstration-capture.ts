@@ -7,6 +7,7 @@ import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
 import { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import { captureBrowserPageSnapshot, type BrowserPageCapture } from './browser-page-snapshot.js'
 import { BROWSER_SELECTION_WORLD_ID } from './browser-selection-script.js'
+import { isOwnDispatch, ownDispatchMark, ownDispatchSince } from './browser-own-dispatch.js'
 
 const STATE = '__agentMuxBrowserDemonstration'
 const MAX_EVENTS = 64
@@ -66,6 +67,8 @@ export class BrowserDemonstrationCapture {
   private flushAgain = false
   private warning: string | undefined
   private starting: Promise<BrowserDemonstrationDraft> | undefined
+  /** Main's own-dispatch mark at the last queue read; page events carry no provenance of their own. */
+  private ownInput = 0
 
   constructor(private readonly options: CaptureOptions) {}
 
@@ -91,6 +94,7 @@ export class BrowserDemonstrationCapture {
     this.token = mintCapabilityToken()
     this.active = true
     this.warning = undefined
+    this.ownInput = ownDispatchMark(contents)
     contents.on('input-event', this.onInput)
     contents.on('did-start-navigation', this.onNavigation)
     contents.on('did-finish-load', this.onLoaded)
@@ -146,7 +150,8 @@ export class BrowserDemonstrationCapture {
   }
 
   private readonly onInput = (_event: unknown, input: { type: string }): void => {
-    if (!this.active || !NATIVE_INPUTS.has(input.type)) return
+    // Agent input is trusted too; only Main's own receipt says it was not the person.
+    if (!this.active || !NATIVE_INPUTS.has(input.type) || isOwnDispatch(this.options.contents, input)) return
     const { browserId, recorder } = this.options
     const identity = this.options.getIdentity()
     recorder.noteNativeInput({ browserId, navigationId: identity.navigationId, type: input.type })
@@ -202,6 +207,16 @@ export class BrowserDemonstrationCapture {
       if (response.dropped) this.warn('Recording capture reached its event budget. Some events were omitted; review the draft before replay.')
       const events = response.events?.slice(0, MAX_EVENTS) ?? []
       if (!events.length) return
+      const { contents } = this.options
+      const agentInput = ownDispatchSince(contents, this.ownInput)
+      this.ownInput = ownDispatchMark(contents)
+      if (agentInput) {
+        // Main's own native input reached this page since the last read, and the queued trusted events
+        // cannot say whose they are. None is recorded as the person's; they are cleared, not replayed.
+        await this.clearEvents(token, events.map(event => event.id))
+        this.warn('Agent input reached this page while recording. Those steps were not recorded as a human demonstration; repeat them to record them.')
+        return
+      }
       const identity = this.identity!
       let snapshot: Promise<BrowserPageCapture> | undefined
       const getSnapshot = (): Promise<BrowserPageCapture> => {
@@ -217,8 +232,7 @@ export class BrowserDemonstrationCapture {
       }))
       for (const draft of await Promise.all(drafts)) if (draft) this.publish(draft)
       if (!this.live(generation)) return
-      const ids = events.map(event => event.id)
-      await this.inWorld(`(() => { const s = globalThis[${JSON.stringify(STATE)}]; if (s?.token === ${JSON.stringify(token)}) { const ids = new Set(${JSON.stringify(ids)}); s.events = s.events.filter(e => !ids.has(e.id)); s.dropped = 0; } })()`)
+      await this.clearEvents(token, events.map(event => event.id))
     } catch {
       if (this.live(generation)) this.warn('Recording events could not be read. The Browser remains usable; stop and start recording to retry.')
     } finally {
@@ -264,6 +278,10 @@ export class BrowserDemonstrationCapture {
     }
     this.warn('The recording isolated world could not be verified. Captured targets need review; the Browser remains usable.')
     return undefined
+  }
+
+  private async clearEvents(token: string, ids: number[]): Promise<void> {
+    await this.inWorld(`(() => { const s = globalThis[${JSON.stringify(STATE)}]; if (s?.token === ${JSON.stringify(token)}) { const ids = new Set(${JSON.stringify(ids)}); s.events = s.events.filter(e => !ids.has(e.id)); s.dropped = 0; } })()`)
   }
 
   private inWorld(code: string): Promise<unknown> {

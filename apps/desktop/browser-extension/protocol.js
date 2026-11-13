@@ -32,6 +32,7 @@ export const EXTERNAL_CDP_METHODS = Object.freeze([
   'CSS.enable', 'CSS.disable', 'CSS.getComputedStyleForNode',
   'DOM.enable', 'DOM.disable', 'DOM.getDocument', 'DOM.describeNode', 'DOM.resolveNode',
   'DOM.querySelector', 'DOM.querySelectorAll', 'DOM.getBoxModel', 'DOM.getContentQuads',
+  'DOM.getNodeForLocation', 'DOM.getFrameOwner',
   'DOM.getOuterHTML', 'DOM.focus', 'DOM.scrollIntoViewIfNeeded', 'DOM.setFileInputFiles',
   'DOM.setAttributeValue', 'DOM.removeAttribute', 'DOM.setNodeValue',
   'DOMSnapshot.captureSnapshot',
