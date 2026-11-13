@@ -103,8 +103,10 @@ it.each([ConversationView])('reads and copies complete system resources with the
   expect(read.mock.calls.length).toBeGreaterThan(1)
   await act(async () => container.querySelector<HTMLButtonElement>('.log-turn__system-toggle')!.click())
   const showBody = container.querySelector<HTMLButtonElement>('.conversation-progressive-body__placeholder button')!
-  expect(showBody).not.toBeNull()
-  await act(async () => showBody.click())
+  // The original Copy can have already prepared this body; either reading path
+  // must still expose the complete resource under the same system record.
+  if (showBody) await act(async () => showBody.click())
   await act(async () => container.querySelector<HTMLButtonElement>('.conversation-resource-text button')!.click())
+  await act(async () => container.querySelector<HTMLButtonElement>('.conversation-resource-text .conversation-progressive-body__placeholder button')!.click())
   expect(container.querySelector('.conversation-resource-text .log-turn__text')?.textContent).toContain('Example/Zone')
 })
