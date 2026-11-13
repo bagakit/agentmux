@@ -19,6 +19,15 @@ export type MoteMainRolloverPolicy = { kind: 'keep-current' } | { kind: 'idle'; 
 export type MoteMainTransitionMarker = { operationId: string; intentDigest: string; effectiveAt: number }
 export type MotePresencePreferences = { enabled: boolean; intervalMs: number }
 export const DEFAULT_MOTE_PRESENCE: Readonly<MotePresencePreferences> = Object.freeze({ enabled: true, intervalMs: 1_800_000 })
+/** A typed decimal minute count, as positive whole milliseconds, or null. Only plain decimals are read:
+ * an exponent or a hex prefix is not a duration someone typed. The product is rounded so binary floating
+ * point cannot reject an ordinary value such as 0.27, which Core then stores as an exact safe integer. */
+export function moteMinutesToMs(value: string, options: { wholeMinutes?: boolean } = {}): number | null {
+  const text = value.trim()
+  if (!(options.wholeMinutes ? /^\d+$/u : /^(?:\d+(?:\.\d*)?|\.\d+)$/u).test(text)) return null
+  const ms = Math.round(Number(text) * 60_000)
+  return Number.isSafeInteger(ms) && ms > 0 && (!options.wholeMinutes || ms >= 60_000) ? ms : null
+}
 export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
 export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('./continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
 export interface MoteQuickPreferencesPort {
