@@ -46,7 +46,7 @@ export function createBrowserProfileEnvironment(ports: {
         publish(profileId, { session: target, key, application: { status: 'applied', scope: 'session-defaults',
           userAgent: appliedUserAgent, acceptLanguages: [...acceptLanguages], unsupported: [...unsupported] } })
       } catch {
-        publish(profileId, { session: target, key, application: { status: 'unknown', scope: 'session-defaults', unsupported: [...unsupported],
+        publish(profileId, { ...(target ? { session: target } : {}), key, application: { status: 'unknown', scope: 'session-defaults', unsupported: [...unsupported],
           reason: 'The saved environment could not be confirmed in the original session. Existing pages remain available; retry by opening a new page in this Profile.' } })
         console.warn('The Browser Profile environment application is unconfirmed. Original pages remain available; inspect the Profile for its saved settings and application scope.')
       }
