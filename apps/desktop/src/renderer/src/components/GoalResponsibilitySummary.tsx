@@ -38,7 +38,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
         : observed.supervisor.state === 'unknown' ? <span className="goal-responsibility__notice">管理状态待确认</span>
         : observed.supervisor.state === 'missing' ? <span className="goal-responsibility__notice">缺少监督责任</span> : null}
     </div> : null}
-    {!observed ? <span className="goal-responsibility__pending">{current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite') ? '正在读取原执行责任…' : '尚无确认执行绑定'}</span> : null}
+    {!observed && (!compact || current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite')) ? <span className="goal-responsibility__pending">{current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite') ? '正在读取原执行责任…' : '尚无确认执行绑定'}</span> : null}
     {visible.map(row => <div className="goal-responsibility__execution" key={`${row.execution.kind}:${row.execution.operationId}`}>
       <div className="goal-responsibility__line"><span className="goal-responsibility__label">执行</span>{identity(row.execution.agentSessionId, row.execution.hostId)}
         <span className={`goal-responsibility__phase${row.alert ? ' goal-responsibility__phase--attention' : ''}`}>{GOAL_RESPONSIBILITY_LABELS[row.phase]}</span>
@@ -57,7 +57,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
     </div>)}
     {compact && rows.length > visible.length ? <span className="goal-responsibility__pending">另有 {rows.length - visible.length} 项原执行 · 详情可读</span> : null}
     {compact && hiddenAttention > 0 ? <span className="goal-responsibility__notice" role="status">另有 {hiddenAttention} 项责任待处理 · 详情可读</span> : null}
-    {observed && !rows.length ? <span className="goal-responsibility__pending">尚无确认执行绑定；负责人和历史会话不代替执行。</span> : null}
+    {observed && !rows.length && !compact ? <span className="goal-responsibility__pending">尚无确认执行绑定；负责人和历史会话不代替执行。</span> : null}
     <GoalPatrolControl demand={current} compact={compact} />
     {retained || issue || current.delegationObservationIssue ? <p className="goal-responsibility__reason" role="status">{issue ?? current.delegationObservationIssue ?? '责任事实正在刷新；保留最后确认内容。'}</p> : null}
   </div>
