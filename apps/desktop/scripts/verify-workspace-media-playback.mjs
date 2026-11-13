@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
+import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 /**
  * Real Electron check of Workspace media playback: the production player, preload and Main lease owner
@@ -26,7 +27,10 @@ const sourceFiles = ['apps/desktop/src/main/workspace-media-streams.ts', 'apps/d
   'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/media-player.ts',
   'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'apps/desktop/src/renderer/src/styles/media-player.css',
   'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'apps/desktop/src/shared/workspace-file-format.ts',
-  'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts']
+  'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts',
+  'apps/desktop/scripts/verify-workspace-media-playback.mjs', 'apps/desktop/scripts/package-smoke-context.mjs',
+  'apps/desktop/scripts/fixtures/workspace-media-playback/main.cjs', 'apps/desktop/scripts/fixtures/workspace-media-playback/entry.tsx',
+  'apps/desktop/scripts/fixtures/workspace-media-playback/preload.ts', 'apps/desktop/scripts/fixtures/workspace-media-playback/native-owner.ts']
 async function sources() { const out = {}; for (const file of sourceFiles) out[file] = sha(await readFile(join(repository, file))); return out }
 
 /** The production renderer's own Content-Security-Policy, read from the page the app loads. */
@@ -83,7 +87,9 @@ try {
   await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, build: { outDir: privateRoot, emptyOutDir: false, minify: false,
     ssr: false, lib: { entry: join(fixture, 'preload.ts'), formats: ['cjs'], fileName: () => 'preload.cjs' }, rollupOptions: { external: ['electron'] } } })
   const main = join(privateRoot, 'main.cjs'); await copyFile(join(fixture, 'main.cjs'), main)
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  const env = privatePackageSmokeEnvironment(process.env, { userData: join(profile, 'user-data'),
+    runtimeRoot: join(privateRoot, 'runtime'), readyFile: join(privateRoot, 'ready.json') })
+  for (const directory of [env.HOME, env.TMPDIR, join(profile, 'app-data')]) await mkdir(directory, { recursive: true })
   for (const phase of ['capture', 'restart']) {
     const lines = [], outcome = await runProbeProcess(require('electron'), [main, join(outDir, 'index.html'), profile, evidence, phase, nativeModule, workspace, process.execPath], { temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 240000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, phase + '-process.log'), lines.join('\n'))

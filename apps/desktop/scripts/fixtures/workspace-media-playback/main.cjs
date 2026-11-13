@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict'), http = require('node:http'), { spawn } = require('node:child_process')
 const [html, profile, evidence, phase, nativeModule, workspacePath] = process.argv.slice(2)
-app.setPath('userData', path.join(profile, 'user-data')); app.setPath('sessionData', path.join(profile, 'session-data'))
+const privatePaths = { home: process.env.HOME, appData: path.join(profile, 'app-data'),
+  userData: path.join(profile, 'user-data'), sessionData: path.join(profile, 'session-data') }
+for (const [name, directory] of Object.entries(privatePaths)) app.setPath(name, directory)
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private native host' }], executors: {},
   workspaces: [{ id: 'media-private', name: 'Media playback workspace', hostId: 'local', path: workspacePath, kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
@@ -201,6 +203,10 @@ async function restart() {
 }
 
 app.whenReady().then(async () => { try {
+  report.isolation = Object.fromEntries(Object.keys(privatePaths).map(name => [name, app.getPath(name)]))
+  assert.deepEqual(report.isolation, privatePaths, 'Electron keeps all four private profile paths')
+  assert.equal(process.env.AGENTMUX_AGENT_SESSION_STORE, path.join(privatePaths.userData, 'agent-sessions.json'))
+  assert.equal(process.env.AGENTMUX_MESSAGE_QUEUE_PATH, path.join(privatePaths.userData, 'global-messages.ndjson'))
   meter()
   const { WorkspaceFiles, WorkspaceMediaStreams, AgentMuxSpatialStateStore, WORKSPACE_FILE_INVALIDATED_CHANNEL } = await import(nativeModule)
   // The real Core spatial owner persists Tabs, Regions and layout across the two processes.
