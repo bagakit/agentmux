@@ -5,7 +5,7 @@ import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/co
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { SemanticIcon } from '../theme/icons.js'
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useContentCopyAction, ContentCopyIntentContext } from '../lib/use-content-copy-action.js'
 import { useClientUiPlatform, useConversationToolLabels, useMarkdownCopyText } from '../platform.js'
@@ -340,6 +340,9 @@ export function ConversationMessage({
   useLayoutEffect(() => () => traceDisclosure?.register(readingIdentity, null), [traceDisclosure?.register, readingIdentity])
   const expandedTraces = controlledTraces ?? traceDisclosure?.expandedTraces
   const onToggleTrace = controlledToggle ?? traceDisclosure?.onToggleTrace
+  // A process step whose body is one tool call or result opens straight to that payload.
+  const singleToolPart = parts.filter(part => part.kind === 'tool-call' || part.kind === 'tool-result').length === 1
+  const [collapsedTraces, setCollapsedTraces] = useState<ReadonlySet<string>>(() => new Set())
 
   const showOrigin = Boolean(inputOrigin && !isSystemContext && !(sources?.submissions?.length && inputSource?.kind === 'native') && (speaker?.role === 'external' || showInputSource || inputSource?.kind === 'captured' && inputSource.device))
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
@@ -487,8 +490,15 @@ export function ConversationMessage({
               <ConversationToolTrace sources={sources?.parts[index]} key={key} part={part} workspaceRoot={workspaceRoot}
                 copyIdentity={readingIdentity}
                 traceId={traceDisclosureKey(messageId, key)}
-                {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
-                {...(onToggleTrace ? { onToggle: (open) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {})} />
+                // Opening a process step already asked to read it: its only tool part shows its
+                // payload without a third disclosure. A later explicit collapse still wins.
+                {...(processContent && singleToolPart
+                  ? { expanded: !collapsedTraces.has(key) || Boolean(expandedTraces?.has(traceDisclosureKey(messageId, key))), onToggle: (open: boolean) => {
+                    setCollapsedTraces(current => { const next = new Set(current); if (open) next.delete(key); else next.add(key); return next })
+                    onToggleTrace?.(traceDisclosureKey(messageId, key), open)
+                  } }
+                  : { ...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {}),
+                    ...(onToggleTrace ? { onToggle: (open: boolean) => onToggleTrace(traceDisclosureKey(messageId, key), open) } : {}) })} />
             ) : part.kind === 'reasoning' ? (
               <ConversationReasoningTrace
                 active={active}
