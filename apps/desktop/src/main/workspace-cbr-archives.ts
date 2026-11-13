@@ -85,7 +85,9 @@ function readArchive(fd: number, signal: AbortSignal, selected?: string): Promis
       }
       if (path !== selected) { stream.resume(); stream.on('end', next); return }
       chunks = []; received = 0
-      stream.on('data', (bytes: Buffer) => {
+      stream.on('data', (value: unknown) => {
+        if (!(value instanceof Uint8Array)) { stop(error('The comic decoder returned a non-byte page payload.')); return }
+        const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength)
         received += bytes.length
         if (received > header.size!) { stop(error('The comic image exceeded its declared entry size.')); return }
         chunks.push(bytes)
