@@ -131,6 +131,9 @@
   --capture-chrome-line: rgba(255, 255, 255, .12); --capture-chrome-hover: rgba(255, 255, 255, .1); --capture-chrome-pressed: rgba(255, 255, 255, .16);
   --capture-chrome-shadow: 0 3px 12px rgba(0, 0, 0, .25); }
 .image-annotation-editor--capture .image-annotation-editor__canvas-area { background: transparent; }
+/* The canvas spans the whole display and takes keyboard focus on open; its selection border is the focus cue, so the
+   default focus ring would frame the entire screen. */
+.image-annotation-editor--capture .image-annotation-editor__viewport > canvas:focus { outline: none; }
 .image-annotation-editor__size-chip { position: absolute; z-index: 3; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--capture-chrome); color: var(--capture-chrome-text); font-size: 11px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .image-annotation-editor__capture-bar { position: absolute; z-index: 4; }
 /* Presses on the hint text still reach the frame beneath; only its Cancel button takes them. */
