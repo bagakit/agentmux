@@ -5,12 +5,12 @@ import { readDelimitedPreview } from '@agentmux/editor-extensions/engines/file-d
 import { fileSupportsInlinePreview } from '../src/renderer/src/lib/file-region-presentation'
 
 describe('shared file capabilities and mature data grammars', () => {
-  it('resolves composite Note identity before JSON, and all consumers agree on legal preview modes', () => {
-    expect(workspaceFileFormat('knowledge.note.json').sourcePreview).toBe('note')
-    expect(workspaceFileFormat('knowledge.note.json').defaultMode).toBe('preview')
+  it('resolves composite Note identity before Markdown, and all consumers agree on legal preview modes', () => {
+    expect(workspaceFileFormat('knowledge.note.md').sourcePreview).toBe('note')
+    expect(workspaceFileFormat('knowledge.note.md').defaultMode).toBe('preview')
     expect(workspaceFileFormat('notes.MDOWN').sourcePreview).toBe('markdown')
     expect(workspaceFileFormat('Windows\\notes.MD').extension).toBe('md')
-    for (const path of ['data.json', 'data.jsonc', 'data.csv', 'data.tsv', 'README.md', 'drawing.svg', 'knowledge.note.json']) {
+    for (const path of ['data.json', 'data.jsonc', 'data.csv', 'data.tsv', 'README.md', 'drawing.svg', 'knowledge.note.md']) {
       expect(fileSupportsInlinePreview(path)).toBe(true)
       expect(workspaceFileFormat(path).sourceEditable).toBe(true)
     }
