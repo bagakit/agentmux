@@ -149,10 +149,10 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   await first.cdp.call('Emulation.setDeviceMetricsOverride', { width: 750, height: 980, deviceScaleFactor: 1, mobile: false })
   await openMailbox(first.cdp, recipientPlace.to.regionId, 'user')
   const userPanel = `${base}.querySelector('[role="tabpanel"][id$="-user"]')`
-  await waitFor('the original User Messages source reader', () => first.cdp.evaluate(`(()=>{const b=${userPanel}.querySelector('.input-mailbox > .input-history__actions button');return Boolean(b&&!b.disabled)})()`))
+  await waitFor('the original User Messages source reader', () => first.cdp.evaluate(`(()=>{const b=${userPanel}.querySelector('[aria-label="Refresh inputs"]');return Boolean(b&&!b.disabled)})()`))
   // Observe a read cycle from the existing refresh action; initial false and failed empty pages cannot sign absence.
   await first.cdp.evaluate(`(()=>{const p=${userPanel};globalThis.__a2aUserReadBusy=[p.getAttribute('aria-busy')];globalThis.__a2aUserReadObserver=new MutationObserver(records=>{for(const record of records)globalThis.__a2aUserReadBusy.push(record.oldValue);globalThis.__a2aUserReadBusy.push(p.getAttribute('aria-busy'))});globalThis.__a2aUserReadObserver.observe(p,{attributes:true,attributeFilter:['aria-busy'],attributeOldValue:true})})()`)
-  await activate(first.cdp, `${userPanel}.querySelector('.input-mailbox > .input-history__actions button')`)
+  await activate(first.cdp, `${userPanel}.querySelector('[aria-label="Refresh inputs"]')`)
   await waitFor('the original User Messages read cycle', () => first.cdp.evaluate(`${userPanel}.getAttribute('aria-busy')==='false'&&globalThis.__a2aUserReadBusy.includes('true')`))
   const userReading = await first.cdp.evaluate(`(async()=>{const reference={hostId:'local',agentSessionId:${JSON.stringify(recipient.agentSessionId)}};
     const mailbox=await window.agentmux.sessions.inputMailbox(reference,{limit:100,maxBytes:4*1024*1024});

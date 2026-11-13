@@ -36,7 +36,7 @@ export function assertA2aReferenceUserReading(reading, recipient, nativeSource, 
   assert.equal(reading.view.busy, 'false'); assert.ok(reading.view.busyTransitions.includes('true'))
   assert.equal(reading.view.inputScope, JSON.stringify(['local', recipient.agentSessionId]))
   assert.equal(reading.view.sourceCount, 2)
-  assert.ok(reading.view.coverage.some(text => text.includes('已查完可用记录（本次读取）')))
+  assert.ok(reading.view.coverage.some(text => text.includes('Available history checked for this read.')))
   assert.deepEqual(reading.view.errors, [])
 }
 /** A one-way stop fence closes the spawn/registration race before ending an Inspector owner. */
