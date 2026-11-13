@@ -284,7 +284,7 @@ Settings 只持有[设置与观测入口的产品消费](behavior/settings-and-o
 
 第二个现有竖切薄接原 Toolkit Performance failure 的 executionId、原阶段和原保留状态，复用原只读 get 与公开 API/CLI，不启动采样、运行或复制存储。它检验没有 logId 的领域接入；latest-only 明确不是 archive。
 
-截图领域后续仍由原[截图 owner](../../apps/desktop/src/main/composer-screenshot.ts)记录 select/capture/save 的原阶段、primary/cleanup failure、有限原 cause 和准确 App/权限观察时刻，经 trusted IPC、产品、typed API/CLI 消费。截图不塞进投递 payload；不同 OS/协议触发检验通用边界，denied 不直接归因为用户未授权。
+截图领域后续仍由原[截图 owner](../../apps/desktop/src/main/screen-capture.ts)记录 select/capture/save 的原阶段、primary/cleanup failure、有限原 cause 和准确 App/权限观察时刻，经 trusted IPC、产品、typed API/CLI 消费。截图不塞进投递 payload；不同 OS/协议触发检验通用边界，denied 不直接归因为用户未授权。
 
 截图的 create-directory、spawn、close、stat/save 和 cleanup 也沿实际来源保留阶段；child PID/出生、exit code/signal、errno/syscall、stderr 范围和裁切仅在确已取得时报告。运行 App 身份沿启动时已核材料及核验时刻，失败处理时读到的权限不是 selector 开始时快照。code=0 且没有输出不证明取消，cleanup 错误不替换 primary；截图失败保留草稿和健康 Agent，公开查询不能绕过原 trusted capture 或权限确认。
 
