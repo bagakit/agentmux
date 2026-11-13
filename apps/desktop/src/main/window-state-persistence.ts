@@ -113,6 +113,40 @@ export function prepareWindowWorkbenchForQuit(window: BrowserWindow): Promise<vo
   return prepareWindowWorkbench(window, 'quit')
 }
 
+/**
+ * Closing the workbench window without quitting (macOS keeps the app running) discards its
+ * Renderer, and with it any user state still batched there. Hold the first close until the same
+ * checkpoint Quit uses has saved it, then close. A save that fails keeps the window open with the
+ * existing save warning; closing it again closes it. Quit owns its own checkpoint, so a close that
+ * is part of quitting passes straight through.
+ */
+export function registerWindowCloseCheckpoint(window: BrowserWindow, quitting: () => boolean): () => void {
+  let state: 'open' | 'saving' | 'closing' = 'open'
+  const onClose = (event: { preventDefault(): void; readonly defaultPrevented: boolean }): void => {
+    // Another owner that keeps the window (hiding it while detached windows remain) keeps its Renderer too.
+    if (state === 'closing' || quitting() || event.defaultPrevented) return
+    event.preventDefault()
+    if (state === 'saving') return
+    state = 'saving'
+    void prepareWindowWorkbench(window, 'quit').then(
+      () => { state = 'closing'; if (!window.isDestroyed()) window.close() },
+      (error: unknown) => { state = 'closing'; reportWorkbenchCloseFailure(window, error) })
+  }
+  window.on('close', onClose)
+  return () => { window.removeListener('close', onClose) }
+}
+
+function reportWorkbenchCloseFailure(window: BrowserWindow, error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error)
+  const message = `The window was kept open because saving the workbench is unconfirmed. Agent input was not disabled by this save request. Restore storage access or retry saving; closing the window again closes it without this save. ${detail}`
+  process.stderr.write(`${message}\n`)
+  if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+    void window.webContents.executeJavaScript(
+      `window.dispatchEvent(new CustomEvent('agentmux-workbench-save-error', { detail: ${JSON.stringify(message)} }))`
+    ).catch(() => {})
+  }
+}
+
 /** Keep the original window and healthy Runs when the presentation save step is unconfirmed. */
 export function reportWorkbenchQuitFailure(window: BrowserWindow, error: unknown): void {
   const detail = error instanceof Error ? error.message : String(error)

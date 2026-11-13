@@ -40,7 +40,7 @@ import { registerRendererCrashRecovery } from './renderer-crash-recovery.js'
 import { WindowGeometryStore } from './window-geometry-store.js'
 import { clampGeometryToVisibleArea, windowConstructorGeometry } from './window-geometry.js'
 import { liveVisibleAreas } from './window-visible-area.js'
-import { persistWindowGeometryForQuit, prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
+import { persistWindowGeometryForQuit, prepareWindowWorkbenchForQuit, registerWindowCloseCheckpoint, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -127,6 +127,8 @@ function startPrimaryInstance(): void {
   let ownerDisposal: Promise<void> | null = null
   let rendererUpdates: RendererUpdates | null = null
   let allowingQuit = false
+  // Set when a quit is requested; quit runs its own workbench checkpoint before any window closes.
+  let quitRequested = false
   let workbenchWindow: BrowserWindow | null = null
   let workbenchWindows: WorkbenchWindows | null = null
   let recoverInterface: (() => Promise<void>) | null = null
@@ -257,6 +259,7 @@ function startPrimaryInstance(): void {
     )
     registerWindowResizeEvents(window)
     registerWindowStatePersistence(window, windowGeometryStore)
+    registerWindowCloseCheckpoint(window, () => quitRequested)
     const reportStartupStage = (stage: string) => {
       if (process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT) process.stderr.write(`file_editing_startup_stage=${stage}\n`)
     }
@@ -534,7 +537,7 @@ function startPrimaryInstance(): void {
     const window = workbenchWindow
     if (window) {
       try { await prepareWindowWorkbenchForQuit(window) }
-      catch (error) { reportWorkbenchQuitFailure(window, error); return }
+      catch (error) { quitRequested = false; reportWorkbenchQuitFailure(window, error); return }
     }
     await workbenchWindows?.prepareQuit()
     try { await disposeOwners() }
@@ -552,6 +555,7 @@ function startPrimaryInstance(): void {
     app.quit()
   })
   app.on('before-quit', (event) => {
+    quitRequested = true
     if (allowingQuit) return
     event.preventDefault()
     void prepareQuit()
