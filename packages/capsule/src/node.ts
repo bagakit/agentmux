@@ -1465,6 +1465,8 @@ export class NodeCapsuleOwner implements CapsulePort {
         await durableMkdir(dirname(contentRoot))
         await copyTree(source, contentRoot)
       }
+      const recipient = params.target ??
+        (context?.caller?.agentSessionId ? { hostId: context.caller.hostId, agentSessionId: context.caller.agentSessionId } : undefined)
       let record: CapsuleRecord = {
         capsuleId,
         title: params.title ?? basename(source),
@@ -1480,7 +1482,9 @@ export class NodeCapsuleOwner implements CapsulePort {
         createdAt: now,
         updatedAt: now,
         ...(params.source ? { source: params.source } : {}),
-        ...(params.target ? { target: params.target } : {}),
+        // The recipient is fixed here: an exact target, else the authenticated creating Agent.
+        // A producer's source declaration never names one, and later reads never infer one.
+        ...(recipient ? { target: recipient } : {}),
         ...(context?.caller ? { caller: context.caller } : {}),
       }
       const content = await this.content(record)
