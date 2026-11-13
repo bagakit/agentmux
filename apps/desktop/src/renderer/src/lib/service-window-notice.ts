@@ -215,6 +215,24 @@ export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome
   } }
 }
 
+/**
+ * This Run's Hook observations are being lost on their way in. What still works comes first, then
+ * what is uncertain, then how it resolves. It resolves by itself: the Agent's next delivered Hook
+ * observation clears it, so there is nothing for the person to retry or resend.
+ */
+export function hookDeliveryServiceOutcome(session: SessionSnapshot): StepOutcome {
+  const loss = session.kind === 'agent' ? session.hookDeliveryObservation : undefined
+  if (!loss || loss.run.runId !== session.control.run.runId) return { completed: true }
+  const running = session.processState === 'running' && session.status.state !== 'disconnected'
+  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected'), step: {
+    label: `Native Hook observations (${loss.code})`,
+    degradedMode: `${running ? 'The Agent, its terminal and input remain usable.' : `The Run was last observed ${session.processState}.`} ${loss.accepted === false
+      ? 'Recent Hook observations were refused before AgentMux processed them, so the status shown here may lag behind the Agent.'
+      : 'Whether AgentMux recorded a recent Hook observation is unconfirmed, so the status shown here may lag behind the Agent.'}`,
+    restore: 'This clears when the next Hook observation from this Run is delivered. Nothing is replayed; you do not need to resend input.'
+  } }
+}
+
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
 

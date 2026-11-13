@@ -100,7 +100,7 @@ import {
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
-import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, hookDeliveryServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { runServiceProjection, useRunService } from '../lib/run-service-projection'
 import { terminalConnectionNotices } from '../lib/runtime-endpoint-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -2231,6 +2231,7 @@ export function TerminalView({
   const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session, nativeService, observationAvailable), observationAvailable)) ??
     (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session), observationAvailable)) : null)
   const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session), observationAvailable))
+  const hookDeliveryNotice = serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(session), observationAvailable))
   const connectionObservations = terminalConnectionNotices(session, connectionWarnings, nativeService, runServiceProjection.evidence(session))
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
@@ -2390,10 +2391,11 @@ export function TerminalView({
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
                 session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session, nativeService)]),
               hookIngress: session.kind === 'agent' ? JSON.stringify([session.hookIngressObservation?.phase, session.hookIngressObservation?.code, session.hookIngressObservation?.message]) : '',
+              hookDelivery: session.kind === 'agent' ? JSON.stringify([session.hookDeliveryObservation?.since, session.hookDeliveryObservation?.accepted, session.hookDeliveryObservation?.code]) : '',
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}
-            attachment={attachmentNotice} writeObservation={writeObservationNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice}
+            attachment={attachmentNotice} writeObservation={writeObservationNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice} hookDelivery={hookDeliveryNotice}
             refreshingObservation={refreshingObservation}
             connectionObservations={connectionObservations}
             storageControl={session.control} continuationReason={continuationAbsence?.reason}

@@ -822,6 +822,7 @@ export function projectRuntimeEvent(
       observedNativeHandle: _observedNativeHandle,
       nativeSourceObservation: _nativeSourceObservation,
       hookIngressObservation: _hookIngressObservation,
+      hookDeliveryObservation: _hookDeliveryObservation,
       nativeConfirmation: _nativeConfirmation,
       ...current
     } = item
@@ -838,6 +839,9 @@ export function projectRuntimeEvent(
       ...(core.session.toolExecution ? { toolExecution: structuredClone(core.session.toolExecution) } : {}),
       ...(core.session.hookIngressObservation
         ? { hookIngressObservation: structuredClone(core.session.hookIngressObservation) }
+        : {}),
+      ...(core.session.hookDeliveryObservation
+        ? { hookDeliveryObservation: structuredClone(core.session.hookDeliveryObservation) }
         : {}),
       nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService ?? null : null,
       ...(timelineObservation && sameRun(timelineObservation.run, core.session.run) ? { timelineObservation } : {}),

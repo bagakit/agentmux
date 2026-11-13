@@ -4,7 +4,7 @@ import { continuitySupervisionPresentation } from './continuity-supervision'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
-import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
+import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, hookDeliveryServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
 import { observeAgentSession } from './agent-observation'
 import { activityObservationPresentation } from '@agentmux/client-ui/agent-presentation'
@@ -68,6 +68,12 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId]),
     cause: JSON.stringify([session.hookIngressObservation.phase, session.hookIngressObservation.code, session.hookIngressObservation.message]),
     observedAt: session.hookIngressObservation.observedAt, notice: hookNotice })
+  // One loss episode per Run is one occurrence; only escalation to unknown is a new cause to read.
+  const deliveryNotice = serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(session), observationAvailable))
+  if (deliveryNotice && session.hookDeliveryObservation) notices.push({ id: 'hook-delivery',
+    occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId, session.hookDeliveryObservation.since]),
+    cause: JSON.stringify([session.hookDeliveryObservation.accepted, session.hookDeliveryObservation.code]),
+    observedAt: session.hookDeliveryObservation.since, notice: deliveryNotice })
   if (session.creation?.initialPrompt === 'unconfirmed' || session.creation?.initialPrompt === 'unknown') notices.push({
     id: 'initial-prompt', occurrence: session.creation.createOperationId, notice: { kind: 'indeterminate', notice: {
       step: 'The original first prompt is unconfirmed', mode: 'The existing Agent Session remains available. Its first prompt will not be sent again automatically.',

@@ -271,6 +271,9 @@ function projectSession(
       ...(subject.agentSession.hookIngressObservation
         ? { hookIngressObservation: structuredClone(subject.agentSession.hookIngressObservation) }
         : {}),
+      ...(subject.agentSession.hookDeliveryObservation
+        ? { hookDeliveryObservation: structuredClone(subject.agentSession.hookDeliveryObservation) }
+        : {}),
       ...(subject.agentSession.nativeHandle
         ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
         : {}),
