@@ -56,3 +56,12 @@ it('marks moved here with Command E are unkept, so Retake confirms before it dro
   expect(api.retake, 'Retake waits for the in-place confirmation while handed-over marks exist nowhere else').not.toHaveBeenCalled()
   expect(node.textContent, 'the confirmation names the marks it would drop').toMatch(/Discard 1 annotation/)
 })
+
+it('a Command E handoff with no marks has nothing to lose, so Cancel closes at once', async () => {
+  // A real Command E handoff always carries the capture selection as its crop.
+  const api = await mount(true, async () => ({ status: 'cancelled' }), { initialState: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 } }, initialTool: 'select' })
+  const cancel = [...node.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Cancel')
+  expect(cancel, 'the window editor offers Cancel').toBeDefined()
+  await act(async () => cancel!.click())
+  expect(api.cancel, 'Cancel closes without a confirmation when no marks were handed over').toHaveBeenCalledOnce()
+})

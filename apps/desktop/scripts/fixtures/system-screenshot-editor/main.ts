@@ -118,7 +118,7 @@ async function run() {
   }), edit: (...args) => editor.edit(...args),
   // The person pressed ⌘E on the capture surface with the whole frame selected and no marks: the window editor takes over.
   present: async () => ({ state: 'expanded', image: nextImage, source: { rect: { x: 0, y: 0, width: nextImage.width, height: nextImage.height }, scale: 1, capturedAt: Date.now() },
-    handoff: { shapes: [], crop: { x: 0, y: 0, width: nextImage.width, height: nextImage.height }, tool: 'select' } }),
+    handoff: { shapes: [], crop: { x: 0, y: 0, width: nextImage.width, height: nextImage.height }, tool: 'select' }, delivered: () => {} }),
   reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
   const image = await sourceImage()
   const started = performance.now()

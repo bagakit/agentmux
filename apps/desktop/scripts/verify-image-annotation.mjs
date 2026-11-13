@@ -21,6 +21,7 @@ const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
 const overlayHost = 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', overlay = 'apps/desktop/test/capture-surface-view.test.tsx'
+const windowHost = 'apps/desktop/src/renderer/screenshot-editor/SystemScreenshotEditorView.tsx', windowView = 'apps/desktop/test/system-screenshot-editor-view.test.tsx'
 const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
 const snapping = 'apps/desktop/test/image-annotation-snapping.test.ts'
 const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.tsx'
@@ -85,8 +86,17 @@ const specifications = {
       consumer: 'draws the leader only when it is long enough to read and never a stub between touching frames', failure: /a 3 point gap draws no leader/ }]
   },
   capture: {
-    tests: [capture, overlay, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
-    mutations: [{ label: 'capture-expand-external-link', source: component + 'CaptureToolbar.tsx',
+    tests: [capture, overlay, windowView, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    mutations: [{ label: 'window-handed-marks-kept', source: windowHost,
+      find: 'initialStateKept: input.initialState.shapes.length === 0,', replace: '', test: windowView,
+      consumer: 'marks moved here with Command E are unkept, so Retake confirms before it drops them', failure: /Retake waits for the in-place confirmation/ },
+    { label: 'capture-remembered-selection-hides-windows', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'lightWindow(!crop || suggested && !rectContains(crop, spot) ? windowAt(spot) : null)', replace: 'lightWindow(crop ? null : windowAt(spot))', test: capture,
+      consumer: 'outside an untouched remembered selection a window still lights and a click selects it', failure: /the front window lights outside the untouched remembered selection/ },
+    { label: 'capture-remembered-selection-blocks-window-click', source: component + 'ImageAnnotationEditor.tsx',
+      find: '&& (!crop.original || untouched) ? windowAt(crop.start)', replace: '&& !crop.original ? windowAt(crop.start)', test: capture,
+      consumer: 'outside an untouched remembered selection a window still lights and a click selects it', failure: /a click outside the untouched remembered selection selects the window/ },
+    { label: 'capture-expand-external-link', source: component + 'CaptureToolbar.tsx',
       find: "ExpandIcon = icon('layout.expand')", replace: "ExpandIcon = icon('action.open-external')", test: capture,
       consumer: 'draws every capture control with its own glyph, and Expand editor with the expand glyph rather than an external link', failure: /expanding stays in the editor/ },
     { label: 'capture-no-crop-delivery-allowed', source: component + 'ImageAnnotationEditor.tsx',
