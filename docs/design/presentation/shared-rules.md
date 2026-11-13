@@ -476,6 +476,7 @@ styles/
   goals.css  现有 Agent Goal 与任务约束表面
   goal-continuation.css  Goal 监督向导与连续推进控件（Goal 详情与 Mote 当前工作共用）
   goal-delegation.css  Goal 委派工作：报告与动作（Goal 详情与 Mote 当前工作共用）
+  goal-plan.css  Goal 计划图：依赖分列、节点卡片、评审证据与进度
   goal-finite-start.css  一次性任务入口：接收者选择与发起动作
   goal-responsibility.css  Goal 责任摘要与巡视（列表、详情与 Mote 共用）
   focus-workspace-stage.css  Focus 卡片派生动作的就地层，覆盖 Focus 工作区一侧
