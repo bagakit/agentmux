@@ -44,7 +44,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
   globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
+  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), on: vi.fn(), off: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
   safeStorage: { isAsyncEncryptionAvailable: async () => false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
@@ -71,7 +71,7 @@ import { parseAgentMuxCliInvocation } from '../../../../packages/core/src/agentm
 import { issueAgentCapability, hashAgentCapability } from '../../../../packages/core/src/agent-capability'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } } }))
 vi.mock('../../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
@@ -196,7 +196,7 @@ beforeEach(async () => {
   await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
-  const frame = { url: 'app://private-goal-fixture', framesInSubtree: [] }
+  const frame = { framesInSubtree: [] } as { url?: string; framesInSubtree: never[] }
   bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false, mainFrame: frame,
     getURL: () => frame.url, getOSProcessId: () => process.pid, isLoadingMainFrame: () => false, getZoomFactor: () => 1,
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
