@@ -199,6 +199,9 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   const root = document.documentElement
   if (!root) return false
   const host = document.createElement('div')
+  // Page dialogs and popovers live above every z-index. Keep this noninteractive
+  // decoration in that same document's top layer without taking page focus.
+  host.setAttribute('popover', 'manual')
   host.setAttribute('data-agentmux-browser-operation-feedback', '')
   host.setAttribute('data-operation-id', payload.operationId); host.setAttribute('data-navigation-id', payload.navigationId)
   host.setAttribute('data-phase', payload.phase); host.setAttribute('data-kind', payload.kind); host.setAttribute('aria-hidden', 'true')
@@ -210,7 +213,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   }
   const shadow = host.attachShadow({ mode: 'closed' })
   const sheet = new CSSStyleSheet()
-  const localCss = `:host,*{pointer-events:none;cursor:default;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}.pointer{width:18px;height:22px;transition:none}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{left:0;top:0;max-width:200px;transition:none}.label.complete{color:#c1cbc5}.amux-browser-agent-avatar{background:transparent}.amux-browser-agent-avatar img{width:100%;height:100%;object-fit:contain}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:#17231f;color:var(--amux-agent-color);font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`
+  const localCss = `:host,*{pointer-events:none;cursor:default;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}:host::backdrop{background:transparent!important;pointer-events:none!important}.pointer{width:18px;height:22px;transition:none}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{left:0;top:0;max-width:200px;transition:none}.label.complete{color:#c1cbc5}.amux-browser-agent-avatar{background:transparent}.amux-browser-agent-avatar img{width:100%;height:100%;object-fit:contain}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:#17231f;color:var(--amux-agent-color);font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`
   const updateStyle = (next: FeedbackPayload) => {
     preferences = next.preferences
     sheet.replaceSync(next.css + localCss + `.label{display:${preferences.showCursor && preferences.showCursorLabel ? 'flex' : 'none'}}`)
@@ -278,10 +281,17 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     const ripple = document.createElement('span'); ripple.className = 'amux-browser-agent-ripple'
     ripple.style.left = `${state.point.x}px`; ripple.style.top = `${state.point.y}px`
     effects.appendChild(ripple); rippleShadow.appendChild(effects); root.appendChild(rippleHost)
+    try {
+      rippleHost.showPopover()
+      if (!rippleHost.matches(':popover-open')) throw new Error('Click feedback could not enter the document top layer')
+    } catch (error) { removeRipple(); throw error }
     rippleTimer = setTimeout(removeRipple, next.preferences.clickDurationMs)
   }
   state.decorate(payload)
-  root.appendChild(host); placeLabel()
+  root.appendChild(host)
+  try { host.showPopover() } catch { state.hide('invalidate'); return false }
+  if (!host.matches(':popover-open')) { state.hide('invalidate'); return false }
+  placeLabel()
   if (point && pointer && history && preferences.showCursor && preferences.pointerTween && payload.moveMs > 0 && !media.matches && (history.point.x !== point.x || history.point.y !== point.y)) {
     motionOrigin = history.point
     // The action never awaits the browser's local animation or its finished promise.
