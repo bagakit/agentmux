@@ -23,6 +23,11 @@ Read only the matching local help:
   Profile and pages; site data, sign-ins, proxy passwords, human approvals and prior
   runtime history do not move. Use the returned new Profile ID to inspect, edit or
   open it. A missing reply leaves creation unknown; do not automatically repeat it.
+  Tags, folder assignment and pinned state are organization metadata, edited through
+  profile update. Discover the stable folder IDs in profile ls; folder create/rename/delete
+  stay under browser profile folder. Deleting a folder only unassigns its Profiles;
+  no Profile, Browser or website data is deleted. Copy carries tags and the same folder
+  assignment into the new identity, but does not pin it. Pinning grants no page input.
   A person or device can set a proxy sign-in with browser profile proxy-sign-in set
   --profile ID --input FILE|-; the JSON contains only username and password. Never put
   a password in command arguments. Managed Agents cannot set or clear sign-ins. The
