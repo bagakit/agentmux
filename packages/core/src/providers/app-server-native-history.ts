@@ -430,7 +430,12 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
   const questionAnswers = type === 'userMessage' ? codexQuestionAnswers(item.content) : undefined
   const messagePhase = type === 'agentMessage'
     ? knownValue(item.phase, { commentary: 'progress', final_answer: 'final' }) : undefined
+  // The app-server echoes the client id an input was submitted with. Core confirms it
+  // against the original durable claim before any adoption; this only reports the fact.
+  const nativeInput = type === 'userMessage' && id && turnId && typeof item.clientId === 'string' && item.clientId.length > 0
+    ? { source: { ...source }, semanticItemId: id, turnId, clientCorrelation: item.clientId } : undefined
   return { id, turnId, kind, contentParts: contentParts.map(part => ({ ...part, contentEligibility })),
+    ...(nativeInput === undefined ? {} : { conversation: { nativeInput } }),
     ...(messagePhase === undefined ? {} : { messagePhase }),
     ...(questionRequest === undefined ? {} : { questionRequest }),
     ...(questionDiagnostic === undefined ? {} : { questionDiagnostic }),
