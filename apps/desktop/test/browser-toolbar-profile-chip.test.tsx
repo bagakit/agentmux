@@ -84,12 +84,23 @@ describe('Browser toolbar Profile chip', () => {
     expect(port.switchProfile).not.toHaveBeenCalled()
   })
 
-  it('a refused switch returns to the original Profile and says it could not switch', async () => {
+  it('a refused switch returns to the original Profile, and Retry asks again for the same target', async () => {
     port.switchProfile.mockRejectedValueOnce(new Error('Take control first'))
     await mount()
     await openMenu()
     await act(async () => items()[0]!.click())
     expect(container.querySelector('.browser-profile-chip')?.getAttribute('aria-label')).toBe('Profile: Northwind client')
     expect(container.querySelector('.browser-profile-chip__failure')?.textContent).toContain('Couldn’t switch')
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('.browser-profile-chip__failure button')].find(button => button.textContent === 'Retry')!
+    await act(async () => retry.click())
+    expect(port.switchProfile).toHaveBeenNthCalledWith(2, 'b1', 'p-personal')
+    expect(container.querySelector('.browser-profile-chip__failure')).toBeNull()
+  })
+
+  it('says the Profile is unknown when the list cannot be read, instead of hiding it', async () => {
+    port.readProfiles.mockRejectedValueOnce(new Error('EACCES'))
+    await mount()
+    expect(container.querySelector('.browser-profile-chip--unknown')?.textContent).toBe('Profile unknown')
+    expect(container.querySelector('.browser-profile-chip--unknown')?.getAttribute('title')).toContain('EACCES')
   })
 })

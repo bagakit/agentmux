@@ -151,7 +151,7 @@ describe('Settings › Browser Profiles', () => {
   it('New Profile opens straight into naming the new Profile', async () => {
     const create = [...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('New Profile'))!
     await act(async () => create.click())
-    expect(port.createProfile).toHaveBeenCalledWith('Profile 3')
+    expect(port.createProfile).toHaveBeenCalledWith('Profile 1')
     expect(document.activeElement).toBe($('input[aria-label="Profile name"]'))
   })
 })
@@ -204,5 +204,48 @@ describe('Settings › Browser Profiles deletion', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
     expect(container.querySelector('.browser-profile-editor__name')?.textContent).toBe('Northwind client')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('saved Browser "Release notes"')
+  })
+})
+
+describe('Settings › Browser Profiles keeps what the person typed', () => {
+  const type = async (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+    const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    await act(async () => { Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+
+  it('reopens a refused rename with the typed name and a refused note with the typed note', async () => {
+    port.updateProfile.mockRejectedValueOnce(Object.assign(new Error('Browser Profiles changed since revision was read.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.browser-profile-editor__name')!.click())
+    await type(container.querySelector<HTMLInputElement>('input[aria-label="Profile name"]')!, 'Personal sign-ins')
+    await act(async () => container.querySelector('input[aria-label="Profile name"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Profile name"]')?.value).toBe('Personal sign-ins')
+
+    await act(async () => container.querySelector('input[aria-label="Profile name"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    port.updateProfile.mockRejectedValueOnce(new Error('EIO'))
+    await act(async () => container.querySelector<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await type(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!, 'For banking only')
+    await act(async () => container.querySelector('textarea[aria-label="Notes"]')!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+    expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Notes"]')?.value).toBe('For banking only')
+  })
+
+  it('names a new Profile with the lowest number not in use', async () => {
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    browserProfiles.reset()
+    port.set({ revision: 4, profiles: [personal, { ...client, label: 'Profile 1' }, { ...client, id: 'p-3', label: 'Profile 3' }] })
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    const create = [...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('New Profile'))!
+    await act(async () => create.click())
+    expect(port.createProfile).toHaveBeenCalledWith('Profile 2')
+  })
+
+  it('finds a Profile by its note or import source, and the editor follows the keyboard', async () => {
+    const filter = container.querySelector<HTMLInputElement>('input[type="search"]')!
+    await type(filter, 'launch qa')
+    expect([...container.querySelectorAll('[data-resource-row] strong')].map(node => node.textContent)).toEqual(['Northwind client'])
+    await type(filter, '')
+    const rows = [...container.querySelectorAll<HTMLButtonElement>('[data-resource-row]')]
+    await act(async () => { rows[0]!.focus(); rows[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(container.querySelector('.browser-profile-editor__name')?.textContent).toBe('Northwind client')
   })
 })
