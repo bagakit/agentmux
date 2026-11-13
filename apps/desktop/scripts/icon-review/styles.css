@@ -154,7 +154,7 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-famil
 .brand-hero::after{content:'';position:absolute;inset:auto 0 0 auto;width:62%;height:56px;background:linear-gradient(to top left,#0c0e12b3,transparent 70%);pointer-events:none}
 .brand-hero--launcher::after{display:none}
 .brand-hero .brand-colophon{position:absolute;z-index:1;right:12px;bottom:10px;color:#dfe6e1;font:500 10px/1 var(--mono);letter-spacing:.08em}
-.brand-realm__lineage{grid-column:1/-1;display:flex;gap:6px;margin:0 0 2px;color:var(--muted);font-size:12px}
+.brand-realm__lineage{grid-column:1/-1;margin:0 0 2px;padding-left:10px;border-left:2px solid var(--line);color:var(--muted);font-size:12px;line-height:1.5}
 .brand-hero[data-borrowed=true] img{filter:saturate(.82)}
 .brand-commons,.brand-ip,.brand-marks{display:grid;gap:14px}
 .brand-commons>header h3,.brand-ip>header h3,.brand-marks>header h3{margin:0 0 4px;font-size:15px;font-weight:600}

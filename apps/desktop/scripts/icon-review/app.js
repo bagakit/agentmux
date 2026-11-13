@@ -137,7 +137,7 @@ function renderInventory() {
   if(!directory&&$('#inspector').open)$('#inspector').close();
   if(directory&&!mobile()&&!$('#inspector').open)$('#inspector').show();
   $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;$('.theme-preview-tools').hidden=mode==='brand';$('#mobile-drafts').hidden=mode==='brand';
-  $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote'||mode==='brand';
+  $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote'||mode==='brand';$('.result-toolbar').hidden=mode==='brand';
   if(!directory){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
   window.history.replaceState(null,'','#'+mode);
   $('#search').placeholder=mode==='brand'?'搜索插画、头像或标志':mode==='motion'?'搜索自绘名称、静止设计、动效或用途':mode==='future'?'搜索候选名称、用途或定义来源':'搜索图标、功能、含义或语义 ID';
@@ -176,7 +176,7 @@ function renderBrand() {
   const heroCard=(realm,surface,place,colophon)=>{const hero=realm.heroes[surface];
     return `<figure class="brand-hero brand-hero--${place}" data-surface="${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy">${colophon?`<figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>`:''}</figure>`;};
   // Lineage is said once per realm, beside the heroes it explains, instead of on every card.
-  const lineage=realm=>realm.heroes.launch.borrowed?`<p class="brand-realm__lineage" data-lineage><span aria-hidden="true">↳</span>这个境还没有自己的大图，借原境的画：原境是所有境的祖先。</p>`:'';
+  const lineage=realm=>realm.heroes.launch.borrowed?`<p class="brand-realm__lineage" data-lineage>这个境还没有自己的大图，借原境的画：原境是所有境的祖先。</p>`:'';
   const commons=ThemeBridge.brandCommons().map(({group,items})=>({group,items:items.filter(item=>!needle||[item.id,item.title,item.file].join(' ').toLowerCase().includes(needle))})).filter(({items})=>items.length);
   const avatars=ThemeBridge.brandAvatars().filter(item=>!needle||[item.id,item.title,item.series].join(' ').toLowerCase().includes(needle));
   const marks=ThemeBridge.providerMarks().filter(item=>!needle||[item.id,item.label].join(' ').toLowerCase().includes(needle));
