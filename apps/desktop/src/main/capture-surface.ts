@@ -13,8 +13,6 @@ import { saveScreenshotPng } from './screenshot-files'
 
 /** Overlays are shown together once every display painted its frozen frame, or after this long at the latest. */
 const PRESENT_FALLBACK_MS = 1500
-/** macOS needs a moment after setOpacity(0) before the grab no longer contains the AgentMux windows. */
-const STEP_OUT_SETTLE_MS = 300
 
 /** One capture's consumer: its primary delivery, and whether ⌘E may move the marks to the window editor. */
 export type CaptureSurfaceSession = {
@@ -41,11 +39,16 @@ type Ports = {
   /** Gives the app that was in front at capture start its focus back. */
   returnFocus(): void
 }
-type Overlay = { window: BrowserWindow; input: CaptureSurfaceInput; engine: string | undefined; presented: boolean }
+/** `presentedMs`: since present(), when its renderer painted the frozen frame. */
+type Overlay = { window: BrowserWindow; input: CaptureSurfaceInput; engine: string | undefined; presented: boolean; presentedMs: number | null }
 type Active = {
   session: CaptureSurfaceSession
   overlays: Overlay[]
   capturedAt: number
+  /** performance.now() at present(); the timing line counts from here. */
+  startedAt: number
+  settleMs: number
+  framesMs: number | null
   /** The display whose overlay holds the selection; the others only show their frozen frame and cancel. */
   owner: number | null
   shown: boolean
@@ -93,7 +96,7 @@ export class CaptureSurface {
         else resolve(outcome)
       }
     })
-    const active: Active = { session, overlays: [], capturedAt: 0, owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
+    const active: Active = { session, overlays: [], capturedAt: 0, startedAt: performance.now(), settleMs: 0, framesMs: null, owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
     const changed = () => active.end(Object.assign(new Error('The display layout changed during this capture, so its selection no longer matches the screen. Take the screenshot again.'),
       { code: 'display_configuration_changed' }))
     // A work area change (Dock or menu bar) leaves every frozen frame where it was; bounds, scale or rotation do not.
@@ -113,10 +116,15 @@ export class CaptureSurface {
     active.faded = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
       .map(window => ({ window, opacity: window.getOpacity() })).filter(({ opacity }) => opacity > 0)
     for (const { window } of active.faded) window.setOpacity(0)
-    if (active.faded.length && process.platform === 'darwin') await new Promise(resolve => setTimeout(resolve, STEP_OUT_SETTLE_MS))
+    // Only a window that was on screen can be in the grab; with none faded the grab starts at once.
+    if (active.faded.length && process.platform === 'darwin') {
+      await new Promise(resolve => setTimeout(resolve, stepOutSettleMs()))
+      active.settleMs = since(active.startedAt)
+    }
     if (this.active !== active) return
     const frames = await this.ports.native().captureDisplays()
     if (this.active !== active) return
+    active.framesMs = since(active.startedAt)
     active.capturedAt = frames.capturedAt
     const displays = screen.getAllDisplays()
     let theme: CaptureSurfaceInput['theme']
@@ -135,7 +143,7 @@ export class CaptureSurface {
         alwaysOnTop: true, enableLargerThanScreen: true, title: 'Screenshot', ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
         webPreferences: { preload: join(import.meta.dirname, '../preload/capture-surface.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
       })
-      const overlay: Overlay = { window, input, engine: frame.engine, presented: false }
+      const overlay: Overlay = { window, input, engine: frame.engine, presented: false, presentedMs: null }
       active.overlays.push(overlay)
       raise(window, frame.frame)
       window.once('ready-to-show', () => raise(window, frame.frame))
@@ -156,6 +164,9 @@ export class CaptureSurface {
   private show(active: Active): void {
     if (this.active !== active || active.shown) return
     active.shown = true
+    // One line per capture, so a packaged build started from a terminal shows where the time before the first frame went.
+    console.info('capture-surface timing ' + JSON.stringify({ settleMs: active.settleMs, framesMs: active.framesMs,
+      presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: since(active.startedAt), displays: active.overlays.length }))
     for (const { window } of active.overlays) window.showInactive()
     const pointer = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
     const target = active.overlays.find(overlay => overlay.input.displayId === pointer) ?? active.overlays[0]
@@ -174,6 +185,7 @@ export class CaptureSurface {
     if (params?.requestId !== overlay.input.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'presented') {
       overlay.presented = true
+      overlay.presentedMs ??= since(active.startedAt)
       if (active.overlays.every(row => row.presented)) this.show(active)
       return
     }
@@ -306,3 +318,10 @@ function send(overlay: Overlay, event: CaptureSurfaceEvent): void {
   if (!overlay.window.isDestroyed()) overlay.window.webContents.send(CAPTURE_SURFACE_EVENT, event)
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+/** setOpacity(0) commits to WindowServer at the end of this run loop turn and is composited on the next refresh;
+ *  a second refresh covers a commit that just missed one. Counted on the slowest display, never shorter than two 60 Hz frames. */
+function stepOutSettleMs(): number {
+  const hz = Math.min(60, ...screen.getAllDisplays().map(display => display.displayFrequency).filter(frequency => frequency > 0))
+  return Math.ceil(2000 / hz)
+}
+function since(start: number): number { return Math.round(performance.now() - start) }
