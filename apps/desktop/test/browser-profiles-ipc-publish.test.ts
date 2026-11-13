@@ -27,7 +27,18 @@ function productionWiring(names: string[], scope: Record<string, unknown>): Reco
     if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && names.includes(node.arguments[0].text)) {
       found[node.arguments[0].text] = node.arguments[1]!.getText(parsed)
     }
-    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'browserProfiles.onChange') subscriptions.push(node.getText(parsed))
+    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'browserProfiles.onChange') {
+      // The proxy credential owner also observes metadata changes. Select the actual Renderer
+      // publication, rather than treating every original-owner observer as a UI subscription.
+      let publishes = false
+      const publication = (child: ts.Node) => {
+        if (ts.isCallExpression(child) && child.expression.getText(parsed) === 'contents.send' &&
+          child.arguments[0] && ts.isStringLiteral(child.arguments[0]) && child.arguments[0].text === 'browser:profilesChanged') publishes = true
+        ts.forEachChild(child, publication)
+      }
+      ts.forEachChild(node, publication)
+      if (publishes) subscriptions.push(node.getText(parsed))
+    }
     ts.forEachChild(node, visit)
   }
   visit(parsed)

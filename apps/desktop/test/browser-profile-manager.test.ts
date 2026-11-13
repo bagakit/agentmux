@@ -143,7 +143,7 @@ class FakeStore {
   nextCreatedId = CREATED_ID
   revision = 0
 
-  snapshot() { return { revision: this.revision, defaultProfileId: DEFAULT_ID, profiles: structuredClone(this.profiles) } }
+  snapshot() { return { revision: this.revision, defaultProfileId: DEFAULT_ID, folders: [], profiles: structuredClone(this.profiles) } }
   commit() { this.revision += 1; return this.snapshot() }
   async listProfiles() { return structuredClone(this.profiles) }
   async list() { return this.snapshot() }
@@ -303,7 +303,7 @@ describe('BrowserProfileManager', () => {
     store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
     await manager.createProfile('Work')
     expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
-    expect(heard).toEqual([{ revision: 1, defaultProfileId: DEFAULT_ID, profiles: manager.listProfiles() }])
+    expect(heard).toEqual([{ revision: 1, defaultProfileId: DEFAULT_ID, folders: [], profiles: manager.listProfiles() }])
     heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
     expect(manager.listProfiles()[0]!.label).toBe('Renamed elsewhere')
 

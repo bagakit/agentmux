@@ -85,7 +85,7 @@ describe('Browser Profile identity edits', () => {
     // Moving the default names its target only; an older list cannot make it conflict.
     await store.updateProfile(WORK_ID, { label: 'Work client' }, 0)
     const moved = await store.setDefaultProfile(WORK_ID)
-    expect(moved).toEqual({ revision: 2, defaultProfileId: WORK_ID, profiles: (await store.list()).profiles })
+    expect(moved).toEqual({ revision: 2, defaultProfileId: WORK_ID, folders: [], profiles: (await store.list()).profiles })
     expect(moved.profiles.map(p => [p.id, p.label, p.isDefault])).toEqual([[DEFAULT_ID, 'Default', false], [WORK_ID, 'Work client', true]])
     const created = await store.createProfile('Third')
     expect(created.snapshot.revision).toBe(3)
@@ -141,7 +141,7 @@ describe('Main Browser Profile owner', () => {
 
     expect(heard.map(snapshot => snapshot.revision)).toEqual([1, 2, 3, 4])
     // Each announcement is the whole committed list, exactly what a fresh read returns at that revision.
-    expect(heard[1]).toEqual({ revision: 2, defaultProfileId: WORK_ID, profiles: [
+    expect(heard[1]).toEqual({ revision: 2, defaultProfileId: WORK_ID, folders: [], profiles: [
       expect.objectContaining({ id: DEFAULT_ID, label: 'Default', isDefault: false }),
       expect.objectContaining({ id: WORK_ID, label: 'Northwind client', isDefault: true })] })
     expect(heard[2]!.profiles.map(p => p.id)).toEqual([DEFAULT_ID, WORK_ID, created.id])
