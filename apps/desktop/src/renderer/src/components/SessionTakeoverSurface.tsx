@@ -33,11 +33,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
   const host = config?.hosts.find(item => item.id === source.hostId)
   // A derived action's default Agent comes first and takes the initial focus; choosing still submits once.
   const preferred = source.derived ? (useAppStore.getState().config?.agentDerivedActions?.actions ?? []).find(action => action.id === source.derived!.id)?.executorId : undefined
-  const executors = useMemo(() => {
-    const all = executorsForHost(config, source.hostId ?? undefined, detections, inventory)
-    const first = all.find(item => item.id === preferred)
-    return first ? [first, ...all.filter(item => item !== first)] : all
-  }, [config?.executors, detections, inventory, host, source.hostId, preferred])
+  const executors = useMemo(() => executorsForHost(config, source.hostId ?? undefined, detections, inventory), [config?.executors, detections, inventory, host, source.hostId])
   const surface = useRef<HTMLElement>(null)
   const admitted = useRef(false)
   const mounted = useRef(true)
@@ -193,7 +189,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
           options={[{ value: '', label: 'Choose an existing destination' }, ...destinations]} />
         {!destinations.length ? <p>No existing Zone for this original execution Host and directory is confirmed. Keep the Agent and open its existing Project before taking over.</p> : null}
       </> : null}
-      <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed || closedRequest !== null || source.kind === 'session' && !destination}
+      <AgentExecutorPicker executors={executors} selected={selected} preferred={preferred} active={active && !closing} disabled={busy || unconfirmed || closedRequest !== null || source.kind === 'session' && !destination}
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
         {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed || closedRequest ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
