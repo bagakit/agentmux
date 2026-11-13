@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest } from '../../../packages/core/src/control-host.js'
-import { browserTaskCreateInput, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from '../../../packages/core/src/browser-task-control.js'
+import { browserTaskCreateInput, browserTaskImportInput, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from '../../../packages/core/src/browser-task-control.js'
 import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -260,6 +260,11 @@ describe('public task authoring consumes the original Main asset owner', () => {
       { operation: 'browser.task.create', browserId, input }, { operation: 'browser.task.create-inspect', browserId, input }]) {
       const request = parseAgentMuxControlRequest({ ...base, ...payload })
       await expect(useAppStore.getState().executeControl(request)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
+    }
+    const portable = browserTaskImportInput(browserId, { format: 'agentmux.browser-task', version: 1, source: { assetId: 'origin-asset', revision: 1 }, definition: { name: 'Portable', url, steps: [], parameters: [] } })
+    for (const payload of [{ operation: 'browser.task.export', browserId, assetId: 'original-asset', expectedRevision: 1 },
+      { operation: 'browser.task.import', browserId, input: portable }, { operation: 'browser.task.import-inspect', browserId, input: portable }]) {
+      await expect(useAppStore.getState().executeControl(parseAgentMuxControlRequest({ ...base, ...payload }))).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
     }
     const after = useAppStore.getState()
     for (const key of ['tabs', 'layouts', 'sessions', 'browserOpinionDrafts'] as const) expect(after[key]).toBe(before[key])
