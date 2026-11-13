@@ -58,3 +58,12 @@
 .browser-task-drag, .browser-task-gesture { min-width: 0; display: grid; gap: var(--sp-2); }
 .browser-task-drag > small, .browser-task-gesture > small { white-space: normal; overflow-wrap: anywhere; }
 .browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) .browser-task-step-failure { grid-template-columns: minmax(0, 1fr); }
+
+/* File bindings and dialog explanations stay inside their actual Browser details column. */
+.browser-task-asset .browser-rsi-replay__steps li:is([data-task-kind="upload"], [data-task-dialog]) { grid-template-columns: 20px minmax(0, 1fr); }
+.browser-task-asset .browser-rsi-replay__steps li:is([data-task-kind="upload"], [data-task-dialog]) > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
+.browser-task-file-dialog { min-width: 0; display: grid; gap: var(--sp-1); }
+.browser-task-file-dialog > small, .browser-task-dialog > small { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4; }
+.browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) :is(input, select) { box-sizing: border-box; max-width: 100%; }
+.browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure { display: flex; flex-wrap: wrap; }
+.browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure .browser-task-asset__field { flex: 1 1 150px; }

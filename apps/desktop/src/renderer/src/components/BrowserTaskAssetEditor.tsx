@@ -144,7 +144,7 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, recording, suggesti
     </div> : null}
     {draft ? <>
       <label className="browser-task-asset__field"><span>Name</span><TextInput aria-label="Task asset name" maxLength={240} value={draft.name} onChange={event => change({ ...draft, name: event.target.value })} /></label>
-      <ol className="browser-rsi-replay__steps">{draft.steps.length ? draft.steps.map((step, index) => <li key={step.id} data-task-kind={step.kind} className={!step.reviewed ? 'is-blocked' : undefined} data-task-step-id={step.id} data-task-has-path={draft.steps.some(item => item.kind === 'branch') && step.kind !== 'checkpoint' || undefined}>
+      <ol className="browser-rsi-replay__steps">{draft.steps.length ? draft.steps.map((step, index) => <li key={step.id} data-task-kind={step.kind} data-task-dialog={Boolean(step.dialog) || undefined} className={!step.reviewed ? 'is-blocked' : undefined} data-task-step-id={step.id} data-task-has-path={draft.steps.some(item => item.kind === 'branch') && step.kind !== 'checkpoint' || undefined}>
         <span className="browser-rsi-replay__step-number">{index + 1}</span>
         <span><strong>{step.kind === 'checkpoint' ? step.label || 'Human checkpoint' : step.kind === 'branch' ? step.label || 'Condition' : step.label || browserTaskStepSummary(step)}</strong>
           {step.label && step.kind !== 'checkpoint' && step.kind !== 'branch' ? <small data-task-step-summary>{browserTaskStepSummary(step)}</small> : null}

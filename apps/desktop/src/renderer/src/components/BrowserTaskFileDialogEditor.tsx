@@ -30,7 +30,7 @@ export function BrowserTaskFileDialogEditor({ dialogTypes, step, index, paramete
       onChange={event => update({ ...step, target: { role: '', name: '', ...step.target, [field]: event.target.value, ordinal: 1, count: 1 } })} /></label>)}
   </span>
   const dialog = step.dialog
-  return <details className="browser-task-asset__parameters" open={dialog ? true : undefined}>
+  return <details className="browser-task-asset__parameters browser-task-dialog" open={dialog ? true : undefined}>
     <summary>Dialog after click{dialog ? ` · ${dialog.action} ${dialog.type}` : ' · optional'}</summary>
     <small>Answer one expected dialog during this click. This does not approve a human checkpoint.</small>
     <label className="browser-task-asset__field"><span>Expected dialog</span><select aria-label={`Task step ${index + 1} dialog type`} value={dialog?.type ?? ''} onChange={event => {
