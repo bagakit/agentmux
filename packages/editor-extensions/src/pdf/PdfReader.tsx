@@ -41,6 +41,18 @@ function outlineEntries(items: OutlineNode[], entries: OutlineEntry[] = [], dept
   return { entries, limited }
 }
 
+/** Prepare code for a visible PDF without opening a source or creating a worker.
+ * Dynamic imports share their native in-flight load; the viewer must follow the engine's global setup. */
+export function preparePdfReader(signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.resolve(null)
+  return import('pdfjs-dist').then(async engine => {
+    if (signal?.aborted) return null
+    const components = await import('pdfjs-dist/web/pdf_viewer.mjs')
+    if (signal?.aborted) return null
+    return { engine, components }
+  })
+}
+
 /** Owns the reader, never the File or its original byte source. Hidden readers release their worker. */
 export function PdfReader({ source, name, visible = true }: { source: RandomAccessSource; name: string; visible?: boolean }) {
   const container = useRef<HTMLDivElement>(null), pages = useRef<HTMLDivElement>(null)
@@ -95,10 +107,9 @@ export function PdfReader({ source, name, visible = true }: { source: RandomAcce
     cancel.current = () => { update({ phase: 'cancelled' }); release() }
     // PDF.js's viewer reads globalThis.pdfjsLib during module evaluation.
     // The engine must finish initializing before the viewer can be imported.
-    void import('pdfjs-dist').then(async engine => {
-      if (disposed) return
-      const components = await import('pdfjs-dist/web/pdf_viewer.mjs')
-      if (disposed) return
+    void preparePdfReader(lifetime.signal).then(prepared => {
+      if (disposed || !prepared) return
+      const { engine, components } = prepared
       engine.GlobalWorkerOptions.workerSrc = workerUrl
       const eventBus = new components.EventBus()
       const failedPages = new Set<number>()
