@@ -319,6 +319,20 @@ describe('live playlist pacing', () => {
     expect(again.at - ended.at).toBeLessThan(500)
   })
 
+  it('a live playlist opened through a link answers a held reload as soon as its target changes', async () => {
+    const f = await fixture()
+    await f.put('hls/source/live.m3u8', live(0, '../live0.ts'))
+    await symlink('source/live.m3u8', join(f.root, 'hls/live.m3u8'))
+    const opened = await ready(f, 'hls/live.m3u8')
+    const first = await get(opened.url)
+    const pending = get(opened.url), started = Date.now()
+    setTimeout(() => { void f.put('hls/source/live.m3u8', live(1, '../live1.ts')) }, 300)
+    const changed = await pending
+    expect(changed.body.toString()).toBe(live(1, '../live1.ts'))
+    expect(changed.at - started).toBeLessThan(900)
+    expect(changed.at - first.at).toBeLessThan(1_400)
+  })
+
   it('never holds an unchanged master playlist reload', async () => {
     const f = await fixture()
     await f.put('hls/master.m3u8', ['#EXTM3U', '#EXT-X-STREAM-INF:BANDWIDTH=800000', 'v0/index.m3u8', ''].join('\n'))
