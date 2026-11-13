@@ -196,7 +196,7 @@ test('confirmed empty native clipboard preserves the old empty-text contract', a
 
 test('late capture keeps its typed result on the original operation', async () => {
   await fixture(async ({ connection }) => {
-    await assert.rejects(connection.request('captureScreenshot', { mode: 'selection' }, { operationId: 'capture-op', timeoutMs: 10 }), { code: 'operation_unknown' })
+    await assert.rejects(connection.request('captureScreenshot', { mode: 'display', displayId: 1 }, { operationId: 'capture-op', timeoutMs: 10 }), { code: 'operation_unknown' })
     await new Promise(resolve => setTimeout(resolve, 90))
     const receipt = connection.inspectOperation('capture-op')
     assert.equal(receipt.result.state, 'captured')
@@ -221,7 +221,7 @@ test('native convenience methods preserve clipboard text and typed cancellation'
     assert.equal(await desktop.readClipboardText(), ' \n原文\n ')
     await desktop.writeClipboardText(' \n原文\n ')
     assert.equal(calls.at(-1).params.data, ' \n原文\n ')
-    assert.deepEqual(await desktop.captureScreenshot(), { state: 'cancelled' })
+    assert.deepEqual(await desktop.captureScreenshot({ mode: 'display', displayId: 1 }), { state: 'cancelled' })
     await desktop.dispose()
   }, request => request.method === 'clipboardRead' ? { format: 'text', state: 'read', data: ' \n原文\n ', changeCount: 7 } : request.method === 'captureScreenshot' ? { state: 'cancelled' } : { state: 'written', format: 'text', byteLength: Buffer.byteLength(request.params.data), changeCount: 8 })
 })
@@ -252,7 +252,7 @@ test('invalid capture receipt does not become a cancellation', async () => {
   await fixture(async ({ connection }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
-    await assert.rejects(desktop.captureScreenshot(), { code: 'invalid_capture_result' })
+    await assert.rejects(desktop.captureScreenshot({ mode: 'display', displayId: 1 }), { code: 'invalid_capture_result' })
     await desktop.dispose()
   }, () => ({ state: 'failed' }))
 })
@@ -265,7 +265,7 @@ test('capture conveniences reject contradictory cancellation and wrong image for
     await fixture(async ({ connection }) => {
       const desktop = new NativeDesktop({})
       desktop.launch = async () => connection
-      await assert.rejects(desktop.captureScreenshot(), error => error.code === 'invalid_capture_result' && Boolean(error.operation?.operationId))
+      await assert.rejects(desktop.captureScreenshot({ mode: 'display', displayId: 1 }), error => error.code === 'invalid_capture_result' && Boolean(error.operation?.operationId))
       await desktop.dispose()
     }, () => result)
   }
@@ -275,109 +275,65 @@ test('capture outcome is a machine string, not string-coerced display data', asy
   await fixture(async ({ connection }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
-    await assert.rejects(desktop.captureScreenshot(), { code: 'invalid_capture_result' })
+    await assert.rejects(desktop.captureScreenshot({ mode: 'display', displayId: 1 }), { code: 'invalid_capture_result' })
     await desktop.dispose()
   }, () => ({ state: ['cancelled'] }))
 })
 
-test('editable selection requires the original opt-in and exact completion intent', async () => {
-  const image = { format: 'png', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 }
-  for (const params of [{ mode: 'selection' }, { mode: 'selection', allowEditing: false }, { mode: 'display', displayId: 1 }]) {
-    await fixture(async ({ connection }) => {
-      const desktop = new NativeDesktop({})
-      desktop.launch = async () => connection
-      const result = await desktop.captureScreenshot(params)
-      assert.deepEqual(result, { state: 'captured', screenshot: image })
-      await desktop.dispose()
-    }, () => ({ state: 'captured', screenshot: image }))
-  }
-  await fixture(async ({ connection }) => {
+test('selection reports that the host capture surface owns it', async () => {
+  const failure = { state: 'failed', error: { code: 'selection_moved_to_host', message: 'Region selection is provided by the AgentMux Desktop capture surface.' } }
+  await fixture(async ({ connection, calls }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
-    assert.deepEqual(await desktop.captureScreenshot({ mode: 'selection', allowEditing: true }), { state: 'cancelled' })
+    assert.deepEqual(await desktop.captureScreenshot({ mode: 'selection' }), failure)
+    assert.deepEqual(calls.at(-1).params, { mode: 'selection' })
     await desktop.dispose()
-  }, () => ({ state: 'cancelled' }))
-  for (const action of ['capture', 'edit']) {
-    await fixture(async ({ connection, calls }) => {
-      const desktop = new NativeDesktop({})
-      desktop.launch = async () => connection
-      const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true })
-      assert.equal(result.completionAction, action)
-      assert.deepEqual(calls.at(-1).params, { mode: 'selection', allowEditing: true })
-      await desktop.dispose()
-    }, () => ({ state: 'captured', screenshot: image, completionAction: action }))
-  }
-  for (const tool of ['rect', 'arrow', 'note', 'pixelate', 'text']) {
-    await fixture(async ({ connection }) => {
-      const desktop = new NativeDesktop({})
-      desktop.launch = async () => connection
-      const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true })
-      assert.equal(result.completionAction, 'edit')
-      assert.equal(result.editTool, tool)
-      await desktop.dispose()
-    }, () => ({ state: 'captured', screenshot: image, completionAction: 'edit', editTool: tool }))
-  }
-  for (const [params, result] of [
-    [{ mode: 'selection' }, { state: 'captured', screenshot: image, completionAction: 'edit' }],
-    [{ mode: 'selection', allowEditing: false }, { state: 'captured', screenshot: image, completionAction: 'capture' }],
-    [{ mode: 'display', displayId: 1 }, { state: 'captured', screenshot: image, completionAction: 'edit' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'annotate' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: ['edit'] }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', completionAction: 'edit' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'failed', error: { code: 'pixels_failed', message: 'Original capture failed' }, completionAction: 'capture' }],
-    [{ mode: 'selection' }, { state: 'captured', screenshot: image, editTool: 'rect' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'capture', editTool: 'arrow' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: 'ellipse' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: ['rect'] }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', editTool: 'rect' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1' } }],
-    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'capture', backdrop: { id: 'b-1' } }],
-    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: '' } }],
-    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: 'b-1' }],
-    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1', window: 3 } }],
-    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'cancelled', backdrop: { id: 'b-1' } }]
+  }, () => failure)
+})
+
+test('display frames keep each display exact and isolate a failed one', async () => {
+  const pixels = { png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }
+  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, isMain: true, ...pixels }
+  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, isMain: false, issue: 'display_not_found: gone' }
+  const frames = { state: 'captured', capturedAt: 1000, displays: [main, failed] }
+  await fixture(async ({ connection, calls }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    assert.deepEqual(await desktop.captureDisplays(), frames)
+    assert.equal(calls.at(-1).method, 'captureDisplays')
+    assert.deepEqual(calls.at(-1).params, {})
+    assert.equal(calls.at(-1).operationId, undefined)
+    await desktop.dispose()
+  }, () => frames)
+  const { png, ...withoutPixels } = main
+  for (const reply of [
+    null,
+    { ...frames, state: 'cancelled' },
+    { ...frames, capturedAt: 'now' },
+    { ...frames, displays: [] },
+    { ...frames, displays: [failed] },
+    { ...frames, displays: [main, { ...main }] },
+    { ...frames, displays: [{ ...main, displayId: 1.5 }] },
+    { ...frames, displays: [{ ...main, frame: { ...main.frame, x: null } }] },
+    { ...frames, displays: [{ ...main, frame: { ...main.frame, width: 0 } }] },
+    { ...frames, displays: [{ ...main, scale: 0 }] },
+    { ...frames, displays: [{ ...main, isMain: 1 }] },
+    { ...frames, displays: [{ ...main, issue: 'both' }] },
+    { ...frames, displays: [main, { ...withoutPixels, displayId: 3 }] },
+    { ...frames, displays: [main, { ...failed, png }] },
+    { ...frames, displays: [main, { ...failed, width: 1 }] },
+    { ...frames, displays: [main, { ...failed, issue: '' }] },
+    { ...frames, displays: [{ ...main, engine: undefined }] },
+    { ...frames, displays: [{ ...main, width: 2 }] },
+    { ...frames, displays: [{ ...main, png: 'not-png' }] }
   ]) {
     await fixture(async ({ connection }) => {
       const desktop = new NativeDesktop({})
       desktop.launch = async () => connection
-      await assert.rejects(desktop.captureScreenshot(params), error => error.code === 'invalid_capture_result' && Boolean(error.operation?.operationId))
-      await desktop.dispose()
-    }, () => result)
-  }
-})
-
-test('inline editing returns its backdrop and releases it by id', async () => {
-  const image = { format: 'png', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 }
-  await fixture(async ({ connection, calls }) => {
-    const desktop = new NativeDesktop({})
-    desktop.launch = async () => connection
-    const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true, inlineEditing: true })
-    assert.deepEqual(result.backdrop, { id: 'b-1' })
-    assert.deepEqual(calls.at(-1).params, { mode: 'selection', allowEditing: true, inlineEditing: true })
-    await desktop.dispose()
-  }, () => ({ state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1' } }))
-  for (const state of ['released', 'missing']) {
-    await fixture(async ({ connection, calls }) => {
-      const desktop = new NativeDesktop({})
-      desktop.launch = async () => connection
-      assert.deepEqual(await desktop.releaseSelectionBackdrop('b-1'), { state })
-      assert.equal(calls.at(-1).method, 'releaseSelectionBackdrop')
-      assert.deepEqual(calls.at(-1).params, { id: 'b-1' })
-      await desktop.dispose()
-    }, () => ({ state }))
-  }
-  for (const reply of [{ state: 'closed' }, { state: ['released'] }, null]) {
-    await fixture(async ({ connection }) => {
-      const desktop = new NativeDesktop({})
-      desktop.launch = async () => connection
-      await assert.rejects(desktop.releaseSelectionBackdrop('b-1'), error => error.code === 'invalid_backdrop_result')
+      await assert.rejects(desktop.captureDisplays(), error => error.code === 'invalid_display_frames')
       await desktop.dispose()
     }, () => reply)
   }
-  const desktop = new NativeDesktop({})
-  await assert.rejects(desktop.releaseSelectionBackdrop(''), error => error.code === 'invalid_argument')
-  await desktop.dispose()
 })
 
 test('fragmented UTF8 frames and coalesced responses preserve request boundaries', async () => {

@@ -93,7 +93,7 @@ async function verifyProducer(executable) {
     assert.equal((await lstat(socketPath)).mode & 0o777, 0o600)
     connection = await NativeConnection.connect({ socketPath, token, requestTimeoutMs: 1000 })
     const operationId = 'publication-capture'
-    assert.deepEqual(await connection.request('captureScreenshot', { mode: 'selection' }, { operationId }), { state: 'cancelled' })
+    assert.deepEqual(await connection.request('captureScreenshot', { mode: 'display', displayId: 1 }, { operationId }), { state: 'cancelled' })
     assert.equal(connection.inspectOperation(operationId).state, 'completed')
     const served = await event('served')
     assert.equal(served.requestCount, 2, 'One handshake and one original capture must be submitted')

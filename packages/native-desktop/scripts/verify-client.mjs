@@ -16,14 +16,16 @@ const mutations = [
   { file: 'client.js', before: "pending.operation.state = 'unknown'", after: "pending.operation.state = 'failed'", test: 'lost mutation retains original' },
   { file: 'client.js', before: 'async request(method, params, options = {}) {\n        await options.beforeSubmit?.();', after: 'async request(method, params, options = {}) {', test: 'submission rechecks the original authority' },
   { file: 'client.js', before: 'freezeReceivedJson(response.result)', after: 'response.result', test: 'callers cannot rewrite' },
-  { file: 'client.js', before: "params.mode === 'selection' && params.allowEditing === true", after: 'true', test: 'editable selection requires' },
-  { file: 'client.js', before: "result.completionAction !== 'capture' && result.completionAction !== 'edit'", after: 'false', test: 'editable selection requires' },
-  { file: 'client.js', before: "!allowsEditing || result.completionAction !== 'edit'", after: 'false', test: 'editable selection requires' },
-  { file: 'client.js', before: '|| !CAPTURE_EDIT_TOOLS.includes(result.editTool)', after: '', test: 'editable selection requires' },
-  { file: 'client.js', before: "if (!shaped || result.state !== 'captured' || !inlineEditing || result.completionAction !== 'edit') {", after: 'if (!shaped) {', test: 'editable selection requires' },
-  { file: 'client.js', before: 'Object.keys(backdrop).length === 1', after: 'true', test: 'editable selection requires' },
-  { file: 'client.js', before: "(result.state !== 'released' && result.state !== 'missing')", after: 'false', test: 'releases it by id' },
-  { file: 'client.js', before: "this.request('releaseSelectionBackdrop', { id })", after: "this.request('releaseSelectionBackdrop', {})", test: 'releases it by id' }
+  { file: 'client.js', before: "raw.state !== 'captured' || !Number.isFinite(raw.capturedAt)", after: "!Number.isFinite(raw.capturedAt)", test: 'display frames keep' },
+  { file: 'client.js', before: '|| ids.has(display.displayId)', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: '|| frame.width <= 0', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: '|| display.scale <= 0', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: "typeof display.isMain !== 'boolean'", after: 'false', test: 'display frames keep' },
+  { file: 'client.js', before: '(display.png === undefined) === (display.issue === undefined)', after: 'false', test: 'display frames keep' },
+  { file: 'client.js', before: '|| display.width !== undefined', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: "typeof display.engine !== 'string' || !display.engine", after: 'false', test: 'display frames keep' },
+  { file: 'client.js', before: 'if (!result.displays.some(display => display.png !== undefined))', after: 'if (false)', test: 'display frames keep' },
+  { file: 'protocol.js', before: "'scroll', 'drag'\n]", after: "'scroll', 'drag', 'captureDisplays'\n]", test: 'display frames keep' }
 ]
 for (const mutation of mutations) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-native-mutation-'))

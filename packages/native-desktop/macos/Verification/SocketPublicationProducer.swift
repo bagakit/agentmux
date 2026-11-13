@@ -74,7 +74,7 @@ private struct SocketPublicationProducer {
         ])
         let capture = try request(peer, buffered: &buffered, token: token)
         guard capture["method"] as? String == "captureScreenshot",
-              let parameters = capture["params"] as? [String: Any], parameters["mode"] as? String == "selection",
+              let parameters = capture["params"] as? [String: Any], parameters["mode"] as? String == "display",
               let operationId = capture["operationId"] as? String, !operationId.isEmpty,
               capture["expectedInstanceId"] as? String == instanceId else {
             throw Failure(stage: "capture_identity", code: EINVAL)
