@@ -194,12 +194,19 @@ async function exercise(directory, capture) {
     const drag = (from, to) => host.request('drag', { from, to, displayId: ready.displayId })
     const images = []
     const image = async (name, viewport = {}) => {
-      if (!capture) return
+      if (!capture && !viewport.width) return
       await delay(60)
       const path = join(directory, name + '-layout.png')
       const value = await host.request('layout', { path, ...viewport })
       assert.equal(value.source, 'AppKit-view-layout-only')
       assert.equal(value.windowServerFrame, false)
+      if (viewport.width) {
+        const intersects = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+        verify(!intersects(value.magnifier, value.toolbar) && !intersects(value.magnifier, value.dimensions), 'Narrow and short magnifiers preserve every color/coordinate row without intersecting the actual toolbar or dimensions')
+        verify(value.buttons.length === 3 && new Set(value.buttons.map(button => button.frame.y)).size === 1, 'The three named screenshot actions remain in one compact horizontal row')
+        verify(value.magnifier.x >= 0 && value.magnifier.y >= 0 && value.magnifier.x + value.magnifier.width <= value.width && value.magnifier.y + value.magnifier.height <= value.height, 'The entire magnifier remains inside its own constrained viewport')
+      }
+
       const bytes = readFileSync(path)
       assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual AppKit layout PNG metadata mismatch')
       images.push({ name, state: 'captured', path, width: value.width, height: value.height, source: value.source,
@@ -274,6 +281,22 @@ async function exercise(directory, capture) {
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
     const editableControls = (await host.request('inspect')).controls
     verify(editableControls.some(button => button.identifier === 'native-selection-edit' && button.enabled), 'Opt-in exposes a real enabled Edit button for the selected image')
+    const sampled = await host.request('inspect')
+    verify(sampled.copiedColors.length === 0, 'Hover and selection never write to the clipboard')
+    await host.request('key', { keyCode: 8 })
+    let copied
+    for (let i = 0; i < 100; i++) { copied = await host.request('inspect'); if (copied.copiedColors.length > 0) break; await delay(10) }
+    verify(copied.copiedColors.length === 1 && copied.copiedColors[0] === sampled.sample.hex, 'Explicit C copies exactly the original frozen pointer sample through the supplied owner')
+    verify(copied.completions === 4 && copied.surfaces.length > 0, 'Color copying preserves the original active selection')
+    await host.request('failColorCopy')
+    await host.request('key', { keyCode: 8 })
+    let failedColor
+    for (let i = 0; i < 100; i++) { failedColor = await host.request('inspect'); if (failedColor.colorCopyFeedback.startsWith('复制未确认')) break; await delay(10) }
+    verify(failedColor.colorCopyFeedback.startsWith('复制未确认') && failedColor.completions === 4 && failedColor.copiedColors.length === 1, 'A rejected color copy reports uncertainty while selection and cancellation remain available')
+    await host.request('key', { keyCode: 8 })
+    let retriedColor
+    for (let i = 0; i < 100; i++) { retriedColor = await host.request('inspect'); if (retriedColor.copiedColors.length === 2) break; await delay(10) }
+    verify(retriedColor.copiedColors.length === 2 && retriedColor.copiedColors[1] === sampled.sample.hex, 'Explicit retry of a failed color copy reaches the same original sample')
     await image('editable-selected')
     await image('narrow', { width: 280, height: 360 })
     await image('short', { width: 640, height: 240 })
@@ -385,6 +408,12 @@ const mutations = [
   { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
   { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
   { name: 'edit-opt-in', path: view, before: 'guard allowEditing else { return }', after: '// Mutant: ignores the original host opt-in.' },
+  { name: 'consumer-color-owner', path: operationsSource, before: 'clipboardWrite(["format": .string("text"), "data": .string(hex)])', after: 'clipboardWrite(["format": .string("png"), "data": .string(hex)])' },
+  { name: 'compact-toolbar', path: view, before: 'let stacked = width < (allowEditing ? 244 : 160)', after: 'let stacked = width < idealWidth' },
+  { name: 'short-toolbar', path: view, before: 'if screen.height < 320 { origin.y = screen.minY + 12 }', after: '// Mutant: leaves the short toolbar in the magnifier band.' },
+  { name: 'color-copy-worker', path: view, before: 'colorCopyQueue.async { [weak self] in', after: 'DispatchQueue.main.async { [weak self] in' },
+  { name: 'color-copy-receipt', path: view, before: 'failure == nil ? "已复制 \\(hex) · C" : "复制未确认 · C 重试"', after: '"已复制 \\(hex) · C"' },
+  { name: 'color-copy-key', path: view, before: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: copyPointerColor()', after: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: break' },
   { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
   { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
   { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },

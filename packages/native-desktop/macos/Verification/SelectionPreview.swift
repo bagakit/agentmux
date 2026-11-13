@@ -12,6 +12,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     private var current: NativeScreenSelection?
     private var savedApplication: NSRunningApplication?
     private var heldPixels: DispatchSemaphore?
+    private let colorCopies = PreviewColorCopies()
+    private let pixelProducers = PreviewPixelProducers()
 
     static func main() {
         UnixSocketPathSafety.initializePrivateCreationMask()
@@ -56,8 +58,11 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         catch { emit(["id": id, "ok": false, "message": String(describing: error)]); return }
         let release = holdPixels ? DispatchSemaphore(value: 0) : nil
         heldPixels = release
+        let copies = colorCopies, producers = pixelProducers
         DispatchQueue.global().async { [weak self] in
-            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing) { _ in
+            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing, copyColor: { try copies.write($0) }) { _ in
+                producers.begin()
+                defer { producers.end() }
                 release?.wait()
                 return pixels
             } }
@@ -107,6 +112,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true); return }
             if method == "releasePixels" { heldPixels?.signal(); heldPixels = nil; emit(observation(id: id)); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
+            if method == "failColorCopy" { colorCopies.failNext(); emit(observation(id: id)); return }
             if method == "inspect" { emit(observation(id: id)); return }
             if method == "displayChange" {
                 NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: NSApp)
@@ -121,6 +127,26 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             }
             if method == "useDisplay" { emit(observation(id: id)); return }
             guard let view = current, let window = view.window else { throw PreviewFailure("Original picker is unavailable") }
+            if method == "compose" {
+                guard let pixels = view.frozenPixels, let rectangle = view.selection.rectangle,
+                      let primary = NSScreen.screens.first else { throw PreviewFailure("Original frozen selection is unavailable") }
+                let quartz = NativeCaptureGeometry.quartzRect(appKitRect: rectangle, primaryDisplayTop: primary.frame.maxY)
+                let started = ProcessInfo.processInfo.systemUptime
+                let output = try pixels.compose(quartz)
+                let composed = ProcessInfo.processInfo.systemUptime
+                guard let png = NSBitmapImageRep(cgImage: output.image).representation(using: .png, properties: [:]) else { throw PreviewFailure("Original frozen output PNG is unavailable") }
+                let sourceBytes = pixels.displays.reduce(0) { total, display in
+                    total + (display.image.map { $0.bytesPerRow * $0.height } ?? 0)
+                }
+                let metrics: [String: Any] = ["id": id, "ok": true, "durationMs": (composed - started) * 1000,
+                      "encodeMs": (ProcessInfo.processInfo.systemUptime - composed) * 1000,
+                      "width": output.image.width, "height": output.image.height, "scale": output.scale,
+                      "rasterBytes": output.image.bytesPerRow * output.image.height, "pngBytes": png.count,
+                      "sourceRasterBytes": sourceBytes,
+                      "scope": "actual-frozen-production-compose-and-AppKit-PNG-encoding-with-controlled-source" ]
+                emit(metrics)
+                return
+            }
             if method == "drag" {
                 let from = try point(value["from"]), to = try point(value["to"])
                 guard let recipient = view.hitTest(view.convert(from, from: nil)) else { throw PreviewFailure("No actual AppKit hit-test recipient") }
@@ -208,8 +234,9 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     private func observation(id: Int) -> [String: Any] {
         var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(),
                                   "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions"),
-                                  "surfaces": pickerViews().map(surfaceObservation)]
+                                  "surfaces": pickerViews().map(surfaceObservation), "copiedColors": colorCopies.values, "pixelProducers": pixelProducers.observation]
         if let view = current {
+            value["colorCopyFeedback"] = view.colorCopyFeedback
             value["rectangle"] = view.selection.rectangle.map(rect) as Any? ?? NSNull()
             value["isInteracting"] = view.selection.isInteracting
             value["canConfirm"] = view.selection.canConfirm
@@ -288,8 +315,16 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             }
             guard let data = composite.representation(using: .png, properties: [:]) else { throw PreviewFailure("Layout PNG encoding failed") }
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            let toolbar = descendants(view).first { $0.identifier?.rawValue == "native-selection-toolbar" && !$0.isHidden }
+            let dimensions = descendants(view).first { $0.identifier?.rawValue == "native-selection-dimensions" && !$0.isHidden }
             emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
                   "source": "AppKit-view-layout-only", "windowServerFrame": false,
+                  "buttons": descendants(view).compactMap { child -> [String: Any]? in
+                      guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
+                      return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
+                  },
+                  "magnifier": rect(view.magnifierRectangle), "toolbar": toolbar.map { rect($0.frame) } as Any? ?? NSNull(),
+                  "dimensions": dimensions.map { rect($0.frame) } as Any? ?? NSNull(),
                   "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1,
                   "constrainedViewport": constrainedSize != nil, "displayId": screenID(window.screen),
                   "viewport": rect(window.frame)])
@@ -355,4 +390,29 @@ private final class PreviewBackground: NSView {
         "Production AppKit picker · logical points · original capture contract".draw(at: NSPoint(x: 64, y: bounds.height - 132),
             withAttributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.white.withAlphaComponent(0.55)])
     }
+}
+
+// A private clipboard sink; no verifier command reads or writes the user's
+// pasteboard. Production continues through NativeDesktopOperations.
+private final class PreviewColorCopies: @unchecked Sendable {
+    private enum Failure: Error { case rejected, mainThread }
+    private let lock = NSLock()
+    private var colors: [String] = []
+    private var nextFails = false
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return colors }
+    func failNext() { lock.lock(); nextFails = true; lock.unlock() }
+    func write(_ value: String) throws {
+        if Thread.isMainThread { throw Failure.mainThread }
+        lock.lock(); defer { lock.unlock() }
+        if nextFails { nextFails = false; throw Failure.rejected }
+        colors.append(value)
+    }
+}
+
+private final class PreviewPixelProducers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = 0, active = 0, finished = 0
+    func begin() { lock.lock(); started += 1; active += 1; lock.unlock() }
+    func end() { lock.lock(); active -= 1; finished += 1; lock.unlock() }
+    var observation: [String: Int] { lock.lock(); defer { lock.unlock() }; return ["started": started, "active": active, "finished": finished] }
 }

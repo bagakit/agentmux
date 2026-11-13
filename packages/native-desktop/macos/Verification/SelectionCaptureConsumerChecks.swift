@@ -7,6 +7,10 @@ import AgentMuxNativeMacOSCore
 // scope, cancellation and error handling remain the production source.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
+    static func clipboardWrite(_ params: [String: JSONValue]) throws -> [String: Any] {
+        ControlledIO.shared.copied(format: params["format"]?.string, value: params["data"]?.string)
+        return ["state": "written"]
+    }
     static func frozenSelectionPixels(loading: NativeSelectionLoading, ownership: NativeSelectionCaptureLease.Ownership) throws -> NativeSelectionPixels {
         _ = try captureRect(CGRect(x: 0, y: 0, width: 400, height: 300), ownership: ownership)
         return NativeSelectionPixels()
@@ -43,8 +47,10 @@ private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Owners
 }
 private enum NativeSelectionRequest {
     static func run(allowEditing: Bool = false,
+        copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledIO.shared.selectorCall()
+        try copyColor("#1A2B3C")
         let pixels = try load(NativeSelectionLoading())
         return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: allowEditing ? .edit : .capture, pixels: pixels)
     }
@@ -64,6 +70,9 @@ private final class ControlledIO: @unchecked Sendable {
     private let lock = NSLock()
     private var selectors = 0, pixels = 0
     private var compositions = 0
+    private var colors: [(String?, String?)] = []
+    func copied(format: String?, value: String?) { lock.lock(); colors.append((format, value)); lock.unlock() }
+    func validColorCopies() -> Bool { lock.lock(); defer { lock.unlock() }; return !colors.isEmpty && colors.allSatisfy { $0.0 == "text" && $0.1 == "#1A2B3C" } }
     private var firstCaptured = false
     func selectorCall() { lock.lock(); selectors += 1; lock.unlock() }
     func selectorCount() -> Int { lock.lock(); defer { lock.unlock() }; return selectors }
@@ -101,6 +110,7 @@ private struct SelectionCaptureConsumerChecks {
         check("production explicit false remains a pure capture", disabled["state"] as? String == "captured" && disabled["completionAction"] == nil)
         let invalid = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .string("true")])
         check("production malformed editing flag is not inferred from text", invalid["state"] as? String == "failed" && (invalid["error"] as? [String: String])?["code"] == "invalid_argument")
+        check("production color-copy callback reaches the existing text clipboard owner with the exact sampled HEX", io.validColorCopies())
         let report: [String: Any] = ["tests": cases.count, "cases": cases, "failures": failures, "boundary": "Exact production capture methods; controlled selector and pixel IO"]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print(String(data: data, encoding: .utf8)!)

@@ -9,6 +9,7 @@ private enum NativeDesktopOperations {
     /* PRODUCTION_FROZEN_METHODS */
     /* PRODUCTION_RECTANGLE_METHODS */
     /* PRODUCTION_PERMISSION_QUERY */
+    static func clipboardWrite(_ params: [String: JSONValue]) throws -> [String: Any] { throw ProviderError.coded("fixture_scope", "this lifetime fixture does not request a clipboard action") }
     static func png(_ image: CGImage, scale: Double) throws -> [String: Any] {
         ControlledPixels.shared.encoded()
         return ["format": "png", "data": "controlled-png", "scale": scale]
@@ -38,6 +39,7 @@ private enum NativeSelectionCompletionAction: String { case capture, edit }
 private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let pixels: NativeSelectionPixels }
 private enum NativeSelectionRequest {
     static func run(allowEditing: Bool = false,
+        copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledPixels.shared.selected()
         let pixels = try load(NativeSelectionLoading())
