@@ -33,6 +33,8 @@ aliases.unshift(
   { find: /^@agentmux\/client-ui\/styles\/(.+)$/u, replacement: client + '/styles/$1' },
   { find: /^@agentmux\/client-ui\/components\/(.+)$/u, replacement: client + '/components/$1.tsx' },
   { find: /^@agentmux\/client-ui\/terminal\/(.+)$/u, replacement: client + '/terminal/$1.ts' },
+  // Brand bitmaps are plain source assets beside src/, exported as ./brand/*.
+  { find: /^@agentmux\/client-ui\/brand\/(.+)$/u, replacement: resolve(root, 'packages/client-ui/brand') + '/$1' },
   { find: /^@agentmux\/client-ui\/platform$/u, replacement: client + '/platform.tsx' },
   { find: /^@agentmux\/client-ui$/u, replacement: client + '/index.ts' },
   { find: /^@agentmux\/client-ui\/(.+)$/u, replacement: client + '/lib/$1.ts' })
