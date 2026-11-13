@@ -199,7 +199,7 @@
 .goals-board-column .goals-row__facts > span { max-width: 100%; white-space: normal; flex-shrink: 0; }
 .goals-board-column :is(.goals-row__selected, .goals-row__open) { margin-left: auto; }
 .goals-board-column__empty { margin: 0; color: var(--text-3); font-size: var(--fs-meta); padding: var(--sp-3) 0; }
-.goals-footer { display: flex; align-items: center; justify-content: space-between; flex: none; padding: var(--sp-3) var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); border-top: 1px solid var(--line-soft); }
+.goals-footer { display: flex; align-items: center; justify-content: space-between; flex: none; padding: var(--sp-3) var(--sp-5) var(--sp-3) calc(var(--sp-8) + var(--sp-7)); color: var(--text-3); font-size: var(--fs-meta); border-top: 1px solid var(--line-soft); }
 .goals-footer button { background: transparent; border: 0; color: var(--text-3); font: inherit; cursor: pointer; padding: var(--sp-2); }
 .goals-row--undefined .goals-row__copy > strong { color: var(--text-2); }
 .goals-service.goals-creation { flex: none; margin: var(--sp-4) var(--sp-5); }
@@ -211,7 +211,7 @@
 .goals-detail__stage { display: flex; align-items: center; gap: var(--sp-4); margin: 0 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
 .goals-detail__stage strong { color: var(--text); font-weight: 600; }
 .goals-detail__stage .goal-stage-mark { width: 20px; height: 20px; }
-.goals-document { box-sizing: border-box; width: 100%; max-width: 960px; margin: 0; padding: var(--sp-6) var(--sp-6) var(--sp-7); }
+.goals-document { box-sizing: border-box; width: 100%; max-width: 820px; margin: 0; padding: var(--sp-6) var(--sp-6) calc(var(--sp-8) * 2); }
 .goals-title { field-sizing: content; display: block; box-sizing: border-box; width: calc(100% + var(--sp-4)); margin: 0 calc(-1 * var(--sp-2)) var(--sp-6); padding: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: var(--fs-display); font-weight: 650; line-height: 1.35; resize: none; }
 .goals-title:hover, .goals-title:focus { background: var(--surface-1); border-color: var(--line-soft); }
 .goals-document h2 { display: flex; gap: var(--sp-4); margin: 0 0 var(--sp-4); color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.5; }

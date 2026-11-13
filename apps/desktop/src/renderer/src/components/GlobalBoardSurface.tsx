@@ -164,7 +164,7 @@ export function GlobalBoardSurface() {
         <p className="goals-page-header__summary" aria-live="polite">{projectedDemands.length === 0 ? <span data-goal-summary-clear>No goals yet</span> : summaryGroups.length ? summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>) : null}{projectedDemands.length > 0 && !groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p>
         <div className="goals-page-header__actions">
           <GlobalGoalPatrolControl />
-          <button ref={newGoalRef} type="button" className="primary-button goals-create" aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
+          <button ref={newGoalRef} type="button" className={`${selectedDemandId ? 'goals-button' : 'primary-button'} goals-create`} aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
         </div>
       </header>
       <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
