@@ -3090,6 +3090,8 @@ export class AgentMuxRpcService {
       // observation gap does not take away the explicit entry, which reports its own Core result.
       if (!prefs || prefs.status !== 'ready') throw new AgentMuxError('The original main settings are unconfirmed. Its history and manual recovery remain available.', 'CONTROL_UNAVAILABLE')
       if (prefs.defaults?.presence?.enabled === false || prefs.maintenance?.status === 'paused' || prefs.maintenance?.status === 'disabled' ||
+          // An unconfirmed reading still carries its last known schedule; an explicit pause or stop there wins.
+          prefs.maintenance?.schedule?.status === 'paused' || prefs.maintenance?.schedule?.status === 'stopped' ||
           observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation || observed.session.continuity?.supervision?.phase === 'cancelled')
         throw new AgentMuxError('The original main was explicitly paused, stopped or cancelled. Its history remains readable; use its original explicit recovery or maintenance control.', 'MOTE_MAIN_RECOVERY_PAUSED')
     }
