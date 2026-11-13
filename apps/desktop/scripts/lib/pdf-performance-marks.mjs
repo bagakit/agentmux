@@ -15,7 +15,8 @@ export function pdfPerformanceMarks() {
     const file = id.split('?')[0]
     const pdf = file.endsWith('/packages/editor-extensions/src/pdf/PdfReader.tsx')
     const consumer = file.endsWith('/apps/desktop/src/renderer/src/components/FilePreviewPane.tsx')
-    if (!pdf && !consumer) return
+    const preparation = file.endsWith('/apps/desktop/src/renderer/src/lib/use-prepare-pdf-reader.ts')
+    if (!pdf && !consumer && !preparation) return
     let code = source
     const replace = (before, after) => {
       assert.equal(code.split(before).length - 1, 1, 'One exact private instrumentation anchor: ' + before)
@@ -28,17 +29,27 @@ export function pdfPerformanceMarks() {
         __pdfMark('reader-module-ready');
         return {default: module.PdfReader};
       })`)
+    } else if (preparation) {
+      replace("void import('@agentmux/editor-extensions/pdf').then(module => {", `__pdfMark('prepare-module-start');
+    void import('@agentmux/editor-extensions/pdf').then(module => {
+      __pdfMark('prepare-module-ready');`)
     } else {
       replace('const lifetime = new AbortController()', `const lifetime = new AbortController()
       const traceReader = ++(globalThis.__agentmuxPdfPerformance ??= {events: [], readers: 0}).readers;
       const mark = (name, detail = {}) => __pdfMark(name, {reader: traceReader, ...detail});
       mark('reader-effect-start');`)
-      replace("void import('pdfjs-dist').then(async engine => {", `mark('engine-module-start');
-    void import('pdfjs-dist').then(async engine => {
-      mark('engine-module-ready');`)
-      replace("const components = await import('pdfjs-dist/web/pdf_viewer.mjs')", `mark('viewer-module-start');
-      const components = await import('pdfjs-dist/web/pdf_viewer.mjs');
-      mark('viewer-module-ready');`)
+      replace('if (signal?.aborted) return Promise.resolve(null)', `const trace = globalThis.__agentmuxPdfPerformance ??= {events: [], readers: 0};
+  const preparation = trace.preparations = (trace.preparations ?? 0) + 1;
+  const prepareMark = name => __pdfMark(name, {preparation});
+  prepareMark('prepare-start');
+  if (signal?.aborted) return Promise.resolve(null);`)
+      replace("return import('pdfjs-dist').then(async engine => {", `prepareMark('engine-module-start');
+  return import('pdfjs-dist').then(async engine => {
+    prepareMark('engine-module-ready');`)
+      replace("const components = await import('pdfjs-dist/web/pdf_viewer.mjs')", `prepareMark('viewer-module-start');
+    const components = await import('pdfjs-dist/web/pdf_viewer.mjs');
+    prepareMark('viewer-module-ready');`)
+      replace('const { engine, components } = prepared', "const { engine, components } = prepared;\n      mark('reader-prepared');")
       replace("reader.currentScaleValue = mode.current === 'custom' ? String(reader.currentScale) : mode.current\n        reader.update()", `mark('layout-update-start');
         reader.currentScaleValue = mode.current === 'custom' ? String(reader.currentScale) : mode.current;
         reader.update();
