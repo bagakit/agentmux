@@ -84,8 +84,9 @@ it('groups by original Host/Project identity with shared completed and working s
   expect(groups[0]!.querySelector('[data-focus-state-icon="results"]')).not.toBeNull()
   expect(groups[1]!.querySelector('[data-focus-state-icon="working"]')).not.toBeNull()
   expect(groups[1]!.querySelector('.mobile-session-state .semantic-icon')?.getAttribute('width')).toBe('12')
-  expect(groups[1]!.querySelector('.mobile-session-state > span[title]')?.getAttribute('title')).toBe('Activity not confirmed')
-  expect(groups[1]!.textContent).toContain('Activity not confirmed')
+  // The row speaks the phone's word for the typed working mark; the shared English label is not shown.
+  expect(groups[1]!.querySelector('.mobile-session-state > span[title]')?.getAttribute('title')).toBe('执行中')
+  expect(groups[1]!.textContent).not.toContain('Activity not confirmed')
   await click(groups[1]!, 'Another original Agent')
   expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ name: 'Another original Agent' }))
 })

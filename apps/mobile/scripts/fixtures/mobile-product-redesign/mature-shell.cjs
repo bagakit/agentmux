@@ -66,14 +66,14 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await button('Focus', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-needs-you-ticket")')
   await tap('.mobile-needs-you-ticket', 'Needs-you ticket')
-  await until('!!document.querySelector("[data-request-id=request-original]")')
+  await until('!!document.querySelector("[data-request-id=request-next]")')
   assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-waiting', 'The ticket opens the exact waiting Agent')
   // The push motion is navigation-declared; measure the settled layer, not a frame mid-slide.
   assert.equal(await read('document.querySelector(".mobile-main")?.dataset.motion'), 'push', 'Opening the request pushed the conversation layer')
   await until('!document.querySelector(".mobile-main[data-motion]")')
   const reading = await read(`(()=>{const r=n=>n?n.getBoundingClientRect().toJSON():null
     const turns=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"]')]
-    const last=turns.at(-1),composer=document.querySelector('.mobile-conversation__composer'),card=document.querySelector('[data-request-id=request-original]')
+    const last=turns.at(-1),composer=document.querySelector('.mobile-conversation__composer'),card=document.querySelector('[data-request-id=request-next]')
     return {turns:turns.map(n=>({role:n.dataset.speakerRole,rect:r(n),body:r(n.querySelector('.log-turn__body'))})),composer:r(composer),card:r(card),lastBottom:last?r(last).bottom:null,
       who:turns.map(n=>n.querySelector('.log-turn__who')?.textContent)}})()`)
   result.matureReading = { reading }

@@ -157,3 +157,18 @@ describe('gestures in the real shell', () => {
     expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
   })
 })
+
+describe('the phone row state words', () => {
+  it('come from the typed mark and state, never from the shared display label', async () => {
+    const { mobileAgentStateLabel } = await import('../src/navigation/mobile-agent-status')
+    const base = row('a', { stateLabel: 'Activity not confirmed' })
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'working', state: 'working' })).toBe('执行中')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'unknown', state: 'running' })).toBe('状态未确认')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'results', state: 'done' })).toBe('有新结果')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'idle', state: 'done' })).toBe('已完成')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'attention', state: 'waiting' })).toBe('等待输入')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'error', state: 'error' })).toBe('出错')
+    expect(mobileAgentStateLabel({ ...base, stateMark: 'interrupted', state: 'exited' })).toBe('已中断')
+    expect(mobileAgentStateLabel(undefined)).toBe('状态未确认')
+  })
+})

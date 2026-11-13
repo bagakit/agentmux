@@ -398,7 +398,9 @@ function Scene() {
     },
     /** The capture's later steps open the same waiting request again. */
     restoreWaitingRequest: () => {
+      // Core issues a new request after the answered one closes; the same id would be the old request.
       waiting.pendingInteraction = structuredClone(waitingRequest)
+      Object.assign(waiting.pendingInteraction!.request, { id: 'request-next', permissionHook: { receiptId: 'request-next' } })
       const row = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
       Object.assign(row, { group: 'attention', state: 'waiting', stateMark: 'attention', stateLabel: '需要你回应' })
       for (const listener of listeners) listener({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
