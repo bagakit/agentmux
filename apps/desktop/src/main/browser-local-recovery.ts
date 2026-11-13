@@ -3,7 +3,7 @@ import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
 import type { BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 
 export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'user-rejected' |
-  'permission-denied' | 'credential-denied' | 'human-control'
+  'permission-denied' | 'credential-denied' | 'human-control' | 'cdp-scope'
 
 /** Only Main creates this error. Script/page error text never grants retry authority. */
 export class BrowserLocalRecoveryFailure extends Error {

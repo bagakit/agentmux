@@ -18,6 +18,7 @@ import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
+import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -1207,11 +1208,22 @@ export function createBrowserPageDispatch(
         }
         return evaluated.result?.value
       }
-      case 'cdp':
-        return await session.sendCommand(
-          requireString(args[0], 'method'),
-          (args[1] ?? {}) as Record<string, unknown>
-        )
+      case 'cdp': {
+        const method = requireString(args[0], 'method')
+        const params = (args[1] ?? {}) as Record<string, unknown>
+        // The escape hatch reaches only this page. Commands whose effect goes past it are refused
+        // before anything is sent, with the ability to use instead (browser-cdp-scope.ts).
+        const refusal = browserCdpScopeRefusal(method)
+        if (refusal) {
+          throw new BrowserLocalRecoveryFailure(`cdp('${method}') ${refusal.reason}, so a page program cannot send it. Nothing was sent. ${refusal.instead}`,
+            'cdp-scope', 'not-dispatched')
+        }
+        if (!isBrowserCdpNativeInput(method)) return await session.sendCommand(method, params)
+        // Raw native input is the Agent's own input too: send it under Main's receipt so it never
+        // reads as a person taking over, exactly like click() and typeText().
+        const native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+        try { return await native.input(() => session.sendCommand(method, params)) } finally { native.end() }
+      }
 
       default:
         // 注入了却没派发的名字会让 Agent 收到一句无从下手的话。这里点名它是谁、以及现在能用什么。
