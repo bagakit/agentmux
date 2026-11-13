@@ -44,12 +44,13 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <input id="tint" type="color" aria-label="Tint">
     <input id="agree" type="checkbox" aria-label="Agree">
   </div>
-  <div style="position:absolute;left:40px;top:300px">
+  <div style="position:absolute;left:40px;top:290px;width:520px">
     <input id="under" aria-label="Under">
     <span id="host"></span>
     <span id="closed"></span>
     <x-switch id="sw" role="switch" aria-label="Wifi"></x-switch>
     <input id="bounce" aria-label="Bounce"><input id="elsewhere" aria-label="Elsewhere">
+    <div id="fruits" role="listbox" tabindex="0" aria-label="Fruits" style="display:inline-flex;gap:4px"><div id="opt1" role="option" tabindex="-1">Apple</div><div id="opt2" role="option" tabindex="-1">Pear</div></div>
   </div>
   <dialog id="modal"><button>Modal button</button></dialog>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
@@ -74,6 +75,8 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     customElements.define('x-switch', class extends HTMLElement {
       constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = '<button>toggle</button>' }
     })
+    // A listbox with roving focus: focusing the box hands focus to its current option, still inside it.
+    document.getElementById('fruits').addEventListener('focus', () => document.getElementById('opt1').focus())
     // A field whose page handler sends focus elsewhere: typing would land in the other field.
     document.getElementById('bounce').addEventListener('focus', () => document.getElementById('elsewhere').focus())
   </script>
@@ -155,6 +158,8 @@ app.whenReady().then(async () => {
     await act('closedDate', 'fillInput', [ref('Closed date'), '2026-03-04'], () => contents.executeJavaScript('({ value: window.closedValues()[0], focus: document.activeElement && document.activeElement.id })'))
     await act('closedName', 'fillInput', [ref('Closed name'), 'Cy'], () => contents.executeJavaScript('({ value: window.closedValues()[1], focus: document.activeElement && document.activeElement.id })'))
     await act('switchKey', 'pressKey', [ref('Wifi'), 'Enter'], () => contents.executeJavaScript('document.activeElement && document.activeElement.id'))
+    await contents.executeJavaScript('document.getElementById("under").focus()')
+    await act('rovingKey', 'pressKey', [ref('Fruits'), 'ArrowDown'], () => contents.executeJavaScript('document.activeElement && document.activeElement.id'))
     await contents.executeJavaScript('document.getElementById("under").focus()')
     await act('bounce', 'fillInput', [ref('Bounce'), 'Dee'], () => contents.executeJavaScript('({ bounce: document.getElementById("bounce").value, elsewhere: document.getElementById("elsewhere").value, focus: document.activeElement && document.activeElement.id })'))
     // A modal dialog makes the rest of the page inert; a field there cannot take focus or a value.
@@ -330,9 +335,13 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     // The host keeps focus while its inner button has it, so the key reaches the switch.
     expect(actions.switchKey, actions.switchKey?.error).toMatchObject({ ok: true })
     expect(order(actions.switchKey)).toContain('keydown:sw')
+    // Focus moved to an option inside the listbox, so the listbox still holds it and the key reaches the option.
+    expect(actions.rovingKey, actions.rovingKey?.error).toMatchObject({ ok: true, value: 'under' })
+    expect(order(actions.rovingKey)).toContain('keydown:opt1')
     // The page sent focus to another field: refused before typing, and focus goes back to the person's field.
     expect(actions.bounce, actions.bounce?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: { bounce: '', elsewhere: '', focus: 'under' } })
     expect(actions.bounce!.error).toContain('the page moved focus elsewhere')
+    expect(actions.bounce!.error).toContain('cannot take focus')
     for (const label of ['inertDate', 'inertName'] as const) {
       expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: false, effects: 'not-dispatched' })
       expect(actions[label]!.error).toContain('inert (behind a modal dialog)')
