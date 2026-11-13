@@ -106,12 +106,12 @@ describe('Remote execution reading and navigation', () => {
     expect(rows[0]!.textContent).not.toContain('Local unrelated project')
   })
 
-  it('advanced Files and tools shows the full selected Host ID and absolute path outside the native select', async () => {
+  it('More options shows the full selected Host ID and absolute path outside the native select', async () => {
     config = { ...config, workspaces: config.workspaces.map(project => project.id !== 'remote-project' ? project : { ...project,
       name: 'An exceptionally long project name for the resource workstation', path: '/original/project/with/a/long/unambiguous/resource/location' }) }
     await pane()
-    await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.remote-execution-advanced')!.open = true; const files = dom.container.querySelector<HTMLSelectElement>('[aria-label="Files and tools"]')!; files.value = 'remote-project'; files.dispatchEvent(new Event('change', { bubbles: true })); const agent = dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!; agent.value = 'local'; agent.dispatchEvent(new Event('change', { bubbles: true })) })
-    const target = dom.container.querySelector('[aria-label="Files and tools identity"]')!
+    await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.remote-execution-advanced')!.open = true; const files = dom.container.querySelector<HTMLSelectElement>('[aria-label="Project folder"]')!; files.value = 'remote-project'; files.dispatchEvent(new Event('change', { bubbles: true })); const agent = dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!; agent.value = 'local'; agent.dispatchEvent(new Event('change', { bubbles: true })) })
+    const target = dom.container.querySelector('[aria-label="Project identity"]')!
     expect(target.textContent).toContain('An exceptionally long project name for the resource workstation')
     expect([...target.querySelectorAll('code')].map(node => node.textContent)).toEqual(['remote', '/original/project/with/a/long/unambiguous/resource/location'])
     expect(dom.container.querySelector<HTMLButtonElement>('[data-remote-prepare]')!.disabled).toBe(false)

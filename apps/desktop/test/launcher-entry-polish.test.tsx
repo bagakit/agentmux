@@ -44,17 +44,18 @@ function originalWarm() {
   return warmCandidates(workspace.path, workspace.hostId)[0]
 }
 async function openEnvironment() {
-  // A retained Launcher cannot open a Portal. Activate this exact original mount first.
+  // The device label reads the project's Space entry; focusing it shows its details without any work.
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={true} />)
   const warmCalls = vi.mocked(useAppStore.getState().prewarmTerminal).mock.calls.length
-  await dom.click('[aria-label="Runtime environment"]')
-  const panel = document.querySelector<HTMLElement>('.launcher-environment__panel')
+  const label = dom.container.querySelector<HTMLElement>('.launcher-environment__device')!
+  expect(label).not.toBeNull()
+  await act(async () => label.focus())
+  const panel = document.querySelector<HTMLElement>('[role="tooltip"]')
   expect(panel).not.toBeNull()
-  await act(async () => panel!.querySelector<HTMLElement>('.launcher-environment__details summary')!.click())
   expect(vi.mocked(useAppStore.getState().prewarmTerminal).mock.calls).toHaveLength(warmCalls)
   return panel!
 }
-async function closeEnvironment() { await act(async () => (document.querySelector('[aria-label="Close runtime environment"]') as HTMLButtonElement).click()) }
+async function closeEnvironment() { await act(async () => dom.container.querySelector<HTMLElement>('.launcher-environment__device')!.blur()); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)) }) }
 
 describe('the mounted Launcher entry polish', () => {
   it('a fresh Space shows the Agent catalog and the same warm Terminal while Browser and Note remain collapsed', async () => {
@@ -134,40 +135,35 @@ describe('the mounted Launcher entry polish', () => {
     await mount(input)
     const summary = dom.container.querySelector('.launcher-environment__path')!
     expect(summary.textContent).toBe(expected)
-    expect(summary.getAttribute('title')).toBe(expected)
     const panel = await openEnvironment()
-    expect(panel.querySelector('.launcher-environment__directory')?.textContent).toBe(expected)
-    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe(expected)
-    if (expected !== input.path) expect(panel.textContent).toContain(input.path)
-    expect(panel.textContent).toContain('Not tested')
+    // The label's details carry the full original path once; the summary keeps the chosen representation.
+    expect(panel.textContent).toContain(input.path)
     expect(panel.textContent).not.toContain('Ready')
-    expect(dom.container.querySelector('.launcher-environment details')).toBeNull()
+    expect(dom.container.querySelector('.launcher-environment details, .launcher-environment button')).toBeNull()
     expect(useAppStore.getState().config?.workspaces[0]?.path).toBe(input.path)
     await closeEnvironment()
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
-    expect(document.activeElement).toBe(dom.container.querySelector('[aria-label="Runtime environment"]'))
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
   })
 
-  it('opening or closing Host details preserves the original Run and gives an honest check failure', async () => {
+  it('reading the device details preserves the original Run and gives an honest check failure', async () => {
     await mount()
     const host = composerConfig.hosts[0]!
     await act(async () => useAppStore.setState({ hostChecks: { local: { state: 'error', input: host, detail: 'Diagnostic unavailable' } } }))
     const panel = await openEnvironment()
     expect(panel.textContent).toContain('Check failed')
     expect(panel.textContent).toContain('Diagnostic unavailable')
-    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe('~/project')
     await closeEnvironment()
     expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 
-  it('an absent Host configuration does not claim a configured shell or abbreviate an unconfirmed local path', async () => {
+  it('an absent Host configuration does not claim a configured device or abbreviate an unconfirmed local path', async () => {
     await mount()
     await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, hosts: [] } }))
     expect(dom.container.querySelector('.launcher-environment__path')?.textContent).toBe(_hygiene_fixturePath("Users/alice/project"))
+    expect(dom.container.querySelector<HTMLElement>('.launcher-environment__device')!.dataset.hostKind).toBe('unknown')
     const panel = await openEnvironment()
-    expect(panel.textContent).toContain('Host unconfirmed')
-    expect(panel.textContent).toContain('Host not configured')
-    expect(panel.textContent).not.toContain('Configured host shell')
+    expect(panel.textContent).toContain('not configured')
+    expect(panel.textContent).not.toContain('Local device')
     expect(originalWarm()?.session?.control.run.runId).toBe('original-shell')
   })
 

@@ -88,8 +88,9 @@ describe('the shared Space Launcher through its original consumers', () => {
     expect(body).not.toBeNull()
     expect(body!.querySelector('.launcher-composer')).not.toBeNull()
     expect(body!.querySelector('.launcher-launch-button')).not.toBeNull()
-    expect(body!.querySelector('.launcher-environment__host [data-semantic-icon="object.host"]')).not.toBeNull()
-    expect(body!.querySelector('.launcher-environment__host [data-semantic-icon="object.terminal"]')).toBeNull()
+    // The device label uses the machine icon, never a terminal prompt standing in for the machine.
+    expect(body!.querySelector('.launcher-environment__device svg')).not.toBeNull()
+    expect(body!.querySelector('.launcher-environment__device [data-semantic-icon="object.terminal"]')).toBeNull()
     const input = dom.container.querySelector('[aria-label="Agent prompt"]')!
     expect(input.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull()
     await act(async () => promptEditor().commands.setContent('<p>Edited task</p><p>Complete second line</p>'))

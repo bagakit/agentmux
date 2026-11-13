@@ -11,12 +11,13 @@ const mutant = process.env.EXECUTION_MODES_MUTANT
 const edits: Record<string, [string, string, string]> = {
   'collapsed-raw-summary': ['components/NewTabSurface.tsx', "'text' in part ? part.text : part.reference.label", "'text' in part ? part.text : part.raw"],
   'unknown-empty-configured': ['components/NewTabSurface.tsx', 'const emptyHostInventoryUnconfirmed = executors.length === 0 && usesHostInventory &&', 'const emptyHostInventoryUnconfirmed = false &&'],
-  'wrong-endpoint-environment': ['components/LauncherExecutionModes.tsx', 'const host = hosts.find(item => item.id === target.hostId)', 'const host = hosts.find(item => item.id === workspace?.hostId)'],
-  'ime-cancels-setup': ['components/LauncherExecutionModes.tsx', ' && !isImeOwnedKeyboardEvent(event)', ''],
-  'wrong-remote-agent-resource': ['components/LauncherExecutionModes.tsx', 'commit(setup.resourceWorkspaceId, id, setup.intent)', 'commit(id, id, setup.intent)'],
-  'ordinary-keeps-binding': ['components/LauncherExecutionModes.tsx', "return commit(workspace.id, null, intent)", "return commit(workspace.id, workspace.id, intent)"],
-  'mode-ignores-project-navigation': ['components/LauncherExecutionModes.tsx', "navigateProject: intent !== 'custom'", 'navigateProject: false'],
-  'custom-premature-commit': ['components/LauncherExecutionModes.tsx', "setSetup({ ...setup, agentWorkspaceId: id, picking: null })", "commit(setup.resourceWorkspaceId!, id, setup.intent)"]
+  // Each mutant breaks one promise of the start page's Agent device control.
+  'project-device-keeps-binding': ['components/LauncherAgentDevice.tsx', "if (hostId === workspace.hostId) { onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: null }); return }", "if (hostId === workspace.hostId) { onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: workspace.id }); return }"],
+  'navigation-cancels-preparation': ['components/LauncherAgentDevice.tsx', "useEffect(() => { cancel(); setFailure(null); return cancel }, [workspace?.id, workspace?.hostId, workspace?.path])", "useEffect(() => useAppStore.subscribe(() => cancel()), [])"],
+  'failure-hidden': ['components/LauncherAgentDevice.tsx', "setFailure({ hostId, message: cause instanceof Error ? cause.message : 'The Agent device could not be prepared.' })", "setFailure(null)"],
+  'single-device-offers-choice': ['components/LauncherAgentDevice.tsx', "if (projectHost?.kind !== 'local' || hosts.length < 2) return null", "if (projectHost?.kind !== 'local') return null"],
+  'settings-arrangement-editable': ['components/LauncherAgentDevice.tsx', "(projectHost?.kind !== 'local' || agentWorkspace?.hostId === workspace.hostId)", "false"],
+  'label-offers-home': ['components/LauncherEnvironment.tsx', ".filter(line => !line.startsWith('~ opens'))", ""]
 }
 if (mutant && !edits[mutant]) throw new Error('Unknown execution modes mutant')
 export default defineConfig({ ...original, resolve: { alias: [...aliases, ...executionUiAliases] },
@@ -26,7 +27,7 @@ export default defineConfig({ ...original, resolve: { alias: [...aliases, ...exe
     if (!mutant) return
     const [suffix, before, after] = edits[mutant]!
     if (!id.endsWith('/' + suffix)) return
-    const count = mutant === 'ordinary-keeps-binding' ? 2 : 1
+    const count = 1
     if (source.split(before).length !== count + 1) throw new Error('Mutant must match exactly its owning source: ' + mutant)
     if (evidence) appendFileSync(resolve(evidence, 'mutation.jsonl'), JSON.stringify({ mutant, path: relative(root, id), matches: count }) + '\n')
     process.stderr.write('EXECUTION_MODES_MUTANT_HIT ' + mutant + '\n')

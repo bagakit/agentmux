@@ -15,8 +15,8 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 
 const dom = composerDOM()
 const launcherBefore = useLauncherState.getState()
-const remote = { id: 'farm', kind: 'ssh' as const, label: 'DAFarm', hostname: 'farm.example' }
-const remoteProject = { id: 'flowlens', hostId: remote.id, name: 'FlowLens', path: _hygiene_fixturePath("home/developer/flowlens"), kind: 'folder' as const }
+const remote = { id: 'farm', kind: 'ssh' as const, label: 'Example Remote', hostname: 'farm.example' }
+const remoteProject = { id: 'sample-project', hostId: remote.id, name: 'Sample Project', path: _hygiene_fixturePath("home/developer/sample-project"), kind: 'folder' as const }
 const warm = { ...composerSession('retained-warm'), kind: 'terminal' as const, providerId: null,
   control: { kind: 'terminal' as const, hostId: 'local', runId: 'retained-run', run: { runId: 'retained-run' } } }
 beforeEach(async () => { await act(async () => useLauncherState.setState({ sections: {}, drafts: {}, executors: {} })) })
@@ -41,17 +41,16 @@ async function mount(empty = false) {
   })
   await dom.render(<NewTabSurface tabGroupId="group" {...(empty ? {} : { tabId: 'launcher', regionId: 'input' })} />)
 }
-async function browse(hostId = 'farm') {
-  await dom.click('[aria-label="Runtime environment"]')
-  const select = document.querySelector<HTMLSelectElement>('[aria-label="Machine for new session"]')!
-  expect(select).not.toBeNull()
-  await act(async () => { select.value = hostId; select.dispatchEvent(new Event('change', { bubbles: true })) })
-}
+/** The project comes from its Space entry; Settings and Space write the same Launcher field. */
 async function selectRemote() {
-  await browse()
-  const button = document.querySelector<HTMLButtonElement>('[data-workspace-id="flowlens"]')!
-  expect(button).not.toBeNull()
-  await act(async () => button.click())
+  await act(async () => {
+    const state = useAppStore.getState()
+    if (state.tabs.launcher) state.selectLauncherExecution({ tabId: 'launcher', regionId: 'input', displayWorkspaceId: 'workspace', groupId: 'group' },
+      { resourceWorkspaceId: remoteProject.id, agentWorkspaceId: null }, { navigateProject: false, reveal: false })
+    else state.openLauncher({ workspaceId: remoteProject.id, tabGroupId: 'group', reveal: false, initialExecution: { resourceWorkspaceId: remoteProject.id, agentWorkspaceId: null },
+      initialInputs: { prompt: useLauncherState.getState().drafts['group:group']?.prompt ?? '', names: useLauncherState.getState().drafts['group:group']?.names ?? { agentName: '', tabName: '' },
+        optionsByProvider: useLauncherState.getState().drafts['group:group']?.optionsByProvider ?? {}, sourceLauncherId: 'group:group' } })
+  })
 }
 
 describe('the real Launcher execution target consumer', () => {
@@ -63,7 +62,7 @@ describe('the real Launcher execution target consumer', () => {
     const originalWarmCalls = vi.mocked(before.prewarmTerminal).mock.calls.length
     await selectRemote()
     const state = useAppStore.getState()
-    expect(dom.container.querySelector('.launcher-environment__host')?.textContent).toContain('DAFarm')
+    expect(dom.container.querySelector('.launcher-environment__device')?.textContent).toContain('Example Remote')
     expect(dom.container.querySelector('.launcher-environment__path')?.textContent).toBe(remoteProject.path)
     expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: remoteProject.id })
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
@@ -77,18 +76,6 @@ describe('the real Launcher execution target consumer', () => {
     expect(vi.mocked(state.detectExecutors)).toHaveBeenLastCalledWith('farm')
     expect(dom.container.querySelector('[data-warm-run]')).toBeNull()
     expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')?.disabled).toBe(false)
-  })
-
-  it('browsing an empty machine does not select a borrowed local directory or stop a Run', async () => {
-    await mount()
-    const before = useAppStore.getState()
-    await browse('empty-machine')
-    expect(document.querySelector('.launcher-target__projects')?.textContent).toContain('No project registered')
-    expect(document.querySelector('.launcher-environment__identity')?.textContent).toContain('Choose where to startCurrent target · This Mac')
-    expect(document.querySelector('.launcher-target__manage')?.textContent).toContain('Manage projects')
-    expect(document.querySelectorAll('.launcher-target__project')).toHaveLength(0)
-    expect(useAppStore.getState().tabs).toBe(before.tabs)
-    expect(useAppStore.getState().warmTerminals).toBe(before.warmTerminals)
   })
 
   it('materializes the empty Group in its original display and transfers every unsent input before choosing execution', async () => {
@@ -106,7 +93,7 @@ describe('the real Launcher execution target consumer', () => {
     expect(tabs).toHaveLength(1)
     const tab = tabs[0]!, id = tab.layout.activeRegionId
     expect(tab.workspaceId).toBe('workspace')
-    expect(tab.regions[id]).toMatchObject({ kind: 'launcher', workspaceId: 'flowlens' })
+    expect(tab.regions[id]).toMatchObject({ kind: 'launcher', workspaceId: 'sample-project' })
     expect(state.layouts.workspace?.groups[0]?.tabOrder).toEqual([tab.id])
     expect(state.agentComposerDrafts[id]).toBe('Original group request')
     expect(state.launcherNameDrafts[id]?.agentName).toBe('Kept name')
@@ -123,7 +110,7 @@ describe('the real Launcher execution target consumer', () => {
     expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'farm', workspacePath: remoteProject.path }))
     const state = useAppStore.getState()
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
-    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', workspaceId: 'flowlens' })
+    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', workspaceId: 'sample-project' })
     expect(state.sessions.find(session => session.id === (state.tabs.launcher?.regions.input as { sessionId: string }).sessionId)?.control.hostId).toBe('farm')
     expect(warmCandidates(_hygiene_fixturePath("repo"))[0]?.session).toBe(warm)
     expect(stop).not.toHaveBeenCalled()
@@ -137,7 +124,7 @@ describe('the real Launcher execution target consumer', () => {
       { tabId: 'launcher', regionId: 'input' })).rejects.toThrow('Private unavailable observation') })
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'farm', workspacePath: remoteProject.path }))
     const state = useAppStore.getState()
-    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: 'flowlens' })
+    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: 'sample-project' })
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
     expect(state.agentComposerDrafts.input).toBe('Keep the complete\nunsent request')
     expect(state.launcherNameDrafts.input).toEqual({ agentName: 'Reviewer', tabName: 'Investigation' })
@@ -151,14 +138,14 @@ describe('the real Launcher execution target consumer', () => {
     const read = vi.spyOn(api.files, 'read')
     const open = vi.spyOn(useAppStore.getState(), 'openFile')
     await act(async () => { await expect(useAppStore.getState().createNote('group', { tabId: 'launcher', regionId: 'input' }, 'Remote note')).resolves.toMatchObject({ status: 'written' }) })
-    expect(write).toHaveBeenCalledExactlyOnceWith('flowlens', expect.objectContaining({ expectedRevision: null, content: expect.stringContaining('Remote note') }))
+    expect(write).toHaveBeenCalledExactlyOnceWith('sample-project', expect.objectContaining({ expectedRevision: null, content: expect.stringContaining('Remote note') }))
     const receipt = useLauncherState.getState().drafts['region:input']?.noteCreation
-    expect(receipt?.target).toMatchObject({ workspaceId: 'flowlens', hostId: 'farm', workspacePath: remoteProject.path,
+    expect(receipt?.target).toMatchObject({ workspaceId: 'sample-project', hostId: 'farm', workspacePath: remoteProject.path,
       directoryPath: remoteProject.path, displayWorkspaceId: 'workspace', groupId: 'group' })
     expect(receipt?.status).toBe('written')
-    expect(read).toHaveBeenCalledWith('flowlens', receipt?.path)
-    expect(useAppStore.getState().documents[documentKey('flowlens', receipt!.path)]?.content).toContain('Remote note')
-    expect(open).toHaveBeenCalledWith(receipt?.path, 'group', undefined, 'flowlens', undefined,
+    expect(read).toHaveBeenCalledWith('sample-project', receipt?.path)
+    expect(useAppStore.getState().documents[documentKey('sample-project', receipt!.path)]?.content).toContain('Remote note')
+    expect(open).toHaveBeenCalledWith(receipt?.path, 'group', undefined, 'sample-project', undefined,
       expect.objectContaining({ displayWorkspaceId: 'workspace', resource: { hostId: 'farm', path: remoteProject.path } }))
   })
 
@@ -168,7 +155,7 @@ describe('the real Launcher execution target consumer', () => {
     await act(async () => useAppStore.setState({ sessions: [session], tabs: { launcher: createWorkbenchTab('launcher', {
       regionId: 'input', kind: 'agent', phase: 'attached', sessionId: session.id, workspaceId: 'workspace' }) } }))
     const before = useAppStore.getState()
-    expect(() => before.setLauncherExecutionWorkspace({ tabId: 'launcher', regionId: 'input' }, 'flowlens')).toThrow('Only an unstarted Launcher')
+    expect(() => before.setLauncherExecutionWorkspace({ tabId: 'launcher', regionId: 'input' }, 'sample-project')).toThrow('Only an unstarted Launcher')
     expect(useAppStore.getState().tabs).toBe(before.tabs)
     expect(useAppStore.getState().sessions).toBe(before.sessions)
   })
@@ -185,21 +172,10 @@ describe('the real Launcher execution target consumer', () => {
     await act(async () => useAppStore.getState().launchTerminal('group', { tabId: 'launcher', regionId: 'input' }))
     const state = useAppStore.getState()
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
-    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', workspaceId: 'flowlens' })
+    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', workspaceId: 'sample-project' })
     expect(state.tabs.launcher?.regions.sibling).toBe(original.tabs.launcher?.regions.sibling)
     expect(state.layouts.third).toBe(layouts.third)
     expect(state.layouts.workspace).toBe(layouts.workspace)
-  })
-
-  it('can choose a valid local project when the original selected remote registration has disappeared', async () => {
-    await mount()
-    await selectRemote()
-    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: composerConfig.workspaces } })))
-    await browse('local')
-    await act(async () => document.querySelector<HTMLButtonElement>('[data-workspace-id="workspace"]')!.click())
-    expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: 'workspace' })
-    expect(dom.container.querySelector('.launcher-environment__host')?.textContent).toContain('This Mac')
-    expect(useAppStore.getState().agentComposerDrafts.input).toBe('Keep the complete\nunsent request')
   })
 
   it('the empty Group keeps a manually chosen non-default Executor after target selection and pending failure remount', async () => {
@@ -228,7 +204,7 @@ describe('the real Launcher execution target consumer', () => {
     await dom.render(<NewTabSurface tabGroupId="group" tabId={tab.id} regionId={regionId} />)
     expect(dom.container.querySelector('[data-executor-id="review"]')?.getAttribute('aria-pressed')).toBe('true')
     const state = useAppStore.getState()
-    expect(state.tabs[tab.id]?.regions[regionId]).toMatchObject({ kind: 'launcher', workspaceId: 'flowlens', executorId: 'review' })
+    expect(state.tabs[tab.id]?.regions[regionId]).toMatchObject({ kind: 'launcher', workspaceId: 'sample-project', executorId: 'review' })
     expect(state.agentComposerDrafts[regionId]).toBe('Original custom request')
     expect(state.launcherNameDrafts[regionId]?.agentName).toBe('Original name')
     expect(state.launcherOptionDrafts[regionId]?.claude).toEqual({ model: 'original-model' })
@@ -242,11 +218,11 @@ describe('the real Launcher execution target consumer', () => {
       .mockResolvedValueOnce([{ name: 'reports', path: 'reports', isDirectory: true, isSymlink: false }])
       .mockResolvedValueOnce([{ name: 'remote.md', path: 'reports/remote.md', isDirectory: false, isSymlink: false }])
     await dom.click('[aria-label="Reference files for the Agent"]')
-    expect(list).toHaveBeenCalledWith('flowlens', '')
+    expect(list).toHaveBeenCalledWith('sample-project', '')
     expect(localPicker).not.toHaveBeenCalled()
-    expect(document.querySelector('.launcher-file-references .confirmation-dialog__description')?.textContent).toBe('FlowLens · DAFarm')
+    expect(document.querySelector('.launcher-file-references .confirmation-dialog__description')?.textContent).toBe('Sample Project · Example Remote')
     await act(async () => document.querySelector<HTMLButtonElement>('[data-reference-path="reports"]')!.click())
-    expect(list).toHaveBeenLastCalledWith('flowlens', 'reports')
+    expect(list).toHaveBeenLastCalledWith('sample-project', 'reports')
     expect(document.querySelector('.launcher-file-references__directory span')?.getAttribute('title')).toBe(`${remoteProject.path}/reports`)
     expect(document.querySelector('[data-reference-path="reports/remote.md"]')?.getAttribute('title')).toBe(`remote.md\n${remoteProject.path}/reports/remote.md`)
     await act(async () => document.querySelector<HTMLButtonElement>('[data-reference-path="reports/remote.md"]')!.click())
@@ -269,7 +245,7 @@ describe('the real Launcher execution target consumer', () => {
     await act(async () => fail(new Error('Task-owned Terminal creation failure')))
     await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="input" />)
     const state = useAppStore.getState()
-    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: 'flowlens', executorId: 'review' })
+    expect(state.tabs.launcher?.regions.input).toMatchObject({ kind: 'launcher', workspaceId: 'sample-project', executorId: 'review' })
     expect(dom.container.querySelector('[data-executor-id="review"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(state.agentComposerDrafts.input).toBe('Keep the complete\nunsent request')
     expect(state.launcherNameDrafts.input).toEqual({ agentName: 'Reviewer', tabName: 'Investigation' })
@@ -301,11 +277,11 @@ describe('the real Launcher execution target consumer', () => {
       opened = outcome.value!
     })
     if (operation === 'open.terminal') expect(terminal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'farm', workspacePath: remoteProject.path }))
-    else expect(browser).toHaveBeenCalledWith(expect.any(String), 'https://example.com', 'flowlens')
-    expect(opened).toMatchObject({ operation, region: { workspaceId: 'flowlens', regionId: 'input' } })
+    else expect(browser).toHaveBeenCalledWith(expect.any(String), 'https://example.com', 'sample-project')
+    expect(opened).toMatchObject({ operation, region: { workspaceId: 'sample-project', regionId: 'input' } })
     const state = useAppStore.getState()
     expect(state.tabs.launcher?.workspaceId).toBe('workspace')
-    expect(state.tabs.launcher?.regions.input).toMatchObject({ workspaceId: 'flowlens' })
+    expect(state.tabs.launcher?.regions.input).toMatchObject({ workspaceId: 'sample-project' })
     expect(state.tabs.launcher?.regions.sibling).toBe(before.tabs.launcher?.regions.sibling)
     expect(state.layouts).toEqual(before.layouts)
     expect(state.activeWorkspaceId).toBe(before.activeWorkspaceId)

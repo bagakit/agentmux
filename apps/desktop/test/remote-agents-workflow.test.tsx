@@ -10,6 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { fileNavigationSelection, useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { chooseField } from './helpers/selection-field'
 const dom = composerDOM(), close = vi.fn()
 const remote: HostConfig = { id: 'agent-mac', kind: 'ssh', label: 'Agent Mac', hostname: 'agent.invalid' }
 const other: HostConfig = { ...remote, id: 'other-mac', hostname: 'other.invalid' }
@@ -129,13 +130,15 @@ it.each([false, true])('an unconfirmed device choice cannot launch the old targe
   expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!.disabled).toBe(false)
   const pending = deferred<{ routeHostId: string; homeDirectory: string }>(), otherHome = { ...home, id: 'other-home', hostId: other.id, path: '/Users/other-agent' }
   vi.mocked(api.hosts.home).mockReturnValue(pending.promise); vi.mocked(api.workspaces.add).mockResolvedValue(otherHome)
-  await select('Agent runs on', other.id)
+  // Inside the Launcher the device is the Agent section's Runs on field.
+  await chooseField(dom.container.querySelector<HTMLButtonElement>('.launcher-agent-device [aria-label="Runs on"]')!, other.id)
   expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!.disabled).toBe(true)
   await dom.click('.launcher-launch-button')
   await act(async () => { for (const key of ['ctrlKey', 'metaKey']) dom.container.querySelector('[aria-label="Agent prompt"]')!.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',code:'Enter',[key]:true,bubbles:true})) })
   expect(launch).not.toHaveBeenCalled()
   await act(async () => { if (failure) pending.reject(new Error('Original device home read failed')); else pending.resolve({ routeHostId: other.id, homeDirectory: otherHome.path }) })
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!.value).toBe(failure ? remote.id : other.id)
+  expect(dom.container.querySelector<HTMLButtonElement>('.launcher-agent-device [aria-label="Runs on"]')!.dataset.value).toBe(failure ? remote.id : other.id)
+  if (failure) expect(dom.container.querySelector('.launcher-agent-device__status[data-state="failed"]')).not.toBeNull()
   await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!.disabled).toBe(false))
   await dom.click('.launcher-launch-button')
   expect(launch).toHaveBeenCalledWith(expect.objectContaining({ hostId: failure ? remote.id : other.id, workspacePath: failure ? home.path : otherHome.path,
