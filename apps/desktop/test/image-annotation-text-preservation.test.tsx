@@ -67,13 +67,13 @@ async function mount(shapes: ScreenshotShape[]) {
     onComplete={complete} onCopyContext={complete} onSaveOriginal={complete} />))
   await frame(); await loaded()
   const canvas = editor().querySelector('canvas')!; canvas.setPointerCapture = vi.fn()
-  const pointer = async () => { await act(async () => {
-    for (const type of ['pointerdown', 'pointerup']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientX: 82, clientY: 32 }))
+  const pointer = async (clientX = 82, clientY = 32) => { await act(async () => {
+    for (const type of ['pointerdown', 'pointerup']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientX, clientY }))
   }); await frame() }
   const output = async (action = 'Copy PNG') => { await click(action); expect(complete).toHaveBeenCalled(); return complete.mock.lastCall![0].shapes }
   return { pointer, output }
 }
-async function editExistingText(pointer: () => Promise<void>) { await click('Select'); await pointer(); await click('Edit text')
+async function editExistingText(pointer: (clientX?: number, clientY?: number) => Promise<void>) { await click('Select'); await pointer(); await click('Edit text')
   const field = editor().querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]'); expect(field).not.toBeNull(); return field! }
 async function submitOriginal(path: string) {
   const modal = document.querySelector<HTMLElement>('.annotation-file-dialog')!; expect(modal).not.toBeNull()
@@ -156,7 +156,8 @@ describe('complete editable annotation text', () => {
     await act(async () => { change(field, ''); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect(await output()).toEqual([])
     await click('Undo'); expect(await output()).toEqual([whitespace])
-    await click('Text'); await pointer()
+    // The restored text stays selected: the first empty click deselects it, the next one starts new text.
+    await click('Text'); await pointer(82, 200); await pointer(82, 200)
     field = editor().querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
     await act(async () => { change(field, ' \t '); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect(await output(), 'blank new text creates no annotation').toEqual([whitespace])

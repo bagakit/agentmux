@@ -90,8 +90,9 @@ describe('standalone image annotation editing consumers', () => {
     await act(async () => { pointer('pointerdown', 50, 100); pointer('pointerup', 110, 120, true) })
     const arrow = (await output()).shapes[2]
     expect(arrow).toMatchObject({ kind: 'arrow', from: { x: 100, y: 200 }, to: { y: 200 } })
-    await act(async () => { pointer('pointerdown', 50, 100); pointer('pointermove', 110, 120, true); pointer('pointerup', 110, 140) })
-    expect((await output()).shapes[3], 'releasing Shift restores the exact free endpoint').toMatchObject({ kind: 'arrow', from: { x: 100, y: 200 }, to: { x: 220, y: 280 } })
+    // A press on the selected arrow's handle would resize it; the next arrow starts on empty image.
+    await act(async () => { pointer('pointerdown', 50, 200); pointer('pointermove', 110, 220, true); pointer('pointerup', 110, 240) })
+    expect((await output()).shapes[3], 'releasing Shift restores the exact free endpoint').toMatchObject({ kind: 'arrow', from: { x: 100, y: 400 }, to: { x: 220, y: 480 } })
     expect(view().view.scale).toBe(.5)
   })
 
