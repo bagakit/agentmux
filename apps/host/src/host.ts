@@ -125,7 +125,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     runtime: () => { if (!runtime) throw new AgentMuxError('The original Host is not yet available. Learning operations and existing Agents are retained.', 'CONTROL_UNAVAILABLE'); return runtime },
     desktop: desktopClient
   }) : undefined
+  // Whether a phone can be given an address at all is read synchronously from the OS adapters, so a Mac
+  // with no local-network address reports unavailable here instead of only when a link is requested.
   const mobileAccessState = (url?: string): AgentMuxRpcMobileAccessState => {
+    if (local && !mobileLinkCandidates(networkInterfaces(), null).length) {
+      return { ...mobileState, state: 'unavailable', message: '这台 Mac 当前没有局域网地址，手机暂时连不上；Agent 会话不受影响。' }
+    }
     try { return { ...mobileState, ...(url ? { origin: new URL(url).origin } : {}) } }
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
@@ -238,8 +243,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
         const originalServer = runtime!.server
         offerUrl = async address => {
-          const [route, labels] = await Promise.all([defaultRouteInterface(), interfacePortLabels()])
-          const candidates = mobileLinkCandidates(networkInterfaces(), route, labels)
+          const interfaces = networkInterfaces()
+          const [route, labels] = await Promise.all([defaultRouteInterface(), interfacePortLabels(mobileLinkCandidates(interfaces, null).map(candidate => candidate.interface))])
+          const candidates = mobileLinkCandidates(interfaces, route, labels)
           if (!candidates.length) throw new AgentMuxError('当前没有可用的局域网地址；Agent 会话仍可使用。', 'CONTROL_UNAVAILABLE')
           const chosen = address === undefined ? candidates[0]! : candidates.find(candidate => candidate.address === address)
           if (!chosen) throw new AgentMuxError('这个地址不是这台 Mac 当前的局域网地址；请从候选地址中选择。', 'INVALID_CONTROL_REQUEST')
@@ -312,7 +318,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const retryMobile = setInterval(() => { if (!disposal && !local) void initializeMobile() }, 5000)
   retryMobile.unref()
 
-  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: getAuthority, dispose(): Promise<void> {
+  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState,
+    /** The local Relay port once the phone page is served; tests reach the page on loopback with it. */
+    mobilePort: () => local?.port ?? null, deviceAuthority: getAuthority, dispose(): Promise<void> {
     return disposal ??= (async () => { clearInterval(retryMobile); await closeResources() })()
   } }
 }

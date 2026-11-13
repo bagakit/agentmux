@@ -32,25 +32,32 @@ export function parsePortLabels(stdout: string): ReadonlyMap<string, string> {
  * the same address disagree; until a read succeeds, labels stay absent.
  */
 export function createInterfacePortLabels(read: () => Promise<string> = async () =>
-  (await run('/usr/sbin/networksetup', ['-listallhardwareports'], { timeout: 3000 })).stdout): () => Promise<ReadonlyMap<string, string>> {
+  (await run('/usr/sbin/networksetup', ['-listallhardwareports'], { timeout: 3000 })).stdout): (wanted?: readonly string[]) => Promise<ReadonlyMap<string, string>> {
   let known: ReadonlyMap<string, string> | null = null, pending: Promise<ReadonlyMap<string, string>> | null = null
-  return async () => {
-    if (known || process.platform !== 'darwin') return known ?? new Map()
-    pending ??= read().then(stdout => { const labels = parsePortLabels(stdout); if (labels.size) known = labels; return labels })
-      .catch(() => new Map<string, string>()).finally(() => { pending = null })
+  // A USB or Thunderbolt adapter plugged in later is new hardware, so a wanted adapter missing from the
+  // last good read asks again; otherwise the last good read is reused and two links agree.
+  return async (wanted = []) => {
+    if (process.platform !== 'darwin') return new Map()
+    if (known && wanted.every(name => known!.has(name))) return known
+    pending ??= read().then(stdout => { const labels = parsePortLabels(stdout); if (labels.size) known = labels; return known ?? labels })
+      .catch(() => known ?? new Map<string, string>()).finally(() => { pending = null })
     return pending
   }
 }
 
+/** Virtual tunnels (VPN, PPP, IPsec) can carry the default route, but a phone on the same Wi-Fi cannot reach them. */
+const TUNNEL = /^(utun|ppp|ipsec|tun|tap|gif|stf)\d*/u
+
 /**
- * Local-network IPv4 addresses a phone could use, preferred first: the default-route interface, then
- * wired and wireless adapters, then the rest; link-local addresses go last. Only the local adapter is
+ * Local-network IPv4 addresses a phone could use, preferred first: the default-route adapter, then
+ * wired and wireless adapters, then the rest, then virtual tunnels even when they carry the default
+ * route; link-local addresses go last. Only the local adapter is
  * described; reachability from the phone is not claimed.
  */
 export function mobileLinkCandidates(interfaces: Interfaces, defaultInterface: string | null,
   labels: ReadonlyMap<string, string> = new Map()): AgentMuxRpcMobileLinkCandidate[] {
   const rank = (name: string, address: string) => (address.startsWith('169.254.') ? 4 : 0) +
-    (name === defaultInterface ? 0 : /^(en|eth|wlan)/u.test(name) ? 1 : 2)
+    (TUNNEL.test(name) ? 3 : name === defaultInterface ? 0 : /^(en|eth|wlan)/u.test(name) ? 1 : 2)
   const seen = new Set<string>()
   const rows = Object.entries(interfaces).flatMap(([name, list]) => (list ?? [])
     .filter(entry => entry.family === 'IPv4' && !entry.internal && isLocalNetworkHost(entry.address))
