@@ -449,10 +449,7 @@ export function ConversationMessage({
         preview={collaborationPreview} hasResources={collaborationHasResources} emptyText={!collaborationPreview && parts.every(part => part.kind === 'text')} />
         : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={systemSummary} hasContent={hasContent} />
         : processContent ? <ConversationProcessCard {...card} />
-        : <ConversationSpeechCard {...card} renderBody={contentId => hasContent ? renderBody(contentId)
-          // A spoken record with no readable body (for example an empty final answer when the
-          // reply went out through a tool) says so instead of drawing a header over nothing.
-          : <p className="log-turn__body log-turn__body--empty" data-empty-message="true">原生记录没有可读正文，可在消息详情中查看原始内容。</p>} sender={<>
+        : <ConversationSpeechCard {...card} sender={<>
           <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
           {!detailsOnlyMetadata ? senderIdentity : null}
         </>} />}
