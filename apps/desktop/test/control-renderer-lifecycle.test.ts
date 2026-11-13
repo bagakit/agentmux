@@ -14,7 +14,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); vi.useRea
 
 function fixture(eagerEvent = false) {
   const source = ts.createSourceFile('ipc.ts', sourceText, ts.ScriptTarget.Latest, true)
-  const required = new Set(['releaseHtmlPreviews', 'releaseRendererResources', 'releaseNavigatedHtmlPreviews', 'acceptingControl', 'controlBridge'])
+  const required = new Set(['contents', 'releaseHtmlPreviews', 'releaseRendererResources', 'releaseNavigatedHtmlPreviews', 'acceptingControl', 'controlBridge'])
   const declarations = new Map<string, ts.VariableStatement>()
   const registrations: ts.ExpressionStatement[] = [], removals: ts.ExpressionStatement[] = []
   function visit(node: ts.Node) {
@@ -27,7 +27,8 @@ function fixture(eagerEvent = false) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)) {
       const call = node.expression, event = call.arguments[0]
       if (event && ts.isStringLiteral(event) && ['render-process-gone', 'did-start-navigation'].includes(event.text) && ts.isPropertyAccessExpression(call.expression)) {
-        if (call.expression.expression.getText(source) === 'args.window.webContents') {
+        // The window's own webContents, named once as `contents` by the owner.
+        if (call.expression.expression.getText(source) === 'contents') {
           if (call.expression.name.text === 'on') registrations.push(node)
           if (call.expression.name.text === 'off') removals.push(node)
         }
@@ -43,6 +44,8 @@ function fixture(eagerEvent = false) {
   const sent: { channel: string; request: unknown }[] = []
   const resources = { htmlPreviews: { releaseAll: vi.fn() }, previewResources: { cancelAll: vi.fn() },
     diagramPreviews: { cancelAll: vi.fn() }, builds: { releaseAll: vi.fn(async () => {}) } }
+  // Playback leases follow the document, not every navigation: a same-document one keeps playing media.
+  const mediaStreams = { releaseAll: vi.fn() }
   const webContents = { isDestroyed: () => false,
     send(channel: string, request: unknown) { sent.push({ channel, request }) },
     on(event: string, handler: (...args: unknown[]) => void) {
@@ -52,7 +55,9 @@ function fixture(eagerEvent = false) {
     off(event: string, handler: (...args: unknown[]) => void) {
       expect(handlers.get(event)).toBe(handler); handlers.delete(event)
     } }
-  const dependencies = { ...resources, DesktopControlIpcBridge, args: { window: { isDestroyed: () => false, webContents } },
+  // Connector readers are released with the document like control requests; this owner only records that call.
+  const channelMetadata = { releaseReaders: vi.fn() }
+  const dependencies = { ...resources, mediaStreams, channelMetadata, DesktopControlIpcBridge, args: { window: { isDestroyed: () => false, webContents } },
     CONTROL_REQUEST_CHANNEL: 'control-request', CONTROL_CANCEL_CHANNEL: 'control-cancel' }
   // Preserve real source order. An event registered before controlBridge construction
   // can fire during an await in registerIpc; eagerEvent makes that TDZ observable.
@@ -63,7 +68,7 @@ function fixture(eagerEvent = false) {
     bridge: DesktopControlIpcBridge; disposeListeners(): void
   }
   cleanups.push(() => { owners.bridge.dispose(); owners.disposeListeners() })
-  return { ...owners, handlers, sent, resources }
+  return { ...owners, handlers, sent, resources, mediaStreams }
 }
 function request(): Extract<AgentMuxControlRequest, { operation: 'file.format' }> {
   return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-operation', operation: 'file.format', regionId: 'original-region' }
@@ -72,10 +77,10 @@ function result() { return { operation: 'file.format' as const, regionId: 'origi
 
 describe('production Main Renderer owner lifecycle callbacks', () => {
   it.each([
-    { event: 'render-process-gone', args: [], retired: true, previews: true },
-    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("replacement.html"), false, true], retired: true, previews: true },
-    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("current.html#section"), true, true], retired: false, previews: true },
-    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("child.html"), false, false], retired: false, previews: false }
+    { event: 'render-process-gone', args: [], retired: true, previews: true, media: true },
+    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("replacement.html"), false, true], retired: true, previews: true, media: true },
+    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("current.html#section"), true, true], retired: false, previews: true, media: false },
+    { event: 'did-start-navigation', args: [{}, _hygiene_fixtureFileUrl("child.html"), false, false], retired: false, previews: false, media: false }
   ])('$event $args retires=$retired while preserving existing preview release', async scenario => {
     vi.useFakeTimers()
     const f = fixture()
@@ -86,6 +91,7 @@ describe('production Main Renderer owner lifecycle callbacks', () => {
     for (const resource of Object.values(f.resources)) {
       expect(('releaseAll' in resource ? resource.releaseAll : resource.cancelAll).mock.calls).toHaveLength(scenario.previews ? 1 : 0)
     }
+    expect(f.mediaStreams.releaseAll.mock.calls).toHaveLength(scenario.media ? 1 : 0)
     expect(f.sent.filter(item => item.channel === 'control-cancel')).toHaveLength(scenario.retired ? 1 : 0)
     if (scenario.retired) {
       expect(f.bridge.accept({ requestId: request().requestId, ok: true, result: result() })).toBe(false)
