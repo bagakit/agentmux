@@ -115,3 +115,63 @@
 @media (pointer: coarse) { .md-link-card__address > summary, .md-link-card__footer > .content-copy { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; } }
 @media (prefers-reduced-motion: reduce) { .md-link-card { transition: none; } }
 .md-block-code .hljs-title, .md-block-code .hljs-type { color: var(--blue); }
+
+/* README HTML subset. Author alignment, sizing and card layout only; no author styles reach the DOM. */
+.md-paragraph[data-align='center'], .md-heading[data-align='center'], .md-container[data-align='center'] { text-align: center; }
+.md-paragraph[data-align='right'], .md-heading[data-align='right'], .md-container[data-align='right'] { text-align: right; }
+.md-paragraph[data-align='justify'], .md-container[data-align='justify'] { text-align: justify; }
+.md-container { display: flex; flex-direction: column; gap: inherit; min-width: 0; }
+.md-container[data-indent] { padding-left: var(--sp-6); }
+.md-image-frame { display: inline-block; max-width: 100%; vertical-align: middle; }
+.md-image-frame > * { display: block; max-width: 100%; }
+.md-image-frame img { width: 100%; height: auto; }
+.md-container[data-align='center'] .md-image-frame { margin-inline: auto; }
+.md-kbd { display: inline-block; min-width: 1.6em; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line), var(--hl); font-family: var(--font-mono); font-size: .86em; line-height: 1.6; text-align: center; }
+.md-sub, .md-sup { font-size: .82em; line-height: 0; }
+.md-mark { padding: 0 var(--sp-1); border-radius: var(--radius-sm); background: var(--amber-wash); color: inherit; }
+.md-ins { text-decoration: underline; text-decoration-color: var(--green-2); text-underline-offset: 3px; }
+.md-small { font-size: .86em; }
+.md-abbr[title] { text-decoration: underline dotted; cursor: help; }
+.md-samp, .md-var { font-family: var(--font-mono); font-size: .92em; }
+
+.md-html-table { border-collapse: collapse; font-size: inherit; }
+.md-html-table > caption { padding-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); text-align: left; }
+.md-html-cell { padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--wash-2); text-align: left; vertical-align: top; }
+th.md-html-cell { color: var(--text-2); font-weight: 620; }
+.md-html-cell > .md-paragraph { margin: 0; }
+.md-html-cell + .md-html-cell { border-left: 0; }
+.md-html-cell[data-align='center'] { text-align: center; }
+.md-html-cell[data-align='right'] { text-align: right; }
+.md-html-cell[data-valign='middle'] { vertical-align: middle; }
+.md-html-cell[data-valign='bottom'] { vertical-align: bottom; }
+.md-html-cell { min-width: 0; overflow-wrap: anywhere; }
+/* A td-only table is layout: equal or authored columns that wrap instead of scrolling. */
+.md-html-table--layout { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: var(--sp-4) 0; }
+.md-table-scroll:has(> .md-html-table--layout) { overflow-x: visible; margin-inline: calc(var(--sp-4) * -1); }
+.md-html-table--layout .md-html-cell { padding: var(--sp-4); border: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.md-html-table--layout .md-html-cell .md-image-frame { margin-bottom: var(--sp-3); }
+.md-html-table--layout .md-html-cell img { border-radius: var(--radius-sm); }
+.md-html-table--layout .md-sub { display: inline-block; margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
+
+.md-details { min-width: 0; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); }
+.md-details__summary { padding: var(--sp-3) var(--sp-4); color: var(--text); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
+.md-details__summary:hover { background: var(--surface-2); }
+.md-details__summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.md-details__body { display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-4); }
+
+/* GitHub alerts: the quote band carries the type color; icon and label carry the meaning. */
+.md-alert { --md-alert-ink: var(--blue); display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--md-alert-ink); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--md-alert-ink) 7%, transparent); color: var(--text); }
+.md-alert[data-alert-type='tip'] { --md-alert-ink: var(--green); }
+.md-alert[data-alert-type='important'] { --md-alert-ink: var(--purple); }
+.md-alert[data-alert-type='warning'] { --md-alert-ink: var(--amber); }
+.md-alert[data-alert-type='caution'] { --md-alert-ink: var(--red); }
+.md-alert__title { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: color-mix(in srgb, var(--md-alert-ink) 82%, var(--text)); font-weight: 620; }
+.md-alert__title > svg { flex: none; }
+.md-alert > .md-paragraph { margin: 0; }
+.md-remote-image { display: inline-block; max-width: 100%; height: auto; vertical-align: middle; }
+.md-document .md-paragraph > .md-remote-image, .md-document [data-reading-find-boundary] > .md-remote-image { margin-block: var(--sp-1); }
+
+/* Reader-chosen document layout. Size scales the whole document so headings, code and tables keep proportion. */
+.md-document { --font-reading-serif: "New York", "Iowan Old Style", Charter, Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
+.md-document[data-reading-typeface='serif'] { font-family: var(--font-reading-serif); }
+.md-document[data-reading-typeface='serif'] .md-heading { letter-spacing: 0; }
