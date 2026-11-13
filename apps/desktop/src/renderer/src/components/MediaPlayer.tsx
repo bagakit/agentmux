@@ -284,7 +284,8 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
   const liveBadge = live ? <button type="button" className="media-player__live" data-live-edge={edge}
     aria-disabled={edge !== 'behind'} aria-label={edge === 'behind' ? 'Go to live' : 'Playing live'} title={edge === 'behind' ? 'Go to live (End)' : 'Live'}
     onClick={() => { if (edge === 'behind') run({ kind: 'seek-end' }, 'pointer') }}>
-    <span aria-hidden="true" className="media-player__live-dot" />{edge === 'behind' ? 'Go live' : 'LIVE'}
+    <span aria-hidden="true" className="media-player__live-dot" />
+    {edge === 'behind' && facts.window ? `-${formatClock(facts.window.end - shown)} LIVE` : 'LIVE'}
   </button> : null
   // Elapsed / total on video and audio alike; the total side toggles to remaining time.
   const endTime = remaining && Number.isFinite(facts.duration) ? `-${formatClock(facts.duration - shown)}` : formatClock(facts.duration)
@@ -298,7 +299,7 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
     title="Speed (< and >)" onClick={() => run({ kind: 'rate', direction: 1 }, 'pointer')}>{facts.rate}×</button> : null
   const failurePanel = failure ? <div className="media-player__failure" role="alert">
     <strong>{failure.title}</strong><span>{failure.detail}</span>
-    {failure.retry ? <button type="button" className="small-button" onClick={onRetry}>Retry</button> : null}
+    {failure.retry ? <button type="button" className="media-player__retry" onClick={onRetry}>Retry</button> : null}
   </div> : null
   const statusLine = <span className="file-preview__metadata media-player__metadata">
     {[facts.width && facts.height ? `${facts.width.toLocaleString()} × ${facts.height.toLocaleString()}` : null,
@@ -336,7 +337,7 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
   </div>
 
   const videoChrome = <>
-    {!facts.started && !failure ? <button type="button" className="media-player__start" aria-label="Play" title="Play (k)" onClick={() => run({ kind: 'toggle-play' }, 'pointer')}><PlayIcon size={22} /></button> : null}
+    {facts.paused && !facts.ended && !failure ? <button type="button" className="media-player__start" aria-label="Play" title="Play (k)" onClick={() => run({ kind: 'toggle-play' }, 'pointer')}><PlayIcon size={22} /></button> : null}
     {buffering && !failure ? <span className="media-player__buffering" aria-hidden="true"><LoadingIcon size={20} animation="spin" /></span> : null}
     {indicator ? <span key={indicator.key} className="media-player__indicator" data-side={indicator.side ?? 'top'} aria-hidden="true"
       onAnimationEnd={() => setIndicator(current => current?.key === indicator.key ? null : current)}>
@@ -344,11 +345,11 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
     {failurePanel}
     <div className="media-player__scrim" aria-hidden="true" />
     <div className="media-player__controls">
-      {timeline}
       <div className="media-player__bar">
         {playButton(false)}
         <div className="media-player__volume-group">{muteButton}{volume}</div>
         {clock}{liveBadge}
+        {timeline}
         <span className="media-player__spacer" />
         {speed}
         <button type="button" className="media-player__button" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} title={`${fullscreen ? 'Exit full screen' : 'Full screen'} (f)`}
