@@ -1681,6 +1681,36 @@ it('keeps region names in their slot and on their territory through a direct ges
   expect(requests).toHaveLength(1)
 })
 
+it('weights routes by saturated message strength and lets regions outside a selection recede', async () => {
+  const scene = scenario(3), [a, b, c] = [...scene.agents.values()] as [CollaborationAgent, CollaborationAgent, CollaborationAgent]
+  scene.areas = [{ id: 'near', name: 'Near', kind: 'project', members: [a.id, b.id] }, { id: 'far', name: 'Far', kind: 'project', members: [c.id] }]
+  const messages = (id: string, source: CollaborationAgent, target: CollaborationAgent, count: number): CollaborationRelation => ({ id, kind: 'communication', source: source.id, target: target.id,
+    evidence: Array.from({ length: count }, (_, index) => ({ kind: 'communication', id: JSON.stringify(['local', id, index]), subject: source.subject!, incarnation: null,
+      message: { messageId: id + index, senderSessionId: source.sessionId, recipientSessionId: target.sessionId, threadId: id, replyTo: null }, events: [] })) })
+  // One message, four, and twenty (past saturation); the same deduplicated count the layout uses.
+  scene.relations = [messages('one', a, b, 1), messages('four', b, a, 4), messages('many', a, c, 20)]
+  await loaded(scene); await revealWorld()
+  const node = (agent: CollaborationAgent) => collaborationAgentNode(agent === c ? 'far' : 'near', agent.id)
+  const weight = (source: CollaborationAgent, target: CollaborationAgent) => {
+    const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
+    const edge = edges.find(edge => { const [, from, to] = JSON.parse(edge.dataset.id!) as [string, string, string]; return from === node(source) && to === node(target) })
+    expect(edge, edges.map(edge => edge.dataset.id).join(' | ')).toBeDefined()
+    return Number(edge!.style.getPropertyValue('--edge-weight'))
+  }
+  expect(weight(a, b)).toBe(0); expect(weight(b, a)).toBeCloseTo(.5, 6); expect(weight(a, c)).toBe(1)
+  const recede = () => Object.fromEntries(['near', 'far'].map(id => [id, dom.container.querySelector<HTMLElement>(`.react-flow__node[data-id='${JSON.stringify(['area', id])}'] .collaboration-area`)!.dataset.recede ?? null]))
+  expect(recede()).toEqual({ near: null, far: null })
+  // b talks only to a, so the far region recedes; a talks to c, so selecting a keeps both present.
+  const before = new Map(captured.nodes.map(node => [node.id, node]))
+  await dom.render(graph(scene, { kind: 'agent', id: b.id }))
+  expect(recede()).toEqual({ near: null, far: 'true' })
+  expect(captured.nodes.filter(node => node !== before.get(node.id)).map(node => node.id)).toEqual([collaborationAgentNode('near', b.id)])
+  await dom.render(graph(scene, { kind: 'agent', id: a.id }))
+  expect(recede()).toEqual({ near: null, far: null })
+  await dom.render(graph(scene))
+  expect(recede()).toEqual({ near: null, far: null })
+})
+
 it('selecting an Agent highlights only its original relations while preserving every other connection', async () => {
   const scene = scenario(24); await loaded(scene)
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
