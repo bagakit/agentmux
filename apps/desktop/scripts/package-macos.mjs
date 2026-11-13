@@ -35,6 +35,11 @@ import { verifyNativeDesktopCopy, verifyNativeDesktopSigning } from './native-de
 import { PRODUCT_NAME, BUNDLE_ID, applicationBranding } from './macos-application-brand.mjs'
 import { inspectElectronApplication } from './electron-application.mjs'
 const desktopRoot = resolve(import.meta.dirname, '..')
+// Waiting for a packaged GUI to answer is a hang guard, not a speed requirement. On a loaded machine a
+// freshly signed App spent most of a minute before Main wrote its first file, and a relaunched App with a
+// large workbench missed a 30-second activation window. Wrong identity, an unrestored workbench or an
+// early exit still rejects at once; only a slow healthy GUI gains time.
+const GUI_STARTUP_HANG_GUARD_MS = 300_000
 const repositoryRoot = resolve(desktopRoot, '../..')
 const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const coreRoot = join(repositoryRoot, 'packages', 'core')
@@ -439,10 +444,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   assert(await macosHostServiceRegistration(service) === null, 'Private launch smoke Host service already exists.')
   let verificationError
   let verificationStage = 'launch-request'
-  // One absolute hang guard across launch, ready, Runtime ownership and exit. On a loaded machine a
-  // freshly signed candidate's first launch spent most of a minute before Main wrote its first file,
-  // so a one-minute window rejected healthy candidates. Early exit and identity checks still fail fast.
-  const verificationDeadline = Date.now() + 300_000
+  // One absolute deadline shared by launch, ready, Runtime ownership and exit.
+  const verificationDeadline = Date.now() + GUI_STARTUP_HANG_GUARD_MS
   try {
     for (const name of ['HOME', 'TMPDIR', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
       await mkdir(guiEnvironment[name], { recursive: true, mode: 0o700 })
@@ -713,10 +716,10 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
 }
 
 // The outgoing read is one public read-only RPC. A loaded original Main can miss its own short Control
-// budget; that is an unknown observation, not an unhealthy GUI. Retry only the missing read within one
-// window. A qualification failure on an actual observation (loading, storage, identity) still rejects.
+// budget; that is an unknown observation, not an unhealthy GUI. Retry only the missing read within the
+// GUI hang guard. A qualification failure on an actual observation (loading, storage, identity) still rejects.
 async function qualifyOutgoingUi(appPath) {
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + GUI_STARTUP_HANG_GUARD_MS
   while (true) {
     try { return await qualifyUi(appPath, null, { outgoing: true }) }
     catch (error) { if (error.uiContinuity || Date.now() >= deadline) throw error }
@@ -726,7 +729,7 @@ async function qualifyOutgoingUi(appPath) {
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
   const { confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings } = await import('./package-runtime-upgrade.mjs')
-  const deadline = Date.now() + 30_000
+  const deadline = Date.now() + GUI_STARTUP_HANG_GUARD_MS
   let lastError, lastObservation = null
   do {
     try {
