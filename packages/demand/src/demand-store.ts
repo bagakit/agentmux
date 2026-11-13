@@ -748,7 +748,7 @@ export class DemandStore {
       const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
-        if (original.author.kind !== author.kind || original.author.id !== author.id || original.author.runtimeId !== author.runtimeId || original.author.hostId !== author.hostId) this.rejectDelegation('This plan revision operation belongs to another author.')
+        if (original.author.kind !== author.kind || original.author.id !== author.id || (original.author.runtimeId ? original.author.runtimeId !== author.runtimeId : original.author.hostId !== undefined && original.author.hostId !== author.hostId)) this.rejectDelegation('This plan revision operation belongs to another author.')
         return { unchanged: demand }
       }
       if ((current?.revision ?? 0) !== revision.expectedRevision)
@@ -780,7 +780,7 @@ export class DemandStore {
         const { reviewer: before, reviewedAt: _time, ...saved } = original
         const ownerHost = demand.delegations?.find(entry => entry.operationId === review.delegationOperationId)?.hostId
         if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id ||
-            (before.runtimeId !== reviewer.runtimeId || (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost)))
+            (before.runtimeId ? before.runtimeId !== reviewer.runtimeId : (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost)))
           this.rejectDelegation('This review operation was already recorded with a different verdict or reviewer.')
         return { unchanged: demand }
       }
