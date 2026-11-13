@@ -27,7 +27,7 @@ export function FocusSourceStatus({ sourceError, loading, laneErrors, onRetrySou
     restore: 'Retry lane details to read the unavailable workspace sources.'
   } } })
   return <>
-    {loading && visible ? <span className="focus-source-loading" role="status"><LoadingIcon size={12} aria-hidden="true" /><span>Loading sources…</span></span> : null}
+    {loading && visible ? <span className="focus-source-loading" role="status"><LoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Loading sources…</span></span> : null}
     <ServiceNoticeDisclosure scope="focus:sources" notices={notices} available={!loading} visible={visible}
     title="Sources unavailable" className="focus-source-status" actions={<>
       {sourceError ? <button type="button" className="small-button" aria-busy={loading} onClick={onRetrySources}>Retry project sources</button> : null}

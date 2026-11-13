@@ -401,10 +401,6 @@
 .mote-threads-panel__locations { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .mote-cooperation--threads { border: 0; padding: 0; }
 .mote-cooperation--threads .mote-cooperation__team-body { max-height: none; }
-.mote-entry-loading { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 16px; min-height: 180px; color: var(--text-3); font-size: var(--fs-body); }
-.mote-entry-loading__orbit { width: 28px; height: 28px; border: 2px solid var(--line-soft); border-top-color: var(--text-2); border-radius: 50%; animation: mote-entry-orbit 1.2s linear infinite; }
-@keyframes mote-entry-orbit { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .mote-entry-loading__orbit { animation: none; border-style: dotted; } }
 @container mote-space (max-width: 760px) {
   .mote-space-frame__header { align-items: center; gap: 8px; }
   .mote-space-frame__navigation { flex-wrap: nowrap; gap: 8px; }

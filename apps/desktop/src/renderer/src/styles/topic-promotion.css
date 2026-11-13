@@ -21,7 +21,6 @@
 .topic-promotion__line { position: relative; width: 32px; height: 1px; background: #7e9f89; }
 .topic-promotion__line::after { content: ''; position: absolute; right: 0; width: 5px; height: 5px; border-top: 1px solid #7e9f89; border-right: 1px solid #7e9f89; transform: translateY(-2px) rotate(45deg); }
 .topic-promotion-dialog[data-phase='writing'] .topic-promotion__line::before { content: ''; position: absolute; top: -2px; left: 0; width: 10px; height: 5px; border-radius: 50%; background: #438d68; box-shadow: 0 0 7px #71b995; animation: topic-promotion-signal 1200ms ease-in-out infinite; }
-.topic-promotion__activity { width: 15px; height: 15px; flex-shrink: 0; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: topic-promotion-turn 800ms linear infinite; }
 .topic-promotion__body { padding: 24px 28px 22px; }
 .topic-promotion__eyebrow { display: block; color: var(--text-3); font-size: var(--fs-meta); letter-spacing: .06em; }
 .topic-promotion__title { margin: 9px 0 10px; color: var(--text); font-size: 25px; font-weight: 650; line-height: 1.3; letter-spacing: -.025em; overflow-wrap: anywhere; text-wrap: balance; }
@@ -56,7 +55,6 @@
 }
 @keyframes topic-promotion-gather-halo { from { opacity: .8; transform: scale(.82); } to { opacity: 0; transform: scale(1.08); } }
 @keyframes topic-promotion-signal { 0% { opacity: 0; transform: translateX(-2px) scaleX(.6); } 25%, 75% { opacity: 1; } 100% { opacity: 0; transform: translateX(27px) scaleX(.6); } }
-@keyframes topic-promotion-turn { to { transform: rotate(360deg); } }
 @keyframes topic-promotion-seal { from { opacity: .9; transform: scale(.7); } to { opacity: 0; transform: scale(1.6); } }
 @keyframes topic-promotion-settle { from { transform: scale(.65) rotate(-12deg); } to { transform: scale(1) rotate(0); } }
 @media (max-width: 480px) {
@@ -71,7 +69,7 @@
   .topic-promotion__submit.primary-button:hover:not(:disabled), .topic-promotion__submit.primary-button:active:not(:disabled) { transform: none; }
   .topic-promotion-notice { animation: none; }
   .topic-promotion__energy { display: none; }
-  .topic-promotion__halo, .topic-promotion__particle, .topic-promotion__activity,
+  .topic-promotion__halo, .topic-promotion__particle,
   .topic-promotion-dialog[data-phase='writing'] .topic-promotion__line::before,
   .topic-promotion-notice__seal::before, .topic-promotion-notice__seal > svg { animation: none; }
   .topic-promotion-dialog[data-phase='writing'] .topic-promotion__line::before,

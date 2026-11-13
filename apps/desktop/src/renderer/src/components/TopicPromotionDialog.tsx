@@ -2,6 +2,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { TopicPromotionReceipt } from '@agentmux/core/control'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
@@ -11,6 +12,8 @@ import topicArt from '../assets/mote-origin/topic-work.png'
 import moteArt from '../assets/mote-origin/grown-team.png'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { MoteIcon } from './MoteIcon'
+
+const LoadingIcon = semanticIconComponent('status.loading')
 
 export type TopicPromotionTarget = { topicId: string; title: string }
 type Props = { target: TopicPromotionTarget | null; onClose(): void; onPromoted(receipt: TopicPromotionReceipt): void }
@@ -113,7 +116,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
             <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
             {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
               : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading} onClick={() => void promote()}>
-                {busy ? <span className="topic-promotion__activity" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
+                {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
               </button>}
           </footer>
           {busy ? <p className="topic-promotion__progress" role="status">正在延续原来的工作。关闭后也可回来查看。</p> : null}

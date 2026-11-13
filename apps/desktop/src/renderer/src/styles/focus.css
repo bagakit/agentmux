@@ -543,9 +543,6 @@
 .focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-retained-projects__row:disabled { cursor: default; }
 .focus-source-loading { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-source-loading > svg { animation: focus-source-turn 1.2s linear infinite; }
-@keyframes focus-source-turn { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .focus-source-loading > svg { animation: none; } }
 
 .focus-search-locations { flex: 0 0 auto; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 6px; min-width: 0; }
 .focus-search-locations > small { color: var(--text-muted); }
