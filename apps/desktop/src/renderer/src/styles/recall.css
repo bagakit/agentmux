@@ -12,7 +12,7 @@
 .recall-notebook-menu-item > svg { flex: none; }
 .recall-notebook-menu-item > .recall-notebook-menu-check { display: flex; flex: none; color: var(--text); }
 .recall-notebook-menu-item[data-state="checked"] { color: var(--text); font-weight: 600; }
-.recall-notebook-menu-item[data-highlighted] { background: var(--wash-2); }
+.recall-notebook-menu-item[data-highlighted], .recall-notebook-menu-item:hover:where(:not([data-disabled])) { background: var(--wash-2); }
 .recall-notebook-menu-item:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .recall-notebook-menu-item[data-disabled] { opacity: .5; cursor: default; }
 .recall-notebook-menu-separator { height: 1px; margin: var(--sp-2); background: var(--line-soft); }
