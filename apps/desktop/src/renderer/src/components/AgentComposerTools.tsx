@@ -88,7 +88,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
   onCommand(text: string, item: ComposerSuggestion): void
-  onCapture?: () => Promise<void>
+  onCapture?: (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode) => Promise<void>
   runAction(action: () => void | Promise<void>): Promise<void>
 }) {
   const [skills, setSkills] = useState<AgentSkill[]>([])
@@ -110,9 +110,9 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     } finally { if (request === discovery.current) setLoading(false) }
   }
 
-  async function capture() {
+  async function capture(mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode) {
     setCapturing(true)
-    try { await onCapture?.() }
+    try { await onCapture?.(mode) }
     finally { setCapturing(false) }
   }
 
@@ -156,7 +156,14 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     {referenceTools}
     </span>
     {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
-      aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${formatChord(SCREENSHOT_SHORTCUT.chord, true).join('')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button></span> : null}
+      aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${formatChord(SCREENSHOT_SHORTCUT.chord, true).join('')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(() => capture()) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button>
+      <DropdownMenu.Root><DropdownMenu.Trigger className="composer-tool" disabled={disabled || capturing} aria-label="Choose screenshot source" title="Choose screenshot source"><SemanticIcon name="control.select-open" size={11} /></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
+          <DropdownMenu.Item onSelect={() => { void runAction(() => capture()) }}>Screen region</DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('display')) }}>Entire display…</DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('window')) }}>Application window…</DropdownMenu.Item>
+        </DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root></span> : null}
     </>}
   </span>
 }

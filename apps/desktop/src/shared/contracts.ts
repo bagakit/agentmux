@@ -1822,7 +1822,7 @@ export type AgentMuxDesktopApi = {
     onEnvironmentWarning(listener: (warning: string | null) => void): () => void
     onAppIconIssue(listener: (issue: string | null) => void): () => void
     onSpatialLinkIssue(listener: (message: string) => void): () => void
-    captureScreenshot(): Promise<string | null>
+    captureScreenshot(mode?: import('./screenshot-source').ScreenshotCaptureMode): Promise<string | null>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>
     onScreenshotIssue(listener: (message: string) => void): () => void
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>

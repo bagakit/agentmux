@@ -11,3 +11,22 @@ body { font-family: var(--font-sans); font-size: var(--fs-body); background: var
 .system-screenshot-editor__error { flex: none; padding: var(--sp-4) var(--sp-5); background: var(--surface-1); color: var(--text); border-top: 1px solid var(--line); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .system-screenshot-editor__error span { color: var(--text-3); }
 .screenshot-editor-startup { padding: var(--sp-6); line-height: 1.5; overflow-wrap: anywhere; }
+
+.screenshot-source { height: 100%; display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.screenshot-source header { display: flex; align-items: flex-start; gap: 12px; }
+.screenshot-source header > div { flex: 1; min-width: 0; }
+.screenshot-source h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+.screenshot-source p { margin: 5px 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+.screenshot-source button { font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; cursor: pointer; }
+.screenshot-source button:hover { background: var(--surface-2); }
+.screenshot-source button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.screenshot-source button:disabled { opacity: .5; }
+.screenshot-source__search { display: flex; flex-wrap: wrap; gap: 8px; }
+.screenshot-source__search input { flex: 1; min-width: 160px; }
+.screenshot-source__choices { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.screenshot-source__choices > button { display: flex; flex-direction: column; text-align: left; gap: 3px; padding: 12px; }
+.screenshot-source__choices strong { font-weight: 500; overflow-wrap: anywhere; }
+.screenshot-source__choices span { color: var(--text-3); font-size: var(--fs-meta); }
+.screenshot-source__issue { font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.screenshot-source__issue button { margin-left: 8px; }
+.screenshot-source footer { color: var(--text-3); font-size: var(--fs-meta); }

@@ -1,4 +1,4 @@
-import type { NativeDesktop } from '@agentmux/native-desktop'
+import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { BrowserPng } from '../shared/contracts.js'
 import { savePastedImage, type PastedImageWriteReceipt } from './pasted-image-write.js'
@@ -8,6 +8,7 @@ type Ports = {
   native(): Pick<NativeDesktop, 'captureScreenshot' | 'writeClipboardImage'>
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, initialIssue?: string): Promise<void>
   reportIssue(error: unknown): void
+  chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
 }
 
 /** One Desktop capture and delivery owner. Native retains the physical selector's lifetime. */
@@ -15,12 +16,17 @@ export class ScreenCapture {
   private busy = false
   constructor(private readonly ports: Ports) {}
 
-  async capture(attachToDraft: boolean): Promise<string | null> {
+  async capture(attachToDraft: boolean, mode: import('../shared/screenshot-source').ScreenshotCaptureMode = 'selection'): Promise<string | null> {
     if (this.busy) throw new Error('A screen capture is already in progress. Finish or cancel that selection or editor, then try again.')
     this.busy = true
     try {
       const native = this.ports.native()
-      const result = await native.captureScreenshot({ mode: 'selection', allowEditing: true })
+      if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
+      if (mode !== 'selection' && !this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
+      const target = mode === 'selection' ? { mode: 'selection' as const, allowEditing: true } : await this.ports.chooseSource?.(mode)
+      if (!target) return null
+      if (target.mode !== mode) throw new Error('The selected capture source does not match the original request. Your draft is kept.')
+      const result = await native.captureScreenshot(target)
       if (result.state === 'cancelled') return null
       if (result.state === 'failed') throw new Error(`Screen capture failed (${result.error?.code ?? 'unknown'}): ${result.error?.message ?? 'No failure details were returned'}. Your work remains available.`)
       if (result.state !== 'captured' || !result.screenshot) throw new Error('The original screen capture result is unconfirmed. Check that operation before taking another screenshot.')
@@ -54,13 +60,15 @@ export class ScreenCapture {
         }
       }
       let submitted: Promise<void> | null = null
+      let originalDelivered = false
       const complete = (final: BrowserPng) => {
-        const result = deliver(final)
+        // Later copies belong to the retained editor, never a second insertion into an old draft.
+        const result = originalDelivered ? native.writeClipboardImage(final) : deliver(final).then(() => { originalDelivered = true })
         submitted = result
         void result.catch(() => {}) // The editor consumes this same receipt; closing it cannot erase submission.
         return result
       }
-      if (result.completionAction === 'edit') await this.ports.edit(image, attachToDraft, complete)
+      if (result.completionAction === 'edit' || mode !== 'selection') await this.ports.edit(image, attachToDraft, complete)
       else {
         try { await deliver(image) }
         catch (error) {

@@ -28,7 +28,7 @@ export default defineConfig({
       externalizeDeps: false,
       isolatedEntries: true,
       rollupOptions: {
-        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), capsule: resolve(import.meta.dirname, 'src/preload/capsule.ts'), 'screenshot-editor': resolve(import.meta.dirname, 'src/preload/screenshot-editor.ts') },
+        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), capsule: resolve(import.meta.dirname, 'src/preload/capsule.ts'), 'screenshot-editor': resolve(import.meta.dirname, 'src/preload/screenshot-editor.ts'), 'screenshot-source': resolve(import.meta.dirname, 'src/preload/screenshot-source.ts') },
         output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }

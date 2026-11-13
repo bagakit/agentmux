@@ -124,6 +124,7 @@ import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/c
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { ScreenCapture } from './screen-capture.js'
+import { ScreenshotSourcePicker } from './screenshot-source-picker.js'
 import { GlobalScreenshot } from './global-screenshot.js'
 import { SystemScreenshotEditor } from './system-screenshot-editor.js'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
@@ -1355,6 +1356,7 @@ export async function registerIpc(args: {
     args.webFiles?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance)
+  const screenshotSources = new ScreenshotSourcePicker({ native: getNativeDesktopOwner, appearance: () => config.appearance })
   const reportScreenshotIssue = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     console.warn('Screen capture:', error)
@@ -1364,11 +1366,12 @@ export async function registerIpc(args: {
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
-    edit: (image, attachToDraft, complete, initialIssue) => screenshotEditor.edit(image, attachToDraft, complete, initialIssue), reportIssue: reportScreenshotIssue })
+    edit: (image, attachToDraft, complete, initialIssue) => screenshotEditor.edit(image, attachToDraft, complete, initialIssue), reportIssue: reportScreenshotIssue,
+    chooseSource: mode => screenshotSources.choose(mode) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
     capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue })
-  registerNativeDesktopIpc({ capture: () => screenCapture.capture(true), native: getDesktopNativeUiOwner,
+  registerNativeDesktopIpc({ capture: mode => screenCapture.capture(true, mode), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
@@ -2277,6 +2280,7 @@ export async function registerIpc(args: {
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
+      { owner: 'screenshot-sources', dispose: () => screenshotSources.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'app-brand-icon', dispose: appBrandIcon.dispose },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
