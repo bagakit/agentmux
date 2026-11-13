@@ -84,7 +84,7 @@ export function createHostMoteDialogue(options: {
   main: MoteMainReader
   spatial: AgentMuxSpatialStateStore
   store: MoteDialogueStore
-  clientForHost(hostId: string): Pick<AgentMuxClient, 'readMessage'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>> | Promise<Pick<AgentMuxClient, 'readMessage'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>>>
+  clientForHost(hostId: string): Pick<AgentMuxClient, 'readDispatch'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>> | Promise<Pick<AgentMuxClient, 'readDispatch'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>>>
 }): MoteDialoguePort & { prepareMainSource(before:MoteMainSnapshot, roleRevision:string, reference:import('@agentmux/core/mote-preferences').MoteDefaultConversation|null, operationId:string):Promise<MoteMainTransitionMarker>; recordMainSource(before: MoteMainSnapshot, after: MoteMainSnapshot, operationId: string): Promise<void> } {
   const mainSource = (snapshot: MoteMainSnapshot, associatedAt: number) => {
     if (snapshot.status !== 'ready' || !snapshot.identity || !snapshot.current || !snapshot.roleRevision || !snapshot.resource || !snapshot.documentRevision) return null
@@ -179,11 +179,11 @@ export function createHostMoteDialogue(options: {
       } else {
         if (input.source.messageHostId !== main.current.hostId) throw new AgentMuxError('The original work message belongs to another Host.', 'MOTE_DIALOGUE_SOURCE_UNCONFIRMED')
         const client = await options.clientForHost(input.source.messageHostId)
-        const original = await client.readMessage({ messageId: input.source.messageId })
-        const envelope = original?.envelope
-        if (!envelope || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' ||
-          envelope.senderSessionId !== main.current.sessionId || envelope.sender.agentSessionId !== main.current.sessionId ||
-          envelope.recipientSessionId !== envelope.recipient.agentSessionId || !envelope.senderRunId || !envelope.recipientRunId)
+        // Dispatch owns Run qualification, including a creation's frozen prompt condition.
+        // Its source keeps the immutable pre-launch envelope; do not demand a Run written back into it.
+        const { dispatch, source: original } = await client.readDispatch({ sourceMessageId: input.source.messageId })
+        const envelope = original.envelope
+        if (dispatch.ownerAgentSessionId !== main.current.sessionId)
           throw new AgentMuxError('A work event requires its exact original main-to-member dispatch message. Existing messages were not reclassified.', 'MOTE_DIALOGUE_SOURCE_UNCONFIRMED')
         const eventId = input.source.eventId ?? JSON.stringify([main.identity.hostId, main.identity.moteId, input.source.messageHostId, envelope.threadId])
         if (input.source.eventId) {
