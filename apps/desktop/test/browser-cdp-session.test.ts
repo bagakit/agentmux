@@ -275,3 +275,39 @@ it('the actual ref dispatcher consumes one stable child sender and refuses its r
   await expect(environment.sendCommand('Runtime.evaluate')).resolves.toBeDefined()
   environment.detach()
 })
+
+describe('independent native network scope and original connection retention', () => {
+  it('keeps the original environment connection protected after the program lease ends, until that exact scope closes', async () => {
+    const contents = fakeContents({sendCommand: async (method) => method === 'Target.getTargetInfo' ? {targetInfo: {targetId: 'original-native'}} : method === 'Target.attachToTarget' ? {sessionId: 'original-network'} : {}})
+    const environment = BrowserCdpSession.attach(contents), program = BrowserCdpSession.attach(contents)
+    const network = await program.openNetworkSession()
+    program.detach()
+    expect(environment.isSoleConsumer).toBe(false)
+    expect(contents.debugger.isAttached()).toBe(true)
+    await network.close()
+    expect(environment.isSoleConsumer).toBe(true)
+    expect(await environment.sendCommand('DOM.getDocument')).toEqual({})
+    environment.detach()
+    expect(contents.debugger.isAttached()).toBe(false)
+  })
+  it('retains the original unknown native scope until its exact detach fact, without detaching another consumer', async () => {
+    let acknowledge!: () => void
+    const contents = fakeContents({sendCommand: async (method) => {
+      if (method === 'Target.getTargetInfo') return {targetInfo: {targetId: 'original-native'}}
+      if (method === 'Target.attachToTarget') return {sessionId: 'original-network'}
+      if (method === 'Target.detachFromTarget') await new Promise<void>(resolve => {acknowledge = resolve})
+      return {}
+    }})
+    const environment = BrowserCdpSession.attach(contents), program = BrowserCdpSession.attach(contents)
+    const network = await program.openNetworkSession(); program.detach()
+    const closing = network.close(); await settle()
+    expect(environment.isSoleConsumer).toBe(false)
+    expect(await environment.sendCommand('DOM.getDocument')).toEqual({})
+    contents.debugger.emit('message', 'Target.detachedFromTarget', {sessionId:'other-scope'})
+    expect(environment.isSoleConsumer).toBe(false)
+    contents.debugger.emit('message', 'Target.detachedFromTarget', {sessionId:'original-network'})
+    expect(environment.isSoleConsumer).toBe(true)
+    acknowledge(); await closing
+    expect(contents.debugger.isAttached()).toBe(true); environment.detach()
+  })
+})

@@ -172,7 +172,12 @@ export async function runProfileEnvironmentScope(input: {
       assert.ok(retention().reasons.includes('debugger'),'Another exact native consumer retains its page')
       const protectedRelease=await browsers.release(id,browsers.target(id)!.navigationId!)
       assert.equal(protectedRelease.status,'retained')
+      const network=await program.openNetworkSession()
       program.detach()
+      assert.ok(retention().reasons.includes('debugger'),'An independently retained native network scope is not a sole background environment consumer')
+      const protectedNetworkRelease=await browsers.release(id,browsers.target(id)!.navigationId!)
+      assert.equal(protectedNetworkRelease.status,'retained')
+      await network.close()
       await until(()=>retention().status==='eligible','clean background environment release eligibility')
       const released=await browsers.release(id,browsers.target(id)!.navigationId!)
       assert.equal(released.status,'released','A sole background environment lease must allow clean native release')
@@ -184,7 +189,7 @@ export async function runProfileEnvironmentScope(input: {
       assert.equal(restored.screen.width,1200)
       assert.equal(browsers.target(id)?.id,id)
       assert.equal(browsers.target(id)?.profile?.id,profileId)
-      report.nativeRelease={protectedRelease,released,restored,browserId:id,profileId}
+      report.nativeRelease={protectedRelease,protectedNetworkRelease,released,restored,browserId:id,profileId}
     })
     return
   }
