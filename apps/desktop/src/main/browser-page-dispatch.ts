@@ -140,6 +140,52 @@ const POINTER_ON_DECLARATION = `function () {
   return self instanceof Element && self.matches(':hover');
 }`
 
+/**
+ * Focus the target and place the caret for native text input; returns the text it held before.
+ *
+ * `replace` selects everything, so the inserted text replaces it. Otherwise the caret goes to the end
+ * so the text is appended. Inputs without a selection API (email, number) keep their position: a
+ * native End key is sent for them afterwards. A target that cannot take text is refused before
+ * anything is typed.
+ */
+const PREPARE_TEXT_DECLARATION = `function (replace) {
+  const self = this;
+  if (!(self instanceof HTMLElement)) return { ok: false, reason: 'is not an element' };
+  const editable = self.isContentEditable;
+  const field = self instanceof HTMLInputElement || self instanceof HTMLTextAreaElement;
+  if (!editable && !field) return { ok: false, reason: 'is not a text field or editable element' };
+  if (field && (self.disabled || self.readOnly)) return { ok: false, reason: self.disabled ? 'is disabled' : 'is read-only' };
+  const previous = document.activeElement;
+  self.focus();
+  if (document.activeElement !== self && !(editable && self.contains(document.activeElement))) return { ok: false, reason: 'did not take focus' };
+  const before = editable ? self.textContent ?? '' : self.value;
+  let caret = 'set';
+  if (editable) {
+    const range = document.createRange();
+    range.selectNodeContents(self);
+    if (!replace) range.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  } else if (replace) self.select();
+  else {
+    try { self.setSelectionRange(self.value.length, self.value.length); } catch { caret = 'end-key'; }
+  }
+  globalThis.__agentMuxTextFocus = previous;
+  return { ok: true, before, caret };
+}`
+
+/** The value after native text input, read in the same isolated world; page code cannot answer for it. */
+const READ_TEXT_DECLARATION = `function () {
+  return this.isContentEditable ? this.textContent ?? '' : this.value;
+}`
+
+/** Return page focus to where it was before native text input, as the synthetic path did (T-012). */
+const RESTORE_TEXT_FOCUS_DECLARATION = `function () {${RESTORE_FOCUS_SNIPPET}
+  const previous = globalThis.__agentMuxTextFocus;
+  delete globalThis.__agentMuxTextFocus;
+  restoreFocus(this, previous);
+}`
+
 /** Center of the first content quad with area. Inline boxes that wrap lines have several quads. */
 function quadCenter(quads: unknown): { x: number; y: number } | null {
   if (!Array.isArray(quads)) return null
@@ -524,7 +570,82 @@ export function createBrowserPageDispatch(
     return undefined
   }
 
-  /** 在一个句柄上跑一小段函数。click 以外的动作暂时还走这条路。 */
+  /**
+   * Trusted native text input into the target: `Input.insertText` after placing the caret, then the
+   * value is read back.
+   *
+   * Same order as click: guard, scroll, guard, target feedback, guard. The field is focused and its
+   * caret placed in an isolated world; then Main's own-dispatch receipt opens and the text is inserted.
+   * Page handlers may reformat what was typed (masks, upper-casing), so a read-back that differs is not
+   * a failure by itself: it is reported with the value the page now holds. A read-back that still
+   * equals the text from before means the insert did not reach the field; that is not-dispatched.
+   */
+  async function nativeText(scope: BrowserPageActionScope | undefined, ref: string, text: string, replace: boolean): Promise<undefined> {
+    const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
+    const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: SCROLL_INTO_VIEW,
+      awaitPromise: true, returnByValue: true }) as { exceptionDetails?: { text?: string } }
+    if (prepared.exceptionDetails) throw new Error(`The page threw while preparing ${ref}: ${pageAuthoredText(prepared.exceptionDetails.text)}`)
+    guard()
+    if (actionFeedback) {
+      await actionFeedback(node, send)
+      guard()
+    }
+    if (!node.frameId) throw notDispatched(`The document holding ${ref} has no frame identity, so it cannot take text safely. Nothing was typed; take a new snapshot().`)
+    const world = await send('Page.createIsolatedWorld', { frameId: node.frameId, worldName: BROWSER_NATIVE_INPUT_WORLD })
+      .catch(() => null) as { executionContextId?: number } | null
+    if (!Number.isInteger(world?.executionContextId)) throw notDispatched(`The document holding ${ref} could not be inspected for text input. Nothing was typed; retry after a new snapshot().`)
+    const isolated = await send('DOM.resolveNode', { backendNodeId: node.backendNodeId, executionContextId: world!.executionContextId })
+      .catch(() => null) as { object?: { objectId?: string } } | null
+    const target = isolated?.object?.objectId
+    if (!target) throw notDispatched(`${ref} could not be inspected for text input. Nothing was typed; take a new snapshot().`)
+    let focused = false
+    try {
+      const ready = await inWorld(send, target, PREPARE_TEXT_DECLARATION, [{ value: replace }]) as
+        { ok?: boolean; reason?: string; before?: unknown; caret?: string } | undefined
+      if (ready?.ok !== true || typeof ready.before !== 'string') {
+        throw notDispatched(`${ref} ${ready?.reason ?? 'could not be prepared for text input'}. Nothing was typed; choose the actual text field or take a new snapshot().`)
+      }
+      focused = true
+      guard()
+      const native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+      try {
+        guard()
+        if (!replace && ready.caret === 'end-key') {
+          // Email and number inputs expose no selection range; a native End key moves their caret.
+          for (const type of ['rawKeyDown', 'keyUp']) {
+            await native.input(() => session.sendCommand('Input.dispatchKeyEvent', { type, key: 'End', code: 'End', windowsVirtualKeyCode: 35,
+              ...(type === 'rawKeyDown' ? { commands: ['moveToEndOfDocument'] } : {}) }))
+          }
+        }
+        // An empty fill clears the selected text; an empty append changes nothing and sends nothing.
+        if (text !== '') await native.input(() => send('Input.insertText', { text }))
+        else if (replace && ready.before !== '') {
+          for (const type of ['rawKeyDown', 'keyUp']) {
+            await native.input(() => session.sendCommand('Input.dispatchKeyEvent', { type, key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+              ...(type === 'rawKeyDown' ? { commands: ['deleteForward'] } : {}) }))
+          }
+        }
+      } finally { native.end() }
+      const after = await inWorld(send, target, READ_TEXT_DECLARATION)
+      const expected = replace ? text : ready.before + text
+      if (typeof after !== 'string') {
+        throw new Error(`Text was sent to ${ref}, but its value could not be read back. Inspect the field before typing again.`)
+      }
+      if (after !== expected) {
+        if (after === ready.before && expected !== ready.before) {
+          throw notDispatched(`The text did not reach ${ref}: its value is unchanged. Nothing was typed; check that the field accepts typing.`)
+        }
+        context.note(`${ref} now holds a different value than was typed; the page changed it (for example a mask or a formatter). ` +
+          `Read the field before relying on it.`)
+      }
+    } finally {
+      if (focused) await inWorld(send, target, RESTORE_TEXT_FOCUS_DECLARATION)
+      await send('Runtime.releaseObject', { objectId: target }).catch(() => {})
+    }
+    return undefined
+  }
+
+  /** 在一个句柄上跑一小段函数。click 和文字输入以外的动作暂时还走这条路。 */
   async function callOn(scope: BrowserPageActionScope | undefined, ref: string, declaration: string, extra: unknown[] = [], feedback?: { scroll: string; action: string } | 'observe'): Promise<unknown> {
     const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
     if (actionFeedback && feedback !== 'observe') {
@@ -726,45 +847,12 @@ export function createBrowserPageDispatch(
         // synthetic events (isTrusted=false) then behave as they do for a person.
         return await nativeClick(scope, requireString(args[0], 'ref'))
       case 'fillInput':
-        // 派 input + change 两个事件：只设 value 的话，React/Vue 的受控输入完全看不见这次修改，
-        // 表现为"填了但提交的是空的"（MEMORY「受控输入可静默变只读」是同一族的坑）。
-        return await callOn(
-          scope,
-          requireString(args[0], 'ref'),
-          `function (value) {${RESTORE_FOCUS_SNIPPET}
-            const previous = document.activeElement
-            this.focus()
-            const setter = Object.getOwnPropertyDescriptor(this.constructor.prototype, 'value')?.set
-            if (setter) setter.call(this, value)
-            else this.value = value
-            this.dispatchEvent(new Event('input', {bubbles: true}))
-            this.dispatchEvent(new Event('change', {bubbles: true}))
-            restoreFocus(this, previous)
-          }`,
-          [requireString(args[1], 'text')]
-        )
-      case 'typeText': {
-        // 与 fillInput 的区别是**追加而不是替换**，不是"逐字符模拟打字"。真去合成按键就回到了
-        // 键鼠模拟那条路上（失败不可判），而这里要的是可判定的结果。
-        const ref = requireString(args[0], 'ref')
-        const text = requireString(args[1], 'text')
-        return await callOn(
-          scope,
-          ref,
-          `function (value) {${RESTORE_FOCUS_SNIPPET}
-            const previous = document.activeElement
-            this.focus()
-            const setter = Object.getOwnPropertyDescriptor(this.constructor.prototype, 'value')?.set
-            const next = (this.value ?? '') + value
-            if (setter) setter.call(this, next)
-            else this.value = next
-            this.dispatchEvent(new Event('input', {bubbles: true}))
-            this.dispatchEvent(new Event('change', {bubbles: true}))
-            restoreFocus(this, previous)
-          }`,
-          [text]
-        )
-      }
+        // Native Input.insertText over the whole selection: React/Vue controlled inputs see a real,
+        // trusted beforeinput/input pair, and change fires when focus returns, as it does for a person.
+        return await nativeText(scope, requireString(args[0], 'ref'), requireString(args[1], 'text'), true)
+      case 'typeText':
+        // Append at the end of what the field holds. One insert, not per-character key simulation.
+        return await nativeText(scope, requireString(args[0], 'ref'), requireString(args[1], 'text'), false)
       case 'pressKey':
         // 键事件派到元素上，不是派到窗口上。派到窗口会打断用户当下的输入焦点——这是 T-012 划下的
         // 那条线：Agent 驱动页面时不抢人的操作位。
