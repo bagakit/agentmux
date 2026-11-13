@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { MoteDialogueLink, MoteMainPeriod } from '@agentmux/core/mote-dialogue'
 import { SemanticIcon } from '../theme/icons.js'
 import '../styles/mote-conversation-start.css'
@@ -14,7 +14,11 @@ export function MoteConversationStart({ name, portrait, brand, composer, history
 }) {
   // A Topic whose title is still being read has no name yet; the scene keeps the Mote wordmark alone.
   const label = typeof name === 'string' ? name.trim() : ''
-  return <section className="mote-start" data-mode={mode} data-active={active} data-drafting={drafting || undefined} aria-label={label ? `${label} · 开始对话` : '开始对话'}>
+  // The entrance plays the first time this scene is shown; returning to it later shows it settled.
+  // The ref is set after commit, so a repeated development render still sees the first showing.
+  const shown = useRef(false), entering = active && !shown.current
+  useEffect(() => { if (active) shown.current = true }, [active])
+  return <section className="mote-start" data-mode={mode} data-active={active} data-entering={entering || undefined} data-drafting={drafting || undefined} aria-label={label ? `${label} · 开始对话` : '开始对话'}>
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
       <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}

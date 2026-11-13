@@ -64,13 +64,13 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--mote-start-accent) 18%, transparent); }
 /* The composer reads as the one primary surface on the scene. */
 .mote-start__composer .composer { border-radius: var(--radius-lg, 12px); box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent), 0 12px 32px -18px color-mix(in srgb, #000 55%, transparent); }
-/* Entrance: once, short, staggered. Hidden or re-shown scenes do not replay a heavy layer. */
-.mote-start[data-active='true'] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history) { animation: mote-start-rise 260ms var(--ease-enter, ease-out) both; }
-.mote-start[data-active='true'] .mote-start__greeting { animation-delay: 40ms; }
-.mote-start[data-active='true'] .mote-start__composer { animation-delay: 80ms; }
-.mote-start[data-active='true'] .mote-start__history { animation-delay: 120ms; }
+/* Entrance: short and staggered, only the first time a scene is shown; a re-shown scene is already settled. */
+.mote-start[data-entering] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history) { animation: mote-start-rise 260ms var(--ease-enter, ease-out) both; }
+.mote-start[data-entering] .mote-start__greeting { animation-delay: 40ms; }
+.mote-start[data-entering] .mote-start__composer { animation-delay: 80ms; }
+.mote-start[data-entering] .mote-start__history { animation-delay: 120ms; }
 @keyframes mote-start-rise { from { opacity: 0; translate: 0 6px; } }
-.mote-start[data-active='true'] .mote-start__aura { animation: mote-start-glow 520ms var(--ease-enter, ease-out) both; }
+.mote-start[data-entering] .mote-start__aura { animation: mote-start-glow 520ms var(--ease-enter, ease-out) both; }
 @keyframes mote-start-glow { from { opacity: 0; } }
 /* Once a question takes shape the scene recedes; text contrast and the input position stay unchanged. */
 .mote-start[data-drafting] .mote-start__aura { opacity: .45; }
@@ -88,7 +88,7 @@
 .mote-start__notice details > button:disabled, .mote-start__notice details > div > button:disabled { opacity: .55; cursor: default; }
 .mote-start__notice details code { display: block; margin-block-start: 6px; color: var(--text-3); font-size: var(--fs-micro, 11px); overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
-  .mote-start[data-active='true'] .mote-start__aura, .mote-start[data-active='true'] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history),
+  .mote-start[data-entering] .mote-start__aura, .mote-start[data-entering] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history),
   .mote-start__notice details[open] > :not(summary) { animation: none; }
   .mote-start__aura, .mote-start__grid { transition: none; }
 }
