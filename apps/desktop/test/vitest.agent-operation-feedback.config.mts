@@ -10,7 +10,11 @@ const mutations: Record<string, { file: string; before: string; after: string }>
   'repeat-stop-on-inspect': { file: 'lib/agent-operation-feedback.ts', before: 'await api.sessions.inspectStop(operation.control, operation.operationId)', after: '(await api.sessions.stop(operation.control, operation.operationId), await api.sessions.inspectStop(operation.control, operation.operationId))' },
   'modal-waits-for-stop': { file: 'components/SessionStop.tsx', before: '    setRequest(null)\n    void stopSessionInBackground(request.intent)', after: '    void stopSessionInBackground(request.intent).then(() => setRequest(null))' },
   'missing-card-feedback': { file: 'components/FocusContextRow.tsx', before: "{context.kind === 'agent' && context.control ? <AgentOperationFeedback subject={{ hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }} /> : null}", after: '{null}' },
-  'hidden-motion-runs': { file: 'components/AgentOperationFeedback.tsx', before: "visible && decoration.phase === 'pending'", after: "decoration.phase === 'pending'" }
+  'hidden-motion-runs': { file: 'components/AgentOperationFeedback.tsx', before: "visible && decoration.phase === 'pending'", after: "decoration.phase === 'pending'" },
+  'takeover-picker-waits': { file: 'lib/session-takeover.ts', before: 'onSubmitted?.(operation)', after: 'void operation' },
+  'takeover-partial-spins': { file: 'lib/session-takeover.ts', before: 'settleAgentCreation(operation, report)', after: "updateAgentOperation(operation, { phase: 'pending' })" },
+  'fork-menu-stays': { file: 'components/AgentCurrentForkControls.tsx', before: '    submitted()\n    let dispatched = false', after: '    let dispatched = false' },
+  'fork-shared-observation-missing': { file: 'components/AgentCurrentForkControls.tsx', before: 'operationKey ? current.agentOperations[operationKey] : undefined', after: 'undefined' }
 }
 export default defineConfig({ ...source, cacheDir: '.tmp/agent-operation-feedback-vitest',
   plugins: [{ name: 'original-agent-operation-proof', enforce: 'pre', transform(original, id) {

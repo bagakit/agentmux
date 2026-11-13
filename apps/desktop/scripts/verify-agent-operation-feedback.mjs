@@ -14,8 +14,14 @@ const cases = {
     ['modal-waits-for-stop', 'apps/desktop/test/session-stop-dialog-operation.test.tsx', 'a pending Stop leaves'],
     ['missing-card-feedback', 'apps/desktop/test/session-stop-dialog-operation.test.tsx', 'a pending Stop leaves']
   ],
-  'T-002': [],
-  'T-003': [],
+  'T-002': [
+    ['takeover-picker-waits', 'apps/desktop/test/session-takeover.test.tsx', 'a submitted takeover releases its picker'],
+    ['takeover-partial-spins', 'apps/desktop/test/session-takeover.test.tsx', 'a partial takeover keeps its real new Agent']
+  ],
+  'T-003': [
+    ['fork-menu-stays', 'apps/desktop/test/current-agent-fork-ui.test.tsx', 'the real Region header dismisses its invoking menu'],
+    ['fork-shared-observation-missing', 'apps/desktop/test/current-agent-fork-ui.test.tsx', 'the real Region header consumes a card-inspected']
+  ],
   'T-004': [['hidden-motion-runs', common, 'hiding the workface pauses']]
 }[task]
 assert.ok(cases?.length, 'Task has a nonempty actual-source mutation set')

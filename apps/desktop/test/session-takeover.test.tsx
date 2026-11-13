@@ -8,7 +8,7 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentCatalogEntry } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { displayLabel } from '@agentmux/core/spatial-graph'
-import { act } from 'react'
+import { act, useState } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -16,9 +16,11 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, executorDetectionKey, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
-import { inspectTakeover, takeOverSession, takeoverExecution, takeoverPrompt, takeoverRequestId, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
+import { inspectTakeover, inspectTakeoverOperation, takeOverSession, takeoverExecution, takeoverPrompt, takeoverRequestId, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTakeoverSurface'
+import { AgentOperationFeedback } from '../src/renderer/src/components/AgentOperationFeedback'
+import { inspectAgentOperation } from '../src/renderer/src/lib/agent-operation-feedback'
 import { launcherTakeoverSource } from '../src/renderer/src/lib/launcher-resume-actions'
 import { launcherNativeResumeRows, launcherResumeRows } from '../src/renderer/src/lib/launcher-resume'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
@@ -102,7 +104,14 @@ function launchBoundary() {
   return vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launched(input.agentSessionId!, input.createOperationId!))
 }
 async function mountPicker(onClose = vi.fn()) {
-  await act(async () => root.render(<SessionTakeoverSurface source={source} active onClose={onClose} />))
+  function Host() {
+    const [open, setOpen] = useState(true)
+    return <>
+      {source.hostId ? <AgentOperationFeedback subject={{ hostId: source.hostId, agentSessionId: source.agentSessionId, regionId: source.origin.regionId }} /> : null}
+      {open ? <SessionTakeoverSurface source={source} active onClose={() => { setOpen(false); onClose() }} /> : null}
+    </>
+  }
+  await act(async () => root.render(<Host />))
   return onClose
 }
 
@@ -278,6 +287,69 @@ it('one choice reaches the real spatial owner, hands over complete context and p
   expect(launch).toHaveBeenCalledTimes(1)
 })
 
+it('a submitted takeover releases its picker before a pending creation and retains the original work after unmount', async () => {
+  let release!: () => void
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(input => new Promise(resolve => {
+    release = () => resolve(launched(input.agentSessionId!, input.createOperationId!))
+  }))
+  const onClose = await mountPicker()
+  await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(launch).toHaveBeenCalledOnce() })
+  const requestId = launch.mock.calls[0]![0].createOperationId!
+  const feedback = Object.values(useAppStore.getState().agentOperations).find(item => item.operationId === requestId)!
+  expect(feedback).toMatchObject({ kind: 'takeover', phase: 'pending', subject: { hostId: 'local', agentSessionId: original.control.agentSessionId, regionId: 'source-region' } })
+  expect(document.querySelector('.agent-operation-feedback[data-phase="pending"]')?.textContent).toContain('接手中')
+  expect(document.querySelector('.session-takeover')?.getAttribute('data-state')).toBe('closing')
+  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledOnce() })
+  expect(document.querySelector('.session-takeover')).toBeNull()
+  expect(useAppStore.getState().sessions.find(item => item.id === original.id)).toEqual(original)
+  await act(async () => root.render(<input aria-label="Later work" />))
+  const later = container.querySelector<HTMLInputElement>('input')!
+  later.focus()
+  await act(async () => release())
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().agentOperations).find(item => item.operationId === requestId)?.phase).toBe('succeeded'))
+  expect(document.activeElement).toBe(later)
+  expect(useAppStore.getState().layouts.repo!.groups[0]!.activeTabId).toBe('source-tab')
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+  expect(launch).toHaveBeenCalledOnce()
+})
+
+it('a partial takeover keeps its real new Agent and exposes a static shared result without reopening the picker', async () => {
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => ({
+    ...launched(input.agentSessionId!, input.createOperationId!), projectionFailures: [{ step: 'timeline', message: 'New timeline is unconfirmed' }]
+  }))
+  const onClose = await mountPicker()
+  await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick')!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledOnce() })
+  expect(document.querySelector('.session-takeover')).toBeNull()
+  expect(document.querySelector('.agent-operation-feedback')?.textContent).toContain('接手部分完成')
+  const reference = Object.values(useAppStore.getState().agentOperations).find(item => item.kind === 'takeover')!
+  expect(reference.phase).toBe('partial')
+  expect(reference.report?.agent?.agentSessionId).toBe(launch.mock.calls[0]![0].agentSessionId)
+  expect(useAppStore.getState().sessions.find(item => item.id === reference.report?.agent?.agentSessionId)?.processState).toBe('running')
+  expect(useAppStore.getState().sessions.find(item => item.id === original.id)).toEqual(original)
+  expect(document.querySelector('.agent-operation-feedback[data-motion-active="true"]')).toBeNull()
+})
+
+it('an unmanaged saved takeover retains a shared feedback entry on its exact Launcher Region', async () => {
+  const launcher = createWorkbenchTab('saved-feedback-tab', { regionId: 'saved-feedback-region', kind: 'launcher', workspaceId: 'repo' })
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [launcher.id]: launcher }, layouts: { repo: createWorkspaceLayout('source-group', ['source-tab', launcher.id]) } }))
+  const saved: TakeoverSource = { kind: 'saved', hostId: 'local', cwd: original.workspacePath, label: 'Saved native work', executorId: 'fixture', diagnostic: '',
+    nativeSource: { nativeHandle: { kind: 'provider', providerId: original.providerId, sessionId: 'saved-native-only' }, workspacePath: original.workspacePath, revision: 'native-lifetime' },
+    origin: { workspaceId: 'repo', tabGroupId: 'source-group', tabId: launcher.id, regionId: 'saved-feedback-region' } }
+  let release!: () => void
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(input => new Promise(resolve => {
+    release = () => resolve(launched(input.agentSessionId!, input.createOperationId!))
+  }))
+  const pending = takeOverSession(saved, 'fixture', () => true)
+  await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+  await act(async () => root.render(<NewTabSurface tabGroupId="source-group" tabId={launcher.id} regionId="saved-feedback-region" visible={false} />))
+  expect(document.querySelector('.agent-operation-feedback')?.textContent).toContain('接手中')
+  const operation = Object.values(useAppStore.getState().agentOperations).find(item => item.kind === 'takeover')!
+  expect(operation.subject).toEqual({ hostId: 'local', agentSessionId: undefined, regionId: 'saved-feedback-region' })
+  await act(async () => { release(); await pending })
+})
+
 it.each(['Investigation - build', ("Investigation - build - " + _hygiene_fixtureCivil(9, 30) + " " + _hygiene_fixtureClock(8, 15))])('inherits %s with one stable creation-time suffix through the durable name owner', async label => {
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(_hygiene_fixtureYear,9,7,17,32))
   try {
@@ -373,18 +445,19 @@ it('names an unobserved remote successor through the original Desktop Host while
   } finally {vi.useRealTimers()}
 })
 
-it('a failed creation keeps its correlation and visible feedback; Check again never resends', async () => {
+it('a failed creation keeps its correlation in shared feedback; checking the original operation never resends', async () => {
   const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Original Host temporarily unavailable'))
   const creation = vi.mocked(api.sessions.creation).mockRejectedValue(new Error('The original creation has no confirmed Session or prepared start.'))
   await mountPicker()
   await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick')!.click())
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover__issue')).not.toBeNull() })
-  expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Original Host temporarily unavailable')
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.agent-operation-feedback')?.textContent).toContain('接手部分完成') })
+  expect(document.querySelector('.agent-operation-feedback')!.textContent).toContain('Original Host temporarily unavailable')
   expect(useAppStore.getState().layouts.repo!.groups[0]!.activeTabId).toBe('source-tab')
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLButtonElement>('.session-takeover__issue button')!.disabled).toBe(false) })
-  await act(async () => document.querySelector<HTMLButtonElement>('.session-takeover__issue button')!.click())
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Original operation failure: Original Host temporarily unavailable') })
-  expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Current creation check: The original creation has no confirmed Session or prepared start.')
+  const check = () => [...document.querySelectorAll<HTMLButtonElement>('.agent-operation-feedback button')].find(button => button.textContent?.includes('核对原操作'))!
+  await vi.waitFor(async () => { await act(async () => {}); expect(check().disabled).toBe(false) })
+  await act(async () => check().click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.agent-operation-feedback')!.textContent).toContain('Original operation failure: Original Host temporarily unavailable') })
+  expect(document.querySelector('.agent-operation-feedback')!.textContent).toContain('Current creation check: The original creation has no confirmed Session or prepared start.')
   const inspected = await inspectTakeover(source)
   expect(inspected!.issues.map(issue => issue.step)).toEqual(['original-owner', 'creation-read'])
   const binding = useAppStore.getState().spatialRequests[inspected!.requestId]!
@@ -408,6 +481,26 @@ it('a failed creation keeps its correlation and visible feedback; Check again ne
   expect(useAppStore.getState().spatialRequests[binding.requestId]!.originalFailure).toEqual(binding.originalFailure)
   expect(launch).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('the exact retained takeover inspection survives a replaced source Region and completes its original naming intent', async () => {
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Creation response unconfirmed'))
+  vi.mocked(api.sessions.creation).mockRejectedValue(new Error('Creation is not yet observed'))
+  const partial = await takeOverSession(source, 'fixture', () => true)
+  const binding = useAppStore.getState().spatialRequests[partial.requestId]!
+  const actual = launched(binding.agentSessionId, partial.requestId).created
+  vi.mocked(api.sessions.creation).mockResolvedValue(actual)
+  const state = useAppStore.getState()
+  useAppStore.setState({ tabs: { ...state.tabs, 'source-tab': createWorkbenchTab('source-tab', {
+    regionId: 'source-region', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: 'replacement'
+  }) } })
+  const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
+  const report = await inspectTakeoverOperation(source, partial.requestId)
+  expect(report).toMatchObject({ requestId: partial.requestId, outcome: 'opened', agent: { agentSessionId: binding.agentSessionId } })
+  expect(execute).toHaveBeenCalledWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: partial.requestId } }))
+  expect(useAppStore.getState().agentNames[binding.agentSessionId]).toMatch(/^Original Agent - /)
+  expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'replacement' })
+  expect(launch).toHaveBeenCalledOnce()
 })
 
 it('a changed source and a cancelled admission cannot target a replacement Agent', async () => {
@@ -741,11 +834,11 @@ it.each(['managed', 'retired', 'unmanaged'] as const)('takes over a %s saved sou
         ...(kind === 'retired' ? { managed: { agentSessionId: original.id, executorId: 'fixture', run: original.control.run, state: 'retired' as const } } : {}) }] }],
       managed: [], agentNames: {}, config })[0]!
   const saved = launcherTakeoverSource(row, { workspaceId: 'repo', tabGroupId: 'source-group', tabId: launcher.id, regionId: 'saved-region' })
-  const beforeTabs = structuredClone(useAppStore.getState().tabs), beforeOriginal = structuredClone(original), onOpened = vi.fn()
-  await act(async () => root.render(<SessionTakeoverSurface source={saved} active onClose={() => {}} onOpened={onOpened} />))
+  const beforeTabs = structuredClone(useAppStore.getState().tabs), beforeOriginal = structuredClone(original), onSubmitted = vi.fn()
+  await act(async () => root.render(<SessionTakeoverSurface source={saved} active onClose={() => {}} onSubmitted={onSubmitted} />))
   await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!.click())
   await vi.waitFor(() => expect(launch, document.querySelector('.session-takeover')?.textContent ?? 'Saved takeover surface').toHaveBeenCalledOnce(), { timeout: 10000 })
-  await vi.waitFor(() => expect(onOpened).toHaveBeenCalledOnce(), { timeout: 10000 })
+  await vi.waitFor(() => expect(onSubmitted).toHaveBeenCalledOnce(), { timeout: 10000 })
   const input = launch.mock.calls[0]![0]
   expect(input.workspacePath).toBe(original.workspacePath); expect(input.hostId).toBe('local')
   expect(input).not.toHaveProperty('nativeResumeSource')

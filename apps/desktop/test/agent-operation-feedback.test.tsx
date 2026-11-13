@@ -9,7 +9,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { AgentOperationFeedback } from '../src/renderer/src/components/AgentOperationFeedback'
 import { agentOperationKey, beginAgentOperation, inspectAgentOperation, settleAgentCreation, type AgentOperationFeedback as Operation } from '../src/renderer/src/lib/agent-operation-feedback'
-import { agentOperationsForSubject, restoredAgentOperations } from '../src/renderer/src/lib/agent-operation'
+import { agentOperationsForSubject, persistedAgentOperations, restoredAgentOperations } from '../src/renderer/src/lib/agent-operation'
 import { stopSessionInBackground } from '../src/renderer/src/lib/session-stop-background'
 
 const initial = useAppStore.getState(), session = composerSession('operation-source')
@@ -141,6 +141,15 @@ it('operation indexing retains exact Host subjects and is stable during unrelate
   expect(agentOperationsForSubject(refs, other.subject)).toEqual([other])
 })
 
+it('only unresolved original references survive restart; confirmed success does not become a new warning', () => {
+  const unresolved = operation('unresolved'), done = { ...operation('confirmed'), phase: 'succeeded' as const }
+  const operations = { [agentOperationKey(unresolved)]: unresolved, [agentOperationKey(done)]: done }
+  const retained = persistedAgentOperations(operations)
+  expect(Object.values(retained)).toEqual([unresolved])
+  expect(persistedAgentOperations(operations)).toBe(retained)
+  expect(Object.values(restoredAgentOperations(retained)).map(item => item.phase)).toEqual(['unconfirmed'])
+})
+
 it('partial creation preserves its real result and does not mark or remove the source Agent', async () => {
   const fork: Operation = { kind: 'fork', operationId: 'one-fork', subject, phase: 'pending', startedAt: 1 }
   beginAgentOperation(fork)
@@ -154,4 +163,10 @@ it('partial creation preserves its real result and does not mark or remove the s
   expect(container.querySelector('[data-motion-active="true"]')).toBeNull()
   expect(useAppStore.getState().sessions).toEqual([session])
   expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.report).toBe(report)
+  const retired = { ...report, outcome: 'retired' as const }
+  await act(async () => { settleAgentCreation(fork, retired) })
+  expect(container.textContent).toContain('Fork目标已关闭')
+  await act(async () => { settleAgentCreation(fork, { ...report, outcome: 'opened' }) })
+  expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.phase).toBe('retired')
+  expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.report).toBe(retired)
 })
