@@ -331,8 +331,8 @@ describe('Browser exact Agent association and trusted handoff', () => {
   })
 
   it('runs a permitted second operator without silently replacing the collaborator or its message recipient', async () => {
-    const f = fakeWindow(), other = { hostId: 'other-host', agentSessionId: 'other-operator' }
-    const manager = browserManager(f.window, undefined, { resolve: id => id === identity.agentSessionId ? identity : other, inspect: inspect() })
+    const f = fakeWindow(), other = { hostId: 'other-host', agentSessionId: 'other-operator' }, read = inspect()
+    const manager = browserManager(f.window, undefined, { resolve: id => id === identity.agentSessionId ? identity : other, inspect: read })
     await manager.create('caller-page', 'https://example.invalid/original', 'workspace-a')
     let attached = false
     Object.assign(f.children[0]!.webContents, { debugger: {
@@ -346,9 +346,20 @@ describe('Browser exact Agent association and trusted handoff', () => {
     const second = await manager.runScript('caller-page', 'return 9', { id: other.agentSessionId, name: 'Other operator' },
       undefined, 'other-caller', undefined, false, undefined, { agentSessionId: other.agentSessionId })
     expect(second).toMatchObject({ result: 9, outcome: { kind: 'completed' }, runOperation: { operator: { id: other.agentSessionId }, control: { agent: identity } } })
-    expect(second.runOperation.warning).toContain('different operator')
+    expect(second.runOperation.warning).toContain('started with a different operator')
     expect(manager.target('caller-page')).toMatchObject({ control: { owner: 'agent', agent: identity }, warning: expect.stringContaining('different operator') })
     expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    const stopped = await manager.runScript('caller-page', 'return 11', { id: other.agentSessionId, name: 'Other operator' },
+      undefined, 'stopped-other-caller', async operation => { await manager.stopOperationById(operation.id) }, false, undefined, { agentSessionId: other.agentSessionId })
+    expect(stopped.outcome.kind).toBe('stopped')
+    expect(stopped.runOperation.warning).toContain('started with a different operator')
+    expect(stopped.runOperation.warning).toContain('stopped explicitly')
+    manager.takeControl('caller-page')
+    const selected = { kind: 'agent' as const, ...other, run: { runId: 'other-run' } }
+    read.mockResolvedValue(selected)
+    const switched = await manager.returnControl('caller-page', { ...input(manager, 'caller-page'), agent: selected, expectedAgent: identity })
+    expect(switched.activity?.warning).not.toContain('different operator')
+    expect(stopped.runOperation.warning).toContain('started with a different operator')
     await manager.dispose()
   })
 
