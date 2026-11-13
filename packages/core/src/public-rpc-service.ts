@@ -157,6 +157,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
+    remoteTransportObservation?: import('./hosted-client-contract.js').AgentMuxHostedClient['remoteTransportObservation']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>

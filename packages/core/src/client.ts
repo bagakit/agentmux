@@ -643,6 +643,9 @@ export class AgentMuxClient {
     return await this.hostExecutorOwner.list(input)
   }
 
+  /** A local Core owns no outgoing remote Runtime RPC carrier. */
+  remoteTransportObservation(): import('./remote-transport-observation.js').RemoteTransportObservation | null { return null }
+
   /** Read this Core process's OS user home without preparing Native or Sessions. */
   async hostEnvironment(): Promise<AgentMuxHostEnvironment> {
     try { return parseHostEnvironment({ homeDirectory: homedir() }) }

@@ -3,6 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { observeRead } from './observation-read.js'
 import type { AgentMuxRpcRemoteEndpoint, AgentMuxTailcatTarget } from './public-rpc.js'
 import { AgentMuxRpcStdioProcessTransport } from './rpc-ssh-transport.js'
+import type { RemoteTransportObservation } from './remote-transport-observation.js'
 
 export function agentMuxRpcTailcatArguments(target: AgentMuxTailcatTarget): string[] {
   if (typeof target.address !== 'string' || !/^tc[A-Za-z0-9_-]+$/u.test(target.address) ||
@@ -22,17 +23,21 @@ export class AgentMuxRpcRemoteTransport {
   private readonly selection: Promise<AgentMuxRpcStdioProcessTransport>
   private selected?: AgentMuxRpcStdioProcessTransport
   private closed = false
+  private observation: Omit<RemoteTransportObservation, 'observedAt'> = {
+    state: 'connecting', transport: null, fallback: false, establishedAt: null
+  }
   constructor(endpoint: AgentMuxRpcRemoteEndpoint, sshArgs: string[] | undefined, private readonly onClose: () => void) {
     const channel = (command: 'ssh' | 'tailcat', args: string[], socketPath?: string) => {
       const value = new AgentMuxRpcStdioProcessTransport(command, args, () => {
         this.channels.delete(value)
-        if (this.selected === value) this.onClose()
+        if (this.selected === value) { this.observation.state = 'disconnected'; this.onClose() }
       }, socketPath)
       this.channels.add(value)
       return value
     }
     this.selection = (async () => {
       let chosen: AgentMuxRpcStdioProcessTransport
+      let transport: 'ssh' | 'tailcat' = endpoint.transport, fallback = false
       if (endpoint.transport === 'tailcat') chosen = channel('tailcat', agentMuxRpcTailcatArguments(endpoint))
       else {
         chosen = channel('ssh', sshArgs!, endpoint.socketPath)
@@ -42,16 +47,20 @@ export class AgentMuxRpcRemoteTransport {
               !['CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED', 'CONTROL_TIMEOUT'].includes(error.code)) throw error
           chosen.dispose()
           chosen = channel('tailcat', agentMuxRpcTailcatArguments(endpoint.tailcat))
+          transport = 'tailcat'; fallback = true
         }
       }
       await chosen.establish()
       if (this.closed) throw new AgentMuxError('RPC connection was disposed before dispatch.', 'CONTROL_CANCELLED')
       if (!this.channels.has(chosen)) throw new AgentMuxError('The remote channel closed during establishment. Its owner and Runs were retained.', 'CONTROL_UNAVAILABLE')
       this.selected = chosen
+      this.observation = { state: 'connected', transport, fallback, establishedAt: Date.now() }
       return chosen
     })()
-    void this.selection.catch(() => { this.onClose() })
+    void this.selection.catch(() => { this.observation.state = 'disconnected'; this.onClose() })
   }
+  /** Read only local carrier facts; never establish a channel or send a request. */
+  remoteTransportObservation(): RemoteTransportObservation { return { ...this.observation, observedAt: Date.now() } }
   async open(request: JSONRPCRequest, receive: (frame: unknown) => void, end: (error?: Error) => void,
     signal: AbortSignal, dispatch: () => void): Promise<{ dispose(): Promise<void> }> {
     let channel: AgentMuxRpcStdioProcessTransport
@@ -68,6 +77,7 @@ export class AgentMuxRpcRemoteTransport {
   dispose(): void {
     if (this.closed) return
     this.closed = true
+    this.observation.state = 'disconnected'
     for (const channel of this.channels) channel.dispose()
     this.channels.clear()
   }

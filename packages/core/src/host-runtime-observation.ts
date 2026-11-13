@@ -4,6 +4,7 @@ import type { AgentMuxControlSettingsResourceFields } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { observeRead } from './observation-read.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { parseRemoteTransportObservation, type RemoteTransportObservation } from './remote-transport-observation.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
 import type { AgentMuxRuntimeIdentity, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeResourceSnapshot } from './types.js'
@@ -29,6 +30,8 @@ export type HostRuntimeObservation = {
   diagnostics: HostRuntimeSource<AgentMuxRuntimeDiagnostics>
   resources: HostRuntimeSource<AgentMuxRuntimeResourceSnapshot>
   tailcat?: TailcatListenerObservation
+  /** Passive observation of this exact client's outgoing RPC carrier, not the listener. */
+  remoteTransport?: RemoteTransportObservation
 }
 function invalid(): never { throw new AgentMuxError('Host Runtime observation is malformed or belongs to another source.', 'CONTROL_PROTOCOL_ERROR') }
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -45,12 +48,13 @@ function source(value: unknown, validate: (value: unknown) => void): void {
   else invalid()
 }
 export function parseHostRuntimeObservation(value: unknown, routeHostId: string): HostRuntimeObservation {
-  const p = record(value, ['routeHostId', 'configuration', 'requestedAt', 'completedAt', 'owner', 'nativeIdentity', 'diagnostics', 'resources', 'tailcat'])
+  const p = record(value, ['routeHostId', 'configuration', 'requestedAt', 'completedAt', 'owner', 'nativeIdentity', 'diagnostics', 'resources', 'tailcat', 'remoteTransport'])
   if (p.routeHostId !== routeHostId) invalid()
   if (p.configuration !== null) settingsResourceRecord(p.configuration, 'CONTROL_PROTOCOL_ERROR')
   identity(p.routeHostId); count(p.requestedAt); count(p.completedAt)
   source(p.owner, parseHostedRuntimeOwnerIdentity); source(p.nativeIdentity, parseRuntimeIdentity); source(p.diagnostics, parseRuntimeDiagnostics); source(p.resources, parseRuntimeResources)
   if (p.tailcat !== undefined) parseTailcatListenerObservation(p.tailcat)
+  if (p.remoteTransport !== undefined) parseRemoteTransportObservation(p.remoteTransport)
   const result = value as HostRuntimeObservation
   if (result.nativeIdentity.state === 'available' && result.diagnostics.state === 'available' &&
       result.nativeIdentity.value.instanceId !== result.diagnostics.value.ctxmux.serving.instanceId) invalid()
@@ -72,7 +76,7 @@ function unavailable(error: unknown): HostRuntimeSource<never> {
 }
 /** Composes the original read methods. No connection, Session discovery, attachment or sampling clock. */
 export async function observeHostRuntime(routeHostId: string,
-  client: Pick<AgentMuxClient, 'runtimeIdentity' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot'>,
+  client: Pick<AgentMuxClient, 'runtimeIdentity' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot'> & Partial<Pick<AgentMuxClient, 'remoteTransportObservation'>>,
   readOwner: () => AgentMuxRuntimeOwnerIdentity | null | Promise<AgentMuxRuntimeOwnerIdentity | null>, signal?: AbortSignal,
   configuration: AgentMuxControlSettingsResourceFields | null = null): Promise<HostRuntimeObservation> {
   signal?.throwIfAborted()
@@ -119,6 +123,14 @@ export async function observeHostRuntime(routeHostId: string,
     owner = unavailable(new AgentMuxError('The semantic owner cache has not confirmed this Native instance. Refresh the original observation.', 'RUNTIME_OWNER_UNCONFIRMED'))
   }
   signal?.throwIfAborted()
+  // This local getter cannot discover, reconnect or sample another Host. Failure
+  // leaves only this optional observation unknown; independent facts stay usable.
+  let remoteTransport: RemoteTransportObservation | undefined
+  try {
+    const observation = client.remoteTransportObservation?.()
+    if (observation != null) remoteTransport = parseRemoteTransportObservation(observation)
+  } catch { /* Missing passive metadata must not revoke any existing capability. */ }
   return parseHostRuntimeObservation({ routeHostId, configuration, requestedAt, completedAt: Date.now(), owner,
-    nativeIdentity, diagnostics: diagnosticSource, resources: resourceSource }, routeHostId)
+    nativeIdentity, diagnostics: diagnosticSource, resources: resourceSource,
+    ...(remoteTransport === undefined ? {} : { remoteTransport }) }, routeHostId)
 }

@@ -183,6 +183,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
+  remoteTransportObservation(): import('./remote-transport-observation.js').RemoteTransportObservation | null
   forwardRpc?: AgentMuxHostedForwardRpc
   subscribeRpc?: AgentMuxHostedSubscribeRpc
   disconnect(): void
@@ -309,6 +310,8 @@ export type AgentMuxHostedOutputRpcPort = {
 
 /** The existing RPC client implements this transport-only port. */
 export type AgentMuxHostedRpcPort = AgentMuxHostedOutputRpcPort & {
+  /** Local composition only, deliberately not a delegated Runtime method. */
+  remoteTransportObservation?(): import('./remote-transport-observation.js').RemoteTransportObservation | null
   call<M extends Exclude<AgentMuxHostedRuntimeMethod, AgentMuxHostedStreamMethod>>(method: M,
     params: AgentMuxHostedRuntimeParameterMap[M], options?: { signal?: AbortSignal }): Promise<AgentMuxHostedRuntimeResultMap[M]>
   subscribe<M extends AgentMuxHostedStreamMethod>(method: M, params: AgentMuxHostedRuntimeParameterMap[M], handlers: {

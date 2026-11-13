@@ -33,6 +33,7 @@ import { parseToolkitSnapshot } from './toolkit.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { decodeHostedValue, parseHostedRuntimeOwnerIdentity, parseHostedTransferChunk } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_METHODS, type AgentMuxRuntimeFence } from './hosted-client-contract.js'
+import type { RemoteTransportObservation } from './remote-transport-observation.js'
 import { parseTerminalContinuation } from './terminal-continuation.js'
 import { parseRpcControlFailure } from './public-rpc-frame.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
@@ -60,6 +61,7 @@ export type AgentMuxPreparedSshRoute = {
   dispose(): Promise<void>
 }
 export interface AgentMuxRpcClient {
+  remoteTransportObservation(): RemoteTransportObservation | null
   setSshRemoteCommand(command?: string): void
   prepareSshRoute(endpoint: AgentMuxRpcRemoteEndpoint, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute>
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options?: AgentMuxRpcCallOptions): Promise<AgentMuxRpcResult<M>>
@@ -301,7 +303,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   throw new AgentMuxError('Reader received an event from another domain.', 'CONTROL_PROTOCOL_ERROR')
 }
-type RpcRoute = { endpoint: AgentMuxRpcEndpoint; stdio?: AgentMuxRpcRemoteTransport; unix?: AgentMuxRpcStreamTransport; relay?: AgentMuxRpcRelayClient }
+type RpcRoute = { endpoint: AgentMuxRpcEndpoint; stdio?: AgentMuxRpcRemoteTransport; closedRemote?: RemoteTransportObservation; unix?: AgentMuxRpcStreamTransport; relay?: AgentMuxRpcRelayClient }
 // Local transport provenance is intentionally not accepted from wire error fields.
 // It grants only original-operation reconciliation, never authority to replay input.
 const unconfirmedReplies = new WeakSet<object>()
@@ -454,7 +456,7 @@ class RpcClient implements AgentMuxRpcClient {
           if ((route.endpoint.transport === 'ssh' || route.endpoint.transport === 'tailcat') && !(options.forwarding ?? this.forwarding)) {
             if (!route.stdio) {
               const channel = new AgentMuxRpcRemoteTransport(route.endpoint, route.endpoint.transport === 'ssh' ? agentMuxRpcSshArguments(route.endpoint) : undefined,
-                () => { if (route.stdio === channel) delete route.stdio })
+                () => { if (route.stdio === channel) { route.closedRemote = channel.remoteTransportObservation(); delete route.stdio } })
               route.stdio = channel
             }
             sharedDispatch = 'queued'
@@ -535,6 +537,12 @@ class RpcClient implements AgentMuxRpcClient {
     else next.command = command
     agentMuxRpcSshArguments(next)
     this.route.endpoint = next
+  }
+  remoteTransportObservation(): RemoteTransportObservation | null {
+    const route = this.route
+    if (route.endpoint.transport !== 'ssh' && route.endpoint.transport !== 'tailcat') return null
+    if (route.stdio) return route.stdio.remoteTransportObservation()
+    return { ...(route.closedRemote ?? { state: 'unopened', transport: null, fallback: false, establishedAt: null }), observedAt: Date.now() }
   }
   async prepareSshRoute(endpoint: AgentMuxRpcRemoteEndpoint, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute> {
     if (this.endpoint.transport !== 'ssh' && this.endpoint.transport !== 'tailcat') throw new AgentMuxError('Only an existing remote connection can repair its route.', 'INVALID_CONTROL_REQUEST')

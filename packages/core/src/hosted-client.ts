@@ -25,6 +25,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedMessageQueuePath, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
 import { parseHostEnvironment } from './host-environment.js'
+import { parseRemoteTransportObservation } from './remote-transport-observation.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -691,6 +692,10 @@ export async function connectHostedAgentMux(options: {
   const client: Record<string, unknown> = {
     connect,
     runtimeOwnerIdentity: () => controlOwner ? structuredClone(controlOwner) : null,
+    remoteTransportObservation: () => {
+      const observation = rpc.remoteTransportObservation?.()
+      return observation == null ? null : parseRemoteTransportObservation(observation)
+    },
     disconnect: () => { runtimePreparing = undefined; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },

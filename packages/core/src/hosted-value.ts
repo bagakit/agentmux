@@ -186,6 +186,11 @@ function wireCount(value: unknown): number {
 export function parseHostedRuntimeOwnerIdentity(value: unknown): import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity {
   const p = wireRecord(value, ['runtimeId', 'ownerInstanceId', 'protocolVersion', 'processId', 'ctxmux', 'availability'])
   wireString(p.runtimeId); wireString(p.ownerInstanceId); wireCount(p.processId)
+  if (p.protocolVersion === 1 && (p.availability === 'connected' || p.availability === 'unverified')) {
+    if (p.ctxmux !== null) parseRuntimeIdentity(p.ctxmux)
+    throw new AgentMuxError('The remote Core uses owner protocol 1; this client requires protocol 2. Update this original service in its connection settings. Its transport and existing work were retained.',
+      'REMOTE_CORE_UPGRADE_REQUIRED')
+  }
   if (p.protocolVersion !== 2 || p.availability !== 'connected' && p.availability !== 'unverified') throw new AgentMuxError(
     'Runtime owner identity is malformed.', 'CONTROL_PROTOCOL_ERROR')
   if (p.ctxmux === null) return p as unknown as import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity
