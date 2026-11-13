@@ -58,7 +58,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.release': 'browser.release', 'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation',
   'browser.profile.ls': 'browser.profile.ls', 'browser.profile.inspect': 'browser.profile.inspect',
-  'browser.profile.create': 'browser.profile.create', 'browser.profile.update': 'browser.profile.update',
+  'browser.profile.create': 'browser.profile.create', 'browser.profile.copy': 'browser.profile.copy', 'browser.profile.update': 'browser.profile.update',
   'browser.profile.set-default': 'browser.profile.set-default', 'browser.profile.delete': 'browser.profile.delete',
   'browser.profile.proxy-sign-in.set': 'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear': 'browser.profile.proxy-sign-in.clear',
   'browser.profile.network.check': 'browser.profile.network.check',

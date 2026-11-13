@@ -747,6 +747,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' complete:false means saved Tabs could not be read; the list then names only open Browsers.'),
   command('browser.profile.create', '--label TEXT', 'Create an empty Browser Profile with its own sign-ins and site data.', { '--label': 'data' },
     f => ({ label: value(f, '--label', true)! }), PROFILE_NOTICE),
+  command('browser.profile.copy', '--profile ID --expected-revision N --label TEXT', 'Copy saved settings into a new Browser Profile with separate sign-ins and site data.',
+    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data' }, f => {
+      const revision = Number(value(f, '--expected-revision', true))
+      if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the non-negative revision from browser profile ls.')
+      return { profileId: id(f, '--profile', true), expectedRevision: revision, label: value(f, '--label', true)! }
+    }, PROFILE_NOTICE + ' Copies saved hue, notes, network endpoint and environment settings. The source Profile and its pages stay unchanged. No site data, sign-ins, proxy password, human approvals or runtime history is copied. The source ID and revision must match the saved list; inspect the returned new Profile ID before opening it.'),
   command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT] [--network system|direct|SERVER] [--no-proxy HOST,...] [--environment JSON]', 'Rename a Browser Profile, change its hue or notes, or choose how its pages reach the network.',
     { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data', '--network': 'data', '--no-proxy': 'data', '--environment': 'data' }, f => {
       if (f.values.has('--hue') && f.booleans.has('--clear-hue')) invalid('Choose a hue or explicitly clear it, not both.')

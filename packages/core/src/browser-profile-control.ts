@@ -6,7 +6,7 @@ import { AgentMuxError } from './errors.js'
  * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
 export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
-  'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
+  'browser.profile.copy', 'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
   'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
 
@@ -24,6 +24,7 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.ls' }
   | { operation: 'browser.profile.inspect'; profileId: string }
   | { operation: 'browser.profile.create'; label: string }
+  | { operation: 'browser.profile.copy'; profileId: string; expectedRevision: number; label: string }
   | { operation: 'browser.profile.update'; profileId: string; expectedRevision: number; edit: BrowserProfileControlEdit }
   | { operation: 'browser.profile.set-default'; profileId: string }
   | { operation: 'browser.profile.delete'; profileId: string }
@@ -100,6 +101,7 @@ export type BrowserProfileControlResult =
   | { operation: 'browser.profile.ls'; revision: number; profiles: BrowserProfileControlProfile[] }
   | { operation: 'browser.profile.inspect'; revision: number; profile: BrowserProfileControlProfile; usage: BrowserProfileControlUsage }
   | { operation: 'browser.profile.create'; revision: number; profile: BrowserProfileControlProfile }
+  | { operation: 'browser.profile.copy'; revision: number; sourceProfileId: string; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.update'; revision: number; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.set-default'; revision: number; profileId: string }
   | { operation: 'browser.profile.delete'; revision: number; profileId: string; deleted: true }
@@ -162,7 +164,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   const operation = source.operation
   if (!isBrowserProfileControlOperation(operation)) fail(code, 'Browser Profile operation is invalid.')
   const fields: Record<BrowserProfileControlOperation, readonly string[]> = {
-    'browser.profile.ls': [], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'],
+    'browser.profile.ls': [], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
     'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId']
   }
@@ -171,6 +173,11 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   switch (operation) {
     case 'browser.profile.proxy-sign-in.set': return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), signIn: parseBrowserProfileProxySignIn(source.signIn) }
     case 'browser.profile.ls': return { operation }
+    case 'browser.profile.copy': {
+      const label = text(source.label, code, 'Browser Profile label', 512)
+      if (!label.trim()) fail(code, 'Browser Profile label is required.')
+      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile revision'), label }
+    }
     case 'browser.profile.create': {
       const label = text(source.label, code, 'Browser Profile label', 512)
       if (!label.trim()) fail(code, 'Browser Profile label is required.')
@@ -264,7 +271,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
   const code = 'CONTROL_PROTOCOL_ERROR'
   const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
     'browser.profile.ls': ['revision', 'profiles'], 'browser.profile.inspect': ['revision', 'profile', 'usage'],
-    'browser.profile.create': ['revision', 'profile'], 'browser.profile.update': ['revision', 'profile'],
+    'browser.profile.create': ['revision', 'profile'], 'browser.profile.copy': ['revision', 'sourceProfileId', 'profile'], 'browser.profile.update': ['revision', 'profile'],
     'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'profileId', 'deleted'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'saved', 'reconnected'], 'browser.profile.proxy-sign-in.clear': ['profileId', 'cleared', 'reconnected'],
     'browser.profile.network.check': ['profileId', 'check']
@@ -303,6 +310,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       return { revision, profiles }
     }
     case 'browser.profile.inspect': return { revision, profile: profile(row.profile, code), usage: usage(row.usage, code) }
+    case 'browser.profile.copy': return { revision, sourceProfileId: identity(row.sourceProfileId, code, 'Source Browser Profile ID'), profile: profile(row.profile, code) }
     case 'browser.profile.create': case 'browser.profile.update': return { revision, profile: profile(row.profile, code) }
     case 'browser.profile.set-default': return { revision, profileId: identity(row.profileId, code, 'Browser Profile ID') }
     case 'browser.profile.delete':
@@ -313,6 +321,13 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
 
 /** The answer must be about the Profile this request named. */
 export function assertBrowserProfileControlTarget(request: BrowserProfileControlPayload, result: BrowserProfileControlResult): void {
+  if (request.operation === 'browser.profile.copy') {
+    if (result.operation !== 'browser.profile.copy' || result.sourceProfileId !== request.profileId || result.profile.id === request.profileId ||
+      result.profile.label !== request.label || result.profile.source !== null || result.profile.isDefault) {
+      fail('CONTROL_PROTOCOL_ERROR', 'Copied Browser Profile result does not identify the original source and a new settings-only Profile.')
+    }
+    return
+  }
   const named = 'profileId' in request ? request.profileId : null
   const answered = 'profile' in result ? result.profile.id : 'profileId' in result ? result.profileId : null
   if (named !== null && answered !== named) fail('CONTROL_PROTOCOL_ERROR', 'Browser Profile result belongs to another Profile.')
