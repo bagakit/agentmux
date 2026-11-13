@@ -76,7 +76,7 @@ describe('playlist reference scanning', () => {
     ['//cdn.example/a.ts', 'external-reference'], ['/etc/a.ts', 'external-reference'], ['\\\\cdn.example\\a.ts', 'external-reference'],
     [' data:video/mp2t,00', 'external-reference'], ['file:///etc/a.ts', 'external-reference'],
     ['../../../a.ts', 'outside-workspace'], ['../../../a/hls/a.ts', 'outside-workspace'], ['..\\..\\..\\b\\a.ts', 'outside-workspace'],
-    ['%2e%2e/%2e%2e/%2e%2e/a.ts', 'outside-workspace'], ['notes.txt', 'unsupported-resource'], ['a%2Fb.ts', 'unsupported-resource'],
+    ['%2e%2e/%2e%2e/%2e%2e/a.ts', 'outside-workspace'], ['a%2Fb.ts', 'unsupported-resource'],
     ['{$host}/a.ts', 'unsupported-resource']
   ] as const)('%s is refused as %s', (reference, state) =>
     expect(resolvePlaylistReference(reference, 'hls/v0/index.m3u8')).toEqual({ state, path: 'hls/v0/index.m3u8' }))
@@ -87,6 +87,8 @@ describe('playlist reference scanning', () => {
     expect(resolvePlaylistReference('100%25.ts', 'hls/index.m3u8')).toBe('hls/100%.ts')
     expect(resolvePlaylistReference('..\\seg\\a.ts', 'hls/v0/index.m3u8')).toBe('hls/seg/a.ts')
     expect(resolvePlaylistReference('../../a.ts', 'hls/v0/index.m3u8')).toBe('a.ts')
+    // The type is the request's question, not the playlist's: a key or caption file stays in scope.
+    expect(resolvePlaylistReference('enc.key', 'hls/v0/index.m3u8')).toBe('hls/v0/enc.key')
   })
 
   it('holds only a playlist that can still grow', () => {
@@ -178,18 +180,20 @@ describe('workspace playlist leases', () => {
     expect((await get(new URL('a.ts', opened.url).href)).body).toEqual(segment(2))
   })
 
-  it('refuses a playlist naming a resource outside the playable set without admitting any of its references', async () => {
+  it('plays a playlist that also names a resource it does not serve, refusing only that resource', async () => {
     const f = await fixture()
-    await f.put('hls/index.m3u8', vod('a.ts', 'run.sh'))
+    await f.put('hls/index.m3u8', vod('a.ts', 'enc.key'))
     await f.put('hls/a.ts', segment(2))
-    await f.put('hls/run.sh', 'echo private')
+    await f.put('hls/enc.key', 'secret key bytes')
     const opened = await ready(f, 'hls/index.m3u8')
-    expect((await get(opened.url)).status).toBe(422)
-    expect(f.streams.status(opened.id)).toEqual({ state: 'unsupported-resource', path: 'hls/index.m3u8' })
-    expect((await get(new URL('a.ts', opened.url).href)).status).toBe(404)
-    const script = await get(new URL('run.sh', opened.url).href)
-    expect(script.status).toBe(404)
-    expect(script.body.toString()).not.toContain('private')
+    expect((await get(opened.url)).status).toBe(200)
+    expect((await get(new URL('a.ts', opened.url).href)).body).toEqual(segment(2))
+    const key = await get(new URL('enc.key', opened.url).href)
+    expect(key.status).toBe(422)
+    expect(key.body.toString()).not.toContain('secret')
+    expect(f.streams.status(opened.id)).toEqual({ state: 'unsupported-resource', path: 'hls/enc.key' })
+    // An unlisted file beside it is still out of scope, whatever its type.
+    expect((await get(new URL('run.sh', opened.url).href)).status).toBe(404)
   })
 
   it('answers an unreferenced sibling or a missing listed segment with 404 and keeps the lease playing', async () => {
