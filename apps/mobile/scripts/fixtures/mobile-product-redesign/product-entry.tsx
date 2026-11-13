@@ -239,7 +239,7 @@ const client = {
       releaseFileUpload = () => { const { dataBase64: _data, ...identity } = params; resolve({ ...identity, status: 'uploaded', path: '/opaque/原资料截图.png' }) }
     })
     // The original Host confirms an explicit-input pause; capturing its unknown path is a separate scene.
-    if (method === 'agent.automation.pause') return { receipt: { ...params, status: 'confirmed', pausedLoopIds: [], disabledIntentIds: [], issues: [] } }
+    if (method === 'agent.automation.pause') return { receipt: { ...params, status: 'confirmed', pausedLoopIds: [], deferredLoopIds: [], disabledIntentIds: [], issues: [] } }
     if (method === 'skill.ls') {
       const original = sessions.find(session => session.agentSessionId === params.agentSessionId)!
       return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
