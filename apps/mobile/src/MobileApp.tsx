@@ -218,7 +218,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     if (!source || !connected) { setNotice('连接暂不可用；主 Agent 的原身份、历史与草稿保留，可连接后显式恢复。'); return }
     void recoverMobileAgent({ client: source, agentSessionId: id, expectedHostId: hostId, mode: 'open',
       isCurrent: () => originalConnection.current.client === source && originalConnection.current.connected && navigationRevision.current === revision,
-      onNotice: setNotice })
+      onNotice: setNotice, quietWhenConfirmed: true })
   }, [client, connected, openSession])
   const openSource = (value: TopicKnowledgeSource) => {
     navigationRevision.current += 1
