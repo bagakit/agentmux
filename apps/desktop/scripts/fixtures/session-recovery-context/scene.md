@@ -6,6 +6,11 @@ It supplies explicit private history pages through the existing API boundary; it
 does not qualify live Provider lifecycle, installed binaries, or process recovery.
 No user Session, Run, home directory or system clipboard is touched.
 
+`AGENTMUX_CLOSE_CHAIN=1` narrows this probe to a Runtime-ended Run in dark,
+light and narrow Regions, its real notification Resume/Close controls and Close
+confirmation, plus a Run whose observation remains unknown. Closing is only
+opened for review; this presentation probe never confirms Stop or recovery.
+
 Owning contracts: [Connecting and recovery](../../../../../docs/design/behavior/session-recovery.md#connecting-与-terminal-恢复页的全页状态舞台)
 and [presentation](../../../../../docs/design/presentation/session-recovery.md#启动与恢复的分量分开).
 
