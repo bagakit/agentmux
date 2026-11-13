@@ -20,12 +20,13 @@ const ThemeDerivedActionIcon = semanticIconComponent('action.derived-action')
 
 
 /** A local workface transition. The underlying Session and editor stay mounted. */
-export function SessionTakeoverSurface({ source, active, onClose, onOpened, returnTrigger }: {
+export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSubmitted, returnTrigger }: {
   source: TakeoverSource
   returnTrigger?: HTMLButtonElement | null
   active: boolean
   onClose(): void
   onOpened?(): void
+  onSubmitted?(): void
 }) {
   const config = useAppStore(state => state.config)
   const detections = useAppStore(state => state.executorDetections)
@@ -37,6 +38,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
   const executors = useMemo(() => executorsForHost(config, source.hostId ?? undefined, detections, inventory), [config?.executors, detections, inventory, host, source.hostId])
   const surface = useRef<HTMLElement>(null)
   const admitted = useRef(false)
+  const submitted = useRef(false)
   const mounted = useRef(true)
   const activeRef = useRef(active)
   const visibleRef = useRef(active)
@@ -113,7 +115,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
     }
   }, [active, closing])
   async function accept(report: AgentMuxSpaceMutationReport) {
-    if (!mounted.current) return
+    if (!mounted.current || submitted.current) return
     if (report.outcome === 'opened') {
       const current = activeRef.current
       if (current) focusTakeoverResult(source, report)
@@ -138,9 +140,14 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
     // inside the workface rather than letting Chromium drop focus to BODY.
     surface.current?.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]')?.focus({ preventScroll: true })
     setSelected(id); setBusy(true); setIssue(null)
-    try { await accept(await takeOverSession(source.kind === 'session' && destination ? { ...source, destination } : source, id, () => mounted.current && activeRef.current, previousRequest)) }
+    try { await accept(await takeOverSession(source.kind === 'session' && destination ? { ...source, destination } : source, id,
+      () => submitted.current || mounted.current && activeRef.current, previousRequest, () => {
+        submitted.current = true
+        close(false)
+        onSubmitted?.()
+      })) }
     catch (error) {
-      if (mounted.current) {
+      if (mounted.current && !submitted.current) {
         setIssue(presentError(error))
         // A retained spatial intent may already have launched. Re-read it rather
         // than resubmitting after a transport/projection failure.

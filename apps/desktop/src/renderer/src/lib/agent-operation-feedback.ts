@@ -21,7 +21,9 @@ export function updateAgentOperation(operation: AgentOperationFeedback, patch: P
   const key = agentOperationKey(operation)
   useAppStore.setState(state => {
     const held = state.agentOperations[key]
-    return held && !(held.phase === 'succeeded' && patch.phase !== 'succeeded')
+    const regresses = held && patch.phase && patch.phase !== held.phase &&
+      (held.phase === 'retired' || held.phase === 'succeeded' && !(held.kind !== 'stop' && patch.phase === 'retired'))
+    return held && !regresses
       ? { agentOperations: { ...state.agentOperations, [key]: { ...held, ...patch } } } : state
   })
 }
@@ -41,8 +43,9 @@ export function settleAgentCreation(operation: AgentOperationFeedback, report: A
     return
   }
   updateAgentOperation(operation, { report, phase: report.outcome === 'opened' ? 'succeeded'
-    : report.outcome === 'partial' ? 'partial' : 'unconfirmed',
-    message: report.issues.map(issue => issue.message).join('\n') || undefined })
+    : report.outcome === 'partial' ? 'partial' : report.outcome === 'retired' ? 'retired' : 'unconfirmed',
+    message: report.issues.map(issue => issue.message).join('\n') ||
+      (report.outcome === 'retired' ? '这次创建的 Agent 后已关闭，原工作仍保留。' : undefined) })
 }
 
 /** Core can join a pre-existing Stop; keep its canonical identity and each original caller. */
@@ -85,12 +88,20 @@ export async function inspectAgentOperation(operation: AgentOperationFeedback) {
         canContinue: inspected.canRetry, message: inspected.failure?.message })
       return
     }
+    if (operation.kind === 'takeover') {
+      const { inspectTakeoverOperation } = await import('./session-takeover')
+      const report = await inspectTakeoverOperation(operation.takeoverSource, operation.operationId)
+      if (stillCurrent()) settleAgentCreation(operation, report)
+      return
+    }
     const result = await useAppStore.getState().executeControl({ schemaVersion: 5,
       requestId: `operation-inspect:${mintObjectId()}`, operation: 'space.inspect', target: { requestId: operation.operationId } })
     if (!stillCurrent()) return
     if (result.operation === 'space.inspect' && result.request?.report) settleAgentCreation(operation, result.request.report)
     else updateAgentOperation(operation, { phase: 'unconfirmed', message: '原创建结果尚未确认；检查不会重新创建 Agent。' })
   } catch (error) {
-    if (stillCurrent()) updateAgentOperation(operation, { phase: 'unconfirmed', message: presentError(error) })
+    if (stillCurrent()) updateAgentOperation(operation, {
+      ...(started.phase === 'succeeded' || started.phase === 'retired' ? {} : { phase: 'unconfirmed' as const }), message: presentError(error)
+    })
   }
 }

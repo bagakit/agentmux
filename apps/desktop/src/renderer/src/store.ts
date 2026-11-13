@@ -1,5 +1,5 @@
 import type { AgentOperationReferences } from './lib/agent-operation'
-import { restoredAgentOperations } from './lib/agent-operation'
+import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
@@ -4202,7 +4202,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     projectGroups: coreSpatialReady ? undefined : state.projectGroups,
     spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
-    agentOperations: state.agentOperations,
+    agentOperations: persistedAgentOperations(state.agentOperations),
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalFiniteStartIntents: state.goalFiniteStartIntents,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,

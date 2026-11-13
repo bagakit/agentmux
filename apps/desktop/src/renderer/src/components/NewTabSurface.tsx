@@ -50,6 +50,8 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { useContext } from 'react'
 import { WorkbenchProjectionContext } from '../lib/workbench-projection'
 import { resolveBrandHero } from '../lib/brand-hero'
+import { useShallow } from 'zustand/react/shallow'
+import { AgentOperationFeedback } from './AgentOperationFeedback'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -80,6 +82,19 @@ export function NewTabSurface({
   const projection = useContext(WorkbenchProjectionContext)
   const settings = useContext(SettingsNavigation)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const operationHosts = useAppStore(useShallow(useMemo(() => {
+    let references: ReturnType<typeof useAppStore.getState>['agentOperations'] | undefined
+    let hosts: string[] = []
+    return (state: ReturnType<typeof useAppStore.getState>) => {
+      if (!visible || !presentationActive) return hosts
+      if (state.agentOperations !== references) {
+        references = state.agentOperations
+        hosts = regionId ? [...new Set(Object.values(references).filter(operation => operation.subject.regionId === regionId)
+          .map(operation => operation.subject.hostId))] : []
+      }
+      return hosts
+    }
+  }, [regionId, visible, presentationActive])))
   const [regionHeight, setRegionHeight] = useState<number | null>(null)
   const restoreAgentsFocus = useRef<LauncherSectionMode | null>(null)
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
@@ -425,6 +440,7 @@ export function NewTabSurface({
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
+      {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
 
 
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {

@@ -9,6 +9,7 @@ import { spatialCatalog } from './space-agent-control'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { api } from './api'
 import { requireAgentNewTabDestination, type AgentNewTabDestination } from './agent-new-tab-destination'
+import { beginAgentOperation, updateAgentOperation, settleAgentCreation, type AgentOperationFeedback } from './agent-operation-feedback'
 
 type TakeoverSourceDetails = {
   hostId: string | undefined
@@ -196,10 +197,18 @@ export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxS
   if (source.kind !== 'session') source = await exactTakeoverSource(source)
   const requestId = await latestTakeoverRequestId(source), state = useAppStore.getState()
   if (!state.spatialRequests[requestId]) return null
+  return inspectTakeoverOperation(source, requestId)
+}
+
+/** Reconcile this submitted request even after its source presentation has gone away. */
+export async function inspectTakeoverOperation(source: TakeoverSource, requestId: string): Promise<AgentMuxSpaceMutationReport> {
+  const state = useAppStore.getState()
   const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
     operation: 'space.inspect', target: { requestId } })
   if (result.operation !== 'space.inspect') throw new Error('The original creation inspection returned another operation. Its result is unconfirmed.')
-  if (!result.request?.report) throw new Error('The original takeover intent is retained; creation is unconfirmed. Check this same request again.')
+  if (!result.request?.report || result.request.requestId !== requestId || result.request.report.requestId !== requestId) {
+    throw new Error('The original takeover intent is retained; its exact creation result is unconfirmed. Check this same request again.')
+  }
   return nameTakeover(source, result.request.report)
 }
 
@@ -215,7 +224,8 @@ export function focusTakeoverResult(source: TakeoverSource, report: AgentMuxSpac
   state.focusRegion(target.displayWorkspaceId, target.tabId, target.regionId, 'pointer', target.groupId)
 }
 
-export async function takeOverSession(source: TakeoverSource, executorId: string, current: () => boolean, previousRequestId?: string): Promise<AgentMuxSpaceMutationReport> {
+export async function takeOverSession(source: TakeoverSource, executorId: string, current: () => boolean, previousRequestId?: string,
+  onSubmitted?: (operation: AgentOperationFeedback) => void): Promise<AgentMuxSpaceMutationReport> {
   if (!current() || !ownsTakeoverRegion(source)) throw new Error('The original Region or Session changed. No replacement source was used; its work is kept.')
   source = await exactTakeoverSource(source)
   const assertSource = () => {
@@ -243,14 +253,35 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
   const currentState = useAppStore.getState()
   const topics = Object.values(currentState.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics ?? [])
   const catalog = spatialCatalog(currentState, topics)
+  async function submit(request: Extract<Parameters<typeof state.executeControl>[0], { operation: 'agent.open' }>) {
+    // These are the already-reviewed source and destination. Closing their picker
+    // now releases presentation only; the caller retains this exact admitted intent.
+    const original = currentState.sessions.find(item => item.kind === 'agent' && item.id === source.agentSessionId && item.control.hostId === source.hostId)
+    const operation = beginAgentOperation({ kind: 'takeover', operationId: requestId, phase: 'pending', startedAt: Date.now(),
+      takeoverSource: structuredClone(source),
+      subject: { hostId: source.hostId!, agentSessionId: original?.kind === 'agent' ? original.control.agentSessionId : source.agentSessionId,
+        regionId: source.origin.regionId } })
+    updateAgentOperation(operation, { phase: 'pending', message: undefined })
+    try {
+      onSubmitted?.(operation)
+      const result = await state.executeControl(request)
+      if (result.operation !== 'agent.open') throw new Error('The takeover creation returned another operation. Its original result is unconfirmed; do not repeat creation.')
+      const report = await nameTakeover(source, result)
+      settleAgentCreation(operation, report)
+      return report
+    } catch (error) {
+      const retained = useAppStore.getState().agentOperations
+      const observed = Object.values(retained).find(item => item.kind === 'takeover' && item.operationId === operation.operationId && item.subject.hostId === operation.subject.hostId)
+      if (observed?.phase === 'pending') updateAgentOperation(operation, { phase: 'unconfirmed', message: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }
   if (source.kind === 'session') {
     if (!source.destination) throw new Error('Choose an exact existing Space, Zone and Group for the takeover Tab. The original Agent is kept.')
     const destination = requireAgentNewTabDestination(source.destination, catalog, currentState.layouts, { hostId: source.hostId, cwd: source.cwd })
     assertSource()
-    const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
+    return submit({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
       destination, content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
-    if (result.operation !== 'agent.open') throw new Error('The takeover creation returned another operation. Its original result is unconfirmed; do not repeat creation.')
-    return nameTakeover(source, result)
   }
   const location = catalog.locations.find(item => item.tabId === source.origin.tabId && item.regionId === source.origin.regionId &&
     item.displayWorkspaceId === source.origin.workspaceId && item.groupId === source.origin.tabGroupId)
@@ -259,9 +290,7 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
   if (!zone || !location) throw new Error('The original execution location is unconfirmed. Re-read its Project; the original Session and draft are kept.')
   // The display may have moved to another Host. Execution stays at the source
   // Zone; the new Tab may still appear beside the original in this display.
-  const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
+  return submit({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
     destination: { zoneId: zone.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
     content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
-  if (result.operation !== 'agent.open') throw new Error('The takeover creation returned another operation. Its original result is unconfirmed; do not repeat creation.')
-  return nameTakeover(source, result)
 }

@@ -477,7 +477,8 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
         {takeover ? <SessionTakeoverSurface source={takeover.source} active={open} returnTrigger={takeover.trigger}
-          onClose={() => setTakeover(null)} onOpened={() => { takeoverOpened.current = true; changeOpen(false) }} /> : null}
+          onClose={() => setTakeover(null)} onSubmitted={() => changeOpen(false)}
+          onOpened={() => { takeoverOpened.current = true; changeOpen(false) }} /> : null}
       </Dialog.Content>
     </DocumentOverlayPortal>
   </Dialog.Root>

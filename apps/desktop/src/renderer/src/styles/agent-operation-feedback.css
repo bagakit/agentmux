@@ -4,6 +4,7 @@
 .agent-operation-feedback[data-kind='stop'] { --operation-accent: var(--red); }
 .agent-operation-feedback[data-kind='fork'] { --operation-accent: var(--blue); }
 .agent-operation-feedback[data-phase='failed'], .agent-operation-feedback[data-phase='partial'], .agent-operation-feedback[data-phase='unconfirmed'] { --operation-accent: var(--amber); }
+.agent-operation-feedback[data-phase='retired'] { --operation-accent: var(--text-2); }
 .agent-operation-feedback__motion { position: absolute; inset: 0; z-index: 2; overflow: hidden; border-radius: inherit; contain: strict; pointer-events: none; }
 .agent-operation-feedback__motion::before { content: ''; position: absolute; inset: 0; border: 1px solid color-mix(in srgb, var(--operation-accent) 30%, transparent); border-radius: inherit; }
 .agent-operation-feedback[data-phase='pending'] .agent-operation-feedback__motion::after { content: ''; position: absolute; top: 0; bottom: 0; width: 25%; transform: translateX(-150%) skewX(-20deg); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--operation-accent) 8%, transparent), transparent); animation: agent-operation-enter var(--dur-exit) var(--ease-enter) 1; }

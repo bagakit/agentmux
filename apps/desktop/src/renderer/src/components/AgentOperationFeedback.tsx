@@ -15,6 +15,7 @@ function label(operation: Operation) {
   if (operation.phase === 'pending') return `${titles[operation.kind]}中`
   if (operation.phase === 'succeeded') return operation.kind === 'stop' ? '已停止' : '已创建'
   if (operation.phase === 'partial') return `${titles[operation.kind]}部分完成`
+  if (operation.phase === 'retired') return `${titles[operation.kind]}目标已关闭`
   return `${titles[operation.kind]}${operation.phase === 'failed' ? '失败' : '未确认'}`
 }
 
@@ -47,6 +48,7 @@ function AgentOperationFeedbackBody({ operations, compact, active }: { operation
       <div className="agent-operation-feedback__detail">
         {operation.message ? <p>{operation.message}</p> : null}
         <p><code>{operation.operationId}</code></p>
+        {operation.kind === 'stop' ? <p>原 Run：{operation.control.run.runId}</p> : null}
         {operation.callerOperationIds?.length ? <p>原请求：{operation.callerOperationIds.join(' · ')}</p> : null}
         {operation.report?.agent ? <p>Agent {operation.report.agent.agentSessionId}</p> : null}
         <div className="agent-operation-feedback__actions">
