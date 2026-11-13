@@ -18,6 +18,14 @@ environment lease permits release and restoration of that original Browser.
 `--scope --cold-target` isolates original new-target initialization and reports its
 actual application scope. These bounded scenes do not claim the full scenario.
 
+`--scope --hardware-baseline-proof` isolates one already-open page whose own
+script shadows the main-world hardware-concurrency getter. The actual production
+Profile owner configures and clears hardware through the public CLI while another
+native consumer stays attached. A production omission of the isolated context
+must restore the spoofed value and fail the native clear assertion; the restored
+candidate must restore the original isolated native value without changing the
+page's getter, input, navigation or other consumer.
+
 Without `--scope`, the retained session-default scenario checks public edits,
 request headers, a failed native session setter's Profile-scoped service notice,
 retry, release/restore and restart. Its warning mutation must fail the real public
