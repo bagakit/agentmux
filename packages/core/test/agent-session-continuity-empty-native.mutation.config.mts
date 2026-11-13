@@ -4,19 +4,39 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './durable-direct-resume.config.mts'
 
-// Loaded mutants for the "no native conversation to continue" decision. Each one must fail a
-// designated case in agent-session-continuity-empty-native.test.ts; the unmutated run must pass.
+// Loaded mutants for Core's "holds no native conversation to continue" decision. Each one must fail
+// a designated case in agent-session-continuity-empty-native.test.ts; the unmutated run must pass.
 const root = resolve(import.meta.dirname, '../../..')
 const attempt = 'packages/core/src/agent-session-recovery/continuity-attempt.ts'
 const policy = 'packages/core/src/agent-session-recovery/continuity-policy.ts'
+const supervisor = 'packages/core/src/agent-session-recovery/supervisor.ts'
 const service = 'packages/core/src/public-rpc-service.ts'
 export const mutations: Record<string, Array<[string, string, string]>> = {
   // Old ordering: automatic admission parks the empty Session as idle-unknown again.
-  'admission-before-fact': [[attempt, 'if (nativeConversationAbsent) admission = undefined\n    else if (receipt.intentOperationId) {', 'if (receipt.intentOperationId) {']],
-  // Candidates awaiting selection are wrongly treated as "never had a conversation".
-  'ignore-candidates': [[policy, '!session.observedNativeHandle && !session.nativeSourceObservation', '!session.observedNativeHandle']],
+  'admission-before-fact': [[attempt, '} else if (!nativeConversationAbsent) admission = agentContinuityAdmission(', '} else admission = agentContinuityAdmission(']],
+  // The fact short-circuits authorization: a revoked standing source is no longer refused.
+  'fact-skips-authorization': [[attempt, '    if (receipt.intentOperationId) {\n      const root = current.continuityOperations?.[receipt.intentOperationId]',
+    '    if (nativeConversationAbsent) admission = undefined\n    else if (receipt.intentOperationId) {\n      const root = current.continuityOperations?.[receipt.intentOperationId]']],
+  // Candidates awaiting selection are wrongly treated as "no conversation".
+  'ignore-candidates': [[policy, '  if (session.nativeHandle || session.observedNativeHandle || session.nativeSourceObservation) return true',
+    '  if (session.nativeHandle || session.observedNativeHandle) return true']],
   // An unconfirmed identity save is wrongly treated as final.
-  'ignore-durability': [[policy, 'return durabilityConfirmed && !session.nativeHandle', 'return !session.nativeHandle']],
+  'ignore-durability': [[policy, '  if (!facts.durabilityConfirmed || !facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false',
+    '  if (!facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false']],
+  // A Provider whose identity channel Core does not install is wrongly treated as fully observed.
+  'ignore-identity-channel': [[policy, '  if (!facts.durabilityConfirmed || !facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false',
+    '  if (!facts.durabilityConfirmed || agentSessionHoldsNativeEvidence(session)) return false']],
+  // Input typed straight into the terminal, or an unknown input count, is ignored.
+  'ignore-run-input': [[policy, '  return facts.acceptedInputBytes === 0 || facts.acceptedInputBytes === protocolBytes', '  return true']],
+  // An authored or unknown first prompt is ignored.
+  'ignore-first-prompt': [[policy, "  if (session.creation?.initialPrompt !== 'not-requested') return true\n", '']],
+  // A protocol initialization that may have created a native object is ignored.
+  'ignore-initialization': [[policy, ' || session.forkedFrom || session.nativeActor?.initializationControl) return true', ' || session.forkedFrom) return true']],
+  // Native status, Hook or activity evidence is ignored.
+  'ignore-native-activity': [[policy, '    session.semanticStatus || session.hookReceipt || session.recoveryActivity || session.activityCommit)', '    false)']],
+  // A Session parked as idle-unknown by an earlier startup is never re-decided.
+  'parked-root-retained': [[supervisor, "    if (input.trigger === 'startup' && root.kind === 'pending' && root.reason === 'idle-unknown' &&",
+    "    if (false && input.trigger === 'startup' && root.kind === 'pending' && root.reason === 'idle-unknown' &&"]],
   // The public resume tells the caller to retry an operation that cannot succeed.
   'public-pending': [[service, "if (restored.kind === 'unavailable' && restored.reason === 'native-conversation-absent') throw", "if (false) throw"]]
 }

@@ -12,10 +12,19 @@ const config = 'packages/core/test/agent-session-continuity-empty-native.mutatio
 const variants = [
   { name: 'candidate' },
   { name: 'admission-before-fact', target: 'answers a startup recovery' },
+  { name: 'fact-skips-authorization', target: 'still refuses a revoked standing source' },
   { name: 'ignore-candidates', target: 'keeps native candidates awaiting selection' },
   { name: 'ignore-durability', target: 'keeps an unconfirmed identity save' },
+  { name: 'ignore-identity-channel', target: 'whose identity channel Core does not install' },
+  { name: 'ignore-run-input', target: 'accepted typed input beyond the handshake' },
+  { name: 'ignore-first-prompt', target: 'holds an authored first prompt' },
+  { name: 'ignore-initialization', target: 'a native initialization may have created an object' },
+  { name: 'ignore-native-activity', target: 'holds a native Hook receipt' },
+  { name: 'parked-root-retained', target: 're-decides at the next startup' },
   { name: 'public-pending', target: 'reports the dedicated reason through the public' }
 ]
+// Every case, including the compiled CLI one, must run unmutated: a skipped case proves nothing.
+const CASES = 24
 const output = join(root, 'packages/core/.tmp/empty-native-continuity')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-'))
@@ -61,8 +70,9 @@ for (const variant of variants) {
   const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile=' + report]
   const result = await new Promise((yes, no) => {
     const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, AMX_EMPTY_NATIVE_LOADED: loaded,
-        ...(variant.name === 'candidate' ? { AGENTMUX_TEST_OBJECT_CLI: join(cli, 'bin/amux') } : { AMX_EMPTY_NATIVE_MUTATION: variant.name }) } })
+      // The private CLI is unmutated; mutants are loaded in-process, so only the public-pending one reaches it.
+      env: { ...process.env, AMX_EMPTY_NATIVE_LOADED: loaded, AGENTMUX_TEST_OBJECT_CLI: join(cli, 'bin/amux'),
+        ...(variant.name === 'candidate' ? {} : { AMX_EMPTY_NATIVE_MUTATION: variant.name }) } })
     let text = ''; child.stdout.on('data', d => { text += d }); child.stderr.on('data', d => { text += d })
     child.once('error', no); child.once('close', code => yes({ code, text }))
   })
@@ -72,7 +82,8 @@ for (const variant of variants) {
   const loadedMutation = variant.name === 'candidate' ? true : (await readFile(loaded, 'utf8').catch(() => '')).includes(`"mutation":"${variant.name}"`)
   receipt.results.push({ name: variant.name, code: result.code, passed: tests.numPassedTests, failed: tests.numFailedTests, loadedMutation, failures: failed })
   await save()
-  if (variant.name === 'candidate') assert.ok(result.code === 0 && tests.numPassedTests === 9 && tests.numFailedTests === 0, 'Unmutated empty-native cases must all pass')
+  if (variant.name === 'candidate') assert.ok(result.code === 0 && tests.numPassedTests === CASES && tests.numFailedTests === 0 && tests.numPendingTests === 0,
+    `Unmutated empty-native cases must all run and pass (${tests.numPassedTests}/${CASES}, ${tests.numPendingTests} skipped)`)
   else {
     assert.ok(loadedMutation, 'Mutation was not loaded: ' + variant.name)
     assert.ok(result.code === 1 && failed.some(name => name.includes(variant.target)), 'Loaded mutation did not fail its designated case: ' + variant.name)

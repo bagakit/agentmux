@@ -553,13 +553,14 @@ it('explicit main entry preserves an unresolved non-Mote producer without starti
   expect(ensure).not.toHaveBeenCalled();expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
-// A Main whose first Run exited before it confirmed a native conversation (for example a first-run
-// prompt nobody answered) has nothing to resume. Entry must return that fact under its own operation,
-// never an empty result that reads as "not yet read", and it starts nothing.
+// A Main whose first Run exited with no input and no native identity (created without a first
+// prompt) has nothing Core can resume. Entry must return that fact under its own operation, never an
+// empty result that reads as "not yet read", and it starts nothing.
 it('explicit main entry records an exited Main with no native conversation as unavailable, without a Start',async()=>{
   const f=await createMoteInputFixture(); closes.push(f.close)
   const old=(await f.store.readMetadata('primary'))!
-  const { nativeHandle: _native, ...withoutNative } = old; await f.store.compareAndSwapMetadata(old,withoutNative)
+  const { nativeHandle: _native, ...withoutNative } = old
+  await f.store.compareAndSwapMetadata(old,{...withoutNative,creation:{createOperationId:'create-primary',initialPrompt:'not-requested',createdRun:{...old.run}}})
   await f.inner.registry.load('local')
   const g=await fixtureFrom(f),main=await g.main.readCurrentMoteMain(g.target),request=mainEntry(main,'entry-no-native'),runtime=endedMainRuntime(g)
   // Host maintenance already failed on this same fact, so its reading is unconfirmed, as on a real Host.
