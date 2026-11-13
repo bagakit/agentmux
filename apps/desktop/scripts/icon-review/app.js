@@ -170,7 +170,7 @@ function renderBrand() {
   brandRealm=realms.some(realm=>realm.id===brandRealm)?brandRealm:realms.find(realm=>realm.isDefault)?.id;
   const focus=realms.find(realm=>realm.id===brandRealm), needle=query.trim().toLowerCase();
   const painted=realms.filter(realm=>!realm.heroes.banner.borrowed).length;
-  $('#result-count').textContent=`${realms.length} 个境 · ${painted} 个已有大图 · 其余借原境`;
+  $('#result-count').textContent='';
   // Each card is cropped the way its product surface crops the same art. Launch and the Settings
   // strip carry the colophon; the Launcher is a work entry and shows none, as in the product.
   const heroCard=(realm,surface,place,colophon)=>{const hero=realm.heroes[surface];
@@ -182,9 +182,9 @@ function renderBrand() {
   const marks=ThemeBridge.providerMarks().filter(item=>!needle||[item.id,item.label].join(' ').toLowerCase().includes(needle));
   $('#inventory-content').innerHTML=`<div class="brand-space">
     <section class="brand-intro"><h2>同一条龙，五个境</h2>
-      <p>每个 App 图标是龙在一个境里的肖像。大图跟随所选的境；还没画到的境借原境的画，题款写明画属于哪个境。工坊插画属于所有境，从不切换。</p></section>
+      <p>五个 App 图标是同一条龙在五个境里的肖像；还没画到的境借原境的画，题款写明出处。</p></section>
     <section class="brand-realms" aria-label="五个境">
-      <div class="brand-realm-tabs" role="tablist" aria-label="选择境">${realms.map(realm=>`<button role="tab" type="button" data-brand-realm="${realm.id}" aria-selected="${realm.id===brandRealm}" tabindex="${realm.id===brandRealm?0:-1}"><img src="${escape(realm.icon)}" alt="" width="40" height="40"><span><strong>${escape(realm.label)}</strong><small>${escape(realm.realm.split(' · ').pop())}</small></span>${realm.isDefault?'<em>默认</em>':''}</button>`).join('')}</div>
+      <div class="brand-realm-tabs" role="tablist" aria-label="选择境">${realms.map(realm=>`<button role="tab" type="button" data-brand-realm="${realm.id}" aria-selected="${realm.id===brandRealm}" tabindex="${realm.id===brandRealm?0:-1}"><img src="${escape(realm.icon)}" alt="" width="40" height="40"><span><strong>${escape(realm.realm.split(' · ')[0])}</strong><small>${realm.label===realm.realm.split(' · ')[0]?'':escape(realm.label)+' · '}${realm.heroes.launch.borrowed?'借原境的画':'有自己的大图'}${realm.isDefault?' · 默认':''}</small></span>${realm.id===brandRealm?'<i class="brand-realm-tabs__check" aria-hidden="true">✓</i>':''}</button>`).join('')}</div>
       ${focus?`<article class="brand-realm" data-realm="${focus.id}" role="tabpanel">
         <div class="brand-realm__portrait"><img src="${escape(focus.icon)}" alt="${escape(focus.label)} App 图标" width="128" height="128"><div class="brand-realm__sizes" aria-label="实际尺寸">${[16,32,64].map(size=>`<span><img src="${escape(focus.icon)}" alt="" width="${size}" height="${size}"><small>${size}</small></span>`).join('')}</div>
           <h3>${escape(focus.label)}</h3><p>${escape(focus.material)}</p>${focus.isOrigin?'<p class="brand-realm__note">所有境的祖先，唯一画齐大图的境。</p>':''}</div>
