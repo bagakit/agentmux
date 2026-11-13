@@ -42,6 +42,7 @@ function entries(mode: Mode) {
     expect(icon!.getAttribute('height')).toBe(icon!.getAttribute('width'))
     if (mode !== 'sidebar') expect((icon as SVGSVGElement).style.strokeWidth).toBe(mode === 'tree' ? '1.5' : '1.4')
     expect(button.querySelector('[data-icon-animation]')).toBeNull()
+    if (mode === 'tree') expect([...button.querySelectorAll('[data-semantic-icon]')].map(node => node.getAttribute('data-semantic-icon'))).toEqual(['object.note'])
   }
   return buttons
 }
