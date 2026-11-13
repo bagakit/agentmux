@@ -13,10 +13,7 @@ enum NativeDesktopOperations {
         do {
             let mode = params["mode"]?.string
             let rect: CGRect
-            if mode == "selection" {
-                return ["state": "failed", "error": ["code": "selection_moved_to_host",
-                    "message": "Region selection is provided by the AgentMux Desktop capture surface."]]
-            } else if mode == "rect" {
+            if mode == "rect" {
                 guard case let .object(values)? = params["rect"],
                       let x = values["x"]?.number, let y = values["y"]?.number,
                       let width = values["width"]?.number, let height = values["height"]?.number else {
@@ -32,7 +29,7 @@ enum NativeDesktopOperations {
             } else if mode == "window" {
                 return try captureWindow(params)
             } else {
-                throw ProviderError.coded("invalid_argument", "mode must be selection, display, rect or window")
+                throw ProviderError.coded("invalid_argument", "mode must be display, rect or window")
             }
             return try capturedRectangle(rect)
         } catch {

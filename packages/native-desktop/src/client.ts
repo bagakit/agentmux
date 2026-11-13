@@ -272,7 +272,7 @@ export class NativeDesktop {
     const raw = await this.request('captureScreenshot', params as unknown as JsonObject, { operationId, timeoutMs: 120_000 })
     const invalid = (message: string) => new NativeRequestError('invalid_capture_result', message,
       this.connections.map(connection => connection.inspectOperation(operationId)).find(Boolean))
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.state !== 'string' || !['captured', 'cancelled', 'failed'].includes(raw.state)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.state !== 'string' || !['captured', 'failed'].includes(raw.state)) {
       throw invalid('Native capture did not return a typed outcome')
     }
     const result = raw as unknown as CaptureResult
@@ -287,8 +287,8 @@ export class NativeDesktop {
       } catch (error) { throw invalid(error instanceof Error ? error.message : 'Native capture PNG is invalid') }
       if (result.error !== undefined) throw invalid('Captured result also reported a failure')
     } else {
-      if (result.screenshot !== undefined || result.state === 'cancelled' && result.error !== undefined) throw invalid('Uncaptured result contains pixels or a contradictory failure')
-      if (result.state === 'failed' && (!result.error || typeof result.error.code !== 'string' || !result.error.code || typeof result.error.message !== 'string')) {
+      if (result.screenshot !== undefined) throw invalid('Failed capture contains pixels')
+      if (!result.error || typeof result.error.code !== 'string' || !result.error.code || typeof result.error.message !== 'string') {
         throw invalid('Failed capture is missing its failure receipt')
       }
     }

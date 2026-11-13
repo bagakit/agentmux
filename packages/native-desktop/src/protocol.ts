@@ -36,13 +36,11 @@ export interface NativeOperation {
   result?: Json
 }
 export type CaptureParams =
-  /** Always fails with `selection_moved_to_host`: the Desktop capture surface owns region selection. */
-  | { mode: 'selection' }
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
 export interface CaptureResult {
-  state: 'captured' | 'cancelled' | 'failed'
+  state: 'captured' | 'failed'
   screenshot?: { format: 'png'; data: string; width: number; height: number; scale: number }
   engine?: string
   selectionRect?: { x: number; y: number; width: number; height: number }
