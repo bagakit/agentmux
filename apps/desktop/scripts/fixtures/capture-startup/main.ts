@@ -153,11 +153,13 @@ async function run() {
   for (const iteration of [1, 2]) await capture(iteration)
   receipt.passed = true
 }
-try { await run() }
-catch (error) { receipt.failure = { name: (error as Error).name, message: (error as Error).message, stack: (error as Error).stack }; process.exitCode = 1 }
-finally {
+// Electron's ESM entry must finish evaluation before app readiness can resolve.
+void run().catch(error => {
+  receipt.failure = { name: (error as Error).name, message: (error as Error).message, stack: (error as Error).stack }
+  process.exitCode = 1
+}).finally(async () => {
   surface?.dispose()
   for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.destroy()
   await writeFile(join(out, 'native.json'), JSON.stringify(receipt, null, 2))
   app.exit(receipt.passed ? 0 : 1)
-}
+})
