@@ -1,4 +1,4 @@
-import { parseBrowserProfileEnvironment, type BrowserProfileEnvironment } from '@agentmux/core/control'
+import { parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -11,7 +11,8 @@ import { normalizeBrowserProfileNetwork, type BrowserProfileStoredNetwork } from
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
-  BrowserProfileSummary
+  BrowserProfileSummary,
+  BrowserProfileFolder
 } from '../shared/contracts.js'
 
 export type { BrowserProfileEdit, BrowserProfileImportedSource, BrowserProfileSummary } from '../shared/contracts.js'
@@ -38,6 +39,12 @@ const profileNetworkSchema = z.custom<BrowserProfileStoredNetwork>((value) => {
   try { const route = normalizeBrowserProfileNetwork(value); return route.mode !== 'system' && JSON.stringify(route) === JSON.stringify(value) } catch { return false }
 }, 'Browser Profile network route is not a valid route')
 
+const folderIdSchema = z.string().refine(isObjectId, 'Folder ID must identify a stored folder')
+const folderSchema = z.object({ id: folderIdSchema, label: profileLabelSchema }).strict()
+const tagsSchema = z.custom<string[]>(value => {
+  try { return JSON.stringify(normalizeBrowserProfileTags(value)) === JSON.stringify(value) } catch { return false }
+}, 'Stored Profile tags must be canonical names')
+
 const importedSourceSchema = z
   .object({
     browserLabel: profileLabelSchema,
@@ -60,6 +67,9 @@ const profileRecordSchema = z
     source: importedSourceSchema.nullable(),
     hue: profileHueSchema.optional(),
     notes: profileNotesSchema.optional(),
+    tags: tagsSchema.optional(),
+    folderId: folderIdSchema.optional(),
+    pinned: z.literal(true).optional(),
     network: profileNetworkSchema.optional(),
     environment: z.custom<BrowserProfileEnvironment>(value => {
       try { parseBrowserProfileEnvironment(value); return true } catch { return false }
@@ -84,12 +94,18 @@ const metadataSchema = z
     revision: nonNegativeSafeIntegerSchema.optional(),
     defaultProfileId: profileIdSchema,
     profiles: z.array(profileRecordSchema).min(1),
+    folders: z.array(folderSchema).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
   })
   .strict()
   .superRefine((metadata, context) => {
+    const folderIds = new Set<string>()
+    for (const [index, folder] of (metadata.folders ?? []).entries()) {
+      if (folderIds.has(folder.id)) context.addIssue({ code: 'custom', path: ['folders', index, 'id'], message: 'Duplicate Profile folder identity' })
+      folderIds.add(folder.id)
+    }
     const profileIds = new Set<string>()
     for (const [index, profile] of metadata.profiles.entries()) {
       if (profileIds.has(profile.id)) {
@@ -100,6 +116,7 @@ const metadataSchema = z
         })
       }
       profileIds.add(profile.id)
+      if (profile.folderId !== undefined && !folderIds.has(profile.folderId)) context.addIssue({ code: 'custom', path: ['profiles', index, 'folderId'], message: 'Profile folder reference is missing from the saved directory' })
     }
     if (!profileIds.has(metadata.defaultProfileId)) {
       context.addIssue({
@@ -141,7 +158,7 @@ type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { revision: number; profiles: BrowserProfileSummary[]; defaultProfileId: string }
+export type BrowserProfileSnapshot = { revision: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[] }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -150,7 +167,7 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
-  return { revision: metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId,
+  return { revision: metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
 
@@ -162,6 +179,9 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     isDefault: profile.id === defaultProfileId,
     source: cloneImportedSource(profile.source),
     ...(profile.hue === undefined ? {} : { hue: profile.hue }),
+    ...(profile.tags === undefined ? {} : { tags: [...profile.tags] }),
+    ...(profile.folderId === undefined ? {} : { folderId: profile.folderId }),
+    ...(profile.pinned === true ? { pinned: true as const } : {}),
     ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes }),
     ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) }),
     ...(profile.environment === undefined ? {} : { environment: structuredClone(profile.environment) }),
@@ -207,7 +227,7 @@ export class BrowserProfileStore {
   updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
-      const metadata = await this.readOrInitialize()
+      const metadata = await this.readMetadata()
       this.assertRevision(metadata, expectedRevision)
       const current = metadata.profiles.find((profile) => profile.id === validatedProfileId)
       if (!current) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
@@ -220,6 +240,20 @@ export class BrowserProfileStore {
         if (notes === '') delete updated.notes
         else updated.notes = notes
       }
+      if (edit.tags !== undefined) {
+        const tags = normalizeBrowserProfileTags(edit.tags)
+        if (tags.length) updated.tags = tags
+        else delete updated.tags
+      }
+      if (edit.folderId === null) delete updated.folderId
+      else if (edit.folderId !== undefined) {
+        const id = folderIdSchema.parse(edit.folderId)
+        if (!(metadata.folders ?? []).some(folder => folder.id === id)) throw new Error(`Unknown Profile folder: ${id}`)
+        updated.folderId = id
+      }
+      if (edit.pinned === true) updated.pinned = true
+      else if (edit.pinned === false) delete updated.pinned
+      else if (edit.pinned !== undefined) throw new Error('Profile pinned must be on or off')
       if (edit.agentAccess === true) delete updated.agentAccess
       else if (edit.agentAccess === false) updated.agentAccess = false
       else if (edit.agentAccess !== undefined) throw new Error('Browser Profile Agent access must be on or off')
@@ -282,7 +316,7 @@ export class BrowserProfileStore {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId), validatedLabel = validateBrowserProfileLabel(label)
       // An exact-source copy must not initialize a substitute identity if its original file is missing.
-      const metadata = metadataSchema.parse(JSON.parse(await readFile(this.path, 'utf8')))
+      const metadata = await this.readMetadata()
       this.assertRevision(metadata, expectedRevision)
       const original = metadata.profiles.find(profile => profile.id === validatedProfileId)
       if (!original) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
@@ -291,11 +325,50 @@ export class BrowserProfileStore {
       const profile: BrowserProfileRecord = { id: this.createUnusedProfileId(metadata), label: validatedLabel, createdAt: Date.now(), source: null,
         ...(original.hue === undefined ? {} : { hue: original.hue }),
         ...(original.notes === undefined ? {} : { notes: original.notes }),
+        ...(original.tags === undefined ? {} : { tags: [...original.tags] }),
+        ...(original.folderId === undefined ? {} : { folderId: original.folderId }),
         ...(original.network === undefined ? {} : { network: structuredClone(original.network) }),
         ...(original.environment === undefined ? {} : { environment: structuredClone(original.environment) }),
         ...(original.agentAccess === false ? { agentAccess: false as const } : {}) }
       const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile] })
       return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
+    })
+  }
+
+  createFolder(label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
+    return this.enqueue(async () => {
+      const name = validateBrowserProfileLabel(label), metadata = await this.readMetadata()
+      this.assertRevision(metadata, expectedRevision)
+      const folder = { id: this.createUnusedProfileId(metadata), label: name }
+      const snapshot = await this.commit({ ...metadata, folders: [...(metadata.folders ?? []), folder] })
+      return { snapshot, folder: { ...folder } }
+    })
+  }
+
+  renameFolder(folderId: string, label: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folder: BrowserProfileFolder }> {
+    return this.enqueue(async () => {
+      const id = folderIdSchema.parse(folderId), name = validateBrowserProfileLabel(label), metadata = await this.readMetadata()
+      this.assertRevision(metadata, expectedRevision)
+      if (!(metadata.folders ?? []).some(folder => folder.id === id)) throw new Error(`Unknown Profile folder: ${id}`)
+      const folder = { id, label: name }
+      const snapshot = await this.commit({ ...metadata, folders: metadata.folders!.map(value => value.id === id ? folder : value) })
+      return { snapshot, folder: { ...folder } }
+    })
+  }
+
+  deleteFolder(folderId: string, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; folderId: string; unassignedProfileIds: string[] }> {
+    return this.enqueue(async () => {
+      const id = folderIdSchema.parse(folderId), metadata = await this.readMetadata()
+      this.assertRevision(metadata, expectedRevision)
+      if (!(metadata.folders ?? []).some(folder => folder.id === id)) throw new Error(`Unknown Profile folder: ${id}`)
+      const unassignedProfileIds = metadata.profiles.filter(profile => profile.folderId === id).map(profile => profile.id)
+      const profiles = metadata.profiles.map(profile => {
+        if (profile.folderId !== id) return profile
+        const { folderId: _folderId, ...retained } = profile
+        return retained
+      })
+      const snapshot = await this.commit({ ...metadata, profiles, folders: metadata.folders!.filter(folder => folder.id !== id) })
+      return { snapshot, folderId: id, unassignedProfileIds }
     })
   }
 
@@ -407,9 +480,11 @@ export class BrowserProfileStore {
     return result
   }
 
+  private async readMetadata(): Promise<BrowserProfileMetadata> { return metadataSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))) }
+
   private async readOrInitialize(): Promise<BrowserProfileMetadata> {
     try {
-      return metadataSchema.parse(JSON.parse(await readFile(this.path, 'utf8')))
+      return await this.readMetadata()
     } catch (error) {
       if (!isMissingFileError(error)) throw error
     }
@@ -441,7 +516,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.pendingDeletes ?? []).includes(id)
+      (metadata.pendingDeletes ?? []).includes(id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

@@ -3,6 +3,7 @@ import { app, BrowserWindow, session, webContents, type Session } from 'electron
 import type {
   BrowserProfileImportSourceSummary,
   BrowserProfileSummary,
+  BrowserProfileFolder,
   BrowserProfileDeleteApproval
 } from '../shared/contracts.js'
 import type {
@@ -32,6 +33,7 @@ type ImportSourceToken = {
 function cloneProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
   return {
     ...profile,
+    ...(profile.tags ? { tags: [...profile.tags] } : {}),
     source: profile.source ? { ...profile.source } : null,
     ...(profile.environment ? { environment: structuredClone(profile.environment) } : {})
   }
@@ -49,6 +51,7 @@ function throwPublicBrowserProfileError(message: string, cause: unknown): never 
 }
 
 export class BrowserProfileManager implements BrowserProfileResolver {
+  private folders: BrowserProfileFolder[] = []
   private readonly profiles = new Map<string, BrowserProfileSummary>()
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
   private readonly importWindows = new Set<BrowserWindow>()
@@ -147,6 +150,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return [...this.profiles.values()].map(profile => this.presentProfile(profile))
   }
 
+  listFolders(): BrowserProfileFolder[] { this.assertInitialized(); return this.folders.map(folder => ({ ...folder })) }
+
   /** Revision of the list this Main last committed or loaded; edits must name it. */
   listRevision(): number {
     this.assertInitialized()
@@ -219,6 +224,19 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       this.adopt(snapshot)
       return cloneProfile(profile)
     })())
+  }
+
+  async createFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder> {
+    this.assertInitialized()
+    return this.trackMutation((async () => { const { snapshot, folder } = await this.store.createFolder(label, expectedRevision); this.adopt(snapshot); return folder })())
+  }
+  async renameFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder> {
+    this.assertInitialized()
+    return this.trackMutation((async () => { const { snapshot, folder } = await this.store.renameFolder(folderId, label, expectedRevision); this.adopt(snapshot); return folder })())
+  }
+  async deleteFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }> {
+    this.assertInitialized()
+    return this.trackMutation((async () => { const { snapshot, ...receipt } = await this.store.deleteFolder(folderId, expectedRevision); this.adopt(snapshot); return receipt })())
   }
 
   async deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void> {
@@ -298,6 +316,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       await Promise.allSettled(this.activeMutations)
       this.importWindows.clear()
       this.profiles.clear()
+      this.folders = []
       this.defaultId = null
     })()
     return this.disposePromise
@@ -406,6 +425,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   private replace(snapshot: BrowserProfileSnapshot): void {
     this.profiles.clear()
+    this.folders = snapshot.folders.map(folder => ({ ...folder }))
     for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
     this.defaultId = snapshot.defaultProfileId
     this.revision = snapshot.revision
@@ -417,7 +437,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.replace(snapshot)
     for (const listener of this.changeListeners) {
       // A subscriber cannot turn a committed write into a failure.
-      try { listener({ revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles() }) }
+      try { listener({ revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders() }) }
       catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }

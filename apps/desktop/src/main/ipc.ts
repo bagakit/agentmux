@@ -2119,8 +2119,8 @@ export async function registerIpc(args: {
     return await browsers.switchProfile(id, profileId)
   })
   // Every surface renders Main's one committed list; the manager announces each commit once.
-  browserProfiles.onChange(({ revision, profiles }) => {
-    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, profiles })
+  browserProfiles.onChange(({ revision, profiles, folders }) => {
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, profiles, folders })
   })
   // Profile handlers return their refusals as data so the Renderer keeps each error code.
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
@@ -2129,10 +2129,13 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:readProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
-    return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() }
+    return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles(), folders: browserProfiles.listFolders() }
   }))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
   handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
+  handleWithEvent('browser:createProfileFolder', (_event, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.createFolder(label, expectedRevision)))
+  handleWithEvent('browser:renameProfileFolder', (_event, folderId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.renameFolder(folderId, label, expectedRevision)))
+  handleWithEvent('browser:deleteProfileFolder', (_event, folderId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteFolder(folderId, expectedRevision)))
   handleWithEvent('browser:updateProfile', (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) =>
     ipcResult(() => browserProfiles.updateProfile(profileId, edit, expectedRevision)))
   handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))

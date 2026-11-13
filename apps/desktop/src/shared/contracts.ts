@@ -1345,6 +1345,8 @@ export type BrowserProfileImportedSource = {
   skippedByReason?: import('./browser-profile-import-skip.js').BrowserProfileCookieSkipCounts
 }
 
+export type BrowserProfileFolder = import('@agentmux/core/control').BrowserProfileFolder
+
 export type BrowserProfileSummary = {
   id: string
   label: string
@@ -1354,6 +1356,9 @@ export type BrowserProfileSummary = {
   /** Identity hue chosen by the person; absent means the hue derived from the id. Never a status color. */
   hue?: number
   notes?: string
+  tags?: string[]
+  folderId?: string
+  pinned?: true
   /** How this Profile's pages reach the network; absent follows the system settings. Never holds a password. */
   network?: import('./browser-profile-network.js').BrowserProfileStoredNetwork
   environment?: import('@agentmux/core/control').BrowserProfileEnvironment
@@ -1363,10 +1368,10 @@ export type BrowserProfileSummary = {
   agentAccess?: false
 }
 
-export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[] }
+export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
-export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string
+export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string; tags?: string[]; folderId?: string | null; pinned?: boolean
   /** A new route, or null to follow the system settings again; a proxy server may be the pasted line. */
   network?: import('./browser-profile-network.js').BrowserProfileNetworkInput | null
   /** Replace UA/request-language settings, or null to restore native defaults. */
@@ -2161,6 +2166,9 @@ export type AgentMuxDesktopApi = {
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     copyProfile(profileId: string, label: string, expectedRevision: number): Promise<BrowserProfileSummary>
+    createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>
+    renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
+    deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>

@@ -758,9 +758,26 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       const revision = Number(value(f, '--expected-revision', true))
       if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the non-negative revision from browser profile ls.')
       return { profileId: id(f, '--profile', true), expectedRevision: revision, label: value(f, '--label', true)! }
-    }, PROFILE_NOTICE + ' Copies saved hue, notes, network endpoint and environment settings. The source Profile and its pages stay unchanged. No site data, sign-ins, proxy password, human approvals or runtime history is copied. The source ID and revision must match the saved list; inspect the returned new Profile ID before opening it.'),
-  command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT] [--network system|direct|SERVER] [--no-proxy HOST,...] [--environment JSON]', 'Rename a Browser Profile, change its hue or notes, or choose how its pages reach the network.',
-    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data', '--network': 'data', '--no-proxy': 'data', '--environment': 'data' }, f => {
+    }, PROFILE_NOTICE + ' Copies saved hue, notes, tags, folder assignment, network endpoint and environment settings; the new identity is not pinned. The source Profile and its pages stay unchanged. No site data, sign-ins, proxy password, human approvals or runtime history is copied. The source ID and revision must match the saved list; inspect the returned new Profile ID before opening it.'),
+  command('browser.profile.folder.create', '--label TEXT --expected-revision N', 'Create an empty Profile folder without moving or opening a Profile.', { '--label': 'data', '--expected-revision': 'value' }, f => {
+    const revision = Number(value(f, '--expected-revision', true))
+    if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the revision from browser profile ls.')
+    return { label: value(f, '--label', true)!, expectedRevision: revision }
+  }, 'Folders are organization metadata, not website partitions or filesystem directories. Discover folders and the current list revision with browser profile ls.'),
+  command('browser.profile.folder.rename', '--folder ID --label TEXT --expected-revision N', 'Rename the same stable folder without changing its Profiles.', { '--folder': 'data', '--label': 'data', '--expected-revision': 'value' }, f => {
+    const revision = Number(value(f, '--expected-revision', true))
+    if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the revision from browser profile ls.')
+    return { folderId: id(f, '--folder', true), label: value(f, '--label', true)!, expectedRevision: revision }
+  }),
+  command('browser.profile.folder.delete', '--folder ID --expected-revision N', 'Remove one folder and clear its assignments, keeping every Profile and its website data.', { '--folder': 'data', '--expected-revision': 'value' }, f => {
+    const revision = Number(value(f, '--expected-revision', true))
+    if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the revision from browser profile ls.')
+    return { folderId: id(f, '--folder', true), expectedRevision: revision }
+  }, 'The receipt names the removed folder and the Profile IDs unassigned in the same atomic write. No Profile, Browser or website data is deleted.'),
+  command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT] [--network system|direct|SERVER] [--no-proxy HOST,...] [--environment JSON] [--tags JSON] [--folder ID | --clear-folder] [--pin | --unpin]', 'Edit a Profile’s saved identity, organization, network or environment settings.',
+    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data', '--network': 'data', '--no-proxy': 'data', '--environment': 'data', '--tags': 'data', '--folder': 'data', '--clear-folder': 'boolean', '--pin': 'boolean', '--unpin': 'boolean' }, f => {
+      if (f.booleans.has('--pin') && f.booleans.has('--unpin')) invalid('Choose --pin or --unpin.')
+      if (f.values.has('--folder') && f.booleans.has('--clear-folder')) invalid('Choose a folder or clear it.')
       if (f.values.has('--hue') && f.booleans.has('--clear-hue')) invalid('Choose a hue or explicitly clear it, not both.')
       const revision = Number(value(f, '--expected-revision', true))
       if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the non-negative revision from browser profile ls.')
@@ -771,14 +788,17 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       const network = route === undefined ? undefined : route === 'system' || route === 'direct' ? { mode: route }
         : { mode: 'proxy', server: route, ...(f.values.has('--no-proxy') ? { bypass: value(f, '--no-proxy', true)!.split(',').map(entry => entry.trim()).filter(Boolean) } : {}) }
       if (network && network.mode !== 'proxy' && f.values.has('--no-proxy')) invalid('--no-proxy applies only to a proxy route.')
-      const edit = { ...(f.values.has('--label') ? { label: value(f, '--label', true)! } : {}),
+      const edit = { ...(f.values.has('--tags') ? { tags: jsonValue(value(f, '--tags', true)!, '--tags') } : {}),
+        ...(f.values.has('--folder') ? { folderId: id(f, '--folder', true) } : f.booleans.has('--clear-folder') ? { folderId: null } : {}),
+        ...(f.booleans.has('--pin') ? { pinned: true } : f.booleans.has('--unpin') ? { pinned: false } : {}),
+        ...(f.values.has('--label') ? { label: value(f, '--label', true)! } : {}),
         ...(f.booleans.has('--clear-hue') ? { hue: null } : hue === undefined ? {} : { hue }),
         ...(f.values.has('--notes') ? { notes: value(f, '--notes', true)! } : {}),
         ...(network ? { network } : {}),
         ...(f.values.has('--environment') ? { environment: jsonValue(value(f, '--environment', true)!, '--environment') } : {}) }
-      if (!Object.keys(edit).length) invalid('Name at least one of --label, --hue, --clear-hue, --notes or --network or --environment.')
+      if (!Object.keys(edit).length) invalid('Name a Profile field to edit, such as --label, --tags, --folder, --pin, --network or --environment.')
       return { profileId: id(f, '--profile', true), expectedRevision: revision, edit }
-    }, PROFILE_NOTICE + ' --expected-revision is the revision from browser profile ls or inspect; an older one is refused with BROWSER_PROFILE_REVISION_CONFLICT and nothing changes, so read again and retry. --hue is an identity color from 0 to 359; hues near red, amber, green or blue read as a status and are refused. An empty --notes clears the notes. --network system follows the system proxy settings, direct uses none, and anything else is one proxy server line such as proxy.example.com:8080 or socks5://proxy.example:1080; a user name or password in the line is refused (proxy sign-in is set in Settings). --no-proxy lists hosts that skip the proxy. A route that cannot be applied leaves the old one in use. --environment replaces the native session defaults with JSON {"userAgent":"Custom/1.0","acceptLanguages":["fr-FR","de-DE"]}; either field can be omitted, and null restores defaults. UA applies to new pages, request languages to subsequent requests; existing page content and UA are preserved. navigator.language/languages and UA client hints are not overridden by this capability. Inspect the Profile for saved settings and the native application receipt.'),
+    }, PROFILE_NOTICE + ' --tags is a JSON array of tag names; whitespace is normalized and duplicates removed. --folder assigns an ID from browser profile ls, --clear-folder unassigns it. --pin and --unpin change organization only. --expected-revision is the revision from browser profile ls or inspect; an older one is refused with BROWSER_PROFILE_REVISION_CONFLICT and nothing changes, so read again and retry. --hue is an identity color from 0 to 359; hues near red, amber, green or blue read as a status and are refused. An empty --notes clears the notes. --network system follows the system proxy settings, direct uses none, and anything else is one proxy server line such as proxy.example.com:8080 or socks5://proxy.example:1080; a user name or password in the line is refused (proxy sign-in is set in Settings). --no-proxy lists hosts that skip the proxy. A route that cannot be applied leaves the old one in use. --environment replaces the native session defaults with JSON {"userAgent":"Custom/1.0","acceptLanguages":["fr-FR","de-DE"]}; either field can be omitted, and null restores defaults. UA applies to new pages, request languages to subsequent requests; existing page content and UA are preserved. navigator.language/languages and UA client hints are not overridden by this capability. Inspect the Profile for saved settings and the native application receipt.'),
   command('browser.profile.set-default', '--profile ID', 'Make one Browser Profile the default for Browsers created later.', { '--profile': 'data' },
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Existing Browsers keep their Profile; only Browsers opened later without --profile use the new default.'),
   command('browser.profile.delete', '--profile ID', 'Delete one Browser Profile and clear its sign-ins and site data.', { '--profile': 'data' },

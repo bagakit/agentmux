@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -58,8 +58,20 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     case 'browser.profile.network.check':
       existing(ports, request.profileId)
       return { operation: request.operation, profileId: request.profileId, check: await ports.network.checkExit(request.profileId) }
+    case 'browser.profile.folder.create': {
+      const folder = await owned(() => ports.profiles.createFolder(request.label, request.expectedRevision))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), folder }
+    }
+    case 'browser.profile.folder.rename': {
+      const folder = await owned(() => ports.profiles.renameFolder(request.folderId, request.label, request.expectedRevision))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), folder }
+    }
+    case 'browser.profile.folder.delete': {
+      const receipt = await owned(() => ports.profiles.deleteFolder(request.folderId, request.expectedRevision))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), deleted: true, ...receipt }
+    }
     case 'browser.profile.ls':
-      return { operation: request.operation, revision: ports.profiles.listRevision(), profiles: ports.profiles.listProfiles() }
+      return { operation: request.operation, revision: ports.profiles.listRevision(), profiles: ports.profiles.listProfiles(), folders: ports.profiles.listFolders() }
     case 'browser.profile.inspect': {
       const profile = existing(ports, request.profileId)
       const revision = ports.profiles.listRevision()
