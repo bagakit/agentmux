@@ -1369,8 +1369,10 @@ export async function registerIpc(args: {
   const inspectScreenshotPin = (operationId: string) => screenshotPins.call('image.inspect', { hostId: 'local', operationId },
     { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
-    // app.hide() is how macOS returns to the previously active app; it never minimizes or closes a window.
-    // It hides every AgentMux window, so an open pin keeps the app visible instead.
+    // Gives focus back to the app that was in front when the capture started. The editor calls this only
+    // when no other AgentMux window has focus. app.hide() is macOS ⌘H for AgentMux: it hides every AgentMux
+    // window, including a workbench that was visible but not in front, which comes back from the Dock or ⌘Tab.
+    // Nothing is minimized or closed. An open pin must stay on screen, so AgentMux is not hidden then.
     returnFocus: () => { if (!screenshotPins.hasOpenPins()) app.hide() },
     copyText: text => getDesktopNativeUiOwner().writeClipboardText(text),
     originalFiles: window => new ScreenshotOriginalFiles({
