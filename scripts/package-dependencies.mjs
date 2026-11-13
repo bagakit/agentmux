@@ -35,12 +35,16 @@ export async function inspectPackageClosure(packageRoot) {
     const entry = { id, name: manifest.name, version: manifest.version,
       manifestSha256: createHash('sha256').update(bytes).digest('hex'), sourceDirectory, dependencies: [] }
     packages.push(entry)
-    const required = manifest.dependencies ?? {}, optional = manifest.optionalDependencies ?? {}
-    for (const name of [...new Set([...Object.keys(required), ...Object.keys(optional)])].sort()) {
+    const required = manifest.dependencies ?? {}, optional = manifest.optionalDependencies ?? {}, peers = manifest.peerDependencies ?? {}
+    for (const name of [...new Set([...Object.keys(required), ...Object.keys(optional), ...Object.keys(peers)])].sort()) {
+      // Peers use this installed package's physical Node lookup context, including
+      // pnpm peer-specific siblings. Never flatten them to the publication root.
+      const requiredPeer = Object.hasOwn(peers, name) && manifest.peerDependenciesMeta?.[name]?.optional !== true
+      const canBeAbsent = !requiredPeer && (Object.hasOwn(optional, name) || !Object.hasOwn(required, name) && manifest.peerDependenciesMeta?.[name]?.optional === true)
       let dependency
       try { dependency = await resolvePackageRoot(sourceDirectory, name) }
-      catch (error) { if (!(name in optional) || error.code !== 'PACKAGE_DEPENDENCY_UNAVAILABLE') throw error }
-      entry.dependencies.push({ name, optional: name in optional, packageId: dependency ? await visit(dependency) : null })
+      catch (error) { if (!canBeAbsent || error.code !== 'PACKAGE_DEPENDENCY_UNAVAILABLE') throw error }
+      entry.dependencies.push({ name, optional: canBeAbsent, packageId: dependency ? await visit(dependency) : null })
     }
     return id
   }
