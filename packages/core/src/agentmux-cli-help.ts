@@ -50,7 +50,7 @@ export function agentMuxCommandHelp(path: string): string | null {
     : path === 'notebook' ? AGENTMUX_NOTE_GUIDE
     : path.startsWith('notebook.') ? 'Read amux notebook --help for original Note content, links and editing conditions.'
     : path === 'device' ? DEVICE_GUIDE
-    : path === 'device.link' ? 'Authenticated Agents can read the link on their exact execution Host. The result contains url (complete public offer), pageUrl, relay and mobileAccess; a known address remains readable while disconnected. Reading does not enroll or revoke a device.'
+    : path === 'device.link' ? 'Authenticated Agents can read the link on their exact execution Host. The result contains url (complete public offer), pageUrl, relay, mobileAccess and candidates: this Mac’s local-network IPv4 addresses with interface name and OS port label, the default-route one marked preferred. Without --address the link uses the preferred address; --address IPV4 uses that candidate and fails with INVALID_CONTROL_REQUEST when it is not one, never falling back to another address. A candidate describes the local adapter only, not whether the phone can reach it. A known address remains readable while disconnected. Reading does not enroll or revoke a device.'
     : path.startsWith('device.') ? 'Read amux device --help for trusted local administration and device identity.'
     : path === 'git' ? GIT_GUIDE
     : path.startsWith('git.') ? 'Read amux git --help for original repository identity, working changes and worktree closeout.'

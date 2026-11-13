@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -30,16 +31,21 @@ export interface DeviceConnection {
 /** device.ls carries at most this many newest operations per device. Older records stay with the Host device owner. */
 export const DEVICE_OPERATION_WINDOW = 100
 export interface DeviceOperation { readonly id: string; readonly method: string; readonly target: string; readonly at: number; readonly result: 'confirmed' | 'failed' | 'unknown' }
+/** One local-network address a phone may reach this Host at. The interface name and its OS port
+ * label describe the local adapter only; they do not prove the phone can reach it. */
+export type AgentMuxRpcMobileLinkCandidate = { readonly address: string; readonly interface: string; readonly label?: string; readonly preferred: boolean }
 export type AgentMuxRpcMobileAccessState = { readonly state: 'starting' | 'connected' | 'disconnected' | 'unavailable'; readonly message: string; readonly origin?: string }
 export type AgentMuxRpcDeviceParameterMap = {
   'device.ls': Record<string, never>
-  'device.link': Record<string, never>
+  'device.link': { address?: string }
   'device.hello': { name: string }
   'device.revoke': { deviceId: string }
 }
 export type AgentMuxRpcDeviceResultMap = {
   'device.ls': { hostId: string; devices: readonly TrustedDevice[]; mobileAccess: AgentMuxRpcMobileAccessState }
-  'device.link': { hostId: string; url: string; pageUrl: string; relay: { endpoint: string; useTls: boolean }; mobileAccess: AgentMuxRpcMobileAccessState }
+  'device.link': { hostId: string; url: string; pageUrl: string; relay: { endpoint: string; useTls: boolean }; mobileAccess: AgentMuxRpcMobileAccessState
+    /** Addresses the link could use; the url uses the requested one, or the preferred one. */
+    candidates: readonly AgentMuxRpcMobileLinkCandidate[] }
   'device.hello': { hostId: string; device: TrustedDevice }
   'device.revoke': { hostId: string; device: TrustedDevice }
 }
@@ -67,8 +73,12 @@ export function parseDeviceConnection(value: unknown): DeviceConnection {
   return c as unknown as DeviceConnection
 }
 export function parseAgentMuxRpcDeviceParams<M extends AgentMuxRpcDeviceMethod>(method: M, value: unknown): AgentMuxRpcDeviceParams<M> {
-  const keys = method === 'device.revoke' ? ['deviceId'] : method === 'device.hello' ? ['name'] : []
+  const keys = method === 'device.revoke' ? ['deviceId'] : method === 'device.hello' ? ['name'] : method === 'device.link' ? ['address'] : []
   const p = rpcRecord(value, keys)
+  if (method === 'device.link') {
+    if (p.address !== undefined && (typeof p.address !== 'string' || isIP(p.address) !== 4)) throw new AgentMuxError('A link address must be one IPv4 address.', 'INVALID_CONTROL_REQUEST')
+    return p as AgentMuxRpcDeviceParams<M>
+  }
   if (Object.keys(p).length !== keys.length) throw new AgentMuxError('Device method requires its exact parameters.', 'INVALID_CONTROL_REQUEST')
   if (method === 'device.revoke') identifier(p.deviceId, 'INVALID_CONTROL_REQUEST')
   if (method === 'device.hello' && (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 128)) throw new AgentMuxError('Device name is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -100,7 +110,7 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     }
     return d as unknown as TrustedDevice
   }
-  const keys = method === 'device.ls' ? ['hostId', 'devices', 'mobileAccess'] : method === 'device.link' ? ['hostId', 'url', 'pageUrl', 'relay', 'mobileAccess'] : ['hostId', 'device']
+  const keys = method === 'device.ls' ? ['hostId', 'devices', 'mobileAccess'] : method === 'device.link' ? ['hostId', 'url', 'pageUrl', 'relay', 'mobileAccess', 'candidates'] : ['hostId', 'device']
   const p = rpcRecord(value, keys, code)
   if (Object.keys(p).length !== keys.length) fail()
   identifier(p.hostId, code)
@@ -113,6 +123,18 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     if (p.pageUrl !== page.href || relay.endpoint !== offer!.relay.endpoint || relay.useTls !== offer!.relay.useTls) fail()
     const access = rpcRecord(p.mobileAccess, ['state', 'message', 'origin'], code)
     if (!['starting', 'connected', 'disconnected', 'unavailable'].includes(access.state as string) || typeof access.message !== 'string' || access.message.length > 4096 || access.origin !== page.origin) fail()
+    if (!Array.isArray(p.candidates) || p.candidates.length > 32) fail()
+    const seen = new Set<string>()
+    for (const raw of p.candidates as unknown[]) {
+      const c = rpcRecord(raw, ['address', 'interface', 'label', 'preferred'], code)
+      if (typeof c.address !== 'string' || isIP(c.address) !== 4 || seen.has(c.address) || typeof c.interface !== 'string' || !c.interface || c.interface.length > 64 ||
+        c.label !== undefined && (typeof c.label !== 'string' || !c.label || c.label.length > 128) || typeof c.preferred !== 'boolean') fail()
+      seen.add(c.address as string)
+    }
+    const host = new URL(`ws://${offer!.relay.endpoint}`).hostname
+    if ((p.candidates as unknown[]).length && !seen.has(host)) fail()
+    const requested = (params as AgentMuxRpcDeviceParams<'device.link'>).address
+    if (requested !== undefined && host !== requested) fail()
   } else if (method === 'device.ls') {
     const access = rpcRecord(p.mobileAccess, ['state','message','origin'], code)
     if (!['starting','connected','disconnected','unavailable'].includes(access.state as string) || typeof access.message !== 'string' || access.message.length > 4096) fail()
