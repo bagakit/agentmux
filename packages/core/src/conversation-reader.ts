@@ -7,7 +7,7 @@ import { rpcRecord } from './rpc-data.js'
 import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationValuesEqual as same, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionEvidence } from './conversation-stream.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPageForWindow, parseConversationChangesPageForWindow, parseRoutedConversationPage,
-  CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
+  CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpoint, type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
 import type { NativeConversationCheckpoint, NativeConversationChangesPage } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -31,7 +31,7 @@ type Position = { native?: string | null; capturedBefore?: number | null; captur
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean; nativeRecoveryRange?: ConversationChangesPage['nativeRecoveryRange'] }
 type Cursor = ConversationRef & { processDetails?: 'deferred'; version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
-  through?: ConversationCheckpoint; recover?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
+  through?: ConversationCheckpoint; recover?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; record?: ConversationItemRef; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
   native?: { witness: string; first: string; last: string; count: number };
   captured?: { first: number; last: number; count: number };
@@ -367,27 +367,19 @@ function recordLiveSpan(history: HistoryPosition[], loaded: { rows: Conversation
   if (extend) history[0] = span; else history.unshift(span)
 }
 async function anchorBatch(input: ConversationTimelineReadInput, port: ConversationReaderPort, state: Cursor) {
-  const anchor = input.anchor, reference = input.record ?? anchor!.record, rows: ConversationSourceRecord[] = [], source = reference.source, coverage = state.scope.sources.map(initialCoverage)
+  const anchor = input.anchor!, reference = anchor.record, rows: ConversationSourceRecord[] = [], source = reference.source, coverage = state.scope.sources.map(initialCoverage)
   try {
     if (source.kind === 'native') {
       const item = await port.nativeRecord(source, source.recordId, state.checkpoint?.cuts.find((cut): cut is NativeCut => cut.kind === 'native')?.checkpoint), value = row(input, { kind: 'native', item }, { kind: 'native-page', source, indexInPage: 0 })
-      if (anchor && value.revision !== anchor.revision) return fail('This original native version is unavailable; latest content cannot replace the anchor.')
-      if (input.record) {
-        // The opening cut cannot certify a record created while this exact read was pending.
-        // A later original cut includes that observation; unrelated appends do not invalidate it.
-        const checkpoint = await port.nativeCheckpoint()
-        if (checkpoint.agentSessionId !== input.agentSessionId || checkpoint.source.providerId !== source.providerId || checkpoint.source.nativeSessionId !== source.nativeSessionId) return fail('The exact record read left its original native source.')
-        state.checkpoint = { ...state.checkpoint!, cuts: [...state.checkpoint!.cuts.filter(cut => cut.kind !== 'native'), { kind: 'native', checkpoint }] }
-      }
+      if (value.revision !== anchor.revision) return fail('This original native version is unavailable; latest content cannot replace the anchor.')
       rows.push(value)
     } else {
-      const cut = (anchor?.frontier.frontier ?? state.checkpoint!).cuts.find(c => c.kind === 'captured')
+      const cut = anchor.frontier.frontier.cuts.find(c => c.kind === 'captured')
       if (!cut || cut.kind !== 'captured') return fail('The original captured anchor has no accepted cut.')
-      const page = await port.captured({ epoch: cut.epoch, throughSequence: cut.sequence, recordId: source.recordId, ...(anchor ? { recordRevision: anchor.revision } : {}), limit: 1 }), record = page.records[0]
+      const page = await port.captured({ epoch: cut.epoch, throughSequence: cut.sequence, recordId: source.recordId, recordRevision: anchor.revision, limit: 1 }), record = page.records[0]
       if (!record) return fail('The original captured version is unavailable; latest content cannot replace it.')
       rows.push(row(input, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision))
     }
-    if (input.record && rows[0]) state.anchor = { record: input.record, revision: rows[0].revision, frontier: { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: input.hostId, frontier: state.checkpoint! } }
   } catch (error) {
     port.signal?.throwIfAborted()
     const kind = source.kind, index = coverage.findIndex(c => c.source.kind === kind)
@@ -444,7 +436,7 @@ function historyNavigation(rows: readonly ConversationSourceRecord[], history: r
   const newer = edges.flatMap(edge => edge.newer === null ? [] : [edge.newer])
   return { older: older.length ? Math.min(...older) : null, newer: newer.length ? Math.max(...newer) : null }
 }
-async function read(input: ConversationTimelineReadInput | ConversationChangesInput, port: ConversationReaderPort, mode: Cursor['mode']): Promise<AgentConversationReadPage | ConversationChangesPage> {
+async function read(input: ConversationTimelineReadInput | ConversationChangesInput, port: ConversationReaderPort, mode: Cursor['mode'], record?: ConversationItemRef): Promise<AgentConversationReadPage | ConversationChangesPage> {
   port.signal?.throwIfAborted()
   const ref = { hostId: input.hostId, agentSessionId: input.agentSessionId }
   let state: Cursor
@@ -452,7 +444,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     state = decode(input.cursor, ref, mode)
     if (mode === 'changes' && !same(state.recover, (input as ConversationChangesInput).recover)) return fail('The continuation changed its original recovery scope.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     if (mode === 'changes' && !same(state.through, (input as ConversationChangesInput).through)) return fail('The continuation changed its original upper frontier.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
-    if (mode === 'changes' && !same(state.checkpoint, (input as ConversationChangesInput).checkpoint.frontier) || ('record' in input && input.record ? !same(state.anchor?.record, input.record) : !same(state.anchor, 'anchor' in input ? input.anchor : undefined))) return fail('The continuation belongs to another original frontier or anchor.')
+    if (mode === 'changes' && !same(state.checkpoint, (input as ConversationChangesInput).checkpoint.frontier) || !same(state.record, record) || !same(state.anchor, 'anchor' in input ? input.anchor : undefined)) return fail('The continuation belongs to another original frontier or anchor.')
   } else if (mode === 'inspect' && input.view && !('anchor' in input && input.anchor) && !('record' in input && input.record) && !('nativeSource' in input && input.nativeSource)) {
     state = decode(input.view, ref, 'inspect')
     if (!state.viewId) return fail('This read does not name an original accepted view.')
@@ -477,6 +469,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (prior.processDetails !== input.processDetails) return fail('The continuation changed its original process detail representation.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
   }
   if (input.processDetails) state.processDetails = input.processDetails
+  if (record) state.record = record
   const requestedPreservation = mode === 'inspect' && 'preserveCurrent' in input && input.preserveCurrent === true
   if (state.snapshotId) {
     if (Boolean(state.preserveCurrent) !== requestedPreservation) return fail('The wire continuation changed its original window preservation policy.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
@@ -513,7 +506,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const originalPort = previousPosition?.head ? { ...port, nativePage: async () => previousPosition.head!.page } : port
       const records = new Map(view.rows.map(record => [record.id, record]))
       const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30, records)
-        : ('anchor' in input && input.anchor || 'record' in input && input.record) ? await anchorBatch(input, port, state)
+        : ('anchor' in input && input.anchor) ? await anchorBatch(input, port, state)
         : previousPosition?.live ? await liveSpanBatch(ref, port, state.scope, previousPosition, view.checkpoint)
         : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30, mode === 'inspect' && state.pageIndex !== undefined ? acceptedCapturedSequence(view.checkpoint, state.position) : undefined)
       // History navigation adds older or evicted originals; the view keeps the frontier live reading reached.
@@ -683,7 +676,39 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   }
 }
 export async function readAgentConversation(input: ConversationTimelineReadInput, port: ConversationReaderPort): Promise<AgentConversationReadPage> {
-  return await read(parseConversationTimelineReadInput(input), port, 'inspect') as AgentConversationReadPage
+  input = parseConversationTimelineReadInput(input)
+  const { record, ...request } = input
+  if (!record) return await read(input, port, 'inspect') as AgentConversationReadPage
+  if (input.cursor) return await read(request, port, 'inspect', record) as AgentConversationReadPage
+  // A location is a candidate normal reading window. Keep the displayed view
+  // untouched until its client accepts this result; an immutable versioned
+  // anchor uses the separate exact-record path above.
+  const target = conversationRecordId(record)
+  let token: string | undefined, delivered = false
+  let query: ConversationTimelineReadInput = { ...request, maxBytes: CONVERSATION_MAX_READ_BYTES, limit: 100 }
+  try {
+    while (true) {
+      port.signal?.throwIfAborted()
+      const page = await read(query, port, 'inspect') as AgentConversationReadPage
+      token = page.window.view ?? page.window.replay
+      if (!page.window.complete) { query = { ...query, cursor: page.nextCursor! }; continue }
+      const view = port.state.get(page.window.id, input, page.scope)
+      if (view.rows.some(row => row.id === target)) {
+        const located = await read({ ...request, view: page.window.view! }, port, 'inspect', record) as AgentConversationReadPage
+        delivered = true
+        return located
+      }
+      const source = page.coverage.find(value => value.source.kind === record.source.kind)
+      const gap = source?.gaps[0]
+      if (gap || source?.current === 'unavailable' || source?.current === 'unsupported') return fail(gap?.message ?? 'The original record source is unavailable. The displayed window is retained.', gap?.code ?? 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
+      const after = view.history.at(-1)?.after
+      const end = record.source.kind === 'native' ? after?.native === null : after?.capturedBefore === null
+      if (end || !page.window.navigation.older) return fail('The original record is not available in its retained source. The displayed window and exact reference are retained.', 'AGENT_SESSION_HISTORY_RECORD_UNAVAILABLE')
+      query = { ...request, maxBytes: CONVERSATION_MAX_READ_BYTES, limit: 100, cursor: page.window.navigation.older }
+    }
+  } finally {
+    if (!delivered && token) port.state.release(token, input)
+  }
 }
 export async function readConversationChanges(input: ConversationChangesInput, port: ConversationReaderPort): Promise<ConversationChangesPage> {
   return await read(parseConversationChangesInput(input), port, 'changes') as ConversationChangesPage

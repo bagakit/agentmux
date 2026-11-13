@@ -1,7 +1,7 @@
 import { readConversationProcessDetail, type ConversationProcessDetailReader } from './read-conversation-process-detail.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
+import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, conversationRecordId, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
   type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
   type ConversationObservationHandle, type ConversationReadOptions, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxClient } from '@agentmux/core'
@@ -351,6 +351,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
             cursor = page.nextCursor
           } while (true)
           if (!isCurrent() || !complete) return
+          if (selection.record && !complete.units.some(unit => unit.records.some(record => record.id === conversationRecordId(selection.record!))))
+            throw Object.assign(new Error('The requested original record is absent from this complete location window. The displayed window is retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
           note({ phase: 'assembly-complete', attemptId: attempt.id, operation: kind, ...conversationDiagnosticFrame(complete) })
           if (prior && kind !== 'latest') {
             // Exact Host, source epoch and view identity precede revision arithmetic.

@@ -446,7 +446,8 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   if (p.processDetails !== input.processDetails) return bad('The process detail representation changed during reading.')
   const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
-  if (input.record && input.record.hostId !== source.hostId || input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
+  if (input.record && (input.record.hostId !== source.hostId || !accepted.sources.some(value => value.kind === input.record!.source.kind &&
+      (input.record!.source.kind === 'captured' || value.kind === 'native' && value.providerId === input.record!.source.providerId && value.nativeSessionId === input.record!.source.nativeSessionId))) || input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
       input.anchor && (input.anchor.frontier.sourceHostId !== source.hostId || !same(input.anchor.frontier.frontier.scope, accepted))) return bad('The read returned another explicitly selected original source.')
   if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
   const reusable = ownsParsedPage(original) && p.items === original.items &&
@@ -475,7 +476,8 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   const navigationCursor = (value: unknown) => value === null ? null : text(value, 131_072)
   if (!w.complete && (navigation.older !== null || navigation.newer !== null)) return bad()
   const anchor = w.anchor === undefined ? undefined : parseConversationVersionedAnchor(w.anchor, input)
-  if (input.record && (Number(w.itemCount) > 0 && !anchor || anchor && !same(anchor.record, input.record) || items.some(entry => entry.kind === 'item' && entry.item.records.some(record => !same(record.reference, input.record))))) return bad('The exact-record read returned another original record.')
+  if (input.record && (anchor || w.complete && Number(w.itemCount) === items.length && items.every(entry => entry.kind === 'item') &&
+      !items.some(entry => entry.kind === 'item' && entry.item.records.some(record => same(record.reference, input.record))))) return bad('The current record location does not include its requested original.')
   if (input.anchor && !same(anchor, input.anchor) || anchor && (changes || !same(anchor.frontier, checkpoint) || Number(w.itemCount) > 1 ||
       navigation.older !== null || navigation.newer !== null || outside.older !== null || outside.newer !== null)) return bad('The exact-anchor window changed its original read intent.')
   const window: ConversationReadWindow = { id: text(w.id), revision: integer(w.revision, 1), itemCount: integer(w.itemCount, 0, CONVERSATION_MAX_WINDOW_RECORDS),
