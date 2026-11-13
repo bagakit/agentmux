@@ -12,7 +12,7 @@ export const NATIVE_HIT_QUAD = [10, 10, 50, 10, 50, 30, 10, 30]
 /** The native click's own geometry checks (hit ownership and pointer landing), never a page action. */
 export function isNativeInputCheck(params: { functionDeclaration?: unknown } | undefined): boolean {
   const declaration = String(params?.functionDeclaration ?? '')
-  return declaration.includes('self.labels') || declaration.includes(':hover')
+  return declaration.includes('self.labels') || declaration.includes('return this.read()')
 }
 
 /** The native text input's own prepare / read-back / focus-return steps, never a page action. */
@@ -57,6 +57,7 @@ export function nativeInputDouble(backendOf: (objectId: string) => number = () =
         if (params?.type === 'mousePressed') presses.push({ target, x: params.x, y: params.y })
         return {}
       }
+      if (method === 'Runtime.callFunctionOn' && params?.returnByValue === false) return { result: { objectId: 'pointer-witness' } }
       if (method === 'Runtime.callFunctionOn' && isNativeInputCheck(params)) return { result: { value: true } }
       return undefined
     }

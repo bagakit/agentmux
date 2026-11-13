@@ -85,9 +85,10 @@ function pagePeer(options: { topmost?: 'target' | 'cover'; landed?: boolean } = 
         if (method === 'DOM.getNodeForLocation') return { backendNodeId: peer.topmost === 'target' ? 11 : 99, frameId: 'main-frame' }
         if (method === 'Runtime.callFunctionOn') {
           const declaration = String(params.functionDeclaration)
+          if (params.returnByValue === false) return { result: { objectId: 'pointer-witness' } }
           // Hit ownership: the page answers whether the node at the point belongs to the target.
           if (declaration.includes('labels')) return { result: { value: params.arguments?.[0]?.objectId === 'isolated-11' } }
-          if (declaration.includes(':hover')) return { result: { value: peer.landed } }
+          if (declaration.includes('return this.read()')) return { result: { value: peer.landed } }
           return { result: { value: null } }
         }
         if (method.startsWith('Input.')) { onInput?.({ method, params }); return {} }
@@ -469,7 +470,7 @@ describe('Agent pressKey and hover are trusted native input', () => {
     expect(f.nativeInput).not.toHaveBeenCalled()
   })
 
-  it('hover is one native move to the proven box, confirmed by Chromium’s :hover, and presses nothing', async () => {
+  it('hover is one native move to the proven box, confirmed by the original trusted mousemove target, and presses nothing', async () => {
     const peer = pagePeer(), contents = nativeContents()
     const { dispatch } = dispatchOn(peer, contents)
     const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
@@ -480,7 +481,7 @@ describe('Agent pressKey and hover are trusted native input', () => {
     const missed = pagePeer({ landed: false })
     const m = dispatchOn(missed, nativeContents())
     const missedPage = await m.dispatch('snapshot', []) as { nodes: { ref: string }[] }
-    await expect(m.dispatch('hover', [missedPage.nodes[0]!.ref])).rejects.toThrow(/did not land on/)
+    await expect(m.dispatch('hover', [missedPage.nodes[0]!.ref])).rejects.toThrow(/target could not be confirmed/)
     const covered = pagePeer({ topmost: 'cover' })
     const c = dispatchOn(covered, nativeContents())
     const coveredPage = await c.dispatch('snapshot', []) as { nodes: { ref: string }[] }
