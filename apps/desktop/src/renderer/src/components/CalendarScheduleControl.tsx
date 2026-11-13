@@ -15,10 +15,12 @@ const EditIcon = semanticIconComponent('action.edit')
 const BackIcon = semanticIconComponent('navigation.back')
 
 /** Session and sourced-Idea arrangements share the same rows, form and operation owner. */
-export function CalendarScheduleControl({ target, onStatusChange, initialMessage, initialMessageContext, onMessageChange, presented = true, unified, progress, progressForm, progressConfigured }: {
+export function CalendarScheduleControl({ target, onStatusChange, initialMessage, initialMessageContext, onMessageChange, presented = true, detailsPresented = true, unified, progress, progressForm, progressConfigured }: {
   target: ContinuousProgressTarget; onStatusChange?: (status: CalendarScheduleStatus) => void
   initialMessage?: string; initialMessageContext?: string; onMessageChange?: (message: string) => void
   presented?: boolean
+  /** The source stays mounted; its details start at first use and then remain retained. */
+  detailsPresented?: boolean
   unified?: boolean
   progress?: ReactNode
   progressForm?: ReactNode
@@ -56,6 +58,7 @@ export function CalendarScheduleControl({ target, onStatusChange, initialMessage
     return <ol className="calendar-schedules__list">{source.records.map(record =>
       <ScheduleArrangementRow key={record.loopId} schedule={record} timezone={timezone} now={now} onReceipt={source.accept} quickActions={!!unified} />)}</ol>
   }
+  if (!detailsPresented) return null
   return <section className="calendar-schedules" aria-label={unified ? 'Agent automation' : 'Calendar arrangements'} data-schedule-state={status} data-unified={unified || undefined} hidden={!presented}>
     <div className="automation-overview" data-automation-view="overview" hidden={unified && editor !== null}>
       {presented ? <>

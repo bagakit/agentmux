@@ -274,7 +274,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
           : <button type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} unified
+    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} detailsPresented={presented} unified
       progressConfigured={!!loop}
       progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
     {presented ? <>
