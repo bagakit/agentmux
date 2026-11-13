@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createPortableCoreArtifact } from '../src/portable-core-artifact.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
-import { rpcFailure, rpcResponseError } from '../src/public-rpc-frame.js'
+import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
 
 const partials = vi.hoisted(() => [] as { directory: string; copied: string; error: unknown }[])
 vi.mock('node:fs/promises', async importOriginal => {
@@ -82,23 +82,23 @@ async function preserved(markers: Record<string, string>) {
 it('removes only actual partial candidates across explicit failures, then retains and reuses successful assembly', async () => {
   const f = await fixture()
   for (let attempt = 0; attempt < 2; attempt++) {
-    const error = await f.manager.check(host).catch(error => error)
-    expect(error).toBe(partials[attempt].error)
-    expect(error.message).toContain('compiled Core Native contract')
+    // A local candidate failure is reported beside the current Core, not thrown.
+    const failed = await f.manager.check(host)
+    expect(failed).toMatchObject({ candidate: null, eligible: false, reason: 'unverified',
+      candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: (partials[attempt].error as Error).message } })
+    expect(failed.candidateUnavailable!.detail).toContain('compiled Core Native contract')
     expect(partials[attempt].copied).toBe(runtime)
     await expect(readFile(join(partials[attempt].directory, 'core', 'dist', 'agentmux.js'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readdir(f.stateDirectory)).toEqual(expect.arrayContaining(['candidate-existing', 'operations', 'unrelated']))
     expect((await readdir(f.stateDirectory)).filter(name => name.startsWith('candidate-'))).toEqual(['candidate-existing'])
-    expect(f.executionHost).not.toHaveBeenCalled()
     await preserved(f.markers)
   }
   expect(partials[0].directory).not.toBe(partials[1].directory)
   await writeFile(f.contractPath, JSON.stringify(f.contract))
   const check = await f.manager.check(host)
-  expect(f.executionHost).toHaveBeenCalledTimes(1)
-  expect(f.executionHost).toHaveBeenNthCalledWith(1, host)
+  expect(f.executionHost).toHaveBeenCalledWith(host)
   expect(check).toMatchObject({ eligible: false, reason: 'unverified', detail: 'No private remote process may be started',
-    candidate: { sourceCommit: 'private-source', protocolVersion: 1 } })
+    candidate: { sourceCommit: 'private-source', requiredNativeProtocolVersion: 1 } })
   const successful = (await readdir(f.stateDirectory)).filter(name => name.startsWith('candidate-') && name !== 'candidate-existing')
   expect(successful).toHaveLength(1)
   expect(await readFile(join(f.stateDirectory, successful[0], 'core', 'dist', 'agentmux.js'), 'utf8')).toBe(runtime)
@@ -107,41 +107,34 @@ it('removes only actual partial candidates across explicit failures, then retain
   expect(vi.mocked(createPortableCoreArtifact)).toHaveBeenCalledTimes(3)
   expect(vi.mocked(mkdtemp)).toHaveBeenCalledTimes(3)
   expect(vi.mocked(rm).mock.calls.map(([path]) => path)).toEqual(partials.map(value => value.directory))
-  expect(f.executionHost).toHaveBeenCalledTimes(2)
-  expect(f.executionHost).toHaveBeenNthCalledWith(1, host)
-  expect(f.executionHost).toHaveBeenNthCalledWith(2, host)
   await preserved(f.markers)
 })
 
 it('never cleans a directory when exclusive child creation failed', async () => {
   const f = await fixture(), error = Object.assign(new Error('exclusive child creation denied'), { code: 'EACCES' })
   vi.mocked(mkdtemp).mockRejectedValueOnce(error)
-  await expect(f.manager.check(host)).rejects.toBe(error)
+  expect(await f.manager.check(host)).toMatchObject({ candidate: null, candidateUnavailable: { detail: 'exclusive child creation denied' } })
   expect(vi.mocked(rm)).not.toHaveBeenCalled()
   expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled()
-  expect(f.executionHost).not.toHaveBeenCalled()
   await preserved(f.markers)
 })
 
-it('reports assembly and cleanup failure together through the existing RPC error transport', async () => {
+it('reports assembly and cleanup failure together in the check and through its strict codec', async () => {
   const f = await fixture(), cleanup = Object.assign(new Error('private cleanup denied'), { code: 'EACCES' })
   vi.mocked(rm).mockRejectedValueOnce(cleanup)
-  const error = await f.manager.check(host).catch(error => error)
+  const check = await f.manager.check(host)
   expect(partials).toHaveLength(1)
   expect(partials[0].copied).toBe(runtime)
-  expect(error.cause).toBe(partials[0].error)
-  expect(error.message).toContain('compiled Core Native contract')
-  expect(error.message).toContain('private cleanup denied')
-  expect(error.message).toContain(partials[0].directory)
+  expect(check).toMatchObject({ candidate: null, eligible: false, reason: 'unverified', candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE' } })
+  const detail = check.candidateUnavailable!.detail
+  expect(detail).toContain('compiled Core Native contract')
+  expect(detail).toContain('private cleanup denied')
+  expect(detail).toContain(partials[0].directory)
   expect(vi.mocked(rm)).toHaveBeenCalledExactlyOnceWith(partials[0].directory, { recursive: true, force: true })
-  const transported = rpcResponseError(JSON.parse(JSON.stringify(rpcFailure('private-check', error))))!
-  expect(transported.code).toBe('CORE_ARTIFACT_UNAVAILABLE')
-  expect(transported.message).toBe(error.message)
-  expect(JSON.parse(transported.detail!)).toEqual({ directory: partials[0].directory,
-    assembly: { code: 'CORE_ARTIFACT_UNAVAILABLE', message: (partials[0].error as Error).message },
-    cleanup: { message: 'private cleanup denied' } })
+  // The same facts survive the public check codec unchanged.
+  expect(parseRemoteCoreUpgradeCheck(JSON.parse(JSON.stringify(check))).candidateUnavailable).toEqual(check.candidateUnavailable)
+  // The partial candidate stays where cleanup failed, named by the detail.
   expect(await readFile(join(partials[0].directory, 'core', 'dist', 'agentmux.js'), 'utf8')).toBe(runtime)
-  expect(f.executionHost).not.toHaveBeenCalled()
   await preserved(f.markers)
 })
 
@@ -150,10 +143,12 @@ it('leaves externally supplied artifact paths and their failures with the caller
   await put(external, 'original-state\n')
   const error = new Error('external assembly failed'), artifact = vi.fn(async () => { throw error })
   const manager = new RemoteCoreUpgradeManager({ stateDirectory: f.stateDirectory, artifact, executionHost: f.executionHost })
-  await expect(manager.check(host)).rejects.toBe(error)
-  await expect(manager.check(host)).rejects.toBe(error)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect(await manager.check(host)).toMatchObject({ candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'external assembly failed' } })
+  }
+  // A failed external assembly is not retained; each explicit check asks the caller again.
   expect(artifact).toHaveBeenCalledTimes(2)
   expect(vi.mocked(mkdtemp)).not.toHaveBeenCalled(); expect(vi.mocked(rm)).not.toHaveBeenCalled()
-  expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled(); expect(f.executionHost).not.toHaveBeenCalled()
+  expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled()
   await preserved({ ...f.markers, [external]: 'original-state\n' })
 })
