@@ -402,6 +402,7 @@ describe('Native replacement review', () => {
     expect(dom.container.textContent).toContain('Saving a copy of the Native state, restarting the Native Runtime and starting the updated Core.')
     expect(dom.container.textContent).toContain('Original upgrade is in progress')
     expect(dom.container.textContent).not.toContain('Check this original operation before starting another upgrade.')
+    expect(dom.container.textContent).not.toContain('Check current versions before reviewing another upgrade.')
     const operationId = upgradeCall.mock.calls[0]![2] as string
     await act(async () => pending.resolve({ ...receipt('completed'), operationId, expected: reviewed.expected!, candidate: reviewed.candidate,
       connectionAdoption: { state: 'connected', readAt: 1700000003000 },
