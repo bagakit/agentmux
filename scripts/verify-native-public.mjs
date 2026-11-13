@@ -15,6 +15,9 @@ const proofRoot = join(root, '.local/state/native-public')
 await mkdir(proofRoot, { recursive: true })
 const proofDirectory = await mkdtemp(join(proofRoot, 'run-'))
 const cli = join(directory, 'amux.mjs')
+// Started like the product bin, which imports the CLI module. A bundle started directly is also every bundled module's
+// own entry, so provider helpers would mistake it for their process and run.
+const entry = join(directory, 'amux-bin.mjs')
 const run = (args, env = process.env) => spawnSync(process.execPath, args, { cwd: root, env, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
 const hash = value => createHash('sha256').update(value).digest('hex')
 const receipt = { schema: 'agentmux.native-public-verification.v1', passed: false, mutations: [], boundary: 'Actual public service/client/CLI through the production Native connection; controlled Unix native protocol, no OS pixels, UI, permissions or installed-app proof.' }
@@ -36,9 +39,10 @@ try {
   const cliBytes = await readFile(cli)
   receipt.cliSha256 = hash(cliBytes)
   await writeFile(join(proofDirectory, 'cli.mjs'), cliBytes)
+  await writeFile(entry, "import './amux.mjs'\n")
   const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'packages/core/test/native-desktop.config.mts']
   const baselinePath = join(proofDirectory, 'baseline.json')
-  const baseline = run([...args, '--reporter=json', '--outputFile', baselinePath], { ...process.env, NATIVE_PUBLIC_CLI: cli })
+  const baseline = run([...args, '--reporter=json', '--outputFile', baselinePath], { ...process.env, NATIVE_PUBLIC_CLI: entry })
   await writeFile(join(proofDirectory, 'baseline.log'), baseline.stdout + baseline.stderr)
   process.stdout.write(baseline.stdout); process.stderr.write(baseline.stderr)
   assert.equal(baseline.status, 0, 'Native public baseline must pass')
@@ -53,7 +57,7 @@ try {
   for (const [mutation, title] of Object.entries(cases)) {
     const report = join(proofDirectory, `${mutation}.json`)
     const prefix = join(proofDirectory, mutation)
-    const result = run([...args, '-t', title, '--reporter=json', '--outputFile', report], { ...process.env, NATIVE_PUBLIC_CLI: cli, NATIVE_PUBLIC_MUTATION: mutation, NATIVE_PUBLIC_LOAD_PREFIX: prefix })
+    const result = run([...args, '-t', title, '--reporter=json', '--outputFile', report], { ...process.env, NATIVE_PUBLIC_CLI: entry, NATIVE_PUBLIC_MUTATION: mutation, NATIVE_PUBLIC_LOAD_PREFIX: prefix })
     await writeFile(join(proofDirectory, `${mutation}.log`), result.stdout + result.stderr)
     assert.notEqual(result.status, 0, `Surviving native public mutation: ${mutation}`)
     const tests = JSON.parse(await readFile(report, 'utf8'))
