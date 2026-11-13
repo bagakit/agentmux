@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { sessionStopReceipt } from './helpers/session-stop-receipt'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { beginMoteStartupRecovery } from '../src/renderer/src/lib/mote-session-recovery'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
@@ -16,12 +17,12 @@ const stale = () => Object.assign(new Error('Agent Session changed before its Ru
 beforeEach(() => {
   useAppStore.setState({ ...initial, config: composerConfig, sessions: [agent], tabs: { [tab.id]: tab },
     layouts: { workspace: createWorkspaceLayout('store-stop-group', [tab.id]) }, activeWorkspaceId: 'workspace', closingWorkbenchViews: {}, error: null }, true)
-  vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) => control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
 })
 afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 
 it('stops the exact Run with one operation id and answers stopped', async () => {
-  expect(await useAppStore.getState().stopSession(agent.id)).toEqual({ status: 'stopped' })
+  expect(await useAppStore.getState().stopSession(agent.id)).toMatchObject({ status: 'stopped', receipt: expect.objectContaining({ agentSessionId: agent.control.agentSessionId, expectedRun: agent.control.run }) })
   expect(stop()).toHaveBeenCalledExactlyOnceWith(agent.control, expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/))
 })
 
@@ -40,7 +41,7 @@ it('a pending startup recovery is cancelled, not awaited: the Stop is sent while
     expect(useAppStore.getState().recoverSession).toHaveBeenCalledTimes(1)
     const outcome = await Promise.race([useAppStore.getState().stopSession(agent.id),
       new Promise(resolve => setTimeout(() => resolve('still waiting'), 200))])
-    expect(outcome).toEqual({ status: 'stopped' })
+    expect(outcome).toMatchObject({ status: 'stopped', receipt: expect.objectContaining({ agentSessionId: agent.control.agentSessionId, expectedRun: agent.control.run }) })
     expect(stop()).toHaveBeenCalledExactlyOnceWith(exited.control, expect.any(String))
   } finally { end() }
 })
@@ -67,7 +68,11 @@ it('an unconfirmed Stop answers its operation and stage; stopping again continue
   expect(first).toMatchObject({ status: 'unconfirmed', operationId, stage: 'runtime-stop' })
   expect(first.status === 'unconfirmed' && first.message).toContain(`--operation-id ${operationId}`)
   expect(useAppStore.getState().error).toContain(operationId)
-  expect(await useAppStore.getState().stopSession(agent.id)).toEqual({ status: 'stopped' })
+  expect(Object.values(useAppStore.getState().agentOperations)).toEqual([expect.objectContaining({
+    kind: 'stop', operationId, control: agent.control, phase: 'unconfirmed', canContinue: false,
+    message: expect.stringContaining('runtime-stop (SESSION_STOP_TIMEOUT)')
+  })])
+  expect(await useAppStore.getState().stopSession(agent.id)).toMatchObject({ status: 'stopped', receipt: expect.objectContaining({ agentSessionId: agent.control.agentSessionId, expectedRun: agent.control.run }) })
   expect(stop().mock.calls[1]).toEqual([agent.control, operationId])
   // After the receipt, a new Stop is a new intent.
   await useAppStore.getState().stopSession(agent.id)
@@ -96,6 +101,9 @@ it('closing the last View again after an unconfirmed Stop resends the same opera
   expect(operationId).toMatch(/^[A-Za-z0-9]/)
   expect(useAppStore.getState().error).toContain(`--operation-id ${operationId}`)
   expect(useAppStore.getState().tabs[tab.id]).toBeTruthy()
+  expect(Object.values(useAppStore.getState().agentOperations)).toEqual([expect.objectContaining({
+    kind: 'stop', operationId, control: agent.control, phase: 'unconfirmed'
+  })])
   await useAppStore.getState().closeTab('workspace', 'store-stop-group', tab.id)
   await vi.waitFor(() => expect(stop()).toHaveBeenCalledTimes(2))
   expect(stop().mock.calls[1]).toEqual([agent.control, operationId])

@@ -6,6 +6,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { api } from '../src/renderer/src/lib/api'
+import { sessionStopReceipt } from './helpers/session-stop-receipt'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -54,7 +55,7 @@ beforeEach(() => {
   useAppStore.setState({ config: composerConfig, loading: false, sessions: agents(), tabs: { [tab.id]: tab },
     layouts: { [workspace.id]: createWorkspaceLayout('retained-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', workspaceTool: 'agents',
-    workspaceAgentOrder: {}, timelines: {}, scratchTopicSnapshots: {}, agentNames: {},
+    workspaceAgentOrder: {}, timelines: {}, scratchTopicSnapshots: {}, agentNames: {}, agentOperations: {},
     agentComposerDrafts: { alpha: 'Keep the original unsent draft' }, error: null })
 })
 
@@ -173,7 +174,7 @@ describe('Space Agent list management through the production Dock and shared Foc
   })
 
   it('reviews exact Runs before original public stop and keeps Sessions, workfaces and drafts after receipts', async () => {
-    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) => control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
     await render(); await click('Select Agents'); await select('alpha'); await select('gamma')
     const state = useAppStore.getState()
     await click('Close Agents')
@@ -217,7 +218,7 @@ describe('Space Agent list management through the production Dock and shared Foc
 
   it('copies and closes an alias through its original canonical control while keeping its presentation identity', async () => {
     const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) => control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
     const original = agents().find(session => session.id === 'alpha')!
     useAppStore.setState({ sessions: [{ ...original, id: 'presentation-alias' }] })
     await render(); await click('Select Agents'); await select('alpha'); await click('Copy titles + Agent links')
@@ -240,7 +241,7 @@ describe('Space Agent list management through the production Dock and shared Foc
   })
 
   it('keeps each failed target selected and visible without automatically resending successful stops', async () => {
-    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async control => { if (control.kind === 'agent' && control.agentSessionId === 'gamma') throw new Error('Original gamma stop receipt unavailable') })
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) => { if (control.kind === 'agent' && control.agentSessionId === 'gamma') throw new Error('Original gamma stop receipt unavailable'); return control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined })
     await render(); await click('Select Agents'); await select('alpha'); await select('gamma'); await click('Close Agents')
     await click('Close Agents', document.querySelector('[role="alertdialog"], [role="dialog"]')!)
     expect(stop).toHaveBeenCalledTimes(2)
@@ -251,4 +252,32 @@ describe('Space Agent list management through the production Dock and shared Foc
     expect(stop).toHaveBeenCalledTimes(2)
     expect(useAppStore.getState().agentComposerDrafts.alpha).toBe('Keep the original unsent draft')
   })
+  it('keeps selection, copying and the next batch available while one original Stop is pending', async () => {
+    let release: (() => void) | undefined
+    const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    const stop = vi.spyOn(api.sessions, 'stop').mockImplementation((control, operationId) => {
+      if (control.kind === 'agent' && control.agentSessionId === 'alpha') return new Promise(resolve => {
+        release = () => resolve(sessionStopReceipt(control, operationId!))
+      })
+      return Promise.resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
+    })
+    try {
+      await render(); await click('Select Agents'); await select('alpha'); await click('Close Agents')
+      await click('Close Agents', document.querySelector('[role="dialog"]')!)
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      const pending = dom.container.querySelector(`.workspace-agent-list-item[data-agent-key='${agentKey('alpha')}']`)!
+      expect(pending.textContent).toContain('停止中')
+      expect(button('Select visible Agents').disabled).toBe(false)
+      expect(button('Clear selection').disabled).toBe(false)
+      expect(button('Copy titles + Agent links').disabled).toBe(false)
+      expect(button('Done selecting').disabled).toBe(false)
+      await click('Clear selection'); await select('beta'); await click('Copy titles + Agent links')
+      expect(copy).toHaveBeenCalledExactlyOnceWith('Beta\namux://agent/beta')
+      await click('Close Agents'); await click('Close Agents', document.querySelector('[role="dialog"]')!)
+      expect(stop.mock.calls.map(call => call[0].kind === 'agent' ? call[0].agentSessionId : null)).toEqual(['alpha', 'beta'])
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(pending.textContent).toContain('停止中')
+    } finally { await act(async () => release?.()) }
+  })
+
 })

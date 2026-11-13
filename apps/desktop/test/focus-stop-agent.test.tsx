@@ -8,6 +8,7 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { sessionStopReceipt } from './helpers/session-stop-receipt'
 import { agentContextForSession, createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => <span /> }))
@@ -57,7 +58,8 @@ beforeEach(async () => {
     agentComposerDrafts: { [first.id]: 'Neighbor draft', [target.id]: 'Target unsent' }, error: null,
     agentFocus: { execution: { sessionId: target.id, history: [] }, pmo: { sessionId: null } } }, true)
   select.mockClear(); collapse.mockClear()
-  vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) => control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
+  vi.spyOn(api.sessions, 'inspectStop').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, expectedRun: control.run, phase: 'stopping', canRetry: true, operationIdMatched: true, failure: { stage: 'runtime-stop', code: 'STOP_UNCONFIRMED', message: 'The original Stop remains unconfirmed.', observedAt: Date.now() }, observedAt: Date.now() }))
   container = document.createElement('div'); later = document.createElement('input'); document.body.append(container, later)
   root = createRoot(container); await act(async () => root.render(<Scene />))
 })
@@ -100,12 +102,13 @@ it.each(['toolbar', 'title'] as const)('the %s Tab menu excludes Agent lifecycle
 
 it('sends one exact host/SID/Run from the card, holds pending and never invents stopped facts', async () => {
   let release!: () => void
-  vi.mocked(api.sessions.stop).mockImplementation(() => new Promise(resolve => { release = resolve }))
+  vi.mocked(api.sessions.stop).mockImplementation((control, operationId) => new Promise(resolve => { release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined) }))
   const before = useAppStore.getState()
   await open()
   await act(async () => { confirm().click(); confirm().click() })
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
-  expect(confirm().disabled).toBe(true); expect(confirm().textContent).toBe('Working…'); retained(before)
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(card().closest('.focus-context-card')?.textContent).toContain('停止中'); retained(before)
   later.focus()
   await act(async () => release()); await settle()
   expect(document.activeElement).toBe(later); expect(document.querySelector('[role="dialog"]')).toBeNull()
@@ -131,9 +134,12 @@ it.each(['run', 'host'] as const)('a changed %s after confirmation opened still 
   // The original exact identity is the only target; the replacement is never stopped by this intent.
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
-  // A new Run on the same Host is offered as a fresh intent; another Host's Session is never adopted.
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(field === 'run' ? 'The Run changed; stop the current Run' : 'The refreshed Session belongs to another Agent.')
-  expect(document.querySelector('[data-confirm-label="Continue Stop"]')).toBeNull()
+  // No replacement is automatically adopted or offered by the settled confirmation.
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(api.sessions.refresh).not.toHaveBeenCalled()
+  expect(Object.values(useAppStore.getState().agentOperations)).toEqual([expect.objectContaining({
+    phase: 'failed', control: target.control
+  })])
 })
 
 it('a rejected or timed-out stop preserves state, reports its exact subject and permits explicit retry', async () => {
@@ -143,12 +149,15 @@ it('a rejected or timed-out stop preserves state, reports its exact subject and 
   expect(useAppStore.getState().error).toContain('timeout'); expect(useAppStore.getState().errorNoticeContext?.summary).toContain('unconfirmed')
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(target.control); retained(before)
   expect(api.sessions.stop).toHaveBeenCalledTimes(1)
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop not confirmed')
-  const continuation = document.querySelector<HTMLButtonElement>('[data-confirm-label="Continue Stop"]')!
-  expect(continuation.disabled).toBe(false)
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(card().closest('.focus-context-card')?.textContent).toContain('停止未确认')
   const operationId = vi.mocked(api.sessions.stop).mock.calls[0]![1]
+  const feedbackAction = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('.agent-operation-feedback__actions button')].find(item => item.textContent === label)!
+  await act(async () => feedbackAction('核对原操作').click()); await settle()
+  expect(api.sessions.inspectStop).toHaveBeenCalledExactlyOnceWith(target.control, operationId)
+  expect(api.sessions.stop).toHaveBeenCalledTimes(1)
   vi.mocked(api.sessions.stop).mockClear()
-  await act(async () => continuation.click()); await settle()
+  await act(async () => feedbackAction('继续同次停止').click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, operationId); retained(before)
 })
 
@@ -164,7 +173,7 @@ it('unknown observation still allows explicit Stop; disappearing identity never 
 
 it('leaving a pending confirmation does not refocus or mutate a later work surface', async () => {
   let release!: () => void
-  vi.mocked(api.sessions.stop).mockImplementation(() => new Promise(resolve => { release = resolve }))
+  vi.mocked(api.sessions.stop).mockImplementation((control, operationId) => new Promise(resolve => { release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined) }))
   await open(); await act(async () => confirm().click())
   await act(async () => root.render(null)); later.focus()
   const before = useAppStore.getState()
@@ -331,5 +340,5 @@ it('admits the original card with an unobserved Run and retains the Core failure
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
   expect(useAppStore.getState().error).toContain('Core could not confirm')
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(original.control)
-  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Continue Stop to check and finish that same operation')
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Check this same operation')
 })
