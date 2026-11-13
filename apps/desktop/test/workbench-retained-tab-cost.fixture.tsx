@@ -182,6 +182,38 @@ async function prepare(kind: 'browser' | 'agent') {
   return { ...original, preserved }
 }
 
+it('opens Automation on demand and retains its original edited form when returning to messages', async () => {
+  fixture('agent')
+  const createSchedule = vi.spyOn(api.schedule, 'create')
+  useAppStore.setState({ initialize: vi.fn(async () => () => {}), projectRailOpen: false, toolsOpen: false })
+  await dom.render(<App />); await settle()
+  await waitForAgentCardReading(() => expect(region('region-b').querySelector('.activity-feed')!.textContent).toContain('Original B reading'))
+  const mailbox = region('region-b').querySelector<HTMLElement>('.composer-mailbox')!
+  const control = mailbox.querySelector<HTMLElement>('.continuous-progress-control')!
+  expect(control.querySelectorAll('*')).toHaveLength(0)
+  const opening = new Event('toggle'); Object.defineProperty(opening, 'newState', { value: 'open' })
+  await act(async () => { mailbox.dispatchEvent(opening); mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click() })
+  await settle()
+  const create = [...mailbox.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('New automation'))!
+  expect(create).toBeDefined()
+  await act(async () => create.click())
+  const input = mailbox.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
+  expect(input).not.toBeNull()
+  await act(async () => {
+    input.focus()
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '原来的' }))
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '原来的未保存日程草稿')
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertCompositionText', isComposing: true }))
+  })
+  await act(async () => mailbox.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]')!.click())
+  expect(mailbox.querySelector('[aria-label="Arranged message"]')).toBe(input)
+  await act(async () => mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click())
+  expect(mailbox.querySelector('[aria-label="Arranged message"]')).toBe(input)
+  expect(input.value).toBe('原来的未保存日程草稿')
+  await act(async () => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value })))
+  expect(createSchedule).not.toHaveBeenCalled()
+})
+
 it.each([0, 24])('switches actual App surfaces without rendering unchanged retained Tab consumers with %i additional Tabs', async extraCount => {
   fixture('agent')
   const extraIds = Array.from({ length: extraCount }, (_, index) => `unrelated-${index}`)
