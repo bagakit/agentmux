@@ -97,6 +97,8 @@ import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResu
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
+import { openSystemPageInSurvey, type SystemPageHost } from './lib/survey-system-page'
+import { isSystemWebUrl, type SystemPageOutcome } from '../../shared/system-web-url'
 import { openSystemFileInSurvey } from './lib/survey-system-file'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
@@ -1176,6 +1178,8 @@ export type AppState = GitReadingActions & {
   setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
+  /** Open an http(s) URL as a new Survey Browser through the same owner as system links; the current workface is kept. */
+  openUrlInSurvey(url: string): Promise<SystemPageOutcome>
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
   /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
@@ -5534,6 +5538,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   createSurveyBrowser(input) { return createSurveyBrowser(get, input) },
+  openUrlInSurvey(url): Promise<SystemPageOutcome> {
+    if (!isSystemWebUrl(url)) return Promise.reject(new Error('Only web links (http or https) open in Survey.'))
+    const host: SystemPageHost = { get, navigation: () => fileNavigationSelection(get()), subscribe: (listener: () => void) => useAppStore.subscribe(listener) }
+    return openSystemPageInSurvey(host, { url }, new AbortController().signal)
+  },
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,

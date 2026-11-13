@@ -1,10 +1,9 @@
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
-import type { useAppStore } from '../store'
+import type { AppState } from '../store'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
 
-type AppState = ReturnType<typeof useAppStore.getState>
 export type SystemPageHost = { get(): AppState; navigation(): string; subscribe(listener: () => void): () => void }
 
 /** Both exact native inputs use the original Survey preparation and Core spatial owner. */
