@@ -57,8 +57,8 @@ export function ComposerFileReferences({ workspace, hostLabel, onSelect, onClose
           <span title={fullPath(directory)}>{directory || workspace.path}</span>
           <button type="button" className="icon-button" aria-label="Refresh project files" onClick={() => setRevision(value => value + 1)}>
             {loading ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></div>
-        <div className="launcher-target__projects" aria-busy={loading}>
-          {entries?.map(entry => <button type="button" key={entry.path} className="launcher-target__project" data-reference-path={entry.path}
+        <div className="launcher-file-references__list" aria-busy={loading}>
+          {entries?.map(entry => <button type="button" key={entry.path} className="launcher-file-references__entry" data-reference-path={entry.path}
             title={`${entry.name}\n${fullPath(entry.path)}`}
             onClick={() => { if (entry.isDirectory) setDirectory(entry.path); else { onSelect(entry.path); onClose() } }}>
             {entry.isDirectory ? <ThemeObjectFolderIcon size={14} /> : <ThemeObjectFileIcon size={14} />}<span><strong>{entry.name}</strong></span>

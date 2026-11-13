@@ -38,7 +38,7 @@ import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
-import { LauncherExecutionModes } from './LauncherExecutionModes'
+import { LauncherAgentDevice } from './LauncherAgentDevice'
 import type { LauncherExecutionSelection } from '../store'
 import { ComposerFileReferences } from './ComposerFileReferences'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
@@ -383,16 +383,16 @@ export function NewTabSurface({
     return displayWorkspaceId ? { workspaceId: displayWorkspaceId, tabGroupId, ...target } : undefined
   }
 
-  function chooseArrangement(selection: LauncherExecutionSelection, options: { navigateProject: boolean }): boolean {
+  function chooseArrangement(selection: LauncherExecutionSelection): boolean {
     if (busy || !workspace) return false
     try {
       const state = useAppStore.getState()
       if (launcherRef) {
         const displayWorkspaceId = projection?.displayWorkspaceId ?? workbenchTabDisplayWorkspaceId(state.layouts, launcherRef.tabId, tabGroupId)
         if (!displayWorkspaceId) throw new Error('The original Launcher location is still restoring. Your draft is kept.')
-        const result = state.selectLauncherExecution({ ...launcherRef, displayWorkspaceId, groupId: tabGroupId }, selection, { ...options, reveal: !projection || options.navigateProject })
-        if (projection && (!result.projectChanged || !options.navigateProject)) projection.onSelect(result)
-      } else if (selection.resourceWorkspaceId === workspace.id) {
+        const result = state.selectLauncherExecution({ ...launcherRef, displayWorkspaceId, groupId: tabGroupId }, selection, { navigateProject: false, reveal: !projection })
+        if (projection) projection.onSelect(result)
+      } else {
         const createdId = state.openLauncher({ workspaceId: workspace.id, ...creationTarget, tabGroupId,
           reveal: Boolean(creationTarget && !projection), initialExecution: selection,
           initialInputs: { prompt, names, optionsByProvider, sourceLauncherId: launcherId } })
@@ -400,19 +400,9 @@ export function NewTabSurface({
         if (!created) return false
         if (projection) projection.onSelect({ displayWorkspaceId: creationTarget?.displayWorkspaceId ?? workspace.id,
           groupId: tabGroupId, tabId: created.id, regionId: created.layout.activeRegionId })
-      } else {
-        // A different project owns its own inputs. The empty Zone's source draft stays here.
-        const result = state.selectLauncherExecution({ resourceWorkspaceId: workspace.id,
-          displayWorkspaceId: creationTarget?.displayWorkspaceId ?? projection?.displayWorkspaceId ?? workspace.id,
-          groupId: tabGroupId }, selection, { ...options, reveal: !projection || options.navigateProject })
-        if (projection && !options.navigateProject) projection.onSelect(result)
       }
       return true
     } catch (cause) { setError(presentError(cause)); return false }
-  }
-
-  function chooseExecutionWorkspace(workspaceId: string): void {
-    chooseArrangement({ resourceWorkspaceId: workspaceId, agentWorkspaceId: agentTarget?.agentWorkspaceId ?? null }, { navigateProject: true })
   }
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
@@ -431,15 +421,7 @@ export function NewTabSurface({
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
       style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties} body={<>
-      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
-        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
-        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')}
-        roleLabel={splitExecution ? 'Project & tools' : undefined} />
-      {!workspace || !isScratchWorkspaceId(workspace.id) ? <LauncherExecutionModes key={launcherId}
-        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
-        explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
-        onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing} onManageProjects={() => settings?.open('hosts')}
-        onGuide={settings ? () => settings.open('remote-execution', undefined, 'guide') : undefined} /> : null}
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
 
 
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
@@ -468,6 +450,10 @@ export function NewTabSurface({
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
+        {sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
+          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
+          onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing}
+          onEditArrangement={settings ? () => settings.open('remote-execution') : undefined} /> : null}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
@@ -479,10 +465,10 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <>
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
         {emptyHostInventoryUnconfirmed ? unconfirmedConfigurations
-          : <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
+          : <div className="launcher-agent-catalog" key={agentWorkspace?.hostId ?? 'none'} data-host-id={agentWorkspace?.hostId}><AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
             active={visible && presentationActive} onSelect={chooseExecutor}
             onConfigure={usesHostInventory && agentWorkspace && settings ? () => settings.openHostExecutors
-              ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} />}
+              ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} /></div>}
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
