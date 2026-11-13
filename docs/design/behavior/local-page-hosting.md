@@ -192,6 +192,8 @@ Capsule 使用指南建议 Agent 为对话内嵌的新页面显式选择注入�
 
 隐藏撤原 lease 与 capture，沿原 native release 的 released／retained／unknown 回执保原 Browser 和导航身份，不自动 Close、不清表单或重放未知操作。页面 DOM 与可信宿主答复编辑分别保全；尚未保存的答复、原保存基线及 unknown 操作句柄沿同一准确 Browser／Capsule／问题的编辑 owner 保留，不随隐藏、滚出或消息组件卸载丢失。恢复挂载只回接和查询原操作，不自动保存、确认或重发；迟到回执不能覆盖后来的输入。原生输入覆盖不能越出真实滚动窗口或遮住时间尺：部分裁剪时保 live capture 和原页，仅撤下不适用于当前几何的 native 输入覆盖；完整进入阅读窗口或打开原 Browser 后仍可交互，几何不成为页面／Agent 权限或健康事实。完整 Browser 打开仍沿原 Capsule 公共 owner。
 
+卡片自有的原生页面以卡片页面区作为布局：页面未被原生显示时，按页面区的实际尺寸排版。展开、收起和窗口尺寸变化后，页面随页面区重排，同一 DOM、导航和输入不变，不靠缩放或裁切凑尺寸。只有拥有这张页面的卡片在展示登记时声明布局宿主；同一 Browser 的其他被动展示与 Browser 工作面只观看，不改页面尺寸，[观看不改执行视口](browser-workface.md#多位置呈现局部遮挡与输入交接)仍然成立。页面被选中原生显示时，尺寸只沿原生显示位置。
+
 共享阅读通过窄 host adapter 呈现，不持页面事实或第二份 Browser／交互账本。外部原生 Channel 卡片按本平台实际能力保原文和引用，不因协议或 skill 获得网页执行能力。公开查询和打开复用 `capsule.inspect`／`capsule.open`，服务、模式、授权和操作查询合同保持。
 
 ## Browser 与 Toolkit Library 联动
