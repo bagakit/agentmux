@@ -7,7 +7,8 @@ import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { clearsSemanticHues } from '../../lib/conversation-avatar-color'
 import { useAppStore } from '../../store'
-import { workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
+import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
+import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
 import { ProfileMark, profileHue } from '../ProfileMark'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import * as Menu from '../HoverDropdownMenu'
@@ -26,13 +27,35 @@ const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
  *  success, attention, failure or a person. Lime and yellow-green read as success, so none here. */
 export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
 
-type Use = { browserId: string; title: string; url: string; state: 'open' | 'saved' }
+type Use = { browserId: string; tabId: string; title: string; url: string; state: 'open' | 'saved' }
 
-function usesOf(profileId: string, surfaces: readonly BrowserWorkbenchSurface[]): Use[] {
+function usesOf(profileId: string, surfaces: readonly (BrowserWorkbenchSurface & { tabId: string })[]): Use[] {
   return surfaces.filter(surface => surface.profileId === profileId).map(surface => ({
-    browserId: surface.browserId, title: surface.title, url: surface.url,
+    browserId: surface.browserId, tabId: surface.tabId, title: surface.title, url: surface.url,
     state: surface.nativeOwnerDeferred || surface.nativeOwnerReleased ? 'saved' : 'open'
   }))
+}
+
+/** Close Settings, then select the exact Browser Region; selection is refused while Settings covers the workbench. */
+async function showBrowser(use: Use, onClose: () => void): Promise<void> {
+  onClose()
+  await awaitDesktopPresentation(() => !readDesktopOverlays().settings)
+  const state = useAppStore.getState()
+  const tab = state.tabs[use.tabId], groupId = tab ? tabGroupForTab(state.layouts[tab.workspaceId], use.tabId) : null
+  if (tab && groupId && state.selectMainRegion({ displayWorkspaceId: tab.workspaceId, groupId, tabId: use.tabId, regionId: use.browserId })) return
+  state.reportError(new Error(`“${use.title || use.url}” could not be shown. Its Tab is kept; open it from its Space.`), { kind: 'indeterminate' })
+}
+
+/** Close Settings and open a new Browser in this Profile beside the current work. */
+async function openInProfile(profileId: string, onClose: () => void): Promise<void> {
+  onClose()
+  await awaitDesktopPresentation(() => !readDesktopOverlays().settings)
+  const state = useAppStore.getState()
+  const workspaceId = state.activeWorkspaceId
+  const layout = workspaceId ? state.layouts[workspaceId] : undefined
+  if (!workspaceId || !layout) { state.reportError(new Error('Open a Space first, then open a Browser in this Profile.'), { kind: 'indeterminate' }); return }
+  try { await state.createBrowser(layout.activeGroupId, undefined, 'about:blank', undefined, workspaceId, workspaceId, 'normal', undefined, profileId) }
+  catch (error) { state.reportError(error, { kind: 'indeterminate' }) }
 }
 
 /** The one line that tells this Profile apart: default, what it is for, or where it came from. */
@@ -42,11 +65,11 @@ function detailLine(profile: BrowserProfileSummary): string {
 }
 
 /** Settings › Browser Profiles: every Profile in one list, one Profile edited in place beside it. */
-export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
+export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { active: boolean; onClose?: () => void }) {
   const list = useBrowserProfiles()
   const tabs = useAppStore(state => state.tabs)
-  const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab))
-    .flatMap(surface => surface.kind === 'browser' ? [surface] : []), [tabs])
+  const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab)
+    .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
   const profiles = list.profiles ?? []
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -107,6 +130,7 @@ export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
           </button>
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error}
+            onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
             onDeleted={() => { setSelectedId(null); setView('library') }} />
             : <p className="settings-resource-empty" role="status">{list.reading ? 'Loading Profiles…' : 'No Profile selected.'}</p>}
@@ -116,7 +140,7 @@ export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, editName, onNameEdited, onDeleted }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, editName, onNameEdited, onDeleted, onShow, onOpen }: {
   profile: BrowserProfileSummary
   revision: number
   uses: Use[]
@@ -126,6 +150,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
   editName: boolean
   onNameEdited(): void
   onDeleted(): void
+  onShow(use: Use): void
+  onOpen(): void
 }) {
   const [naming, setNaming] = useState(editName)
   const [name, setName] = useState(profile.label)
@@ -177,6 +203,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
               {saved ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
           <small>{profile.isDefault ? 'Default for new Browsers · ' : ''}{open.length ? `Open in ${open.length} Browser${open.length > 1 ? 's' : ''}` : 'Not open'}</small>
         </div>
+        <button type="button" className="primary-button browser-profile-editor__open" onClick={onOpen}>Open Browser</button>
         <Menu.Root>
           <Menu.Trigger asChild><button type="button" className="icon-button" aria-label={`More for ${profile.label}`}><ThemeActionMoreIcon size={14} /></button></Menu.Trigger>
           <DocumentOverlayPortal component={Menu.Portal}>
@@ -213,8 +240,10 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
         {uses.length ? <ul className="browser-profile-editor__uses">
-          {uses.map(use => <li key={use.browserId}><ThemeObjectBrowserIcon size={13} /><span>{use.title || use.url || 'New Browser'}</span>
-            <small data-state={use.state}>{use.state === 'open' ? 'Open' : 'Not loaded yet'}</small></li>)}
+          {uses.map(use => <li key={use.browserId}><button type="button" className="browser-profile-editor__use" onClick={() => onShow(use)}
+            title={use.state === 'open' ? 'Show this Browser' : 'Show this Browser; it loads when shown'}>
+            <ThemeObjectBrowserIcon size={13} /><span>{use.title || use.url || 'New Browser'}</span>
+            <small data-state={use.state}>{use.state === 'open' ? 'Open' : 'Not loaded yet'}</small></button></li>)}
         </ul> : <p className="browser-profile-editor__quiet">No Browser uses this Profile.</p>}
       </section>
 

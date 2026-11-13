@@ -1548,7 +1548,9 @@ export type AppState = GitReadingActions & {
     requestedWorkspaceId?: string,
     requestedDisplayWorkspaceId?: string,
     mode?: import('@agentmux/core').AgentMuxBrowserMode,
-    capsuleId?: string
+    capsuleId?: string,
+    /** A normal Browser opens in this exact Profile instead of the default one. */
+    profileId?: string
   ): Promise<void>
   openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination, presentation?: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'>): Promise<void>
   /**
@@ -10596,7 +10598,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void open().then(() => { release(); resolveOpening() }, error => { release(); rejectOpening(error) })
     return flight.promise
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId, mode, capsuleId) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId, mode, capsuleId, profileId) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -10636,7 +10638,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       const browser = capsuleId
         ? await api.browser.create(regionId, url, workspaceId, undefined, mode, undefined, capsuleId)
-        : await api.browser.create(regionId, url, workspaceId, undefined, mode)
+        : await api.browser.create(regionId, url, workspaceId, mode === 'private' ? undefined : profileId, mode)
       const surface: BrowserWorkbenchSurface = {
         ...browser,
         regionId,

@@ -15,7 +15,7 @@ export const browserProfilesSettingsModule = {
     { id: 'browser-profiles', title: 'Browser Profiles', keywords: 'profile sign-in cookies import default rename color' },
   ],
   savedSummary: () => '',
-  Pane({ active }) {
-    return <BrowserProfilesSettingsPane active={active} />
+  Pane({ active, onClose }) {
+    return <BrowserProfilesSettingsPane active={active} onClose={onClose} />
   }
 } as const satisfies SettingsModule
