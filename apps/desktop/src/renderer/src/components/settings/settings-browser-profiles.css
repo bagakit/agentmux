@@ -7,6 +7,10 @@
 .settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-3); }
 .settings-browser-profiles .settings-pane-toolbar > strong { margin-right: auto; font-size: var(--fs-body); font-weight: 550; }
 .settings-browser-profiles .settings-pane-toolbar > strong > span { color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+/* In the narrow single layer the editor opens on Back alone; New and Import belong to the list layer. */
+@container settings-resource (width < 720px) {
+  .settings-browser-profiles[data-resource-view='editor'] > .settings-pane-toolbar { display: none; }
+}
 .settings-browser-profiles .settings-resource-row__mark { width: 22px; }
 .browser-profiles-settings__service { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-profiles-settings__service button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; cursor: pointer; font: inherit; }
@@ -72,11 +76,13 @@
 .browser-profile-editor__uses { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .browser-profile-editor__uses li { display: contents; }
 .browser-profile-editor__use {
-  width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); min-height: 30px;
+  width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 12px; align-items: center; gap: var(--sp-3); min-height: 30px;
   margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm);
   color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); text-align: left; cursor: pointer;
 }
 .browser-profile-editor__use:hover { color: var(--text); background: var(--wash-1); }
+.browser-profile-editor__use > .browser-profile-editor__go { color: var(--text-3); opacity: .7; }
+.browser-profile-editor__use:hover > .browser-profile-editor__go, .browser-profile-editor__use:focus-visible > .browser-profile-editor__go { color: var(--text-2); opacity: 1; }
 .browser-profile-editor__use:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .browser-profile-editor__open { flex: none; }
 .browser-profile-editor__use > svg { color: var(--text-3); }

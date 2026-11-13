@@ -23,6 +23,7 @@ const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeNavigationNextIcon = semanticIconComponent('navigation.next')
 
 /** The palette lives with the mark, so a chosen and an automatic Profile color can never drift apart. */
 export { PROFILE_HUES }
@@ -300,7 +301,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
           {uses.map(use => <li key={use.browserId}><button type="button" className="browser-profile-editor__use" onClick={() => onShow(use)}
             title={use.state === 'open' ? 'Show this Browser' : 'Show this Browser; it loads when shown'}>
             <ThemeObjectBrowserIcon size={13} /><span>{use.title || use.url || 'New Browser'}</span>
-            <small data-state={use.state}>{use.state === 'open' ? 'Open' : 'Not loaded yet'}</small></button></li>)}
+            <small data-state={use.state}>{use.state === 'open' ? 'Open' : 'Not loaded yet'}</small>
+            <ThemeNavigationNextIcon className="browser-profile-editor__go" size={12} aria-hidden="true" /></button></li>)}
         </ul> : <p className="browser-profile-editor__quiet">No Browser uses this Profile.</p>}
       </section>
 
