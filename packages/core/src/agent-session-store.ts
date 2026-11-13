@@ -635,7 +635,9 @@ function canSupersedeRestartWithStop(
 function assertLifecycleReceiptFence(reservation: AgentMuxLifecycleReservation | null | undefined,
   current: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null, committing = false): void {
   const resolution = current?.continuity?.resolution
-  if (current && next && resolution && current.continuity!.previousRun.runId === current.run.runId) {
+  // A resolution owns its receipt only through a lifecycle reservation. Once a handed-off successor Start is
+  // confirmed not applied and its reservation released, nothing executes it and a new manual intent may continue.
+  if (reservation && current && next && resolution && current.continuity!.previousRun.runId === current.run.runId) {
     const original = current.continuityOperations?.[resolution.originalOperationId]
     if (next.continuity?.operationId !== resolution.operationId ||
         !(committing && reservation?.kind === 'resume' && reservation.resolution) && !isDeepStrictEqual(next.continuityOperations?.[resolution.originalOperationId], original) ||

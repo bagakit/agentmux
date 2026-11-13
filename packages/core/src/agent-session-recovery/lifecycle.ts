@@ -668,6 +668,16 @@ export class AgentSessionRunLifecycle {
           Object.defineProperty(rejected, 'cause', { value: error })
           throw rejected
         }
+        if (resolutionHandoff) {
+          // The handoff already replaced the resolution reservation, so the resolution owner cannot record this.
+          // Keep the confirmed refusal on the original operation: its code and cause stay readable.
+          const pending = await this.ports.sessions.updateExactAgentSession(current.agentSessionId, current.run, value => {
+            const original = value.continuityOperations?.[input.operationId] ?? value.continuity!
+            const retained = { ...original, errorCode: error.code, error: error.message, observedAt: Date.now() }
+            return { ...value, continuity: retained, continuityOperations: { ...value.continuityOperations, [input.operationId]: retained } }
+          })
+          this.ports.events.publishSession(pending)
+        }
         throw error
       })
       if (continuity) await this.settleContinuityMessageInput(continuity, { outcome: 'launch-carried', run: runRef(run.runId) })
