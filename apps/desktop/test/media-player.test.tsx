@@ -183,6 +183,19 @@ describe('mounted player', () => {
     await act(async () => button.click()); expect(retry).toHaveBeenCalledTimes(1)
   })
 
+  it('a failure reason that arrives after the player moved to a new lease does not land on it', async () => {
+    let answer!: (value: { state: 'deleted'; path: string }) => void
+    vi.spyOn(api.files, 'mediaStreamStatus').mockImplementation(() => new Promise(resolve => { answer = resolve }))
+    const first = lease(), next = { ...lease(), id: 'lease-next', url: 'http://127.0.0.1:1/lease-next/clip' }
+    await render(<MediaPlayer lease={first} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { error: { code: 4 } })
+    await act(async () => { media().dispatchEvent(new Event('error')) })
+    // The same player instance is handed a new lease before the old lease's reason comes back.
+    await render(<MediaPlayer lease={next} name="clip.mp4" onRetry={() => {}} />)
+    await act(async () => { answer({ state: 'deleted', path: 'clip.mp4' }) })
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+  })
+
   it('an active lease with code 4 reads as an unsupported format', async () => {
     vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
     await render(<MediaPlayer lease={lease()} name="clip.mov" onRetry={() => {}} />)
