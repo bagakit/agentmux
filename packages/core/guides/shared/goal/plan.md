@@ -38,3 +38,10 @@ If retrieval is unavailable, retain the source and report identities and inspect
 operation; locally verified replies remain readable. Submission, delivery, collection and
 independent review are separate facts. Only the independent passing review releases a
 node's dependents, and a person still accepts the Goal.
+
+An unlinked remote outbox remains unknown: it proves only the original owner save. After
+restoring the exact route or message trust, explicitly repeat goal delegate with the same
+operation, source MID and frozen intent to reconcile the worker receipt. Reading or observing
+the Goal never retries the original delivery. goal delegation bind never sends; it links a
+remote source only after an exact read of the worker inbox confirms that original source.
+A later offline worker does not erase an already confirmed original link.
