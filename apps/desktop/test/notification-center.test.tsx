@@ -141,6 +141,8 @@ it('the problem itself is the details disclosure and reading stays scoped to tha
   expect(disclosure.querySelector('.notification-item__title')?.textContent).toBe('The original first prompt is unconfirmed')
   expect(disclosure.textContent).toContain('Unconfirmed')
   expect(disclosure.querySelector('button')).toBeNull()
+  // Unread is signalled once, by the mark-read control beside the item.
+  expect(disclosure.querySelector('[title="Unread"]')).toBeNull()
   expect(first.querySelector('.notification-item__read')?.closest('.notification-item__reading')?.contains(disclosure)).toBe(true)
   expect(first.querySelector('.notification-item__original')).toBeNull()
   expect(unread()).toBe(3)
