@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os'
 import {dirname,join,resolve} from 'node:path'
 import {runProbeProcess,listProbeProcesses,signalOwnedProbeProcess} from './probe-process.mjs'
 import {privatePackageSmokeEnvironment} from './package-smoke-context.mjs'
+import {pdfPerformanceMarks} from './lib/pdf-performance-marks.mjs'
 
 const require=createRequire(import.meta.url),{build,loadConfigFromFile}=await import('vite'),esbuild=createRequire(require.resolve('vite'))('esbuild')
 const desktop=resolve(import.meta.dirname,'..'),root=resolve(desktop,'../..'),fixture=join(desktop,'scripts/fixtures/workspace-file-sources')
@@ -15,7 +16,7 @@ const temporary=await mkdtemp(join(tmpdir(),'agentmux-pdf-source-')),profile=joi
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
 const paths=['apps/desktop/src/main/workspace-file-sources.ts','apps/desktop/src/main/workspace-files.ts','apps/desktop/src/renderer/src/lib/use-workspace-file-source.ts',
   'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx','packages/editor-extensions/src/pdf/PdfReader.tsx','packages/editor-extensions/src/bytes.ts',
-  'apps/desktop/scripts/verify-workspace-file-sources.mjs','apps/desktop/test/vitest.file-sources.config.mts',...['entry.tsx','preload.ts','main.cjs','native-owner.ts','index.html'].map(file=>'apps/desktop/scripts/fixtures/workspace-file-sources/'+file)]
+  'apps/desktop/scripts/verify-workspace-file-sources.mjs','apps/desktop/scripts/lib/pdf-performance-marks.mjs','apps/desktop/test/vitest.file-sources.config.mts',...['entry.tsx','preload.ts','main.cjs','native-owner.ts','index.html'].map(file=>'apps/desktop/scripts/fixtures/workspace-file-sources/'+file)]
 const sources=async()=>Object.fromEntries(await Promise.all(paths.map(async path=>[path,sha(await readFile(join(root,path)))])))
 const receipt={schema:'agentmux.workspace-file-sources.v1',passed:false,sources:await sources()}
 try{
@@ -39,9 +40,13 @@ try{
   await writeFile(join(workspace,'large.pdf'),pdf)
   const aliases=(await loadConfigFromFile({command:'build',mode:'production'},join(desktop,'test/vitest.file-sources.config.mts'))).config.resolve.alias
   const page=await readFile(join(desktop,'src/renderer/index.html'),'utf8'),csp=/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(page)?.[1];assert.ok(csp)
+  const performanceMarks=pdfPerformanceMarks()
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},
-    plugins:[{name:'production-csp',transformIndexHtml:html=>html.replace('__PRODUCTION_CSP__',csp)}],
+    plugins:[performanceMarks,{name:'production-csp',transformIndexHtml:html=>html.replace('__PRODUCTION_CSP__',csp)}],
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true}})
+  assert.equal(performanceMarks.api.observed.length,2,'Both actual PDF consumer and reader are instrumented')
+  receipt.instrumentedSources=performanceMarks.api.observed
+  for(const item of receipt.instrumentedSources)assert.equal(item.original,receipt.sources[item.file.slice(root.length+1)],'Instrumentation binds the recorded original source')
   const pdfjs=dirname(require.resolve('pdfjs-dist/package.json'))
   for(const directory of ['cmaps','standard_fonts','wasm','iccs'])await cp(join(pdfjs,directory),join(outDir,'pdfjs',directory),{recursive:true})
   await symlink(join(desktop,'node_modules'),join(temporary,'node_modules'))
