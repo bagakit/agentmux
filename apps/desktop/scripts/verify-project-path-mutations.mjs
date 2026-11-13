@@ -25,7 +25,7 @@ if (scope === 'metadata-paths') {
     ['resume-directory-hover', 'LauncherResumePicker', 'title={displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}', 'title={selected.candidate.workspacePath}'],
     ['progress-target-body', 'ContinuousProgressControl', '>{displayPath(target.workspacePath, target.hostId)}</dd>', '>{target.workspacePath}</dd>'],
     ['request-workspace-body', 'AttentionRequestPanel', '>{displayPath(session.workspacePath, session.hostId)}</small>', '>{session.workspacePath}</small>'],
-    ['settings-workspace-body', 'settings/WorkspaceSettingsPane', '>{displayPath(workspace.path, workspace.hostId)}</small>', '>{workspace.path}</small>'],
+    ['settings-host-project-body', 'settings/HostProjectsPane', '>{displayPath(workspace.path, workspace.hostId)}</code>', '>{workspace.path}</code>'],
     ['space-topic-hover', 'SpaceTopicsTree', 'displayPath(topic.directoryPath, workspace.hostId)', 'topic.directoryPath'],
     ['topic-directory-body', 'WorkspaceTopicsPanel', 'topic.summary || displayPath(topic.directoryPath, workspace.hostId)', 'topic.summary || topic.directoryPath']
   ].map(([label, name, before, after]) => ({ label, file: component(name), before, after }))
