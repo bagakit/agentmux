@@ -19,12 +19,12 @@ export function createHostMoteChat(options: {
   const agents = createMoteChatAgents({ resources,
     clients: () => [{ hostId: 'local', client: options.runtime().client }],
     executors: {
-      resolve: async (hostId, executorId, workspacePath) => {
+      resolve: async (hostId, executorId) => {
         exact(hostId)
         const config = await readConfiguredExecutor(options.configurationPath, executorId)
         return { providerId: config.providerId, launch: {
           commandOverride: config.command, args: [...config.args],
-          env: { ...config.env, AGENTMUX_WIKI_DIR: workspacePath }, injectAgentMuxGuide: config.injectAgentMuxGuide
+          env: { ...config.env }, injectAgentMuxGuide: config.injectAgentMuxGuide
         } }
       },
       create: async prepared => {

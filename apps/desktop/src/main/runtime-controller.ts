@@ -1192,10 +1192,7 @@ export class RuntimeController {
           ...(spatialIntent ? { spatialIntent } : {}),
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
           args: localExecutor!.args,
-          env: {
-            ...localExecutor!.env,
-            ...(preparedTopic ? { AGENTMUX_WIKI_DIR: preparedTopic.absolutePath } : {})
-          },
+          env: localExecutor!.env,
           injectAgentMuxGuide: localExecutor!.injectAgentMuxGuide,
           commandOverride: localExecutor!.command,
           ...(agentMuxNote ? { agentMuxNote } : {}),
@@ -2279,29 +2276,11 @@ export class RuntimeController {
     }
     // Target-owned Sessions reattach without a local template or a fresh command probe.
     // Core resolves its own Executor only if Level B recovery needs a new native Run.
-    const scratch = config.workspaces.find((workspace) => (
-      workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
-    ))
-    let scratchTopicId: string | null = null, advisory: string | undefined
-    const name = stored.workspacePath.split('/').at(-1) ?? ''
-    if (scratch && /^(?:topic--(?:launcher|session|view)--|[0-9a-f]{16}$)/.test(name)) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        const topic = await Promise.race([this.scratchTopics.readForDirectory(scratch, stored.workspacePath),
-          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('The optional Wiki directory check timed out.')), 100) })])
-        if (topic?.readError) throw new Error(topic.readError)
-        scratchTopicId = topic?.id ?? null
-      } catch (error) {
-        advisory = `Wiki directory association is unconfirmed: ${error instanceof Error ? error.message : String(error)} Agent continuity and input remain available. Retry the original directory repair before the next resume.`
-      } finally { clearTimeout(timer) }
-    }
-    const executor = this.sessionExecutorOptions(control.hostId, client, config, stored)
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
       operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {}),
-      ...executor,
-      ...(executor.env && scratchTopicId ? { env: { ...executor.env, AGENTMUX_WIKI_DIR: stored.workspacePath } } : {})
+      ...this.sessionExecutorOptions(control.hostId, client, config, stored)
     })
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
     const session = await this.sessionByTarget(client,
@@ -2310,7 +2289,7 @@ export class RuntimeController {
       session.control.agentSessionId !== control.agentSessionId || session.control.run.runId !== result.run.runId) {
       throw new AgentMuxError('The original Core recovery Run changed before its result was projected.', 'STALE_AGENT_SESSION')
     }
-    return { kind: result.kind, session, ...(advisory ? { advisory } : {}) }
+    return { kind: result.kind, session }
   }
 
   async restartSession(

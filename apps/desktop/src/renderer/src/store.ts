@@ -12698,9 +12698,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (priorFailure && get().notificationEvents.includes(priorFailure)) {
           set(state => settleNotificationRecords(state, [priorFailure]))
         }
-        if ((recovery.kind === 'reattachable' || recovery.kind === 'resumed') && recovery.advisory &&
-          get().sessions.some(item => item.id === sessionId && sessionOwnsControl(item, session.control)))
-          get().reportError(new Error(recovery.advisory), { kind: 'indeterminate' })
         return session
       }
       // Core owns the canonical recovery Run for both Agent and raw Terminal intents.

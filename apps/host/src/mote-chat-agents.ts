@@ -7,7 +7,7 @@ import type { AgentMuxAgentCreateInput, AgentMuxHostExecutorInventory, AgentMuxH
 type AgentMuxAgentCreationResult = Awaited<ReturnType<AgentMuxClient['createAgentWithDelivery']>>
 type Core = Pick<AgentMuxClient, 'inspectAgentCreation' | 'readAgentSession' | 'runtimeSubject' | 'ensureAgentContinuity'> & { listHostExecutors(input?: { refresh?: boolean }): Promise<AgentMuxHostExecutorInventory>; createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput): Promise<AgentMuxAgentCreationResult> }
 export type MoteChatExecutorPort = {
-  resolve(hostId: string, executorId: string, workspacePath: string): Promise<
+  resolve(hostId: string, executorId: string): Promise<
     { providerId: string; revision: string; launch?: never } |
     { providerId: string; revision?: never; launch: Pick<AgentMuxAgentCreateInput, 'commandOverride' | 'args' | 'env' | 'injectAgentMuxGuide'> }>
   create(prepared: MoteChatPreparedLaunch): Promise<AgentMuxAgentCreationResult>
@@ -55,7 +55,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
     if (topic.quickMode?.status === 'unconfirmed') return failure('MOTE_CHAT_EXECUTOR_UNCONFIRMED', 'This Mote saved Executor is unconfirmed. Restore its original MOTE.md; existing conversations remain available.')
     const executorId = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.executorId : undefined
     if (!executorId) return failure('MOTE_CHAT_EXECUTOR_REQUIRED', 'Choose Executor for new chat in this Mote Profile. No Agent was started.')
-    const executor = await executors.resolve(original.workspace.hostId, executorId, original.topic.physicalDirectoryPath!)
+    const executor = await executors.resolve(original.workspace.hostId, executorId)
     core(original.workspace.hostId)
     return { ...original, executorId, executor }
   }

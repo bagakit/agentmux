@@ -21,10 +21,10 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): DesktopMote
     return { workspace: found.length === 1 ? found[0]! : null, ...(profileContext ? { profileContext } : {}) }
   } })
   return createHostMoteChatAgents({ resources, clients: options.clients, executors: {
-    resolve: async (_hostId, executorId, workspacePath) => {
+    resolve: async (_hostId, executorId) => {
       const config = options.config(), executor = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
       if (!executor) throw new AgentMuxError('The original saved Mote Executor is unavailable.', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE')
-      return { providerId: executor.providerId, launch: { injectAgentMuxGuide: executor.injectAgentMuxGuide, commandOverride: executor.command, ...(executor.args ? { args: executor.args } : {}), env: { ...executor.env, AGENTMUX_WIKI_DIR: workspacePath } } }
+      return { providerId: executor.providerId, launch: { injectAgentMuxGuide: executor.injectAgentMuxGuide, commandOverride: executor.command, ...(executor.args ? { args: executor.args } : {}), env: { ...executor.env } } }
     },
     create: async prepared => {
       if (prepared.executorRevision || typeof prepared.input.injectAgentMuxGuide !== 'boolean') throw new AgentMuxError('This prepared creation belongs to its original Host Executor owner. Retain and inspect it without recomposing.', 'MOTE_CHAT_EXECUTOR_UNCONFIRMED')
