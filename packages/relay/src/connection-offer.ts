@@ -32,12 +32,18 @@ export function parseConnectionOffer(value: unknown): ConnectionOffer {
  *   byte 0      format and flags: 0x02 = this layout, | 0x01 when the Relay endpoint is written out
  *   bytes 1-32  the Mac's X25519 public key
  *   byte 33     serverId length n, then n ASCII bytes of serverId
- *   if flagged: endpoint length m, then m ASCII bytes of host:port
+ *   if flagged: endpoint length m, then m UTF-8 bytes of host:port
  *
  * Without the flag the Relay endpoint is the page's own host:port and its TLS follows the page scheme.
  */
-const FORMAT = 0x02, EXPLICIT_ENDPOINT = 0x01, KEY_BYTES = 32, MAX_FRAGMENT = 512
-const ascii = (bytes: Uint8Array) => { let text = ''; for (const byte of bytes) { if (byte < 0x21 || byte > 0x7e) throw new Error('Invalid connection link.'); text += String.fromCharCode(byte) } return text }
+const FORMAT = 0x02, EXPLICIT_ENDPOINT = 0x01, KEY_BYTES = 32
+// One format byte, the key, two length bytes, the longest Host ID and endpoint.
+const MAX_FRAGMENT = Math.ceil((1 + KEY_BYTES + 1 + 160 + 1 + 255) / 3) * 4
+const decodeText = (bytes: Uint8Array) => {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  if (/[\u0000-\u0020\u007f]/u.test(text)) throw new Error('Invalid connection link.')
+  return text
+}
 const base64urlEncode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 const base64urlDecode = (text: string) => {
   if (!/^[A-Za-z0-9_-]+$/.test(text) || text.length % 4 === 1) throw new Error('Invalid connection link.')
@@ -46,13 +52,13 @@ const base64urlDecode = (text: string) => {
 }
 
 /**
- * A fragment carries an offer only when it decodes to this format byte; the first base64url character
- * of every such fragment is 'A' (format 0x02 and 0x03 both start with six zero bits). Any other
- * fragment, such as the phone page's own update marker, is not a connection link.
+ * The first two base64url characters identify format 0x02 or 0x03: 'A', then an index in 32..63.
+ * The rest is validated by the parser, so a truncated or polluted offer cannot become an absent offer
+ * and silently select a saved connection. Other page fragments are not connection links.
  */
 export function hasConnectionOffer(input: string): boolean {
   const fragment = new URL(input).hash.slice(1)
-  return /^A[A-Za-z0-9_-]{40,}$/.test(fragment)
+  return /^A[g-z0-9_-]/.test(fragment)
 }
 
 /** The offer in a link, or null when the link carries none. A malformed offer fragment is refused. */
@@ -67,7 +73,7 @@ export function parseConnectionOfferUrl(input: string): ConnectionOffer | null {
   const take = () => {
     const length = bytes[at++]
     if (length === undefined || at + length > bytes.length) throw new Error('Invalid connection link.')
-    return ascii(bytes.slice(at, at += length))
+    return decodeText(bytes.slice(at, at += length))
   }
   const serverId = take()
   const explicit = (bytes[0]! & EXPLICIT_ENDPOINT) !== 0

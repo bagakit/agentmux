@@ -27,19 +27,18 @@ export function parsePortLabels(stdout: string): ReadonlyMap<string, string> {
 }
 
 /**
- * OS port labels such as "Wi-Fi" or "USB 10/100/1000 LAN". They change only with hardware, so one
- * successful read serves the Host's lifetime and a slow or failed read never makes two links for
- * the same address disagree; until a read succeeds, labels stay absent.
+ * OS port labels such as "Wi-Fi" or "USB 10/100/1000 LAN". A successful read also records the
+ * interfaces it checked: virtual interfaces can have no hardware-port label. A newly requested
+ * interface is checked again; a failed read retains known labels and can be retried.
  */
 export function createInterfacePortLabels(read: () => Promise<string> = async () =>
   (await run('/usr/sbin/networksetup', ['-listallhardwareports'], { timeout: 3000 })).stdout): (wanted?: readonly string[]) => Promise<ReadonlyMap<string, string>> {
   let known: ReadonlyMap<string, string> | null = null, pending: Promise<ReadonlyMap<string, string>> | null = null
-  // A USB or Thunderbolt adapter plugged in later is new hardware, so a wanted adapter missing from the
-  // last good read asks again; otherwise the last good read is reused and two links agree.
+  let checked = new Set<string>()
   return async (wanted = []) => {
     if (process.platform !== 'darwin') return new Map()
-    if (known && wanted.every(name => known!.has(name))) return known
-    pending ??= read().then(stdout => { const labels = parsePortLabels(stdout); if (labels.size) known = labels; return known ?? labels })
+    if (known && wanted.every(name => known!.has(name) || checked.has(name))) { checked = new Set(wanted); return known }
+    pending ??= read().then(stdout => { const labels = parsePortLabels(stdout); if (labels.size || !known) known = labels; checked = new Set(wanted); return known ?? labels })
       .catch(() => known ?? new Map<string, string>()).finally(() => { pending = null })
     return pending
   }
