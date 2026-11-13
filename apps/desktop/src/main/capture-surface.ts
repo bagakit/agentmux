@@ -52,8 +52,8 @@ type Active = {
   /** A primary delivery is in flight; a second one would write the clipboard again. */
   finishing: boolean
   fallback: ReturnType<typeof setTimeout> | undefined
-  /** AgentMux windows faded out of the grab, and the one that had focus. */
-  faded: BrowserWindow[]
+  /** AgentMux windows faded out of the grab with the opacity each had (a pin keeps its own), and the one that had focus. */
+  faded: Array<{ window: BrowserWindow; opacity: number }>
   focused: BrowserWindow | null
   end(outcome: CaptureSurfaceOutcome | Error): void
 }
@@ -88,7 +88,7 @@ export class CaptureSurface {
           if (session.returnFocus) this.ports.returnFocus()
           else if (active.focused && !active.focused.isDestroyed()) active.focused.focus()
         }
-        for (const window of active.faded) if (!window.isDestroyed()) window.setOpacity(1)
+        for (const { window, opacity } of active.faded) if (!window.isDestroyed()) window.setOpacity(opacity)
         if (outcome instanceof Error) reject(outcome)
         else resolve(outcome)
       }
@@ -109,8 +109,10 @@ export class CaptureSurface {
   private async start(active: Active): Promise<void> {
     active.focused = BrowserWindow.getFocusedWindow()
     // Step out without leaving the stacking order or focus, so nothing flashes in the Dock or Mission Control.
+    // A window already at opacity 0 is out of the grab and keeps its own value.
     active.faded = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
-    for (const window of active.faded) window.setOpacity(0)
+      .map(window => ({ window, opacity: window.getOpacity() })).filter(({ opacity }) => opacity > 0)
+    for (const { window } of active.faded) window.setOpacity(0)
     if (active.faded.length && process.platform === 'darwin') await new Promise(resolve => setTimeout(resolve, STEP_OUT_SETTLE_MS))
     if (this.active !== active) return
     const frames = await this.ports.native().captureDisplays()
