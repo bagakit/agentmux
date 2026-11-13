@@ -438,6 +438,7 @@ describe('original Browser screenshot workface', () => {
 
   it('real Select, Delete, Erase, Crop, Pixelate and editable numbered-note controls feed copy and context consumers', async () => {
     await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    await act(async () => button(opened, 'Pen').click())
     const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
       await act(async () => {
         pointer('pointerdown', from.x, from.y); pointer('pointermove', to.x, to.y); pointer('pointerup', to.x, to.y)
@@ -555,7 +556,8 @@ describe('original Browser screenshot workface', () => {
 
   it('coalesces continuous drawing on one frame while Copy consumes all samples and the final endpoint exactly once', async () => {
     const waiting = deferred<BrowserPng>(); fixture.compose.mockReturnValueOnce(waiting.promise)
-    await mount(); const opened = await openScreenshot(); await flushFrames()
+    await mount(); const opened = await openScreenshot()
+    await act(async () => button(opened, 'Pen').click()); await flushFrames()
     const canvas = opened.querySelector('canvas')!
     canvas.setPointerCapture = vi.fn()
     const pointer = (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, {

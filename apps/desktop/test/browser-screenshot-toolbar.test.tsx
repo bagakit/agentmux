@@ -52,7 +52,7 @@ async function mount(busy = false) {
   document.head.append(style)
   const node = document.createElement('div'); document.body.append(node)
   const anchor = document.createElement('div'); anchor.dataset.nativeBrowserStage = ''; document.body.append(anchor)
-  const props = { image: { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }, busy, onCancel: vi.fn(), onComplete: vi.fn() }
+  const props = { image: { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300, byteLength: 1 }, busy, initialTool: 'pen' as const, onCancel: vi.fn(), onComplete: vi.fn() }
   root = createRoot(node)
   await act(async () => root!.render(<ImageAnnotationEditor {...props} />))
   await flushFrames()
@@ -123,9 +123,14 @@ it('keeps the real palette, width, text size, drawing history, Copy and Cancel h
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load')))
   await act(async () => button(editor, 'Copy PNG').click())
   expect(props.onComplete).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ displayWidth: 400, displayHeight: 300, crop: null, shapes: [expect.objectContaining({ color: selected, width: 20, points: [{ x: 50, y: 62.5 }, { x: 112.5, y: 62.5 }] })] }))
+  // The new stroke stays selected and owns the property bar; an empty click hands it back to the Text tool.
   await act(async () => button(editor, 'Text').click())
+  for (const type of ['pointerdown', 'pointerup']) await act(async () => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientX: 300, clientY: 250 })))
   expect([...editor.querySelector<HTMLSelectElement>('select[aria-label="Text size"]')!.options].map(o => Number(o.value))).toEqual([...SCREENSHOT_FONT_SIZES])
+  expect(editor.querySelector('[aria-label="Screenshot text"]'), 'the deselecting click starts no text').toBeNull()
   await act(async () => button(editor, 'Cancel').click())
+  expect(props.onCancel, 'the unkept stroke asks before closing').not.toHaveBeenCalled()
+  await act(async () => button(editor, 'Discard').click())
   expect(props.onCancel).toHaveBeenCalledTimes(1)
 })
 

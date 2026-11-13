@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.clearAllMocks(); node = document.createElement('div'); document.body.append(node); root = createClientUiRoot(node)
 })
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-const content = (active = true, busy = false) => <><button aria-label="Other workface">Other workface</button><ImageAnnotationEditor image={image} active={active} busy={busy} onCancel={cancel} onComplete={complete} onEdited={edited} /></>
+const content = (active = true, busy = false) => <><button aria-label="Other workface">Other workface</button><ImageAnnotationEditor image={image} initialTool="pen" active={active} busy={busy} onCancel={cancel} onComplete={complete} onEdited={edited} /></>
 const trigger = () => node.querySelector<HTMLButtonElement>('[aria-label="Markup tool"]')!
 const canvas = () => node.querySelector<HTMLCanvasElement>('canvas')!
 async function frame() { await act(async () => { const queued = [...frames.values()]; frames.clear(); queued.forEach(callback => callback(16)) }) }

@@ -34,7 +34,7 @@ function button(editor: HTMLElement, name: string): HTMLButtonElement {
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
 async function mount(shapes: ScreenshotShape[] = [], source = image) {
-  const props = { image: source, busy: false, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn(), onCopyContext: vi.fn(), onSaveOriginal: vi.fn(), onOpenOriginal: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onEdited: vi.fn() }
+  const props = { image: source, busy: false, initialTool: 'pen' as const, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn(), onCopyContext: vi.fn(), onSaveOriginal: vi.fn(), onOpenOriginal: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onEdited: vi.fn() }
   await act(async () => root.render(<ImageAnnotationEditor {...props} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
   expect(editor).not.toBeNull(); canvas.setPointerCapture = vi.fn()
