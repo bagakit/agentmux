@@ -27,6 +27,8 @@ export interface DeviceConnection {
   /** HTTP client declaration, not a verified device model or browser identity. */
   readonly userAgent?: string
 }
+/** device.ls carries at most this many newest operations per device. Older records stay with the Host device owner. */
+export const DEVICE_OPERATION_WINDOW = 100
 export interface DeviceOperation { readonly id: string; readonly method: string; readonly target: string; readonly at: number; readonly result: 'confirmed' | 'failed' | 'unknown' }
 export type AgentMuxRpcMobileAccessState = { readonly state: 'starting' | 'connected' | 'disconnected' | 'unavailable'; readonly message: string; readonly origin?: string }
 export type AgentMuxRpcDeviceParameterMap = {
@@ -89,7 +91,7 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     if (d.connection !== undefined) parseDeviceConnection(d.connection)
     if (d.connectionIssue !== undefined && (typeof d.connectionIssue !== 'string' || !d.connectionIssue || d.connectionIssue.length > 4096)) fail()
     if (d.operations !== undefined) {
-      if (!Array.isArray(d.operations) || d.operations.length > 100) fail()
+      if (!Array.isArray(d.operations) || d.operations.length > DEVICE_OPERATION_WINDOW) fail()
       for (const value of d.operations as unknown[]) {
         const o = rpcRecord(value, ['id', 'method', 'target', 'at', 'result'], code)
         identifier(o.id, code); identifier(o.method, code); identifier(o.target, code); time(o.at)
