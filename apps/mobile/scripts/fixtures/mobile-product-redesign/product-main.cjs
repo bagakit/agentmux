@@ -126,6 +126,10 @@ app.whenReady().then(async () => {
     await require('./conversation-spacing.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return
   }
+  if (mode === 'mature-shell') {
+    await require('./mature-shell.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'focus-state') {
     await require('./focus-state.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
