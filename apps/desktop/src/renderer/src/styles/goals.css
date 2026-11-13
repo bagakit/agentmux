@@ -122,16 +122,13 @@
 .goals-search input { min-width: 0; width: 100%; border: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
 .goals-search button { padding: var(--sp-2); display: flex; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .goals-button, .goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
-/* Secondary: a quiet fill with the shared top highlight. Primary: the product's solid brand green, one per stage. */
+/* Secondary: a quiet fill with the shared top highlight. Primary is the shared .primary-button, one per stage. */
 .goals-button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.goals-detail .goals-button:not(.goals-button--primary):not(.goals-detail__menu), .goals-service .goals-button:not(.goals-button--primary) { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.goals-detail .goals-button:not(.goals-button--primary):not(.goals-detail__menu):hover:not(:disabled), .goals-service .goals-button:not(.goals-button--primary):hover:not(:disabled) { background: var(--surface-3); box-shadow: var(--hl-strong); }
-.goals-button--primary, .goals-button--primary:hover:not(:disabled) { color: var(--bg); font-weight: 620; background: linear-gradient(180deg, var(--green), var(--green-2)); box-shadow: var(--elev-1), var(--hl-strong); }
-.goals-button--primary:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
-.goals-button--primary:active:not(:disabled) { background: var(--green-2); box-shadow: inset 0 1px 3px var(--scrim-1); }
+.goals-detail .goals-button:not(.goals-detail__menu), .goals-service .goals-button { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.goals-detail .goals-button:not(.goals-detail__menu):hover:not(:disabled), .goals-service .goals-button:hover:not(:disabled) { background: var(--surface-3); box-shadow: var(--hl-strong); }
 /* Light appearance: the brand primary keeps its dark label, as in dark appearance (5.5:1 against --text). */
-:root[data-appearance='light'] .goals-surface :is(.goals-button--primary, .primary-button) { color: var(--text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 52%, #fff), color-mix(in srgb, var(--green) 66%, #fff)); }
-:root[data-appearance='light'] .goals-surface :is(.goals-button--primary, .primary-button):hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--green) 60%, #fff), color-mix(in srgb, var(--green) 74%, #fff)); }
+:root[data-appearance='light'] .goals-surface .primary-button { color: var(--text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 52%, #fff), color-mix(in srgb, var(--green) 66%, #fff)); }
+:root[data-appearance='light'] .goals-surface .primary-button:hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--green) 60%, #fff), color-mix(in srgb, var(--green) 74%, #fff)); }
 .goals-button:disabled { opacity: .45; cursor: default; }
 .goals-button.is-active { background: var(--surface-2); color: var(--text); box-shadow: var(--hl); }
 .goals-toolbar .surface-mode-switch { flex: none; }

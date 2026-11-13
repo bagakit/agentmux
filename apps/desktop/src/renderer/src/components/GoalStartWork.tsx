@@ -20,7 +20,7 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     <div className="goal-delegation__actions">
       <button type="button" className="goals-button" title={`Host ${start.hostId} · Session ${start.agentSessionId}`}
         onClick={() => void openAgent(start.agentSessionId)}>Open original Agent</button>
-      {observation?.goalResult ? <button type="button" className="goals-button goals-button--primary" onClick={() => void review()}>Review results</button> : null}
+      {observation?.goalResult ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
     </div>
     <details className="goal-delegation__source"><summary>Original Start and input</summary>
       <dl><dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd><dt>Original Run</dt><dd>{start.runId}</dd>

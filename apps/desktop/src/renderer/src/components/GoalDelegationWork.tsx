@@ -77,9 +77,9 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
         {row.delegation.attention ? <button type="button" className="goals-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
-        {row.state === 'report' ? <button type="button" className="goals-button goals-button--primary" disabled={busy.has(row.delegation.operationId)}
+        {row.state === 'report' ? <button type="button" className="primary-button" disabled={busy.has(row.delegation.operationId)}
           onClick={() => void collect(row.delegation.operationId, row.report!.replyMessageId)}>{busy.has(row.delegation.operationId) ? 'Collecting…' : 'Collect report'}</button> : null}
-        {row.state === 'collected' ? <button type="button" className="goals-button goals-button--primary" onClick={() => void review()}>Review results</button> : null}
+        {row.state === 'collected' ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
         <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId)}>Open original Agent</button>
         <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}

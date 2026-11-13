@@ -79,7 +79,7 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
   const openConversation = targetSessionId ? <button type="button" className="goals-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{compact ? '打开原对话' : targetName ? `打开 ${targetName} 的对话` : '打开原负责人对话'}</button> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
-      <button type="button" className={`goals-button${pending ? '' : ' goals-button--primary'}`} aria-busy={busy}
+      <button type="button" className={pending ? 'goals-button' : 'primary-button'} aria-busy={busy}
         aria-label={pending ? '核对原巡查' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'} onClick={() => {
         const entry = requestAgentConversationFloatingOpen(targetSessionId, targetHostId,
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
