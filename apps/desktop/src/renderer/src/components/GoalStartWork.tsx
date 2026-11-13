@@ -14,11 +14,11 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     {issue && (observation?.attention?.state === 'confirmed' || issue !== observation?.attention?.reason) ? <p className="goals-service" role="status">{issue}</p> : null}
     {observation?.goalResult ? <p className="goals-service">Goal-level results are available. Their association with this Start is unknown.</p> : null}
     {observation?.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{observation.attention.reason} Goal results and human review remain separate.</p></details> : observation?.attention ? <p className="goals-service" role="status">Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.
-      {start.attention ? <button type="button" className="goals-button"
+      {start.attention ? <button type="button" className="small-button"
         onClick={() => void openAgent(start.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
     </p> : null}
     <div className="goal-delegation__actions">
-      <button type="button" className="goals-button" title={`Host ${start.hostId} · Session ${start.agentSessionId}`}
+      <button type="button" className="small-button" title={`Host ${start.hostId} · Session ${start.agentSessionId}`}
         onClick={() => void openAgent(start.agentSessionId)}>Open original Agent</button>
       {observation?.goalResult ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
     </div>

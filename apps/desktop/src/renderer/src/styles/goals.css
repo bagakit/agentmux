@@ -3,6 +3,8 @@
 .goals-layout { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .goals-index { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; min-height: 0; }
 .goals-surface--detail-open .goals-index { flex: 0 0 288px; min-width: 260px; max-width: 320px; }
+/* Goals uses the shared tiers and sets only its reading density: Secondary actions sit at 28px and keep one line. */
+.goals-surface .small-button { min-height: 28px; flex-shrink: 0; white-space: nowrap; }
 /* One directory and authored instruction library; small objects identify the original requests. */
 .goals-entry { flex: none; min-height: 0; padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .goals-common { max-height: 58%; overflow: auto; }
@@ -104,15 +106,14 @@
 .goals-page-header__summary > [data-goal-summary-stage='unknown'], .goals-page-header__summary > [data-goal-summary-clear] { color: var(--text-3); }
 .goals-page-header__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-left: auto; }
 .goals-page-header .goals-create { min-height: 30px; padding-inline: var(--sp-5); }
-.goals-page-header .goals-button { min-height: 30px; color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.goals-page-header .goals-button:hover:not(:disabled) { background: var(--surface-3); box-shadow: var(--hl-strong); }
+.goals-page-header .small-button { min-height: 30px; }
 /* Beside an open Goal the header keeps title and actions on one line and the counts below. */
 .goals-surface--detail-open .goals-page-header { gap: var(--sp-3) var(--sp-4); padding: var(--sp-5) var(--sp-5) var(--sp-4); }
 .goals-surface--detail-open .goals-page-header h1 { font-size: var(--fs-title); letter-spacing: -.01em; }
 .goals-surface--detail-open .goals-page-header__mark { width: 22px; height: 22px; border-radius: var(--radius-sm); }
 .goals-surface--detail-open .goals-page-header__summary { order: 3; flex-basis: 100%; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-meta); }
 .goals-surface--detail-open .goals-page-header__actions { gap: var(--sp-2); }
-.goals-surface--detail-open .goals-page-header :is(.goals-button, .goals-create) { min-height: 26px; padding-inline: var(--sp-4); font-size: var(--fs-meta); }
+.goals-surface--detail-open .goals-page-header :is(.small-button, .goals-create) { min-height: 26px; padding-inline: var(--sp-4); }
 .goals-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .goals-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 40px; width: 100%; padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .goals-surface--detail-open .goals-toolbar { flex-wrap: wrap; }
@@ -122,10 +123,7 @@
 .goals-search input { min-width: 0; width: 100%; border: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
 .goals-search button { padding: var(--sp-2); display: flex; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .goals-button, .goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
-/* Secondary: a quiet fill with the shared top highlight. Primary is the shared .primary-button, one per stage. */
 .goals-button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.goals-detail .goals-button:not(.goals-detail__menu), .goals-service .goals-button { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
-.goals-detail .goals-button:not(.goals-detail__menu):hover:not(:disabled), .goals-service .goals-button:hover:not(:disabled) { background: var(--surface-3); box-shadow: var(--hl-strong); }
 /* Light appearance: the brand primary keeps its dark label, as in dark appearance (5.5:1 against --text). */
 :root[data-appearance='light'] .goals-surface .primary-button { color: var(--text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 52%, #fff), color-mix(in srgb, var(--green) 66%, #fff)); }
 :root[data-appearance='light'] .goals-surface .primary-button:hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--green) 60%, #fff), color-mix(in srgb, var(--green) 74%, #fff)); }
@@ -299,12 +297,12 @@
 .goals-criteria-reading { margin: var(--sp-4) 0; }
 .goals-criteria-reading > summary { cursor: pointer; font-size: var(--fs-body); color: var(--text-2); }
 .goals-criteria-reading[open] > summary { margin-bottom: var(--sp-4); }
-.goals-evidence button { display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; padding: var(--sp-2) 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.goals-evidence :is(.goals-evidence__open, .goals-evidence__copy) { display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; padding: var(--sp-2) 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; overflow-wrap: anywhere; text-align: left; }
 .goals-evidence__open { min-width: 0; }
 .goals-evidence__open svg { flex-shrink: 0; }
 .goals-evidence .goals-evidence__copy { flex: none; color: var(--text-3); }
-.goals-evidence button:hover { color: var(--text); text-decoration: underline; }
-.goals-evidence button:disabled { color: var(--text-3); cursor: default; text-decoration: none; }
+.goals-evidence :is(.goals-evidence__open, .goals-evidence__copy):hover { color: var(--text); text-decoration: underline; }
+.goals-evidence :is(.goals-evidence__open, .goals-evidence__copy):disabled { color: var(--text-3); cursor: default; text-decoration: none; }
 .goals-previous-report { margin: var(--sp-4) 0; }
 .goals-previous-report > .goals-proposal { margin-top: var(--sp-4); }
 .goals-original-intent { border-top: 1px solid var(--line-soft); padding: var(--sp-5) 0; margin-bottom: 0; }
@@ -357,7 +355,7 @@
 .goal-collaboration__member[data-session-state='error'] small { color: var(--red-text); font-weight: 560; }
 .goal-agent-face { display: inline-flex; flex: none; }
 .goal-collaboration__recommendations { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: var(--sp-3) 0 var(--sp-5) 84px; }
-.goal-collaboration__recommendations .goals-button { gap: var(--sp-3); }
+.goal-collaboration__recommendations .small-button { gap: var(--sp-3); }
 .goal-collaboration__assign { color: var(--text-2); font-size: var(--fs-meta); }
 .goals-topology { padding-top: var(--sp-4); }
 @media (max-width: 520px) {

@@ -17,11 +17,11 @@ export function GlobalGoalPatrolControl() {
   }
   return <div className="goals-global-patrol" aria-label="全局巡查">
     <div className="goal-patrol__actions">
-      <button type="button" className="goals-button" disabled={request?.pending} onClick={() => void requestGlobalGoalPatrol()}>
+      <button type="button" className="small-button" disabled={request?.pending} onClick={() => void requestGlobalGoalPatrol()}>
         {request?.pending ? '正在准备全局巡查…' : request ? '检查本次巡查' : '全局巡查'}
       </button>
-      {binding ? <button type="button" className="goals-button" onClick={openCurrent}>打开巡查对话</button> : null}
-      {request?.operationId && !request.pending ? <button type="button" className="goals-button" onClick={() => void requestGlobalGoalPatrol(true)}>新巡查</button> : null}
+      {binding ? <button type="button" className="small-button" onClick={openCurrent}>打开巡查对话</button> : null}
+      {request?.operationId && !request.pending ? <button type="button" className="small-button" onClick={() => void requestGlobalGoalPatrol(true)}>新巡查</button> : null}
     </div>
     {request ? <div className="goals-global-patrol__feedback" role="status">
       {request.report ? <span>{request.report.agent?.initialPrompt === 'confirmed' ? '任务已投递；检查结果与处理建议回到本次对话。' : '原讨论与请求已保留；输入回执尚待确认。'}</span> : null}

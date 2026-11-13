@@ -37,7 +37,7 @@
 .goal-responsibility--compact .goal-responsibility__phase--attention { color: var(--amber-text); }
 .goal-patrol__secondary { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) 0; }
 .goal-patrol--compact { padding-top: var(--sp-2); }
-.goal-patrol--compact .goal-patrol__actions :is(.primary-button, .goals-button) { min-height: 24px; padding: var(--sp-1) var(--sp-3); }
+.goal-patrol--compact .goal-patrol__actions :is(.primary-button, .small-button) { min-height: 24px; padding: var(--sp-1) var(--sp-3); }
 .goal-patrol--compact .goal-patrol__source { font-size: var(--fs-meta); }
 .goal-patrol__source summary { width: fit-content; border-radius: var(--radius-sm); }
 .goal-patrol__source summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }

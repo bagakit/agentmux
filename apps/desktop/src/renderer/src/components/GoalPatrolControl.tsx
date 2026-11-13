@@ -76,19 +76,19 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
   const needsSupervisor = !manager || !['available', 'busy'].includes(manager.state)
   const canContinue = pending && patrol?.supervisorAgentSessionId && manager?.agentSessionId === patrol.supervisorAgentSessionId && manager.runId &&
     manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
-  const openConversation = targetSessionId ? <button type="button" className="goals-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{compact ? '打开原对话' : targetName ? `打开 ${targetName} 的对话` : '打开原负责人对话'}</button> : null
+  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{compact ? '打开原对话' : targetName ? `打开 ${targetName} 的对话` : '打开原负责人对话'}</button> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
-      <button type="button" className={pending ? 'goals-button' : 'primary-button'} aria-busy={busy}
+      <button type="button" className={pending ? 'small-button' : 'primary-button'} aria-busy={busy}
         aria-label={pending ? '核对原巡查' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'} onClick={() => {
         const entry = requestAgentConversationFloatingOpen(targetSessionId, targetHostId,
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
         void run(pending ? () => refreshGoalDelegations(demand.id) : () => request(entry), entry)
       }}>{busy ? '核对原巡查…' : compact ? pending ? '核对原巡查' : '请求巡查' : pending ? '巡查请求已保存' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'}</button>
-      {!compact && patrol ? <button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
-      {canContinue ? <button type="button" className="goals-button" disabled={busy} onClick={() => void run(continueOriginal)}>接续原巡查</button> : null}
+      {!compact && patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
+      {canContinue ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(continueOriginal)}>接续原巡查</button> : null}
       {!compact || needsSupervisor ? openConversation : null}
-      {needsSupervisor ? <button type="button" className="goals-button" onClick={() => setSupervisorGoalId(demand.id)}>选择 Supervisor</button> : null}
+      {needsSupervisor ? <button type="button" className="small-button" onClick={() => setSupervisorGoalId(demand.id)}>选择 Supervisor</button> : null}
     </div>
     {observed ? <p className="goal-patrol__feedback" role="status"><strong>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}
     {observed?.state === 'missing' ? <p className="goal-patrol__feedback">原 PMO 尚未确认，巡查尚未开始。恢复原 PMO 后接续原巡查，或明确选择 Supervisor；选择不会自动发送。</p> : null}
@@ -98,7 +98,7 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
     {supervisorGoalId === demand.id ? <GoalAgentPicker key={demand.id} demand={demand} role="supervisor" onSave={saveSupervisor} onClose={() => setSupervisorGoalId(null)} /> : null}
     {patrol || compact && targetSessionId && !needsSupervisor ? <details className="goal-patrol__source"><summary>{compact ? '巡查详情' : '原巡查与输入'}</summary>
       {compact ? <div className="goal-patrol__secondary">
-        {patrol ? <button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
+        {patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
         {!needsSupervisor ? openConversation : null}
       </div> : null}
       {patrol ? <dl><dt>巡查 operation</dt><dd>{patrol.operationId}</dd>

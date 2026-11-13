@@ -101,14 +101,14 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
     else void run(() => execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' }))
   }
   return <section className="goals-continuation" aria-label="Goal continuous progress">
-    <div className="goals-continuation__heading"><span>Continue this work</span><button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => inspect())}>Refresh</button></div>
+    <div className="goals-continuation__heading"><span>Continue this work</span><button type="button" className="small-button" disabled={busy} onClick={() => void run(() => inspect())}>Refresh</button></div>
     {!supervisorId ? <div className="goals-supervisor-guide">
       <span className="goals-supervisor-guide__orbit" aria-hidden="true"><ThemeObjectOrbitIcon size={26} strokeWidth={1.25} /></span>
       <div><strong>Keep this work moving</strong><p>Choose one assignee to supervise ongoing progress.</p></div>
-      <button type="button" className="goals-button" disabled={busy} onClick={openSupervisor}>Choose Supervisor</button>
+      <button type="button" className="small-button" disabled={busy} onClick={openSupervisor}>Choose Supervisor</button>
     </div> : <div className="goals-supervisor-identity">
       <div><span>Supervisor</span><GoalContinuationAgent agentSessionId={supervisorId} active={active} size={20} /></div>
-      <button type="button" className="goals-button" disabled={busy} onClick={openSupervisor}>Change</button>
+      <button type="button" className="small-button" disabled={busy} onClick={openSupervisor}>Change</button>
     </div>}
     {error ? <p className="goals-service" role="status">{error}</p> : null}
     {observedGoal !== demand.id && !error ? <p className="goals-service">Checking the original continuation…</p> : null}
@@ -118,16 +118,16 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
       {loop.status !== 'stopped' && loop.agentSessionId !== supervisorId ? <p className="goals-service">This loop keeps its original Agent. Stop it explicitly before starting with the new Supervisor.</p> : null}
       <p>{loop.lastDecision ?? (loop.initialDelivery?.state !== 'confirmed' ? 'The original start receipt is unconfirmed. Your Agent and input are retained.' : 'Uses the same executing Agent. Host acceptance does not mean work is complete.')}</p>
       {loop.status === 'active' ? <small>Next check {new Date(loop.nextCheckAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small> : null}
-      {loop.status !== 'stopped' && loop.initialDelivery && loop.initialDelivery.state !== 'confirmed' ? <button type="button" className="goals-button" disabled={busy || Boolean(mutation.current)} onClick={() => retrySavedStart(loop)}>Inspect and retry original start</button> : null}
-      <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <button type="button" className="goals-button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</button>)}</div>
+      {loop.status !== 'stopped' && loop.initialDelivery && loop.initialDelivery.state !== 'confirmed' ? <button type="button" className="small-button" disabled={busy || Boolean(mutation.current)} onClick={() => retrySavedStart(loop)}>Inspect and retry original start</button> : null}
+      <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <button type="button" className="small-button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</button>)}</div>
     </div>)}
     {supervisorId && !currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <form className="goals-continuation__start" onSubmit={event => { event.preventDefault(); start() }}>
       <label className="goals-continuation__interval">Check every<TextInput aria-label="Goal continuation minutes" type="number" min="1" value={minutes} disabled={busy || Boolean(attempt.current)} onChange={event => setMinutes(event.target.value)} /> minutes</label>
-      <button type="submit" className="goals-button" disabled={busy || Boolean(mutation.current) || Boolean(attempt.current) || demand.alignment?.confirmedAt == null || !assigneeSessionIds.includes(supervisorId) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
+      <button type="submit" className="small-button" disabled={busy || Boolean(mutation.current) || Boolean(attempt.current) || demand.alignment?.confirmedAt == null || !assigneeSessionIds.includes(supervisorId) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
       {demand.alignment?.confirmedAt == null ? <p className="goals-service">Confirm this Goal’s scope before enabling automatic work.</p> : null}
     </form> : null}
-    {error && mutation.current?.goalId === demand.id ? <button type="button" className="goals-button" disabled={busy} onClick={() => { const saved = mutation.current, loop = currentLoops.find(item => item.loopId === saved?.loopId); if (saved && loop) mutate(loop, saved.action, true) }}>Inspect and retry original {mutation.current.action}</button> : null}
-    {error && attempt.current?.goalId === demand.id && !currentLoops.some(loop => loop.creationOperationId === attempt.current?.operationId && loop.status !== 'stopped') ? <button type="button" className="goals-button" disabled={busy} onClick={() => start(true)}>Inspect and retry original start</button> : null}
+    {error && mutation.current?.goalId === demand.id ? <button type="button" className="small-button" disabled={busy} onClick={() => { const saved = mutation.current, loop = currentLoops.find(item => item.loopId === saved?.loopId); if (saved && loop) mutate(loop, saved.action, true) }}>Inspect and retry original {mutation.current.action}</button> : null}
+    {error && attempt.current?.goalId === demand.id && !currentLoops.some(loop => loop.creationOperationId === attempt.current?.operationId && loop.status !== 'stopped') ? <button type="button" className="small-button" disabled={busy} onClick={() => start(true)}>Inspect and retry original start</button> : null}
   </section>
 }
 

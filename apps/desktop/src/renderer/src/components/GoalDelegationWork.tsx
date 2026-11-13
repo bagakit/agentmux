@@ -64,7 +64,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   return <><GoalResponsibilitySummary demand={current} active={active} /><section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label="Delegated work">
-    <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="goals-button" onClick={() => void refresh()}>Refresh reports</button></div>
+    <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
     <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
     {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId}>
@@ -74,15 +74,15 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
       {row.report ? <p className="goal-delegation__summary">{row.report.grounding.summary}</p> : null}
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}
       {row.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{row.attention.reason} The report and human review remain separate.</p></details> : row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
-        {row.delegation.attention ? <button type="button" className="goals-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
+        {row.delegation.attention ? <button type="button" className="small-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId)}>Open original Supervisor</button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
         {row.state === 'report' ? <button type="button" className="primary-button" disabled={busy.has(row.delegation.operationId)}
           onClick={() => void collect(row.delegation.operationId, row.report!.replyMessageId)}>{busy.has(row.delegation.operationId) ? 'Collecting…' : 'Collect report'}</button> : null}
         {row.state === 'collected' ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
-        <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.workerAgentSessionId}`}
+        <button type="button" className="small-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId)}>Open original Agent</button>
-        <button type="button" className="goals-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
+        <button type="button" className="small-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.ownerAgentSessionId)}>Open task owner</button>
       </div>
       <details className="goal-delegation__source"><summary>Task and source</summary>

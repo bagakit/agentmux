@@ -72,6 +72,6 @@ function Evidence({ reference }: { reference: DemandEvidence }) {
     <button type="button" className="goals-evidence__copy" aria-label={`Copy evidence location ${label}`} title="Copy full location" onClick={() => void copy()}>Copy</button>
     {typeof reference === 'string' && !external ? <small>Original reference · File source not recorded</small> : null}
     {typeof reference !== 'string' ? <details><summary>{sourceName}</summary><code>{reference.resource.workspacePath}</code><small>{reference.resource.hostId} · {reference.resource.workspaceId} · {reference.revision ?? 'Revision not recorded'}</small></details> : null}
-    {issue ? <span className="goals-service" role="status">{issue}{changed ? <button type="button" className="goals-button" disabled={busy} onClick={() => void open(true)}>View current file</button> : null}</span> : null}
+    {issue ? <span className="goals-service" role="status">{issue}{changed ? <button type="button" className="small-button" disabled={busy} onClick={() => void open(true)}>View current file</button> : null}</span> : null}
   </span>
 }
