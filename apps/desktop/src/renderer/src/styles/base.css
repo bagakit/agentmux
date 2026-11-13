@@ -141,6 +141,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-item__original .service-window { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .notification-item__actions { display: flex; flex: none; align-items: center; gap: var(--sp-1); margin-left: auto; font-size: var(--fs-meta); }
 .notification-item__action { max-width: 140px; min-height: 26px; padding: 0 var(--sp-2); white-space: normal; overflow-wrap: anywhere; font-weight: 500; }
+.notification-item__action > svg { display: none; }
 .notification-item__read { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; color: var(--text-3); }
 .notification-item__read::before { content: ''; }
 .notification-item__read > svg, .notification-item:is(:hover, :focus-within) .notification-item__read::before { display: none; }
