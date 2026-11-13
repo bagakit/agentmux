@@ -72,6 +72,16 @@
 - **恢复动作必须幂等**。同一 Agent Session 在重复启动、窗口重新聚焦或 Topic 重进时，若已有精确匹配的 live Run 只能 attach；若 Run 已丢失且 handle 有效，只允许创建一个新的 Provider-native Run。任何迟到的旧 Run 事件都不得覆盖新的绑定。
 - **机器重启后的边界必须如实表达**：旧 PTY 进程、ctxmux 内存 scrollback 与 pending interaction 不承诺可恢复；可恢复的是持久化的 Agent Session 语义身份及 Provider 自己支持的 resume。于是重启后终端可能从新 Run 的首屏开始，但布局、Agent 身份与恢复入口必须仍在。**布局仍在的含义是它的每一面都能用**：一个恢复出来的文件面必须真的把文档装上，而不是留一个报「不可用」的空壳；文件确已不在磁盘上时，走的是与「打开着的文件被删」完全同一条既有失败态，不另造一种。
 
+### 已关闭 Session 的 AgentMux 记录
+
+已关闭 Session 的 AgentMux 记录由用户决定是否删除，不自动清理。用户可以在原历史入口选择准确的已退休 Session，查看原对话和按 owner 区分的资源明细。关闭一个 View、自然退出或暂时读不到 Session，不是可删除资格；准确生命周期仍由 Core 判定。读取历史和资源不恢复或操作 Run。
+
+资源检查只按选中对象和实际取得的范围表达逻辑字节与记录数，并保留来源、观察时点、版本边界、部分完成和取消。未检查的 Core 记录、Provider 原件、ctxmux Runtime 与全库文件／页分别表达为未测量或未知，不推算“可回收磁盘”。统计失败不撤销原历史、恢复或其他健康能力，也不是删除权限的依据。
+
+动作明确称为“删除 AgentMux 记录”。确认说明准确 Host／Session 与范围：删除后此原 Session 的 Core 受管记录不可读、不可继续；Provider 原件及 ctxmux Runtime 资源由各自 owner 保留，本动作不物理删除它们，也不声称释放其空间。原 Session 的终局身份与已知创建、继续和删除操作关联必须保留；旧创建／继续请求或迟到观察不能因原记录缺席重新造出 Session。未确认删除保留同一原操作及只读核对入口，不换身份或自动重放；源漂移只拒绝本次准确请求，不影响其他健康 Session。
+
+用户独立未发送草稿和队列不属于本动作的删除范围。它们保留在原 client 持久 owner，删除后仍有可发现、可复制的入口，包括关联已删除 Session 或缺少旧 Region 绑定的内容。不因历史目录不再列出原 Session 而消失；关联未知时保留原 key，不猜测 Host／Session。不将旧输入重置为可自动发送，也不为复制内容启动新 Session。原 Core 历史缓存消费准确删除事实，本机独立内容不冒称为仍可读的 Core 原件。
+
 ### Agent Session 启动与恢复的统一阶段
 
 会话恢复由 Core 的 `@agentmux/core/agent-session-recovery` 模块统一拥有决策、原操作对账、有界推进和结果合同。Provider 贡献准确原生初始化、对象身份与前台事实；ctxmux 仍拥有 Run／进程／PTY，原输入 owner 仍持有输入意图和回执。GUI、CLI 及其他宿主消费同一 Core 结果，不凭进程存活或展示报错自行认定恢复成功。模块机制见[会话恢复模块](../../architecture/agent-session-recovery.md)。
