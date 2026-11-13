@@ -30,7 +30,7 @@ beforeEach(() => useAppStore.setState({ config: structuredClone(composerConfig),
 it('the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const row = dom.container.querySelector<HTMLElement>('[data-settings-section="continuity"]')!
-  expect(row?.textContent).toContain('Execution'); expect(row?.textContent).toContain('3 retries')
+  expect(row?.textContent).toContain('Session recovery'); expect(row?.textContent).toContain('3 retries')
   const search = dom.container.querySelector<HTMLInputElement>('input[placeholder="Search settings"]')!
   expect(search).not.toBeNull()
   await act(async () => {
@@ -71,7 +71,7 @@ it('retry choices are discoverable, strictly authored and separate from rechecks
   expect(useAppStore.getState().config?.continuity).toBeUndefined()
   const section = dom.container.querySelector('[data-continuity-retry-settings]')!
   expect(section.textContent).toContain('Zero disables automatic retries')
-  expect(section.textContent).toContain('at most one second and at most one quarter')
+  expect(section.textContent).toContain('up to 25% of the base, capped at one second')
   expect(section.textContent).toContain('without resending earlier input')
   await input('First retry base delay', '2.125'); await input('Maximum retry base delay', '1')
   expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')?.disabled).toBe(true)
