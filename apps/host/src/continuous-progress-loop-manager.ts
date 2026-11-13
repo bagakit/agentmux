@@ -663,6 +663,9 @@ export class ContinuousProgressLoopManager {
       let outcome: LoopTickOutcome = 'skipped'
       let pending = claim.loop.pendingCompletion
       let newCheckInClaim = false
+      // Until a pending send is saved and handed to the input owner, a failure proves nothing was
+      // sent: the tick is skipped and the next one retries. Afterwards the result stays unknown.
+      let dispatched = Boolean(pending)
       try {
         if (!isCurrent()) continue
         if (claim.loop.taskSource?.kind === 'goal') {
@@ -722,12 +725,13 @@ export class ContinuousProgressLoopManager {
               this.patch(claim.loop.loopId, { pendingCompletion: pending })
               await this.store.save(this.scheduler.list())
               if (!isCurrent()) continue
+              dispatched = true
               outcome = await this.onTick({ ...claim.loop, pendingCompletion: pending }, pending.operationId, isCurrent, controller.signal)
             }
           }
         }
       } catch (error) {
-        outcome = 'unknown'
+        outcome = dispatched ? 'unknown' : 'skipped'
         this.patch(claim.loop.loopId, { lastDecision: error instanceof Error ? error.message : String(error) })
       }
       finally { this.activeDelivery = undefined }
