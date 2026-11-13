@@ -13,7 +13,7 @@ async function visible(selector: string, timeout = 4000) {
 }
 async function create() {
   await f.open()
-  await f.click('Create a bot for this Mote')
+  await f.click('Sign in & continue')
   await visible('.mote-bot-confirmation svg')
 }
 function observeViews() {
@@ -103,10 +103,15 @@ it('stops on an unknown native result and reads the same recorded request withou
   expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count)
   expect(f.creationCount).toBe(0); expect(f.beginCount).toBe(1)
   const platformRequests = f.registration.mock.calls.length
+  const reads = f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.inspect').length
+  const observations = f.connectionCalls.mock.calls.filter(([method]) => method === 'connection.enrollment.inspect').length
   await f.click('Original setup details'); await f.click('Check saved progress')
+  await vi.waitFor(() => expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.inspect')).toHaveLength(reads + 1))
+  await vi.waitFor(() => expect(f.connectionCalls.mock.calls.filter(([method]) => method === 'connection.enrollment.inspect')).toHaveLength(observations + 1))
   await pause(50)
   expect(parent().operationId).toBe(id)
-  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count + 1)
+  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.inspect').at(-1)![1]).toMatchObject({ operationId: id })
+  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count)
   expect(f.registration.mock.calls).toHaveLength(platformRequests)
   expect(f.beginCount).toBe(1)
 })

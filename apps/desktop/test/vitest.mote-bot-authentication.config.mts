@@ -13,7 +13,7 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
     if (file !== 'apps/desktop/src/renderer/src/lib/use-mote-bot-setup.ts') return
     let code = source
     if (mutation) {
-      const anchor = 'if (!driving || !selectedId || busy.includes(selectedId) || enrollmentView?.parentId !== selectedId) return'
+      const anchor = 'if (!enabled || !driving || !selectedId || busy.includes(selectedId) || enrollmentView?.parentId !== selectedId) return'
       if (source.split(anchor).length !== 2) throw Error('Missing unique original Mote authentication driver')
       code = source.replace(anchor, 'if (true) return')
     }
