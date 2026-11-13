@@ -30,7 +30,7 @@ type PlaylistLease = LeaseBase & {
 }
 type Lease = FileLease | PlaylistLease
 
-type MediaFiles = Pick<WorkspaceFiles, 'openMediaHandle' | 'readMediaPlaylist'>
+type MediaFiles = Pick<WorkspaceFiles, 'openMediaHandle' | 'readMediaPlaylist' | 'mediaPlaylistStamp'>
 type Range = { start: number; end: number }
 type Fail = (status: number, message: string, headers?: Record<string, string>) => void
 
@@ -395,8 +395,13 @@ export class WorkspaceMediaStreams {
     if (previous && hold !== null && previous.body.equals(body)) {
       lease.responses.add(response)
       response.once('close', () => lease.responses.delete(response))
+      // While held, compare a cheap stamp; only a changed stamp pays for a full confined read.
+      let stamp = await this.files.mediaPlaylistStamp(lease.workspace, path).catch(() => null)
       for (const deadline = previous.at + hold; Date.now() < deadline;) {
         if (!await this.pause(lease, response, Math.min(LIVE_PLAYLIST_RECHECK_MS, deadline - Date.now()))) { fail(410, 'This media lease was released.'); return }
+        const nextStamp = await this.files.mediaPlaylistStamp(lease.workspace, path).catch(() => null)
+        if (nextStamp !== null && nextStamp === stamp) continue
+        stamp = nextStamp
         const next = await this.readPlaylist(lease, path, fail)
         if (!next) return
         if (!next.equals(body)) { body = next; break }

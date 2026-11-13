@@ -1123,6 +1123,23 @@ export class WorkspaceFiles {
    * Encoders replace playlists by rename, so nothing is pinned across reads; a read that
    * observes a replacement retries on the new object, and only this request reports changed.
    */
+  /**
+   * A cheap change stamp for a playlist path: which object it names and that object's size and times.
+   * A held live reload compares this before paying for a full confined read. Null when it is gone.
+   */
+  async mediaPlaylistStamp(workspace: WorkspaceRecord, requestedPath: string): Promise<string | null> {
+    if (this.hostFor(workspace.hostId).kind !== 'local') return null
+    const { root, requested } = await localFileScope(workspace, requestedPath)
+    try {
+      const info = await lstat(localPathWithin(root, requested), { bigint: true })
+      return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'ENOENT' || code === 'ENOTDIR') return null
+      throw error
+    }
+  }
+
   async readMediaPlaylist(workspace: WorkspaceRecord, requestedPath: string): Promise<Buffer> {
     for (let attempt = 1; ; attempt++) {
       let media: WorkspaceMediaHandle
