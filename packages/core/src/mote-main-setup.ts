@@ -65,6 +65,7 @@ export async function reconcileMoteMainSetup(input: MoteMainSetupRequest, advanc
     if (observed) {
       result.binding = 'confirmed'; result.bindingObserved = observed
       if (advance) { await ports.assertCurrent(); result.record = await ports.spatial.observeMoteMainBinding(record.requestId,observed) }
+      else result.issue = 'The original Main binding is observed; retaining this observation in its original admission is unconfirmed. Explicitly advance this same setup operation to confirm it. The original Agent and request are kept.'
       return result
     }
     if (original.moteMainFollowUps?.refusedBeforeBinding) { result.binding = 'refused'; result.issue = 'The original MOTE settings changed before binding was submitted. The created Agent is kept; review it in settings or begin a new action from the current source.'; return result }
