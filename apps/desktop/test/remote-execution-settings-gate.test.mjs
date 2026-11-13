@@ -13,11 +13,10 @@ test('records both exact hashes for Vite source-map blanking without accepting o
   assert.throws(() => sourceObservation('source.ts', source, loaded.replace('types', 'wrong')), /Unaccounted loaded source/)
 })
 
-test('illustration and CSS bind visual approval without pretending to be consumed component source', () => {
-  assert(productFiles.includes('apps/desktop/src/renderer/src/assets/settings/remote-execution.png'))
+test('CSS binds visual approval without pretending to be consumed component source', () => {
   assert(productFiles.includes('apps/desktop/src/renderer/src/styles/remote-execution-settings.css'))
   assert(componentFiles.length > 0 && componentFiles.every(path => /\.tsx?$/u.test(path)))
-  assert.equal(componentFiles.length, productFiles.length - 2)
+  assert.equal(componentFiles.length, productFiles.length - 1)
 })
 
 test('full gate consumes canonical independent visual approval; a checks-only run remains distinct', () => {

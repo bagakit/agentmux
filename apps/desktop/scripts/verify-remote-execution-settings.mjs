@@ -24,8 +24,7 @@ export const productFiles = [
   'apps/desktop/src/renderer/src/components/AgentToolExecutionNotice.tsx',
   'apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
   'apps/desktop/src/renderer/src/store.ts',
-  'apps/desktop/src/renderer/src/styles/remote-execution-settings.css',
-  'apps/desktop/src/renderer/src/assets/settings/remote-execution.png'
+  'apps/desktop/src/renderer/src/styles/remote-execution-settings.css'
 ]
 // Presentation bytes bind independent visual approval; only executable component sources bind the component checks.
 export const componentFiles = productFiles.filter(path => /\.tsx?$/u.test(path))

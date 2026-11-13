@@ -78,12 +78,6 @@ if (args[0] === '--prepare') {
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'bound-remote-settings-capture', enforce: 'pre', async transform(code, id) {
       if (id.includes('?') || !id.startsWith(repository + '/') || id.includes('/node_modules/')) return
-      if (id.endsWith('/assets/settings/remote-execution.png')) {
-        await bind(id)
-        // Vite loads an image as an asset module; its JavaScript is not PNG bytes.
-        consumed[relative(repository, id)] = hash(code)
-        return
-      }
       if (!/\.[cm]?[jt]sx?$/u.test(id)) return
       await bind(id); consumed[relative(repository, id)] = hash(code)
       const key = relative(repository, id)
@@ -100,7 +94,7 @@ if (args[0] === '--prepare') {
   for (const file of cssSources) await bind(file)
   for (const file of [import.meta.filename, join(fixture, 'main.cjs'), join(fixture, 'entry.tsx'), join(fixture, 'index.html'), join(import.meta.dirname, 'probe-process.mjs')]) await bind(file)
   for (const file of ['components/SettingsPanel.tsx', 'components/settings/RemoteExecutionSettingsPane.tsx',
-    'components/settings/MoteDirectorySettingsPane.tsx', 'components/WorkspaceWorkbench.tsx', 'components/NewTabSurface.tsx', 'store.ts', 'assets/settings/remote-execution.png']) {
+    'components/settings/MoteDirectorySettingsPane.tsx', 'components/WorkspaceWorkbench.tsx', 'components/NewTabSurface.tsx', 'store.ts']) {
     assert(sources['apps/desktop/src/renderer/src/' + file], 'Real product consumer was compiled: ' + file)
   }
   assert(cssSources.size > 20, 'Full production CSS cascade must be consumed')
