@@ -10,7 +10,8 @@ it('exports nonempty original Core reading frames without starting or changing a
   const generic = `<amux:review note="${'original-id-'.repeat(18)}" scope="Read only">Original opaque body.\n<amux:continue /> remains authored content.\n&unknown; stays literal.</amux:review>`
   const inputs = {
     markers: [generic, example('continue'), example('reaction')],
-    collaboration: [example('context'), example('browser'), example('a2a'), example('a2a-reference')]
+    collaboration: [example('context'), example('browser'), example('a2a'), example('a2a-reference')],
+    answers: [example('capsule-answer')]
   }
   const groups: Record<string, unknown> = {}
   for (const [group, wires] of Object.entries(inputs)) {

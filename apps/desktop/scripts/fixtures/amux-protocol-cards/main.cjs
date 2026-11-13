@@ -51,7 +51,7 @@ app.whenReady().then(async () => {
   const mode = async (value, group) => {
     await read((value, group) => { if (group) window.protocolCapture.group(group); window.protocolCapture.mode(value) }, value, group)
     await until(value => document.querySelector('[data-scene]')?.dataset.scene === value, value)
-    if (value !== 'settings') await until(group => document.querySelectorAll('.conversation-protocol').length === (group === 'markers' ? 3 : 2), group)
+    if (value !== 'settings') await until(group => document.querySelectorAll('.conversation-protocol').length === (group === 'markers' ? 3 : group === 'answers' ? 1 : 2), group)
   }
   window.webContents.on('console-message', event => {
     result.console.push({ level: event.level, message: event.message })
@@ -143,6 +143,17 @@ app.whenReady().then(async () => {
     await shown('.conversation-browser-context')
     await frame('mobile-narrow-light-browser.png')
     result.operations.push({ scene: 'mobile', actualMobileConsumer: true, originalCoreRecords: true, physicalDevice: false })
+
+    await mode('desktop', 'answers'); await appearance('dark', 1080)
+    await shown('[data-protocol-kind="capsule-answer"]')
+    await frame('desktop-wide-dark-answer.png')
+    await appearance('light', 332); await shown('[data-protocol-kind="capsule-answer"]')
+    await frame('desktop-narrow-light-answer.png')
+    await mode('mobile', 'answers'); await appearance('dark', 390)
+    await shown('[data-protocol-kind="capsule-answer"]')
+    await frame('mobile-narrow-dark-answer.png')
+    assert.equal(await read(() => document.querySelector('[data-protocol-kind="capsule-answer"] .conversation-capsule-answer__answer')?.textContent), 'B, with a lighter shadow')
+    result.operations.push({ scene: 'capsule-answer', originalCoreRecords: true, desktop: true, mobile: true })
     assert.deepEqual(await read(() => window.protocolCapture.controls), [])
     assert.equal(await read(() => window.protocolCapture.reads.length > 0), true)
     result.controls = await read(() => window.protocolCapture.controls)
