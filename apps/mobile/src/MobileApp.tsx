@@ -575,7 +575,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     {moteConversation && teamSpaceId ? <nav className="mobile-mote-navigation" aria-label="Mote 导航" role="tablist">
       <button type="button" role="tab" aria-selected={moteSection === 'discussion'} onClick={() => { setMoteStart(null); setMoteHistory(null); if (workface.selectedSessionId) returnToMoteMain() }}>Discussion</button>
       <button type="button" role="tab" aria-selected={moteSection === 'threads'} onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) }}>Threads</button>
-      <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" onClick={() => setSheet('team')}>团队{team?.members.some(member => member.request) ? ' · 需要你' : ''}</button>
+      {(() => { const waiting = team?.members.filter(member => member.request).length ?? 0
+        return <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" {...(waiting ? { 'aria-description': `${waiting} 个需要你` } : {})} onClick={() => setSheet('team')}>
+          <ThemeObjectNetworkIcon size={16} /><span>团队</span>{waiting ? <span className="mobile-tab-badge" aria-hidden="true" data-count={waiting}>{waiting}</span> : null}</button> })()}
     </nav> : null}
     <main className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-key': screenMotion.key } : {})}>
       {!workspaceVisible && <section className="mobile-connect-page"><BrandIcon icon={hostAppearance.appIcon} className="mobile-connect-dragon" size={150} alt="AgentMux" /><h1>连接你的 Mac</h1>
