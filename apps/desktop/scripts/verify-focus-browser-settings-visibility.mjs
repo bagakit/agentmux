@@ -65,7 +65,7 @@ if (slice === 'native-visual') {
   }
   try {
     await owning('baseline')
-    for (const mutation of ['settings-keeps-focus-visible', 'focus-target-ignores-visible']) {
+    for (const mutation of ['settings-keeps-focus-visible', 'hidden-removes-focus-target']) {
       await owning(mutation, mutation); await owning(`${mutation}-exact-restore`)
     }
     const productionTypes = await run('production-types', 'pnpm', ['--filter', '@agentmux/desktop', 'typecheck'])

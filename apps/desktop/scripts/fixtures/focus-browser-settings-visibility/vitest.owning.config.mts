@@ -3,12 +3,12 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import original from '../../../../../vitest.config'
+import original from '../settings-overview/vitest.config.mts'
 const root = resolve(import.meta.dirname, '../../../../..')
 const pane = resolve(root, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx')
 const mutations = {
-  'settings-keeps-focus-visible': ['apps/desktop/src/renderer/src/App.tsx', "const focusVisible = mainSurface === 'agents' && !settingsRoute", "const focusVisible = mainSurface === 'agents'"],
-  'focus-target-ignores-visible': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', '(tabProjection?.surface ? tabProjection.visible === true : true)', 'true']
+  'settings-keeps-focus-visible': ['apps/desktop/src/renderer/src/App.tsx', "const focusVisible = mainSurface === 'agents' && focusMode === 'list' && !settingsOpen", "const focusVisible = mainSurface === 'agents' && focusMode === 'list'"],
+  'hidden-removes-focus-target': ['apps/desktop/src/renderer/src/App.tsx', 'if (focusProjection && focusTab) {', 'if (focusVisible && focusProjection && focusTab) {']
 } as const
 export default defineConfig({ ...original, root,
   plugins: [...(original.plugins ?? []), {
@@ -30,13 +30,23 @@ export default defineConfig({ ...original, root,
         const anchor = '  const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)'
         assert.equal(code.split(anchor).length - 1, 1)
         code = code.replace(anchor, `  useEffect(() => {
-    globalThis.__focusBrowserVisibleCommit?.(tab.browserId, visible)
-  }, [tab.browserId, visible])
-  useEffect(() => {
     globalThis.__focusBrowserResidency?.(tab.browserId, 'mount')
     return () => globalThis.__focusBrowserResidency?.(tab.browserId, 'unmount')
   }, [])
 ${anchor}`)
+        const stage = '<div className="browser-stage" data-native-browser-stage={tab.browserId}'
+        assert.equal(code.split(stage).length - 1, 1)
+        code = code.replace(stage, stage + ' data-source-observed-presentation={key} data-source-observed-stage-host={presentation?.stageHostId}')
+        const body = '<div className="browser-body">'
+        assert.equal(code.split(body).length - 1, 1)
+        code = code.replace(body, body + '<SourceBrowserPresentationObservation browserId={tab.browserId} presentationId={key} stageHostId={presentation?.stageHostId ?? null} visible={visible} />')
+        code += `
+function SourceBrowserPresentationObservation({browserId,presentationId,stageHostId,visible}) {
+  useEffect(() => {globalThis.__focusBrowserVisibleCommit?.(browserId,presentationId,stageHostId,visible,'commit')},[browserId,presentationId,stageHostId,visible])
+  useEffect(() => () => globalThis.__focusBrowserVisibleCommit?.(browserId,presentationId,stageHostId,undefined,'unmount'),[browserId,presentationId,stageHostId])
+  return null
+}
+`
       }
       if (process.env.AGENTMUX_BROWSER_SETTINGS_LOADED) appendFileSync(process.env.AGENTMUX_BROWSER_SETTINGS_LOADED,
         JSON.stringify({ path: relative(root, path), originalSHA256: createHash('sha256').update(source).digest('hex'),
@@ -46,6 +56,6 @@ ${anchor}`)
     }
   }],
   cacheDir: resolve(root, '.tmp/focus-browser-settings-visibility-cache'),
-  test: { ...original.test, include: ['apps/desktop/test/focus-browser-settings-visibility.test.tsx'],
+  test: { ...original.test, env: { AGENTMUX_BROWSER_SETTINGS_SOURCE_OBSERVATION: '1' }, include: ['apps/desktop/test/focus-browser-settings-visibility.test.tsx'],
     fileParallelism: false, passWithNoTests: false, maxWorkers: 1, testTimeout: 15_000 }
 })
