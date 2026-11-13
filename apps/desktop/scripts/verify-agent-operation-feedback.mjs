@@ -61,7 +61,6 @@ await check('original-green', files)
 for (const [mutant, file, test] of cases) await check(mutant, [file], mutant, test)
 await check('restored-green', files)
 if (task === 'T-004') {
-  const nativeDirectory = join(evidence, 'native-hidden-motion-runs')
   const candidateDirectory = resolve(root, process.argv.find(value => value.startsWith('--native-evidence='))?.slice('--native-evidence='.length) ?? '.local/agent-card-operations/product')
   async function nativeRun(name, args) {
     const result = await new Promise((done, reject) => {
@@ -73,35 +72,57 @@ if (task === 'T-004') {
     await writeFile(join(evidence, name + '.log'), result.log)
     return result
   }
-  const mutantArgs = ['apps/desktop/scripts/verify-session-takeover.mjs', '--native', '--agent-operations', '--native-mutant=hidden-motion-runs', '--evidence=' + nativeDirectory]
-  const negative = await nativeRun('native-work-red', mutantArgs)
-  assert.notEqual(negative.code, 0, 'Actual native visibility mutation must fail')
-  const native = JSON.parse(await readFile(join(nativeDirectory, 'receipt.json'), 'utf8'))
-  assert.equal(native.qualification, 'agent-operations-mutation-v1')
-  assert.equal(native.processes.length, 1, 'Negative proof executes only its actual first Renderer')
-  const rendered = native.processes[0].rendered
-  assert.equal(native.processes[0].outcome.timedOut, false)
-  assert.equal(rendered.failure?.name, 'AssertionError', 'Compile/setup/missing-source errors cannot qualify')
-  assert.equal(rendered.failure?.stage, 'agent-operation-visibility-work')
-  assert.ok(rendered.agentOperations?.isolationObservations.some(observation => observation.label === 'offscreen' && (observation.beforeRunning + observation.afterRunning > 0 || observation.moving)), 'Actual offscreen running/moving animation work, not a data attribute, falsifies isolation')
-  assert.equal(native.sourceMutations.length, 1)
-  const inputs = native.sourceMutations
-  for (const input of inputs) {
-    assert.notEqual(input.source, input.loaded)
-    assert.equal(createHash('sha256').update(await readFile(join(root, input.file))).digest('hex'), input.source, 'Native mutation never writes production source')
+  const allNativeInputs = []
+  for (const mutant of ['hidden-motion-runs', 'tooltip-reorders-host']) {
+    const nativeDirectory = join(evidence, 'native-' + mutant)
+    const mutantArgs = ['apps/desktop/scripts/verify-session-takeover.mjs', '--native', '--agent-operations', '--native-mutant=' + mutant, '--evidence=' + nativeDirectory]
+    const negative = await nativeRun('native-' + mutant + '-red', mutantArgs)
+    assert.notEqual(negative.code, 0, 'Actual native source mutation must fail')
+    const native = JSON.parse(await readFile(join(nativeDirectory, 'receipt.json'), 'utf8'))
+    assert.equal(native.qualification, 'agent-operations-mutation-v1')
+    assert.equal(native.processes.length, 1, 'Negative proof executes only its actual first Renderer')
+    const rendered = native.processes[0].rendered
+    assert.equal(native.processes[0].outcome.timedOut, false)
+    assert.equal(rendered.failure?.name, 'AssertionError', 'Compile/setup/missing-source/deadline failures cannot qualify')
+    let oracle
+    if (mutant === 'hidden-motion-runs') {
+      assert.equal(rendered.failure?.stage, 'agent-operation-visibility-work')
+      assert.ok(rendered.agentOperations?.isolationObservations.some(observation => observation.label === 'offscreen' && (observation.beforeRunning + observation.afterRunning > 0 || observation.moving)), 'Actual offscreen running/moving animation work, not a data attribute, falsifies isolation')
+      oracle = 'Actual offscreen running/moving animation work'
+    } else {
+      assert.equal(rendered.failure?.stage, 'agent-operation-fork-pointer')
+      assert.ok(rendered.failure.message.includes('Trusted native Fork activation reaches its original operation controller'), 'The original real Fork consumer assertion failed')
+      const pointer = rendered.agentOperations?.forkNativePointer
+      assert.equal(pointer?.hit?.destination, 'right', 'The physical native destination hit is the original Right button')
+      const events = pointer.after?.events ?? []
+      const down = events.find(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
+      assert.ok(down, 'A trusted native pointerdown reached the exact destination')
+      assert.ok(events.some(event => event.type === 'beforetoggle' && event.oldState === 'open' && event.newState === 'closed' && event.at >= down.at && event.target?.className?.split(/\s+/).includes('window-overlay-host')), 'The native overlay host closed during the actual pointer activation')
+      assert.equal(pointer.after.submitted, false, 'Reordering lost the real Fork activation rather than launching another operation')
+      assert.ok(!events.some(event => event.type === 'click' && event.trusted && event.target?.destination === 'right'), 'The destination pointerup/click was cancelled by the real host reorder')
+      oracle = 'Trusted exact Right pointerdown interrupted by native host beforetoggle closed, with no Fork submission'
+    }
+    assert.equal(native.sourceMutations.length, 1)
+    const inputs = native.sourceMutations
+    for (const input of inputs) {
+      assert.notEqual(input.source, input.loaded)
+      assert.equal(createHash('sha256').update(await readFile(join(root, input.file))).digest('hex'), input.source, 'Native mutation never writes production source')
+    }
+    allNativeInputs.push(...inputs)
+    assert.ok(native.cleanup.privateRootRemoved && native.cleanup.remaining.length === 0)
+    runs.push({ name: 'native-' + mutant, outcome: 'RED', command: [process.execPath, ...mutantArgs], inputs, oracle, evidence: join(nativeDirectory, 'receipt.json') })
   }
-  assert.ok(native.cleanup.privateRootRemoved && native.cleanup.remaining.length === 0)
-  runs.push({ name: 'native-hidden-animation-work', outcome: 'RED', command: [process.execPath, ...mutantArgs], inputs, oracle: 'Actual offscreen running/moving animation work', evidence: join(nativeDirectory, 'receipt.json') })
   const restoredArgs = ['apps/desktop/scripts/verify-session-takeover.mjs', '--native', '--agent-operations', '--evidence=' + candidateDirectory]
   const positive = await nativeRun('native-work-restored-green', restoredArgs)
   assert.equal(positive.code, 0, positive.log)
   const restored = JSON.parse(await readFile(join(candidateDirectory, 'receipt.json'), 'utf8'))
   assert.ok(restored.passed && restored.qualification === 'agent-operations-v1' && restored.processes.length === 2)
-  for (const input of inputs) assert.equal(restored.sourceBefore[input.file], input.source, 'Restored GREEN binds the same exact source as RED')
+  for (const input of allNativeInputs) assert.equal(restored.sourceBefore[input.file], input.source, 'Restored GREEN binds the same exact source as RED')
   const isolation = restored.processes[0].rendered.agentOperations.isolationObservations
   assert.ok(isolation.length >= 2 && isolation.every(observation => observation.beforeRunning + observation.afterRunning === 0 && !observation.moving))
+  assert.equal(restored.processes[0].rendered.agentOperations.forkNativePointer.after.submitted, true, 'Restored native trusted Fork activation reaches its original controller')
   runs.push({ name: 'native-animation-work-restored', outcome: 'GREEN', command: [process.execPath, ...restoredArgs], evidence: join(candidateDirectory, 'receipt.json'), reusedExactCandidateAllowed: true })
-  process.stdout.write('T-004 actual native work oracle: RED → restored GREEN\n')
+  process.stdout.write('T-004 actual native work and pointer oracles: RED → restored GREEN\n')
 }
 const hash = value => createHash('sha256').update(value).digest('hex')
 const sources = [...new Set(runs.flatMap(run => run.inputs?.map(input => input.file) ?? []))]

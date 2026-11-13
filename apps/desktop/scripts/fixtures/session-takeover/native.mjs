@@ -15,6 +15,10 @@ const require = createRequire(join(desktop, 'package.json'))
 const coreRequire = createRequire(join(core, 'package.json'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
+const nativeMutations = {
+  'hidden-motion-runs': { file: 'components/AgentOperationFeedback.tsx', before: `visible && decoration.phase === 'pending'`, after: `decoration.phase === 'pending'` },
+  'tooltip-reorders-host': { file: 'components/WindowOverlayHost.tsx', before: `if (node.getAttribute('role') !== 'tooltip') opened = true`, after: 'opened = true' }
+}
 async function artifacts(directory) {
   const files = {}
   for (const file of await readdir(directory, { recursive: true, withFileTypes: true })) if (file.isFile()) {
@@ -25,7 +29,7 @@ async function artifacts(directory) {
   return files
 }
 export async function runNative(requestedEvidence, options = {}) {
-  if (options.nativeMutant !== undefined) assert.equal(options.nativeMutant, 'hidden-motion-runs', 'A native source mutation must be explicitly supported')
+  if (options.nativeMutant !== undefined) assert.ok(Object.hasOwn(nativeMutations, options.nativeMutant), 'A native source mutation must be explicitly supported')
   const evidence = resolve(repo, requestedEvidence ?? ".tmp/session-takeover-fixture/native")
   await mkdir(evidence, { recursive: true })
   const privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-takeover-renderer-")))
@@ -64,11 +68,11 @@ export async function runNative(requestedEvidence, options = {}) {
           const actual = await assertOwnWorkspace(file)
           sourceBefore[actual.slice(repo.length + 1)] = hash(await readFile(actual))
         }
-        if (options.nativeMutant && id.endsWith('/renderer/src/components/AgentOperationFeedback.tsx')) {
-          const before = `visible && decoration.phase === 'pending'`, after = `decoration.phase === 'pending'`
-          assert.equal(_source.split(before).length - 1, 1, 'Native mutation targets one actual production visibility predicate')
-          const code = _source.replace(before, after)
-          receipt.sourceMutations.push({ mutant: options.nativeMutant, file: id.slice(repo.length + 1), source: hash(_source), loaded: hash(code) })
+        const mutation = options.nativeMutant && nativeMutations[options.nativeMutant]
+        if (mutation && file.endsWith('/renderer/src/' + mutation.file)) {
+          assert.equal(_source.split(mutation.before).length - 1, 1, 'Native mutation targets one actual production owner')
+          const code = _source.replace(mutation.before, mutation.after)
+          receipt.sourceMutations.push({ mutant: options.nativeMutant, file: file.slice(repo.length + 1), source: hash(_source), loaded: hash(code) })
           return { code, map: null }
         }
       }, async generateBundle() {
@@ -109,7 +113,7 @@ export async function runNative(requestedEvidence, options = {}) {
     }
     if (options.nativeMutant) {
       assert.equal(receipt.sourceMutations.length, 1, 'Native mutation was consumed by the actual production bundle')
-      throw new Error('Native visibility mutation survived its actual animation-work oracle')
+      throw new Error('Native source mutation survived its actual production-consumer oracle')
     }
     assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
     assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)

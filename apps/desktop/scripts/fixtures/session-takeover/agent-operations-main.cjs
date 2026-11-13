@@ -47,12 +47,30 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
       await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
       await wait(`!${picker}`, 'Takeover submitted choice releases its local selection surface')
     } else {
+      result.stage = 'agent-operation-fork-pointer'
       await openCard(0, 'Fork current conversation…')
       const destination = 'document.querySelector("[data-current-fork-review] [data-destination=right]")'
       await wait(`Boolean(${destination})`)
       // Expanding the real review resizes and collision-shifts its Radix menu.
       // Let its positioning paint before dispatching coordinates to the button.
-      await painted(); await click(destination)
+      await painted()
+      own.forkNativePointer = await evaluate(`(()=>{
+        const button=${destination}, rect=button.getBoundingClientRect(), host=button.closest('[popover]');
+        const events=[], controller=new AbortController();
+        const describe=node=>node?.nodeType===1?{tag:node.tagName,role:node.getAttribute('role'),destination:node.closest('[data-destination]')?.getAttribute('data-destination'),className:typeof node.className==='string'?node.className:null}:null;
+        for(const type of ['pointerdown','pointerup','click','focusin','focusout','beforetoggle','toggle'])document.addEventListener(type,event=>events.push({type,at:performance.now(),target:describe(event.target),trusted:event.isTrusted,oldState:event.oldState,newState:event.newState,hostShown:host?.matches(':popover-open'),active:describe(document.activeElement)}),{capture:true,signal:controller.signal});
+        window.__forkPointerObservation={events,controller};
+        return {rect:rect.toJSON(),hit:describe(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),hostShown:host?.matches(':popover-open')};
+      })()`)
+      await click(destination)
+      await painted()
+      own.forkNativePointer.after = await evaluate(`(()=>{const probe=window.__forkPointerObservation;probe.controller.abort();return {events:probe.events,submitted:Object.values(takeoverProbe.operations.facts().operations).some(item=>item.kind==='fork')}})()`)
+      assert.equal(own.forkNativePointer.after.submitted, true, 'Trusted native Fork activation reaches its original operation controller')
+      const pointerEvents = own.forkNativePointer.after.events
+      const down = pointerEvents.findIndex(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
+      const activation = pointerEvents.findIndex(event => event.type === 'click' && event.trusted && event.target?.destination === 'right')
+      assert.ok(down >= 0 && activation > down, 'Original Fork destination receives the real trusted pointer activation')
+      assert.ok(!pointerEvents.slice(down, activation).some(event => event.type === 'beforetoggle' && event.newState === 'closed'), 'Opening its tooltip preserves the shown host through the native pointer sequence')
       await wait('!document.querySelector("[data-current-fork-review]") && !document.querySelector(".focus-context-menu[role=menu]")', 'Submitted fork releases the original menu')
     }
     await wait(`takeoverProbe.operations.facts().pending.some(item=>item.kind==='creation')`)
@@ -179,7 +197,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await pausedWork('offscreen')
     await evaluate('takeoverProbe.operations.offscreen(false)'); await delay(100)
     own.scenarios.push('reduced-hidden-offscreen-pause')
-    if (nativeMutant) { own.mutationSurvived = true; own.passed = true; return }
+    if (nativeMutant === 'hidden-motion-runs') { own.mutationSurvived = true; own.passed = true; return }
     result.stage = 'agent-operation-native-cost'
 
     for (let sample = 0; sample < 3; sample++) for (const unrelated of [0, 384]) await browserCost(unrelated, sample)
