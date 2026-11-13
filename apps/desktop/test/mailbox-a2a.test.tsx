@@ -29,7 +29,10 @@ function props() {
 const notificationKey = { kind: 'prompt' as const, agentSessionId: 'subject', expectedRun: { runId: 'subject-run' }, submissionId: 'notice-input' }
 const notificationStates: { label: string; notification?: NonNullable<AgentMuxMessageMetadata['notification']> }[] = [
   { label: 'Saved to inbox' },
-  { label: 'Saved to inbox · Awaiting idle notification', notification: { state: 'pending' } },
+  { label: 'Saved to inbox · Awaiting notification', notification: { state: 'pending' } },
+  { label: 'Saved to inbox · Awaiting idle notification', notification: { state: 'pending', automatic: 'idle-queue' } },
+  { label: 'Saved to inbox · Awaiting next turn end', notification: { state: 'pending', automatic: 'turn-end' } },
+  { label: 'Saved to inbox · No automatic notification', notification: { state: 'pending', automatic: 'none' } },
   { label: 'Saved to inbox · Notification pending', notification: { state: 'pending', notificationId: 'notice-input', key: notificationKey } },
   { label: 'Saved to inbox · Notification submitted', notification: { state: 'submitted', notificationId: 'notice-input', key: notificationKey } },
   { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed' } },
