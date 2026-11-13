@@ -23,6 +23,11 @@ Keep that original ID. After an unknown or failed acknowledgement, inspect noteb
 --operation-id ID, then explicitly retry the same directory and ID to finish its original move.
 Existing Note identities and original copies remain retained until the move is acknowledged.
 
+When one value cannot be read this time, settings inspect still returns every other entry and
+lists that key under issues with its code and reason. An issue means the value is unknown, not
+absent or default; do not set it from the issue alone. Inspect the exact key to read it again;
+asking for it by name reports its own failure.
+
 Resource input uses --input <file|->. Input is bounded UTF-8 JSON, read from a file or stdin (-). Create takes a field
 object; the ID occurs only in the positional argument. Update takes {"changes": {...},
 "expected": {...}} with nonempty changes and optional expected fields. Delete optionally
