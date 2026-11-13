@@ -116,6 +116,11 @@ export function isBrowserProfileControlOperation(value: unknown): value is Brows
   return typeof value === 'string' && (BROWSER_PROFILE_CONTROL_OPERATIONS as readonly string[]).includes(value)
 }
 
+/** Classifies the request union only; it neither validates data nor grants authority. */
+export function isBrowserProfileControlRequest<T extends { operation: string }>(request: T): request is Extract<T, { operation: BrowserProfileControlOperation }> {
+  return isBrowserProfileControlOperation(request.operation)
+}
+
 export function isBrowserProfileProxySignInWrite(value: string): boolean {
   return value === 'browser.profile.proxy-sign-in.set' || value === 'browser.profile.proxy-sign-in.clear'
 }

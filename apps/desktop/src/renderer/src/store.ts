@@ -105,7 +105,7 @@ import { openSystemUrlInSurvey } from './lib/survey-system-url'
 import { openSystemPageInSurvey, type SystemPageHost } from './lib/survey-system-page'
 import { isSystemWebUrl, type SystemPageOutcome } from '../../shared/system-web-url'
 import { openSystemFileInSurvey } from './lib/survey-system-file'
-import { isToolkitRequest } from '@agentmux/core/control'
+import { isToolkitRequest, isBrowserProfileControlRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState, initializeLauncherState, checkpointLauncherState, launcherUnreadEditsPending } from './lib/launcher-state'
 import { initializeAgentBookmarks, agentBookmarks } from './lib/agent-bookmarks'
@@ -6386,9 +6386,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {
       throw Object.assign(new Error('Crash log diagnostics belong to the Main owner.'), { code: 'CONTROL_FAILED' })
     }
-    if (request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.create' ||
-        request.operation === 'browser.profile.update' || request.operation === 'browser.profile.set-default' || request.operation === 'browser.profile.delete' ||
-        request.operation === 'browser.profile.proxy-sign-in.set' || request.operation === 'browser.profile.proxy-sign-in.clear' || request.operation === 'browser.profile.network.check') {
+    if (isBrowserProfileControlRequest(request)) {
       throw Object.assign(new Error('Browser Profiles belong to the Main Profile owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
