@@ -77,7 +77,7 @@ describe('Claude native mod activity', () => {
 
   it('projects native active and idle without declaring success, input readiness or main child completion', () => {
     const provider = new AgentProviderRegistry().get('claude')
-    const payload = { session_id: 'native-A', sourceId: 'observer-A', sequence: 1, turnId: 'native-turn-A' }
+    const payload = { session_id: 'native-A', sourceId: 'observer-A', sequence: 1, turnId: 'native-turn-A', backgroundWork: 'none' }
     const event = (eventName: string, extra: Record<string, unknown> = {}) => provider.normalizeHook({
       receiptId: `native-${eventName}`, agentSessionId: 'core-A', runId: 'run-A', providerId: 'claude',
       eventName, payload: { ...payload, ...extra }
@@ -86,7 +86,7 @@ describe('Claude native mod activity', () => {
       sourceId: 'observer-A', sequence: 1, nativeTurnId: 'native-turn-A' })
     for (const reason of ['answer', 'error', 'refusal', 'aborted']) {
       const end = event('turn.complete', { reason, isAborted: reason === 'aborted' })
-      expect(end.currentActivity?.state).toBe('idle')
+      expect(end.currentActivity?.state).toBe(reason === 'answer' ? 'idle' : 'unknown')
       expect(end.semanticState).toBe(reason === 'error' ? 'error' : 'unknown')
       expect(end.lifecycleEvent).toBe(reason === 'error' ? 'turn-end' : null)
       expect(end.status.detail).toBe(reason === 'error'
@@ -818,6 +818,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
         client: {
           list: async () => [{ id: runId }],
           status: async () => run(),
+          observeStorage: async (id: string) => ({ observation: { run_id: id, policy: { terminal_history_rows: 10_000 } } }),
           recoverableInput,
           attach: attachTerminal,
           attachTerminal,

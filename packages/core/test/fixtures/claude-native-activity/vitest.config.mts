@@ -4,6 +4,9 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const edits: Record<string, [string, string, string]> = {
+  'background-capture': ['packages/core/src/providers/claude-native-activity.ts', "mainTurn.backgroundWork = Array.isArray(tasks)", "mainTurn.backgroundWork = false && Array.isArray(tasks)"],
+  'background-forwarding': ['packages/core/src/providers/claude-native-activity.ts', 'backgroundWork: event.backgroundWork', "backgroundWork: 'none'"],
+  'background-projection': ['packages/core/src/providers/claude-native-activity.ts', "payload.backgroundWork === 'none' ? 'idle' : 'unknown'", "payload.backgroundWork === 'none' ? 'idle' : 'idle'"],
   'initial-binding': ['packages/core/src/client.ts', 'current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current', 'current, nativeActivity)) return current'],
   'child-transition': ['packages/core/src/client.ts', "provider.hook.nativeSessionTransition?.(eventName, payload) === true &&\n      !nativeHookHasSubagentSubject(provider.hook, eventName, payload)", 'provider.hook.nativeSessionTransition?.(eventName, payload) === true'],
   'history-source': ['packages/core/src/client.ts', "nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown'", 'nativeTargetSourceUnconfirmed(session)'],
@@ -15,7 +18,7 @@ const edits: Record<string, [string, string, string]> = {
   'child-source': ['packages/core/src/client.ts', 'agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined)', 'false'],
   projection: ['packages/core/src/client.ts', 'if (currentActivity) projected.currentActivity = currentActivity', 'if (false) projected.currentActivity = currentActivity']
 }
-export default defineConfig({ root, cacheDir: resolve(root, '.local/claude-native-activity/cache'),
+export default defineConfig({ root, cacheDir: resolve(root, '.local/claude-native-activity/cache', process.env.AGENTMUX_ACTIVITY_MUTATION ?? 'baseline'),
   plugins: [{ name: 'native-activity-source-mutation', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
     const mutation = process.env.AGENTMUX_ACTIVITY_MUTATION
@@ -28,6 +31,6 @@ export default defineConfig({ root, cacheDir: resolve(root, '.local/claude-nativ
     appendFileSync(process.env.AGENTMUX_ACTIVITY_MUTATION_RECEIPT, JSON.stringify({ path, mutation,
       original: createHash('sha256').update(source).digest('hex'), loaded: createHash('sha256').update(changed).digest('hex') }) + '\n')
     return {code:changed,map:null}
-  } }], test: {include:['packages/core/test/claude-native-current-activity.test.ts','packages/core/test/providers/claude.test.ts'],
+  } }], test: {include:['packages/core/test/stop-background-tasks-idle.test.ts','packages/core/test/claude-native-current-activity.test.ts','packages/core/test/providers/claude.test.ts'],
     globalSetup:[resolve(root,'vitest.dist-freshness.ts')],setupFiles:[resolve(root,'vitest.setup.ts')],
     fileParallelism:false,maxWorkers:1,testTimeout:20000,hookTimeout:15000,passWithNoTests:false} })

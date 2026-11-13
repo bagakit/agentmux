@@ -22,7 +22,7 @@ async function start(h: Awaited<ReturnType<typeof harness>>, sequence = 1, turnI
   await h.hook('turn.start', `start-${sequence}`, native(sequence, turnId))
 }
 async function end(h: Awaited<ReturnType<typeof harness>>, sequence = 2, turnId = 'native-turn-1', reason = 'answer') {
-  await h.hook('turn.complete', `end-${sequence}`, native(sequence, turnId, { reason, isAborted: reason === 'aborted' }))
+  await h.hook('turn.complete', `end-${sequence}`, native(sequence, turnId, { reason, isAborted: reason === 'aborted', backgroundWork: 'none' }))
 }
 
 async function attachTranscript(h: Awaited<ReturnType<typeof harness>>) {
@@ -33,15 +33,15 @@ async function attachTranscript(h: Awaited<ReturnType<typeof harness>>) {
   return transcript
 }
 
-it.each(['answer', 'refusal', 'error', 'aborted'])('native %s end confirms current idle without manufacturing task success or readiness', async reason => {
+it.each(['answer', 'refusal', 'error', 'aborted'])('native %s end preserves task results and qualifies idle only with a final background snapshot', async reason => {
   const h = await harness(`native-${reason}`)
   await start(h)
   expect((await h.client.statusAgent(`native-${reason}`)).observation.semantic).toBe('active')
   const before = (await h.sessions())[0]!
   await end(h, 2, 'native-turn-1', reason)
   const status = await h.client.statusAgent(`native-${reason}`)
-  expect(status.observation).toMatchObject({ semantic: 'idle', readiness: 'ready', source: 'native-hook', stale: false })
-  expect(status.session.currentActivity).toMatchObject({ state: 'idle', nativeTurnId: 'native-turn-1', run: { runId: h.run.runId } })
+  expect(status.observation).toMatchObject({ semantic: reason === 'answer' ? 'idle' : 'unknown', readiness: 'ready', source: 'native-hook', stale: false })
+  expect(status.session.currentActivity).toMatchObject({ state: reason === 'answer' ? 'idle' : 'unknown', nativeTurnId: 'native-turn-1', run: { runId: h.run.runId } })
   expect(status.session.semanticStatus?.state).toBe(reason === 'error' ? 'error' : 'working')
   if (reason === 'error') expect(status.session.terminalPromptReadiness?.source).toBe('native-stop')
   else expect(status.session.terminalPromptReadiness).toEqual(before.terminalPromptReadiness)
@@ -58,7 +58,7 @@ it('pre-decision Stop and idle notification cannot end work; duplicate or late n
   expect((await h.client.statusAgent('native-activity')).observation.semantic).toBe('active')
   await end(h)
   const first = h.client.agentSession('native-activity').currentActivity
-  await h.hook('turn.complete', 'duplicate-native-end', native(2, 'native-turn-1', { reason: 'answer', isAborted: false }))
+  await h.hook('turn.complete', 'duplicate-native-end', native(2, 'native-turn-1', { reason: 'answer', isAborted: false, backgroundWork: 'none' }))
   expect(h.client.agentSession('native-activity').currentActivity).toEqual(first)
   await start(h, 4, 'native-turn-2')
   await end(h, 3, 'native-turn-1')
@@ -72,7 +72,7 @@ it('unknown initial end, foreign Session and another Run do not establish main i
   expect(h.client.agentSession('native-activity').currentActivity).toBeUndefined()
   await start(h)
   await h.hook('turn.complete', 'foreign-end', native(2, 'native-turn-1', { session_id: 'foreign-main', reason: 'answer', isAborted: false }))
-  await h.hook('turn.complete', 'old-run-end', native(2, 'native-turn-1', { reason: 'answer', isAborted: false }), 'retired-run')
+  await h.hook('turn.complete', 'old-run-end', native(2, 'native-turn-1', { reason: 'answer', isAborted: false, backgroundWork: 'none' }), 'retired-run')
   expect(h.client.agentSession('native-activity').currentActivity?.state).toBe('active')
 })
 
@@ -329,7 +329,7 @@ it.each([
   try {
     await h.hook('turn.start', 'main-start-A', payload('source-A', 1, 'main-turn-A'))
     if (startOld) await h.hook('turn.start', 'child-start-A', payload('source-A', 2, 'child-turn-A', {agent_id:'same-child'}))
-    await h.hook('turn.complete', 'main-end-A', payload('source-A', 3, 'main-turn-A', {reason:'answer',isAborted:false}))
+    await h.hook('turn.complete', 'main-end-A', payload('source-A', 3, 'main-turn-A', {reason:'answer',isAborted:false,backgroundWork:'none'}))
     if (startOld) expect(h.client.agentSession(id).currentActivity).toBeUndefined()
     await h.hook('turn.start', 'child-start-B', payload('source-B', 1, 'child-turn-B', {agent_id:childId}))
     await h.hook('turn.complete', 'late-child-end-A', payload('source-A', 4, 'child-turn-A', {agent_id:'same-child',reason:'answer',isAborted:false}))
