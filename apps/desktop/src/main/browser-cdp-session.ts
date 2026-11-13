@@ -124,34 +124,6 @@ class BrowserCdpConnection implements BrowserPageTransport {
     return () => this.listeners.delete(listener)
   }
 
-  async openNetworkSession(): Promise<BrowserNetworkSession> {
-    const { targetInfo } = await this.sendCommand('Target.getTargetInfo') as { targetInfo: { targetId: string } }
-    if (this.endedReason) throw new Error(this.endedReason)
-    const { sessionId } = await this.sendCommand('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true }) as { sessionId: string }
-    if (!sessionId) throw new Error('The original native network session acknowledgement is unavailable.')
-    const contents = this.contents, listeners = new Set<(method: string, params: unknown) => void>()
-    let ended: string | null = null
-    const release = () => { if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }; listeners.clear() }
-    const detached = (_event: unknown, reason: string) => { ended = reason; release() }
-    const message = (_event: unknown, method: string, params: unknown, sourceId?: string) => {
-      if (sourceId === sessionId) for (const listener of listeners) listener(method, params)
-      if (method === 'Target.detachedFromTarget' && (params as { sessionId?: string }).sessionId === sessionId) { ended = 'The original network session detached.'; release() }
-    }
-    contents.debugger.on('message', message); contents.debugger.on('detach', detached)
-    const close = async () => {
-      if (ended || contents.isDestroyed()) { ended ??= 'The original network target ended.'; release(); return }
-      await contents.debugger.sendCommand('Target.detachFromTarget', { sessionId })
-      ended = 'The original network session detached.'; release()
-    }
-    if (this.endedReason) { await close(); throw new Error(this.endedReason) }
-    const sendCommand: BrowserCdpSender = async (method, params) => {
-      if (ended || contents.isDestroyed()) throw new Error(ended ?? 'The original network target ended.')
-      return await contents.debugger.sendCommand(method, params, sessionId)
-    }
-    try { await sendCommand('Page.enable') } catch (error) { await close(); throw error }
-    return { sendCommand, get endedReason() { return ended }, observe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } }, close }
-  }
-
   private async sendTo(
     sessionId: string | undefined,
     method: string,
@@ -262,6 +234,41 @@ export class BrowserCdpSession implements BrowserPageTransport {
     this.observers.add(release)
     return release
   }
+  async openNetworkSession(): Promise<BrowserNetworkSession> {
+    this.assertActive()
+    if (this.endedReason || BrowserCdpSession.connections.get(this.contents) !== this.owner) throw new Error('The original native connection changed. No replacement target is selected.')
+    const retained = BrowserCdpSession.attach(this.contents)
+    let held = true
+    const releaseHold = () => { if (held) { held = false; retained.detach() } }
+    let targetInfo: { targetId: string }
+    try { ({ targetInfo } = await retained.sendCommand('Target.getTargetInfo') as { targetInfo: { targetId: string } }) }
+    catch (error) { releaseHold(); throw error }
+    if (this.endedReason) { releaseHold(); throw new Error(this.endedReason) }
+    const { sessionId } = await retained.sendCommand('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true }) as { sessionId: string }
+    if (!sessionId) throw new Error('The original native network session acknowledgement is unavailable.')
+    const contents = this.contents, listeners = new Set<(method: string, params: unknown) => void>()
+    let ended: string | null = null
+    const release = () => { if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }; listeners.clear(); releaseHold() }
+    const detached = (_event: unknown, reason: string) => { ended = reason; release() }
+    const message = (_event: unknown, method: string, params: unknown, sourceId?: string) => {
+      if (sourceId === sessionId) for (const listener of listeners) listener(method, params)
+      if (method === 'Target.detachedFromTarget' && (params as { sessionId?: string }).sessionId === sessionId) { ended = 'The original network session detached.'; release() }
+    }
+    contents.debugger.on('message', message); contents.debugger.on('detach', detached)
+    const close = async () => {
+      if (ended || contents.isDestroyed()) { ended ??= 'The original network target ended.'; release(); return }
+      await retained.sendCommand('Target.detachFromTarget', { sessionId })
+      ended = 'The original network session detached.'; release()
+    }
+    if (this.endedReason) { await close(); throw new Error(this.endedReason) }
+    const sendCommand: BrowserCdpSender = async (method, params) => {
+      if (ended || contents.isDestroyed() || retained.endedReason) throw new Error(ended ?? retained.endedReason ?? 'The original network target ended.')
+      return await contents.debugger.sendCommand(method, params, sessionId)
+    }
+    try { await sendCommand('Page.enable') } catch (error) { await close(); throw error }
+    return { sendCommand, get endedReason() { return ended }, observe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } }, close }
+  }
+
   detach(): string | null {
     if (this.released) return null
     this.released = true
