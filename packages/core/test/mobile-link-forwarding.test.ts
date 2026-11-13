@@ -23,7 +23,7 @@ async function host() {
   const owner = { runtimeId: 'original-semantic-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2 as const, processId: process.pid, availability: 'connected' as const,
     ctxmux: { protocolVersion: 5, buildIdentity: 'isolated-native-port', hostId: 'local', processId: process.pid, instanceId: 'original-native-instance' } }
   const url = connectionOfferUrl('https://relay.example.org/', { v: 2, serverId: 'original-host', daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint: 'relay.example.org', useTls: true } })
-  const link = { hostId: 'original-host', url, pageUrl: url.split('#')[0]!, relay: { endpoint: 'relay.example.org', useTls: true }, mobileAccess: { state: 'disconnected' as const, message: 'Original disconnected observation', origin: 'https://relay.example.org' } }
+  const link = { hostId: 'original-host', url, pageUrl: url.split('#')[0]!, relay: { endpoint: 'relay.example.org', useTls: true }, mobileAccess: { state: 'disconnected' as const, message: 'Original disconnected observation', origin: 'https://relay.example.org' }, candidates: [] }
   const calls = vi.fn(async () => link)
   // Only native Runtime I/O and the already-qualified Host link producer are
   // ports; authorization, transport, forwarding, parsing and CLI are real.
