@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { closeSync, cpSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -63,21 +63,35 @@ function parseSources() {
   }
   for (const file of swiftFiles(join(root, 'Verification'))) command('swiftc', ['-frontend', '-parse', file])
 }
+// Xcode finds Swift Testing on its own. Command Line Tools ship it without
+// XCTest and outside SwiftPM's default search paths, so the gate names them.
+function swiftTestingFlags() {
+  const developer = command('xcode-select', ['-p'], { capture: true }).stdout.trim()
+  const frameworks = join(developer, 'Library', 'Developer', 'Frameworks')
+  if (basename(developer) !== 'CommandLineTools' || !existsSync(join(frameworks, 'Testing.framework'))) return []
+  const libraries = join(developer, 'Library', 'Developer', 'usr', 'lib')
+  const swiftc = command('xcrun', ['-f', 'swiftc'], { capture: true }).stdout.trim()
+  const plugins = resolve(dirname(swiftc), '..', 'lib', 'swift', 'host', 'plugins', 'testing')
+  assert(existsSync(join(plugins, 'libTestingMacros.dylib')), `Swift Testing macros missing beside Testing.framework: ${plugins}`)
+  return ['-Xswiftc', '-F', '-Xswiftc', frameworks, '-Xswiftc', '-plugin-path', '-Xswiftc', plugins,
+    '-Xlinker', '-F', '-Xlinker', frameworks, '-Xlinker', '-rpath', '-Xlinker', frameworks,
+    '-Xlinker', '-rpath', '-Xlinker', libraries, '-Xlinker', '-L', '-Xlinker', libraries]
+}
 function testCounts(report) {
   const count = xpath => Number(command('/usr/bin/xmllint', ['--nonet', '--xpath', xpath, report], { capture: true }).stdout.trim())
   const tests = count('count(//testcase)')
   const skipped = count('count(//testcase[skipped])')
   const failures = count('count(//testcase/failure | //testcase/error)')
-  assert(Number.isSafeInteger(tests) && tests > 0, `Empty/non-XCTest report: ${report}`)
+  assert(Number.isSafeInteger(tests) && tests > 0, `Empty/non-Swift test report: ${report}`)
   assert(Number.isSafeInteger(skipped) && skipped >= 0 && skipped <= tests && tests - skipped > 0,
-    `No executed XCTest cases: ${report}`)
-  assert(Number.isSafeInteger(failures) && failures >= 0, `Invalid XCTest failure count: ${report}`)
+    `No executed Swift test cases: ${report}`)
+  assert(Number.isSafeInteger(failures) && failures >= 0, `Invalid Swift test failure count: ${report}`)
   return { tests, skipped, executed: tests - skipped, failures }
 }
 
 // Mutants live in this invocation's private copy. Missing reports, compilation
 // errors and empty test selections are infrastructure failures, never kills.
-function verifyMutations(evidence, moduleCache) {
+function verifyMutations(evidence, moduleCache, testFlags) {
   const definitions = [
     { name: 'ax-unknown-must-not-fallback', file: 'NativeAXReply.swift', from: 'default: .unknown', to: 'default: .unsupported', filter: 'NativeAXReplyTests' },
     { name: 'pixels-are-mutations', file: 'NativePeerPolicy.swift', from: 'case "getAppState": includesScreenshot', to: 'case "getAppState": false', filter: 'NativePeerPolicyTests' },
@@ -102,7 +116,7 @@ let package = Package(name: "NativeMutation", platforms: [.macOS(.v12)], targets
     const report = join(directory, 'tests.xml')
     const result = command('swift', ['test', '--package-path', directory, '--scratch-path', join(directory, '.build'), '--jobs', '1',
       '--disable-index-store', '-Xswiftc', '-module-cache-path', '-Xswiftc', moduleCache,
-      '--filter', definition.filter, '--xunit-output', report], { log: join(directory, 'test.log'), allowFailure: true })
+      ...testFlags, '--filter', definition.filter, '--xunit-output', report], { log: join(directory, 'test.log'), allowFailure: true })
     const counts = testCounts(report)
     assert(result.status !== 0 && counts.failures > 0, `Mutant survived or failed outside a test assertion: ${definition.name}`)
     return { name: definition.name, changedBranches: 1, ...counts, state: 'killed-by-test', report }
@@ -261,11 +275,15 @@ try {
     const swiftArgs = ['-module-cache-path', moduleCache]
     const shared = ['--package-path', root, '--scratch-path', buildDirectory, '--jobs', '1', '--disable-index-store',
       '-Xswiftc', '-module-cache-path', '-Xswiftc', moduleCache]
+    // Only Swift Testing remains, so its report owns the exact --xunit-output path.
+    const toolchainFlags = swiftTestingFlags()
+    const testFlags = ['--disable-xctest', '--enable-swift-testing', ...toolchainFlags]
+    report.swiftTesting = toolchainFlags.length > 0 ? 'command-line-tools-search-paths' : 'toolchain-default'
     const xunit = join(evidence, 'tests.xml')
-    command('swift', ['test', ...shared, '--xunit-output', xunit], { log: join(evidence, 'test.log') })
+    command('swift', ['test', ...shared, ...testFlags, '--xunit-output', xunit], { log: join(evidence, 'test.log') })
     report.tests = testCounts(xunit)
-    assert(report.tests.failures === 0, 'Baseline XCTest report has failing tests')
-    report.mutations = verifyMutations(evidence, moduleCache)
+    assert(report.tests.failures === 0, 'Baseline Swift test report has failing tests')
+    report.mutations = verifyMutations(evidence, moduleCache, testFlags)
     command('swift', ['build', ...shared, '--configuration', 'debug', '--product', 'agentmux-native-macos'], { log: join(evidence, 'build.log') })
     const binDirectory = command('swift', ['build', ...shared, '--configuration', 'debug', '--show-bin-path'], { capture: true }).stdout.trim()
     assert(binDirectory && !binDirectory.includes('\n'), 'SwiftPM did not identify one binary directory')
