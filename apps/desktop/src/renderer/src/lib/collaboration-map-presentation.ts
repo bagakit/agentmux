@@ -35,9 +35,11 @@ export function useCollaborationRecencyClock(visible: boolean) {
 }
 /** Observed activity first; a retired member has only its retirement record. */
 const recencyAt = (agent: CollaborationAgent | undefined) => agent?.lastActivityAt ?? agent?.retiredAt ?? null
-/** Recency weighs ink inside the stable slot; it never feeds layout geometry. */
+/** Recency weighs ink inside the stable slot; it never feeds layout geometry. The map clock
+ * ticks once a minute while facts carry their own fresh time, so a fact newer than the clock
+ * is the newest there is, not an unknown one. */
 export function collaborationRecencyStep(agent: CollaborationAgent | undefined, now: number): CollaborationRecencyStep {
-  const at = recencyAt(agent), age = at != null && at > 0 && at <= now ? now - at : null
+  const at = recencyAt(agent), age = at != null && Number.isFinite(at) && at > 0 ? Math.max(0, now - at) : null
   if (agent?.tier === 'active' || age != null && age < HOUR) return 'recent'
   return age != null && age < 24 * HOUR ? 'today' : 'older'
 }
