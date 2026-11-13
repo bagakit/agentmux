@@ -84,7 +84,7 @@ import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
-import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
+import {DesktopSpatialPersistence,SpatialConflictError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
@@ -5658,7 +5658,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ]
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if(api.spatial) {
-        const spatialOwner = new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
+        // A conflict is a confirmed save that kept another writer's value for named items; it is not an
+        // unconfirmed save. It gets its own notice per conflicting key set, so it never blocks Quit.
+        const spatialOwner = new DesktopSpatialPersistence(api.spatial,error=>error instanceof SpatialConflictError
+          ? get().reportError(error,{kind:'process-degraded',summary:'Another writer changed workface items you also edited. Every other change was saved.',
+            event:{source:'workface-save-conflict',key:error.conflicts.map(conflict=>conflict.key).join('\n')}})
+          : get().reportWorkbenchSaveFailure(error))
         ownedSpatial = spatialOwner
         coreSpatialPersistence = spatialOwner
         try {

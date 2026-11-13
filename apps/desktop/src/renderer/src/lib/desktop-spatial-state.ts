@@ -1,5 +1,6 @@
-import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE } from '@agentmux/core/spatial-graph';
-import { AGENTMUX_DISPLAY_LABEL_RESOURCE, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from '@agentmux/core/spatial-graph';
+import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
+import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict } from './spatial-merge';
+export { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
@@ -199,67 +200,15 @@ export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph, config?:
   return result;
 }
 export type DesktopSpatialPort = import('../../../shared/contracts').AgentMuxDesktopApi['spatial'];
-/** Compare persisted facts without treating JSON property order as a content change. */
-export function sameSpatialValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && a.length !== (b as unknown[]).length) return false;
-  const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
-  const keys = Object.keys(left).filter(key => left[key] !== undefined);
-  return keys.length === Object.keys(right).filter(key => right[key] !== undefined).length &&
-    keys.every(key => Object.hasOwn(right, key) && sameSpatialValue(left[key], right[key]));
-}
-/** Rebase only disjoint document edits. Overlapping edits stay visible and unsaved. */
-export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentMuxSpatialGraph, remote: AgentMuxSpatialGraph, intermediate: AgentMuxSpatialGraph = base): AgentMuxSpatialGraph {
-  const result = structuredClone(remote), same = sameSpatialValue;
-  const arrays = [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId'], ['bindings', null], ['projectGroups', 'groupId']] as const;
-  for (const [field, key] of arrays) {
-    if (field === 'projectGroups' && !base.projectGroups && !local.projectGroups && !remote.projectGroups && !intermediate.projectGroups) continue;
-    const identity = (value: unknown) => key ? String((value as Record<string, unknown>)[key]) : JSON.stringify([(value as {
-        zoneId: string;
-      }).zoneId, (value as {
-        spaceId: string;
-      }).spaceId]);
-    const original = new Map((base[field] ?? []).map(v => [identity(v), v])), changed = new Map((local[field] ?? []).map(v => [identity(v), v])), current = new Map((remote[field] ?? []).map(v => [identity(v), v]));
-    const between = intermediate === base ? original : new Map((intermediate[field] ?? []).map(v => [identity(v), v]));
-    for (const id of new Set([...original.keys(), ...changed.keys(), ...between.keys()])) {
-      let before = original.get(id), after = changed.get(id), middle = between.get(id);
-      // Label edits use their own exact revision; bulk layout reconciliation
-      // always retains the acknowledged remote Tab name.
-      if (field === 'tabs' && current.has(id)) {
-        const name = (current.get(id) as AgentMuxSpatialGraph['tabs'][number]).name;
-        if (before) before = { ...before as AgentMuxSpatialGraph['tabs'][number], name };
-        if (after) after = { ...after as AgentMuxSpatialGraph['tabs'][number], name };
-        if (middle) middle = { ...middle as AgentMuxSpatialGraph['tabs'][number], name };
-      }
-      if (same(before, after) && same(middle, after))
-        continue;
-      if (!same(current.get(id), before) && !same(current.get(id), middle) && !same(current.get(id), after))
-        throw new Error('The same spatial entity was edited elsewhere. Local changes are retained; inspect the current graph before retrying.');
-      if (after === undefined)
-        current.delete(id);
-      else
-        current.set(id, after);
-    }
-    ;
-    (result as unknown as Record<string, unknown>)[field] = [...current.values()];
+/** Another writer changed these exact keys to different values; their committed values were kept. */
+export class SpatialConflictError extends Error {
+  readonly code = 'SPATIAL_ENTITY_CONFLICT';
+  constructor(readonly conflicts: readonly SpatialConflict[]) {
+    super(`Another writer changed ${conflicts.length === 1 ? 'one workface item' : conflicts.length + ' workface items'} you also edited (${conflicts.map(conflict => conflict.key).join(', ')}). Their saved version is kept and every other change was saved; edit the item again to apply yours.`);
   }
-  for (const field of ['layouts', 'tabLayouts', 'resources'] as const) {
-    for (const id of new Set([...Object.keys(base[field]), ...Object.keys(local[field]), ...Object.keys(intermediate[field])])) {
-      if (field === 'resources' && (id === AGENTMUX_DISPLAY_LABEL_RESOURCE || id === AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE)) continue;
-      const before = base[field][id], after = local[field][id], middle = intermediate[field][id];
-      if (same(before, after) && same(middle, after))
-        continue;
-      if (!same(remote[field][id], before) && !same(remote[field][id], middle) && !same(remote[field][id], after))
-        throw new Error('The same spatial layout or resource was edited elsewhere. Local changes are retained; inspect the current graph before retrying.');
-      if (after === undefined)
-        delete result[field][id];
-      else
-        (result[field] as Record<string, unknown>)[id] = after;
-    }
-  }
-  return result;
 }
+/** A save re-merges against a newer revision this many times before reporting it as unconfirmed. */
+const STALE_REVISION_ATTEMPTS = 3;
 /** One client's pending edit and revision, with no resource or Session lifecycle. */
 export class DesktopSpatialPersistence {
   private state: AgentMuxSpatialState | null = null;
@@ -273,6 +222,9 @@ export class DesktopSpatialPersistence {
   } | null = null;
   private saving: Promise<void> | null = null;
   private unconfirmed: { baseline: AgentMuxSpatialState; input: AgentMuxSpatialGraph; graph: AgentMuxSpatialGraph } | null = null;
+  // Keys another writer changed to a different value. The committed graph keeps that value; the local
+  // intent stays named here until the user's view or the other writer agrees again.
+  private retained = new Map<string, SpatialConflict>();
   private readonly removed = new Set<string>();
   private readonly removedProjectGroups = new Set<string>();
   removeProjectGroup(id: string): void { this.removedProjectGroups.add(id); }
@@ -289,13 +241,25 @@ export class DesktopSpatialPersistence {
   /** Read-only observation: equal graphs cannot settle an in-flight or unknown write. */
   get pendingChanges(): boolean { return !!(this.startup || this.pending || this.saving || this.unconfirmed); }
   get current(): AgentMuxSpatialState | null { return this.state; }
+  /** Exact keys whose local intent conflicts with another writer's committed value. */
+  get conflicts(): SpatialConflict[] { return [...this.retained.values()]; }
+  /** Record the latest merge's conflicts once per key; a key that agrees again is settled. */
+  private retain(conflicts: readonly SpatialConflict[]): void {
+    const next = new Map(conflicts.map(conflict => [conflict.key, conflict]));
+    const fresh = conflicts.filter(conflict => !this.retained.has(conflict.key));
+    this.retained = next;
+    if (fresh.length) this.warn(new SpatialConflictError(fresh));
+  }
   acceptNames(state: AgentMuxSpatialState): void {
     if (this.state && state.revision < this.state.revision) return;
     // The serialized save owns an in-flight or unconfirmed input relationship.
     // Keep that intent and mark the newer observation so an older layout ACK
     // cannot apply before flush reconciles the independent name facts.
-    if (this.pending) this.pending = this.saving || this.unconfirmed ? { ...this.pending } : { baseline: state,
-      graph: reconcileSpatialGraphs(this.pending.baseline.graph, this.pending.graph, state.graph) };
+    if (this.pending && !this.saving && !this.unconfirmed) {
+      const merged = reconcileSpatialGraphs(this.pending.baseline.graph, this.pending.graph, state.graph);
+      this.pending = { baseline: state, graph: merged.graph };
+      this.retain(merged.conflicts);
+    } else if (this.pending) this.pending = { ...this.pending };
     this.state = state;
   }
   async read(): Promise<AgentMuxSpatialState | null> {
@@ -320,12 +284,13 @@ export class DesktopSpatialPersistence {
     // A failed read is unknown, never an absent document. Read again before any write.
     const remote = await this.port.read();
     if (remote) {
-      const graph = reconcileSpatialGraphs(startup.baseline, startup.graph, remote.graph);
+      const merged = reconcileSpatialGraphs(startup.baseline, startup.graph, remote.graph);
       this.state = remote;
       this.readConfirmed = true;
       this.startup = null;
-      if (sameSpatialValue(graph, remote.graph)) this.publish(remote, startup.graph);
-      else this.pending = { baseline: remote, graph };
+      this.retain(merged.conflicts);
+      if (sameSpatialValue(merged.graph, remote.graph)) this.publish(remote, startup.graph);
+      else this.pending = { baseline: remote, graph: merged.graph };
     } else {
       const graph = startup.graph;
       const next = await this.port.commit({ expectedRevision: 0, graph });
@@ -333,7 +298,7 @@ export class DesktopSpatialPersistence {
       this.readConfirmed = true;
       this.startup = null;
       if (startup.graph === graph) this.publish(next, graph);
-      else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph) };
+      else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph).graph };
     }
   }
   connect(apply: (state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void, acknowledgeName?: (state: AgentMuxSpatialState) => void): () => void {
@@ -393,39 +358,60 @@ export class DesktopSpatialPersistence {
       const pending = this.pending, local = pending.graph, baseline = pending.baseline;
       const removals = new Set(this.removed);
       const groupRemovals = new Set(this.removedProjectGroups);
-      const remote = await this.port.read();
-      if (!remote)
-        throw new Error('The durable spatial document is unavailable. Pending work is retained.');
-      const uncertain = this.unconfirmed;
-      // A lost ACK may have saved the intermediate edit. Carry the subsequent
-      // input delta onto that attempted graph, retaining unrelated observed data.
-      // Equal values permit a merge; they never prove who applied the write.
-      const graph = uncertain ? reconcileSpatialGraphs(uncertain.baseline.graph,
-        reconcileSpatialGraphs(uncertain.input, local, uncertain.graph), remote.graph, uncertain.graph)
-        : remote.revision === baseline.revision ? local : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
-      let next: AgentMuxSpatialState;
-      try {
-        next = await this.port.commit({ expectedRevision: remote.revision, graph, allowEntityRemoval: removals.size > 0,
-          ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
-      } catch (error) {
-        // Each successful read supplies the next baseline, including after
-        // repeated lost replies. Do not apply an unconfirmed projection.
-        this.unconfirmed = { baseline: remote, input: local, graph };
-        throw error;
+      // Another writer may commit between this read and the commit; a refused stale revision is
+      // merged again against the newer document a bounded number of times before it is reported.
+      let remote: AgentMuxSpatialState | null = null, merged: ReturnType<typeof reconcileSpatialGraphs> | null = null, next: AgentMuxSpatialState | null = null;
+      let observed: AgentMuxSpatialState | null = null;
+      for (let attempt = 0; attempt < STALE_REVISION_ATTEMPTS && !next; attempt++) {
+        remote = observed ?? await this.port.read();
+        observed = null;
+        if (!remote)
+          throw new Error('The durable spatial document is unavailable. Pending work is retained.');
+        const uncertain = this.unconfirmed;
+        // A lost ACK may have saved the intermediate edit. Carry the subsequent
+        // input delta onto that attempted graph, retaining unrelated observed data.
+        // Equal values permit a merge; they never prove who applied the write.
+        // Each key merges on its own: a conflict keeps the committed remote value for that
+        // key and is retained by name, while every other change is still committed.
+        merged = uncertain ? reconcileSpatialGraphs(uncertain.baseline.graph,
+          reconcileSpatialGraphs(uncertain.input, local, uncertain.graph).graph, remote.graph, uncertain.graph)
+          : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
+        try {
+          next = await this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
+            ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
+        } catch (error) {
+          // When the document has moved on, merge again against that newer revision right away. The
+          // attempted graph is recorded as the unconfirmed intermediate, so the next pass is exact both
+          // when another writer won the race (Core applied nothing) and when our write landed and only
+          // its reply was lost: a value already present on the remote side counts as agreement.
+          this.unconfirmed = { baseline: remote, input: local, graph: merged.graph };
+          if (attempt + 1 < STALE_REVISION_ATTEMPTS) {
+            observed = await this.port.read().catch(() => null);
+            if (observed && observed.revision > remote.revision) continue;
+            observed = null;
+          }
+          // Each successful read supplies the next baseline, including after
+          // repeated lost replies. Do not apply an unconfirmed projection.
+          throw error;
+        }
       }
+      if (!next || !merged) throw new Error('The durable spatial document kept changing during this save. Pending work is retained.');
       this.unconfirmed = null;
       this.state = next;
+      this.retain(merged.conflicts);
       for (const id of removals)
         this.removed.delete(id);
       for (const id of groupRemovals) this.removedProjectGroups.delete(id);
       if (this.pending === pending) {
         this.pending = null;
+        // `local` is the baseline the UI already shows. A retained conflict then applies the
+        // committed value for that key, so the next capture starts from what Core holds.
         this.publish(next, local);
       }
       else if (this.pending) {
         // Later local edits were made against our in-flight graph. Preserve the
         // remote changes accepted by that write, without treating our own ACK as a conflict.
-        this.pending = { baseline: next, graph: reconcileSpatialGraphs(local, this.pending.graph, next.graph) };
+        this.pending = { baseline: next, graph: reconcileSpatialGraphs(local, this.pending.graph, next.graph).graph };
       }
     })();
     try {
