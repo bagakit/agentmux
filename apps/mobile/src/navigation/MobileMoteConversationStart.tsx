@@ -123,12 +123,13 @@ export function MobileMoteConversationStart({ client, target, identity, platform
         {mode === 'start' && state.reading?.dialogue.main.current && <p role="status">已有主对话可继续；这份草稿保留，可展开打开主对话，或明确选择新一轮。</p>}
         {state.busy && <p role="status">正在核对这次开始…</p>}
         {state.result && <p role="status">{agentPromptSubmissionOutcome(state.result.deferredInput?.record ?? null) === 'admitted' || agentPromptSubmissionOutcome(state.result.deferredInput?.record ?? null) === 'terminal-confirmed'
-          ? '首条消息已送达。' : state.result.issue ?? '这次开始还在核对，不会重复发送。'}</p>}
+          ? '首条消息已送达。' : '这次开始还在核对，不会重复发送。'}</p>}
+        {state.result?.issue && <p role="status">{state.result.issue}</p>}
         {local.notice && <p role="status">这台手机还没保存草稿，可以展开复制。</p>}
         <details className="mobile-mote-start-details"><summary>配置与请求{state.pending.length ? ` · ${state.pending.length}` : ''}</summary>
         {state.issue && <p>{state.issue}</p>}{local.notice && <p>{local.notice}</p>}
         {state.result?.record?.moteMain?.deferredInput && <details><summary>首条消息</summary><pre>{state.result.record.moteMain.deferredInput.prompt}</pre></details>}
-        {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对这次开始</button>
+        {[...new Set([...state.pending, ...(state.result ? [state.result.operationId] : [])])].map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对这次开始</button>
           <button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续这次开始</button><details><summary>请求</summary><code>{id}</code></details></div>)}
         {(state.result?.reference ?? state.reading?.dialogue.main.current) && <button type="button" onClick={() => onOpenMain((state.result?.reference ?? state.reading!.dialogue.main.current)!)}>打开主对话</button>}
         <button type="button" onClick={onConfigure}>快捷配置</button><button type="button" disabled={state.busy} onClick={() => { state.refresh(); dialogue.refresh() }}>重新核对</button>

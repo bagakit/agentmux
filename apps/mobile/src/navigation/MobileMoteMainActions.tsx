@@ -127,9 +127,14 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     {(!reading && !issue) && <p role="status">正在核对主对话与配置…</p>}
     {readIssue && <p role="status">{readIssue}</p>}
     {issue && <p role="status">{issue}</p>}
-    {result && <p role="status">{result.binding === 'confirmed' ? 'Main 已绑定，可回到主对话。' : result.issue ?? '主 Agent 已创建，绑定还没确认。'}</p>}
+    {result && <p role="status">{result.binding === 'confirmed' ? 'Main 已绑定，可回到主对话。' : '主 Agent 已创建，绑定还没确认。'}</p>}
+    {result?.issue && <p role="status">{result.issue}</p>}
     {operationId && (!result || result.binding === 'unconfirmed') ? <div><button type="button" disabled={busy} onClick={() => void run('inspect')}>核对主 Agent 创建</button><button type="button" disabled={busy} onClick={() => void run('advance')}>继续设置主 Agent</button></div>
       : reading && !readIssue && <button type="button" disabled={busy} onClick={() => void run('create')}>{busy ? '正在处理…' : reading.dialogue.main.current ? '新建并轮转 Main Agent' : '新建 Main Agent'}</button>}
+    {result?.binding === 'confirmed' && <details><summary>本次设置请求</summary><code>{result.operationId}</code><div>
+      <button type="button" disabled={busy} onClick={() => void run('inspect', undefined, result.operationId)}>核对主 Agent 创建</button>
+      <button type="button" disabled={busy} onClick={() => void run('advance', undefined, result.operationId)}>继续设置主 Agent</button>
+    </div></details>}
     {result?.binding === 'confirmed' && onOpenMain && <button type="button" onClick={onOpenMain}>打开主对话</button>}
     <button type="button" onClick={onConfigure}>配置默认 Executor</button><button type="button" disabled={busy} onClick={() => refresh(value => value + 1)}>刷新主对话配置</button>
   </section>
