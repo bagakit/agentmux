@@ -447,6 +447,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         const mode = handle ?? (inside ? 'move' : !crop || !documentState.shapes.length ? 'create' : null)
         setSelectedId(null)
         if (mode) { event.currentTarget.setPointerCapture(event.pointerId); cropRef.current = { mode, start: at, at, original: crop } }
+        // A new selection needs travel like any region mark, so a jittery click keeps the current one.
+        if (mode === 'create') downRef.current = { at: localPoint(event), deselected: false }
         schedulePaint(); return
       }
     }
