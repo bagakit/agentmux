@@ -62,7 +62,7 @@ describe('derived actions through the sole Main owner', () => {
     expect((await list(f.owner)).filter(item => item.value.hidden).map(item => item.id)).toEqual(['take-over', 'pass-on-experience'])
     await execute(request({ operation: 'settings.resource.update', resource: 'derived-actions', id: 'take-over', changes: { hidden: false } }), f.owner)
     await execute(request({ operation: 'settings.resource.update', resource: 'derived-actions', id: 'pass-on-experience', changes: { hidden: false } }), f.owner)
-    expect((await f.disk()).agentDerivedActions).toEqual({})
+    expect(Object.hasOwn(await f.disk(), 'agentDerivedActions')).toBe(false)
   })
 
   it('merges concurrent first edits by identity and conflicts on the same field', () => {
