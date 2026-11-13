@@ -64,7 +64,7 @@ app.whenReady().then(async () => {
     await capture('large-commit-selected-and-hover-light-narrow', 420, 820)
     await pointAt(1, 1)
     await win.loadFile(process.env.CHANGED_FILE_LIST_HTML, { search: 'scene=small' })
-    await ready('document.querySelectorAll(".git-workbench__files > li").length === 3')
+    await ready('document.querySelectorAll(".git-workbench__files > li").length === 5')
     receipt.measurements.smallCommitHasFilter = await evaluate('Boolean(document.querySelector(\'input[aria-label="Filter changed files"]\'))')
     await evaluate('changedFileListVisual.appearance("dark")')
     await capture('small-commit-dark', 760, 640)

@@ -15,7 +15,11 @@ const scene = new URLSearchParams(location.search).get('scene')
 const entries: Ready['entries'] = scene === 'small'
   ? [{ path: 'src/renderer/features/git/ChangedFileList.tsx', origPath: null, change: 'added' },
      { path: 'src/renderer/features/git/commit/GitCommitDetails.tsx', origPath: null, change: 'modified' },
-     { path: 'src/renderer/styles/git-workbench.css', origPath: null, change: 'modified' }]
+     { path: 'src/renderer/styles/git-workbench.css', origPath: null, change: 'modified' },
+     // Long folders and a deep rename: at a narrow width the name must stay readable before either path.
+     { path: 'packages/client-ui/src/components/conversation/threads/MoteConversationThreadList.tsx', origPath: null, change: 'modified' },
+     { path: 'apps/desktop/src/renderer/src/features/git/history/GitHistoryReferencePicker.tsx',
+       origPath: 'apps/desktop/src/renderer/src/components/git/history/RefPicker.tsx', change: 'renamed' }]
   : [...Array.from({ length: 5000 }, (_, index) => ({ path: `assets/icons/${['action', 'state', 'object', 'brand'][index % 4]}/glyph-${String(index).padStart(4, '0')}.svg`,
       origPath: null, change: (index % 7 === 0 ? 'modified' : 'added') as Ready['entries'][number]['change'] })),
      { path: 'src/renderer/features/git/ChangedFileList.tsx', origPath: 'src/renderer/features/git/FileList.tsx', change: 'renamed' }]
