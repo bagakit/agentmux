@@ -865,10 +865,13 @@ export function requireOutgoingWorkbenchStorage(observation) {
   const user = storage?.userState, receipt = user?.lastConfirmedWrite
   if (!user || !current || storage.spatialRevision === undefined) fail(false,
     "This running interface does not report native workbench save evidence. The existing interface and Runs were kept; use the original application's normal Quit, then retry installation with its GUI closed. A cold-install receipt cannot confirm complete workbench continuity.")
+  const spatial = current?.spatial
+  const unsavedSince = typeof spatial?.pendingSince === 'number' ? ` Workface changes have been unsaved since ${new Date(spatial.pendingSince).toISOString()}` +
+    (spatial.lastFailureCode ? ` (last failure ${spatial.lastFailureCode}).` : '.') : ''
   fail(user?.availability === 'present' && receipt?.diskDurability === 'confirmed' && receipt.path === user.path &&
     typeof user.contentDigest === 'string' && user.contentDigest === receipt.contentDigest && user.sizeBytes === receipt.sizeBytes &&
     current?.userStatePending === false && current.userStateContentDigest === user.contentDigest &&
-    current.spatial.aligned === true && typeof storage.spatialRevision === 'number' &&
-    current.spatial.revision === storage.spatialRevision,
-    'The original workbench storage owner is unconfirmed. The existing interface and Runs were kept; restore storage access and retry the update.')
+    spatial.aligned === true && typeof storage.spatialRevision === 'number' &&
+    spatial.revision === storage.spatialRevision,
+    'The original workbench storage owner is unconfirmed. The existing interface and Runs were kept; restore storage access and retry the update.' + unsavedSince)
 }

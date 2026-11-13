@@ -209,6 +209,30 @@ export class SpatialConflictError extends Error {
 }
 /** A save re-merges against a newer revision this many times before reporting it as unconfirmed. */
 const STALE_REVISION_ATTEMPTS = 3;
+/**
+ * Unconfirmed structural intent older than this is announced while the user works. A normal save
+ * settles in milliseconds; this only has to exceed a slow disk sync and a Core lock wait (5 s).
+ */
+export const SAVE_STALL_AFTER_MS = 15_000;
+/** Background retries back off to at most this interval; they never stop while intent is unsaved. */
+const SAVE_RETRY_MAX_MS = 120_000;
+export type SpatialSaveClock = {
+  now(): number
+  setTimeout(callback: () => void, delay: number): unknown
+  clearTimeout(handle: unknown): void
+};
+const defaultSaveClock: SpatialSaveClock = { now: () => Date.now(), setTimeout: (callback, delay) => setTimeout(callback, delay),
+  clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) };
+export type SpatialSaveObservation = { pendingSince: number | null; lastConfirmedAt: number | null; stalled: boolean;
+  lastFailureCode: string | null; conflicts: number };
+/** Workface changes have stayed unconfirmed past the bound. The original work stays visible and retried. */
+export class SpatialSaveStalledError extends Error {
+  readonly code = 'SPATIAL_SAVE_STALLED';
+  constructor(readonly pendingSince: number, readonly lastFailureCode: string | null) {
+    super('Workface changes have not reached storage for a while. They stay on screen and are retried automatically'
+      + (lastFailureCode ? ` (last failure ${lastFailureCode}).` : '; the current save has not answered yet.'));
+  }
+}
 /** One client's pending edit and revision, with no resource or Session lifecycle. */
 export class DesktopSpatialPersistence {
   private state: AgentMuxSpatialState | null = null;
@@ -236,10 +260,66 @@ export class DesktopSpatialPersistence {
   private apply: ((state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void) | null = null;
   private acknowledgeName: ((state: AgentMuxSpatialState) => void) | undefined;
   private unsubscribe: (() => void) | null = null;
-  constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void) { }
+  constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void,
+    private readonly clock: SpatialSaveClock = defaultSaveClock) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
   /** Read-only observation: equal graphs cannot settle an in-flight or unknown write. */
   get pendingChanges(): boolean { return !!(this.startup || this.pending || this.saving || this.unconfirmed); }
+  // When unconfirmed structural intent first appeared, and when Core last confirmed a save.
+  private pendingSince: number | null = null;
+  private lastConfirmedAt: number | null = null;
+  private lastFailureCode: string | null = null;
+  private failures = 0;
+  private watchdog: ReturnType<SpatialSaveClock['setTimeout']> | null = null;
+  private stalled = false;
+  /** The facts app.inspect and the installer read; no user content. */
+  get saveObservation(): SpatialSaveObservation {
+    return { pendingSince: this.pendingChanges ? this.pendingSince : null, lastConfirmedAt: this.lastConfirmedAt,
+      stalled: this.stalled, lastFailureCode: this.lastFailureCode, conflicts: this.retained.size };
+  }
+  /** Start the bounded check once per unconfirmed period; edits inside the period add no timer. */
+  private markPending(): void {
+    this.pendingSince ??= this.clock.now();
+    this.arm(SAVE_STALL_AFTER_MS);
+  }
+  private arm(delay: number): void {
+    if (this.watchdog !== null) return;
+    this.watchdog = this.clock.setTimeout(() => { this.watchdog = null; this.check(); }, delay);
+  }
+  private check(): void {
+    if (!this.pendingChanges || this.pendingSince === null) return;
+    if (this.saving) { this.arm(SAVE_STALL_AFTER_MS); return this.reportStall(); }
+    // Nothing is in flight: the last attempt failed or nothing has retried it yet. Retry with backoff.
+    this.reportStall();
+    this.arm(Math.min(SAVE_RETRY_MAX_MS, SAVE_STALL_AFTER_MS * 2 ** Math.min(this.failures, 4)));
+    void this.flush().catch(() => undefined);
+  }
+  private reportStall(): void {
+    if (this.stalled || this.pendingSince === null || this.clock.now() - this.pendingSince < SAVE_STALL_AFTER_MS) return;
+    this.stalled = true;
+    this.warn(new SpatialSaveStalledError(this.pendingSince, this.lastFailureCode));
+  }
+  private confirmed(): void {
+    this.lastConfirmedAt = this.clock.now();
+    this.failures = 0;
+    this.lastFailureCode = null;
+    if (this.pendingChanges) return;
+    this.pendingSince = null;
+    if (this.watchdog !== null) { this.clock.clearTimeout(this.watchdog); this.watchdog = null; }
+    if (this.stalled) { this.stalled = false; this.onRecovered?.(); }
+  }
+  private failed(error: unknown): void {
+    this.failures++;
+    this.lastFailureCode = error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code : 'UNKNOWN';
+    this.markPending();
+  }
+  /** Called once when a reported stall is confirmed saved again. */
+  onRecovered: (() => void) | null = null;
+  dispose(): void {
+    if (this.watchdog !== null) this.clock.clearTimeout(this.watchdog);
+    this.watchdog = null;
+  }
   get current(): AgentMuxSpatialState | null { return this.state; }
   /** Exact keys whose local intent conflicts with another writer's committed value. */
   get conflicts(): SpatialConflict[] { return [...this.retained.values()]; }
@@ -333,7 +413,7 @@ export class DesktopSpatialPersistence {
   }
   stage(graph: AgentMuxSpatialGraph): void {
     if (!this.ready) {
-      if (this.startup) this.startup.graph = graph;
+      if (this.startup) { this.startup.graph = graph; this.markPending(); }
       this.warn(new Error('Core spatial state has not been confirmed. Original work is retained; restore storage and retry.'));
       return;
     }
@@ -342,6 +422,7 @@ export class DesktopSpatialPersistence {
     if (sameSpatialValue(graph, this.pending?.graph ?? this.applied?.graph ?? this.state!.graph))
       return;
     this.pending = { graph, baseline: this.pending?.baseline ?? this.applied ?? this.state! };
+    this.markPending();
     // Coalesce synchronous structural changes; this never opens a resource or Run.
     queueMicrotask(() => { void this.flush().catch(this.warn); });
   }
@@ -417,10 +498,15 @@ export class DesktopSpatialPersistence {
     try {
       await this.saving;
     }
+    catch (error) {
+      this.failed(error);
+      throw error;
+    }
     finally {
       this.saving = null;
     }
     if (this.pending)
       await this.flush();
+    else this.confirmed();
   }
 }

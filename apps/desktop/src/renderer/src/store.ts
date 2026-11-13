@@ -5529,6 +5529,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeOwnedSpatialObservation = null
       dispose?.()
       if (disposeCoreSpatial === dispose) disposeCoreSpatial = null
+      ownedSpatial?.dispose()
     }
     const a2aNotifications = createA2AMessageNotifier(async input => {
       const delivery = await api.ui.notifyAgentAttention(input)
@@ -5664,6 +5665,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ? get().reportError(error,{kind:'process-degraded',summary:'Another writer changed workface items you also edited. Every other change was saved.',
             event:{source:'workface-save-conflict',key:error.conflicts.map(conflict=>conflict.key).join('\n')}})
           : get().reportWorkbenchSaveFailure(error))
+        // A stall uses the existing unconfirmed-save warning and Retry; recovery clears only that warning.
+        spatialOwner.onRecovered = () => {
+          if (coreSpatialPersistence === spatialOwner && get().workbenchSaveWarningOwner === 'workbench')
+            useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
+        }
         ownedSpatial = spatialOwner
         coreSpatialPersistence = spatialOwner
         try {
@@ -6529,7 +6535,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           })(),
           spatial: { revision: coreSpatialPersistence?.current?.revision ?? null,
             aligned: !!coreSpatialPersistence?.ready && !coreSpatialPersistence.pendingChanges &&
-              sameSpatialValue(captureSpatialWorkbench(coreSpatialPersistence), coreSpatialPersistence.current!.graph) } },
+              sameSpatialValue(captureSpatialWorkbench(coreSpatialPersistence), coreSpatialPersistence.current!.graph),
+            ...(coreSpatialPersistence ? coreSpatialPersistence.saveObservation : {}) } },
         desktop: { selection, ...presentation,
           focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId, agent: readFocusAgentPresentation(state.focusAgentReveal) } },
         layouts: state.layouts,

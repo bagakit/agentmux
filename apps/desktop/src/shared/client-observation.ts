@@ -82,7 +82,11 @@ export const desktopWorkbenchObservationSchema = z.object({
   survey: survey.optional(),
   // Missing older facts stay unknown; observation never flushes or manufactures an ACK.
   persistence: z.object({ userStatePending: z.boolean(), userStateContentDigest: contentDigest.nullable(),
-    spatial: z.object({ revision: spatialRevision, aligned: z.boolean() }).strict() }).strict().optional(),
+    // Save stall facts; absent from older producers, where they remain unknown.
+    spatial: z.object({ revision: spatialRevision, aligned: z.boolean(),
+      pendingSince: z.number().int().nonnegative().nullable().optional(), lastConfirmedAt: z.number().int().nonnegative().nullable().optional(),
+      stalled: z.boolean().optional(), lastFailureCode: z.string().max(128).nullable().optional(),
+      conflicts: z.number().int().nonnegative().optional() }).strict() }).strict().optional(),
   desktop: desktopObservationSchema,
   tabs: z.array(z.object({ id, workspaceId: id, topicId: id.optional(), titleRegionId: id, name: z.string().optional(),
     layout: z.object({ root: regionTree, activeRegionId: id }).strict(), regions: z.array(region) }).strict()),
