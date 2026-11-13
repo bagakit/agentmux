@@ -3520,14 +3520,11 @@ it('forwards owner geometry to the attached Renderer without requesting another 
   await controller.dispose()
 })
 
-// A Topic directory read is never a recovery gate or a library scan.
-it.each(['stalled', 'failed', 'foreign'])('short Mote recovery with a %s Topic read retains healthy continuity', async variant => {
+// Recovery is owned by Core continuity; Topic directory metadata never sits on its path.
+it('short Mote recovery never reads its Topic directory or scans the library', async () => {
   const scratch: import('../src/shared/contracts').WorkspaceRecord={id:SCRATCH_WORKSPACE_ID,hostId:'local',path:_hygiene_fixturePath("private/wiki-recovery/scratch"),name:'Topics',kind:'folder'}
   const config: AppConfig={...localConfig,workspaces:[scratch],executors:{review:{id:'review',kind:'agent',providerId:'codex',label:'Review',command:'codex',args:[],env:{}}}}
-  const topics=new ScratchTopics(),read=vi.spyOn(topics,'readForDirectory')
-  if(variant==='stalled')read.mockImplementation(()=>new Promise(()=>{}))
-  else if(variant==='failed')read.mockRejectedValue(new Error('Private metadata access unavailable'))
-  else read.mockResolvedValue(null)
+  const topics=new ScratchTopics(),read=vi.spyOn(topics,'readForDirectory').mockImplementation(()=>new Promise(()=>{}))
   const list=vi.spyOn(topics,'list').mockRejectedValue(new Error('Must never scan library'))
   const controller=new RuntimeController(store,localRuntimeConnector,topics);controller.commit(await controller.prepare(config))
   const client=runtimeFixture.FakeClient.instances.at(-1)!,stored={...client.agentSession(),workspacePath:_hygiene_fixturePath("private/wiki-recovery/motes/0123456789abcdef")}
@@ -3536,7 +3533,7 @@ it.each(['stalled', 'failed', 'foreign'])('short Mote recovery with a %s Topic r
   client.runtimeProjection.mockResolvedValue({hostId:'local',subjects:[{subjectId:'agent:local:agent-1',kind:'agent',hostId:'local',workspacePath:stored.workspacePath,providerId:'codex',executorId:'review',agentSession:stored,run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'review',agentSessionId:'agent-1',workspacePath:stored.workspacePath,pid:42,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 1),latestOutputBytes:0,acceptedInputBytes:0}}]})
   const began=Date.now(),result=await controller.recoverSession({kind:'agent',hostId:'local',agentSessionId:'agent-1',run:stored.run},config)
   expect(Date.now()-began).toBeLessThan(1000);expect(result).toMatchObject({kind:'reattachable',session:{id:'agent-1',processState:'running'}})
-  expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(list).not.toHaveBeenCalled()
+  expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(read).not.toHaveBeenCalled();expect(list).not.toHaveBeenCalled()
   await controller.dispose();vi.restoreAllMocks()
 })
 
