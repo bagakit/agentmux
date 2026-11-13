@@ -120,6 +120,28 @@ try {
     assert.equal(value.layout.headerText.includes('Injected') || value.layout.headerText.includes('Isolated'), false, 'The header carries only the page title; its mode lives in the page details')
     for (const button of value.layout.buttons) assert.ok(button.width > 0 && button.height >= 24 && button.x >= value.layout.card.x - 1 && button.right <= value.layout.card.right + 1, 'Every original action must keep a readable hit target inside the card')
   }
+  // The card's page lays out to its page area: the frame's CSS size, the original page's own layout size and the
+  // stage agree within 2px, so nothing is scaled, cropped or banded.
+  const pageFill = async (name: string, value: any) => {
+    const nativePage = webContents.getAllWebContents().find(contents => contents.getURL().startsWith('http://127.0.0.1') && !contents.isDestroyed() && value.browserId && (manager as any).entries.get(value.browserId)?.view.webContents === contents)
+    assert.ok(nativePage, 'The page fill receipt reads the card\'s own original page')
+    // The page reads in its own CSS px at the Browser's page zoom; its layout area in window units is that size times the zoom.
+    const zoom = nativePage!.getZoomFactor(), css = await nativePage!.executeJavaScript('({ width: innerWidth, height: innerHeight })')
+    const page = { width: css.width * zoom, height: css.height * zoom }
+    const frame = { width: value.videoWidth / value.screenPixelRatio, height: value.videoHeight / value.screenPixelRatio }
+    const receipt = { name, stage: { width: value.stage.width, height: value.stage.height }, frame, page, css, zoom, notice: value.noticeOverlay }
+    ;(report.pageFill ??= []).push(receipt)
+    for (const [label, size] of [['frame', frame], ['page', page]] as const) {
+      assert.ok(Math.abs(size.width - value.stage.width) <= 2 && Math.abs(size.height - value.stage.height) <= 2,
+        `${name}: the ${label} must match the page area 1:1 (${JSON.stringify(receipt)})`)
+    }
+    assert.equal(value.noticeOverlay, 'overlay', `${name}: the preview notice floats on the page area`)
+    return receipt
+  }
+  const settledFill = async (name: string, expression = 'true') => {
+    await until(`(() => {const f=conversationCapsuleProbe.facts();return f.ready && ${expression} && Math.abs(f.videoWidth/f.screenPixelRatio-f.stage.width)<=2 && Math.abs(f.videoHeight/f.screenPixelRatio-f.stage.height)<=2})()`, `${name}: the original page relays out to its page area`)
+    const value = await facts(); await pageFill(name, value); return value
+  }
   const assertFrame = (value: any) => {
     assert.equal(value.ready, true, 'The original native page must supply a decoded preview')
     const expected = [237, 244, 239, 255]
@@ -244,7 +266,7 @@ try {
   } }
   await until('conversationCapsuleProbe.facts().ready', 'Actual native WebContentsView capture must decode into the production card video')
   await step('native-video-ready')
-  const first = await facts(); report.isolated = first; assertFrame(first)
+  const first = await settledFill('collapsed'); report.isolated = first; assertFrame(first)
   const createdBeforeFrame = report.created.length
   await until('conversationCapsuleProbe.facts().cachedFrame?.startsWith("data:image/")', 'The actual timeline hook must cache an already-painted native video keyframe')
   report.nativeKeyframe = { srcPrefix: (await facts()).cachedFrame.slice(0, 40), createdBefore: createdBeforeFrame, createdAfter: report.created.length }
@@ -252,12 +274,16 @@ try {
   assertCardLayout(first)
   await evaluate("conversationCapsuleProbe.click('Expand page')")
   await until('conversationCapsuleProbe.facts().height>320', 'Expand must give the original live page a larger bounded reading surface')
-  report.expanded = await facts()
+  report.expanded = await settledFill('expanded', 'f.stage.height>320')
+  const [collapsed, expanded] = [report.pageFill.find((item: any) => item.name === 'collapsed'), report.pageFill.at(-1)]
+  assert.equal(expanded.zoom, collapsed.zoom, 'Expand keeps the page text size')
+  assert.ok(expanded.css.height > collapsed.css.height + 100, 'Expand shows more of the page at the same text size')
   assert.ok(report.expanded.height <= 700 && report.expanded.browserId === first.browserId)
   assert.equal(report.created.length, createdBeforeFrame, 'Expanding the original stage must not acquire another Browser')
   await writeFile(join(evidence!, `${phase}-expanded.png`), (await win.webContents.capturePage()).toPNG())
   await evaluate("conversationCapsuleProbe.click('Compact page')")
   await until('conversationCapsuleProbe.facts().height<=320 && conversationCapsuleProbe.facts().ready', 'Compact restores the original bounded live stage')
+  await settledFill('compacted', 'f.stage.height<=320')
   const nativePage = webContents.getAllWebContents().find(contents => contents.getURL() === (isolated.endpoint as any).url)!
   assert.ok(nativePage, 'The page comes from an actual native owner, not a screenshot fixture')
   assert.equal(await nativePage.executeJavaScript('document.querySelector("h1").textContent'), 'A saved result, right in the conversation')
@@ -387,7 +413,7 @@ try {
     await evaluate("document.querySelector('.activity-feed').scrollTop=0;document.querySelector('.capsule-chrome').scrollTop=0")
     await delay(120)
     await until('conversationCapsuleProbe.facts().ready', 'The original native frame remains readable across viewport and theme changes')
-    const value = await facts(); assertCardLayout(value); assertFrame(value)
+    const value = await settledFill(name); assertCardLayout(value); assertFrame(value)
     assert.equal(value.appearance, theme)
     assert.equal(value.questions[0].answer, retainedDraft, 'Presentation changes retain the original unsent editor bytes')
     report.presentationCases.push({ name, value })

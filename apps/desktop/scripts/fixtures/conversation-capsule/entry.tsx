@@ -95,6 +95,8 @@ function Feed({ content, visible }: { content: string; visible: boolean }) {
         activeTrigger: document.activeElement === document.querySelector('.md-diagram-image') },
       browserId: stage?.dataset.nativeBrowserStage, keyframe: page?.dataset.conversationKeyframe, cachedFrame: document.querySelector<HTMLImageElement>('.conversation-axis__keyframe')?.src,
       ready: Boolean(video && video.readyState >= 2 && video.videoWidth > 0),
-      videoWidth: video?.videoWidth, videoHeight: video?.videoHeight, notices: [...document.querySelectorAll('.browser-presentation-notice')].map(node => node.textContent),
+      videoWidth: video?.videoWidth, videoHeight: video?.videoHeight,
+      screenPixelRatio: (video?.srcObject as MediaStream | null)?.getVideoTracks()[0]?.getSettings().screenPixelRatio,
+      stage: rect(stage), noticeOverlay: page?.querySelector('.browser-presentation')?.getAttribute('data-notice') ?? null, notices: [...document.querySelectorAll('.browser-presentation-notice')].map(node => node.textContent),
       uri: page?.querySelector('.conversation-capsule__source code')?.textContent, inputs: [...document.querySelectorAll('input,textarea')].map(input => input.tagName) } }
 }
