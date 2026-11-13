@@ -147,7 +147,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   }
 
 
-  const copy = async (profile: BrowserProfileSummary, revision: number) => {
+  const copy = async (profile: BrowserProfileSummary, revision: string) => {
     const taken = new Set(profiles.map(value => value.label))
     let n = 1, label: string
     do { const suffix = n === 1 ? ' copy' : ` copy ${n}`; label = profile.label.slice(0, 128 - suffix.length).trimEnd() + suffix; n += 1 } while (taken.has(label))
@@ -190,7 +190,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision} folders={folders}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
-            onCopy={() => void copy(selected, list.revision!)}
+            onCopy={() => void copy(selected, selected.revision)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
             onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setCopyTarget(null); setNotice(pending) }} />
             : <p className="settings-resource-empty" role="status">{list.reading ? 'Loading Profiles…' : 'No Profile selected.'}</p>}
@@ -228,6 +228,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
   const [hues, setHues] = useState(false)
   const [saved, setSaved] = useState(false)
   const [confirm, setConfirm] = useState<'delete' | null>(null)
+  const nameRevision = useRef(profile.revision), notesRevision = useRef(profile.revision)
+  const [baselineRefresh, setBaselineRefresh] = useState(0)
   const nameInput = useRef<HTMLInputElement>(null)
   const markButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
@@ -243,8 +245,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
   useEffect(() => { if (!noting) setNotes(profile.notes ?? '') }, [profile.notes])
   useEffect(() => { if (!saved) return; const timer = setTimeout(() => setSaved(false), 1200); return () => clearTimeout(timer) }, [saved])
 
-  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1]): Promise<boolean> => {
-    const ok = await run('edit', () => api.browser.updateProfile(profile.id, edit, revision))
+  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1], expectedRevision = profile.revision): Promise<boolean> => {
+    const ok = await run('edit', () => api.browser.updateProfile(profile.id, edit, expectedRevision))
     if (ok) setSaved(true)
     return ok
   }
@@ -254,7 +256,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
     const next = name.trim()
     if (!keep || !next || next === profile.label) { setNaming(false); setName(profile.label); return }
     setNaming(false)
-    if (!await commit({ label: next })) { setName(next); setNaming(true) }
+    if (!await commit({ label: next }, nameRevision.current)) { setName(next); setNaming(true) }
   }
   const nameKeys = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); void finishName(true) }
@@ -263,7 +265,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
   const finishNotes = async () => {
     const draft = notes
     setNoting(false)
-    if (draft.trim() !== (profile.notes ?? '') && !await commit({ notes: draft.trim() })) { setNotes(draft); setNoting(true) }
+    if (draft.trim() !== (profile.notes ?? '') && !await commit({ notes: draft.trim() }, notesRevision.current)) { setNotes(draft); setNoting(true) }
   }
   const blockedDelete = profile.isDefault ? 'The default Profile can’t be deleted' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
   const open = uses.filter(use => use.state === 'open')
@@ -275,8 +277,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
           onClick={() => setHues(value => !value)}><ProfileMark profile={profile} size="large" /></button>
         <div className="browser-profile-editor__who">
           {naming ? <TextInput ref={nameInput} aria-label="Profile name" value={name} maxLength={128}
-            onChange={event => setName(event.target.value)} onKeyDown={nameKeys} onBlur={() => void finishName(true)} />
-            : <h3><button type="button" className="browser-profile-editor__name" onClick={() => setNaming(true)} title="Rename">{profile.label}</button>
+            onChange={event => setName(event.target.value)} onKeyDown={nameKeys} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishName(true) }} />
+            : <h3><button type="button" className="browser-profile-editor__name" onClick={() => { nameRevision.current = profile.revision; setNaming(true) }} title="Rename">{profile.label}</button>
               {saved ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
           <small>{profile.isDefault ? 'Default for new Browsers · ' : ''}{open.length ? `Open in ${open.length} Browser${open.length > 1 ? 's' : ''}` : 'Not open'}</small>
         </div>
@@ -318,13 +320,27 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
       </RovingFocus.Root> : null}
 
       {noting ? <textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus rows={2} maxLength={2000} value={notes}
-          onChange={event => setNotes(event.target.value)} onBlur={() => void finishNotes()}
+          onChange={event => setNotes(event.target.value)} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishNotes() }}
           onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setNotes(profile.notes ?? ''); setNoting(false) } }} />
-        : <button type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => setNoting(true)}>
+        : <button type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => { notesRevision.current = profile.revision; setNoting(true) }}>
           {profile.notes || 'Add a note'}
         </button>}
 
-      {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onClick={() => void browserProfiles.refresh()}>Reload</button></> : null}</p> : null}
+      {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void (async () => {
+        await browserProfiles.refresh()
+        const current = browserProfiles.get().profiles?.find(value => value.id === profile.id)
+        if (current) { nameRevision.current = current.revision; notesRevision.current = current.revision; setBaselineRefresh(value => value + 1) }
+      })()}>Reload</button></> : null}</p> : null}
+
+      <section className="browser-profile-editor__section" aria-label="Observed activity">
+        <h4>Observed activity</h4>
+        <p className="browser-profile-editor__quiet">Last observed use: {profile.activity
+          ? <time dateTime={Number.isFinite(new Date(profile.activity.lastUsedAt).getTime()) ? new Date(profile.activity.lastUsedAt).toISOString() : undefined}>{new Date(profile.activity.lastUsedAt).toLocaleString()}</time> : 'Unknown'}</p>
+        <p className="browser-profile-editor__quiet">Observed Browser time: {profile.activity
+          ? profile.activity.observedRunMs < 1000 ? 'Less than a second confirmed' : `${Math.floor(profile.activity.observedRunMs / 1000)} s confirmed` : 'Unknown'}</p>
+        <p className="browser-profile-editor__quiet">Overlapping pages count once. Earlier or interrupted use is unknown.
+          {profile.activity?.state === 'unknown' ? ' The last native observation was interrupted; its confirmed time is kept.' : ''}</p>
+      </section>
 
       <BrowserProfileOrganization profile={profile} folders={folders} revision={revision} busy={busy !== null} run={run} onEdit={commit} />
 
@@ -343,7 +359,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
       </section>
 
       {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
-      <ProfileNetworkRoute profile={profile} revision={revision} openBrowsers={open.length} run={run} />
+      <ProfileNetworkRoute profile={profile} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />
       {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
 
       {/* A reading belongs to the route and check address that produced it, including late results. */}

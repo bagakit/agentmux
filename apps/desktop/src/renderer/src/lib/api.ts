@@ -348,6 +348,7 @@ const windowResizeListeners = new Set<(event: { active: boolean }) => void>()
 const mockBrowsers = new Map<string, BrowserSnapshot>()
 const mockDemands = new Map<string, Demand>()
 const mockDefaultBrowserProfile: BrowserProfileSummary = {
+  revision: 'preview:default',
   id: '11111111-1111-4111-8111-111111111111',
   label: 'Default',
   createdAt: now,
@@ -364,7 +365,7 @@ let mockBrowserProfileRevision = 0
 const mockBrowserProfileListeners = new Set<(list: BrowserProfileList) => void>()
 function publishMockBrowserProfiles(): void {
   mockBrowserProfileRevision += 1
-  const list = { revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }
+  const list = { revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }
   mockBrowserProfileListeners.forEach((listener) => listener(structuredClone(list)))
 }
 let mockBrowserImportSources: BrowserProfileImportSourceSummary[] = []
@@ -1449,17 +1450,17 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(browser)
     },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
-    readProfiles: async () => ({ revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }),
+    readProfiles: async () => ({ revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }),
     onProfilesChanged(listener) {
       mockBrowserProfileListeners.add(listener)
       return () => { mockBrowserProfileListeners.delete(listener) }
     },
     updateProfile: async (profileId, edit, expectedRevision) => {
       if (edit.tags !== undefined || edit.folderId !== undefined || edit.pinned !== undefined) throw new Error('Profile organization requires the Desktop host.')
-      if (expectedRevision !== mockBrowserProfileRevision) throw Object.assign(new Error('Browser Profiles changed since revision was read. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
       const current = mockBrowserProfiles.find((profile) => profile.id === profileId)
       if (!current) throw new Error(`Unknown Browser Profile: ${profileId}`)
-      const next: BrowserProfileSummary = { ...current, ...(edit.label === undefined ? {} : { label: edit.label }) }
+      if (expectedRevision !== current.revision) throw Object.assign(new Error('This Profile configuration changed. Read it again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+      const next: BrowserProfileSummary = { ...current, revision: mintObjectId(), ...(edit.label === undefined ? {} : { label: edit.label }) }
       if (edit.hue === null) delete next.hue
       else if (edit.hue !== undefined) next.hue = edit.hue
       if (edit.notes === '') delete next.notes
@@ -1491,6 +1492,7 @@ const mockApi: AgentMuxDesktopApi = {
     copyProfile: async () => { throw new Error('Copying Browser Profile settings requires the desktop app.') },
     createProfile: async (label) => {
       const profile: BrowserProfileSummary = {
+        revision: mintObjectId(),
         id: mintObjectId(),
         label,
         createdAt: Date.now(),
@@ -1531,6 +1533,7 @@ const mockApi: AgentMuxDesktopApi = {
       mockBrowserImportSources = mockBrowserImportSources.filter((candidate) => candidate.token !== sourceToken)
       if (!source) throw new Error('Unknown or already consumed Browser Profile import source')
       const profile: BrowserProfileSummary = {
+        revision: mintObjectId(),
         id: mintObjectId(),
         label,
         createdAt: Date.now(),

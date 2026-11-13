@@ -17,9 +17,9 @@ const ROUTE_LABELS: Readonly<Record<RouteMode, string>> = { system: 'System', di
  * pasted line, and the Don't proxy list under More. Apply is the only way to change it: Main applies the
  * route to the Profile's session before saving, so a route that cannot be applied leaves the old one in use.
  */
-export function ProfileNetworkRoute({ profile, revision, openBrowsers, run }: {
+export function ProfileNetworkRoute({ profile, openBrowsers, run, baselineRefresh = 0 }: {
   profile: BrowserProfileSummary
-  revision: number
+  baselineRefresh?: number
   /** How many of this Profile's Browsers are open now; they reconnect through the new route. */
   openBrowsers: number
   run(key: string, action: () => Promise<unknown>): Promise<boolean>
@@ -27,6 +27,9 @@ export function ProfileNetworkRoute({ profile, revision, openBrowsers, run }: {
   const saved = profile.network ?? { mode: 'system' as const }
   const savedServer = saved.mode === 'proxy' ? formatBrowserProfileProxyServer(saved.server) : ''
   const savedBypass = saved.mode === 'proxy' ? (saved.bypass ?? []).join(', ') : ''
+  const draftRevision = useRef(profile.revision), dirty = useRef(false)
+  useEffect(() => { draftRevision.current = profile.revision }, [baselineRefresh])
+  const beginEdit = () => { if (!dirty.current) draftRevision.current = profile.revision; dirty.current = true }
   const [mode, setMode] = useState<RouteMode>(saved.mode)
   const [server, setServer] = useState(savedServer)
   const [bypass, setBypass] = useState(savedBypass)
@@ -43,13 +46,13 @@ export function ProfileNetworkRoute({ profile, revision, openBrowsers, run }: {
       <h4>Network</h4>
       <div className="browser-profile-editor__route-modes" role="radiogroup" aria-label="Network route">
         {(Object.keys(ROUTE_LABELS) as RouteMode[]).map(option => (
-          <button key={option} type="button" role="radio" aria-checked={mode === option} onClick={() => setMode(option)}>{ROUTE_LABELS[option]}</button>
+          <button key={option} type="button" role="radio" aria-checked={mode === option} onClick={() => { beginEdit(); setMode(option) }}>{ROUTE_LABELS[option]}</button>
         ))}
       </div>
       {mode === 'proxy' ? <div className="browser-profile-editor__route-fields">
         <TextInput aria-label="Proxy server" placeholder="host:port or socks5://host:port" value={server} spellCheck={false}
-          aria-invalid={problem !== null && server.trim() !== ''} onChange={event => setServer(event.target.value)} />
-        {more ? <TextInput aria-label="Don’t proxy" placeholder="*.corp.example, localhost" value={bypass} spellCheck={false} onChange={event => setBypass(event.target.value)} />
+          aria-invalid={problem !== null && server.trim() !== ''} onChange={event => { beginEdit(); setServer(event.target.value) }} />
+        {more ? <TextInput aria-label="Don’t proxy" placeholder="*.corp.example, localhost" value={bypass} spellCheck={false} onChange={event => { beginEdit(); setBypass(event.target.value) }} />
           : <button type="button" className="browser-profile-editor__link" onClick={() => setMore(true)}>More</button>}
       </div> : null}
       <p className={problem && server.trim() ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={problem && server.trim() ? 'alert' : undefined}>
@@ -58,9 +61,9 @@ export function ProfileNetworkRoute({ profile, revision, openBrowsers, run }: {
           : 'Every page of this Profile goes through this server. If it cannot be reached, its pages do not open rather than connecting directly.'}
       </p>
       {changed ? <div className="browser-profile-editor__route-apply">
-        <button type="button" className="small-button" onClick={() => { setMode(saved.mode); setServer(savedServer); setBypass(savedBypass) }}>Revert</button>
+        <button type="button" className="small-button" onClick={() => { dirty.current = false; draftRevision.current = profile.revision; setMode(saved.mode); setServer(savedServer); setBypass(savedBypass) }}>Revert</button>
         <button type="button" className="primary-button" disabled={problem !== null}
-          onClick={() => void run('network', () => api.browser.updateProfile(profile.id, { network: draft.mode === 'system' ? null : draft }, revision))}>Apply network{reconnect}</button>
+          onClick={() => void run('network', () => api.browser.updateProfile(profile.id, { network: draft.mode === 'system' ? null : draft }, draftRevision.current)).then(ok => { if (ok) dirty.current = false })}>Apply network{reconnect}</button>
       </div> : null}
     </section>
   )

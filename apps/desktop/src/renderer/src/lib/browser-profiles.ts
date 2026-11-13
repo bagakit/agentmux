@@ -5,11 +5,12 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 
 /**
  * The one Renderer view of Main's Browser Profile list. Main pushes the whole
- * committed list after every change; reads and pushes are ordered by revision,
+ * committed list after every change; reads and pushes are ordered by snapshot sequence,
  * so a late reply can never replace a newer list. Components never copy it.
  */
 export type BrowserProfilesState = {
   revision: number | null
+  sequence: number | null
   /** Last list Main confirmed; kept while a later read fails. */
   profiles: BrowserProfileSummary[] | null
   folders: BrowserProfileFolder[] | null
@@ -18,7 +19,7 @@ export type BrowserProfilesState = {
 }
 
 type Listener = () => void
-const EMPTY: BrowserProfilesState = { revision: null, profiles: null, folders: null, error: null, reading: false }
+const EMPTY: BrowserProfilesState = { revision: null, sequence: null, profiles: null, folders: null, error: null, reading: false }
 
 export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readProfiles' | 'onProfilesChanged'>) {
   let state = EMPTY
@@ -27,9 +28,9 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   let reading: Promise<void> | null = null
   const set = (next: BrowserProfilesState): void => { state = next; for (const listener of listeners) listener() }
   const accept = (list: BrowserProfileList): void => {
-    if (!list || !Number.isSafeInteger(list.revision) || !Array.isArray(list.profiles) || !Array.isArray(list.folders)) throw new Error('Main returned an unreadable Browser Profile list.')
-    if (state.revision !== null && list.revision < state.revision) return
-    set({ revision: list.revision, profiles: list.profiles, folders: list.folders, error: null, reading: state.reading })
+    if (!list || !Number.isSafeInteger(list.revision) || !Number.isSafeInteger(list.sequence) || !Array.isArray(list.profiles) || !Array.isArray(list.folders)) throw new Error('Main returned an unreadable Browser Profile list.')
+    if (state.sequence !== null && list.sequence < state.sequence) return
+    set({ revision: list.revision, sequence: list.sequence, profiles: list.profiles, folders: list.folders, error: null, reading: state.reading })
   }
   // Concurrent consumers and retries share one Main read.
   const read = (): Promise<void> => reading ??= (async () => {
