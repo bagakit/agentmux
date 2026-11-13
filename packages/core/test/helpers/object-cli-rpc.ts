@@ -13,12 +13,12 @@ export function objectCliEnvironment(root: string, overrides: NodeJS.ProcessEnv 
   return { ...clean, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(root, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson'), ...overrides }
 }
-export async function runCompiledObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = '', timeoutMs = 15_000): Promise<CliResult> {
+export async function runCompiledObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = '', timeoutMs = 15_000, executable = process.execPath): Promise<CliResult> {
   const cli = env.AGENTMUX_TEST_OBJECT_CLI ?? process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve(dirname(fileURLToPath(import.meta.url)), '../../bin/amux')
   const compiled = resolve(dirname(cli), '../dist/agentmux.js')
   if (!(await readFile(compiled)).byteLength) throw new Error('Compiled CLI is empty.')
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(executable, [cli, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Private CLI exceeded its bounded test deadline.')) }, timeoutMs)
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')

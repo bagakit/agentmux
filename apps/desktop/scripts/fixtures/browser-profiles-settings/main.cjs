@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
     })()`)
     const capture = async (name, width, height) => {
       win.setContentSize(width, height); await wait(300)
-      if (name.startsWith('profiles-toolbar') || name.startsWith('profiles-service-notice')) {
+      if (name.startsWith('profiles-toolbar') || name.startsWith('profiles-service-notice') || name.startsWith('profiles-environment-notice')) {
         const bounds = await evaluate('document.querySelector(".browser-surface").getBoundingClientRect().toJSON()')
         if (Math.abs(bounds.width - width) > 1 || Math.abs(bounds.x) > 1) throw new Error('The real BrowserPane must fill its fixture workface')
         if (!await toolbarFits()) throw new Error('The Profile mark, name and disclosure must fit inside their real toolbar chip')
@@ -43,12 +43,13 @@ app.whenReady().then(async () => {
     await win.loadFile(process.env.PROFILES_VISUAL_HTML)
     await ready('Boolean(window.profilesVisual && document.querySelectorAll(\'[data-settings-pane="browser-profiles"] [data-resource-row]\').length === 4)')
     win.showInactive()
-    if (receipt.scene === 'service-notice') {
-      await evaluate('profilesVisual.serviceNotice()')
+    if (receipt.scene === 'service-notice' || receipt.scene === 'environment-notice') {
+      const prefix='profiles-'+receipt.scene
+      await evaluate(receipt.scene==='environment-notice'?'profilesVisual.environmentNotice()':'profilesVisual.serviceNotice()')
       await ready('document.querySelector(".browser-operation-warning")?.textContent.includes("Settings → Browser Profiles")')
-      await capture('profiles-service-notice-dark', 900, 520)
+      await capture(prefix+'-dark', 900, 520)
       await evaluate('profilesVisual.appearance("light")')
-      await capture('profiles-service-notice-narrow-light', 360, 520)
+      await capture(prefix+'-narrow-light', 360, 520)
       await click('[aria-label="Dismiss this Browser notice"]')
       if (await evaluate('Boolean(document.querySelector(".browser-operation-warning"))')) throw new Error('Dismiss hides only this service notice')
       receipt.complete = true

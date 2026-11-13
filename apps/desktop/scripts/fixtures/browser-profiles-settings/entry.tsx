@@ -60,6 +60,9 @@ Object.assign(window, { profilesVisual: {
     api.browser.setProfileProxySignIn = async (...args) => { await setProxySignIn(...args); return { reconnected: false } }
   },
   browser,
+  async environmentNotice() {
+    await browser('This Profile’s native environment could not be fully confirmed. The original pages and input remain available. Open Settings → Browser Profiles to review the saved environment. If DevTools is open, close it to reapply without reloading. Subdocument, Worker and first-script scope remain unknown.')
+  },
   async serviceNotice() {
     await api.browser.updateProfile(client.id, { network: { mode: 'proxy', server: { scheme: 'http', host: 'gateway.example.test', port: 3128 } } }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
     await browser('Profile “Northwind client”: The saved proxy password could not be read from the keychain. Enter it again. Browser controls remain available. Open Settings → Browser Profiles → Northwind client → Proxy sign-in.')
