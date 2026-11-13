@@ -22,7 +22,7 @@ vi.mock('../src/renderer/src/components/settings/settings-modules', async import
   const fixture = { id: 'fixture', group: 'preferences', title: 'Contributed page', description: 'An independent contributor.',
     keywords: 'page-needle', icon: semanticIconComponent('object.settings'), savedSummary: () => 'Saved', Pane: ContributedPane,
     searchTargets: [{ id: 'fixture-field', title: 'Contributor field', keywords: 'unique-field-needle' },
-      { id: 'absent-field', title: 'Unavailable original field', keywords: 'absent-needle' }]
+      { id: 'absent-field', archetype: 'preference', title: 'Unavailable original field', keywords: 'absent-needle' }]
   } satisfies SettingsModule
   const modules = [...original.settingsModules, fixture] as const
   const settingsCatalog = createSettingsCatalog(modules)

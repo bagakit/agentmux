@@ -24,7 +24,7 @@ vi.mock('../src/renderer/src/components/settings/settings-modules', async (impor
     </label>
   }
   const fixture = {
-    id: 'fixture-module', group: 'work', title: 'Fixture module',
+    id: 'fixture-module', archetype: 'preference', group: 'work', title: 'Fixture module',
     description: 'One independently contributed settings page.', keywords: 'fixture-needle', icon: Settings2,
     savedSummary: (config: AppConfig) => config.copyPathsAsAbsolute === true ? 'Saved absolute paths' : 'Saved abbreviated paths',
     Pane: FixturePane
