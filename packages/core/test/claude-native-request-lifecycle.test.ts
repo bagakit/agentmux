@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { releaseSubagentRoster } from '../src/hook-normalizer.js'
-import { CLAUDE_ASKED_TOOL_END_EVENT } from '../src/providers/claude-native-activity.js'
+import { CLAUDE_ASKED_TOOL_END_EVENT, claudeNativeActivitySource } from '../src/providers/claude-native-activity.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import type { AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 
@@ -58,6 +62,51 @@ async function harness() {
 }
 
 describe('Claude native request lifecycle follows the actual Hook protocol', () => {
+  it.each(['result', 'deny', 'throw'] as const)('settles a permission through the generated observer when its nested native call returns %s', async outcome => {
+    const h = await harness()
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-nested-permission-'))
+    type Handler = (api: unknown, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => Promise<unknown>
+    const handlers = new Map<string, Handler>()
+    const deliveries: Promise<unknown>[] = []
+    const api = { env: { get: async () => '1' }, session: { id: async () => nativeSessionId },
+      process: { run: (_argv: string[], init: { stdin: string }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        const delivery = h.hook(String(body.hook_event_name), body).then(() => ({ exitCode: 0, stdout: '{}\n', stderr: '' }))
+        deliveries.push(delivery)
+        return delivery
+      } }, ui: { log: async () => {} } }
+    try {
+      const path = join(directory, 'register.mjs')
+      await writeFile(path, claudeNativeActivitySource())
+      const mod = await import(/* @vite-ignore */ pathToFileURL(path).href)
+      mod.register((name: string, handler: Handler) => { handlers.set(name, handler); return { catch() {} } })
+      await handlers.get('session.start')!(api, {}, event => event)
+      const result = outcome === 'deny' ? { deny: 'native rejection' } : { ref: 1, result: 'native result' }
+      const failure = new Error('native failure')
+      // Claude's native tool.call wraps PreToolUse, tool.check, the actual ask and the tool.
+      const call = handlers.get('tool.call')!(api, { tool: 'Bash', tool_use_id: 'toolu_nested' }, async () => {
+        await h.hook('PreToolUse', { tool_name: 'Bash', tool_input: command, tool_use_id: 'toolu_nested' })
+        const verdict = { decision: 'ask' }
+        expect(await handlers.get('tool.check')!(api, { tool: 'Bash', input: command, tool_use_id: 'toolu_nested' }, async () => verdict)).toBe(verdict)
+        await handlers.get('classic.PermissionRequest')!(api, { tool_name: 'Bash', tool_input: command }, async event => {
+          await h.hook('PermissionRequest', event)
+          return {}
+        })
+        expect(h.pending()?.request).toMatchObject({ kind: 'permission', nativeToolCallId: 'toolu_nested' })
+        if (outcome === 'throw') throw failure
+        return result
+      })
+      if (outcome === 'throw') await expect(call).rejects.toBe(failure)
+      else expect(await call).toBe(result)
+      // The passive end is asynchronous; wait only for this observer's original delivery.
+      await expect.poll(() => h.pending()).toBeUndefined()
+      await Promise.all(deliveries)
+      expect(await h.stored()).toBeUndefined()
+      expect(h.client.agentSession(agentSessionId).semanticStatus?.state).toBe('working')
+      expect(h.writes).toEqual([])
+    } finally { await Promise.allSettled(deliveries); await h.close(); await rm(directory, { recursive: true, force: true }) }
+  })
+
   it('a question announced then asked is one request, settled by its own completion', async () => {
     const h = await harness()
     try {
