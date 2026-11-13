@@ -22,7 +22,7 @@ export default defineConfig({ ...original, cacheDir: '.cache/conversation-readin
     }
     const mutation = process.env.AGENTMUX_READING_COST_MUTATION
     const edits: Record<string, [string,string,string]> = {
-      'repeat-navigation': ['packages/core/src/conversation-reader.ts', 'snapshot.navigation ??= historyNavigation(snapshot.rows, snapshot.history)', 'historyNavigation(snapshot.rows, snapshot.history)'],
+      'repeat-navigation': ['packages/core/src/conversation-reader.ts', 'const navigation = snapshot.navigation', 'const navigation = historyNavigation(snapshot.rows, snapshot.history)'],
       'restore-unused-locators': ['packages/core/src/conversation-reader.ts', 'const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }', "const batch: Batch = { ...loaded.batch, records: loaded.rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [] }"]
     }
     const selected = mutation === 'legacy-all' ? Object.values(edits) : mutation && edits[mutation] ? [edits[mutation]!] : []
