@@ -6,9 +6,9 @@ import { clearsSemanticHues, speakerColorHue } from '../lib/conversation-avatar-
 import { useBrowserProfiles } from '../lib/browser-profiles'
 
 /** The list-wide hue assignment for the Profiles Main reports now; empty until they are read. */
-function useProfileHueAssignment(): ReadonlyMap<string, number> | undefined {
-  const { profiles } = useBrowserProfiles()
-  return useMemo(() => profiles ? assignProfileHues(profiles) : undefined, [profiles])
+function useProfileHueAssignment(assignment?: ReadonlyMap<string, number>): ReadonlyMap<string, number> | undefined {
+  const { profiles } = useBrowserProfiles(assignment === undefined)
+  return useMemo(() => assignment ?? (profiles ? assignProfileHues(profiles) : undefined), [profiles, assignment])
 }
 
 const ThemeObjectProfileIcon = semanticIconComponent('object.browser')
@@ -75,13 +75,15 @@ export function profileHue(profile: Pick<BrowserProfileSummary, 'id' | 'hue'>, a
  * the editor header, the Browser toolbar chip and the switcher all draw this same element, so
  * a Profile looks the same wherever a person meets it. State never tints the mark.
  */
-export function ProfileMark({ profile, size = 'small' }: {
+export function ProfileMark({ profile, size = 'small', assignment }: {
   profile: Pick<BrowserProfileSummary, 'id' | 'label' | 'hue'>
   size?: 'small' | 'large'
+  /** An owning library may supply the same full-list assignment without one subscription per mark. */
+  assignment?: ReadonlyMap<string, number>
 }) {
   const letter = projectMonogram(profile.label)
   // Every mark reads the same list-wide assignment, so a Profile has one color wherever it is drawn.
-  const hue = profileHue(profile, useProfileHueAssignment())
+  const hue = profileHue(profile, useProfileHueAssignment(assignment))
   return (
     <span className="profile-mark" data-size={size} data-tone={profileTone(hue)} aria-hidden="true"
       style={{ '--profile-hue': hue } as CSSProperties}>

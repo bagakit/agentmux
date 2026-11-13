@@ -11,7 +11,7 @@ const ScrollForwardIcon = semanticIconComponent('navigation.disclosure')
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
 
 /** A compact selector only. Drafts and resource operations stay in the owning pane. */
-export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list', followFocus = false }: {
+export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list', followFocus = false, selection }: {
   label: string
   items: ResourceRow[]
   selectedId: string | null
@@ -22,6 +22,8 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   layout?: 'list' | 'horizontal'
   /** Arrow keys also select, so the editor follows the row the keyboard is on. Only for editors that keep no unsaved draft. */
   followFocus?: boolean
+  /** In explicit selection mode row activation toggles exact IDs and keeps the editor target. */
+  selection?: { ids: ReadonlySet<string>; onToggle: (id: string) => void }
 }) {
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -74,10 +76,10 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
       </label> : null}
       <div className="settings-resource-library__viewport">
       {scrollable ? <button type="button" className="icon-button settings-resource-scroll" aria-label={`Previous ${label.toLowerCase()}`} disabled={!overflow.previous} onClick={() => scrollPage(-1)}><ScrollBackIcon size={13} /></button> : null}
-      <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
-        {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
+      <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-multiselectable={selection ? true : undefined} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
+        {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selection ? selection.ids.has(item.id) : selectedId === item.id}
           tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={`${item.name}\n${item.detail}`} className="settings-resource-row"
-          onFocus={() => { setFocusedId(item.id); if (followFocus && item.id !== selectedId) onSelect(item.id) }} onClick={() => onSelect(item.id)} onKeyDown={(event) => {
+          onFocus={() => { setFocusedId(item.id); if (!selection && followFocus && item.id !== selectedId) onSelect(item.id) }} onClick={() => selection ? selection.onToggle(item.id) : onSelect(item.id)} onKeyDown={(event) => {
             let next: number
             switch (event.key) {
               case 'ArrowRight': if (layout !== 'horizontal') return; next = Math.min(index + 1, items.length - 1); break
@@ -93,7 +95,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
           }}>
           <span className="settings-resource-row__mark">{item.mark}</span>
           <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
-          <span className="settings-resource-row__status">{item.status}{selectedId === item.id ? <ThemeStatusSelectedIcon size={13} aria-hidden="true" /> : null}</span>
+          <span className="settings-resource-row__status">{item.status}{(selection ? selection.ids.has(item.id) : selectedId === item.id) ? <ThemeStatusSelectedIcon size={13} aria-hidden="true" /> : null}</span>
         </button>)}
         {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No ${label.toLowerCase()} match “${query}”.` : `No ${label.toLowerCase()} yet.`}</p> : null}
       </div>

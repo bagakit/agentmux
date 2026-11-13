@@ -14,12 +14,13 @@ export type BrowserProfilesState = {
   /** Last list Main confirmed; kept while a later read fails. */
   profiles: BrowserProfileSummary[] | null
   folders: BrowserProfileFolder[] | null
+  views: import('@agentmux/core/control').BrowserProfileView[] | null
   error: string | null
   reading: boolean
 }
 
 type Listener = () => void
-const EMPTY: BrowserProfilesState = { revision: null, sequence: null, profiles: null, folders: null, error: null, reading: false }
+const EMPTY: BrowserProfilesState = { revision: null, sequence: null, profiles: null, folders: null, views: null, error: null, reading: false }
 
 export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readProfiles' | 'onProfilesChanged'>) {
   let state = EMPTY
@@ -28,9 +29,9 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   let reading: Promise<void> | null = null
   const set = (next: BrowserProfilesState): void => { state = next; for (const listener of listeners) listener() }
   const accept = (list: BrowserProfileList): void => {
-    if (!list || !Number.isSafeInteger(list.revision) || !Number.isSafeInteger(list.sequence) || !Array.isArray(list.profiles) || !Array.isArray(list.folders)) throw new Error('Main returned an unreadable Browser Profile list.')
+    if (!list || !Number.isSafeInteger(list.revision) || !Number.isSafeInteger(list.sequence) || !Array.isArray(list.profiles) || !Array.isArray(list.folders) || !Array.isArray(list.views)) throw new Error('Main returned an unreadable Browser Profile list.')
     if (state.sequence !== null && list.sequence < state.sequence) return
-    set({ revision: list.revision, sequence: list.sequence, profiles: list.profiles, folders: list.folders, error: null, reading: state.reading })
+    set({ revision: list.revision, sequence: list.sequence, profiles: list.profiles, folders: list.folders, views: list.views, error: null, reading: state.reading })
   }
   // Concurrent consumers and retries share one Main read.
   const read = (): Promise<void> => reading ??= (async () => {
@@ -59,6 +60,7 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
 
 export const browserProfiles = createBrowserProfilesStore(api.browser)
 
-export function useBrowserProfiles(): BrowserProfilesState {
-  return useSyncExternalStore(browserProfiles.subscribe, browserProfiles.get)
+const inactiveSubscription = () => () => {}
+export function useBrowserProfiles(active = true): BrowserProfilesState {
+  return useSyncExternalStore(active ? browserProfiles.subscribe : inactiveSubscription, browserProfiles.get)
 }

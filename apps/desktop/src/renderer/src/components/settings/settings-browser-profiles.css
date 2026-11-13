@@ -153,3 +153,27 @@
 .browser-profile-organization__tag { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; overflow-wrap: anywhere; padding: 3px 7px; border-radius: var(--radius-sm); color: var(--text-2); background: var(--wash-1); font-size: var(--fs-meta); }
 .browser-profile-organization__tag > button { flex: none; border: 0; padding: 0 2px; color: var(--text-3); background: transparent; cursor: pointer; font: inherit; }
 .browser-profile-organization__pin { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); color: var(--text-2); }
+
+/* Query and explicit selection remain in the original library column. */
+.browser-profile-library { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: var(--sp-3); overflow-y: auto; scrollbar-gutter: stable; padding-right: var(--sp-2); }
+.browser-profile-library > .settings-resource-library { flex: none; min-height: 0; }
+.browser-profile-library .settings-resource-library__list { overflow: visible; }
+.browser-profile-library__views, .browser-profile-library__filters, .browser-profile-library__bulk { display: flex; flex-direction: column; gap: var(--sp-3); }
+.browser-profile-library__views label, .browser-profile-library__bulk label { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-meta); }
+.browser-profile-library :is(.browser-profile-library__views, .browser-profile-library__bulk) :is(input:not([type='checkbox']), select) { width: 100%; min-width: 0; min-height: 28px; padding: var(--sp-1) var(--sp-2); background: var(--surface-1); color: var(--text); border: 1px solid var(--line-soft); border-radius: var(--radius); font: inherit; }
+.browser-profile-library summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); padding-block: var(--sp-1); }
+
+.browser-profile-library__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.browser-profile-library__filters { padding-top: var(--sp-2); }
+.browser-profile-library__bulk, .browser-profile-library__results { flex: none; border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.browser-profile-library__bulk > label:has(input[type='checkbox']) { flex-direction: row; align-items: center; }
+.browser-profile-library__bulk details[open], .browser-profile-library__results details[open] { max-height: 160px; overflow: auto; }
+.browser-profile-library ul { padding-left: var(--sp-4); margin: var(--sp-1) 0; }
+.browser-profile-library code { font-size: var(--fs-meta); color: var(--text-3); }
+.settings-resource-library[aria-multiselectable='true'] .settings-resource-row { cursor: pointer; }
+@container settings-resource (max-width: 720px) {
+  .settings-browser-profiles[data-resource-view='editor'] .browser-profile-library { display: none; }
+  .settings-browser-profiles[data-resource-view='library'] .browser-profile-library { flex: 1; }
+}
+.browser-profile-library__results ul { list-style: none; padding-left: 0; }
+.browser-profile-library__results li + li { margin-top: var(--sp-2); }

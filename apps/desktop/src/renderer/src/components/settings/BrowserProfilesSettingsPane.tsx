@@ -11,8 +11,8 @@ import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
-import { PROFILE_HUES, ProfileMark, profileTone } from '../ProfileMark'
-import { SettingsResourceLibrary } from './SettingsResourceLibrary'
+import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../ProfileMark'
+import { BrowserProfileLibrary } from './BrowserProfileLibrary'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
 import { BrowserProfileOrganization } from './BrowserProfileOrganization'
 import * as Menu from '../HoverDropdownMenu'
@@ -95,7 +95,7 @@ function detailLine(profile: BrowserProfileSummary): string {
 
 /** Settings › Browser Profiles: every Profile in one list, one Profile edited in place beside it. */
 export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { active: boolean; onClose?: () => void }) {
-  const list = useBrowserProfiles()
+  const list = useBrowserProfiles(active)
   const tabs = useAppStore(state => state.tabs)
   // The Profile switch only narrows the global one, so the editor says when the global switch already keeps Agents out.
   const automation = useAppStore(state => state.config?.browser?.agentAutomation === true)
@@ -104,8 +104,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
   const profiles = list.profiles ?? []
   const folders = list.folders ?? []
+  const hueAssignment = useMemo(() => assignProfileHues(profiles), [list.profiles])
+  const openCounts = useMemo(() => new Map(profiles.map(profile => [profile.id, usesOf(profile.id, surfaces).filter(use => use.state === 'open').length])), [list.profiles, surfaces])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
   const [view, setView] = useState<'library' | 'editor'>('editor')
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -118,11 +119,6 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
-  // Find by anything a person remembers about a Profile: its name, its note, or where it came from.
-  const needle = query.trim().toLowerCase()
-  const visible = profiles.filter(profile => !needle || [profile.label, profile.notes ?? '', profile.source?.browserLabel ?? '', profile.source?.profileLabel ?? '',
-    ...(profile.tags ?? []), folders.find(folder => folder.id === profile.folderId)?.label ?? ''].some(text => text.toLowerCase().includes(needle)))
-    .sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true))
   const run = (async (key: string, action: () => Promise<unknown>, report = false) => {
     if (busy) return report ? { code: null, message: '' } : false
     setBusy(key); setError(null); setErrorCode(null)
@@ -176,18 +172,13 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
       </p> : null}
       <div className="settings-resource-split">
-        <SettingsResourceLibrary label="Profiles" selectedId={selected?.id ?? null} query={query} onQuery={setQuery} focusRequest={returnFocus} followFocus
-          onSelect={id => { setSelectedId(id); setView('editor'); setError(null); setErrorCode(null) }}
-          items={visible.map(profile => {
-            const open = usesOf(profile.id, surfaces).filter(use => use.state === 'open').length
-            return { id: profile.id, name: profile.label, detail: detailLine(profile),
-              mark: <ProfileMark profile={profile} />, status: profile.pinned || open ? <span>{profile.pinned ? <span aria-label="Pinned Profile">Pinned</span> : null}{profile.pinned && open ? ' · ' : ''}{open ? `${open} open` : ''}</span> : undefined }
-          })} />
+        <BrowserProfileLibrary list={list} active={active} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={openCounts} detailLine={detailLine}
+          onSelect={id => { setSelectedId(id); setView('editor'); setError(null); setErrorCode(null) }} />
         <div className="settings-resource-editor">
           <button className="small-button settings-resource-back" type="button" onClick={() => { setView('library'); setReturnFocus({ id: selected?.id ?? null }) }}>
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
-          {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision} folders={folders}
+          {selected && list.revision !== null ? <ProfileEditor assignment={hueAssignment} key={selected.id} profile={selected} revision={list.revision} folders={folders}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, selected.revision)}
@@ -200,9 +191,10 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders }: {
+function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders }: {
   profile: BrowserProfileSummary
   folders: BrowserProfileFolder[]
+  assignment: ReadonlyMap<string, number>
   revision: number
   uses: Use[]
   busy: string | null
@@ -274,7 +266,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
     <article className="browser-profile-editor" aria-label={profile.label}>
       <header className="browser-profile-editor__identity">
         <button ref={markButton} type="button" className="browser-profile-editor__mark" aria-label={`Color for ${profile.label}`} aria-expanded={hues}
-          onClick={() => setHues(value => !value)}><ProfileMark profile={profile} size="large" /></button>
+          onClick={() => setHues(value => !value)}><ProfileMark assignment={assignment} profile={profile} size="large" /></button>
         <div className="browser-profile-editor__who">
           {naming ? <TextInput ref={nameInput} aria-label="Profile name" value={name} maxLength={128}
             onChange={event => setName(event.target.value)} onKeyDown={nameKeys} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishName(true) }} />

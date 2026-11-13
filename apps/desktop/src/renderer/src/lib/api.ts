@@ -365,7 +365,7 @@ let mockBrowserProfileRevision = 0
 const mockBrowserProfileListeners = new Set<(list: BrowserProfileList) => void>()
 function publishMockBrowserProfiles(): void {
   mockBrowserProfileRevision += 1
-  const list = { revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }
+  const list = { revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [], views: [] }
   mockBrowserProfileListeners.forEach((listener) => listener(structuredClone(list)))
 }
 let mockBrowserImportSources: BrowserProfileImportSourceSummary[] = []
@@ -1450,7 +1450,7 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(browser)
     },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
-    readProfiles: async () => ({ revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }),
+    readProfiles: async () => ({ revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [], views: [] }),
     onProfilesChanged(listener) {
       mockBrowserProfileListeners.add(listener)
       return () => { mockBrowserProfileListeners.delete(listener) }
@@ -1486,6 +1486,9 @@ const mockApi: AgentMuxDesktopApi = {
     recordInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     removeInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     clearInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    saveProfileView: async () => { throw new Error('Saved Profile views require the Desktop host.') },
+    deleteProfileView: async () => { throw new Error('Saved Profile views require the Desktop host.') },
+    bulkUpdateProfiles: async () => { throw new Error('Bulk Profile changes require the Desktop host.') },
     createProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
     renameProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
     deleteProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
