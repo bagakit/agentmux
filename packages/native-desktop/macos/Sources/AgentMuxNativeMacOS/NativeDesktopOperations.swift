@@ -231,13 +231,22 @@ enum NativeDesktopOperations {
                     }
                 }
                 guard !screens.isEmpty else { throw ProviderError.coded("display_not_found", "macOS reports no active display") }
+                // Every display's pixels share one response frame. The identity envelope and
+                // all displays' metadata stay far below the reserve.
+                var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
                 let displays = screens.map { screen -> [String: Any] in
                     let frame = CGDisplayBounds(screen.id)
                     var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale,
                         "isMain": screen.id == CGMainDisplayID()]
                     do {
                         let capture = try displayPixels(screen.id, frame: frame, scale: screen.scale, ownership: ownership)
-                        entry["png"] = try pngData(capture.image).base64EncodedString()
+                        let png = try pngData(capture.image)
+                        let encodedBytes = (png.count + 2) / 3 * 4
+                        guard encodedBytes <= remainingFrameBytes else {
+                            throw ProviderError.coded("image_too_large", "this display's pixels do not fit one response beside the displays listed before it")
+                        }
+                        remainingFrameBytes -= encodedBytes
+                        entry["png"] = png.base64EncodedString()
                         entry["width"] = capture.image.width
                         entry["height"] = capture.image.height
                         entry["engine"] = capture.engine
