@@ -22,7 +22,8 @@ import {
   type ClientUiPlatform, type ConversationMessageProps
 } from '@agentmux/client-ui'
 import { errorMessage } from './delivery'
-import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
+import type { PromptAttempt, ResponseAttempt } from './local-drafts'
+import { useMobileLocalDrafts } from './local-drafts-owner'
 import type { MobileConnection } from './use-hosted-conversation'
 import { useMobileConversationReading } from './use-mobile-conversation-reading'
 import { MobileMessageTools, MobilePosturePicker } from './MobileMessageTools'
@@ -105,7 +106,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     follow.current = change.state
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
-  const [local] = useState(createLocalDrafts)
+  const local = useMobileLocalDrafts()
   const drafts = useRef(local.drafts)
   const [, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)

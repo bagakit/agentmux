@@ -61,6 +61,7 @@ import { mobileWebUpdateStatus } from './mobile-web/use-mobile-web-observation'
 import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-observation'
 
 import { deferMobileSurface } from './navigation/defer-mobile-surface'
+import { MobileLocalDraftsOwner } from './conversation/local-drafts-owner'
 
 const MobileTerminalViewer = deferMobileSurface('终端', async () => ({ default: (await import('./terminal/MobileTerminalViewer')).MobileTerminalViewer }))
 const MobileSpatialNavigation = deferMobileSurface('目录', async () => ({ default: (await import('./navigation/MobileSpatialNavigation')).MobileSpatialNavigation }), { menu: true })
@@ -550,7 +551,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const serviceNotices = [...new Set([notice, visibleProjectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
-  return <MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} {...(needsYouElsewhere ? { 'aria-description': `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={18} /><span>{pageName}</span>{needsYouElsewhere ? <span className="mobile-back-badge" aria-hidden="true" data-count={needsYouElsewhere}>{needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
@@ -743,5 +744,5 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </>}
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
-  </div></MobileNoticeScope></MobileAgentMenuContext.Provider></MobileHeaderMenuContext.Provider>
+  </div></MobileNoticeScope></MobileAgentMenuContext.Provider></MobileHeaderMenuContext.Provider></MobileLocalDraftsOwner>
 }
