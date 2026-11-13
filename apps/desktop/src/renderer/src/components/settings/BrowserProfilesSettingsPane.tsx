@@ -146,8 +146,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     <div className="settings-resource-workbench settings-browser-profiles" data-resource-view={view} data-settings-field="browser-profiles">
       <div className="settings-pane-toolbar">
         <strong>Profiles <span>{list.profiles ? profiles.length : '…'}</span></strong>
-        <button className="small-button" type="button" disabled={busy !== null || !list.profiles} onClick={() => void create()}>
-          {busy === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionCreateIcon size={13} />} New Profile
+        <button className="small-button" type="button" aria-label="New Profile" title="New Profile" disabled={busy !== null || !list.profiles} onClick={() => void create()}>
+          {busy === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionCreateIcon size={13} />} New
         </button>
         <ImportMenu disabled={busy !== null || !list.profiles} onImported={id => { setSelectedId(id); setView('editor') }} />
       </div>

@@ -4,11 +4,15 @@
   padding-inline: max(var(--sp-7), calc((100% - 960px) / 2));
   overflow: hidden;
 }
-.settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-3); }
+/* The list's own actions stay over the list. The toolbar spans only the library column (the same width
+   the split gives it), so New Profile and Import never read as editor actions. */
+.settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-2); width: max(190px, 27%); min-width: 0; }
+.settings-browser-profiles .settings-pane-toolbar .small-button { padding-inline: var(--sp-3); }
 .settings-browser-profiles .settings-pane-toolbar > strong { margin-right: auto; font-size: var(--fs-body); font-weight: 550; }
 .settings-browser-profiles .settings-pane-toolbar > strong > span { color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
 /* In the narrow single layer the editor opens on Back alone; New and Import belong to the list layer. */
 @container settings-resource (width < 720px) {
+  .settings-browser-profiles .settings-pane-toolbar { width: auto; }
   .settings-browser-profiles[data-resource-view='editor'] > .settings-pane-toolbar { display: none; }
 }
 .settings-browser-profiles .settings-resource-row__mark { width: 22px; }
