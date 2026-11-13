@@ -73,6 +73,7 @@ describe('Launcher utility intent and local focus', () => {
     const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved' })
     await dom.render(<Utility />)
     expect(iconOf('Go to Browser address or search')).toBe('action.submit')
+    expect([iconOf('Save and open note draft'), iconOf('Open Terminal')]).toEqual(['action.create-note', 'action.create-tab'])
     if (origin === 'header') await activate('input', 'Save and open note draft'); else await saveBody()
     expect(write).toHaveBeenCalledOnce(); const [workspaceId, request] = write.mock.calls[0]!
     expect(workspaceId).toBe('workspace'); expect(request.expectedRevision).toBeNull()
@@ -95,7 +96,8 @@ describe('Launcher utility intent and local focus', () => {
     useLauncherState.getState().setDraft('region:input', 'note', '')
     await dom.render(<Utility />)
     const actions = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.includes('Create blank note') || button.getAttribute('aria-label') === 'Create blank note')
-    expect(actions).toHaveLength(1); await act(async () => actions[0]!.click())
+    expect(actions).toHaveLength(1); expect(actions[0]!.querySelector('[data-semantic-icon]')).toBeNull()
+    await act(async () => actions[0]!.click())
     expect(write).toHaveBeenCalledOnce(); expect(readNoteDocument(write.mock.calls[0]![1].content)).toMatchObject({ status: 'valid', note: { content: { content: [{ type: 'paragraph' }] } } })
   })
 })
