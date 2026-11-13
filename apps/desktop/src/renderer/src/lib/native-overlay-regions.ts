@@ -3,10 +3,14 @@ import { NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT } from '../../../share
 import type { RendererOverlayObservation } from '@agentmux/core/control'
 import { boundsOverlap } from '../../../shared/native-overlay'
 import { rendererCssBoundsToWindowDip } from './browser-bounds-sync'
+import { autoUpdate } from '@floating-ui/dom'
 import { MODAL_PRESENTATION_FAILURE_EVENT } from '@agentmux/client-ui/components/Modal'
 import { compareOverlayPaintOrder, opaqueComputedColor } from './overlay-paint-order'
 
 const OPEN_FLOAT = '[data-state="open"], [role="tooltip"], [role="dialog"], [role="menu"], [role="listbox"]'
+// Display frames confirmed unchanged after the last geometry trigger before the frame is released.
+// A later relocation without any DOM, resize or scroll event arrives through the position observation.
+const STABLE_GEOMETRY_FRAMES = 3
 
 /** Portal scopes exclude the entire terminal/editor tree. IDs belong to actual mounted float elements. */
 export function observeNativeOverlayRegions(
@@ -25,6 +29,8 @@ export function observeNativeOverlayRegions(
   let watched: Element[] = []
   let geometry: Element[] = []
   let geometryBounds = new Map<Element, DOMRect>()
+  let stableFrames = 0
+  let releasePositions: Array<() => void> = []
   let hoveredStage: Element | undefined
   let hoveredFloat: Element | undefined
   const topLayers = new Set<Element>()
@@ -37,7 +43,7 @@ export function observeNativeOverlayRegions(
   const html = (value: Element): value is HTMLElement => value.namespaceURI === body.namespaceURI
   const canRead = (): boolean => !disposed && nativeDemand?.bounds.length !== 0 && body.ownerDocument.visibilityState !== 'hidden'
   const ensureFrame = (): void => {
-    if (!frame && canRead() && (collectRequested || nativeDemand !== null && geometry.length > 0)) frame = win.requestAnimationFrame(tick)
+    if (!frame && canRead() && (collectRequested || nativeDemand !== null && geometry.length > 0 && stableFrames < STABLE_GEOMETRY_FRAMES)) frame = win.requestAnimationFrame(tick)
   }
   function tick(): void {
     frame = 0
@@ -50,6 +56,7 @@ export function observeNativeOverlayRegions(
         changed = true; break
       }
     }
+    if (!collectRequested && !changed) stableFrames++
     if (collectRequested || changed) collect()
     ensureFrame()
   }
@@ -63,6 +70,7 @@ export function observeNativeOverlayRegions(
   }
   const collect = (): void => {
     collectRequested = false
+    stableFrames = 0
     if (!canRead()) return
     const started = win.performance.now()
     let geometryReadCount = 0
@@ -203,7 +211,16 @@ export function observeNativeOverlayRegions(
     const observed = [...new Set([...activeFloats, ...stages])]
     if (geometry.length !== observed.length || geometry.some((node, index) => node !== observed[index])) {
       resize.disconnect()
+      for (const release of releasePositions) release()
+      releasePositions = []
       for (const node of observed) resize.observe(node)
+      if (typeof win.IntersectionObserver === 'function') for (const node of observed) if (html(node)) {
+        let initial = true
+        const release = autoUpdate(node, node, () => { if (!initial) schedule('resize') }, {
+          ancestorScroll: false, ancestorResize: false, elementResize: false, layoutShift: true, animationFrame: false
+        })
+        initial = false; releasePositions.push(release)
+      }
       geometry = observed
     }
     geometryBounds = new Map(observed.map(node => [node, rectOf(node)]))
@@ -314,6 +331,8 @@ export function observeNativeOverlayRegions(
       releaseMotion()
       win.cancelAnimationFrame(frame); frame = 0
       observer.disconnect(); resize.disconnect(); geometry = []; geometryBounds.clear(); watched = []; collectRequested = false
+      for (const release of releasePositions) release()
+      releasePositions = []
       clearHover(); publish([]); schedule('demand')
     } else { bind(); schedule('demand') }
   }, handleNativeInput(input) {
@@ -380,6 +399,8 @@ export function observeNativeOverlayRegions(
     win.cancelAnimationFrame(frame)
     observer.disconnect()
     resize.disconnect()
+    for (const release of releasePositions) release()
+    releasePositions = []
     win.removeEventListener('resize', onResize)
     win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)
