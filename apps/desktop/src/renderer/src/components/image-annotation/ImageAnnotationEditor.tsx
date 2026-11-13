@@ -39,6 +39,10 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); finish(event.currentTarget.value) }
   else if (event.key === 'Escape') { event.preventDefault(); abandon() }
 }
+/** The original selection inside the host window's viewport, in that viewport's CSS pixels; the host converts screen coordinates. */
+export type InlineAnnotationFrame = { x: number; y: number; width: number; height: number }
+/** The marks and tool an inline editor hands to a separate window editor on Expand. */
+export type InlineAnnotationHandoff = { shapes: ScreenshotShape[]; crop: ScreenshotDocument['crop']; tool: AnnotationTool }
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
@@ -56,6 +60,16 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   title?: string
   completeLabel?: string
   busyLabel?: string
+  /**
+   * 'inline' draws on the original selection at a fixed one-to-one pixel scale, with a floating toolbar and a property
+   * popover instead of the header, property row, footer and notes panel. The root and canvas area are transparent; the
+   * canvas still paints the frozen image. Defaults to 'window'.
+   */
+  presentation?: 'window' | 'inline'
+  /** Image pixels per viewport CSS pixel. Inline uses it for the fixed view, and widths and font sizes in image pixels. Defaults to 1. */
+  pixelRatio?: number
+  /** Inline only: where the original selection sits in the host viewport. */
+  inlineFrame?: InlineAnnotationFrame
   onCancel(): void
   onComplete: AnnotationOutput
   onCopyContext?: AnnotationOutput
@@ -64,6 +78,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   onSavePng?: AnnotationOutput
   onPin?: AnnotationOutput
   onCheckPin?(): void
+  /**
+   * Inline only: the host reopens these marks in a separate window editor, passing them back as initialState and
+   * initialTool. The host also unmounts the inline editor after a confirmed primary output; Save PNG, Pin and
+   * Copy context keep it open.
+   */
+  onExpand?(handoff: InlineAnnotationHandoff): void
   onEdited?(): void
   onError?(error: unknown): void
 }) {
