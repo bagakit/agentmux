@@ -365,8 +365,9 @@ export function AgentSessionComposer({
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
         disabled={!submitMode.canSubmit}
         inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : requestPending
-          ? 'Send after the pending request ends.' : session.processState !== 'running' || session.status.state === 'disconnected'
-            ? 'Send to restore this Session.' : 'Send a message to this Session.'}
+          ? 'Send after the pending request ends.' : !submitMode.canSubmit ? submitMode.placeholder
+            : session.processState !== 'running' || session.status.state === 'disconnected'
+              ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
       {...(workspace || runtimeWorkspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {

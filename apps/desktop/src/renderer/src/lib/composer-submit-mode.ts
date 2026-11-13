@@ -42,6 +42,13 @@ export function composerSubmitMode(
     return { canType: true, canSubmit: true, primaryAction: 'send', placeholder: 'Send to restore this Agent…' }
   }
   if (session.processState !== 'running') {
+    // Core has already answered this Session's recovery with a final fact: there is no native
+    // conversation to continue. Send would only replay that refusal, so the draft stays writable and
+    // kept while the surface's one primary action starts a new conversation (RED-LINES question 1:
+    // the ended Run has no resumable capability left to take away).
+    if (session.status.continuity === 'unavailable' && session.status.continuityReason === 'native-conversation-absent') {
+      return { canType: true, canSubmit: false, primaryAction: 'send', placeholder: 'Your draft is kept. Start a new conversation above to continue.' }
+    }
     return { canType: true, canSubmit: true, primaryAction: 'send', placeholder: 'Send to restore this Agent…' }
   }
   // Deliberately NO `state === 'error'` gate here. A running process whose live OUTPUT channel died
