@@ -416,57 +416,106 @@ styles/
   index.css       入口：@import 的顺序即层叠顺序
   tokens.css  导入共享颜色、焦点与表面阴影；持有 Desktop 字号、间距、圆角、动效与宿主几何
   base.css  reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
+  context-menu.css  工作台与独立图片窗口共用的右键菜单面
   chrome.css  Titlebar、Project Rail、Tabbar 与窗口 chrome
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
   space-object-appearance.css  Space 共用身份图标与紧凑选择面
   mote-avatar-series.css  Mote 头像系列目录、3D/图片调整与示例创建向导
   selector.css  同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
   dock.css  Tool Dock 这个容器本身及其 Topics / Agents 面板
+  space-content-presentation.css  Tool Dock 内容槽展开后填满原有外壳，不移动保留的工作面
   topic-topology.css  Topic 行尾的工作台拓扑：Region 缩略图、在场簇、悬停展开的 Tab/Region 检视面
+  topic-promotion.css  Topic 升格对话框：前后对照、进度与回执
   file-explorer.css  被塞进工具槽的文件浏览器：Explorer 头、搜索、文件树、文件列表
   source-control.css  Source Control 面板：Branches、Changes、History 共用导航与工作列表
   git-history.css  Git History 的固定引用选择、已读提交与拓扑图
   workbench.css  Pane、Region、分屏、拖放
   file-preview.css  共用文件预览与就地编辑
   note.css  Note 阅读、编辑与恢复
+  note-links.css  Note 双向链接面板：来源、范围与块引用
+  note-shared-details.css  Note 共享块就近详情浮层：使用处与返回阅读位置
+  note-canvas.css  Note 画布：工具栏、卡片、端点与连线
   terminal.css  终端表面与它的状态覆盖层
+  toolkit-tui.css  工具结果里的 TUI 终端：状态、提示与尺寸调整
   surfaces.css  Settings、New Tab、Launch、Welcome
+  settings-search.css  Settings 搜索结果与返回
+  settings-groups.css  Settings 分组标题的语义图标
   settings-overview.css  Settings overview 的实际分区与紧凑身份行
   settings-toolkit.css  Settings 工具目录
   toolkit-custom.css  自定义工具的动作、参数与结果
   settings-keyboard-shortcuts.css  Settings 键盘快捷键
+  settings-workview-layout.css  Settings 的 Space、Goals 与 Focus 偏好：密度、视图示例与布局
+  settings-continuity.css  Settings 连续推进与自动化默认值：范围、数值、预览与展开项
+  settings-recall.css  Settings Notes 阅读尺寸、宽度预览与存储目录
+  settings-survey.css  Settings Browser 起始页的字段与预览
+  browser-agent-control-settings.css  Settings Browser Agent 控制：编辑区与预览
+  remote-management.css  Settings Hosts 工作台：图与列表两种投影、详情分页与拓扑
+  remote-execution-settings.css  Settings 远程执行：准备、绑定、端点与身份
   board.css  Goals／讨论相关表面；历史文件名不定义全局入口或 Branch/Topic × 状态矩阵
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
   goals.css  现有 Agent Goal 与任务约束表面
+  goal-continuation.css  Goal 监督向导与连续推进控件（Goal 详情与 Mote 当前工作共用）
+  goal-delegation.css  Goal 委派工作：报告与动作（Goal 详情与 Mote 当前工作共用）
+  goal-finite-start.css  一次性任务入口：接收者选择与发起动作
+  goal-responsibility.css  Goal 责任摘要与巡视（列表、详情与 Mote 共用）
+  focus-workspace-stage.css  Focus 卡片派生动作的就地层，覆盖 Focus 工作区一侧
+  collaboration.css  Focus 协作图：画布、筛选、关系与检视面
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
   focus-timeline-ruler.css  Focus 时间轴与有界标尺
   pmo-teams-topic.css  Mote 快捷面、对象选择与 compact 入口
+  mote-cooperation.css  Mote 团队协作的紧凑阅读面与返回
+  mote-primary-agent.css  Mote 主 Agent：返回入口、输入回执与浮动动作
+  mote-quick-mode.css  Mote 快速模式：保持开启、空闲时长与自动维护
+  mote-calendar.css  Mote 日历与日程：模式切换、排期与创建
+  mote-private-chat.css  Mote 私聊：参与者、请求、活动与历史
+  mote-connection-identity.css  Mote 连接身份：Bot 设置、确认与历史
+  mote-origin-story.css  Mote 来源故事：选择与路径
+  settings-mote.css  Settings Mote 目录视图与头像尺寸
+  browser-recovery-surface.css  Browser 恢复与证书问题页
   browser.css  Browser 工具与地址栏
+  browser-resources.css  Browser 资源概览、筛选与批量回收（Settings 与性能工具共用）
   browser-operation-surface.css  Browser 操作轨迹与回放表面
   browser-step-evidence.css  Browser 步骤证据详情
   browser-structured-fields.css  Browser 有限结构化字段与来源
   browser-task-assets.css  Browser 版本资产与参数编辑
   agent.css  Agent 会话外壳、状态栏与 Provider 选择
+  channel-settings.css  Settings 平台连接：Bot 库、环境与 Host 托管
+  channel-metadata.css  Settings Channel 资料元数据：类型与工具条
+  connector-identity-cards.css  Settings 连接器的 Mote 身份卡片与详情
+  settings-lark.css  Settings Lark 连接：凭据来源、诊断与下一步
+  settings-discord.css  Settings Discord 连接设置
   interaction.css  权限与问题卡（packages/client-ui/src/styles）
   settings-prompts.css  Settings 用户 Prompt
   settings-materials.css  Settings 素材目录
+  recall.css  Recall 笔记本选择、目录工具与折叠图
   survey.css  结构化问答表面
   result-review.css  Result ready 的紧凑入口、结果详情与复查动作
   service-notice.css  服务提醒的轻量入口、收起、复查与有界详情
   status-prompts.css  用户 Prompt 的状态绑定与 Composer 快捷动作
   agent-region-header.css  Agent Region 身份与就地操作
+  region-current-demand.css  Region header 里的当前需求入口与菜单
+  agent-current-fork.css  当前会话分叉：复核、首条消息预览与取消
+  connector-entity-identity.css  连接器实体身份字段与复制
+  connector-sharing.css  连接器共享图：回复模式与边界
+  connector-group-details.css  连接器群组详情：头部、状态与群元数据
+  connector-group-status.css  连接器群组状态浮层：卡片、收发统计、成员与恢复
+  connector-traffic-summary.css  连接器收发摘要：方向、计数与投递详情
+  connector-connection-overview.css  连接器连接概览：接收状态与主动作
   session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   composer.css  Composer——Agent 那格底部的输入条（packages/client-ui/src/styles）
+  original-input-waiting.css  原输入等待：回执与重试动作
+  mailbox-collaboration.css  Mailbox 协作记录的有界阅读面
+  automation.css  连续推进与自动化：概览、编辑、间隔与目标
   launcher.css  新 Agent 启动入口
   resume.css  已有 Session 恢复入口
   activity.css  Activity 时间线、机器步骤与标尺
+  agent-session-action-surface.css  Agent 会话记录阅读浮层：标题与正文
   conversation-message.css  对话回合、消息动作与状态（packages/client-ui/src/styles）
   markdown.css  共同正文的 Markdown 与资源（packages/client-ui/src/styles）
   conversation-image.css  共同图片缩略图、放大预览与可访问性（packages/client-ui/src/styles）
   conversation-input-details.css  消息来源、作者与输入详情（packages/client-ui/src/styles）
   conversation-tool-trace.css  原生对话工具调用与结果（packages/client-ui/src/styles）
   conversation-native-thread.css  原生对话过程与消息顺序（packages/client-ui/src/styles）
-  session-history.css  持久会话记录的内联阅读
   workflow.css  Workflow 观察画廊：组件目录、章节与流程图
   conversation-avatar.css  两条对话轴共用的说话人身份标记（packages/client-ui/src/styles）
   conversation-axis.css  共同参与者轨与原文菜单（本会话／发送者同源身份）
@@ -476,6 +525,9 @@ styles/
   agent-avatar.css  执行器头像的 Provider 轮廓、角标、状态、计数与设置预览
   full-page-loading.css  启动与全页 loading/recovering/failed 大屏的网格、切片、品牌层和动效
   session-recap.css  Session recap 的真实来源、阅读与就地动作
+  bot-setup-guide.css  Bot 设置进度：阶段与已确认里程碑
+  bot-profile.css  Bot 资料结果：写入回执与当前观察
+  mote-profile-task.css  Mote 资料任务：结果、检查、动作与请求追踪
 ```
 
 这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`
