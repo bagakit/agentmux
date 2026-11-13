@@ -109,7 +109,7 @@ import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@ag
 import { inspectDesktopClient, observeWorkbenchUserState, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
-import { observeClientRpcSnapshot } from './rpc-client-observations.js'
+import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { registerHostRuntimeObservationIpc } from './host-runtime-observation-ipc.js'
 import { registerSearchIpc } from './search-ipc.js'
