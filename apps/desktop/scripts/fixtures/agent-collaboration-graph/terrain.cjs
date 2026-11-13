@@ -144,8 +144,12 @@ function visualCounterfactual({ phase, areaId }) {
     neighbour = name && nodes.sort((a, b) => Math.hypot(centre(a).x - name.right, centre(a).y - name.y) - Math.hypot(centre(b).x - name.right, centre(b).y - name.y))[0]
     if (!neighbour) throw Error('The held-name paint counterfactual needs an actual neighbouring original face')
     neighbourStyle = neighbour.style.cssText
+    // Translate in screen pixels: the node lives inside the scaled viewport, so divide by zoom.
+    const zoom = new DOMMatrix(getComputedStyle(viewport).transform).a || 1
     const face = centre(neighbour), at = { x: name.right - name.width * .2, y: name.y + name.height / 2 }
-    neighbour.style.translate = `${at.x - face.x}px ${at.y - face.y}px`
+    neighbour.style.translate = `${(at.x - face.x) / zoom}px ${(at.y - face.y) / zoom}px`
+    const moved = centre(neighbour)
+    if (Math.hypot(moved.x - at.x, moved.y - at.y) > 2) throw Error('The neighbouring original face must sit under the held name for the paint counterfactual')
   }
   try {
     if (!folded) target.style.setProperty('pointer-events', 'auto', 'important')
