@@ -245,3 +245,29 @@ it('the mounted original Viewer forwards keyboard events to one coalesced origin
   expect(p.write.mock.calls.every(([input]) => input.agentSessionId === 'initial-original-session' && input.expectedRun.runId === 'original-run')).toBe(true)
   expect(p.resize).not.toHaveBeenCalled()
 })
+
+it('the keypad sends each key as its terminal encoding through the same control queue, without taking focus', async () => {
+  const p = port(), view = await mount(p.client)
+  // Each receipt continues the original byte stream, as the Host's own receipts do.
+  let accepted = 0
+  p.write.mockImplementation(async input => {
+    const start = accepted; accepted += typeof input.data === 'string' ? new TextEncoder().encode(input.data).length : input.data.length
+    return { runId: 'original-run', appliedByteRange: { startByte: start, endByte: accepted }, acceptedThroughByte: accepted }
+  })
+  expect(view.node.querySelector('.mobile-terminal-keys')).toBeNull()
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  const keys = [...view.node.querySelectorAll<HTMLButtonElement>('.mobile-terminal-keys > .mobile-terminal-key:not(.mobile-terminal-key--quiet)')]
+  expect(keys.map(key => key.getAttribute('aria-label'))).toEqual(['终端 Esc', '终端 ←', '终端 ↑', '终端 ↓', '终端 →', '终端 Tab', '终端 Enter', '终端 Ctrl-C'])
+  const expected = { Esc: '\x1b', '←': '\x1b[D', '↑': '\x1b[A', '↓': '\x1b[B', '→': '\x1b[C', Tab: '\t', Enter: '\r', 'Ctrl-C': '\x03' } as Record<string, string>
+  for (const key of keys) {
+    const pointer = new Event('pointerdown', { bubbles: true, cancelable: true })
+    key.dispatchEvent(pointer)
+    expect(pointer.defaultPrevented, key.getAttribute('aria-label')!).toBe(true)
+    p.write.mockClear()
+    await act(async () => { key.click(); for (let index = 0; index < 8; index++) await Promise.resolve() })
+    const label = key.getAttribute('aria-label')!.replace('终端 ', '')
+    expect(p.write.mock.calls.map(([input]) => input.data), label).toEqual([expected[label]])
+    expect(p.write.mock.calls[0]![0]).toMatchObject({ agentSessionId: 'initial-original-session', expectedRun: { runId: 'original-run' } })
+  }
+  expect(p.resize).not.toHaveBeenCalled()
+})
