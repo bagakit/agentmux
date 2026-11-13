@@ -33,7 +33,7 @@ export type MobileTopicsRoute = { context: MobileTopicsContext;
   sources: Array<{ source: MobileTopicSourceReference; origin: MobileTopicsContext; originKnowledge?: MobileKnowledgeReference;
     content?: MobileTopicSourceContentReference }> }
 const sourcePaths = ['MOTE.md', 'BEHAVIOR.md', 'SOUL.md', 'topic.md']
-function invalid(): never { throw new Error('设备原工作面引用无法完整核实；原记录保留。') }
+function invalid(): never { throw new Error('这台手机上的工作面位置记录无法读取，记录保持不变。') }
 function object(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
   const v = value as Record<string, unknown>

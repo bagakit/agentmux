@@ -82,7 +82,7 @@ export function emptyDeviceWorkface(): DeviceWorkface {
   return { version: 1, selectedSessionId: null, hostUrl: '', panel: 'conversation', host: null,
     conversation: { version: 1, drafts: [], attempts: [], responses: [] } }
 }
-function invalid(): Error { return new Error('设备工作面记录无法完整核实；原记录与当前阅读仍保留。') }
+function invalid(): Error { return new Error('这台手机上的工作面记录无法读取，记录和当前阅读保持不变。') }
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))) throw invalid()
@@ -363,13 +363,13 @@ export class DeviceWorkfaceStore {
         return
       }
       if (this.temporary) {
-        this.issue = '设备存储已可读取或原记录已变化；当前临时工作面仍保留，尚未覆盖原字节。请先导出需要保留的内容，再明确采用当前工作面或导入备份。'
+        this.issue = '设备存储已恢复，或记录已在别处更新。当前仍是临时工作面，没有覆盖已存的记录。请先导出需要的内容，再选择采用当前工作面或导入备份。'
         return
       }
       if (raw !== null && new TextEncoder().encode(raw).byteLength > MAX_BYTES) throw invalid()
       this.value = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
       this.issue = null
-    } catch { this.issue = '这台设备的工作面记录暂时无法读取。原记录尚未覆盖，当前阅读和草稿保留；请恢复原记录或导入已保全的工作面。' }
+    } catch { this.issue = '暂时读不到这台手机上的工作面记录，已存的记录尚未覆盖。请恢复设备存储，或导入已保存的工作面。' }
   }
   snapshot(): { record: DeviceWorkface; issue: string | null } {
     this.refresh(); return { record: structuredClone(this.value), issue: this.issue }
@@ -440,9 +440,9 @@ export class DeviceWorkfaceStore {
       const existing = current.find(value => value.request.operationId === captured.request.operationId)
       if (existing) {
         const { confirmation: _confirmation, ...original } = existing
-        if (!sameValue(original, captured)) throw new Error('原操作身份已绑定其他请求；原记录未覆盖。')
+        if (!sameValue(original, captured)) throw new Error('这个操作标识已用于另一个请求，记录没有被覆盖。')
       }
-      if (!existing && current.length >= MAX_ENTRIES) throw new Error('设备操作记录已满；原记录与本次请求均保留。')
+      if (!existing && current.length >= MAX_ENTRIES) throw new Error('这台手机上的操作记录已满，这次没有记录。')
       return existing ? record : { ...record, goalOperationRecords: [...current, captured] }
     }, expectedRecordId, undefined, signal).finally(() => this.notifyGoalIntents())
   }
@@ -464,7 +464,7 @@ export class DeviceWorkfaceStore {
       const existing = current.find(value => value.request.operationId === captured.request.operationId)
       if (!existing) return record
       const { confirmation, ...original } = existing
-      if (!sameValue(original, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      if (!sameValue(original, captured)) throw new Error('操作记录已在别处更新，这次结果没有覆盖它。')
       if (confirmation === 'confirmed') return record
       return { ...record, goalOperationRecords: current.filter(value => value !== existing) }
     }, expectedRecordId).finally(() => this.notifyGoalIntents())
@@ -475,11 +475,11 @@ export class DeviceWorkfaceStore {
       const current = record.goalOperationRecords ?? []
       const existing = current.find(value => value.request.operationId === captured.request.operationId)
       if (!existing) {
-        if (current.length >= MAX_ENTRIES) throw new Error('设备操作记录已满；原记录与本次请求均保留。')
+        if (current.length >= MAX_ENTRIES) throw new Error('这台手机上的操作记录已满，这次没有记录。')
         return { ...record, goalOperationRecords: [...current, { ...captured, confirmation: 'confirmed' }] }
       }
       const { confirmation: _confirmation, ...original } = existing
-      if (!sameValue(original, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      if (!sameValue(original, captured)) throw new Error('操作记录已在别处更新，这次结果没有覆盖它。')
       return { ...record, goalOperationRecords: current.map(value => value === existing ? { ...existing, confirmation: 'confirmed' } : value) }
     }, expectedRecordId, undefined, signal).finally(() => this.notifyGoalIntents())
   }
@@ -488,11 +488,11 @@ export class DeviceWorkfaceStore {
     this.writeRevision++
     this.refresh()
     const recordId = expectedRecordId === undefined ? this.value.recordId ?? null : expectedRecordId
-    if ((this.value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。')
+    if ((this.value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('这台手机上的工作面已被替换，这次结果没有写入。请核对这次操作。')
     this.value = parseDeviceWorkface(change(this.value))
     this.temporary = true
     const project = (value: DeviceWorkface) => {
-      if ((value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('原记录已替换。')
+      if ((value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('记录已被替换。')
       return change(value)
     }
     this.pending.push(project)
@@ -511,7 +511,7 @@ export class DeviceWorkfaceStore {
       const latest = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
       let next: DeviceWorkface
       failedLatest = latest; failedRaw = raw
-      if ((latest.recordId ?? null) !== recordId) { domainFailure = true; throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。') }
+      if ((latest.recordId ?? null) !== recordId) { domainFailure = true; throw new DeviceWorkfaceRecordChangedError('这台手机上的工作面已被替换，这次结果没有写入。请核对这次操作。') }
       try { next = parseDeviceWorkface(change(latest)) } catch (error) { domainFailure = true; throw error }
       this.write(next)
       const acknowledged = acknowledge?.(next) as T
@@ -537,7 +537,7 @@ export class DeviceWorkfaceStore {
       }
       if (!domainFailure && (!this.issue || this.writeUnavailable)) {
         this.writeUnavailable = true
-        this.issue = '设备意图尚未持久保存；先前记录仍保留，当前内存与原操作可继续。刷新保障不足，请导出备份，存储恢复后重试保存。'
+        this.issue = '操作尚未持久保存在这台手机上，先前记录仍保留。可以继续使用，但刷新保障不足，请导出备份，存储恢复后重试保存。'
       }
       throw error
     }).finally(() => { if (signal && cancelWait) signal.removeEventListener('abort', cancelWait) })
@@ -552,8 +552,8 @@ export class DeviceWorkfaceStore {
       const all = record.agentResumes ?? []
       const retainedConfirmed = new Set(all.filter(item => item.phase === 'confirmed' || item.phase === 'superseded').slice(-31))
       const current = all.filter(item => item.phase !== 'confirmed' && item.phase !== 'superseded' || retainedConfirmed.has(item)), prior = current.find(item => item.input.operationId === captured.input.operationId)
-      if (prior && !sameValue({ ...prior, phase: captured.phase }, captured)) throw new Error('原恢复操作已绑定另一目标；未覆盖原记录。')
-      if (!prior && current.some(item => item.phase !== 'confirmed' && item.phase !== 'superseded' && item.runtimeId === captured.runtimeId && item.deviceHostId === captured.deviceHostId && item.input.agentSessionId === captured.input.agentSessionId)) throw new Error('此 Agent 已有待核对的原恢复操作；请先核对原操作。')
+      if (prior && !sameValue({ ...prior, phase: captured.phase }, captured)) throw new Error('这个恢复操作已用于另一个目标，记录没有被覆盖。')
+      if (!prior && current.some(item => item.phase !== 'confirmed' && item.phase !== 'superseded' && item.runtimeId === captured.runtimeId && item.deviceHostId === captured.deviceHostId && item.input.agentSessionId === captured.input.agentSessionId)) throw new Error('这个 Agent 有一次恢复还没确认结果，请先核对。')
       if (prior?.phase === 'confirmed' || prior?.phase === 'superseded') return record
       return { ...record, agentResumes: prior ? current.map(item => item === prior ? captured : item) : [...current, captured] }
     }, expectedRecordId)
@@ -564,7 +564,7 @@ export class DeviceWorkfaceStore {
       const all = record.agentCreates ?? []
       const retainedConfirmed = new Set(all.filter(item => item.phase === 'confirmed').slice(-31))
       const current = all.filter(item => item.phase !== 'confirmed' || retainedConfirmed.has(item)), prior = current.find(item => item.input.operationId === captured.input.operationId)
-      if (prior && (!sameValue(prior.input, captured.input) || prior.runtimeId !== captured.runtimeId || prior.deviceHostId !== captured.deviceHostId || prior.agentSessionId && prior.agentSessionId !== captured.agentSessionId)) throw new Error('原创建操作已绑定另一目标；未覆盖原记录。')
+      if (prior && (!sameValue(prior.input, captured.input) || prior.runtimeId !== captured.runtimeId || prior.deviceHostId !== captured.deviceHostId || prior.agentSessionId && prior.agentSessionId !== captured.agentSessionId)) throw new Error('这个创建操作已用于另一个目标，记录没有被覆盖。')
       if (prior?.phase === 'confirmed') return record
       return { ...record, agentCreates: prior ? current.map(item => item === prior ? captured : item) : [...current, captured] }
     }, expectedRecordId)
@@ -586,7 +586,7 @@ export class DeviceWorkfaceStore {
   editGoalDraft(expected: MobileGoalDraft | null, next: MobileGoalDraft, recordId: string | null): Promise<MobileGoalDraftCommit> {
     const captured = parseMobileGoalDraft(next), previous = expected === null ? null : parseMobileGoalDraft(expected)
     const key = mobileGoalDraftKey(captured.goalId, captured.scope)
-    if (previous && mobileGoalDraftKey(previous.goalId, previous.scope) !== key) throw new MobileGoalDraftInvalidError('目标草稿的原对象或 Host 不同；本次保存未发送，原正文保留。')
+    if (previous && mobileGoalDraftKey(previous.goalId, previous.scope) !== key) throw new MobileGoalDraftInvalidError('目标草稿属于另一个目标或另一台 Mac，这次没有保存。')
     return this.update(value => {
       const drafts = value.goalDrafts ?? [], current = drafts.find(item => mobileGoalDraftKey(item.goalId, item.scope) === key) ?? null
       let result: DeviceWorkface
@@ -596,7 +596,7 @@ export class DeviceWorkfaceStore {
       } else result = { ...value, goalDrafts: [...drafts.filter(item => mobileGoalDraftKey(item.goalId, item.scope) !== key), captured] }
       // This is the same record budget, checked before the I/O boundary so a
       // rejected oversized intent cannot be mistaken for a failed durable save.
-      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileGoalDraftInvalidError('当前设备工作面已超过原保存范围；本次请求未发送，原记录与本页草稿保留，请先保全内容。')
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileGoalDraftInvalidError('这台手机上的工作面已超出保存上限，这次请求没有发送。请先导出内容。')
       return result
     }, recordId, committed => {
       const draft = committed.goalDrafts?.find(item => mobileGoalDraftKey(item.goalId, item.scope) === key) ?? null
@@ -609,7 +609,7 @@ export class DeviceWorkfaceStore {
   editKnowledgeDraft(expected: MobileKnowledgeDraft | null, next: MobileKnowledgeDraft, recordId: string | null): Promise<MobileKnowledgeDraftCommit> {
     const captured = parseMobileKnowledgeDraft(next), previous = expected === null ? null : parseMobileKnowledgeDraft(expected)
     const key = mobileKnowledgeDraftKey(captured.topicId, captured.entryId, captured.scope)
-    if (previous && mobileKnowledgeDraftKey(previous.topicId, previous.entryId, previous.scope) !== key) throw new MobileKnowledgeDraftInvalidError('知识草稿的原条目或 Host 不同；本次保存未发送，原正文保留。')
+    if (previous && mobileKnowledgeDraftKey(previous.topicId, previous.entryId, previous.scope) !== key) throw new MobileKnowledgeDraftInvalidError('知识草稿属于另一个条目或另一台 Mac，这次没有保存。')
     return this.update(value => {
       const drafts = value.knowledgeDrafts ?? [], current = drafts.find(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) === key) ?? null
       let result: DeviceWorkface
@@ -617,7 +617,7 @@ export class DeviceWorkfaceStore {
         const conflicts = value.knowledgeDraftConflicts ?? []
         result = { ...value, knowledgeDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
       } else result = { ...value, knowledgeDrafts: [...drafts.filter(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) !== key), captured] }
-      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileKnowledgeDraftInvalidError('当前设备工作面已超过原保存范围；本次请求未发送，原记录与本页草稿保留，请先保全内容。')
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileKnowledgeDraftInvalidError('这台手机上的工作面已超出保存上限，这次请求没有发送。请先导出内容。')
       return result
     }, recordId, committed => {
       const draft = committed.knowledgeDrafts?.find(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) === key) ?? null
@@ -630,7 +630,7 @@ export class DeviceWorkfaceStore {
   editMoteFileDraft(expected: MoteFileDraft | null, next: MoteFileDraft, recordId: string | null): Promise<MoteFileDraftCommit> {
     const captured = parseMoteFileDraft(next), previous = expected === null ? null : parseMoteFileDraft(expected)
     const key = moteFileDraftKey(captured.scope)
-    if (previous && moteFileDraftKey(previous.scope) !== key) throw new MoteFileDraftInvalidError('原文件、Mote 或 Host 不同；正文保留，本次保存未发送。')
+    if (previous && moteFileDraftKey(previous.scope) !== key) throw new MoteFileDraftInvalidError('草稿属于另一个文件、Mote 或另一台 Mac，这次没有保存。')
     return this.update(value => {
       const drafts = value.moteFileDrafts ?? [], current = drafts.find(item => moteFileDraftKey(item.scope) === key) ?? null
       let result: DeviceWorkface
@@ -638,7 +638,7 @@ export class DeviceWorkfaceStore {
         const conflicts = value.moteFileDraftConflicts ?? []
         result = { ...value, moteFileDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
       } else result = { ...value, moteFileDrafts: [...drafts.filter(item => moteFileDraftKey(item.scope) !== key), captured] }
-      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MoteFileDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MoteFileDraftCapacityError('这台手机上的工作面已超出备份上限，这次没有存到手机上。')
       return result
     }, recordId, committed => {
       const draft = committed.moteFileDrafts?.find(item => moteFileDraftKey(item.scope) === key) ?? null
@@ -651,7 +651,7 @@ export class DeviceWorkfaceStore {
   editMoteQuickDraft(expected: MoteQuickDraft | null, next: MoteQuickDraft, recordId: string | null): Promise<MoteQuickDraftCommit> {
     const captured = parseMoteQuickDraft(next), previous = expected === null ? null : parseMoteQuickDraft(expected)
     const key = moteQuickDraftKey(captured.scope)
-    if (previous && moteQuickDraftKey(previous.scope) !== key) throw new MoteQuickDraftInvalidError('原配置、Mote 或 Host 不同；正文保留，本次保存未发送。')
+    if (previous && moteQuickDraftKey(previous.scope) !== key) throw new MoteQuickDraftInvalidError('配置属于另一个 Mote 或另一台 Mac，这次没有保存。')
     let conflicting = false
     return this.update(value => {
       const drafts = value.moteQuickDrafts ?? [], current = drafts.find(item => moteQuickDraftKey(item.scope) === key) ?? null
@@ -662,8 +662,8 @@ export class DeviceWorkfaceStore {
         result = { ...value, moteQuickDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
       } else result = { ...value, moteQuickDrafts: [...drafts.filter(item => moteQuickDraftKey(item.scope) !== key), captured] }
       if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) {
-        const error = new MoteQuickDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
-        if (conflicting) throw new MoteQuickDraftInvalidError(`另一页面已改原配置；冲突副本未进入设备备份，当前选择与完整请求保留。${error.message}`, { cause: error })
+        const error = new MoteQuickDraftCapacityError('这台手机上的工作面已超出备份上限，这次没有存到手机上。')
+        if (conflicting) throw new MoteQuickDraftInvalidError(`另一个页面已改了这份配置，冲突的副本没有存到手机上。${error.message}`, { cause: error })
         throw error
       }
       return result
@@ -675,7 +675,7 @@ export class DeviceWorkfaceStore {
     }).catch(error => {
       // A failed conflict-copy write is not permission to forward the stale business request.
       if (conflicting && !(error instanceof DeviceWorkfaceRecordChangedError || error instanceof MoteQuickDraftInvalidError)) {
-        throw new MoteQuickDraftInvalidError(`另一页面已改原配置；冲突副本未进入设备备份，当前选择与完整请求保留。${error instanceof Error ? error.message : String(error)}`, { cause: error })
+        throw new MoteQuickDraftInvalidError(`另一个页面已改了这份配置，冲突的副本没有存到手机上。${error instanceof Error ? error.message : String(error)}`, { cause: error })
       }
       throw error
     })
@@ -707,8 +707,8 @@ export class DeviceWorkfaceStore {
     return this.update(value => {
       const current = value.fileUploads ?? []
       const previous = current.find(item => item.identity.operationId === upload.identity.operationId)
-      if (expectedUpload && !sameValue(previous, expectedUpload)) throw new Error('原附件记录已变化；迟到回执保留，不覆盖较新状态。')
-      if (previous && (previous.runtimeId !== upload.runtimeId || JSON.stringify(previous.identity) !== JSON.stringify(upload.identity))) throw new Error('原附件的目标或内容不同；保留原记录，不覆盖或换目标。')
+      if (expectedUpload && !sameValue(previous, expectedUpload)) throw new Error('附件记录已更新，较晚到达的结果不会覆盖它。')
+      if (previous && (previous.runtimeId !== upload.runtimeId || JSON.stringify(previous.identity) !== JSON.stringify(upload.identity))) throw new Error('附件的目标或内容不同，已有记录不会被覆盖。')
       return { ...value, fileUploads: previous ? current.map(item => item === previous ? upload : item) : [...current, upload] }
     }, expectedRecordId)
   }
@@ -716,7 +716,7 @@ export class DeviceWorkfaceStore {
     return this.update(value => {
       const current = value.fileUploads ?? []
       const original = current.find(item => item.identity.operationId === operationId)
-      if (original?.phase === 'sending' || original?.phase === 'unknown') throw new Error('原上传回执尚未确认；记录保留，可核对原操作。')
+      if (original?.phase === 'sending' || original?.phase === 'unknown') throw new Error('这次上传尚未确认，可以核对这次上传。')
       return { ...value, fileUploads: current.filter(item => item !== original) }
     }, expectedRecordId)
   }
@@ -729,9 +729,9 @@ export class DeviceWorkfaceStore {
     return this.update(value => {
       const current = value.goalWork ?? { selection: null, pending: [] }
       const existing = current.pending.find(op => op.operationId === operation.operationId)
-      if (existing && !sameGoalOperation(existing, operation)) throw new Error('原目标操作的内容不同；保留原操作，不能换目标重试。')
+      if (existing && !sameGoalOperation(existing, operation)) throw new Error('这个目标操作的内容不同，不能换目标重试。')
       if (!existing && current.pending.some(op => op.runtimeId === operation.runtimeId && op.sessionId === operation.sessionId && op.goalId === operation.goalId
-        && (op.deviceHostId === null || operation.deviceHostId === null || op.deviceHostId === operation.deviceHostId))) throw new Error('这个原目标已有待确认操作；请先检查并重试原操作，不替换为新的操作。')
+        && (op.deviceHostId === null || operation.deviceHostId === null || op.deviceHostId === operation.deviceHostId))) throw new Error('这个目标有一次操作还没确认，请先核对这次操作。')
       const pending = existing ? current.pending : [...current.pending, operation]
       return { ...value, goalWork: parseGoalWorkface({ ...current, pending }) }
     })
@@ -749,7 +749,7 @@ export class DeviceWorkfaceStore {
     const work = this.update(record => {
       const value = parseGoalIntent(intent), current = record.goalIntents ?? []
       const existing = current.find(item => item.operationId === value.operationId)
-      if (existing || current.some(item => sameGoalIntentScope(item, value) && (value.kind === 'create' ? item.kind === 'create' : item.kind !== 'create' && item.goalId === value.goalId))) throw new Error('原 Goal 已有待核对的操作意图；先读原目标，不替换或重复提交。')
+      if (existing || current.some(item => sameGoalIntentScope(item, value) && (value.kind === 'create' ? item.kind === 'create' : item.kind !== 'create' && item.goalId === value.goalId))) throw new Error('这个目标有一次操作还没确认，请先读取目标，不会重复提交。')
       return { ...record, goalIntents: [...current, value] }
     }, expectedRecordId).catch(error => { if (error instanceof DeviceWorkfaceRecordChangedError || !this.issue) throw error }).finally(() => this.notifyGoalIntents())
     this.goalIntentFlights.set(intent.operationId, expectedRecordId)
@@ -760,11 +760,11 @@ export class DeviceWorkfaceStore {
     this.notifyGoalIntents()
   }
   settleGoalIntent(intent: GoalIntent, phase: 'unknown' | 'saved' | 'confirmed', expectedRecordId = this.recordIdentity(), expectedIntent = this.snapshot().record.goalIntents?.find(item => item.operationId === intent.operationId)): Promise<void> {
-    if (this.goalIntentRunning(intent.operationId)) throw new Error('原操作仍在等待回执，当前读取不能代签它。')
+    if (this.goalIntentRunning(intent.operationId)) throw new Error('这次操作还在等待确认，读取结果不能代替确认。')
     return this.update(value => {
       const current = value.goalIntents ?? [], existing = current.find(item => item.operationId === intent.operationId)
       if (!existing || !sameGoalIntent(existing, intent)) return value
-      if (!sameValue(existing, expectedIntent)) throw new Error('原 Goal 意图已变化；迟到回执不能覆盖较新状态。')
+      if (!sameValue(existing, expectedIntent)) throw new Error('目标操作已更新，较晚到达的结果不会覆盖它。')
       const next = phase === 'confirmed' ? current.filter(item => item !== existing) : current.map(item => item === existing ? { ...item, phase } : item)
       return { ...value, goalIntents: next }
     }, expectedRecordId).catch(error => { if (error instanceof DeviceWorkfaceRecordChangedError || !this.issue) throw error }).finally(() => this.notifyGoalIntents())
@@ -773,7 +773,7 @@ export class DeviceWorkfaceStore {
     return this.update(value => {
       if (!origin(host.origin) || !id(host.hostId)) throw invalid()
       if (value.host && (value.host.hostId !== host.hostId)) {
-        throw new DeviceHostMismatchError('当前 Mac 与已保全工作面的原 Host 身份不同。原会话、草稿和未确认输入仍保留；请接回原 Mac，或明确建立另一份设备工作面。')
+        throw new DeviceHostMismatchError('当前连接的 Mac 和保存工作面的 Mac 不同。请连回之前那台 Mac，或另建一份工作面。')
       }
       return { ...value, host: { ...host } }
     })

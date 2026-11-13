@@ -17,7 +17,7 @@ export type MobileKnowledgeDraftCommit = {
 }
 export class MobileKnowledgeDraftInvalidError extends Error {}
 const MAX_ENTRIES = 256
-function invalid(): never { throw new MobileKnowledgeDraftInvalidError('原知识草稿或完整写入请求无法核实；原字节与本页正文保留。') }
+function invalid(): never { throw new MobileKnowledgeDraftInvalidError('知识草稿记录无法读取，记录内容和本页正文保持不变。') }
 function object(value: unknown, keys: string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) invalid()

@@ -10,7 +10,7 @@ export type MobileGoalOperationRecord = {
 }
 
 export function parseMobileGoalOperationRecord(value: unknown): MobileGoalOperationRecord {
-  const invalid = () => { throw new Error('设备目标操作记录无法完整核实；原记录保留。') }
+  const invalid = () => { throw new Error('这台手机上的目标操作记录无法读取，记录保持不变。') }
   const object = (v: unknown, keys: string[]): Record<string, unknown> => {
     if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length !== keys.length || !keys.every(key => Object.hasOwn(v, key))) return invalid()
     return v as Record<string, unknown>

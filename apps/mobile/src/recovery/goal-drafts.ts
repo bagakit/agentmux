@@ -19,7 +19,7 @@ export class MobileGoalDraftInvalidError extends Error {}
 export type MobileGoalDraftCommit = { recordId: string | null; applied: boolean; draft: MobileGoalDraft | null; conflict: MobileGoalDraft | null }
 const MAX_ENTRIES = 256
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength
-function invalid(): never { throw new MobileGoalDraftInvalidError('原目标草稿或请求无法完整核实；原字节与当前正文保留。') }
+function invalid(): never { throw new MobileGoalDraftInvalidError('目标草稿记录无法读取，记录内容和当前正文保持不变。') }
 function object(value: unknown, keys: string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) invalid()

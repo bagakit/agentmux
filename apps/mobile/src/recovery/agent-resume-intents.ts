@@ -9,7 +9,7 @@ export type MobileAgentResumeIntent = {
   phase: 'sending' | 'unknown' | 'confirmed' | 'superseded'
 }
 export function parseMobileAgentResumeIntent(value: unknown): MobileAgentResumeIntent {
-  const invalid = (): never => { throw new Error('原 Agent 恢复意图无效；保留原记录，不重放。') }
+  const invalid = (): never => { throw new Error('这条 Agent 恢复记录无效，已保留记录，不会重新恢复。') }
   const object = (value: unknown, keys: string[]) => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) invalid()
     return value as Record<string, unknown>

@@ -33,7 +33,7 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
   }), [client, agentSessionId])
   useEffect(() => {
     if (beforeRead && !beforeRead()) { setReading(false); return }
-    if (!client?.forwardRpc || !connected) { setReading(false); setIssue('连接暂不可用；原消耗读数保留，可接回后刷新。'); return }
+    if (!client?.forwardRpc || !connected) { setReading(false); setIssue('连接暂不可用，连上后可以刷新消耗。'); return }
     let live = true
     const originalScope = scope, originalHost = cached?.hostId
     const unchanged = () => live && current.current.client === client && current.current.agentSessionId === agentSessionId &&
@@ -43,10 +43,10 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
     setReading(true); setIssue('')
     void client.forwardRpc('agent.inspect', { target: { kind: 'agent-session', agentSessionId } }, {}, fence).then(result => {
       if (!unchanged()) return
-      if (result.session.agentSessionId !== agentSessionId || originalHost && result.session.hostId !== originalHost) throw new Error('读数返回了另一 Agent 或 Host，未采用。')
+      if (result.session.agentSessionId !== agentSessionId || originalHost && result.session.hostId !== originalHost) throw new Error('返回的读数属于另一个 Agent 或另一台 Mac，没有采用。')
       let latest: AgentMuxAgentSession | undefined
       try { latest = client.agentSession(agentSessionId) } catch { /* Missing metadata does not invalidate the exact original public read. */ }
-      if (latest && (latest.hostId !== result.session.hostId || latest.run.runId !== result.session.run.runId)) throw new Error('原会话已更新，未采用旧 Host 或 Run 的读数。')
+      if (latest && (latest.hostId !== result.session.hostId || latest.run.runId !== result.session.run.runId)) throw new Error('对话已更新，没有采用旧的读数。')
       setObserved({ client, agentSessionId, scope: originalScope, session: result.session })
     }).catch(error => { if (unchanged()) setIssue(`读取消耗未完成：${error instanceof Error ? error.message : String(error)}`) })
       .finally(() => { if (live) setReading(false) })

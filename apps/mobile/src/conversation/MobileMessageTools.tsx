@@ -65,7 +65,7 @@ export function MobileCommandPicker({ commands, disabled, onSelect, onOpenChange
           <strong>{item.label ?? item.text}</strong>
           {item.description ? <small>{item.description}</small> : null}
         </button>)}</div>)}
-        {!matching.length ? <p className="mobile-command-menu__empty" role="status">{commands.length ? '无匹配命令' : '当前会话尚未列出命令；可继续原输入。'}</p> : null}
+        {!matching.length ? <p className="mobile-command-menu__empty" role="status">{commands.length ? '无匹配命令' : '当前对话没有可用命令，可以继续输入。'}</p> : null}
       </div>
     </ComposerToolMenu>
   </span>
@@ -92,6 +92,6 @@ export function MobileMessageTools({ refresh, onInterrupt, commands = [], onComm
       {onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} onOpenChange={onCommandsOpenChange} loading={commandsLoading} issue={commandsIssue} retry={retryCommands} /> : null}
       {referenceTools}
     </span> : null}
-    {phase !== 'collapsed' ? <span className="composer-tool-group" role="group" aria-label="Conversation refresh"><button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button></span> : null}
+    {phase !== 'collapsed' ? <span className="composer-tool-group" role="group" aria-label="Conversation refresh"><button type="button" className="composer-tool" aria-label="刷新对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button></span> : null}
   </span>
 }

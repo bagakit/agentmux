@@ -8,7 +8,7 @@ import type { createLocalDrafts } from './local-drafts'
 
 export type MobileQuestionReplyAttempt = QuestionReplyAttempt & { runtimeId: string | null; hostId: string }
 type Local = ReturnType<typeof createLocalDrafts>
-const notAppliedDiagnostic = { code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core 已确认原答复完全未应用；草稿和原操作保留，可明确重新发送答案。' }
+const notAppliedDiagnostic = { code: 'QUESTION_REPLY_NOT_APPLIED', message: '答复没有送达，可以重新发送。' }
 export async function submitMobileQuestionReply(local: Local, sessionId: string, client: AgentMuxHostedClient | null,
   input: ConversationQuestionInput, notify: () => void, moteSource?: AgentInputMoteSource): Promise<void> {
   const key = questionReplyKey(sessionId, input)
@@ -16,28 +16,28 @@ export async function submitMobileQuestionReply(local: Local, sessionId: string,
     sessionId,
     get: () => local.questions.get(key),
     create: () => {
-      if (!client) throw new Error('原 Host 尚未连接，答案草稿保留；连接恢复后可继续发送。')
+      if (!client) throw new Error('Mac 还没连接，连上后可以继续发送。')
       const session = client.agentSession(sessionId)
       return { phase: 'sending', runtimeId: client.runtimeOwnerIdentity()?.runtimeId ?? null, hostId: session.hostId,
         input: structuredClone({ ...input, ...agentPromptCondition(session), operationId: randomClientRequestId(),
           ...(moteSource ? { moteSource } : {}) }) }
     },
     retain: async (next, expected) => {
-      if (local.questions.get(key) !== expected) throw new Error('另一页面已更新原答复；原操作和草稿保留，请核对原记录。')
+      if (local.questions.get(key) !== expected) throw new Error('另一个页面更新了这条答复，请核对记录。')
       local.questions.set(key, next)
       notify()
       const saved = await local.save(), issue = local.saveIssue
       notify()
-      if (!saved || issue || local.questions.get(key) !== next) throw new Error(issue ?? '原答复尚未持久保存；原操作和答案保留，恢复设备存储后可重试。')
+      if (!saved || issue || local.questions.get(key) !== next) throw new Error(issue ?? '答复还没存到这台手机上，恢复设备存储后可以重试。')
     },
     submit: async frozen => {
-      if (!client) throw new Error('原 Host 尚未连接，原操作和答案保留；连接恢复后可核对发送结果。')
+      if (!client) throw new Error('Mac 还没连接，连上后可以核对发送结果。')
       const original = local.questions.get(key)!
       let target: AgentMuxAgentSession | undefined
       try { target = client.agentSession(sessionId) } catch { /* Missing observations do not replace the original reply target. */ }
       const runtimeId = client.runtimeOwnerIdentity()?.runtimeId
       if (original.runtimeId && runtimeId && original.runtimeId !== runtimeId || target?.hostId && original.hostId !== target.hostId) {
-        throw new Error('当前连接与原答复的 Host 或 Runtime 不一致；原操作保留，不会转向另一处重投。')
+        throw new Error('当前连接的不是这条答复所在的 Mac，不会改发到别处。')
       }
       return client.replySessionQuestion({ ...frozen, agentSessionId: sessionId, authorHuman: true, sourceChannel: 'question-reply' })
     }

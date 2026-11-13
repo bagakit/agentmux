@@ -4,7 +4,7 @@ import { isLocalNetworkHost } from '@agentmux/relay/offer'
 
 export const moteFileSources = [
   { path: 'MOTE.md', label: 'MOTE.md' }, { path: 'BEHAVIOR.md', label: '合作方式 · BEHAVIOR.md' },
-  { path: 'SOUL.md', label: '自我设定 · SOUL.md' }, { path: 'topic.md', label: '原摘要 · topic.md' }
+  { path: 'SOUL.md', label: '自我设定 · SOUL.md' }, { path: 'topic.md', label: '摘要 · topic.md' }
 ] as const
 export type MoteFilePath = typeof moteFileSources[number]['path']
 /** Device text and original requests only. File bytes/revisions remain with the original Files owner. */
@@ -25,7 +25,7 @@ export type MoteFileDraftCommit = { recordId: string | null; applied: boolean; d
 export class MoteFileDraftInvalidError extends Error {}
 /** This owner refused the complete update before any durable write. */
 export class MoteFileDraftCapacityError extends MoteFileDraftInvalidError {}
-function invalid(): never { throw new MoteFileDraftInvalidError('原 Mote 文件草稿或完整保存请求无法核实；原字节与当前正文保留。') }
+function invalid(): never { throw new MoteFileDraftInvalidError('Mote 文件草稿记录无法读取，记录内容和当前正文保持不变。') }
 function object(value: unknown, keys: string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) invalid()

@@ -58,16 +58,16 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
       const sameOriginal = () => getDeviceWorkface().recordIdentity() === recordId && (recordIds.current.get(id) ?? null) === recordId &&
         (!latestUploads.current.some(item => item.identity.operationId === id) || latestUploads.current.some(item => item.identity.operationId === id && fileUploadIntentKey(item) === intent))
       try {
-        if (!sameOriginal()) throw new Error('原设备工作面或附件请求已改变。')
+        if (!sameOriginal()) throw new Error('附件记录已在别处更新。')
         const previous = originalEntries.current.get(id)
         if (previous && fileUploadIntentKey(previous) === intent && (previous.phase === 'uploaded' || previous.phase === 'inserted') &&
-            upload.phase !== 'uploaded' && upload.phase !== 'inserted') throw new Error('原上传已确认；不会用较早的未确认结果覆盖回执。')
+            upload.phase !== 'uploaded' && upload.phase !== 'inserted') throw new Error('上传已确认，较早的未确认结果不会覆盖它。')
         await getDeviceWorkface().retainFileUpload(upload, recordId, previous)
-        if (!sameOriginal()) throw new Error('原设备工作面或附件请求已改变。')
+        if (!sameOriginal()) throw new Error('附件记录已在别处更新。')
         originalEntries.current.set(upload.identity.operationId, upload) }
       catch (error) {
-        if (required) throw new Error(`原上传操作尚未保全；请核对原操作，附件和草稿保留。${errorMessage(error)}`)
-        if (mounted.current) setNotice(`原附件回执尚未保全；可核对同一操作。${errorMessage(error)}`)
+        if (required) throw new Error(`上传记录还没存到这台手机上，可以核对这次上传。${errorMessage(error)}`)
+        if (mounted.current) setNotice(`附件结果还没存到这台手机上，可以核对这次上传。${errorMessage(error)}`)
         return false
       }
     }
@@ -102,10 +102,10 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
       const url = saved.url
       const link = document.createElement('a'); link.href = url; link.download = file.name; link.click()
       setCopyDecision(decideCopy(upload, file, 'saved'))
-      setNotice('已请求保存；浏览器尚未确认文件已保存。请核对保存结果后再确认。')
+      setNotice('已请求保存，浏览器还没确认文件已保存。请核对后再确认。')
     } catch (error) {
       if (created) { const saved = exportedCopies.current.get(id); if (saved) { try { URL.revokeObjectURL(saved.url) } catch { /* The browser owns URL cleanup. */ }; exportedCopies.current.delete(id) } }
-      setNotice(`本机副本未确认保存；原附件仍保留。${errorMessage(error)}`)
+      setNotice(`本机副本没有确认保存，附件仍保留。${errorMessage(error)}`)
     }
   }
   function releaseCopy(decision: NonNullable<typeof copyDecision>) {
@@ -113,15 +113,15 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     const currentUpload = latestUploads.current.find(item => item.identity.operationId === id)
     if (bytes.current.get(id) !== decision.file || decision.file.revision !== decision.revision || decision.file.dataBase64 !== decision.dataBase64 ||
         !currentUpload || fileUploadIntentKey(currentUpload) !== decision.intent || (recordIds.current.get(id) ?? null) !== decision.recordId || busy.current.has(id)) {
-      setNotice('原附件或其操作已变化；本次没有移除本机副本。'); setCopyDecision(null); return
+      setNotice('附件已变化，这次没有移除本机副本。'); setCopyDecision(null); return
     }
     bytes.current.delete(id)
     const saved = exportedCopies.current.get(id)
     if (saved?.file === decision.file) { try { URL.revokeObjectURL(saved.url) } catch { /* The browser owns URL cleanup. */ }; exportedCopies.current.delete(id) }
     if (!originalEntries.current.has(id)) latestUploads.current = latestUploads.current.filter(item => item !== currentUpload)
-    else latestUploads.current = latestUploads.current.map(item => item === currentUpload ? { ...item, issue: '本机副本已移除；原 Host 操作仍保留，可核对原回执。' } : item)
+    else latestUploads.current = latestUploads.current.map(item => item === currentUpload ? { ...item, issue: '本机副本已移除，可以核对 Mac 上的上传结果。' } : item)
     owner.changed(); setCopyDecision(null)
-    setNotice('本机副本已移除；原 Host 操作与其他附件未删除。')
+    setNotice('本机副本已移除。')
   }
   useEffect(() => {
     if (!confirmedPrompt) return
@@ -131,16 +131,16 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
   function selectionTarget(): SelectionTarget | null {
     const { client, session } = current.current
     const runtimeId = client?.runtimeOwnerIdentity?.()?.runtimeId
-    if (!client || !session || !runtimeId) { setNotice('尚未确认原会话与 Mac；这次附件没有上传。原消息仍可编辑。'); return null }
+    if (!client || !session || !runtimeId) { setNotice('还没确认对话和 Mac，这次附件没有上传。'); return null }
     return { runtimeId, hostId: session.hostId, sessionId: session.agentSessionId, runId: session.run.runId,
       recordId: getDeviceWorkface().recordIdentity() }
   }
   async function stageSelectedAttachment(file: LocalAttachment, original: SelectionTarget): Promise<void> {
     if (bytes.current.has(file.id) || latestUploads.current.some(item => item.identity.operationId === file.id) || originalEntries.current.has(file.id)) {
-      throw new Error('附件操作标识与原记录冲突；原附件和这次正文保留，请重新选择文件。')
+      throw new Error('附件标识与已有记录冲突，请重新选择文件。')
     }
     if ([...bytes.current.values()].reduce((total, item) => total + item.size, 0) + file.size > FILE_UPLOAD_MAX_BYTES * 4) {
-      throw new Error('待上传附件已占用这台设备的本次选择预算；先上传或移除一个附件，再选择新文件。原草稿保留。')
+      throw new Error('待上传附件已达上限。请先上传或移除一个附件，再选择新文件。')
     }
     const identity: FileUploadIdentity = { hostId: original.hostId, agentSessionId: original.sessionId,
       expectedRun: { runId: original.runId }, operationId: file.id, name: file.name,
@@ -152,8 +152,8 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     const upload: MobileFileUpload = { runtimeId: original.runtimeId, identity, phase: 'selected' }
     const recordChanged = getDeviceWorkface().recordIdentity() !== original.recordId
     const changed = recordChanged || !fileUploadScopeMatches(upload, scope())
-    await retain(changed ? { ...upload, issue: '选择开始时的会话、Run 或设备工作面已改变；附件仍保留在原目标，没有上传或转绑。' } : upload)
-    if (changed && mounted.current) setNotice(`已保留 ${file.name} 的原选择（${original.sessionId}）；${recordChanged ? '设备工作面已替换，可移除后重新选择' : '返回原目标后继续'}，当前草稿未改变。`)
+    await retain(changed ? { ...upload, issue: '选择期间对话或工作面已变化，附件仍属于开始选择时的对话，没有上传或转移。' } : upload)
+    if (changed && mounted.current) setNotice(`已保留 ${file.name}，它属于开始选择时的对话（${original.sessionId}）。${recordChanged ? '工作面已替换，可以移除后重新选择。' : '回到那个对话后可以继续。'}`)
   }
   function beginSelection(kind: SelectionOperation['kind'], label: string, target: SelectionTarget, allowUpdate: () => void): SelectionOperation {
     let stop!: () => void
@@ -173,14 +173,14 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     if (selections.current.get(operation.id) !== operation) return
     operation.cancelled = true; operation.controller.abort(); operation.stop(); operation.allowUpdate()
     finishSelection(operation)
-    if (mounted.current) setNotice(`已结束本次${operation.kind === 'picker' ? '选择' : '读取'}等待；其他附件和原正文保留。`)
+    if (mounted.current) setNotice(`已结束本次${operation.kind === 'picker' ? '选择' : '读取'}等待。`)
   }
   async function choose(): Promise<void> {
     if (pickerOpen.current) return
     const original = selectionTarget()
     if (!original) return
     setNotice(null)
-    await protectUpdate(`原 Session ${original.sessionId} 的附件选择尚未结束；返回原对话结束该次等待，或等待完成后再更新。`, async allowUpdate => {
+    await protectUpdate(`对话 ${original.sessionId} 的附件选择还没结束。请回到那个对话结束等待，或等完成后再更新。`, async allowUpdate => {
       const operation = beginSelection('picker', '附件', original, allowUpdate)
       pickerOpen.current = operation
       try {
@@ -198,7 +198,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     const original = selectionTarget(), selected = [...files]
     if (!original || !selected.length) return
     setNotice(null)
-    await protectUpdate(`原 Session ${original.sessionId} 的附件读取尚未结束；返回原对话结束该次等待，或等待完成后再更新。`, async allowUpdate => {
+    await protectUpdate(`对话 ${original.sessionId} 的附件读取还没结束。请回到那个对话结束等待，或等完成后再更新。`, async allowUpdate => {
       const label = `${selected[0]!.name || '未命名附件'}${selected.length > 1 ? ` 等 ${selected.length} 项` : ''}`
       const operation = beginSelection('read', label, original, allowUpdate)
       const predecessor = selectionTail.current
@@ -226,7 +226,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
   useImperativeHandle(controls, () => ({ choose, stageFile, stageFiles, captureForSend }))
 
   async function add(upload: MobileFileUpload): Promise<void> {
-    if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null) || !upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('原附件属于另一 Mac、Session 或 Run；回执已保留，当前草稿未改变。')
+    if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null) || !upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('附件属于另一个对话或另一台 Mac，当前草稿没有改变。')
     await insert(async () => upload.path!, upload)
     await retain({ ...upload, phase: 'inserted' })
     if (!exportedCopies.current.has(upload.identity.operationId)) bytes.current.delete(upload.identity.operationId)
@@ -238,9 +238,9 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     if (flight.saved && busy.current.get(id) === flight) {
       flight.stop()
       busy.current.delete(id)
-      const issue = flight.dispatched === 'upload' ? '已结束上传等待；原操作回执未知，可核对同一操作，不会自动重传。'
-        : flight.dispatched === 'inspect' ? '已结束核对等待；原上传是否发生仍未知，可核对同一操作。'
-        : '已取消本页续做；原请求尚未派发，原操作与附件保留。'
+      const issue = flight.dispatched === 'upload' ? '已结束上传等待。上传结果还没确认，不会自动重传，可以核对这次上传。'
+        : flight.dispatched === 'inspect' ? '已结束核对等待。还不知道是否已上传，可以再核对一次。'
+        : '已取消，这次请求还没发出。'
       const known = originalEntries.current.get(id)
       latestUploads.current = latestUploads.current.map(item => item.identity.operationId === id &&
         fileUploadIntentKey(item) === flight.intent && (recordIds.current.get(id) ?? null) === flight.recordId
@@ -248,7 +248,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
       owner.changed()
     }
     if (mounted.current) {
-      setNotice(flight.saved ? null : '已取消后续上传；设备仍在保全原操作，完成前请保留当前页面。')
+      setNotice(flight.saved ? null : '已取消后续上传。这台手机还在保存上传记录，完成前请不要关闭页面。')
     }
   }
   function act(upload: MobileFileUpload, inspectOnly: boolean, insertIntoDraft = true): Promise<MobileFileUpload | null> {
@@ -257,7 +257,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     const existing = busy.current.get(id), recordId = getDeviceWorkface().recordIdentity(), intent = fileUploadIntentKey(upload)
     if (existing) {
       if (existing.client !== current.current.client || existing.recordId !== recordId || existing.intent !== intent || !fileUploadScopeMatches(upload, scope())) {
-        const issue = '原上传仍属于另一客户端、工作面或目标；本次未上传、插入或发送，可核对原操作。'
+        const issue = '这次上传属于另一个页面或对话，这次没有上传、加入或发送。可以核对这次上传。'
         const { path: _path, ...original } = upload
         setNotice(issue); return Promise.resolve({ ...original, phase: 'error', issue })
       }
@@ -272,24 +272,24 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
       const originalClient = current.current.client, originalScope = scope(), originalPrompt = current.current.promptOperationId
       let requested = false, confirmed: MobileFileUpload | null = null
       try {
-        if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null)) throw new Error('设备工作面已被替换；原附件仍保留，本次不上传或插入。')
-        if (!current.current.connected || !originalClient?.forwardRpc) throw new Error('原 Mac 当前未连接；附件和草稿保留，可连接后再试。')
-        if (upload.runtimeId !== originalScope.runtimeId || upload.identity.hostId !== originalScope.hostId || upload.identity.agentSessionId !== originalScope.sessionId) throw new Error('当前连接不属于原附件的 Mac 与 Session；本次未上传或重传。')
+        if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null)) throw new Error('这台手机上的工作面已被替换，这次没有上传或加入附件。')
+        if (!current.current.connected || !originalClient?.forwardRpc) throw new Error('Mac 当前没有连接，连上后可以再试。')
+        if (upload.runtimeId !== originalScope.runtimeId || upload.identity.hostId !== originalScope.hostId || upload.identity.agentSessionId !== originalScope.sessionId) throw new Error('当前连接的不是附件所属的对话或 Mac，这次没有上传。')
         if (upload.phase === 'uploaded' && !inspectOnly) { if (insertIntoDraft) await add(upload); return upload }
-        if (!inspectOnly && !fileUploadScopeMatches(upload, originalScope)) throw new Error('原 Run 已变化；本次未上传，原文件仍保留。')
+        if (!inspectOnly && !fileUploadScopeMatches(upload, originalScope)) throw new Error('Agent 已重新启动，这次没有上传。')
         const file = bytes.current.get(id)
-        if (!inspectOnly && !file) throw new Error('本次设备选择已结束；原上传记录保留，可先核对原操作。')
+        if (!inspectOnly && !file) throw new Error('这次选择的文件已不在页面上，可以先核对之前的上传。')
         const persisted = originalEntries.current.get(id)
         if (!(inspectOnly && persisted && fileUploadIntentKey(persisted) === intent && (persisted.phase === 'uploaded' || persisted.phase === 'inserted'))) {
           await retain({ ...upload, phase: 'sending' }, true)
         }
         flight.saved = true
         if (flight.cancelled) { retireFlight(flight); return null }
-        if (fileUploadIntentKey(upload) !== flight.intent || getDeviceWorkface().recordIdentity() !== flight.recordId) throw new Error('原设备工作面或附件请求已改变；没有派发这次操作。')
+        if (fileUploadIntentKey(upload) !== flight.intent || getDeviceWorkface().recordIdentity() !== flight.recordId) throw new Error('附件记录已在别处更新，这次没有发出。')
         let inserted = false
         const request = async () => {
           if (flight.cancelled) return null
-          if (fileUploadIntentKey(upload) !== flight.intent || getDeviceWorkface().recordIdentity() !== flight.recordId) throw new Error('原设备工作面或附件请求已改变；没有派发这次操作。')
+          if (fileUploadIntentKey(upload) !== flight.intent || getDeviceWorkface().recordIdentity() !== flight.recordId) throw new Error('附件记录已在别处更新，这次没有发出。')
           requested = true
           const pending = inspectOnly ? originalClient.forwardRpc!('file.upload.inspect', upload.identity)
             : originalClient.forwardRpc!('file.upload', { ...upload.identity, dataBase64: file!.dataBase64 })
@@ -317,7 +317,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
         const failed: MobileFileUpload = retained?.phase === 'uploaded' ? { ...retained, issue: errorMessage(error) }
           : { ...upload, phase: requested ? 'unknown' : upload.phase, issue: errorMessage(error) }
         if (flight.cancelled) {
-          if (!flight.saved && mounted.current) setNotice(`设备未能保全原操作；后续上传已取消，附件和正文保留。${errorMessage(error)}`)
+          if (!flight.saved && mounted.current) setNotice(`上传记录没有存到这台手机上，后续上传已取消。${errorMessage(error)}`)
           return null
         }
         await retain(failed)
@@ -340,11 +340,11 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
     let cancelled = false
     const originalSelection = selected.every(upload => recordIds.current.get(upload.identity.operationId) === originalRecord && fileUploadScopeMatches(upload, originalScope))
     const assertOriginal = () => {
-      if (cancelled) throw new Error('本次发送准备已取消；原上传和附件仍保留。')
+      if (cancelled) throw new Error('发送准备已取消。')
       const now = scope()
       if (!mounted.current || current.current.client !== originalClient || getDeviceWorkface().recordIdentity() !== originalRecord ||
           !originalSelection || now.sessionId !== originalScope.sessionId || now.runId !== originalScope.runId || now.runtimeId !== originalScope.runtimeId || now.hostId !== originalScope.hostId) {
-        throw new Error('原附件消息的 Mac、Session、Run 或设备工作面已改变；原正文和附件保留，没有请求输入。')
+        throw new Error('这条带附件的消息所在的对话、Mac 或工作面已改变，这次没有发送。')
       }
     }
     return {
@@ -356,7 +356,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
           assertOriginal()
           const result = await act(upload, upload.phase === 'unknown' || upload.phase === 'sending', false)
           assertOriginal()
-          if (result?.phase !== 'uploaded' || !result.path) throw new Error(`附件未就绪；本次消息没有发送。${result?.issue ?? '原上传结果尚未确认。'} 可在附件详情核对原操作，或明确仅发送正文。`)
+          if (result?.phase !== 'uploaded' || !result.path) throw new Error(`附件未就绪；本次消息没有发送。${result?.issue ?? '上传结果还没确认。'} 可以在附件详情里核对这次上传，或只发送正文。`)
           confirmed.push(result)
         }
         return confirmed.reduce((text, upload) => draftIncludesUpload(body, upload.path!) ? text : appendNamedFileReference(text, upload.path!, upload.identity.name), body)
@@ -390,14 +390,14 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
   return <div className="mobile-attachments" aria-live="polite">
     {visibleSelections.map((operation, index) => <div className="mobile-attachment-pending" key={operation.id}>
       <div className="mobile-attachment-pending__row">
-        <button type="button" className="mobile-attachment-pending__status" aria-expanded={operation.expanded} aria-label={`${operation.kind === 'picker' ? '附件选择' : `读取 ${operation.label}`}的原目标`}
+        <button type="button" className="mobile-attachment-pending__status" aria-expanded={operation.expanded} aria-label={`${operation.kind === 'picker' ? '附件选择' : `读取 ${operation.label}`}的目标`}
           onClick={() => { operation.expanded = !operation.expanded; owner.changed() }}>
           <SemanticIcon name="status.loading" size={13} animation="spin" /><span>{operation.kind === 'picker' ? '选择附件中' : `读取 ${operation.label}`}</span><small>{operation.expanded ? '收起' : '详情'}</small>
         </button>
         <button type="button" className="mobile-text-button" aria-label={operation.kind === 'picker' ? '取消本次选择' : '取消本次读取'} onClick={() => cancelSelection(operation)}>取消</button>
         {index === 0 && onSendBodyOnly && <button type="button" className="mobile-text-button" aria-label="本次仅发送正文" disabled={bodyOnlyDisabled} onClick={onSendBodyOnly}>仅正文</button>}
       </div>
-      {operation.expanded && <p className="mobile-attachment-pending__identity">原 Host {operation.target.hostId} · Session {operation.target.sessionId} · Run {operation.target.runId} · Runtime {operation.target.runtimeId}</p>}
+      {operation.expanded && <p className="mobile-attachment-pending__identity">Mac {operation.target.hostId} · 对话 {operation.target.sessionId} · 运行 {operation.target.runId} · Mac 实例 {operation.target.runtimeId}</p>}
     </div>)}
     {visible.map(upload => {
       const image = upload.identity.mimeType.startsWith('image/'), file = bytes.current.get(upload.identity.operationId)
@@ -407,15 +407,15 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
       return <div className="mobile-attachment-entry" key={upload.identity.operationId}><div className="mobile-attachment" data-phase={upload.phase}>
         {image && file ? <img className="mobile-attachment-preview" alt="" src={`data:${file.mimeType};base64,${file.dataBase64}`} />
           : <span className="mobile-attachment-icon">{image ? <SemanticIcon name="object.image" size={19} /> : <SemanticIcon name="object.file" size={19} />}</span>}
-        <div className="mobile-attachment-copy"><details className="mobile-attachment-details"><summary aria-label={`${upload.identity.name} 原上传详情`}><strong title={upload.identity.name}>{upload.identity.name}</strong>
-          <small>{targetUnknown ? '目标未确认' : upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busyUpload ? '正在核对原上传…' : unknown ? '回执待核对' : ready ? '已在原 Mac' : targetUnknown ? '仅在本机' : '仅在这台设备'}</small></summary>
-          {targetUnknown && <p className="mobile-attachment-original">当前连接目标尚未确认；原目标：</p>}
-          <p className={targetUnknown ? 'mobile-attachment-original' : undefined}>Host <code>{upload.identity.hostId}</code> · Session <code>{upload.identity.agentSessionId}</code> · Run <code>{upload.identity.expectedRun.runId}</code></p><p>操作 <code>{upload.identity.operationId}</code></p>{upload.issue && <p>{upload.issue}</p>}{upload.phase !== 'selected' && !busyUpload && !unknown && <button type="button" className="mobile-text-button" onClick={() => { void act(upload, true, false) }}>核对 {upload.identity.name} 原上传</button>}</details>
+        <div className="mobile-attachment-copy"><details className="mobile-attachment-details"><summary aria-label={`${upload.identity.name} 上传详情`}><strong title={upload.identity.name}>{upload.identity.name}</strong>
+          <small>{targetUnknown ? '目标未确认' : upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busyUpload ? '正在核对上传…' : unknown ? '结果待核对' : ready ? '已在 Mac' : targetUnknown ? '仅在本机' : '仅在这台设备'}</small></summary>
+          {targetUnknown && <p className="mobile-attachment-original">当前连接还没确认，附件的目标是：</p>}
+          <p className={targetUnknown ? 'mobile-attachment-original' : undefined}>Mac <code>{upload.identity.hostId}</code> · 对话 <code>{upload.identity.agentSessionId}</code> · 运行 <code>{upload.identity.expectedRun.runId}</code></p><p>操作 <code>{upload.identity.operationId}</code></p>{upload.issue && <p>{upload.issue}</p>}{upload.phase !== 'selected' && !busyUpload && !unknown && <button type="button" className="mobile-text-button" onClick={() => { void act(upload, true, false) }}>核对 {upload.identity.name} 上传</button>}</details>
           </div>
-        {!busyUpload && upload.phase !== 'inserted' && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
-          title={ready ? '加入消息' : unknown ? '核对原上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
+        {!busyUpload && upload.phase !== 'inserted' && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 上传` : `上传并加入 ${upload.identity.name}`}
+          title={ready ? '加入消息' : unknown ? '核对上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
           {ready ? <SemanticIcon name="action.confirm" size={17} /> : unknown ? <SemanticIcon name="action.refresh" size={17} /> : <SemanticIcon name="action.upload" size={17} />}</button>}
-        {busyUpload && <><SemanticIcon name="status.loading" size={17} animation="spin" aria-label="上传回执待确认" />{inFlight && <button type="button" className="mobile-text-button" aria-label="结束等待" onClick={() => { const flight = busy.current.get(upload.identity.operationId); if (flight) retireFlight(flight) }}>结束等待</button>}</>}
+        {busyUpload && <><SemanticIcon name="status.loading" size={17} animation="spin" aria-label="上传待确认" />{inFlight && <button type="button" className="mobile-text-button" aria-label="结束等待" onClick={() => { const flight = busy.current.get(upload.identity.operationId); if (flight) retireFlight(flight) }}>结束等待</button>}</>}
         {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><SemanticIcon name="action.close" size={15} /></button>}
       </div>{upload.issue && !unknown && <MobileNotice className="mobile-attachment-notice" identity={[upload.identity.operationId,upload.phase,upload.issue]} role="status">{upload.issue.split('\n')[0]}</MobileNotice>}
       {file && !busyUpload && (unknown || exportedCopies.current.has(upload.identity.operationId) || copyDecision?.upload.identity.operationId === upload.identity.operationId) && <div className="mobile-attachment-copy-actions">
@@ -426,7 +426,7 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
         </div>
         {copyManager === upload.identity.operationId && (copyDecision?.upload.identity.operationId === upload.identity.operationId
           ? <div className="mobile-attachment-copy-actions__confirm"><p>{copyDecision.kind === 'saved' ? '确认已另行保存' : '确认放弃'} <strong>{upload.identity.name}</strong> 的本机副本？</p><div>
-            <button type="button" className="mobile-text-button" onClick={() => { setCopyDecision(null); setNotice(value => value === '已请求保存；浏览器尚未确认文件已保存。请核对保存结果后再确认。' ? null : value) }}>保留</button>
+            <button type="button" className="mobile-text-button" onClick={() => { setCopyDecision(null); setNotice(value => value === '已请求保存，浏览器还没确认文件已保存。请核对后再确认。' ? null : value) }}>保留</button>
             <button type="button" className="mobile-text-button" onClick={() => releaseCopy(copyDecision)}>{copyDecision.kind === 'saved' ? '已保存，移除副本' : '确认放弃'}</button>
           </div></div>
           : <div className="mobile-attachment-copy-actions__choices">

@@ -13,7 +13,7 @@ export type MoteQuickDraft = { scope: MoteQuickScope; values: MoteQuickDefaults;
 export type MoteQuickDraftCommit = { recordId: string | null; applied: boolean; draft: MoteQuickDraft | null; conflict: MoteQuickDraft | null }
 export class MoteQuickDraftInvalidError extends Error {}
 export class MoteQuickDraftCapacityError extends MoteQuickDraftInvalidError {}
-function invalid(): never { throw new MoteQuickDraftInvalidError('原 Quick 配置、完整请求或归属无法核实；当前选择与原请求保留。') }
+function invalid(): never { throw new MoteQuickDraftInvalidError('Quick 配置记录无法读取，当前选择保持不变。') }
 function object(value: unknown, keys: string[]) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) invalid()
   return value as Record<string, unknown>

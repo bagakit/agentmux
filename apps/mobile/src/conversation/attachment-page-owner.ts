@@ -23,7 +23,7 @@ export function createAttachmentPageOwner(onChange: () => void = () => {}): Atta
   const workface = getDeviceWorkface(), original = workface.snapshot().record.fileUploads ?? [], listeners = new Set<() => void>()
   const owner: AttachmentPageOwner = {
     revision: 0,
-    uploads: { current: original.map(item => item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '原上传回执尚未确认；核对同一操作，不会自动重传。' } : item) },
+    uploads: { current: original.map(item => item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '还没确认上传结果，不会自动重传。可以核对这次上传。' } : item) },
     recordIds: { current: new Map(original.map(item => [item.identity.operationId, workface.recordIdentity()])) },
     originalEntries: { current: new Map(original.map(item => [item.identity.operationId, item])) }, bytes: { current: new Map() }, exports: { current: new Map() }, busy: { current: new Map() },
     pickerOpen: { current: null }, selectionTail: { current: Promise.resolve() }, selections: { current: new Map() }, nextSelection: { current: 0 },
@@ -32,12 +32,12 @@ export function createAttachmentPageOwner(onChange: () => void = () => {}): Atta
     changed() { owner.revision++; onChange(); for (const listener of listeners) listener() },
     issue() {
       const pending = owner.selections.current.values().next().value as SelectionOperation | undefined
-      if (pending) return `原 Session ${pending.target.sessionId} 的附件仍在选择或读取；返回原对话结束该次等待，或等待完成后再更新。`
+      if (pending) return `对话 ${pending.target.sessionId} 的附件还在选择或读取。请回到那个对话结束等待，或等完成后再更新。`
       const flight = owner.busy.current.values().next().value as AttachmentFlight | undefined
-      if (flight) return `原附件操作仍在进行；返回原 Host ${flight.original.identity.hostId} 的 Session ${flight.original.identity.agentSessionId} 处理后再更新网页。`
+      if (flight) return `附件操作还在进行。请回到 Mac ${flight.original.identity.hostId} 上的对话 ${flight.original.identity.agentSessionId} 处理后再更新网页。`
       if (owner.bytes.current.size) {
         const original = owner.uploads.current.find(upload => owner.bytes.current.has(upload.identity.operationId))
-        return original ? `所选附件仅保存在当前页面；请返回原 Host ${original.identity.hostId} 的 Session ${original.identity.agentSessionId}，上传或移除后再更新网页。`
+        return original ? `所选附件仅保存在当前页面。请回到 Mac ${original.identity.hostId} 上的对话 ${original.identity.agentSessionId}，上传或移除后再更新网页。`
           : '所选附件仅保存在当前页面；请先上传并加入消息，或移除附件，再更新网页。'
       }
       return null

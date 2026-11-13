@@ -31,7 +31,7 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
     const source = { client, agentSessionId }, recordId = owner.recordIdentity()
     const unchanged = () => current.current.visible && current.current.client === source.client && current.current.agentSessionId === source.agentSessionId && owner.recordIdentity() === recordId
     try { const copied = await copyText(link, () => {}); if (!unchanged()) return; if (!copied) throw new Error('浏览器未确认复制。'); setNotice('已复制 Agent 身份链接。'); setShowLink(false) }
-    catch (error) { if (!unchanged()) return; setShowLink(true); setNotice(`${error instanceof Error ? error.message : String(error)} 可选取下方原链接。`) }
+    catch (error) { if (!unchanged()) return; setShowLink(true); setNotice(`${error instanceof Error ? error.message : String(error)} 可以手动选取下方链接。`) }
   }
   async function recover(mode: 'new' | 'inspect' | 'continue') {
     if (beforeAction && !beforeAction() || !client || !connected || !visible) return
@@ -51,7 +51,7 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
       } : undefined} />
     <div className="mobile-agent-actions__shortcuts">
     <button className="mobile-menu-row" aria-label="复制 Agent 身份链接" onClick={() => void copy()}><SemanticIcon name="action.copy" size={16} /><span>复制身份链接</span></button>
-    <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover(pending ? 'inspect' : 'new')}><SemanticIcon name="action.refresh" size={16} /><span>{busy ? '正在核对原会话…' : pending ? '核对原恢复操作' : '恢复原 Agent'}</span></button>
+    <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover(pending ? 'inspect' : 'new')}><SemanticIcon name="action.refresh" size={16} /><span>{busy ? '正在核对对话…' : pending ? '核对恢复结果' : '恢复 Agent'}</span></button>
     </div>
     {showLink && <input aria-label="Agent 身份链接" value={link} readOnly onFocus={event => event.target.select()} />}
     {pending && <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover('continue')}><span>继续同一恢复操作</span></button>}

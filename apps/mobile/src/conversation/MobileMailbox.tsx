@@ -43,7 +43,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
   const [selection, setSelection] = useState<{ scope: string; message: AgentSessionUserMessage } | null>(null)
   const action = useRef<AbortController | null>(null)
   const readInputMailbox = useCallback(async (input: import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead) => {
-    if (!client) throw new Error('原发送信箱尚未连接；原消息保留。')
+    if (!client) throw new Error('发送信箱还没连接，消息已留在这台手机上。')
     return await client.readAgentInputMailbox(input)
   }, [client])
   const mailbox = useAgentInputMailbox({ hostId, agentSessionId: session?.agentSessionId ?? '',
@@ -120,7 +120,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
       <Dialog.Description id="mobile-message-tools-description">{session?.providerId ?? 'Agent'} · {label}</Dialog.Description>
       <div className="mobile-message-tools__actions"><button className="mobile-text-button" onClick={() => { refresh(); history.search(); void mailbox.refresh() }}><ThemeActionRefreshIcon size={16} />刷新消息</button>{terminal && <button className="mobile-text-button" onClick={() => { changeOpen(false); terminal() }}><ThemeObjectTerminalIcon size={16} />查看 Terminal</button>}</div>
       <section className="mobile-message-tools__records" aria-label="通信记录">
-        {unrecordedAttempts.length > 0 ? <div className="mobile-message-tools__attempts" aria-label="本机投递回执">
+        {unrecordedAttempts.length > 0 ? <div className="mobile-message-tools__attempts" aria-label="这台手机上的发送记录">
           {unrecordedAttempts.map(([key, attempt]) => {
             const waiting = attempt.inputReceipt?.control.waiting
             const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
@@ -130,7 +130,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
                 logId={attempt.logId} log={attempt.logId ? diagnostics?.get(attempt.logId) : undefined}
                 inputReceipt={attempt.inputReceipt} inputStopReceipt={attempt.manualInput?.stopReceipt}
                 copyText={text => platform.copyText(text, () => {})} />
-              <small className="mobile-message-tools__attempt-meta">原操作 {attempt.operationId}{attempt.runId ? ` · 原 Run ${attempt.runId}` : ''}</small>
+              <small className="mobile-message-tools__attempt-meta">操作 {attempt.operationId}{attempt.runId ? ` · 运行 ${attempt.runId}` : ''}</small>
             </div>
           })}
         </div> : null}
@@ -142,7 +142,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
             return <InputHistoryOriginalRecords messages={messages ?? []} {...historyActions} />
           }} renderRecords={records => <InputHistoryList history={groupedHistory} relatedMessages={relatedMessages}
             relatedContent={new Map(selectedOriginal && selectedJournalKeys.size ? [[selectedOriginal.id,
-              <ol className="input-history__records" aria-label="本次输入的原登记与回执">{records.filter(record => selectedJournalKeys.has(record.key)).map(record => record.node)}</ol>]] : [])}
+              <ol className="input-history__records" aria-label="这次输入的记录与确认">{records.filter(record => selectedJournalKeys.has(record.key)).map(record => record.node)}</ol>]] : [])}
             onReadingChange={message => setSelection(message ? { scope: historyScope, message } : null)}
             additionalRecords={records.filter(record => !selectedJournalKeys.has(record.key))} localEntries={localIntents}
             {...(onHistoryFillLocal ? { onFillLocal: onHistoryFillLocal } : {})} {...historyActions} />} />

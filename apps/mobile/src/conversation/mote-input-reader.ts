@@ -5,7 +5,7 @@ import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 export function createMobileMoteInputReader(client: AgentMuxHostedClient | null, recipient: string | null): NonNullable<ClientUiPlatform['readMoteInput']> {
   return async (owner, memberAgentSessionId, observationId) => {
     if (!client || owner.routeHostId !== 'local' || owner.recipientAgentSessionId !== recipient)
-      throw new Error('原通知的 Host 或主 Agent 尚未匹配；原通知与当前输入仍保留。')
+      throw new Error('这条通知的 Mac 或主 Agent 还没对上。')
     return client.inspectMoteInput({ agentSessionId: memberAgentSessionId, observationId })
   }
 }

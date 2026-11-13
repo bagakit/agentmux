@@ -47,7 +47,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
       ? structuredClone(priorInput)
       : structuredClone({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent })
     const originalKey = JSON.stringify([session.agentSessionId, requestRun.runId, request.id, input.operationId])
-    const original: ResponseAttempt = { phase: 'sending', message: '正在发送原请求的答复…', original: {
+    const original: ResponseAttempt = { phase: 'sending', message: '正在发送答复…', original: {
       input,
       hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null } }
     responses.current.set(originalKey, original)
@@ -56,7 +56,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     try {
       if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
       const target = client.agentSession(original.original!.input.agentSessionId)
-      if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.original!.runtimeId) throw new Error('原请求的 Host 或 Runtime 已改变；原答复保留，本次未发送。')
+      if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.original!.runtimeId) throw new Error('Mac 连接已变化，这次没有发送。答复已留在这台手机上。')
       const receipt = await client.respondAgentInteraction(original.original!.input)
       if (!mounted.current || responses.current.get(originalKey) !== original) return
       adoptResponseReceipt(original, receipt)
@@ -65,33 +65,33 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
       if (!mounted.current) throw error
       original.phase = deliveryOutcome(error, 'interaction')
       original.message = original.phase === 'unknown'
-        ? `答复回执未知；不会重复回答这个请求。请在原会话核对。${errorMessage(error)}`
+        ? `还没确认答复是否送达，不会重复发送。可以打开对话查看。${errorMessage(error)}`
         : `Core 已拒绝答复。${errorMessage(error)}`
       throw error
     } finally { if (mounted.current) { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) } }
   }
   function adoptResponseReceipt(attempt: ResponseAttempt, receipt: AgentMuxInteractionOperationReceipt) {
     const input = attempt.original!.input
-    if (!agentInteractionOperationReceiptMatches(input, receipt)) throw new Error('原答复回执身份未匹配；原请求与操作保留。')
+    if (!agentInteractionOperationReceiptMatches(input, receipt)) throw new Error('确认结果不属于这条答复，没有采用。')
     attempt.phase = receipt.delivery === 'unknown' || receipt.delivery === 'saved' ? 'unknown' : 'confirmed'
-    attempt.message = receipt.nativeCompleted ? '原请求已确认完成；答复回执仍可查询。'
+    attempt.message = receipt.nativeCompleted ? '这个请求已完成。'
       : receipt.delivery === 'saved' ? '答复已保存；是否送达尚未确认。'
-      : receipt.delivery === 'unknown' ? '答复回执未知；请查询原操作。' : '答复已送入原会话；是否采用及任务进展仍需核对。'
+      : receipt.delivery === 'unknown' ? '还没确认答复是否送达，可以查询结果。' : '答复已送达对话，Agent 是否采用还需要查看。'
   }
   async function inspectResponse(key: string, attempt: ResponseAttempt): Promise<AgentMuxInteractionOperationReceipt | null> {
     if (!client || !attempt.original) return null
     const original = attempt.original
     try {
       if (client.agentSession(original.input.agentSessionId).hostId !== original.hostId ||
-          !original.runtimeId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.runtimeId) throw new Error('当前连接不属于原答复的 Host 或 Runtime；原操作保留。')
+          !original.runtimeId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.runtimeId) throw new Error('当前连接的不是这条答复所在的 Mac。')
       const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
       if (!mounted.current || responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)
-      else attempt.message = '尚未取得原操作的回执；是否送达仍未知，原答复保留。'
+      else attempt.message = '还没查到确认结果，答复是否送达仍未知。'
       await local.save()
       return receipt
     } catch (error) {
-      if (mounted.current && responses.current.get(key) === attempt) attempt.message = `原答复查询未确认；原操作保留。${errorMessage(error)}`
+      if (mounted.current && responses.current.get(key) === attempt) attempt.message = `没有查到答复结果。${errorMessage(error)}`
       throw error
     } finally { if (mounted.current) redraw(value => value + 1) }
   }

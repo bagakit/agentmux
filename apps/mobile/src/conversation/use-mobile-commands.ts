@@ -18,12 +18,12 @@ export function useMobileCommands({ client, agentSessionId, providerId, commands
     setState(previous => ({ client, scope, prompts: retained(previous), loading: true, issue: '' }))
     void (async () => {
       try {
-        if (!client?.forwardRpc || !connected) throw new Error('原 Host 的自定义 Commands 暂不可读；原命令与草稿保留。')
+        if (!client?.forwardRpc || !connected) throw new Error('暂时读不到 Mac 上的自定义 Commands。')
         const result = await client.forwardRpc('settings.prompts.ls', {}, { signal: controller.signal })
         const prompts = result.items.map(({ id, value }): ComposerPrompt => {
           if (typeof id !== 'string' || typeof value.keyword !== 'string' || typeof value.label !== 'string' ||
               typeof value.body !== 'string' || value.providerId !== undefined && typeof value.providerId !== 'string') {
-            throw new Error('原 Prompt 的展示字段不完整；已读候选与原命令保留。')
+            throw new Error('有一条 Prompt 的信息不完整，已读到的命令仍可使用。')
           }
           return { id, keyword: value.keyword, label: value.label, body: value.body,
             ...(value.providerId === undefined ? {} : { providerId: value.providerId }) }

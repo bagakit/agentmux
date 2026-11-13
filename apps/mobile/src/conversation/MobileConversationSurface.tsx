@@ -134,15 +134,15 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     moteDialogue?.page?.main, moteTarget, agentSessionId)
   mainObservation.current = moteMain
   const moteMainIssue = moteDirectAgent ? undefined : mobileMoteMainInputIssue(moteDialogue?.page?.main, moteTarget, agentSessionId, Boolean(moteDialogue?.unavailable))
-    ?? (moteTarget && !moteMain ? '主对话角色尚未核对。原正文和草稿保留；可重新核对，或从 Threads 明确打开原 Agent。' : undefined)
+    ?? (moteTarget && !moteMain ? '主对话角色还没核对。可以重新核对，或从 Threads 打开之前的 Agent。' : undefined)
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
-    if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
+    if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或操作尚未确认保存在设备上。请先恢复设备存储并保存，再更新网页。'
     if (hasAnyPreparation() || [...local.attempts.entries()].some(([key, item]) => item.phase === 'sending' && !isDispatchedPrompt(key, item)) ||
       [...local.responses.values(), ...local.questions.values()].some(item => item.phase === 'sending')) {
-      return hasAnyPreparation() ? '附件消息仍在准备；可返回原对话选择“取消发送准备”。' : '原消息或答复仍在发送；请等待回执，再更新网页。'
+      return hasAnyPreparation() ? '附件消息还在准备。可以回到那个对话选择“取消发送准备”。' : '消息或答复仍在发送。请等确认后再更新网页。'
     }
     return null
   })
@@ -179,7 +179,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const agentReferences = useMobileAgentReferences(client, agentSessionId, displayName, visible && referenceRequested)
   async function insertSuggestion(item: ComposerSuggestion) {
     if (!insertion.current) {
-      setCopyNotice('原编辑器未准备好；草稿保留。')
+      setCopyNotice('编辑器还没准备好。')
       return
     }
     try {
@@ -196,7 +196,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     try {
       const originalSession = client.agentSession(agentSessionId)
       if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
-        setCopyNotice('原 Session 或 Run 已改变，未发送中断信号；原草稿保留。')
+        setCopyNotice('对话已变化，没有发送中断。')
         return
       }
       await client.signalAgent(originalSession.agentSessionId, { ...originalSession.run }, 'SIGINT')
@@ -210,7 +210,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     try {
       const originalSession = client.agentSession(agentSessionId)
       if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
-        setCopyNotice('原 Session 或 Run 已改变，未切换模式；原草稿保留。')
+        setCopyNotice('对话已变化，没有切换模式。')
         return
       }
       await client.setAgentPosture({ agentSessionId: originalSession.agentSessionId, expectedRun: { ...originalSession.run }, modeId })
@@ -226,9 +226,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const currentHistory = useRef({ scope: historyScope, client, agentSessionId, visible })
   currentHistory.current = { scope: historyScope, client, agentSessionId, visible }
   const readInputHistory = useCallback<InputHistoryRead>(async (input, signal) => {
-    if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，已读取记录和草稿保留。')
+    if (!client || !agentSessionId) throw new Error('Mac 还没连接。')
     const page = await client.readAgentSessionHistory({ ...input, hostId: 'local', agentSessionId }, { signal })
-    if (page.agentSessionId !== agentSessionId || page.hostId !== 'local') throw new Error('历史返回了另一处 Agent 的记录；原列表和草稿保留。')
+    if (page.agentSessionId !== agentSessionId || page.hostId !== 'local') throw new Error('历史返回了另一个 Agent 的记录，没有采用。')
     return page
   }, [client, agentSessionId])
   async function readHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
@@ -237,11 +237,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       currentHistory.current.client === original.client && currentHistory.current.agentSessionId === original.agentSessionId &&
       currentHistory.current.visible === original.visible
     signal.throwIfAborted()
-    if (!unchanged() || message.agentSessionId !== original.agentSessionId) throw new Error('已切换 Agent，原记录保留，当前草稿未改变。')
+    if (!unchanged() || message.agentSessionId !== original.agentSessionId) throw new Error('已切换 Agent，当前草稿没有改变。')
     const content = await inputHistoryText(message, original.client && original.agentSessionId ? input =>
       original.client!.sessionHistoryResource(original.agentSessionId!, { ...input, signal }) : undefined, signal)
     signal.throwIfAborted()
-    if (!unchanged()) throw new Error('已切换 Agent，原记录保留，当前草稿未改变。')
+    if (!unchanged()) throw new Error('已切换 Agent，当前草稿没有改变。')
     return content
   }
   function currentHistoryTarget(scope: string) {
@@ -253,17 +253,17 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     const before = drafts.current.get(draftKey) ?? ''
     const content = await readHistoryMessage(message, signal)
     signal.throwIfAborted()
-    if (!currentHistoryTarget(originalScope) || insertion.current !== originalEditor) throw new Error('原编辑器或 Agent 已切换，原记录保留，当前草稿未改变。')
+    if (!currentHistoryTarget(originalScope) || insertion.current !== originalEditor) throw new Error('编辑器或 Agent 已切换，当前草稿没有改变。')
     if ((drafts.current.get(draftKey) ?? '') !== before) throw new Error('读取期间草稿已更新，保留新稿；可重新选择这条记录。')
-    if (!originalEditor) throw new Error('原编辑器已关闭，记录和草稿保留。')
+    if (!originalEditor) throw new Error('编辑器已关闭。')
     originalEditor.replace(content.text)
-    return content.attachments ? '已填入正文，尚未发送；附件仍在原记录' : undefined
+    return content.attachments ? '已填入正文，还没发送。附件仍在那条记录里。' : undefined
   }
   async function copyHistoryMessage(message: AgentSessionUserMessage, signal: AbortSignal) {
     const originalScope = historyScope
     const content = await readHistoryMessage(message, signal)
     signal.throwIfAborted()
-    if (!currentHistoryTarget(originalScope)) throw new Error('已切换 Agent，原记录保留，本次没有复制。')
+    if (!currentHistoryTarget(originalScope)) throw new Error('已切换 Agent，这次没有复制。')
     let cause: unknown
     const copied = await platform.copyText(content.originalText, error => { cause = error })
     signal.throwIfAborted()
@@ -276,7 +276,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   function responseStatus(key: string, attempt: ResponseAttempt) {
     return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
       <MobileNotice identity={[attempt.original?.input.operationId,attempt.phase,attempt.message]} role="status">{attempt.message}</MobileNotice>
-      <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
+      <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询答复结果</button>
     </aside>
   }
   const mainAvatar = useCallback((size?: number) => <MobileMoteSpeakerAvatar spaceId={moteTarget?.spaceId ?? ''} name={moteName ?? 'Mote'} appearance={moteAppearance} {...(size === undefined ? {} : { size })} />,
@@ -302,7 +302,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const mailboxMessages = useMemo(() => reading.projection?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [reading.projection])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
-    if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
+    if (!client || !agentSessionId) throw new Error('Mac 还没连接，暂时打不开这个资源。')
     return client.sessionHistoryResource(agentSessionId, input)
   }, [client, agentSessionId])
   const pageClient = reading.pageOwner?.client, pageSessionId = reading.pageOwner?.agentSessionId
@@ -315,7 +315,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       pageClient === client && pageSessionId === agentSessionId ? moteMemberName?.(...args) : undefined
   }), [conversationIoPlatform, readMoteInput, moteMemberName, pageClient, pageSessionId, client, agentSessionId])
   const readNativeResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
-    if (!pageClient || !pageSessionId) throw new Error('原阅读来源尚未确认，原资源引用和草稿保留。')
+    if (!pageClient || !pageSessionId) throw new Error('还没确认对话的来源，暂时打不开这个资源。')
     return pageClient.sessionHistoryResource(pageSessionId, input)
   }, [pageClient, pageSessionId])
   const readingProps = {
@@ -351,7 +351,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         data-original-operation={original.operationId} aria-live="polite">
         <span className="mobile-send-status__collapsed-title">{summary}</span>
         <div className="mobile-send-status__actions">
-          <button type="button" aria-label="查看投递回执" onClick={() => updateDismissed(set => set.delete(signature))}>查看回执</button>
+          <button type="button" aria-label="查看发送结果" onClick={() => updateDismissed(set => set.delete(signature))}>查看结果</button>
         </div>
       </aside>
     }
@@ -363,8 +363,8 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             {hasPendingAction(key, 'stop') && <button type="button" onClick={() => cancelPendingAction(key, 'stop')}>取消未发起的停止</button>}
           </div>}
           {controlledManual ? <>
-            {original.phase === 'sending' && !original.inputReceipt ? <p role="status">正在保存这条原消息…</p>
-              : original.phase === 'confirmed' && !original.inputReceipt ? <p role="status">先前输入已确认；当前 Core 回执观察待恢复。这不代表任务完成。</p>
+            {original.phase === 'sending' && !original.inputReceipt ? <p role="status">正在保存这条消息…</p>
+              : original.phase === 'confirmed' && !original.inputReceipt ? <p role="status">之前的输入已送达，最新状态还没读到。这不代表任务已完成。</p>
               : <MessageDeliveryFailure compact error={failure ?? diagnostics.get(original.logId ?? '')?.record.error ?? original.message}
               logId={original.logId} log={original.logId ? diagnostics.get(original.logId) : undefined}
               inputReceipt={original.inputReceipt} inputStopReceipt={original.manualInput!.stopReceipt}
@@ -374,29 +374,29 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             {(original.inputReceipt?.status === 'waiting' || original.inputReceipt?.status === 'not-applied' || key !== draftKey || onShowTerminal) ? <div className="mobile-send-status__actions">
               {original.inputReceipt?.status === 'waiting' ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
                 {original.manualInput!.stopIntent && !original.manualInput!.stopReceipt ? '重试停止等待' : '停止等待'}</button> : null}
-              {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { clearDismissedForOperation(); void submit(true, original, key) }}>重新发送原正文</button> : null}
-              {key !== draftKey ? <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制原正文</button> : null}
+              {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { clearDismissedForOperation(); void submit(true, original, key) }}>重新发送</button> : null}
+              {key !== draftKey ? <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制正文</button> : null}
               {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
             </div> : null}
           </> : <>
           <div className="mobile-send-status__summary">
             <span>{original.phase === 'sending' ? '正在发送…' : key !== draftKey
-              ? original.phase === 'unknown' ? '先前消息结果未确认 · 原记录保留' : '先前消息未发送 · 原记录保留'
+              ? original.phase === 'unknown' ? '之前的消息还没确认送达' : '之前的消息没有发送'
               : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
             {original.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{original.moteMain ? '核对原主对话输入' : promptWasRefused(original) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
+              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{original.moteMain ? '核对主对话消息' : promptWasRefused(original) ? '重新发送' : key === draftKey ? '重试发送' : '重试这条消息'}</button>
               <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
               <button type="button" className="mobile-send-status__dismiss" aria-label="关闭操作说明" title="关闭操作说明" onClick={() => updateDismissed(set => set.add(signature))}>收起</button>
             </div> : null}
           </div>
           {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
-            <p>{original.moteMain ? '原主对话输入与正文保留。核对只读取这次原操作，不会改投新的主 Agent。' : original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
+            <p>{original.moteMain ? '核对只查询这次发送的结果，不会改发给新的主 Agent。' : original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
             <details><summary>消息正文</summary><pre>{original.draft}</pre>
-              <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`原正文未复制：${errorMessage(error)}`))
-                .then(copied => { if (copied) setCopyNotice('已复制原正文。') }) }}>复制原正文</button>
+              <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`正文没有复制：${errorMessage(error)}`))
+                .then(copied => { if (copied) setCopyNotice('已复制正文。') }) }}>复制正文</button>
             </details>
             <details><summary>技术信息</summary><p role="alert">{original.message}</p>
-              <dl><dt>操作</dt><dd>{original.operationId}</dd><dt>Run</dt><dd>{original.runId ?? '尚未确认'}</dd></dl>
+              <dl><dt>操作</dt><dd>{original.operationId}</dd><dt>运行</dt><dd>{original.runId ?? '尚未确认'}</dd></dl>
               {original.logId ? <DeliveryLogDetails log={diagnostics.get(original.logId)} logId={original.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
             </details>
             {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
@@ -414,8 +414,8 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       promptAttempts={sessionAttempts} diagnostics={diagnostics}
       onHistoryFillLocal={entry => {
         if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
-          throw new Error('已切换 Agent，原正文和当前草稿保留。')
-        if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
+          throw new Error('已切换 Agent，当前草稿没有改变。')
+        if (!insertion.current) throw new Error('编辑器已关闭。')
         insertion.current.replace(entry.text)
       }}
       reading={readingProps}
@@ -427,9 +427,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {readers}
       {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
-      {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
+      {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取还没确认 · 可以继续输入</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新记录</button></details> : null}
       {questionCapability.issue ? <MobileNotice identity={[questionCapability.issue]} className="mobile-conversation__notice" role="status">
-        异步问题能力观察未确认；原会话与草稿保留，普通输入仍按原 Core 条件处理。{questionCapability.issue}
+        异步问题能力观察未确认，普通输入照常可用。{questionCapability.issue}
         <button type="button" onClick={() => redraw(value => value + 1)}>重新核对问题能力</button>
       </MobileNotice> : null}
       {local.notice ? <MobileNotice identity={[local.notice]} className="mobile-conversation__notice" role="status">{local.notice}
@@ -440,13 +440,13 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         }}>复制当前草稿</button>
         {local.recordChanged ? <button type="button" onClick={() => {
           void platform.copyText(local.exportBackup(), error => setCopyNotice(`本页备份未复制：${errorMessage(error)}`))
-            .then(copied => { if (copied) setCopyNotice('已复制本页保全备份，包含原正文和操作身份。') })
+            .then(copied => { if (copied) setCopyNotice('已复制本页备份，包含正文和操作记录。') })
         }}>复制本页保全备份</button> : null}
       </MobileNotice> : null}
       {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
         {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
-          const body = typeof item.value === 'string' ? item.value : Array.isArray(item.value) ? item.value.map(answer => answer.answer).join('\n') : 'draft' in item.value ? item.value.draft : 'input' in item.value ? item.value.input.answers.map(answer => answer.answer).join('\n') : '原请求的答复回执尚未确认。'
-          return <div key={index}>{typeof item.value !== 'string' && <p>原请求记录保留，请核对回执。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
+          const body = typeof item.value === 'string' ? item.value : Array.isArray(item.value) ? item.value.map(answer => answer.answer).join('\n') : 'draft' in item.value ? item.value.draft : 'input' in item.value ? item.value.input.answers.map(answer => answer.answer).join('\n') : '这条答复还没确认送达。'
+          return <div key={index}>{typeof item.value !== 'string' && <p>请求记录已保留，可以核对结果。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
         })}
       </details>}
       <div className="mobile-conversation__reader">
@@ -529,7 +529,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             const selected = selectedId ? originalClient?.agentSession(selectedId) : null
             if (!fileUploadScopeMatches(original, { runtimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
               hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null }) || !insertion.current) {
-              throw new Error('原附件回执已保留；当前编辑器不属于原 Mac、Session 或 Run，草稿未改变。')
+              throw new Error('当前编辑器属于另一个对话或另一台 Mac，草稿没有改变。')
             }
             await insertion.current.insert(async () => {
               const path = await resolve()
@@ -538,7 +538,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
               const selected = selectedId ? client?.agentSession(selectedId) : null
               if (!fileUploadScopeMatches(original, { runtimeId: client?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
                 hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null })) {
-                throw new Error('原附件已保存；当前编辑器已切换，原回执保留，草稿未改变。')
+                throw new Error('附件已上传，但编辑器已切换，草稿没有改变。')
               }
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
@@ -557,7 +557,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
           {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:
             <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
           } : {})}
-          {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</MobileNotice> } : {})}
+          {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">运行状态未确认，模式切换以 Mac 的结果为准。</MobileNotice> } : {})}
           primaryAction={isWorking && !draft.trim() && !hasPendingAttachments ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
           value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
@@ -576,7 +576,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
           ? <details><summary>{preparationIssue}</summary><p className="mobile-compact-notice__detail">{preparationDetail}</p></details>
           : <p>{preparationIssue}</p>}</MobileNotice> : null}
         {attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}
-        {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
+        {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}
         {copyNotice ? <MobileNotice kind="feedback" identity={[copyNotice]} role="status">{copyNotice}</MobileNotice> : null}

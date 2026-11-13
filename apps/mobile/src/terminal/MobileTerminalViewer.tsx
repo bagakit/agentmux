@@ -39,12 +39,12 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const controls = useRef(new Map<string, ReturnType<typeof createMobileTerminalControl>>())
   const selectedSession = useRef(agentSessionId); selectedSession.current = agentSessionId
   const [inputState, setInputState] = useState<MobileTerminalControlState>({ mode: 'watch', phase: 'idle', queuedBytes: 0,
-    message: '观看不发送输入；PTY 尺寸沿用 Mac。', storageIssue: null, notice: null })
+    message: '观看不发送输入，终端大小跟随 Mac。', storageIssue: null, notice: null })
   const [sizeOpen, setSizeOpen] = useState(false)
   const [cols, setCols] = useState('80'), [rows, setRows] = useState('24')
   const released = useRef<Promise<void>>(Promise.resolve())
   const visibleRef = useRef(visible); visibleRef.current = visible
-  const [reading, setReading] = useState<MobileTerminalReading>({ phase: 'unavailable', message: '终端输出尚未核实。请选择原会话并恢复 Mac 连接。', historyBoundary: null, notice: null })
+  const [reading, setReading] = useState<MobileTerminalReading>({ phase: 'unavailable', message: '还没有终端输出。请选择一个对话并连接 Mac。', historyBoundary: null, notice: null })
   const [copyFeedback, setCopyFeedback] = useState<{ message: string; issue: boolean } | null>(null)
   const gestures = useRef<ReturnType<typeof bindMobileTerminalGestures> | null>(null)
   const [fontSize, setFontSize] = useState(MOBILE_TERMINAL_FONT_DEFAULT)
@@ -63,7 +63,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       windowOptions: {}, theme: paletteRef.current ?? { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
     canvas.open(container.current)
     const unicode = activateTerminalUnicodeWidth(canvas)
-    setRenderIssue(unicode === UNICODE_WIDTH_VERSION ? null : '终端字宽配置尚未生效，部分符号可能错位；原输出与输入继续可用。该显示问题尚未恢复。')
+    setRenderIssue(unicode === UNICODE_WIDTH_VERSION ? null : '终端字宽设置没有生效，部分符号可能错位。输出和输入仍可使用。')
     if (canvas.textarea) { canvas.textarea.readOnly = true; canvas.textarea.tabIndex = -1; canvas.textarea.inputMode = 'none' }
     // Terminal output cannot read/write the OS clipboard. Copy requires the explicit button below.
     canvas.parser.registerOscHandler(52, () => true)
@@ -142,7 +142,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     canvas.options.mouseEventsRequireAlt = !enabled
     if (canvas.textarea) {
       canvas.textarea.readOnly = !enabled; canvas.textarea.tabIndex = enabled ? 0 : -1; canvas.textarea.inputMode = enabled ? 'text' : 'none'
-      canvas.textarea.setAttribute('aria-label', enabled ? '原会话终端输入' : '只读终端输出')
+      canvas.textarea.setAttribute('aria-label', enabled ? '终端输入' : '只读终端输出')
     }
   }, [currentCanvas, agentSessionId, visible, inputActive, connection.state, inputState.mode, inputState.phase])
   const enableControl = () => {
@@ -180,24 +180,24 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       {MOBILE_TERMINAL_KEYS.map(([label, data, icon, wide]) =>
         <button key={label} type="button" className="mobile-terminal-key" data-wide={wide || undefined} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`}
           onPointerDown={event => event.preventDefault()} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={18} /> : label}</button>)}
-      <button type="button" className="mobile-terminal-key mobile-terminal-key--quiet" aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
+      <button type="button" className="mobile-terminal-key mobile-terminal-key--quiet" aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>终端大小</button>
     </div>}
     {inputState.mode === 'control' && sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
-    }}><label>列<TextInput aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
-    {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
-    <div className="mobile-terminal-canvas" style={{ background: terminalPalette?.background ?? '#151b1b' }} ref={container} aria-label="原会话终端输出" />
+    }}><label>列<TextInput aria-label="终端列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="终端行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到 Mac</button><p>只按这次选择改变 Mac 上的终端大小，手机旋转不会再改它。</p></form>}
+    {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看对话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
+    <div className="mobile-terminal-canvas" style={{ background: terminalPalette?.background ?? '#151b1b' }} ref={container} aria-label="终端输出" />
     {serviceMessage && <aside className="mobile-terminal-notice" role="status">{serviceMessage}</aside>}
     <Dialog.Root open={readingOpen} onOpenChange={setReadingOpen}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-terminal-reading-sheet">
         <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>终端阅读</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭终端阅读"><SemanticIcon name="action.close" size={19} /></Dialog.Close></div>
-        <Dialog.Description>缩放只改变手机显示，原 Run 的网格保持不变。</Dialog.Description>
+        <Dialog.Description>缩放只改变手机上的显示，Mac 上的终端大小不变。</Dialog.Description>
         <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
           <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}><SemanticIcon name="action.decrease-font-size" size={18} /></button>
           <button aria-label="恢复终端文字大小" onClick={() => gestures.current?.zoom(MOBILE_TERMINAL_FONT_DEFAULT)}>{fontSize}px</button>
           <button aria-label="放大终端文字" onClick={() => gestures.current?.zoom(fontSize + 1)}><SemanticIcon name="action.increase-font-size" size={18} /></button>
         </div>
-        <div className="mobile-terminal-reading-actions"><button onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={16} />复制选中文字</button><button onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={16} />重新核实输出</button></div>
+        <div className="mobile-terminal-reading-actions"><button onClick={() => { void copy() }}><SemanticIcon name="action.copy" size={16} />复制选中文字</button><button onClick={() => { void reader.current?.retry() }}><SemanticIcon name="action.refresh" size={16} />重新读取输出</button></div>
         <div className="mobile-terminal-details">
           {renderIssue && <p>{renderIssue}</p>}
           <p>{!client || !agentSessionId ? connection.message : reading.message}</p>
@@ -206,12 +206,12 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
           {inputState.notice && inputState.notice !== inputState.message && <p>{inputState.notice}</p>}
           {reading.historyBoundary && <p>{reading.historyBoundary}</p>}
           {inputState.storageIssue && <p>{inputState.storageIssue}</p>}
-          {inputState.phase === 'unknown' && <button onClick={() => { control.current?.continueAfterReview() }}>已在原会话核对，继续新输入</button>}
+          {inputState.phase === 'unknown' && <button onClick={() => { control.current?.continueAfterReview() }}>已核对，继续输入</button>}
           {inputState.queuedBytes > 0 && <div className="mobile-terminal-unsent"><p>{inputState.queuedBytes} 字节尚未提交，仅在当前页面保留。</p><div className="mobile-terminal-unsent__actions"><button onClick={() => {
             const text = control.current?.queuedText(); if (text) void copyText(text, '未发送输入已复制。')
           }}>复制未发送输入</button><button onClick={() => control.current?.discardUnsent()}>放弃未发送输入</button></div></div>}
           {copyFeedback && <MobileNotice kind="feedback" identity={[copyFeedback?.message,copyFeedback?.issue]} role="status">{copyFeedback.message}</MobileNotice>}
-          {originalPending && <dl><dt>原 Run</dt><dd>{originalPending.runId}</dd><dt>本机操作记录</dt><dd>{originalPending.intentId}</dd></dl>}
+          {originalPending && <dl><dt>运行</dt><dd>{originalPending.runId}</dd><dt>本机操作记录</dt><dd>{originalPending.intentId}</dd></dl>}
         </div>
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>

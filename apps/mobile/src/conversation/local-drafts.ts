@@ -36,9 +36,9 @@ export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string;
   original?: { input: AgentMuxAgentInteractionInput; hostId: string; runtimeId: string | null } }
 function restoredMessage(value: PromptAttempt['phase'], interaction = false): string {
   if (value === 'unknown') return interaction
-    ? '重启后的原请求答复回执未知；不会重复回答，请核对原会话。'
-    : '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。'
-  return value === 'confirmed' ? '先前已由 Core 确认；当前连接另行核对。' : '原输入未发送或已被拒绝；草稿保留。'
+    ? '重启前的答复还没确认送达，不会重复发送。可以打开对话查看。'
+    : '重启前的消息还没确认送达，不会自动重发。可以刷新对话查看。'
+  return value === 'confirmed' ? '先前已由 Core 确认；当前连接另行核对。' : '这条消息没有发送或被拒绝。'
 }
 
 /** Derived routing only; the original keyed Map remains the device intent owner. */
@@ -88,7 +88,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     const snapshot = owner.snapshot()
     if (snapshot.issue) {
       state.canSave = false
-      state.notice = '本机草稿存储暂时无法读取，原记录尚未覆盖。当前草稿和未确认输入仍保留，可继续编辑和复制；请恢复设备存储后明确保存当前工作面。'
+      state.notice = '暂时读不到这台手机上的草稿，已存的记录尚未覆盖。当前草稿和未确认输入都还在，可以继续编辑和复制，恢复设备存储后再保存当前工作面。'
     }
     {
       originalRecord = snapshot.record
@@ -112,7 +112,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     }
   } catch {
     state.canSave = false
-    state.notice = '本机草稿存储暂时无法读取，原记录尚未覆盖。当前仍可编辑和复制，但本次修改仅在当前运行中保留；请恢复设备存储后重新读取。'
+    state.notice = '暂时读不到这台手机上的草稿，已存的记录尚未覆盖。可以继续编辑和复制，但修改只留在当前页面。请恢复设备存储后重新读取。'
   }
   function serialize(): DraftRecord {
       const record: DraftRecord = { version: 1, drafts: [...drafts],
@@ -155,7 +155,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
     return operation.then(committed => {
       if (committed.recordId !== expectedRecordId || owner.recordIdentity() !== expectedRecordId) {
-        throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原保存回执不能采用新的记录，原正文与操作仍保留。')
+        throw new DeviceWorkfaceRecordChangedError('这台手机上的工作面已被替换，这次保存结果没有写入。')
       }
       const saved = committed.conversation
       state.conflicts = saved.conflicts ?? []
@@ -191,14 +191,14 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       if (revision === saveRevision) { baseline = saved; durableRevision = revision }
       state.canSave = true
       state.recordChanged = false
-      state.notice = state.conflicts.length ? '另一页面已更新同一条记录；原请求和两份正文均保留。请核对保全内容，不会自动重投。' : null
+      state.notice = state.conflicts.length ? '另一个页面更新了同一条记录，两份正文都已保留。请核对保留的内容，不会自动重发。' : null
       return true
     }).catch(error => {
       const issue = owner.snapshot().issue
       if (revision === saveRevision) baseline = durableBaseline
       state.recordChanged = error instanceof DeviceWorkfaceRecordChangedError
       state.canSave = !state.recordChanged && owner.canRetrySave()
-      state.notice = error instanceof DeviceWorkfaceRecordChangedError ? error.message : issue ?? '本机草稿暂时无法保存，先前记录仍保留。当前仍可编辑和发送，但新草稿与未知回执仅在本次运行中保留；请恢复设备存储后重试保存。'
+      state.notice = error instanceof DeviceWorkfaceRecordChangedError ? error.message : issue ?? '草稿暂时存不到这台手机上，先前记录仍保留。可以继续编辑和发送，但新草稿只留在当前页面。请恢复设备存储后重试保存。'
       return !(error instanceof DeviceWorkfaceRecordChangedError)
     })
   }

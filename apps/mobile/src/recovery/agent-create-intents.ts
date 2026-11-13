@@ -11,7 +11,7 @@ export type MobileAgentCreateIntent = {
   agentSessionId?: string
 }
 export function parseMobileAgentCreateIntent(value: unknown): MobileAgentCreateIntent {
-  const invalid = (): never => { throw new Error('原 Agent 创建意图无效；保留原记录，不重放。') }
+  const invalid = (): never => { throw new Error('这条 Agent 创建记录无效，已保留记录，不会重新创建。') }
   const object = (value: unknown, keys: string[]) => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) invalid()
     return value as Record<string, unknown>

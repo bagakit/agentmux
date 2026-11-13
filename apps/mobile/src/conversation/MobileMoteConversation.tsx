@@ -23,9 +23,9 @@ export function MobileMoteConversation({ client, target, dialogue, agentSessionI
   renderCurrent(insertions: readonly ConversationRecordInsertion[]): ReactNode; readingGeometry: ConversationReadingGeometry; describeSpeaker: DescribeSpeaker
 }) {
   const readWork = useCallback(async (source: MobileMoteWork) => {
-    if (!client?.forwardRpc) throw new Error('工作资料暂不可读，原对话和工作引用仍保留。')
+    if (!client?.forwardRpc) throw new Error('工作资料暂时读不到。')
     const value = await client.forwardRpc('message.dispatch.read', { hostId: source.origin.hostId, sourceMessageId: source.origin.messageId })
-    if (value.hostId !== source.origin.hostId) throw new Error('工作来源未能核对，原引用仍保留。')
+    if (value.hostId !== source.origin.hostId) throw new Error('工作来源未能核对。')
     return value
   }, [client])
   if (!target || !hostId || !dialogue) return renderCurrent([])
