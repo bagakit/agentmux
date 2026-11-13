@@ -4,7 +4,7 @@ import {
   AGENT_BUILT_IN_DERIVED_ACTIONS, AGENT_DERIVED_ACTION_LIMITS, parseAgentDerivedActionFields,
   type AgentBuiltInDerivedActionId, type AgentDerivedAction, type AgentDerivedActionsConfig
 } from '@agentmux/core/agent-derived-actions'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { configuredExecutors } from '../../lib/executors'
@@ -26,6 +26,13 @@ const BackIcon = semanticIconComponent('navigation.back')
 const SelectedIcon = semanticIconComponent('status.selected')
 
 const OFFICIAL_ICONS = { 'take-over': TakeOverIcon, fork: ForkIcon, 'pass-on-experience': PassOnIcon } as const
+/** What starting each official action asks for. Behavior stays with each action's own owner. */
+const OFFICIAL_FACTS: Record<AgentBuiltInDerivedActionId, readonly [string, string][]> = {
+  'take-over': [['You choose', 'Which Agent continues; where it opens only when the original has no single location'], ['It reads', 'The original conversation, records and diagnostics'], ['Also offered', 'After a Session cannot resume, even when hidden here']],
+  fork: [['You choose', 'A new Tab or a split beside the original'], ['Needs', 'A Provider that can fork its current conversation'], ['Keeps', 'The same Provider, folder and full conversation']],
+  'pass-on-experience': [['You choose', 'The Agent that drafts it and the Mote or Topic that learns'], ['You review', 'The draft before anything is learned'], ['Keeps', 'The original Session and its work unchanged']]
+}
+function OfficialIcon({ id }: { id: AgentBuiltInDerivedActionId }) { const Icon = OFFICIAL_ICONS[id]; return <Icon size={13} /> }
 const BASES = [
   { value: 'new-agent', label: 'A new Agent reads the original work', detail: 'Choose any Agent when you start it. It reads the original conversation and records first.' },
   { value: 'fork', label: 'Fork the current conversation', detail: 'The same Provider continues a copy of the conversation and receives this instruction first.' }
@@ -116,14 +123,27 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     if (committed) setHidden(current => ({ value: current.value, expected: visibility.value }))
   }
 
-  const row = (id: string, name: string, detail: string, Icon: typeof DerivedIcon, extra?: { hidden?: boolean; status?: string }) =>
+  const changedCount = drafts.filter(draft => !configValuesEqual(draft, Object.hasOwn(resource.expected, draft.id) ? resource.expected[draft.id] : undefined)).length + (hiddenDirty ? 1 : 0)
+  const row = (id: string, name: string, detail: string, Icon: typeof DerivedIcon, extra?: { hidden?: boolean; status?: 'invalid' | 'hidden' | 'unsaved' }) =>
     <button type="button" className="prompt-library__item derived-actions__item" key={id} data-derived-action-id={id} aria-pressed={selected === id}
       data-hidden={extra?.hidden || undefined} onClick={() => open(id)}>
-      <span className="prompt-library__name"><Icon size={13} /><strong>{name}</strong>
+      <span className="prompt-library__name"><span className="derived-actions__glyph" aria-hidden="true"><Icon size={13} /></span><strong>{name}</strong>
         {extra?.status ? <span className="derived-actions__badge" data-status={extra.status}>{extra.status === 'invalid' ? 'Check' : extra.status === 'hidden' ? 'Hidden' : 'Unsaved'}</span> : null}
         {selected === id ? <SelectedIcon size={13} aria-label="Selected action" /> : null}</span>
-      <span className="prompt-library__scope"><span>{detail}</span></span>
+      <span className="prompt-library__scope derived-actions__detail"><span>{detail}</span></span>
     </button>
+  // A faithful miniature of the real derived group, so placement is visible before saving.
+  const preview = (current: string) => <ol className="derived-actions__menu" aria-label="Agent menu preview">
+    {[...AGENT_BUILT_IN_DERIVED_ACTIONS.filter(action => !hidden.value.includes(action.id)).map(action => ({ id: action.id, label: action.label + (action.id === 'fork' ? '…' : ''), Icon: OFFICIAL_ICONS[action.id] })),
+      ...drafts.map(draft => ({ id: draft.id, label: nameOf(draft) + '…', Icon: DerivedIcon }))].map(item =>
+      <li key={item.id} data-current={item.id === current || undefined}><item.Icon size={13} /><span>{item.label}</span></li>)}
+    {official && hidden.value.includes(official.id) ? <li data-current="" data-absent=""><OfficialIcon id={official.id} /><span>{official.label} · hidden</span></li> : null}
+  </ol>
+  const identity = (Icon: typeof DerivedIcon, tag: string, title: ReactNode) => <div className="derived-actions__identity">
+    <span className="derived-actions__tile" aria-hidden="true"><Icon size={18} /></span>
+    <div>{title}<span className="derived-actions__tag">{tag}</span></div>
+  </div>
+  const back = <button type="button" className="small-button prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</button>
 
   return <div className="settings-pane-stack prompt-workbench derived-actions" data-view={view}>
     <div className="settings-pane-toolbar prompt-workbench__toolbar">
@@ -134,31 +154,39 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
       <section className="prompt-library" aria-label="Derived actions">
         <div className="prompt-library__items">
           <LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-derived-action-id" />
-          <p className="derived-actions__section">Official</p>
+          <p className="derived-actions__section">Official <span>{AGENT_BUILT_IN_DERIVED_ACTIONS.length}</span></p>
           {AGENT_BUILT_IN_DERIVED_ACTIONS.map(action => row(action.id, action.label, action.description, OFFICIAL_ICONS[action.id],
             hidden.value.includes(action.id) ? { hidden: true, status: 'hidden' } : {}))}
-          <p className="derived-actions__section">Yours</p>
-          {drafts.map(draft => row(draft.id, nameOf(draft), draft.base === 'fork' ? 'Fork with an instruction' : 'New Agent with an instruction', DerivedIcon,
+          <p className="derived-actions__section">Yours <span>{drafts.length}</span></p>
+          {drafts.map(draft => row(draft.id, nameOf(draft), draft.base === 'fork' ? 'Forks with your instruction' : 'New Agent with your instruction', DerivedIcon,
             problems.has(draft.id) ? { status: 'invalid' } : !configValuesEqual(draft, Object.hasOwn(resource.expected, draft.id) ? resource.expected[draft.id] : undefined) ? { status: 'unsaved' } : {}))}
-          {!drafts.length ? <p className="settings-resource-empty">Turn something you often ask a second Agent to do into one menu action.</p> : null}
+          {!drafts.length ? <div className="derived-actions__empty"><p>Turn something you often ask a second Agent to do into one menu action.</p>
+            <div>{STARTING_POINTS.map(start => <button type="button" key={start.label} className="derived-actions__start" onClick={() => add(start)}><DerivedIcon size={13} /><span>{start.label}</span></button>)}</div></div> : null}
         </div>
       </section>
-      {official ? <section className="prompt-settings-card prompt-editor" aria-label={`${official.label} options`} data-derived-editor={official.id}>
-        <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</button><span>Official · read only</span></div>
-        <h3 className="derived-actions__title">{official.label}</h3>
+      {official ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`${official.label} options`} data-derived-editor={official.id}>
+        <div className="prompt-editor__heading">{back}</div>
+        {identity(OFFICIAL_ICONS[official.id], 'Official', <h3 className="derived-actions__title">{official.label}</h3>)}
         <p className="derived-actions__lead">{official.description}</p>
         <label className="derived-actions__toggle"><input type="checkbox" checked={!hidden.value.includes(official.id)} onChange={() => toggle(official.id)} />
-          <span><strong>Show in the Agent menu</strong><small>Hiding never removes recovery options, such as Take over after a Session cannot resume.</small></span></label>
+          <span><strong>Show in the Agent menu</strong><small>Hiding only affects the menu. Recovery options, such as Take over after a Session cannot resume, stay available.</small></span></label>
+        <dl className="derived-actions__facts">{OFFICIAL_FACTS[official.id].map(([term, detail]) => <div key={term}><dt>{term}</dt><dd>{detail}</dd></div>)}</dl>
+        <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(official.id)}</section>
         {official.id === 'take-over' ? <div className="derived-actions__actions"><button type="button" className="small-button" onClick={() => add({ label: 'Take over with a note', base: 'new-agent', instruction: 'Continue the original work. Before you start, ' })}>
-          <DerivedIcon size={13} /> Start your own from this</button></div> : null}
-      </section> : custom ? <section className="prompt-settings-card prompt-editor" aria-label={`Edit ${nameOf(custom)}`} data-derived-editor={custom.id}>
-        <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</button><span>Yours</span>
+          <DerivedIcon size={13} /> Start your own from this</button><small>Keeps the full original context; you add the instruction.</small></div> : null}
+      </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`} data-derived-editor={custom.id}>
+        <div className="prompt-editor__heading">{back}
           {problems.has(custom.id) ? <span className="prompt-editor__status" data-prompt-status="invalid">Needs attention</span> : null}</div>
         <div className="agent-settings-fields prompt-editor__fields">
-          <label className="prompt-editor__name"><span>Name in the menu</span><TextInput ref={nameInput} value={custom.label} maxLength={AGENT_DERIVED_ACTION_LIMITS.label} placeholder="Review this work" onChange={event => update(custom.id, { label: event.target.value })} /></label>
-          <fieldset className="derived-actions__base"><legend>Starts from</legend>{BASES.map(base => <label key={base.value}>
-            <input type="radio" name={`${describedBy}-base`} value={base.value} checked={custom.base === base.value} onChange={() => update(custom.id, { base: base.value })} />
-            <span><strong>{base.label}</strong><small>{base.detail}</small></span></label>)}</fieldset>
+          {identity(DerivedIcon, 'Yours', <label className="prompt-editor__name derived-actions__name"><span>Name in the menu</span><TextInput ref={nameInput} value={custom.label} maxLength={AGENT_DERIVED_ACTION_LIMITS.label} placeholder="Review this work" onChange={event => update(custom.id, { label: event.target.value })} /></label>)}
+          <fieldset className="derived-actions__base"><legend>Starts from</legend><div className="derived-actions__bases" role="radiogroup" aria-label="Starts from">{BASES.map(base => {
+            const BaseIcon = base.value === 'fork' ? ForkIcon : TakeOverIcon
+            return <label key={base.value} className="derived-actions__base-choice" data-selected={custom.base === base.value || undefined}>
+              <input className="settings-choice-radio" type="radio" name={`${describedBy}-base`} value={base.value} checked={custom.base === base.value} onChange={() => update(custom.id, { base: base.value })} />
+              <BaseIcon size={16} aria-hidden="true" /><span><strong>{base.label}</strong><small>{base.detail}</small></span>
+              {custom.base === base.value ? <SelectedIcon size={13} className="derived-actions__base-check" /> : null}
+            </label>
+          })}</div></fieldset>
           <label className="prompt-editor__instruction"><span>Instruction</span>
             <ComposerTextarea value={custom.instruction} rows={7} aria-describedby={`${describedBy}-instruction`} placeholder="Review the changes and list concrete bugs. Do not edit files."
               onValueChange={value => update(custom.id, { instruction: value })} />
@@ -167,18 +195,15 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
           {custom.base === 'new-agent' ? <div className="derived-actions__agent"><span aria-hidden="true">Default Agent</span><AgentExecutorPicker presentation="field" label="Default Agent" unsetLabel="Ask each time"
             executors={executors} selected={custom.executorId ?? null} onSelect={id => update(custom.id, id ? { executorId: id } : { executorId: '' })} />
             <small>Listed first when you start the action. You still choose before anything starts.</small></div> : null}
-          <section className="prompt-usage derived-actions__preview" aria-label="Menu preview"><header>In the Agent menu <small>Read only</small></header>
-            <div><span className="derived-actions__preview-item"><DerivedIcon size={13} />{nameOf(custom)}{custom.base === 'fork' ? '…' : ''}</span>
-              <span>Right-click an Agent or open its More menu. It starts beside the original; nothing is sent to the original Agent.</span></div></section>
+          <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(custom.id)}
+            <small>It starts beside the original. Nothing is sent to the original Agent.</small></section>
           <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(custom.id)}>{Object.hasOwn(resource.expected, custom.id)
             ? <><RemoveIcon size={13} /> Delete action</> : <><CancelIcon size={13} /> Cancel new action</>}</button></div>
         </div>
       </section> : null}
     </div>
-    {!drafts.length ? <section className="derived-actions__starts" aria-label="Starting points"><p>Start from an example</p>
-      <div>{STARTING_POINTS.map(start => <button type="button" key={start.label} className="small-button" onClick={() => add(start)}><DerivedIcon size={13} />{start.label}</button>)}</div></section> : null}
     <footer className="prompt-save-footer">
-      <p className="prompt-save-summary" role="status">Saves your actions and which official actions appear.{dirty ? <> {drafts.filter(draft => !configValuesEqual(draft, Object.hasOwn(resource.expected, draft.id) ? resource.expected[draft.id] : undefined)).length + (hiddenDirty ? 1 : 0)} changed{deleted ? ` · ${deleted} pending ${deleted === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}</p>
+      {dirty ? <p className="prompt-save-summary" role="status">{`${changedCount} changed${deleted ? ` · ${deleted} pending ${deleted === 1 ? 'deletion' : 'deletions'}` : ''}`}</p> : null}
       <SettingsSaveBar save={saveState} dirty={dirty} disabled={problems.size > 0} label="Save actions" onSave={() => void save()} />
     </footer>
   </div>
