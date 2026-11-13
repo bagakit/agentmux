@@ -32,7 +32,7 @@ beforeEach(async () => {
   const manager = new RemoteCoreUpgradeManager({ stateDirectory: join(root, 'upgrade'), artifact: async () => ({ digest, sourceCommit: 'source', version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22,
     nativeBuild: 'native-source', nativeDigest: 'b'.repeat(64), archivePath: join(root, 'unused'), archiveDigest: 'c'.repeat(64), files: [] }) })
   const runtime = { checkHost: vi.fn(async () => ({ detail: 'ordinary check' })) }
-  const upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime)
+  const upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime, join(root, 'adoptions.json'))
   server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: async request => {
     seen.push(request)
     if (!request.operation.startsWith('settings.hosts.')) throw new Error('Unexpected control operation')
@@ -109,15 +109,17 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
   let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [host] }
   const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value as typeof config } })
   const connection = vi.fn(async (): Promise<{ detail: string }> => { throw new Error('fresh handshake could not be confirmed') })
-  const upgrades = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection })
+  const adoptions = join(root, 'restart-adoptions.json')
+  const upgrades = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection }, adoptions)
   expect(await upgrades.check(host)).toMatchObject({ eligible: true, reason: 'ready', latestOperation: { status: 'completed', connectionAdoption: { state: 'pending-confirmation' } } })
   expect(connection).not.toHaveBeenCalled()
   expect(await upgrades.upgrade(host, pinned, receipt.operationId)).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'unconfirmed' } })
   expect(config.hosts[0].remoteCommand).toBe(receipt.remoteCommand)
   // Maintenance qualifies the old owner even when the new ordinary SDK cannot
   // handshake with it. Only upgrade/inspect claims a fresh client connection.
-  const restarted = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection })
-  expect(await restarted.check(config.hosts[0])).toMatchObject({ eligible: true, reason: 'ready', latestOperation: { operationId: receipt.operationId, status: 'completed' } })
+  // A restarted Main reads the recorded adoption fact; it is not reset to pending.
+  const restarted = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection }, adoptions)
+  expect(await restarted.check(config.hosts[0])).toMatchObject({ eligible: true, reason: 'ready', latestOperation: { operationId: receipt.operationId, status: 'completed', connectionAdoption: { state: 'unconfirmed' } } })
   expect(connection).toHaveBeenCalledTimes(1)
   const check = await manager.check(config.hosts[0])
   for (const rejected of [
@@ -128,11 +130,13 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
     expect(await restarted.check(config.hosts[0])).toMatchObject(rejected)
   }
   expect(connection).toHaveBeenCalledTimes(1)
-  expect(await restarted.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'pending-confirmation' } })
+  expect(await restarted.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'unconfirmed' } })
   expect(receipt.status).toBe('completed')
   connection.mockImplementation(async () => ({ detail: 'fresh connection confirmed' }))
   expect((await restarted.reconnect(config.hosts[0], receipt.operationId))?.connectionAdoption?.state).toBe('connected')
-  expect(inspect).toHaveBeenCalledTimes(2); expect(deploy).toHaveBeenCalledTimes(1)
+  const again = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection }, adoptions)
+  expect(await again.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'completed', connectionAdoption: { state: 'connected' } })
+  expect(inspect).toHaveBeenCalledTimes(3); expect(deploy).toHaveBeenCalledTimes(1); expect(connection).toHaveBeenCalledTimes(2)
 })
 
 it('actual compiled CLI keeps inspect pure and explicitly reconnects the original completed deployment without redeploying', async () => {
@@ -146,7 +150,7 @@ it('actual compiled CLI keeps inspect pure and explicitly reconnects the origina
   const save = vi.fn(async (value: typeof config) => value)
   const owner = new ConfigOwner({ read: () => config, save: save as never, publish: value => { config = value as typeof config } })
   const check = vi.fn(async () => ({ detail: 'Connection verified' }))
-  const runtime = { checkHost: check }, upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime)
+  const runtime = { checkHost: check }, upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime, join(root, 'cli-adoptions.json'))
   server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: async request => executeSettingsHostsControl(request as never, owner, runtime, upgrades) })
   await server.start()
   const env = objectCliEnvironment(root)

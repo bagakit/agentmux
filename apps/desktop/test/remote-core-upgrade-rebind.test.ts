@@ -1,4 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxMemoryAgentSessionStore, type RemoteCoreUpgradeManager } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller.js'
@@ -51,8 +54,10 @@ async function fixture() {
   const receipt = { input: host, expected: { runtimeId: host.runtimeId }, operationId: 'original-upgrade',
     status: 'completed', stage: 'completed', remoteCommand: next.remoteCommand, updatedAt: 1, detail: 'Authoritative maintenance completed.' }
   const manager = { inspect: vi.fn(async () => receipt), upgrade: vi.fn() } as unknown as RemoteCoreUpgradeManager
-  const upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime)
-  return { runtime, owner, original, clients, save, connector, history, manager, upgrades, config: () => config,
+  const adoptionRoot = await mkdtemp(join(tmpdir(), 'upgrade-adoptions-')); closes.push(() => rm(adoptionRoot, { recursive: true }))
+  const adoptions = join(adoptionRoot, 'adoptions.json')
+  const upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime, adoptions)
+  return { runtime, owner, original, clients, save, connector, history, manager, upgrades, adoptions, config: () => config,
     probe: (prepare: NonNullable<typeof prepareProbe>) => { prepareProbe = prepare } }
 }
 
@@ -189,4 +194,33 @@ it('pure inspect preserves the completed deployment without adopting config or p
   expect(f.manager.upgrade).not.toHaveBeenCalled()
   await f.runtime.write(control, 'original healthy input after pure inspect', 'user')
   expect(f.original.writeAgent).toHaveBeenCalledOnce()
+})
+
+it('leaves an unreadable adoption ledger byte-identical, keeps the true receipt, and reads the file again later', async () => {
+  const f = await fixture(), damaged = '{"adoptions":{"earlier-upgrade":{"targetDigests":['
+  await writeFile(f.adoptions, damaged)
+  const adopted = await f.upgrades.reconnect(host, 'original-upgrade')
+  expect(adopted?.connectionAdoption?.state).toBe('connected')
+  expect(adopted?.connectionAdoption?.detail).toContain('It was not saved for restart: saved adoption receipts could not be read, so the file was left unchanged')
+  expect(await readFile(f.adoptions, 'utf8')).toBe(damaged)
+  expect((await f.upgrades.inspect(next, 'original-upgrade'))?.connectionAdoption?.state).toBe('connected')
+  // Once the file is readable again, the same process reads it again and keeps the earlier entry.
+  const earlier = { targetDigests: ['f'.repeat(64)], value: { state: 'unconfirmed', readAt: 1, code: 'EARLIER' } }
+  await writeFile(f.adoptions, JSON.stringify({ adoptions: { 'earlier-upgrade': earlier } }))
+  const retained = await f.upgrades.reconnect(next, 'original-upgrade')
+  expect(retained?.connectionAdoption).toMatchObject({ state: 'connected' }); expect(retained?.connectionAdoption?.detail).not.toContain('not saved for restart')
+  const ledger = JSON.parse(await readFile(f.adoptions, 'utf8'))
+  expect(ledger.adoptions['earlier-upgrade']).toEqual(earlier)
+  expect(ledger.adoptions['original-upgrade'].value.state).toBe('connected')
+})
+
+it('names an adoption entry it cannot read and keeps unknown entries verbatim on the next write', async () => {
+  const f = await fixture(), stranger = { shape: 'not an adoption receipt' }
+  await writeFile(f.adoptions, JSON.stringify({ adoptions: { 'original-upgrade': { value: { state: 'connected' } }, stranger } }))
+  expect((await f.upgrades.inspect(host, 'original-upgrade'))?.connectionAdoption).toMatchObject({ state: 'pending-confirmation',
+    detail: expect.stringContaining('The saved adoption receipt for original-upgrade could not be read.') })
+  expect((await f.upgrades.reconnect(host, 'original-upgrade'))?.connectionAdoption?.state).toBe('connected')
+  const ledger = JSON.parse(await readFile(f.adoptions, 'utf8'))
+  expect(ledger.adoptions.stranger).toEqual(stranger)
+  expect(ledger.adoptions['original-upgrade'].value.state).toBe('connected')
 })
