@@ -948,3 +948,33 @@ describe('transport-authenticated device origin', () => {
     } finally { await subscription.dispose(); await f.service.dispose() }
   })
 })
+
+describe('transport-authenticated human answers', () => {
+  // A phone answering a member's permission request is the same human act as answering its
+  // question. Only the transport principal can say so; the wire cannot.
+  const answer = { agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' }, operationId: 'phone-permission',
+    response: { kind: 'permission' as const, requestId: 'permission-original', decision: { outcome: 'selected' as const, optionId: 'allow-once' } } }
+  it('marks a device permission answer as human, as it does a question reply', async () => {
+    const f = fixture(), subscription = await f.subscribe('consumer-answer', f.eventsA)
+    const respond = vi.fn(async (..._args: unknown[]) => ({ authorHuman: true }))
+    Object.assign(f.core, { respondAgentInteraction: respond })
+    try {
+      await f.service.call('runtime.invoke', { fence, consumerId: 'consumer-answer', invocation: { method: 'respondAgentInteraction', args: [answer] } },
+        { principal: { kind: 'device', id: 'approved-phone' } })
+      expect(respond.mock.calls[0]![0]).toMatchObject({ ...answer, authorHuman: true })
+    } finally { await subscription.dispose(); await f.service.dispose() }
+  })
+  it('does not mark an answer without a person or device principal, and refuses one naming an Agent author', async () => {
+    const f = fixture(), subscription = await f.subscribe('consumer-answer', f.eventsA)
+    const respond = vi.fn(async (..._args: unknown[]) => ({}))
+    Object.assign(f.core, { respondAgentInteraction: respond })
+    try {
+      await f.service.call('runtime.invoke', { fence, consumerId: 'consumer-answer', invocation: { method: 'respondAgentInteraction', args: [answer] } }, {})
+      expect(respond.mock.calls[0]![0]).not.toHaveProperty('authorHuman')
+      await expect(f.service.call('runtime.invoke', { fence, consumerId: 'consumer-answer', invocation: { method: 'respondAgentInteraction',
+        args: [{ ...answer, authorAgentSessionId: 'b123456789012345' }] } }, { principal: { kind: 'device', id: 'approved-phone' } }))
+        .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+      expect(respond).toHaveBeenCalledTimes(1)
+    } finally { await subscription.dispose(); await f.service.dispose() }
+  })
+})
