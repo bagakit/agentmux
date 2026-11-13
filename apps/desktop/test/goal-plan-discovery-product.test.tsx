@@ -259,3 +259,51 @@ it('a failed native planning-reference save sends no Host request and retry keep
   expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBeNull()
   evidence.push({ phase: 'native-save-refusal-before-input', rejectedPayload, request, unchangedInputBeforeRetry: accepted })
 })
+
+it.each(['none', 'existing'] as const)('ordinary legacy Goal preserves %s supervision through the first plan and graph', async role => {
+  const supervisor = role === 'existing' ? fixture.primary.agentSessionId : null
+  // Ordinary Domain creation naturally has no UI creation provenance. Do not
+  // simulate a legacy Goal by removing fields from a modern UI-created one.
+  await fixture.host.demands.create({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
+    status: 'in_progress', supervisorSessionId: supervisor, assigneeSessionIds: supervisor ? [supervisor] : [], sessionIds: supervisor ? [supervisor] : [] })
+  const before = (await fixture.host.demands.get('discovery'))!, starts = fixture.core.start.mock.calls.length
+  const assertNoDiscussionSource = async () => {
+    const current = (await fixture.host.demands.get('discovery'))!
+    expect(current.creationOrigin).toBeUndefined(); expect(current.discussionOperationId).toBeUndefined(); expect(current.discussionIntent).toBeUndefined()
+    expect(current.plan).toBeUndefined(); expect(current.supervisorSessionId).toBe(supervisor)
+    expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'discovery')).toBeNull()
+    expect(fixture.core.start.mock.calls.length).toBe(starts)
+  }
+  await assertNoDiscussionSource()
+  await useAppStore.getState().refreshDemand('discovery')
+  useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
+  await act(async () => useAppStore.getState().refreshDemand('discovery'))
+  await assertNoDiscussionSource()
+  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  await act(async () => useAppStore.getState().updateDemand('discovery', { alignment: proposal }))
+  await assertNoDiscussionSource()
+  fixture.host.clear()
+  const request = await requestPlan(), original = binding(), recipient = fixture.core.core.agentSession(original.recipient.agentSessionId)
+  const registered = (await fixture.host.demands.get('discovery'))!, intent = registered.discussionIntent!
+  expect(registered.id).toBe(before.id); expect(registered.createdAt).toBe(before.createdAt); expect(registered.description).toBe(before.description)
+  expect(registered.creationOrigin).toBeUndefined(); expect(registered.supervisorSessionId).toBe(supervisor)
+  expect(registered.assigneeSessionIds).toEqual(before.assigneeSessionIds)
+  expect(registered.participations.some(item => item.kind === 'create')).toBe(false)
+  expect(registered.discussionOperationId).toEqual(expect.any(String))
+  expect(intent).toMatchObject({ mode: 'plan', requestOperationId: request.requestId, prompt: 'Make a plan for this existing Goal: discovery.' })
+  const created = await fixture.core.core.inspectAgentCreation(recipient.agentSessionId)
+  expect(created.creation?.createOperationId).toBe(registered.discussionOperationId)
+  expect(fixture.core.start.mock.calls.length).toBe(starts + 1)
+  if (supervisor) expect(recipient.agentSessionId).not.toBe(supervisor)
+  const timeline = (await fixture.core.store.loadTimeline(recipient.agentSessionId)).items
+  expect(timeline.some(item => item.kind === 'system_message' && item.source === 'agentmux' && item.content.includes(intent.agentMuxNote))).toBe(true)
+  expect(timeline.some(item => item.kind === 'user_message' && item.content === intent.prompt)).toBe(true)
+  expect(registered.plan).toBeUndefined(); expect(registered.alignment?.confirmedAt).toBeNull()
+  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  expect((await fixture.host.demands.list()).map(goal => goal.id)).toEqual(['discovery'])
+  expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision('ordinary-legacy-plan') })).code).toBe(0)
+  await expectSavedGraph()
+  expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBe(supervisor)
+  expect((await fixture.host.demands.get('discovery'))!.creationOrigin).toBeUndefined()
+  evidence.push({ phase: 'ordinary-legacy-goal-to-real-graph', role, before, registered, request, original, created, timeline })
+})
