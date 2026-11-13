@@ -6357,7 +6357,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw Object.assign(new Error('Crash log diagnostics belong to the Main owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.create' ||
-        request.operation === 'browser.profile.update' || request.operation === 'browser.profile.set-default' || request.operation === 'browser.profile.delete') {
+        request.operation === 'browser.profile.update' || request.operation === 'browser.profile.set-default' || request.operation === 'browser.profile.delete' ||
+        request.operation === 'browser.profile.proxy-sign-in.set' || request.operation === 'browser.profile.proxy-sign-in.clear' || request.operation === 'browser.profile.network.check') {
       throw Object.assign(new Error('Browser Profiles belong to the Main Profile owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
