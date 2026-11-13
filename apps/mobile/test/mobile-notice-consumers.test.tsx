@@ -8,7 +8,7 @@ import type { MobileFileUpload } from '../src/conversation/attachments'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { MobileRecoveryPanel } from '../src/recovery/MobileRecoveryPanel'
-import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, paste, openAppMenu } from './conversation-fixture'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
@@ -59,7 +59,7 @@ it('restores an original connection notice from the fixed App menu without losin
   const originalEditor = editor(view.element), packet = structuredClone(getDeviceWorkface().snapshot().record.conversation)
   await click(button(view.element.querySelector('.mobile-conversation__connection')!, '收起提醒'))
   expect(view.element.querySelector('.mobile-conversation__connection')).toBeNull()
-  await click(button(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   expect(document.body.querySelector('[role=dialog]')!.textContent).toContain('有已收起的提醒')
   await click(button(document.body, '恢复已收起提醒'))

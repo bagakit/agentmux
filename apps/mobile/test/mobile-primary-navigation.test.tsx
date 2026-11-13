@@ -6,7 +6,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
-import { openTreeSession, button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openTreeSession, button, click, deferred, editor, fixture, mount, mounted, paste, openAppMenu } from './conversation-fixture'
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async importOriginal => ({ ...await importOriginal<Record<string, unknown>>(),
   bindNativeDevice: vi.fn((options: { onBack(): void }) => { native.back = options.onBack; return { dispose: async () => { native.back = null } } }) }))
@@ -55,10 +55,13 @@ describe('actual phone primary workfaces', () => {
       expect(headings).toHaveLength(1)
       expect(headings[0]!.querySelector('h1')?.textContent).toBe(label)
       expect(view.element.querySelector('.mobile-header')).toBeNull()
-      const menu = view.element.querySelector('.mobile-navigation-bar [aria-label="手机设置与连接"]')
-      expect(headings[0]!.querySelector('[aria-label="手机设置与连接"]')).toBeNull()
+      // The confirmed tab bar holds only the five workfaces; the menu leads the directory header.
+      expect(view.element.querySelector('.mobile-navigation-bar [aria-label="手机设置与连接"]')).toBeNull()
+      expect([...nav(view.element).querySelectorAll('button')].map(value => value.getAttribute('aria-label'))).toEqual(order)
+      const menu = headings[0]!.querySelector('[aria-label="手机设置与连接"]')
       expect(menu?.closest('nav')).toBeNull()
       expect(menu).not.toBeNull()
+      expect(headings[0]!.firstElementChild).toBe(menu)
       await click(menu!)
       expect(document.querySelector('.mobile-drawer')?.textContent).toContain('连接与设备')
       await click(document.querySelector('[aria-label="关闭面板"]')!)
@@ -142,7 +145,7 @@ describe('actual phone primary workfaces', () => {
     expect(f.client.forwardRpc).toHaveBeenCalledWith('goal.ls', { limit: 1000 })
     expect(f.client.forwardRpc).toHaveBeenCalledWith('topic.category.ls', {})
     expect(f.client.forwardRpc).toHaveBeenCalledWith('space.ls', { target: {}, presentation: true })
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     const menu = overlay.querySelector<HTMLElement>('.mobile-drawer-workfaces')!
     expect([...menu.querySelectorAll('button')].map(value => value.textContent)).toEqual(['Survey研究与笔记'])
     expect([...overlay.querySelectorAll('select option')].map(value => value.textContent)).toEqual(order)
@@ -257,7 +260,7 @@ describe('actual phone primary workfaces', () => {
     f.client.forwardRpc = vi.fn().mockImplementation((method, params) => method === 'space.inspect' ? read.promise
       : method === 'space.ls' ? Promise.resolve({ catalog }) : ordinary(method, params))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element, '手机设置与连接')); await click(button(overlay, 'Survey研究与笔记'))
+    await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
     await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Research原研究选择'))
     await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Topic'))
     expect(f.client.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { spaceId: 'topic-space' } })

@@ -42,11 +42,16 @@ it('the actual phone connection fact selects distinct themed masks in the origin
   for (const [state, label] of [['connecting', '连接中'], ['disconnected', '连接中断'], ['connected', '已连接']] as const) {
     await view.render(<MobileApp client={null} connection={{ state, message: 'Original connection fact' }} platform={platform}/>)
     expect(view.element.querySelector('[data-connection]')?.getAttribute('data-connection')).toBe(state)
-    expect(button.querySelector('.mobile-status-dot')).toBe(marker)
-    expect(marker.getAttribute('aria-label')).toBe(label)
-    expect(button.disabled).toBe(false)
+    // Before a connection the menu leads the connect page; once connected it leads the
+    // directory header. Either way exactly one menu carries the same themed status slot.
+    const menus = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-settings-button')].filter(value => !value.closest('[hidden]'))
+    expect(menus).toHaveLength(1)
+    if (state !== 'connected') expect(menus[0]).toBe(button)
+    expect(menus[0]!.querySelector('.mobile-status-dot')?.getAttribute('aria-label')).toBe(label)
+    expect(menus[0]!.disabled).toBe(false)
   }
-  await click(button)
+  expect(marker.isConnected || view.element.querySelector('.mobile-settings-button .mobile-status-dot')).toBeTruthy()
+  await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-settings-button')].find(value => !value.closest('[hidden]'))!)
   expect(overlay.querySelector('[role="dialog"]')).not.toBeNull()
   await click(overlay.querySelector('[aria-label="关闭面板"]')!)
   expect(overlay.querySelector('[role="dialog"]')).toBeNull()

@@ -5,7 +5,7 @@ import { MobileGoalLinks } from '../src/goals/MobileGoalLinks'
 import { MobileWebUpdateSafetyProvider, useMobileWebUpdateSafety } from '../src/mobile-web/update-safety'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, fixture, mount, mounted, openAppMenu } from './conversation-fixture'
 
 let update: ReturnType<typeof useMobileWebUpdateSafety>['apply']
 function CaptureUpdate() { update = useMobileWebUpdateSafety().apply; return null }
@@ -33,7 +33,7 @@ it('keeps an unpersisted request through Goal unmount and retries it through the
   await act(async () => { waiting.reject(Error('receipt unavailable')); await Promise.resolve() })
   await view.render(render(false))
   expect(await update()).toMatchObject({ status: 'blocked', message: expect.stringContaining('尚未保存在当前设备工作面') })
-  await click(button(view.element, '手机设置与连接')); await click(button(document.body, '提醒与诊断'))
+  await openAppMenu(view.element); await click(button(document.body, '提醒与诊断'))
   expect(document.body.textContent).toContain('goal-original')
   await click(button(document.body, '保存原设备工作面'))
   expect(await update()).toEqual({ status: 'navigating' })
@@ -48,7 +48,7 @@ it('shows an original unknown Goal request in the actual offline App even if the
   const platform = createBrowserPlatform(), copy = vi.fn(async () => true)
   platform.copyText = copy
   const view = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Host 暂时离线' }} platform={platform} />)
-  await click(button(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   expect(document.body.textContent).toContain('deleted-original-goal')
   expect(document.body.textContent).toContain('回执未确认')

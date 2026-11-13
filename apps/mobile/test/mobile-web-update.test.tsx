@@ -5,7 +5,7 @@ import type { MobileAssetsInspection, MobileAssetsLoadedReceipt } from '@agentmu
 import { MobileConnectionRoot } from '../src/connection/MobileConnectionRoot'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, fixture, mount, mounted, openAppMenu } from './conversation-fixture'
 
 const relay = vi.hoisted(() => ({ connect: vi.fn() }))
 vi.mock('@agentmux/core/relay-hosted', async original => ({ ...await original<object>(), connectRelayHostedClient: relay.connect }))
@@ -73,7 +73,7 @@ describe('mobile update through the actual connection root and App', () => {
     const fetchEntry = vi.fn(async () => ({ ok: true, url: location.origin + '/mobile/reviewed-page-build/' + 'a'.repeat(64) + '/index.html' }) as Response)
     vi.stubGlobal('fetch', fetchEntry)
     const view = await openProduct(f)
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     expect(document.body.textContent).toContain(version === 'current' ? '已是当前版本' : '版本尚未确认')
     const reopen = button(document.body, '重新打开网页')
     expect(reopen.disabled).toBe(false)
@@ -89,7 +89,7 @@ describe('mobile update through the actual connection root and App', () => {
     const fetchEntry = vi.fn(() => waiting.promise), navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchEntry)
     const view = await openProduct(f)
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     await click(button(document.body, '载入最新版'))
     await vi.waitFor(() => expect(fetchEntry).toHaveBeenCalledOnce())
     await click(button(document.body, '关闭面板'))
@@ -111,7 +111,7 @@ describe('mobile update through the actual connection root and App', () => {
     await click(button(document.body, '关闭面板'))
     await click(notice.querySelector('[aria-label="收起提醒"]')!)
     expect(updateNotice(view.element)).toBeNull()
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     expect(document.body.textContent).toContain('网页更新')
     expect(button(document.body, '检查更新')).toBeDefined()
     expect(button(document.body, '载入最新版')).toBeDefined()

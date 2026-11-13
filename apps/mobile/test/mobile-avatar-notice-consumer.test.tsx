@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
+import { button, click, deferred, editor, fixture, mount, mounted, paste, waitForElement, openAppMenu } from './conversation-fixture'
 
 // First-use deferred panels are awaited as product state, not a latency oracle.
 vi.setConfig({ testTimeout: 30000 })
@@ -93,7 +93,7 @@ it.each(['mote', 'space'] as const)('%s original failure is readable, dismissibl
   expect(document.querySelector('button button')).toBeNull()
   await click(button(item, '收起提醒'))
   expect([...document.querySelectorAll('summary')].some(node => node.textContent?.includes('头像外观未确认'))).toBe(false)
-  await click(button(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   expect(document.body.textContent).toContain('有已收起的提醒')
   await click(button(document.body, '恢复已收起提醒'))
@@ -202,7 +202,7 @@ it('groups same-name Space failures into one notice and retries only the selecte
   expect(item('space-A')).toBeDefined()
   await click(button(document.querySelector<HTMLElement>('.mobile-avatar-notice')!, '收起提醒'))
   expect(summaries()).toHaveLength(0)
-  await click(button(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   await click(button(document.body, '恢复已收起提醒'))
   await vi.waitFor(() => expect(summaries()).toHaveLength(1))

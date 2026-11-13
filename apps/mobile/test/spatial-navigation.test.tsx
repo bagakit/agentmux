@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { openTreeSession, button, click, editor, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openTreeSession, button, click, editor, fixture, mount, mounted, waitForElement, openAppMenu } from './conversation-fixture'
 const connection = { state: 'connected' as const, message: '已连接 Mac' }
 const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Space', hostId: 'host-original', directoryPath: fixturePath("unrelated"), projectId: null }],
   zones: [], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }],
@@ -66,7 +66,7 @@ describe('mobile production workspace navigation', () => {
     expect(view.element.querySelector('.mobile-mote-heading')?.getAttribute('aria-label')).toContain('Chosen Agent')
     expect(view.element.querySelector('.mobile-mote-heading .mote-face')).not.toBeNull()
     const input = editor(view.element)
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     expect(overlay.querySelector('.mobile-drawer')).not.toBeNull()
     expect(editor(view.element)).toBe(input)
     await click(button(overlay, '关闭面板'))
@@ -78,7 +78,7 @@ describe('mobile production workspace navigation', () => {
     const f = fixture(); f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element, '手机设置与连接'))
+    await openAppMenu(view.element)
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage unavailable') })
     await act(async () => { const select = overlay.querySelector<HTMLSelectElement>('select')!; select.value = 'mote'; select.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(overlay.textContent).toContain('默认主页未保存')
@@ -104,7 +104,7 @@ it('keeps the locally selected Topic across a Session round trip after an extern
     return { catalog: original }
   })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-  await click(button(view.element, '手机设置与连接')); await click(button(overlay, 'Survey研究与笔记'))
+  await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
   await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '原研究原研究选择'))
   await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '外部 Topic A'))
   const topics = view.element.querySelector('.mobile-topics') as HTMLElement

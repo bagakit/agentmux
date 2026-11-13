@@ -4,7 +4,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, paste, openAppMenu } from './conversation-fixture'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
@@ -88,7 +88,7 @@ it('scopes missing selected-session metadata to that conversation while retainin
     expect(editor(view.element)).toBe(originalEditor)
     expect(originalEditor.textContent).toBe('保留这段对话里的未发送正文')
   }
-  await click(button(view.element, '手机设置与连接'))
+  await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   const diagnostic = document.body.querySelector('.mobile-session-diagnostic')!
   expect(diagnostic).not.toBeNull()

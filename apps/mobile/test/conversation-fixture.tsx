@@ -107,6 +107,13 @@ export function button(element: HTMLElement, label: string): HTMLButtonElement {
   expect(match, `Actual mounted action ${label}`).toBeDefined()
   return match!
 }
+/** The app menu is the directory header's leading entry, or a row in the conversation's more sheet. */
+export async function openAppMenu(element: HTMLElement): Promise<void> {
+  const direct = [...element.querySelectorAll<HTMLButtonElement>('button[aria-label="手机设置与连接"]')].find(value => !value.closest('[hidden]'))
+  if (direct) { await click(direct); return }
+  await click(button(element, '当前对话操作'))
+  await click(button(document.body, '手机设置、提醒与诊断'))
+}
 export function editor(element: HTMLElement): HTMLElement {
   const match = element.querySelector<HTMLElement>('[contenteditable="true"]')
   expect(match, 'The maintained shared editor is editable').not.toBeNull()
