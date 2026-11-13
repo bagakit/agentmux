@@ -66,3 +66,22 @@ it('distinguishes the same Session id on two Hosts for delegation and independen
   expect(saved.plan!.reviews[0]!.reviewer).toEqual({ kind: 'agent', id: 'owner', hostId: 'owner-host' })
   expect(projectGoalPlan(saved.plan!, saved.delegations!, criteria).nodes.map(item => item.state)).toEqual(['done', 'ready'])
 })
+
+it('retains verified Runtime references and rejects the worker under a second Host alias', async () => {
+  await store.revisePlan('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
+    nodes: [node('work'), node('next', ['work'])] }, { kind: 'agent', id: 'owner', hostId: 'owner-host', runtimeId: 'owner-runtime' })
+  const task = { ...intent(), planNodeId: 'work' }, runtimeIdentity = { ownerRuntimeId: 'owner-runtime', workerRuntimeId: 'worker-runtime' }
+  expect(() => parseDemandDelegationIntent({ ...task, runtimeIdentity })).toThrow('unsupported')
+  await store.prepareDelegation('goal', task, 'owner')
+  await store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner', runtimeIdentity)
+  await expect(store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner', { ...runtimeIdentity, workerRuntimeId: 'other-runtime' })).rejects.toThrow('Runtime identities differ')
+  await store.submitDelegationReport('goal', task.operationId, { operationId: 'worker-report', replyMessageId: 'worker-reply', authorAgentSessionId: 'worker',
+    grounding: { alignmentRevision: 1, summary: 'Delivered', checks: [{ criterionId: 'original', outcome: 'met', evidence: ['artifacts/result.log'], note: '' }] } }, 'worker')
+  await expect(store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-worker-alias', runtimeId: 'worker-runtime' })).rejects.toThrow('cannot review its own work')
+  await expect(store.reviewPlanNode('goal', review, { kind: 'agent', id: 'reviewer', hostId: 'review-host' })).rejects.toThrow('Runtime is not yet confirmed')
+  await store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'other-host', runtimeId: 'independent-runtime' })
+  const saved = (await openDemandStore({ root }).get('goal'))!
+  expect(saved.delegations![0]!.runtimeIdentity).toEqual(runtimeIdentity)
+  expect(saved.plan!.reviews[0]!.reviewer.runtimeId).toBe('independent-runtime')
+  expect(projectGoalPlan(saved.plan!, saved.delegations!, criteria).nodes.map(item => item.state)).toEqual(['done', 'ready'])
+})
