@@ -5,7 +5,7 @@ import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT } from '../src/shared/ca
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 
 const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], workbench: [] as any[],
-  displays: [] as Array<{ id: number; bounds: { x: number; y: number; width: number; height: number } }>, cursor: { x: 0, y: 0 },
+  displays: [] as Array<{ id: number; bounds: { x: number; y: number; width: number; height: number }; displayFrequency?: number }>, cursor: { x: 0, y: 0 },
   screenListeners: new Map<string, Array<(...args: any[]) => void>>(), appListeners: new Map<string, Array<() => void>>(), focus: vi.fn(),
   focused: null as unknown, saves: [] as unknown[] }))
 vi.mock('electron', async () => {
@@ -253,10 +253,10 @@ it('fades visible AgentMux windows out of the grab and restores them when the su
   const captureDisplays = vi.fn(async () => { opacityAtGrab = [workbench.opacity, pin.opacity]; return frames() })
   ports.native.mockReturnValue({ captureDisplays })
   const outcome = surface.present(session())
-  await vi.advanceTimersByTimeAsync(299)
-  expect(captureDisplays, 'macOS settles the fade before the grab').not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(33)
+  expect(captureDisplays, 'the compositor gets two 60 Hz frames after the fade before the grab').not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(1)
-  expect(captureDisplays).toHaveBeenCalledOnce()
+  expect(captureDisplays, 'and no more than that').toHaveBeenCalledOnce()
   expect(opacityAtGrab, 'faded before the grab').toEqual([0, 0])
   expect(hidden.setOpacity, 'a hidden window is not touched').not.toHaveBeenCalled()
   expect(clear.setOpacity, 'a window already at opacity 0 is not touched').not.toHaveBeenCalled()
@@ -267,6 +267,45 @@ it('fades visible AgentMux windows out of the grab and restores them when the su
   expect(pin.opacity, 'a pin comes back at its own opacity, not 100%').toBe(0.4)
   expect(clear.opacity).toBe(0)
   expect(workbench.focus, 'the window that had focus gets it back').toHaveBeenCalledOnce()
+})
+
+it('grabs at once when no AgentMux window was on screen, and waits two frames of the slowest display when one was', async () => {
+  const { EventEmitter } = await import('node:events')
+  const captureDisplays = vi.fn(async () => frames())
+  ports.native.mockReturnValue({ captureDisplays })
+  // Hidden, minimized and already transparent windows are not in the grab, so they cost no settle.
+  const quiet = (visible: boolean, minimized: boolean, opacity: number) => Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => visible,
+    isMinimized: () => minimized, getOpacity: () => opacity, setOpacity: vi.fn() })
+  electron.workbench = [quiet(false, false, 1), quiet(true, true, 1), quiet(true, false, 0)]
+  const first = surface.present(session())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays, 'nothing faded, so the grab does not wait').toHaveBeenCalledOnce()
+  surface.dispose(); await first
+  surface = new CaptureSurface(ports)
+  electron.displays = [{ id: 1, bounds: main, displayFrequency: 120 }, { id: 7, bounds: side, displayFrequency: 30 }]
+  electron.workbench = [quiet(true, false, 1)]
+  const second = surface.present(session())
+  await vi.advanceTimersByTimeAsync(66)
+  expect(captureDisplays, 'a 30 Hz display needs two of its own frames').toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(captureDisplays).toHaveBeenCalledTimes(2)
+  surface.dispose(); await second
+})
+
+it('logs one timing line from present() to frames, each display painted and shown', async () => {
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+  try {
+    const { overlays } = await opened()
+    expect(info, 'nothing is logged before the overlays show').not.toHaveBeenCalled()
+    await overlays[0]!.call('presented'); await overlays[1]!.call('presented')
+    expect(info).toHaveBeenCalledOnce()
+    const [line] = info.mock.calls[0]! as [string]
+    expect(line.startsWith('capture-surface timing ')).toBe(true)
+    const timing = JSON.parse(line.slice('capture-surface timing '.length))
+    expect(timing).toMatchObject({ settleMs: 0, displays: 2 })
+    expect([timing.framesMs, ...timing.presentedMs, timing.shownMs].every((value: unknown) => typeof value === 'number' && value >= 0), JSON.stringify(timing)).toBe(true)
+    expect(timing.presentedMs).toHaveLength(2)
+  } finally { info.mockRestore() }
 })
 
 it('returns focus to the previous app once when the capture started elsewhere', async () => {
