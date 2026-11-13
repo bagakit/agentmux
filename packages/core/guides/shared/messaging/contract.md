@@ -64,12 +64,25 @@ MID --text TEXT` or the equivalent complete JSON input. Core derives the exact
 reverse participant, key, Run and thread from that verified source. No reverse network
 connection is required: `transport.state=outbox` confirms the worker's signed local
 outbox save, not delivery to the original sender. It is not a native input queue.
+Record a question or escalation with `message dispatch report --source-message MID
+--reply-message REPLY --kind question|escalation` after saving its actual reply.
+A remote worker receives `kind=dispatch-event-submission`: its own signed fact is
+saved, and the original owner's next sync imports that typed event. This does not
+invent an owner-open on the worker Host or complete any business task.
 
 The original sender opens supervision with `message dispatch open --source-message
 MID` and reads back replies with `message dispatch sync --source-message MID --host
 HOST`. Sync uses the existing sender-to-worker connection, exports only this exact
 signed thread and admits the original replies locally. The original participant or
 an authorized Host reader may synchronize; a carrier does not become the author.
+Once the remote Core confirms the exact original source, sync also carries the
+sender's subsequent signed outbox answers through that same connection. It reconciles
+existing remote MIDs before intake and never uploads an absent initial dispatch.
+The optional `peerInbox` is the target Core's signed durable Inbox receipt for one
+original outbox message. It survives source restart and offline reads, while the
+original `transport=outbox` and Native delivery facts stay unchanged. Missing proof
+is unknown; a prepared answer alone does not show that the worker received it.
+Inbox receipt verification grants no source-message trust or proof of model adoption.
 Use `message dispatch read --source-message MID --host local` for the retained local
 observation. Synchronizing a reply does not accept its work or finish a business task.
 After a lost response keep the original source, operation and message IDs; changed
