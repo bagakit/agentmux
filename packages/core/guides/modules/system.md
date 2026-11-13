@@ -23,6 +23,8 @@ Reading never marks notifications read, clears history, focuses the workface or 
 Notification IDs are client observation references, not logIds or permission to act on Agents.
 Keep each page's original filters and cursor; expired means the document or snapshot changed,
 so begin a new list. Unavailable or partial coverage does not mean the inbox is empty.
+Activity keeps a bounded window of the newest events; activityNotRetained counts older ones
+that were not kept, so "complete" covers the kept window only. Those events were not read.
 The client route Host and each original notification subject Host are separate identities;
 this is one registered client document, not an archive of all windows or Hosts.
 
