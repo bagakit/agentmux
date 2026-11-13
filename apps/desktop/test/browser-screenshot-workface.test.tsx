@@ -174,6 +174,9 @@ async function cancel(method: 'Cancel' | 'Escape') {
     if (method === 'Cancel') button(editor(), 'Cancel').click()
     else window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   })
+  // Unexported marks ask once before closing; confirming is part of the actual cancel flow.
+  const discard = container.querySelector<HTMLButtonElement>('.image-annotation-editor__discard .danger-button')
+  if (discard) await act(async () => discard.click())
   await flushFrames()
 }
 function originalPageKept() {
@@ -223,6 +226,12 @@ describe('original Browser screenshot workface', () => {
       ? [expect.objectContaining({ kind: 'text', text: 'Markup text', at: { x: 85, y: 90 } })] : [])
 
     const focused = document.activeElement
+    // Text is not the opening tool, and a committed text asks before it is discarded: those layers come first.
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    if (key === 'Enter') {
+      await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+      expect(opened.querySelector('.image-annotation-editor__discard')?.textContent).toContain('Discard 1 annotation?')
+    }
     const exit = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     await act(async () => window.dispatchEvent(exit))
     await flushFrames()

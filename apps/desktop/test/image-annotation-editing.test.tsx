@@ -220,6 +220,9 @@ describe('standalone image annotation editing consumers', () => {
     expect(view().view).toEqual({ scale: 1, x: 60, y: 50 })
     await act(async () => canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))); await frame()
     expect(view().view).toEqual({ scale: 1, x: 0, y: 0 }); expect(props.onCancel).not.toHaveBeenCalled()
+    // Later Escapes peel the remaining layers in order: selection, the Pan tool, then the editor.
+    for (let layer = 0; layer < 2; layer++) await act(async () => canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(props.onCancel).not.toHaveBeenCalled()
     await act(async () => canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(props.onCancel).toHaveBeenCalledOnce()
   })
