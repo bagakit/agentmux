@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { readingMutations } from './fixtures/a2a-reference-reading/mutations.mjs'
-import { a2aProofSha as sha, runA2aReferenceReadingProductProof, verifyA2aReferenceReadingProductProof } from './lib/a2a-inbox-product-proof.mjs'
+import { captureA2aReferenceReading } from './fixtures/a2a-reference-reading/capture.mjs'
+const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 
 const root = resolve(import.meta.dirname, '../../..'), area = join(root, '.tmp/a2a-reference-reading')
 const config = 'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.owning.config.mts'
 const sources = [
   'apps/desktop/scripts/verify-a2a-reference-reading.mjs', config, 'apps/desktop/scripts/fixtures/a2a-reference-reading/mutations.mjs',
-  'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', 'apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
-  'apps/desktop/scripts/probe-process.mjs',
-  ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
+  'apps/desktop/scripts/fixtures/a2a-reference-reading/capture.mjs', 'apps/desktop/scripts/probe-process.mjs',
+  'apps/desktop/test/a2a-message-data-bridge.test.tsx', 'apps/desktop/test/vitest.a2a-message-data.config.mts',
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
   'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts', 'packages/core/src/session-history-content.ts',
   'packages/core/src/session-user-messages.ts', 'packages/core/src/conversation-stream.ts', 'packages/core/src/conversation-author.ts',
@@ -19,7 +20,9 @@ const sources = [
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
   ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload', 'ContentCopyButton', 'ConversationAmuxProtocol', 'ConversationProgressiveBody'].map(name => `packages/client-ui/src/components/${name}.tsx`),
   'packages/client-ui/src/platform.tsx', 'packages/client-ui/src/lib/use-content-copy-action.ts',
-  'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css',
+  'packages/client-ui/src/lib/conversation-speaker.ts',
+  ...['conversation-message', 'conversation-a2a', 'conversation-protocol', 'conversation-input-details', 'conversation-tool-payload', 'markdown', 'input-history', 'composer', 'composer-editor'].map(name => `packages/client-ui/src/styles/${name}.css`),
+  'apps/desktop/src/renderer/src/styles/mailbox-collaboration.css',
   'packages/client-ui/test/a2a-reference-reading.test.tsx', 'packages/client-ui/test/conversation-leading-context.test.tsx',
   'apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx',
   'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/clipboard-copy.ts',
@@ -108,11 +111,37 @@ function mergeSources(target, inputs) {
     target[path] = digest
   }
 }
-function owningProductionInputs(facts) {
-  const inputs = Object.fromEntries(facts.inputs.filter(input => sources.includes(input.path) && input.path.includes('/src/')).map(input => [input.path, input.sourceSHA256]))
-  assert.ok(Object.keys(inputs).length > 0)
-  for (const path of new Set(readingMutations.map(edit => edit.path))) assert.ok(inputs[path], 'Actual tests must consume their production mutation owner: ' + path)
-  return inputs
+async function assertBaseline(run) {
+  const report = await json(local(run.report))
+  const expected = sources.filter(path => path.includes('/test/') && /\.test\.tsx?$/u.test(path))
+    .filter(path => !path.endsWith('/a2a-message-data-bridge.test.tsx'))
+  assert.ok(expected.length > 0)
+  assert.deepEqual(report.testResults.map(file => relative(root, file.name)).sort(), expected.sort(), 'All named owning files must collect real assertions')
+}
+async function bridge(directory, name, mutation = '') {
+  const evidence = join(directory, name)
+  const result = await execute(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config',
+    'apps/desktop/test/vitest.a2a-message-data.config.mts'], directory, name,
+    { AGENTMUX_MESSAGE_DATA_EVIDENCE: evidence, AGENTMUX_TEST_MESSAGE_DATA_MUTATION: mutation })
+  const report = await json(join(evidence, 'results.json')), inputs = await json(join(evidence, 'mutation.json'))
+  assert.ok(report.numTotalTests > 0); assert.equal(report.numPendingTests, 0)
+  if (mutation) {
+    assert.equal(result.exitCode, 1); assert.ok(report.numFailedTests > 0)
+    assert.ok(report.testResults.flatMap(file => file.assertionResults).some(test => test.status === 'failed' && test.failureMessages.some(text => text.includes('AssertionError'))))
+    assert.equal(inputs.applied.length, 1)
+  } else { assert.equal(result.exitCode, 0); assert.equal(report.numFailedTests, 0); assert.equal(inputs.applied.length, 0) }
+  const fence = await json(join(evidence, 'note-link-execution.json'))
+  assert.equal(fence.actualModuleLoaded, true)
+  assert.deepEqual(fence.calls, { openDesktopNoteLink: 0, resolveDesktopNoteFileLink: 0, useDesktopNoteLinkOpener: 0 })
+  return { ...result, sources: inputs.sources, artifacts: ['results.json', 'mutation.json', 'note-link-execution.json'].map(file => relative(root, join(evidence, file))) }
+}
+function commitOfSources(inputs) {
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+  for (const [path, digest] of Object.entries(inputs)) {
+    const bytes = execFileSync('git', ['show', commit + ':' + path], { cwd: root, maxBuffer: 32 * 1024 * 1024 })
+    assert.equal(sha(bytes), digest, 'The accepted owning input is committed: ' + path)
+  }
+  return commit
 }
 async function prepare() {
   for (const edit of readingMutations) {
@@ -126,7 +155,7 @@ async function prepare() {
     for (const path of sources) receipt.sources[path] = sha(await readFile(local(path)))
     receipt.baseline = await tests(directory, 'baseline')
     const baseline = await testFacts(receipt.baseline)
-    assert.ok(baseline.cases.length >= 100, 'Core, shared reading and Desktop adjacent consumers must all run')
+    await assertBaseline(receipt.baseline)
     mergeSources(receipt.sources, Object.fromEntries(baseline.inputs.map(input => [input.path, input.sourceSHA256])))
     for (const edit of readingMutations) {
       let mutant = await tests(directory, edit.label, edit)
@@ -147,16 +176,32 @@ async function prepare() {
     }
     receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], directory, 'types')
     assert.equal(receipt.types.exitCode, 0, 'Current Core and shared UI types: ' + receipt.types.log)
-    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, testInputs: owningProductionInputs(baseline) })
+    receipt.bridge = []
+    for (const [name, mutation] of [['bridge-baseline', ''], ['bridge-wrong-host', 'originalResponseHost'], ['bridge-restored', '']]) {
+      const proof = await bridge(directory, name, mutation)
+      mergeSources(receipt.sources, proof.sources)
+      receipt.bridge.push(proof)
+    }
+    const captureDirectory = process.env.AGENTMUX_A2A_REFERENCE_CAPTURE
+      ? resolve(process.env.AGENTMUX_A2A_REFERENCE_CAPTURE) : join(directory, 'visual')
+    const capture = process.env.AGENTMUX_A2A_REFERENCE_CAPTURE
+      ? await json(join(captureDirectory, 'capture.json')) : await captureA2aReferenceReading({ root, evidence: captureDirectory })
+    assert.equal(capture.completed, true); assert.equal(capture.privateRootRemoved, true)
+    assert.deepEqual(capture.remainingPrivateProcesses, [])
+    assert.deepEqual(capture.transforms ?? [], [], 'Accepted images use the unchanged product stylesheet')
+    mergeSources(receipt.sources, Object.fromEntries(Object.entries(capture.inputs).map(([path, input]) => [path, input.sha256])))
+    receipt.capture = { directory: relative(root, captureDirectory), sha256: sha(await readFile(join(captureDirectory, 'capture.json'))) }
+    receipt.sourceCommit = commitOfSources(receipt.sources)
+    receipt.reviewPath = relative(root, join(captureDirectory, 'review.json'))
     const runs = [receipt.baseline, ...receipt.mutations.flatMap(item => [item.mutant, item.restored])]
-    for (const path of [...runs.flatMap(run => [run.log, run.report, run.loaded]), receipt.types.log]) receipt.artifacts[path] = sha(await readFile(local(path)))
+    for (const path of [...runs.flatMap(run => [run.log, run.report, run.loaded]), receipt.types.log, ...receipt.bridge.flatMap(run => [run.log, ...run.artifacts])]) receipt.artifacts[path] = sha(await readFile(local(path)))
     for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Source stayed fixed: ' + path)
     receipt.prepared = true
   } catch (error) { receipt.error = { message: error.message, stack: error.stack } }
   const path = join(directory, 'receipt.json'); await writeFile(path, JSON.stringify(receipt, null, 2) + '\n')
   assert.equal(receipt.prepared, true, receipt.error?.message)
   await writeFile(join(area, 'current.json'), JSON.stringify({ path: relative(root, path), sha256: sha(await readFile(path)) }) + '\n')
-  console.log(JSON.stringify({ prepared: true, passed: false, receipt: relative(root, path), product: receipt.product,
+  console.log(JSON.stringify({ prepared: true, passed: false, receipt: relative(root, path), capture: receipt.capture, reviewPath: receipt.reviewPath,
     next: 'An independent Agent must actually open every product image and write the exact source-bound visual review before the bare gate can pass.' }))
 }
 async function verify() {
@@ -167,16 +212,34 @@ async function verify() {
   for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Current candidate: ' + path)
   assert.ok(Object.keys(receipt.artifacts).length > 0)
   for (const [path, digest] of Object.entries(receipt.artifacts)) assert.equal(sha(await readFile(local(path))), digest, 'Bound proof bytes: ' + path)
-  const baseline = await testFacts(receipt.baseline); assert.ok(baseline.cases.length >= 100)
+  const baseline = await testFacts(receipt.baseline); await assertBaseline(receipt.baseline)
   assert.deepEqual(receipt.mutations.map(item => item.label), readingMutations.map(item => item.label))
   for (const [index, edit] of readingMutations.entries()) {
     const item = receipt.mutations[index], mutant = await testFacts(item.mutant, edit), restored = await testFacts(item.restored)
     assertTestPair(mutant, restored, edit)
   }
   assert.equal(receipt.types.exitCode, 0); assert.deepEqual(receipt.types.argv, ['--filter', '@agentmux/client-ui', 'typecheck'])
-  const productBytes = await readFile(receipt.product.path); assert.equal(sha(productBytes), receipt.product.sha256)
-  const product = JSON.parse(productBytes), result = await verifyA2aReferenceReadingProductProof(product, { root, testInputs: owningProductionInputs(baseline) })
-  console.log(JSON.stringify({ passed: true, tests: baseline.cases.length, mutants: receipt.mutations.length, ...result }))
+  assert.deepEqual(receipt.bridge.map(run => run.exitCode), [0, 1, 0])
+  const captureBytes = await readFile(local(join(receipt.capture.directory, 'capture.json')))
+  assert.equal(sha(captureBytes), receipt.capture.sha256)
+  const capture = JSON.parse(captureBytes)
+  assert.equal(capture.completed, true); assert.equal(capture.privateRootRemoved, true)
+  assert.deepEqual(capture.remainingPrivateProcesses, [])
+  assert.deepEqual(capture.transforms ?? [], [], 'Accepted images use the unchanged product stylesheet')
+  assert.deepEqual(capture.frames.map(frame => frame.file).sort(), [
+    ...['dark', 'light'].flatMap(theme => [960, 360].map(width => `reference-conversation-${theme}-${width}.png`)),
+    'reference-user-messages.png', 'reference-inbox-original.png', 'reference-outbox.png'
+  ].sort(), 'Every original Conversation and Mailbox face is represented')
+  const review = await json(local(receipt.reviewPath))
+  assert.equal(review.verdict, 'pass'); assert.equal(review.independent, true); assert.equal(review.openedAll, true)
+  assert.ok(typeof review.reviewer === 'string' && review.reviewer.length > 0)
+  assert.equal(review.captureSha256, receipt.capture.sha256)
+  assert.deepEqual(review.frames.map(frame => [frame.path, frame.sha256]).sort(), capture.frames.map(frame => [frame.path, frame.sha256]).sort())
+  for (const frame of review.frames) { assert.equal(frame.verdict, 'pass'); assert.equal(sha(await readFile(frame.path)), frame.sha256) }
+  const changed = execFileSync('git', ['diff', receipt.sourceCommit, 'HEAD', '--name-only', '--', ...Object.keys(receipt.sources)], { cwd: root, encoding: 'utf8' }).trim()
+  assert.equal(changed, '', 'The accepted owning sources stayed unchanged after their commit')
+  console.log(JSON.stringify({ passed: true, sourceCommit: receipt.sourceCommit, tests: baseline.cases.length, mutants: receipt.mutations.length + 1, images: capture.frames.length,
+    boundary: capture.boundary }))
 }
 const args = process.argv.slice(2)
 assert.ok(args.length === 0 || args.length === 1 && args[0] === '--prepare', 'Run bare to verify, or --prepare to run tests, mutations and the private product scene')
