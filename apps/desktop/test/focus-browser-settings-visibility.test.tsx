@@ -74,7 +74,7 @@ it.skipIf(process.env.AGENTMUX_BROWSER_SETTINGS_SOURCE_OBSERVATION !== '1').each
   const tab = createWorkbenchTab('settings-visibility-tab', { regionId: 'agent-region', workspaceId: 'workspace-demo',
     kind: 'agent', phase: 'attached', sessionId: session.id })
   tab.regions['browser-region'] = { kind: 'browser', regionId: 'browser-region', workspaceId: tab.workspaceId,
-    browserId, id: browserId, navigationId: 'settings-visibility-navigation', profileId: 'profile',
+    browserId, id: browserId, navigationId: 'settings-visibility-navigation', profileId: 'profile', mode: 'normal',
     url: 'https://example.test/unchanged', title: 'Original browser', loading: false, canGoBack: false,
     canGoForward: false, viewport: 'responsive', error: null, driving: false, appLinkPrompt: null }
   tab.layout = splitWorkbenchRegion(tab.layout, 'agent-region', 'right', 'browser-region')
@@ -82,7 +82,7 @@ it.skipIf(process.env.AGENTMUX_BROWSER_SETTINGS_SOURCE_OBSERVATION !== '1').each
   const moteId = 'settings-foreground-mote-browser'
   const mote = { ...createWorkbenchTab('settings-foreground-mote-tab', {
     kind: 'browser', regionId: 'mote-browser-region', workspaceId: SCRATCH_WORKSPACE_ID,
-    browserId: moteId, id: moteId, navigationId: 'mote-original-navigation', profileId: 'profile',
+    browserId: moteId, id: moteId, navigationId: 'mote-original-navigation', profileId: 'profile', mode: 'normal',
     url: 'https://example.test/mote-unchanged', title: 'Foreground Mote browser', loading: false,
     canGoBack: false, canGoForward: false, viewport: 'responsive', error: null, driving: false, appLinkPrompt: null
   }), topicId: moteTopicId }
