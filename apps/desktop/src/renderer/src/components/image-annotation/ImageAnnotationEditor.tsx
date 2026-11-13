@@ -16,6 +16,8 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint,
+  createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
+  DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
 import { selectionHandles, hitSelectionHandle, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
@@ -29,12 +31,23 @@ const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
 const SaveIcon = icon('action.save'), PinIcon = icon('action.pin')
 type Size = { width: number; height: number; dpr: number }
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
-type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId }
+// `bubble` drags only a magnifier's bubble; its source region and leader origin stay in place.
+type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId; bubble?: true }
 // Region marks need travel; a press that moves less than this many screen pixels creates none of them.
 type AnnotationOutput = (input: ImageAnnotationInput) => ImageAnnotationOutputResult
 // The last tool and style carry over to the next editor in this Renderer.
-let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number } = {
-  tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32 }
+let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number
+  blurRadius: number; spotlightDim: number; calloutZoom: number } = {
+  tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32,
+  blurRadius: DEFAULT_BLUR_RADIUS, spotlightDim: DEFAULT_SPOTLIGHT_DIM, calloutZoom: DEFAULT_CALLOUT_ZOOM }
+// The strength each pointing mark offers, in its own unit: blur radius in screen pixels, dimming opacity and zoom factor.
+const POINTING_STRENGTHS = {
+  blur: { property: 'radius', style: 'blurRadius', label: 'Strength', name: 'Blur strength', range: BLUR_RADIUS_RANGE, step: 1, scaled: true, unit: (value: number) => value + 'px' },
+  spotlight: { property: 'dim', style: 'spotlightDim', label: 'Dim', name: 'Spotlight dimming', range: SPOTLIGHT_DIM_RANGE, step: 0.05, scaled: false, unit: (value: number) => Math.round(value * 100) + '%' },
+  callout: { property: 'zoom', style: 'calloutZoom', label: 'Zoom', name: 'Magnifier zoom', range: CALLOUT_ZOOM_RANGE, step: 0.5, scaled: false, unit: (value: number) => value + '×' }
+} as const
+type PointingKind = keyof typeof POINTING_STRENGTHS
+const isPointingKind = (kind: string): kind is PointingKind => Object.hasOwn(POINTING_STRENGTHS, kind)
 // Inline text and note inputs keep Enter as a newline; modifier Enter finishes and Escape abandons the edit.
 function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish: (value: string) => void, abandon: () => void) {
   event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
@@ -43,7 +56,7 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
 }
 /** The marks, selection and tool a capture editor hands to a separate window editor on Expand; color and other styles carry over through the editors' shared in-process style memory. */
 export type CaptureAnnotationHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
-const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
+const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover', 'blur', 'spotlight', 'callout'])
 // Selection handle hit radius and painted diameter, in frame CSS pixels.
 const CROP_HANDLE_HIT = 6, CROP_HANDLE_SIZE = 7
 // The loupe magnifies a square of frozen pixels around the pointer into a grid of cells, in loupe CSS pixels.
@@ -136,6 +149,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const [color, setColor] = useState(lastStyle.color), [width, setWidth] = useState(lastStyle.width)
   const [fontSize, setFontSize] = useState(lastStyle.fontSize), [blockSize, setBlockSize] = useState(lastStyle.blockSize)
   const [pixelateMode, setPixelateMode] = useState(lastStyle.pixelateMode), [brushWidth, setBrushWidth] = useState(lastStyle.brushWidth)
+  const [strengths, setStrengths] = useState({ blurRadius: lastStyle.blurRadius, spotlightDim: lastStyle.spotlightDim, calloutZoom: lastStyle.calloutZoom })
   const [textRows, setTextRows] = useState(2)
   const [noteDraft, setNoteDraft] = useState(''), [noteEditor, setNoteEditor] = useState<string | null>(null), [panHeld, setPanHeld] = useState(false)
   const [view, setView] = useState<AnnotationView>({ scale: 1, x: 0, y: 0 }), [fitted, setFitted] = useState(true)
@@ -310,7 +324,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     target.strokeStyle = 'rgba(0, 0, 0, .6)'; target.strokeRect(centre - .5, centre - .5, LOUPE_CELL + 1, LOUPE_CELL + 1)
     target.strokeStyle = '#ffffff'; target.strokeRect(centre + .5, centre + .5, LOUPE_CELL - 1, LOUPE_CELL - 1)
   }, [loupeSample])
-  useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth])
+  useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, ...strengths } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, strengths])
 
   function fitImage() { resetGesture(); setFitted(true); requestView(fitView()) }
   function zoomTo(next: number, anchor = { x: size.width / 2, y: size.height / 2 }) {
@@ -463,7 +477,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       setSelectedId(shape?.id ?? null)
       if (shape || tool === 'select') {
         event.currentTarget.setPointerCapture(event.pointerId)
-        if (shape) { transformRef.current = { original: shape, start: at, ...(handle ? { handle } : {}) }; currentGestureRef.current = shape }
+        const bubble = !handle && shape?.kind === 'callout' && rectContains(calloutBubble(shape), at)
+        if (shape) { transformRef.current = { original: shape, start: at, ...(handle ? { handle } : {}), ...(bubble ? { bubble: true as const } : {}) }; currentGestureRef.current = shape }
         schedulePaint(); return
       }
     }
@@ -485,6 +500,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           ? { id, kind: 'pixelate-brush', color, width: brushWidth / fit, blockSize: blockSize / fit, points: [at] }
           : { id, kind: 'pixelate', color, blockSize: blockSize / fit, from: at, to: at }
         : tool === 'cover' ? { id, kind: 'cover', color: '#111827', from: at, to: at }
+        : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius / fit)
+        : tool === 'spotlight' ? createSpotlightShape(id, '#ffffff', at, at, strengths.spotlightDim)
+        : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom)
         : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: Math.max(0, ...notes.map(note => note.number)) + 1, note: '', from: at, to: at }
         : { id, kind: tool, color, width: stroke, from: at, to: at }
     }
@@ -493,7 +511,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function updateGesture(at: ScreenshotPoint, constrained = false) {
     const transform = transformRef.current
     if (transform) currentGestureRef.current = transform.handle ? resizeShapeFromHandle(transform.original, transform.handle, at, constrained)
-      : moveShape(transform.original, at.x - transform.start.x, at.y - transform.start.y)
+      : transform.bubble && transform.original.kind === 'callout'
+        ? { ...transform.original, at: { x: transform.original.at.x + at.x - transform.start.x, y: transform.original.at.y + at.y - transform.start.y } }
+        : moveShape(transform.original, at.x - transform.start.x, at.y - transform.start.y)
     else if (cropRef.current) cropRef.current.at = at
     else if (eraseRef.current) {
       const from = lastErasePoint.current ?? at
@@ -509,6 +529,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {
         const last = shape.points.at(-1)
         if (!last || last.x !== at.x || last.y !== at.y) shape.points.push(at)
+      } else if (shape.kind === 'callout') {
+        // While its source is drawn, the bubble keeps the default place beside it; after release it moves on its own.
+        currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom)
       } else shape.to = constrained && (shape.kind === 'rect' || shape.kind === 'ellipse' || shape.kind === 'arrow')
         ? constrainedEndpoint(shape.kind, shape.from, at) : at
     }
@@ -618,10 +641,24 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (selected && property in selected) edit(doc => replaceShape(doc, { ...selected, [property]: property === 'color' ? value : Number(value) / viewRef.current.scale } as ScreenshotShape))
   }
   const properties = selected
+  // A selected pointing mark shows and changes its own strength; otherwise the control sets the next one's.
+  const strengthKind = properties ? (isPointingKind(properties.kind) ? properties.kind : null) : isPointingKind(tool) ? tool : null
+  const strength = strengthKind && POINTING_STRENGTHS[strengthKind]
+  const strengthValue = !strength ? 0 : properties && properties.kind === strengthKind
+    ? Number(((properties as unknown as Record<string, number>)[strength.property]! * (strength.scaled ? scale : 1)).toFixed(2)) : strengths[strength.style]
+  function setStrength(value: number) {
+    if (!strength) return
+    setStrengths(current => ({ ...current, [strength.style]: value }))
+    if (properties && properties.kind === strengthKind) {
+      const next = { ...properties, [strength.property]: strength.scaled ? value / viewRef.current.scale : value } as ScreenshotShape
+      edit(doc => replaceShape(doc, next))
+    }
+  }
   const propertyColor = properties?.color ?? color
   const customColor = propertyColor.length === 4 ? '#' + propertyColor.slice(1).split('').map(value => value + value).join('') : propertyColor
-  const showColor = properties ? !isScreenshotMask(properties) : !['select', 'crop', 'pixelate', 'cover', 'erase', 'pan'].includes(tool)
-  const showWidth = showColor && (properties ? properties.kind !== 'text' : tool !== 'text' && tool !== 'note')
+  // Masks and the spotlight paint fixed colors; a magnifier's color is its frame and leader line.
+  const showColor = properties ? !isScreenshotMask(properties) && properties.kind !== 'spotlight' : !['select', 'crop', 'pixelate', 'cover', 'blur', 'spotlight', 'erase', 'pan'].includes(tool)
+  const showWidth = showColor && (properties ? properties.kind !== 'text' && properties.kind !== 'callout' : tool !== 'text' && tool !== 'note' && tool !== 'callout')
   const showFont = properties ? properties.kind === 'text' : tool === 'text'
   const displayedWidth = Number((properties && 'width' in properties ? properties.width * scale : width).toFixed(2))
   const displayedFont = Number((properties?.kind === 'text' ? properties.fontSize * scale : fontSize).toFixed(2))
@@ -642,6 +679,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       {showColor ? <label className="image-annotation-editor__custom-color" title="Choose an opaque annotation color"><input type="color" aria-label="Custom color" value={customColor} disabled={busy} onChange={event => setProperty('color', event.target.value)} /><span>Custom</span></label> : null}
       {showWidth ? <label>Width<select aria-label="Stroke width" value={displayedWidth} disabled={busy} onChange={event => setProperty('width', Number(event.target.value))}>{widthOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {showFont ? <label>Size<select aria-label="Text size" value={displayedFont} disabled={busy} onChange={event => setProperty('fontSize', Number(event.target.value))}>{fontOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
+      {strength ? <label>{strength.label}<input type="range" aria-label={strength.name} min={strength.range.min} max={strength.range.max} step={strength.step}
+        value={strengthValue} disabled={busy} onChange={event => setStrength(Number(event.target.value))} /><output>{strength.unit(strengthValue)}</output></label> : null}
       {tool === 'pixelate' ? <>
         <div className="image-annotation-editor__mode" role="group" aria-label="Pixelation mode">
           <button type="button" aria-pressed={pixelateMode === 'region'} disabled={busy} onClick={() => setPixelateMode('region')}>Region</button>
@@ -707,7 +746,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const bar = barShown ? placement : null
     const chip = shown && placement ? captureSizeChipPlacement(shown, measured.chip, placement.side, frame) : null
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
-    const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
+    const hasProperties = showColor || showWidth || showFont || tool === 'pixelate' || strength !== null
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
     const hint = locked ? 'Selecting on another display · Esc to cancel'
       : !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
