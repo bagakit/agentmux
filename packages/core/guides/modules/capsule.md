@@ -1,7 +1,7 @@
 ---
-summary: "Durable local pages, isolated or injected display, and retained page interactions"
+summary: "Durable local pages, conversation display and page questions the person answers"
 roles: "Agents publishing local page artifacts and authorized people managing their pages"
-when: "Preserve, inspect, open, update or diagnose a generated local page across restarts"
+when: "Publish, open or diagnose a generated local page, or ask the person to compare, choose or fill something on a page"
 ---
 
 # capsule
@@ -12,50 +12,13 @@ defaults, stable endpoint and retained operations. A Capsule ID identifies conte
 Browser, Tab or Region identifies its display. Names, paths, ports, producer source fields
 and amux links do not authenticate a caller or grant input permission.
 
-The Capsule runtime is a fixed independent process carried by an ordinary ctxmux Run.
-Core owns its durable running/stopped intent, exact Run binding and keepalive; the runtime
-owns content and HTTP. Bare headless Core provides this same capability. Closing the App
-or stopping Core only disconnects management; a healthy service continues serving.
-Existing absolute content/state paths stay with their original execution Host, including
-namespaces inside an App data directory. Independence never means opening an empty library.
-
-Use amux capsule runtime inspect to read revision, desired intent, original Run, actual
-runtime identity and any recovery issue. Pass --input FILE with {operationId} to inspect one
-original management command, including after another intent or Run generation. Inspection and page/configuration/interaction reads,
-including original-operation queries, do not start or stop a service, replace an ended Run,
-or save a binding. Prepared work remains starting/stopping; unknown dispatch stays unknown.
-Existing keepalive owns convergence separately. To explicitly
-start, use runtime start --input FILE with {operationId,expectedRevision}; to stop, use
-runtime stop --input FILE with {operationId,expectedRevision,expectedRun:{runId}|null}.
-Use exactly the revision and Run from inspection. Stop persists before the native effect;
-ordinary page reads and keepalive cannot undo it. A timeout leaves the original operation
-and Run unconfirmed: inspect them, do not resubmit Start/Stop or mint a replacement ID.
-The original result retains its first failure and structured creation/storage diagnostics.
-Only an exact not_applied result permits a new explicit command with a fresh operationId
-and the current revision. Reads and keepalive never retry that refused command. A missing
-Native creation mapping or receipt remains unknown. Native creation alone does not confirm
-service readiness; a late result cannot undo a later Stop or rewrite confirmed history.
-Native process readiness, runtime handshake, page HTTP and Browser display are distinct.
-
-Only an explicit first capsule create or runtime start establishes running intent. Other
-page, configuration and interaction operations, including original-operation queries, on
-an unconfigured namespace return CAPSULE_RUNTIME_UNCONFIGURED with an explicit Start
-recovery; they create no binding or service Run. Runtime stop may persist stopped intent
-even before a first Start. Existing saved running intent still permits original-Run
-recovery and keepalive.
-
-On a remote Core, paths and 127.0.0.1 refer to that execution Host. The existing authorized
-Core transport can manage the service; it does not create a tunnel or authorize a public
-listener. Without a confirmed presentation route the page remains saved and serving on
-its Host while remote Browser display is unavailable. A Toolkit TUI custom kit may wrap
-these same management commands. Its own tool execution/Run remains separate; closing or
-stopping that tool does not stop the Capsule service.
-
 Use this module for static HTML, assets, existing frontend build output and explicitly
-selected SPA routing. It does not run a build command, backend or temporary development
-server. Managed storage copies content into the Host's durable library. Path storage
-follows an exact external directory; missing source content is reported and never replaced
-with an empty page. Storage mode and isolated/injected display mode are independent.
+selected SPA routing. It does not run a build command, backend or development server.
+Managed storage copies content into the Host's durable library; path storage follows an
+exact external directory and reports missing content instead of serving an empty page.
+Storage mode and isolated/injected display mode are independent.
+
+## Publish and open a page
 
 Read the matching leaf help for the exact JSON input:
 - amux capsule ls and capsule inspect discover original IDs and current observations.
@@ -67,85 +30,82 @@ Read the matching leaf help for the exact JSON input:
 - amux capsule update and config update require the original expectedRevision. Creation
   defaults and a changed new-content root do not move or reinterpret existing pages.
 - amux capsule open --input FILE requests display of {capsuleId,operationId,placement?}.
-  Read amux capsule open --help for the existing placement JSON and original result reads.
   Before opening, read amux space --skill and browser --skill. With an attached Region,
   normally pass an explicit readable split in the same Tab instead of relying on the
   Desktop's new-Tab default when placement is omitted; preserve the user's new-Tab/tool
-  choice and real layout exceptions. Reuse the confirmed Browser. Presentation, navigation
-  and keyboard input focus are separate facts; retain the original page and input. Available rendering returns
-  exact Browser/Tab/Region IDs, not a created/reused assertion. An unavailable presentation
-  can leave the original HTTP page available. Open never confirms Agent delivery.
+  choice and real layout exceptions. Reuse the confirmed Browser. The result returns exact
+  Browser/Tab/Region IDs; it confirms presentation, not Agent delivery.
 - amux capsule operation inspect --input FILE reads {operationId} without replaying it.
 
-To display a saved page in an AgentMux Desktop conversation, include its actual returned
-amux://capsule/ORIGINAL_ID or [Page title](amux://capsule/ORIGINAL_ID). Ordinary references
-automatically display the page; ![Page title](amux://capsule/ORIGINAL_ID) is also supported.
-A paragraph containing only Capsule references displays the bounded pages directly.
-In a sentence the original link stays in the prose and its page follows that paragraph;
-headings, lists, quotes, tables and footnotes likewise keep their text and show the page
-after its owning block. Repeated references to the same URI in one block share one page.
-Code and math stay literal. Reading uses the original message identity and page owner,
-not a second copy of the author's Markdown or a new page publication.
-For new pages intended for conversation replies, prefer explicit mode "injected" and
-theme "follow" in capsule create. Use the granted App theme variables and respond to
-theme changes so typography, colors and light/dark appearance fit the conversation.
-Choose "isolated" when independent styling or isolation is needed. This recommendation
-does not change creation defaults, convert existing pages or grant communication/input
-capabilities; keep the page's actual authorization and the person's explicit confirmation.
-The Desktop reconnects an existing native page while its card is visible, retaining that
-document even if later service observation fails. A first display reads the original Capsule
-and displays an already-serving page in its original isolated/injected native container. Reading a reply never Starts a
-stopped/unconfigured service. Hide releases presentation resources through the original
-Browser owner; it does not delete the page or auto-Close a used document. Expand and
-Open in Browser provide larger reading surfaces. Injected page questions still require the
-person's explicit confirmation in trusted App chrome. Shared read-only/document readers and
-clients without this adapter keep the title/address. External native chat cards use their own
-formatters and do not execute this page syntax; include an ordinary Capsule object link when
-sharing there. A declaration confirms neither display nor permission.
+To show a saved page in an AgentMux Desktop conversation, write its returned
+amux://capsule/ID, [Title](amux://capsule/ID) or ![Title](amux://capsule/ID). A paragraph
+of only page references shows the pages in place; in a sentence, heading, list, quote,
+table or footnote the text stays and the page follows its block. One URI repeated in a
+block shows one page. Code and math stay literal. Read-only and external chat clients keep
+the link; share an ordinary link there. For conversation pages prefer "mode":"injected" and
+"theme":"follow" so the page uses the App's theme variables; choose isolated for
+independent styling. The card loads only while visible and never starts a stopped service;
+the person can Hide, Expand or Open in Browser, and hiding never deletes the page or draft.
 
-Isolated pages have no App theme or communication channel. Injected pages receive only
-the capabilities actually granted by their Host. Theme inheritance does not authorize
-messaging; neither mode exposes Electron, Node or arbitrary RPC. A page SDK can prepare a
-page-business question and save its draft. Only the trusted App input owner can confirm
-the actual person's explicit submission to the original Agent target. An Agent, page
-script, source field or HTTP request cannot self-author Human or answer a Provider-native
-permission/question through this module.
+## Ask the person on a page
 
-In the App's injected Browser, window.capsule exposes capabilities(), theme(), request(),
-read(), saveDraft(), inspectOperation(), createOperationId() and onThemeChanged(). Before
-each mutation, retain an ID from createOperationId() and pass it explicitly to
-request(question, draft, operationId) or
-saveDraft(interactionId, expectedRevision, draft, operationId). Use undefined for an absent
-initial draft. Persist the ID first when recovery must survive a page reload. Missing IDs
-are rejected before dispatch; the preload never creates an implicit replacement ID.
-After an unknown result, query inspectOperation(originalId). Error properties and text
-are not a transport for original identity across ContextBridge.
-The SDK derives its page and target from the exact
-native document; do not supply a principal or recipient. It has no reply/approval method.
-The person reviews the original question and answer in the App's Questions control and
-explicitly confirms there. Host/Core's capsule.input is a narrow adapter protocol; it has
-no ordinary CLI authoring command and requires that live native confirmation for prepare
-and submit. A local transport identity or a saved prepared envelope alone grants none.
+A page question lets the person look, compare, choose or fill in, then send one confirmed
+answer back to the page's recipient Agent. Prefer it to a chat question for visual
+candidates, side-by-side layouts, long option lists or a small form. Ask in chat for one
+short text answer, for Provider-native permission or question answers, and for secrets:
+the answer arrives as ordinary input text.
 
-Keep page/request/answer identities and the original operation after an unknown response.
-For a stranded service creation, runtime inspect exposes recoveryTarget only when the
-exact original binding is available. Its runtime is the recorded original Native lineage;
-null means the older binding did not record that fact. Establish the exact original
-owner from authoritative original records before supplying it; the current listener
-identity cannot certify the old owner. Read runtime
-start --help, then explicitly start with a fresh operationId, current expectedRevision
-and that unchanged recoveryTarget as recovery. Core records the original retirement
-intent before invoking Native. A matching retained Run reconnects without Stop; only
-a confirmed durable retirement fence permits a new creation key in the same Capsule
-namespace. The old unknown Start remains historical unknown. Preserve the recovery
-operationId after an unknown reply: runtime inspect with that ID is read-only; repeating
-only the identical recovery command observes its original fence and may explicitly
-continue that same retry-safe monotonic retirement intent. Native alone resolves its
-original physical owner. not_retired never certifies the old Start was unapplied and
-never authorizes repeating Start or inventing a new recovery operation. No inspection retires a creation, changes intent or saves a binding.
-Read that same operation and its actual delivery receipt before deciding a next action;
-do not automatically resend an answer, open another Browser or bind a newer Run. Saved
-answers, submitted input and the Agent's adoption or task completion are separate facts.
-Service, theme, diagnostic or input failures retain the page, draft, original workface and
-healthy Agent. Capsule removal and content deletion are explicit, distinct effects;
-external path content is never deleted by Capsule.
+1. capsule create. The recipient defaults to you, the authenticated calling Agent. Pass
+   target {hostId,agentSessionId} only for another exact Session. It is fixed at creation;
+   a page created without a recipient cannot gain one, so create a new page.
+2. Before sharing the link, ask with capsule interaction request
+   {capsuleId,operationId,question,draft?}. The returned interaction must have a target.
+   Questions work on isolated and injected pages; on an injected page, page script may also
+   ask with window.capsule.request() after checking capabilities().interaction.
+3. Post amux://capsule/ID and tell the person to answer through the page's Questions
+   button. End your turn and keep your Session running; do not poll.
+4. The person edits and confirms in trusted App chrome. It arrives as your next input:
+   <amux:capsule-answer version="1">
+   {"capsuleId":"PAGE","interactionId":"QUESTION","question":"Which icon?","answer":"B"}
+   </amux:capsule-answer>
+   It answers only that question. capsule interaction inspect with those IDs reads its
+   status, answer and reply.delivery.
+
+A form page can write the person's selections into the draft with saveDraft(); the person
+still reviews and confirms. The Questions list refreshes when the card is visible or opened.
+If your Run is not running when the person confirms, the answer is kept and the App reports
+SESSION_NOT_RUNNING. An Agent, page script, source field or HTTP request
+cannot self-author Human input or answer a Provider-native permission or question:
+capsule interaction reply is refused for Agents and pages. Saving, submitting and the Agent adopting an answer are
+separate results.
+
+## Page script on injected pages
+
+Isolated pages get no App theme and no page script API. Injected pages get only what their
+Host grants; neither mode exposes Electron, Node or arbitrary RPC. In the App's injected
+Browser, window.capsule exposes capabilities(), theme(), request(), read(), saveDraft(),
+inspectOperation(), createOperationId() and onThemeChanged(). Before each mutation keep an
+ID from createOperationId() and pass it to request(question, draft, operationId) or
+saveDraft(interactionId, expectedRevision, draft, operationId); use undefined for no draft.
+Persist the ID first when recovery must survive a reload. Missing IDs are rejected before
+dispatch. After an unknown result, call inspectOperation(originalId); never mint a new ID
+or resend. The SDK derives its page and target from the exact native document and has no
+reply or approval method.
+
+## Service and recovery
+
+The Capsule runtime is one independent service carried by an ordinary ctxmux Run. Core
+keeps its running/stopped intent and keepalive; headless Core provides the same. Closing
+the App or stopping Core only detaches management; a healthy service keeps serving. Paths
+and 127.0.0.1 belong to the execution Host; a remote Core does not create a tunnel, and
+remote Browser display needs a confirmed presentation route. Only the first capsule create
+or an explicit runtime start sets running intent; other calls on an unconfigured namespace
+return CAPSULE_RUNTIME_UNCONFIGURED. Reads never start, stop or rebind the service. For
+start, stop, unknown results and stranded-creation recovery, read capsule runtime inspect,
+start and stop --help and use their exact revision, Run and recoveryTarget. A Toolkit TUI
+kit may wrap these commands; closing that tool does not stop the service.
+
+Keep page, request and answer identities and the original operation after an unknown
+response; read that operation before any next action. Service, theme or input failures
+keep the page, draft, original workface and healthy Agent. Capsule removal and content
+deletion are explicit, distinct effects; external path content is never deleted.
