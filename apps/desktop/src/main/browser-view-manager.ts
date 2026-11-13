@@ -2,6 +2,7 @@ import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
 import { parseBrowserTaskImportInput, type BrowserTaskImportInput, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
+import type { BrowserProfileActivityCheckpoint, BrowserProfileActivityGap } from './browser-profile-store.js'
 import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../shared/browser-task-creation.js'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
@@ -388,6 +389,9 @@ export interface BrowserProfileResolver {
   prepareSession?(profileId: string): Promise<void> | undefined
   environmentApplication?(profileId: string): BrowserProfileEnvironmentApplication | undefined
   onEnvironmentApplicationChange?(listener: (profileId: string) => void): () => void
+  readonly activityObserverId?: string
+  activitySource?(profileId: string): string | null
+  recordActivity?(profileId: string, checkpoint: BrowserProfileActivityCheckpoint): Promise<void>
 }
 
 /**
@@ -446,6 +450,14 @@ export function normalizeBrowserUrl(value: string): string {
   }
   return assertAllowedBrowserUrl(resolveBrowserAddress(input))
 }
+
+type ProfileNativeObservation = {
+  profileId: string; previousObserverId: string | null; sequence: number; unionMs: number;
+  tick: number; observedAt: number; lastUsedAt: number; markers: Set<ProfileNativeMarker>;
+  gaps: Map<string, BrowserProfileActivityGap>; pending?: BrowserProfileActivityCheckpoint;
+  writing?: Promise<void>; warning?: string
+}
+type ProfileNativeMarker = { view: WebContentsView; observation: ProfileNativeObservation; observing: boolean; gap?: BrowserProfileActivityGap }
 
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
@@ -599,7 +611,8 @@ export class BrowserViewManager {
     const sitePermissions = this.sitePermissionState(entry)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
     const environmentWarning = this.profileEnvironmentWarning(entry.storage)
-    const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, !available
+    const activityWarning = entry.storage.mode === 'normal' && entry.storage.profileId ? this.profileObservations.get(entry.storage.profileId)?.warning : undefined
+    const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, activityWarning, !available
       ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
         ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join('\n')
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, ...(profile ? { profile } : {}), status: available ? 'ready' : 'unavailable',
@@ -767,6 +780,125 @@ export class BrowserViewManager {
   private readonly taskExecutions = new Map<string, { entry: BrowserEntry; runId: string | undefined; operationId: string | undefined; stopRequested: boolean }>()
   private readonly unsubscribeTaskAssets: (() => void) | undefined
   private readonly unsubscribeProfileEnvironment: (() => void) | undefined
+
+  // These markers refer to the original native incarnations; current→closing keeps the same marker.
+  private readonly profileNativeMarkers = new WeakMap<WebContentsView, ProfileNativeMarker>()
+  private readonly profileObservations = new Map<string, ProfileNativeObservation>()
+  private readonly activeProfileObservations = new Set<ProfileNativeObservation>()
+  private profileActivityTimer: ReturnType<typeof setInterval> | undefined
+  private profileActivityFinalized = false
+
+  private activityTime(): { monotonic: number; wall: number } { return { monotonic: performance.now(), wall: Date.now() } }
+
+  private advanceProfileActivity(observation: ProfileNativeObservation, monotonic: number): void {
+    if ([...observation.markers].some(marker => marker.observing)) observation.unionMs += Math.max(0, monotonic - observation.tick)
+    observation.tick = monotonic
+  }
+
+  private beginProfileActivity(storage: BrowserStorage, view: WebContentsView): void {
+    if (storage.mode !== 'normal' || !storage.profileId || 'capsule' in storage || !this.profiles.recordActivity || !this.profiles.activityObserverId || this.profileActivityFinalized) return
+    if (this.profileNativeMarkers.has(view)) return
+    const now = this.activityTime(), profileId = storage.profileId
+    let observation = this.profileObservations.get(profileId)
+    if (!observation) {
+      observation = { profileId, previousObserverId: this.profiles.activitySource?.(profileId) ?? null, sequence: 0, unionMs: 0,
+        tick: now.monotonic, observedAt: now.wall, lastUsedAt: now.wall, markers: new Set(), gaps: new Map() }
+      this.profileObservations.set(profileId, observation)
+    }
+    this.advanceProfileActivity(observation, now.monotonic)
+    const marker = { view, observation, observing: true }
+    this.profileNativeMarkers.set(view, marker); observation.markers.add(marker); this.activeProfileObservations.add(observation)
+    observation.lastUsedAt = Math.max(observation.lastUsedAt, now.wall); observation.observedAt = Math.max(observation.observedAt, now.wall)
+    this.publishProfileActivity(observation)
+    // Precision/IO cadence only: this timer never controls native admission or ends a page.
+    this.profileActivityTimer ??= setInterval(() => this.checkpointProfileActivity(), 5_000)
+    this.profileActivityTimer.unref?.()
+  }
+
+  private interruptProfileActivity(view: WebContentsView): void {
+    const marker = this.profileNativeMarkers.get(view)
+    if (!marker?.observing || this.profileActivityFinalized) return
+    const observation = marker.observation, now = this.activityTime()
+    // A crash receipt does not establish how long the last unobserved suffix was healthy.
+    marker.observing = false
+    if ([...observation.markers].some(other => other.observing)) this.advanceProfileActivity(observation, now.monotonic)
+    else observation.tick = now.monotonic
+    const gap: BrowserProfileActivityGap = { id: mintObjectId(), after: observation.observedAt, reason: 'renderer-gone' }
+    marker.gap = gap; observation.gaps.set(gap.id, gap); this.publishProfileActivity(observation)
+  }
+
+  private resumeProfileActivity(view: WebContentsView): void {
+    const marker = this.profileNativeMarkers.get(view)
+    if (!marker || marker.observing || this.profileActivityFinalized || view.webContents.isDestroyed() || view.webContents.isCrashed()) return
+    const observation = marker.observation, now = this.activityTime()
+    this.advanceProfileActivity(observation, now.monotonic)
+    if (marker.gap) { marker.gap.until = now.wall; delete marker.gap }
+    marker.observing = true; observation.lastUsedAt = Math.max(observation.lastUsedAt, now.wall); observation.observedAt = Math.max(observation.observedAt, now.wall)
+    this.publishProfileActivity(observation)
+  }
+
+  private endProfileActivity(view: WebContentsView): void {
+    const marker = this.profileNativeMarkers.get(view)
+    if (!marker) return
+    const observation = marker.observation, now = this.activityTime()
+    this.advanceProfileActivity(observation, now.monotonic)
+    if (marker.gap) marker.gap.until = now.wall
+    observation.markers.delete(marker); this.profileNativeMarkers.delete(view)
+    if (!observation.markers.size && !observation.pending) this.activeProfileObservations.delete(observation)
+    observation.observedAt = Math.max(observation.observedAt, now.wall)
+    if (!this.profileActivityFinalized) this.publishProfileActivity(observation)
+  }
+
+  /** Sample only the Profiles with native observations or an unconfirmed original checkpoint. */
+  checkpointProfileActivity(): void {
+    if (this.profileActivityFinalized) return
+    const now = this.activityTime()
+    for (const observation of this.activeProfileObservations) {
+      for (const marker of observation.markers) {
+        if (marker.observing && (marker.view.webContents.isDestroyed() || marker.view.webContents.isCrashed())) this.interruptProfileActivity(marker.view)
+      }
+      this.advanceProfileActivity(observation, now.monotonic)
+      const observing = [...observation.markers].some(marker => marker.observing)
+      if (observing) observation.lastUsedAt = Math.max(observation.lastUsedAt, now.wall)
+      observation.observedAt = Math.max(observation.observedAt, now.wall)
+      this.publishProfileActivity(observation)
+    }
+  }
+
+  private publishProfileActivity(observation: ProfileNativeObservation): void {
+    if (this.profileActivityFinalized || !this.profiles.recordActivity || !this.profiles.activityObserverId) return
+    observation.pending = { observerId: this.profiles.activityObserverId, previousObserverId: observation.previousObserverId,
+      sequence: ++observation.sequence, unionMs: Math.floor(observation.unionMs), observedAt: observation.observedAt,
+      lastUsedAt: observation.lastUsedAt, active: [...observation.markers].some(marker => marker.observing), gaps: [...observation.gaps.values()].map(gap => ({ ...gap })) }
+    this.activeProfileObservations.add(observation)
+    if (observation.writing) return
+    observation.writing = (async () => {
+      while (observation.pending) {
+        const checkpoint = observation.pending; delete observation.pending
+        try {
+          await this.profiles.recordActivity!(observation.profileId, checkpoint)
+        } catch {
+          const newer = observation.pending as BrowserProfileActivityCheckpoint | undefined
+          if (!newer || newer.sequence < checkpoint.sequence) observation.pending = checkpoint
+          observation.warning = 'Observed Browser time could not be saved. Confirmed history is kept and Browser controls remain available. Keep this page open to retry the original activity observation.'
+          try { this.refreshProfileProxySignIn(observation.profileId) } catch { console.warn('Browser activity notice delivery is unconfirmed; its original observation remains available.') }
+          break
+        }
+        const warned = observation.warning; delete observation.warning
+        if (warned) { try { this.refreshProfileProxySignIn(observation.profileId) } catch { console.warn('Saved Browser activity notice delivery is unconfirmed; its confirmed checkpoint remains readable.') } }
+      }
+    })().finally(() => {
+      delete observation.writing
+      if (!observation.pending && !observation.markers.size) this.activeProfileObservations.delete(observation)
+    })
+  }
+
+  /** Drain only confirmed native observations; a still-open closing owner remains an unknown suffix after restart. */
+  async flushProfileActivity(finalize = false): Promise<void> {
+    this.checkpointProfileActivity()
+    await Promise.all([...this.profileObservations.values()].flatMap(observation => observation.writing ? [observation.writing] : []))
+    if (finalize) { this.profileActivityFinalized = true; if (this.profileActivityTimer) clearInterval(this.profileActivityTimer); this.profileActivityTimer = undefined }
+  }
 
   constructor(
     private readonly window: BrowserWindow,
@@ -1969,6 +2101,7 @@ export class BrowserViewManager {
         this.emit(entry)
       })
       if (this.taskAssets) void this.getTaskAssets(id).catch(() => {})
+      this.beginProfileActivity(storage, view)
       return entry
     } catch (error) {
       this.entries.delete(id)
@@ -2294,6 +2427,7 @@ export class BrowserViewManager {
       if (entry.initialDocument) entry.initialDocument.superseded.abort()
       entry.initialDocument = null
       entry.storage = { mode: 'normal', profileId, partition }
+      this.beginProfileActivity(entry.storage, candidate)
       entry.requestedUrl = candidate.webContents.getURL() || url
       entry.navigationId = pending.navigationId
       entry.committedNavigationId = null
@@ -4368,6 +4502,8 @@ export class BrowserViewManager {
   }
 
   dispose(): void {
+    if (this.profileActivityTimer) clearInterval(this.profileActivityTimer)
+    this.profileActivityTimer = undefined
     const previousClosures = this.closingOwners(), cleanupErrors: unknown[] = [], privateClosures = new Set<string>()
     this.presentationDisposed = true
     this.invalidatePresentationRequester()
@@ -4686,7 +4822,9 @@ export class BrowserViewManager {
       entry.error = `${errorDescription} (${errorCode})`
       this.emit(entry)
     })
+    contents.on('dom-ready', () => this.resumeProfileActivity(view))
     contents.on('render-process-gone', (_event, details) => {
+      this.interruptProfileActivity(view)
       this.sitePermissions?.cancel(entry.id, contents)
       if (!this.owns(entry, view)) return
       entry.certificateDecision?.settle(false)
@@ -4699,6 +4837,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      this.endProfileActivity(view)
       this.sitePermissions?.cancel(entry.id, contents)
       if (entry.view === view) entry.certificateDecision?.settle(false)
       this.entriesByContents.delete(contents)
@@ -5102,7 +5241,8 @@ export class BrowserViewManager {
       : entry.activity.warning ?? persistenceWarning
     const sitePermissions = this.sitePermissionState(entry)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
-    const profileWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage)].filter(Boolean).join('\n')
+    const activityWarning = entry.storage.mode === 'normal' && entry.storage.profileId ? this.profileObservations.get(entry.storage.profileId)?.warning : undefined
+    const profileWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage), activityWarning].filter(Boolean).join('\n')
     const warning = this.closingWarning(entry.id, profileWarnings ? appendWarning(currentWarnings, profileWarnings) : currentWarnings || undefined)
     return {
       id: entry.id,

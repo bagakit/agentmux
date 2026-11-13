@@ -1345,9 +1345,12 @@ export type BrowserProfileImportedSource = {
   skippedByReason?: import('./browser-profile-import-skip.js').BrowserProfileCookieSkipCounts
 }
 
+export type BrowserProfileActivity = import('@agentmux/core/control').BrowserProfileActivity
 export type BrowserProfileFolder = import('@agentmux/core/control').BrowserProfileFolder
 
 export type BrowserProfileSummary = {
+  activity?: BrowserProfileActivity
+  revision: string
   id: string
   label: string
   createdAt: number
@@ -1368,7 +1371,7 @@ export type BrowserProfileSummary = {
   agentAccess?: false
 }
 
-export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[] }
+export type BrowserProfileList = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string; tags?: string[]; folderId?: string | null; pinned?: boolean
@@ -2041,11 +2044,11 @@ export type AgentMuxDesktopApi = {
     readProfiles(): Promise<BrowserProfileList>
     /** Main publishes the whole list after every committed change, in revision order. */
     onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
-    updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary>
+    updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary>
     /** Moves only which Profile new Browsers use; it edits no Profile, so it names no revision. */
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
-    copyProfile(profileId: string, label: string, expectedRevision: number): Promise<BrowserProfileSummary>
+    copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary>
     createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>

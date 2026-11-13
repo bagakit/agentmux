@@ -2123,8 +2123,8 @@ export async function registerIpc(args: {
     return await browsers.switchProfile(id, profileId)
   })
   // Every surface renders Main's one committed list; the manager announces each commit once.
-  browserProfiles.onChange(({ revision, profiles, folders }) => {
-    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, profiles, folders })
+  browserProfiles.onChange(({ revision, sequence, profiles, folders }) => {
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders })
   })
   // Profile handlers return their refusals as data so the Renderer keeps each error code.
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
@@ -2133,14 +2133,14 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:readProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
-    return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles(), folders: browserProfiles.listFolders() }
+    return { revision: browserProfiles.listRevision(), sequence: browserProfiles.listSequence(), profiles: browserProfiles.listProfiles(), folders: browserProfiles.listFolders() }
   }))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
-  handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
+  handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: string) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
   handleWithEvent('browser:createProfileFolder', (_event, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.createFolder(label, expectedRevision)))
   handleWithEvent('browser:renameProfileFolder', (_event, folderId: string, label: string, expectedRevision: number) => ipcResult(() => browserProfiles.renameFolder(folderId, label, expectedRevision)))
   handleWithEvent('browser:deleteProfileFolder', (_event, folderId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteFolder(folderId, expectedRevision)))
-  handleWithEvent('browser:updateProfile', (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) =>
+  handleWithEvent('browser:updateProfile', (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: string) =>
     ipcResult(() => browserProfiles.updateProfile(profileId, edit, expectedRevision)))
   handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))
   const profileUsage = createBrowserProfileUsage({
@@ -2595,7 +2595,7 @@ export async function registerIpc(args: {
       { owner: 'native-chrome', dispose: () => nativeChrome.dispose() },
       { owner: 'external-browsers', dispose: () => externalBrowsers.dispose() },
       { owner: 'workbench-native-window-port', dispose: releaseNativeWindowOwner },
-      { owner: 'browsers', dispose: () => browsers.dispose() },
+      { owner: 'browsers', dispose: async () => { try { browsers.dispose() } finally { await browsers.flushProfileActivity(true) } } },
       { owner: 'browser-feedback-preferences', dispose: disposeBrowserFeedbackPreferences },
       { owner: 'browser-agent-retirement', dispose: releaseRetiredBrowserAgents },
       { owner: 'capsule-appearance', dispose: () => { disposeCapsuleAppearance(); nativeTheme.removeListener('updated', updateCapsuleThemes); browsers.capsuleDocumentReady = undefined } },

@@ -1,4 +1,4 @@
-import { mintCapabilityToken } from '@agentmux/core/object-id'
+import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
   BrowserProfileImportSourceSummary,
@@ -13,6 +13,8 @@ import type {
 import {
   browserProfilePartition,
   BrowserProfileStore,
+  BrowserProfileConfigurationConflict,
+  type BrowserProfileActivityCheckpoint,
   validateBrowserProfileLabel,
   type BrowserProfileEdit,
   type BrowserProfileSnapshot
@@ -33,6 +35,7 @@ type ImportSourceToken = {
 function cloneProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
   return {
     ...profile,
+    ...(profile.activity ? { activity: { ...profile.activity } } : {}),
     ...(profile.tags ? { tags: [...profile.tags] } : {}),
     source: profile.source ? { ...profile.source } : null,
     ...(profile.environment ? { environment: structuredClone(profile.environment) } : {})
@@ -61,6 +64,10 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly deleting = new Set<string>()
   private defaultId: string | null = null
   private revision = 0
+  private sequence = 0
+  private activitySources: Record<string, string> = {}
+  readonly activityObserverId = mintObjectId()
+  private readonly configurationTails = new Map<string, Promise<unknown>>()
   private initialization: Promise<void> | null = null
   private initializationError: Error | null = null
   private disposed = false
@@ -152,28 +159,39 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   listFolders(): BrowserProfileFolder[] { this.assertInitialized(); return this.folders.map(folder => ({ ...folder })) }
 
-  /** Revision of the list this Main last committed or loaded; edits must name it. */
+  /** Configuration collection revision; folder writes name this stamp, Profile edits use their own token. */
   listRevision(): number {
     this.assertInitialized()
     return this.revision
   }
 
-  /** Called with the whole committed list after every store write, in revision order. */
+  listSequence(): number { this.assertInitialized(); return this.sequence }
+  activitySource(profileId: string): string | null { return this.activitySources[profileId] ?? null }
+  async recordActivity(profileId: string, checkpoint: BrowserProfileActivityCheckpoint): Promise<void> {
+    this.assertInitialized()
+    await this.trackMutation((async () => { this.adopt(await this.store.recordActivity(profileId, checkpoint)) })())
+  }
+
+  private configuration<T>(profileId: string, action: () => Promise<T>): Promise<T> {
+    const result = (this.configurationTails.get(profileId) ?? Promise.resolve()).catch(() => {}).then(action)
+    this.configurationTails.set(profileId, result)
+    void result.finally(() => { if (this.configurationTails.get(profileId) === result) this.configurationTails.delete(profileId) }).catch(() => {})
+    return this.trackMutation(result)
+  }
+
+  /** Called with the whole committed list after every store write, in snapshot sequence order. */
   onChange(listener: (snapshot: BrowserProfileSnapshot) => void): () => void {
     this.changeListeners.add(listener)
     return () => { this.changeListeners.delete(listener) }
   }
 
-  async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary> {
+  async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
-    // A route is applied before it is saved: one that cannot be applied leaves the old route saved and in use.
     const network = edit.network === undefined ? undefined : edit.network === null ? null : normalizeBrowserProfileNetwork(edit.network)
-    return await this.trackMutation((async () => {
+    return this.configuration(profileId, async () => {
+      const { profile: current } = await this.store.inspectProfile(profileId)
+      if (expectedRevision !== current.revision) throw new BrowserProfileConfigurationConflict(current.revision)
       if (network !== undefined) {
-        if (expectedRevision !== this.revision) {
-          throw Object.assign(new Error('Browser Profiles changed since revision was read. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
-        }
-        const previous = this.profiles.get(profileId)?.network
         await this.sessions.apply(profileId, network === null || network.mode === 'system' ? undefined : network)
         try {
           const { snapshot, profile } = await this.store.updateProfile(profileId, { ...edit, ...(network === null ? { network: null } : { network }) }, expectedRevision)
@@ -181,8 +199,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
           this.sessions.applyEnvironment?.(profileId)
           return this.presentProfile(profile)
         } catch (error) {
-          // The record kept the old route; put the session back on it too.
-          await this.sessions.apply(profileId, previous).catch(() => {})
+          try { await this.sessions.apply(profileId, current.network) }
+          catch (rollbackError) { throw new AggregateError([error, rollbackError], 'The Profile change was not saved and its previous network route could not be confirmed. Browser controls remain available; retry the original route in Profile settings.') }
           throw error
         }
       }
@@ -190,12 +208,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       this.adopt(snapshot)
       if (edit.environment !== undefined) this.sessions.applyEnvironment?.(profileId)
       return this.presentProfile(profile)
-    })())
+    })
   }
 
   private presentProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
     const application = this.sessions.environmentApplication?.(profile.id)
-    return { ...cloneProfile(profile), ...(application ? { environmentApplication: application } : {}) }
+    return { ...cloneProfile(profile), ...(profile.activity && this.activitySources[profile.id] !== this.activityObserverId && profile.activity.state === 'running'
+      ? { activity: { ...profile.activity, state: 'unknown' as const } } : {}), ...(application ? { environmentApplication: application } : {}) }
   }
 
   /** Only Browsers created later without an explicit Profile use the new default. */
@@ -217,13 +236,13 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   }
 
   /** Copy only saved settings. A new native session is prepared when a Browser actually opens it. */
-  async copyProfile(profileId: string, label: string, expectedRevision: number): Promise<BrowserProfileSummary> {
+  async copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
-    return await this.trackMutation((async () => {
+    return this.configuration(profileId, async () => {
       const { snapshot, profile } = await this.store.copyProfile(profileId, label, expectedRevision)
       this.adopt(snapshot)
       return cloneProfile(profile)
-    })())
+    })
   }
 
   async createFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder> {
@@ -429,15 +448,17 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
     this.defaultId = snapshot.defaultProfileId
     this.revision = snapshot.revision
+    this.sequence = snapshot.sequence
+    this.activitySources = { ...snapshot.activitySources }
   }
 
   /** The store committed this whole list; it replaces the cache, then subscribers hear it. */
   private adopt(snapshot: BrowserProfileSnapshot): void {
-    if (this.disposed) return
+    if (this.disposed || snapshot.sequence < this.sequence) return
     this.replace(snapshot)
     for (const listener of this.changeListeners) {
       // A subscriber cannot turn a committed write into a failure.
-      try { listener({ revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders() }) }
+      try { listener({ activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders() }) }
       catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }

@@ -28,8 +28,8 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.folder.delete'; folderId: string; expectedRevision: number }
   | { operation: 'browser.profile.inspect'; profileId: string }
   | { operation: 'browser.profile.create'; label: string }
-  | { operation: 'browser.profile.copy'; profileId: string; expectedRevision: number; label: string }
-  | { operation: 'browser.profile.update'; profileId: string; expectedRevision: number; edit: BrowserProfileControlEdit }
+  | { operation: 'browser.profile.copy'; profileId: string; expectedRevision: string; label: string }
+  | { operation: 'browser.profile.update'; profileId: string; expectedRevision: string; edit: BrowserProfileControlEdit }
   | { operation: 'browser.profile.set-default'; profileId: string }
   | { operation: 'browser.profile.delete'; profileId: string }
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; signIn: BrowserProfileProxySignIn }
@@ -98,11 +98,24 @@ export type BrowserProfileControlSource = { browserLabel: string; profileLabel: 
 export type BrowserProfileControlNetwork =
   | { mode: 'direct' }
   | { mode: 'proxy'; server: { scheme: string; host: string; port: number }; bypass?: string[] }
+/** Confirmed native observations only; partial history never means zero unobserved use. */
+export type BrowserProfileActivity = { observedRunMs: number; lastUsedAt: number; observedAt: number;
+  state: 'running' | 'idle' | 'unknown'; history: 'partial'; interruptions: number }
+
+function activity(value: unknown, code: string): BrowserProfileActivity {
+  const row = record(value, ['observedRunMs', 'lastUsedAt', 'observedAt', 'state', 'history', 'interruptions'], code, 'Profile activity')
+  if (!['running', 'idle', 'unknown'].includes(row.state as string) || row.history !== 'partial') fail(code, 'Profile activity observation is invalid.')
+  return { observedRunMs: count(row.observedRunMs, code, 'Observed Browser time'), lastUsedAt: count(row.lastUsedAt, code, 'Last observed use'),
+    observedAt: count(row.observedAt, code, 'Activity observation time'), state: row.state as BrowserProfileActivity['state'], history: 'partial',
+    interruptions: count(row.interruptions, code, 'Activity interruptions') }
+}
+
 export type BrowserProfileFolder = { id: string; label: string }
 
 /** One Profile as Main lists it. hue is absent when the person chose none. */
 export type BrowserProfileControlProfile = {
-  id: string; label: string; createdAt: number; isDefault: boolean; source: BrowserProfileControlSource | null; hue?: number; notes?: string
+  id: string; label: string; revision: string; createdAt: number; isDefault: boolean; source: BrowserProfileControlSource | null; hue?: number; notes?: string
+  activity?: BrowserProfileActivity
   tags?: string[]
   folderId?: string
   pinned?: true
@@ -118,11 +131,11 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean }
 
 export type BrowserProfileControlResult =
-  | { operation: 'browser.profile.ls'; revision: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[] }
+  | { operation: 'browser.profile.ls'; revision: number; sequence: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[] }
   | { operation: 'browser.profile.folder.create'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.rename'; revision: number; folder: BrowserProfileFolder }
   | { operation: 'browser.profile.folder.delete'; revision: number; folderId: string; deleted: true; unassignedProfileIds: string[] }
-  | { operation: 'browser.profile.inspect'; revision: number; profile: BrowserProfileControlProfile; usage: BrowserProfileControlUsage }
+  | { operation: 'browser.profile.inspect'; revision: number; sequence: number; profile: BrowserProfileControlProfile; usage: BrowserProfileControlUsage }
   | { operation: 'browser.profile.create'; revision: number; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.copy'; revision: number; sourceProfileId: string; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.update'; revision: number; profile: BrowserProfileControlProfile }
@@ -213,7 +226,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
     case 'browser.profile.copy': {
       const label = text(source.label, code, 'Browser Profile label', 512)
       if (!label.trim()) fail(code, 'Browser Profile label is required.')
-      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile revision'), label }
+      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected Profile configuration revision'), label }
     }
     case 'browser.profile.create': {
       const label = text(source.label, code, 'Browser Profile label', 512)
@@ -224,7 +237,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
       const edit = record(source.edit, ['label', 'hue', 'notes', 'network', 'environment', 'tags', 'folderId', 'pinned'], code, 'Browser Profile edit')
       if (edit.pinned !== undefined && typeof edit.pinned !== 'boolean') fail(code, 'Profile pinned must be on or off.')
       if (!Object.keys(edit).length) fail(code, 'Browser Profile edit names no field.')
-      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile revision'),
+      return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected Profile configuration revision'),
         edit: { ...(edit.label === undefined ? {} : { label: text(edit.label, code, 'Browser Profile label', 512) }),
           ...(edit.hue === undefined ? {} : { hue: edit.hue === null ? null : hue(edit.hue, code) }),
           ...(edit.notes === undefined ? {} : { notes: text(edit.notes, code, 'Browser Profile notes', 8192) }),
@@ -277,7 +290,7 @@ function network(value: unknown, code: string): BrowserProfileControlNetwork {
 }
 
 function profile(value: unknown, code: string): BrowserProfileControlProfile {
-  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess', 'environment', 'environmentApplication', 'tags', 'folderId', 'pinned'], code, 'Browser Profile')
+  const row = record(value, ['id', 'label', 'revision', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess', 'environment', 'environmentApplication', 'tags', 'folderId', 'pinned', 'activity'], code, 'Browser Profile')
   const canonicalTags = row.tags === undefined ? undefined : tags(row.tags, code)
   if (canonicalTags && JSON.stringify(canonicalTags) !== JSON.stringify(row.tags)) fail(code, 'Stored Profile tags are not canonical.')
   if (row.pinned !== undefined && row.pinned !== true) fail(code, 'Stored Profile pinned flag is invalid.')
@@ -289,8 +302,8 @@ function profile(value: unknown, code: string): BrowserProfileControlProfile {
       importedAt: count(imported.importedAt, code, 'Import time'), importedCookies: count(imported.importedCookies, code, 'Imported cookies'), skippedCookies: count(imported.skippedCookies, code, 'Skipped cookies'),
       ...(imported.skippedByReason === undefined ? {} : { skippedByReason: skipCounts(imported.skippedByReason, code) }) }
   })()
-  return { id: identity(row.id, code, 'Browser Profile ID'), label: text(row.label, code, 'Browser Profile label'), createdAt: count(row.createdAt, code, 'Browser Profile creation time'),
-    isDefault: row.isDefault, source, ...(canonicalTags === undefined ? {} : { tags: canonicalTags }),
+  return { id: identity(row.id, code, 'Browser Profile ID'), revision: identity(row.revision, code, 'Profile configuration revision'), label: text(row.label, code, 'Browser Profile label'), createdAt: count(row.createdAt, code, 'Browser Profile creation time'),
+    isDefault: row.isDefault, source, ...(row.activity === undefined ? {} : { activity: activity(row.activity, code) }), ...(canonicalTags === undefined ? {} : { tags: canonicalTags }),
     ...(row.folderId === undefined ? {} : { folderId: identity(row.folderId, code, 'Folder ID') }),
     ...(row.pinned === true ? { pinned: true as const } : {}), ...(row.hue === undefined ? {} : { hue: hue(row.hue, code) }),
     ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }),
@@ -322,9 +335,9 @@ export type BrowserProfileControlResultBody = OmitEach<BrowserProfileControlResu
 export function parseBrowserProfileControlResult(operation: BrowserProfileControlOperation, value: unknown): BrowserProfileControlResultBody {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
-    'browser.profile.ls': ['revision', 'profiles', 'folders'],
+    'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders'],
     'browser.profile.folder.create': ['revision', 'folder'], 'browser.profile.folder.rename': ['revision', 'folder'],
-    'browser.profile.folder.delete': ['revision', 'folderId', 'deleted', 'unassignedProfileIds'], 'browser.profile.inspect': ['revision', 'profile', 'usage'],
+    'browser.profile.folder.delete': ['revision', 'folderId', 'deleted', 'unassignedProfileIds'], 'browser.profile.inspect': ['revision', 'sequence', 'profile', 'usage'],
     'browser.profile.create': ['revision', 'profile'], 'browser.profile.copy': ['revision', 'sourceProfileId', 'profile'], 'browser.profile.update': ['revision', 'profile'],
     'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'profileId', 'deleted'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'saved', 'reconnected'], 'browser.profile.proxy-sign-in.clear': ['profileId', 'cleared', 'reconnected'],
@@ -364,7 +377,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       if (!Array.isArray(row.folders)) fail(code, 'Profile folders are invalid.')
       const folders = row.folders.map(item => folder(item, code)), folderIds = new Set(folders.map(item => item.id))
       if (folderIds.size !== folders.length || profiles.some(item => item.folderId !== undefined && !folderIds.has(item.folderId))) fail(code, 'Profile folder references are inconsistent.')
-      return { revision, profiles, folders }
+      return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profiles, folders }
     }
     case 'browser.profile.folder.create': case 'browser.profile.folder.rename': return { revision, folder: folder(row.folder, code) }
     case 'browser.profile.folder.delete': {
@@ -373,7 +386,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
       if (new Set(ids).size !== ids.length) fail(code, 'Unassigned Profile identities are duplicated.')
       return { revision, folderId: identity(row.folderId, code, 'Folder ID'), deleted: true, unassignedProfileIds: ids }
     }
-    case 'browser.profile.inspect': return { revision, profile: profile(row.profile, code), usage: usage(row.usage, code) }
+    case 'browser.profile.inspect': return { revision, sequence: count(row.sequence, code, 'Profile snapshot sequence'), profile: profile(row.profile, code), usage: usage(row.usage, code) }
     case 'browser.profile.copy': return { revision, sourceProfileId: identity(row.sourceProfileId, code, 'Source Browser Profile ID'), profile: profile(row.profile, code) }
     case 'browser.profile.create': case 'browser.profile.update': return { revision, profile: profile(row.profile, code) }
     case 'browser.profile.set-default': return { revision, profileId: identity(row.profileId, code, 'Browser Profile ID') }

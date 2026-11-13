@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -71,11 +71,11 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       return { operation: request.operation, revision: ports.profiles.listRevision(), deleted: true, ...receipt }
     }
     case 'browser.profile.ls':
-      return { operation: request.operation, revision: ports.profiles.listRevision(), profiles: ports.profiles.listProfiles(), folders: ports.profiles.listFolders() }
+      return { operation: request.operation, revision: ports.profiles.listRevision(), sequence: ports.profiles.listSequence(), profiles: ports.profiles.listProfiles(), folders: ports.profiles.listFolders() }
     case 'browser.profile.inspect': {
       const profile = existing(ports, request.profileId)
       const revision = ports.profiles.listRevision()
-      return { operation: request.operation, revision, profile, usage: await ports.usage.usage(request.profileId) }
+      return { operation: request.operation, revision, sequence: ports.profiles.listSequence(), profile, usage: await ports.usage.usage(request.profileId) }
     }
     case 'browser.profile.create': {
       const profile = await owned(() => ports.profiles.createProfile(request.label))
