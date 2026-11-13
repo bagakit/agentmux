@@ -9,6 +9,7 @@ import { api } from '@desktop/renderer/src/lib/api'
 import { settingsModules } from '@desktop/renderer/src/components/settings/settings-modules'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import '@desktop/renderer/src/styles/index.css'
+import { settingsElementVisible } from './visibility'
 
 const config = await api.config.get()
 useAppStore.setState({ config, loading: false })
@@ -38,11 +39,12 @@ function measure(section: string) {
   const pane = [...document.querySelectorAll<HTMLElement>('[data-settings-pane]')].find(element => element.dataset.settingsPane === section && !element.hidden)
   if (!pane) throw new Error(`The real SettingsPanel did not mount ${section}.`)
   pane.scrollTop = 0
-  const visible = (element: Element) => !element.closest('[hidden], [inert]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden'
+  const visible = settingsElementVisible
   const rect = pane.getBoundingClientRect()
+  const controlBounds = (element: HTMLElement) => (element.matches('input[type=radio],input[type=checkbox]') ? element.closest('label') ?? element : element).getBoundingClientRect()
   const control = [...pane.querySelectorAll<HTMLElement>('input:not([type=hidden]), select, textarea, button, [role=switch], [role=radio], [contenteditable=true]')]
     .filter(element => visible(element) && !element.matches(':disabled, [aria-disabled=true]'))
-    .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)[0]
+    .sort((left, right) => controlBounds(left).top - controlBounds(right).top)[0]
   const introductions = [...pane.querySelectorAll<HTMLElement>('.settings-concept-intro, .mote-origin')].filter(visible)
     .filter(element => !element.parentElement?.closest('.settings-concept-intro, .mote-origin'))
     .map(element => ({ className: element.className, height: Math.round(element.getBoundingClientRect().height) }))
@@ -72,7 +74,7 @@ function measure(section: string) {
   }
   return {
     textLength: pane.innerText.trim().length, clientHeight: pane.clientHeight, scrollHeight: pane.scrollHeight,
-    firstControl: control ? { top: Math.round(control.getBoundingClientRect().top - rect.top), name: control.getAttribute('aria-label') || control.textContent?.trim().slice(0, 100) || control.id || control.tagName.toLowerCase() } : null,
+    firstControl: control ? { top: Math.round(controlBounds(control).top - rect.top), name: control.getAttribute('aria-label') || control.textContent?.trim().slice(0, 100) || control.id || control.tagName.toLowerCase() } : null,
     introductions, introductionHeight: introductions.reduce((sum, intro) => sum + intro.height, 0),
     bodyFontSizes: [...bodyFontSizes].sort((a, b) => a - b), bodyToken, smallBody, cjk, jargon,
     saveBars: [...pane.querySelectorAll<HTMLElement>('[data-settings-save-bar]')].filter(visible).map(element => ({
