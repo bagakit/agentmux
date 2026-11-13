@@ -3,7 +3,8 @@ import { AgentMuxClient } from './client.js'
 import { connectHostedAgentMux } from './hosted-client.js'
 import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import { connectAgentMuxRpc, type AgentMuxPreparedSshRoute } from './public-rpc-client.js'
-import type { AgentMuxRpcRemoteEndpoint, AgentMuxTailcatTarget } from './public-rpc.js'
+import { agentMuxSshEndpoint, type AgentMuxSshRuntimeTarget } from './ssh-runtime-target.js'
+export { agentMuxSshEndpoint, type AgentMuxSshRuntimeTarget } from './ssh-runtime-target.js'
 export type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
@@ -28,33 +29,9 @@ export type AgentMuxSshRuntimeClientOptions = {
   expectedRuntimeId?: string
   waitForReady?: boolean
   consumerId?: string
-  target: {
-    hostId: string
-    hostname: string
-    user?: string
-    port?: number
-    identityFile?: string
-    remoteCommand?: string
-    remoteSocketPath?: string
-    transport?: 'ssh' | 'ssh-tailcat' | 'tailcat'
-    tailcat?: AgentMuxTailcatTarget
-  }
+  target: AgentMuxSshRuntimeTarget
 }
 
-/** One mapping for connection, route repair and explicit configuration inspection. */
-export function agentMuxSshEndpoint(target: AgentMuxSshRuntimeClientOptions['target']): AgentMuxRpcRemoteEndpoint {
-  if (target.transport !== undefined && !['ssh', 'ssh-tailcat', 'tailcat'].includes(target.transport)) throw new AgentMuxError('Unknown remote transport selection.', 'INVALID_CONTROL_REQUEST')
-  if (target.transport === 'tailcat' || target.transport === 'ssh-tailcat') {
-    if (!target.tailcat) throw new AgentMuxError('Tailcat connection requires its saved address and client key.', 'INVALID_CONTROL_REQUEST')
-    if (target.transport === 'tailcat') return { transport: 'tailcat', ...target.tailcat }
-  }
-  return { transport: 'ssh', host: target.hostname,
-    ...(target.transport === 'ssh-tailcat' ? { tailcat: target.tailcat! } : {}),
-    ...(target.user === undefined ? {} : { user: target.user }), ...(target.port === undefined ? {} : { port: target.port }),
-    ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
-    ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),
-    ...(target.remoteSocketPath === undefined ? {} : { socketPath: target.remoteSocketPath }) }
-}
 
 /** Connect physical Run capabilities without awaiting Session/catalog observation.
  * Call client.connect() explicitly to load semantics; failures remain diagnostic

@@ -3,12 +3,11 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import { settingsResourceRecord } from './settings-resource-json.js'
 import { observeRead } from './observation-read.js'
-import { agentMuxSshEndpoint } from './runtime-client.js'
+import { agentMuxSshEndpoint, type AgentMuxSshRuntimeTarget } from './ssh-runtime-target.js'
 import { readNetworkInterfaces, parseNetworkInterfaces, parseRuntimeNetworkSnapshot, type NetworkInterfaceAddress, type RuntimeNetworkSnapshot } from './runtime-network.js'
 import { readSshNetworkConfiguration, type SshNetworkConfiguration } from './ssh-network-configuration.js'
 import type { AgentMuxControlSettingsResourceFields } from './control.js'
 import type { AgentMuxRuntimeOwnerIdentity, AgentMuxRuntimeFence } from './hosted-client-contract.js'
-import type { AgentMuxSshRuntimeClientOptions } from './runtime-client.js'
 import type { HostRuntimeSource } from './host-runtime-observation.js'
 
 export type HostNetworkObservation = {
@@ -101,7 +100,7 @@ export async function observeHostNetwork(hostId: string, configuration: AgentMux
       return { requestDurationMs, sample }
     }),
     configuration.kind === 'ssh' && configuration.transport !== 'tailcat' ? read(scope => {
-      const target = { ...configuration, hostId, hostname: rpcString(configuration.hostname, 'SSH hostname') } as AgentMuxSshRuntimeClientOptions['target']
+      const target = { ...configuration, hostId, hostname: rpcString(configuration.hostname, 'SSH hostname') } as AgentMuxSshRuntimeTarget
       const endpoint = agentMuxSshEndpoint(target)
       if (endpoint.transport !== 'ssh') throw new AgentMuxError('This Host uses Tailcat; SSH configuration is not selected.', 'SSH_NOT_SELECTED')
       return readSshNetworkConfiguration(endpoint, scope)
