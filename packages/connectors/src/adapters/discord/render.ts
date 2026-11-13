@@ -4,10 +4,14 @@ import { discordId, discordFailure } from './protocol.js'
 import { publicationResourceDescriptor } from '../../publication-resource.js'
 import { discordQuestionComponents } from './actions.js'
 import { createHash } from 'node:crypto'
-export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900, directResources: true, permissionActions: true, questionActions: true } as const
+import { publicationReplyText } from '../../publication-reply-text.js'
+import { discordQueryReaction } from './reaction.js'
+export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900, directResources: true, permissionActions: true, questionActions: true, replyMetadata: true, queryFeedback: true } as const
 export const discordNonce = (operationId: string): string => createHash('sha256').update(operationId).digest('base64url').slice(0, 25)
 export function prepareDiscordPublication(operation: Readonly<PublicationOperation>): PreparedPublication {
   const channel = discordId(operation.target.externalConversationId), mapping = operation.mapping
+  if (operation.payload.kind === 'query-feedback') return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId,
+    request: discordQueryReaction(channel, operation.payload, operation.effect, mapping) }
   const path = `/channels/${channel}/messages${mapping ? '/' + discordId(mapping.messageId) : ''}`
   if (operation.effect === 'withdraw') {
     if (!mapping) return discordFailure('DISCORD_ORIGINAL_MESSAGE_UNCONFIRMED')
@@ -64,8 +68,9 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
       { type: 13, file: { url: 'attachment://' + file.name } }, ...buttons] }], attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
     return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
   }
+  const footer = p.kind === 'speech' && p.replyMetadata ? publicationReplyText(p.replyMetadata) : ''
   const components = [{ type: 17, ...(human ? { accent_color: 0x2e8b57 } : {}), components: [{ type: 10, content },
-    ...(inputStatus ? [{ type: 10, content: inputStatus }] : []), ...buttons] }]
+    ...(inputStatus ? [{ type: 10, content: inputStatus }] : []), ...(footer ? [{ type: 14, spacing: 1 }, { type: 10, content: '-# ' + footer }] : []), ...buttons] }]
   const body = JSON.stringify({ flags: 32768, components, allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
   return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, body, contentType: 'application/json' } }
 }

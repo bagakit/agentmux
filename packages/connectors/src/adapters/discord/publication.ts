@@ -8,6 +8,7 @@ import { discordId, discordFailure } from './protocol.js'
 import type { DiscordClients } from './client.js'
 
 import { prepareDiscordPublication, discordNonce } from './render.js'
+import { readDiscordQueryReaction } from './reaction.js'
 function nativeFieldsMatch(expected: unknown, actual: unknown): boolean {
   if (Array.isArray(expected)) return Array.isArray(actual) && expected.length === actual.length && expected.every((value, index) => nativeFieldsMatch(value, actual[index]))
   if (expected && typeof expected === 'object') return !!actual && typeof actual === 'object' && Object.entries(expected).every(([key, value]) => nativeFieldsMatch(value, (actual as Record<string, unknown>)[key]))
@@ -30,6 +31,8 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
   readonly fragmentBytes = 1900
   readonly permissionActions = true as const
   readonly questionActions = true as const
+  readonly replyMetadata = true as const
+  readonly queryFeedback = true as const
   readonly directResources = true as const
   readonly images = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
   readonly files = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
@@ -50,6 +53,8 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
       const rest = this.clients.rest({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential)
       const message = await rest.request({ method: prepared.request.method as RequestMethod, fullRoute: prepared.request.path as `/${string}`, signal,
         ...(prepared.request.multipart ? { body: JSON.parse(prepared.request.multipart.payloadJson), files: files! } : prepared.request.body === undefined ? {} : { body: JSON.parse(prepared.request.body) }) }) as APIMessage | undefined
+      const reaction = readDiscordQueryReaction(prepared, target.externalConversationId)
+      if (reaction) return { state: 'confirmed', mapping: reaction }
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
       if (!message || message.channel_id !== target.externalConversationId || message.author?.id !== identity.botId || mapping && message.id !== mapping.messageId || prepared.request.method === 'POST' && String(message.nonce) !== discordNonce(prepared.requestKey)) return unknown()
       discordId(message.id)
