@@ -12,6 +12,23 @@ const source = import.meta.dirname
 const sha = value => createHash('sha256').update(value).digest('hex')
 await fs.mkdir(out, { recursive: true })
 const inputs = new Map()
+// Library builds inline every asset, which would turn the brand art into a 60 MB script. Brand
+// and avatar images are copied next to the page instead, and the page links to the copies.
+const linkedRoots = [['packages/client-ui/brand', 'brand'], ['packages/client-ui/src/assets/app-icons', 'app-icons'], ['apps/desktop/resources/avatar-series', 'avatar-series']]
+const linkedAssets = new Map()
+const linkedBrandAssets = () => ({name:'icon-review-linked-brand-assets',enforce:'pre',load(id){
+  const [path, query] = id.split('?')
+  if (query !== undefined && !/(^|&)url(&|$)/.test(query)) return null
+  if (!/\.(png|avif|svg|webp)$/.test(path)) return null
+  const owner = linkedRoots.find(([from]) => path.startsWith(join(root, from) + '/'))
+  if (!owner) return null
+  const published = owner[1] + '/' + relative(join(root, owner[0]), path).replaceAll('\\', '/')
+  linkedAssets.set(published, path)
+  return 'export default ' + JSON.stringify('./' + published)
+}, renderChunk(code){
+  // Small Provider marks stay inlined as data URLs; their URL base is irrelevant to the browser.
+  return code.replace(/new URL\(("data:[^"]*"),\s*import\.meta\.url\)\.href/g, '$1')
+}})
 const inputCapture = () => ({name:'icon-review-source-inputs',enforce:'pre',async transform(code,id){
   const path=id.split('?')[0]
   if(path.startsWith(root+'/')&&!path.includes('/node_modules/')) inputs.set(relative(root,path),sha(await fs.readFile(path)))
@@ -28,7 +45,14 @@ for (const name of ['semantic-icons', 'mote-identity']) {
   await fs.copyFile(join(root,style),join(out,`${name}.css`))
   inputs.set(style,sha(await fs.readFile(join(root,style))))
 }
-await build({configFile:false,root:source,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},esbuild:{jsxDev:false},plugins:[inputCapture()],build:{emptyOutDir:false,outDir:out,minify:false,lib:{entry:join(source,'app.js'),formats:['es'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}})
-for(const name of ['index.html','styles.css','review-manifest.json','context-labels.json','catalog.mjs','catalog-source.ts','build.mjs'])inputs.set(relative(root,join(source,name)),sha(await fs.readFile(join(source,name))))
+await build({configFile:false,root:source,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},esbuild:{jsxDev:false},plugins:[linkedBrandAssets(),inputCapture()],build:{emptyOutDir:false,outDir:out,minify:false,lib:{entry:join(source,'app.js'),formats:['es'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}})
+for (const [published, path] of linkedAssets) {
+  await fs.mkdir(join(out, published, '..'), { recursive: true })
+  await fs.copyFile(path, join(out, published))
+  inputs.set(relative(root, path), sha(await fs.readFile(path)))
+}
+// A module-only construct left in the bundle would stop the page in a classic script context.
+if ((await fs.readFile(join(out, 'app.js'), 'utf8')).includes('import.meta')) throw new Error('The published workbench bundle still references import.meta.')
+for(const name of ['index.html','styles.css','review-manifest.json','context-labels.json','catalog.mjs','catalog-source.ts','build.mjs','brand.ts'])inputs.set(relative(root,join(source,name)),sha(await fs.readFile(join(source,name))))
 await fs.writeFile(join(out, 'build-inputs.json'), JSON.stringify({ inputs:[...inputs].map(([path,sha256])=>({path,sha256})), publicContract: 'Original catalog, native semantic sprite, theme runtime and validated complete theme file; no product configuration writes.' }, null, 2))
 console.log(JSON.stringify({ out: relative(root, out), roles: catalog.roles.length, glyphs: catalog.glyphCount, sourceRefs: catalog.roles.reduce((count, role) => count + role.sources.length, 0), snapshot: catalog.snapshot }))
