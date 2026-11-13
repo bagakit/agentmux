@@ -11,15 +11,20 @@ export default defineConfig({ ...base, cacheDir: '.cache/focus-conversation-read
     let code = source
     const mutation = process.env.AGENTMUX_FOCUS_READING_MUTATION
     if (mutation && path === 'apps/desktop/src/renderer/src/components/ActivityView.tsx') {
-      const replacements: Record<string, [string, string]> = {
-        'failure-remains-pending': ['const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)', 'const emptyReadFailed = false'],
-        'decorate-source-failure': ['{!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light"', '{true ? <div className="full-page-loading__light activity-feed__reading-light"'],
-        'ignore-hidden-reading-motion': ["style={{ animationPlayState: documentVisible ? undefined : 'paused' }}", 'style={{ animationPlayState: undefined }}'],
-        'hide-retained-reading-feedback': ['pending={readPending && !earlierReadPending}', 'pending={false}']
+      const fullSurface: [string, string] = ['const fullReadFailure = Boolean(conversationReading && !hasReadContent && readingIssues.length)', 'const fullReadFailure = false']
+      const replacements: Record<string, [string, string][]> = {
+        'failure-without-full-surface': [fullSurface],
+        // The full failure surface never draws the light, so the decoration branch is reachable only without it.
+        'decorate-source-failure': [fullSurface, ['{!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light"', '{true ? <div className="full-page-loading__light activity-feed__reading-light"']],
+        'ignore-hidden-reading-motion': [["style={{ animationPlayState: documentVisible ? undefined : 'paused' }}", 'style={{ animationPlayState: undefined }}']],
+        'hide-retained-reading-feedback': [['pending={readPending && !earlierReadPending}', 'pending={false}']]
       }
-      const change = replacements[mutation]
-      if (!change || source.split(change[0]).length !== 2) throw Error('Unknown or nonunique Focus reading mutation: ' + mutation)
-      code = source.replace(change[0], change[1])
+      const changes = replacements[mutation]
+      if (!changes) throw Error('Unknown Focus reading mutation: ' + mutation)
+      for (const [from, to] of changes) {
+        if (code.split(from).length !== 2) throw Error('Nonunique Focus reading mutation target: ' + mutation)
+        code = code.replace(from, to)
+      }
     }
     if (process.env.AGENTMUX_FOCUS_READING_LOADED) {
       const hash = (value: string) => createHash('sha256').update(value).digest('hex')
