@@ -9,6 +9,7 @@ import { publicGoalRecord } from '@agentmux/host/goal-projection'
 import { readPresentationConfiguration } from '@agentmux/host/presentation-configuration'
 import { projectWorkspaces } from '@agentmux/host/workspace-projects'
 import { createHostGoals } from '../../../host/src/goals.js'
+import { createHostSpatialAgentControl } from '../../../host/src/spatial-agent-control.js'
 import { api } from '../../src/renderer/src/lib/api'
 import type { AppConfig } from '../../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics'
@@ -59,15 +60,23 @@ export async function openHostGoalTransport(options: {
   }
   await persistConfig()
   const unavailable = () => { throw new AgentMuxError('The original Host is not yet available. Original operations and healthy Agents are retained.', 'CONTROL_UNAVAILABLE') }
-  const hostGoals = createHostGoals({ configurationPath, spatial: new AgentMuxSpatialStateStore(join(directory, 'spatial-state.json')),
+  const spatial = new AgentMuxSpatialStateStore(join(directory, 'spatial-state.json'))
+  let server: AgentMuxControlServer
+  const hostGoals = createHostGoals({ configurationPath, spatial,
     runtime: options.runtime ?? unavailable,
     // The same Project projection the original Host composes (apps/host/src/host.ts).
     projects: async () => projectWorkspaces((await readPresentationConfiguration(configurationPath)).workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID))
       .map(project => ({ projectId: project.id, name: project.name })),
-    coreCall: options.coreCall ?? (async () => unavailable()) })
-  const server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), coreClients: () => [],
-    spatialState: new AgentMuxSpatialStateStore(join(directory, 'spatial-state.json')), conversationLandmarks: new ConversationLandmarkStore(join(directory, 'landmarks.json')),
-    goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges, goalParticipation: hostGoals.participation })
+    coreCall: options.coreCall ?? (async (hostId, method, params, context) => {
+      if (!options.runtime || hostId !== 'local') return unavailable()
+      return server.callRpc(method, params, context)
+    }) })
+  const ports = { coreClients: () => options.runtime ? [{ hostId: 'local', client: options.runtime().client }] : [],
+    spatialState: spatial, conversationLandmarks: new ConversationLandmarkStore(join(directory, 'landmarks.json')),
+    goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges, goalParticipation: hostGoals.participation,
+    ...(options.runtime ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime: options.runtime,
+      agentMuxContext: request => hostGoals.contextForSpatialOpen(request) }) } : {}) }
+  server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), ...ports })
   await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
 
@@ -107,7 +116,7 @@ export async function openHostGoalTransport(options: {
   })()))
 
   return {
-    directory, configurationPath, hostGoals,
+    directory, configurationPath, hostGoals, spatial,
     /** The Host's original durable Demand store, for seeding and reading committed facts. */
     demands: hostGoals.demands,
     execute, list, rpc,
@@ -139,14 +148,14 @@ export async function openHostGoalTransport(options: {
     async settle() {
       for (let round = 0; round < 8; round++) { await Promise.resolve(); if (!inflight.size) return; await Promise.allSettled([...inflight]) }
     },
-    async dispose() {
+    async dispose(beforeRemove?: () => Promise<void>) {
       for (const gate of faults.splice(0)) gate.release()
       await this.settle()
       const failures: unknown[] = []
-      for (const release of [() => rpc.dispose(), () => server.stop(), () => hostGoals.dispose(), () => rm(directory, { recursive: true, force: true })]) {
+      for (const release of [() => rpc.dispose(), () => server.stop(), () => hostGoals.dispose(), ...(beforeRemove ? [beforeRemove] : []), () => rm(directory, { recursive: true, force: true })]) {
         try { await release() } catch (error) { failures.push(error) }
       }
-      if (failures.length) throw new AggregateError(failures, 'The Host Goal transport fixture did not dispose cleanly.')
+      if (failures.length) throw new AggregateError(failures, 'The Host Goal transport fixture did not dispose cleanly: ' + failures.map(String).join('; '))
     }
   }
 }

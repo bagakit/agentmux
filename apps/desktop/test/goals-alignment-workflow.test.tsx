@@ -4,9 +4,8 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { writeFile } from 'node:fs/promises'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '@agentmux/demand'
-import { createWorkspaceLayout } from '@agentmux/layout'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
@@ -14,16 +13,15 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/clien
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
-import { openHostGoalTransport, type HostGoalTransport } from './helpers/host-goal-transport'
+import { useAppStore, currentCoreSpatialGraph, prepareRendererUpdate } from '../src/renderer/src/store'
+import { readGoalDiscussionBinding } from '../../host/src/goal-discussion-bindings'
+import { openHostGoalDiscussionFixture } from './helpers/host-goal-discussion-fixture'
+import type { HostGoalTransport } from './helpers/host-goal-transport'
 
 const initial = useAppStore.getState()
-let dispose: (() => void) | undefined
-beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
-afterAll(() => dispose?.())
+let discussion: Awaited<ReturnType<typeof openHostGoalDiscussionFixture>>
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [{ id: 'repo', name: 'Repo', path: _hygiene_fixturePath("repo"), hostId: 'local', kind: 'folder' }, { id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: _hygiene_fixturePath("scratch"), hostId: 'local', kind: 'scratch' }], executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } }, appearance: { terminalTheme: 'graphite' } } as unknown as AppConfig
 const intent = '  Keep the exact original work.\n  A healthy Agent must remain available.  '
 const proposal: DemandAlignmentProposal = { summary: 'Return to the same work after restart.', criteria: [{ id: 'tabs', text: 'The same tabs and splits return.' }, { id: 'agent', text: 'The original healthy Agent can resume.' }], openQuestions: [] }
@@ -38,13 +36,15 @@ beforeEach(async () => {
   disposeTheme = mountThemeRuntime(window)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ ...initial, config, demands: {}, selectedDemandId: null, sessions: [], tabs: {}, layouts: {}, mainSurface: 'board', demandPmoTabIds: {} })
-  // Only Electron IPC is substituted. UI invokes the production store methods, the public Goal codec and the original Host owner.
-  host = await openHostGoalTransport({ config }); owner = host.demands; temporaryRoot = owner.root
+  discussion = await openHostGoalDiscussionFixture(config)
+  host = discussion.host; owner = host.demands; temporaryRoot = owner.root
 })
-afterEach(async () => { await act(async () => root.unmount()); disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await host.dispose() })
+afterEach(async () => { try { await act(async () => root.unmount()); await discussion.dispose() } finally { disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true) } })
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 async function save(alignment?: DemandAlignmentProposal, confirmed = false, grounding?: DemandGroundingProposal) {
   await useAppStore.getState().createDemand({ id: 'goal', title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
+  // Source is a retained Renderer presentation field; the Host Demand domain has no source field.
+  useAppStore.setState(state => ({ demands: { ...state.demands, goal: { ...state.demands.goal!, source: 'session' } } }))
   if (alignment) await useAppStore.getState().updateDemand('goal', { alignment })
   if (confirmed) await useAppStore.getState().confirmDemandGoal('goal', 1)
   if (grounding) await useAppStore.getState().updateDemand('goal', { grounding })
@@ -52,7 +52,7 @@ async function save(alignment?: DemandAlignmentProposal, confirmed = false, grou
   host.clear()
 }
 function button(label: string) { const action = ['Clarify goal', 'Discuss changes'].includes(label) ? '[data-goal-grill]' : label === 'Ask agent to check work' ? '[data-goal-grounding]' : null; const node = (action ? container.querySelector<HTMLButtonElement>(action) : null) ?? [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
-async function click(label: string, waitForTransport = true) { await act(async () => { button(label).click(); if (waitForTransport) await host.settle() }) }
+async function click(label: string, waitForTransport = true) { const target = button(label); await act(async () => { target.click(); if (waitForTransport) await host.settle() }); if (waitForTransport) await eventually(() => expect(target.isConnected && target.disabled).toBe(false)) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
 // The Goals list groups rows by whose turn it is; read this Goal's own row, never whichever row is first.
 function next() { return container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent }
@@ -168,38 +168,31 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect((await owner.get('goal'))!).toMatchObject({ description: intent, grounding: { checks: report().checks, acceptedAt: null } })
   })
 
-  it('retains the original discussion after preparation failure and distinguishes request from navigation failures', async () => {
-    await save(); let reject!: (error: Error) => void
-    const ensure = vi.spyOn(api.scratch, 'ensureTopic').mockImplementationOnce(() => new Promise((_resolve, no) => { reject = no }))
-    const launch = vi.spyOn(api.sessions, 'launchAgent')
-    await mount(); await click('Clarify goal', false)
+  it('keeps the original Goal and input after Host preparation fails and distinguishes request from navigation failure', async () => {
+    await save(); await mount()
+    const held = host.once('demand.discuss', { kind: 'hold-request' })
+    const configured = useAppStore.getState().config!, originalGoal = await owner.get('goal')
+    await click('Clarify goal', false); await held.reached
     expect(button('Sending request…').disabled).toBe(true)
-    expect(button('Open discussion for Restore my work').textContent).toContain('Open original discussion')
-    await act(async () => { reject(new Error('Discussion preparation unavailable')); await Promise.resolve() })
-    await eventually(() => expect(container.querySelector('.goals-detail')?.textContent).toContain('The original discussion launcher is kept.'))
-    const retained = useAppStore.getState(), tabId = retained.demandPmoTabIds.goal!, tab = retained.tabs[tabId]!
-    expect(retained.agentComposerDrafts[tab.layout.activeRegionId]).toBe('Clarify goal')
-    expect(retained.agentComposerNotes[tab.layout.activeRegionId]).toContain(JSON.stringify(intent))
-    expect((await owner.get('goal'))!).toMatchObject({ description: intent, sessionIds: ['healthy-run'] })
-    expect(retained.selectedDemandId).toBe('goal'); expect(launch).not.toHaveBeenCalled()
-    await click('Open discussion for Restore my work')
-    expect(ensure).toHaveBeenCalledTimes(1); expect(launch).not.toHaveBeenCalled()
-    expect(useAppStore.getState().tabs[tabId]).toEqual(tab)
-    // Losing placement observation cannot silently create a replacement discussion.
-    await act(async () => useAppStore.setState({ layouts: {} }))
-    await click('Clarify goal')
+    await act(async () => { useAppStore.setState({ config: { ...configured, executors: {} } }); held.release(); await host.settle() })
     await eventually(() => expect(container.querySelector('.goals-detail')?.textContent).toContain('Goal request delivery is unconfirmed. Your goal and current work are kept.'))
-    await click('Retry goal request'); expect(ensure).toHaveBeenCalledTimes(1)
+    expect(await owner.get('goal')).toEqual(originalGoal)
+    expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')).toBeNull()
+    expect(discussion.core.start).toHaveBeenCalledTimes(1) // Only the already-existing primary Mote.
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
     await click('Open discussion for Restore my work')
     await eventually(() => expect(container.querySelector('.goals-detail')?.textContent).toContain('The discussion could not be opened.'))
     expect(button('Retry opening discussion')).toBeTruthy()
-    expect(container.querySelector('[data-goal-grill]')?.textContent).toContain('Clarify goal')
-    expect(useAppStore.getState().demandPmoTabIds.goal).toBe(tabId)
-    expect(useAppStore.getState().tabs[tabId]).toEqual(tab); expect(launch).not.toHaveBeenCalled()
-    await act(async () => useAppStore.setState({ layouts: retained.layouts }))
+    expect(container.querySelector('[data-goal-grill]')).toBeTruthy()
+    await act(async () => useAppStore.setState({ config: configured }))
     await click('Retry opening discussion')
+    await eventually(() => expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')?.recipient.kind).toBe('agent'))
     expect(container.querySelector('.goals-detail')?.textContent).not.toContain('The discussion could not be opened.')
-    expect(ensure).toHaveBeenCalledTimes(1)
+    expect(discussion.core.start).toHaveBeenCalledTimes(2)
+    const bound = readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')!
+    if (bound.recipient.kind !== 'agent') throw new Error('The original discussion Agent is not confirmed')
+    const created = await discussion.core.core.inspectAgentCreation(bound.recipient.agentSessionId)
+    expect(created.creation?.initialPrompt).toBe('not-requested') // Opening does not silently send the failed clarification.
   })
 
   it('accepts a real reported gap only through the explicit action and keeps the gap and its evidence', async () => {
@@ -343,25 +336,28 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     if (kind === 'accept') expect((await owner.get('goal'))!.grounding!.submissionId).toBe(reviewed.grounding!.submissionId)
   })
 
-  it('uses the mapped healthy Mote Run for both stages and keeps real deferred input when readiness is unavailable', async () => {
-    await save()
-    const session = { id: 'mote-session', label: 'Goal coordinator', providerId: 'codex', hostId: 'local', workspacePath: config.workspaces[0]!.path, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'mote-session', run: { runId: 'original-run' } }, status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, processState: 'running', promptSubmissionPredecessor: null, capabilities: { promptExecution: { immediate: 'terminal-submit' } } } as SessionSnapshot
-    const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'Mote'), topicId: PMO_TEAMS_TOPIC_ID }
-    vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
-    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session); vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Prompt readiness not observed'))
-    useAppStore.setState({ sessions: [session], demandPmoTabIds: { goal: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [tab.id]) } })
-    await mount(); await click('Open discussion for Restore my work'); expect(submit).not.toHaveBeenCalled(); await click('Clarify goal')
-    await eventually(() => expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]?.status).toBe('deferred'))
-    const first = useAppStore.getState().agentSteerQueues[session.id]![0]!
-    expect(first.text).toBe('Clarify goal'); expect(first.agentMuxNote).toContain('Grill:'); expect(first.agentMuxNote).toContain(JSON.stringify(intent)); expect(first.runId).toBe('original-run')
-    // Goal discussion uses the original predecessor-bound input; Main resolves only after its original receipt is confirmed.
-    submit.mockResolvedValue(undefined); await act(async () => { await useAppStore.getState().sendQueuedAgentSteer(session.id, first.operationId); await useAppStore.getState().updateDemand('goal', { alignment: proposal }); await useAppStore.getState().confirmDemandGoal('goal', 1) }); await click('Ask agent to check work')
-    await eventually(() => expect(submit.mock.calls.at(-1)?.[1]).toBe('Ask agent to check work'))
-    expect(submit.mock.calls.at(-1)?.[6]).toContain(proposal.criteria[0]!.text)
-    expect(submit.mock.calls.at(-1)?.[6]).toContain('\"revision\": 1')
-    expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id]); expect(useAppStore.getState().sessions).toEqual([session])
-    expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
+  it.each(['grill', 'grounding'] as const)('keeps the exact canonical discussion Run and original %s input when readiness is unavailable', async mode => {
+    await save(mode === 'grounding' ? proposal : undefined, mode === 'grounding'); await mount()
+    await click('Open discussion for Restore my work')
+    const binding = readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')!
+    if (binding.recipient.kind !== 'agent') throw new Error('The original discussion Agent is not confirmed')
+    const original = discussion.core.core.agentSession(binding.recipient.agentSessionId)
+    const native = (discussion.core.core as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence
+    vi.mocked(native.wait).mockRejectedValueOnce(new Error('Prompt readiness not observed'))
+    await click(mode === 'grill' ? 'Clarify goal' : 'Ask agent to check work')
+    await eventually(() => expect(container.querySelector('.goals-detail')?.textContent).toContain('Prompt readiness not observed'))
+    const request = host.executed('demand.discuss').at(-1)!, writes = [...discussion.core.writes]
+    const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: request.requestId }
+    const retained = await discussion.core.core.inspectAgentPromptSubmission(key)
+    expect(retained).not.toBeNull()
+    expect(retained?.admission?.intent?.message).toMatchObject({ userContent: mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.', systemContext: expect.stringContaining('goal inspect --goal "goal"') })
+    expect(retained?.admission?.acknowledged).not.toBe(true)
+    await expect(host.hostGoals.execute(request, {})).rejects.toBeTruthy()
+    expect(discussion.core.writes).toEqual(writes) // Reconciliation never repeats the unknown original input.
+    expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')).toEqual(binding)
+    expect(discussion.core.core.agentSession(original.agentSessionId).run).toEqual(original.run)
+    expect((await owner.get('goal'))!.description).toBe(intent)
+    if (mode === 'grounding') expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
     expect((await owner.get('goal'))!.grounding).toBeUndefined()
   })
 
@@ -418,8 +414,9 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const unrelated = { ...related, id: 'unrelated', control: { kind: 'agent', hostId: 'local', agentSessionId: 'unrelated', run: { runId: 'unrelated-run' } } } as SessionSnapshot; useAppStore.setState({ sessions: [related, unrelated] })
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(2); expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · waiting')
+    await act(async () => { await host.settle(); await prepareRendererUpdate() })
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
-    await act(async () => useAppStore.setState({ sessions: [related, { ...unrelated, latestOutputBytes: 99999, updatedAt: _reshape_fixtureEpoch(0, 0, 9) }], tabs: {} }))
+    await act(async () => useAppStore.setState({ sessions: [related, { ...unrelated, latestOutputBytes: 99999, updatedAt: _reshape_fixtureEpoch(0, 0, 9) }], tabs: { ...useAppStore.getState().tabs } }))
     expect(commits.mock.calls.length).toBe(count)
   })
 })

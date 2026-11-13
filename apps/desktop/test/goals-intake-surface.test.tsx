@@ -9,20 +9,23 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { chooseField } from './helpers/selection-field'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, currentCoreSpatialGraph } from '../src/renderer/src/store'
+import { readGoalDiscussionBinding } from '../../host/src/goal-discussion-bindings'
+import { spatialAgentOpenRecord } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { directGoalRequest, retryDirectGoal } from '../src/renderer/src/lib/goals-direct-pmo'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { chooseField } from './helpers/selection-field'
-import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import { openHostGoalTransport, type HostGoalTransport, type GoalTransportGate } from './helpers/host-goal-transport'
+import { openHostGoalDiscussionFixture } from './helpers/host-goal-discussion-fixture'
+import type { HostGoalTransport, GoalTransportGate } from './helpers/host-goal-transport'
 
 const baseline = useAppStore.getState()
-const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [{ id: 'repo', name: 'Repo', path: _hygiene_fixturePath("repo"), hostId: 'local', kind: 'folder' }, { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("topics"), hostId: 'local', kind: 'folder' }], executors: { configured: { label: 'Configured Agent', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } }, appearance: { terminalTheme: 'graphite' } } as AppConfig
+// This suite verifies unassigned creation/filtering; Supervisor defaulting is covered by the participation suite.
+const config = { version: 9, goals: { requesterAsSupervisor: false }, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [{ id: 'repo', name: 'Repo', path: _hygiene_fixturePath("repo"), hostId: 'local', kind: 'folder' }, { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("topics"), hostId: 'local', kind: 'folder' }], executors: { configured: { label: 'Configured Agent', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } }, appearance: { terminalTheme: 'graphite' } } as AppConfig
 function goal(id = 'goal:one', status = 'backlog' as const) { return { id, title: 'A readable outcome', description: 'Make the original work recoverable.', status, priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), source: 'default-topic' as const } }
 function session(id: string, workspacePath = _hygiene_fixturePath("repo")): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'configured', hostId: 'local', workspacePath, label: 'Configured Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1),
@@ -34,6 +37,7 @@ const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: '
 const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
 const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], quickMode: { status: 'saved' as const, version: 'original-mote-preference', defaults: { executorId: 'configured' } }, soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
 let root: Root, container: HTMLDivElement, host: HostGoalTransport, owner: HostGoalTransport['demands']
+let discussion: Awaited<ReturnType<typeof openHostGoalDiscussionFixture>>
 let releaseHeldReceipt: (() => void) | undefined, releaseShowFailures: (() => void) | undefined, tearingDown = false
 beforeEach(async () => {
   expect(directGoalRequest(), 'the previous finite operation and cleanup completed').toBeNull()
@@ -45,14 +49,9 @@ beforeEach(async () => {
     tabs: { [originalTab.id]: originalTab, [primaryTab.id]: primaryTab }, layouts: { repo: createWorkspaceLayout('original-group', [originalTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [primaryTab.id]) },
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(config.workspaces[1]!), revision: 1, topics: [topic], reading: false, error: null } },
     agentComposerDrafts: { healthy: 'Original unsent draft' }, demandPmoTabIds: {}, pendingAgentLaunches: {}, error: null, errorNoticeContext: null })
-  // Only Electron IPC is substituted: Goal writes and reads reach the original Host owner through its public codec.
-  host = await openHostGoalTransport({ config: () => useAppStore.getState().config }); owner = host.demands
-  vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue(topic)
-  vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
-  vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
-    const value = session(input.agentSessionId!, _hygiene_fixturePath("topics/teams"))
-    return { created: agentCreationFixture(value), session: value, projectionFailures: [], timeline: { agentSessionId: value.id, revision: 0, items: [] } }
-  })
+  discussion = await openHostGoalDiscussionFixture(useAppStore.getState().config!)
+  host = discussion.host; owner = host.demands
+  vi.spyOn(api.sessions, 'launchAgent')
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
 })
 afterEach(async () => {
@@ -75,10 +74,20 @@ afterEach(async () => {
     expect(directGoalRequest()).toBeNull()
   } finally {
     try { await act(async () => root.unmount()) }
-    finally { container.remove(); useAppStore.setState(baseline, true); await host.dispose(); vi.restoreAllMocks() }
+    finally { container.remove(); await discussion.dispose(); useAppStore.setState(baseline, true); vi.restoreAllMocks() }
   }
 }, 5_000)
 const creates = () => host.executed('demand.create')
+const starts = () => discussion.core.start.mock.calls.length - 1 // The primary Mote predates every operation.
+function binding(goalId: string) { const value = readGoalDiscussionBinding(currentCoreSpatialGraph()!, goalId); expect(value).not.toBeNull(); return value! }
+async function discussionInput(goalId: string) {
+  const target = binding(goalId); expect(target.recipient.kind).toBe('agent')
+  if (target.recipient.kind !== 'agent') throw new Error('Expected the original dedicated Agent')
+  const created = await discussion.core.core.inspectAgentCreation(target.recipient.agentSessionId)
+  const key = created.creation!.initialInputKey!
+  const input = await discussion.core.core.inspectAgentPromptSubmission(key)
+  return input?.launch?.message ?? input?.admission?.intent?.message
+}
 // A held creation receipt: the original Host owner commits, the renderer's receipt waits for the test.
 function holdCreateReceipt(): GoalTransportGate { const gate = host.once('demand.create', { kind: 'hold-receipt' }); releaseHeldReceipt = gate.release; if (tearingDown) gate.release(); return gate }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }, { timeout: 3_000 }) }
@@ -88,10 +97,8 @@ async function click(text: string) { await act(async () => button(text).click())
 async function edit(label: string, text: string) { const node = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[aria-label="${label}"]`)!; expect(node).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, text); node.dispatchEvent(new Event('input', { bubbles: true })) }); return node }
 
 describe('Goals direct PMO creation and reading surface', () => {
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('one actual click saves a caller-owned undefined Goal and launches its dedicated PMO through the original owner', async () => {
-    const originalLayout = useAppStore.getState().layouts.repo, originalFocus = useAppStore.getState().agentFocus
+    const originalLayout = useAppStore.getState().layouts.repo, originalFocus = useAppStore.getState().agentFocus, originalWork = useAppStore.getState().tabs[originalTab.id]
     await mount(); await click('New Goal')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     const goals = await owner.list(); expect(goals).toHaveLength(1)
@@ -101,12 +108,15 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(creates()).toHaveLength(1); expect(creates()[0]).toMatchObject({ demandId: saved.id, title: 'Untitled goal', description: '', status: 'backlog' })
     expect(container.querySelector('.goals-intake, [aria-label="Goal intent"]')).toBeNull()
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
-    const state = useAppStore.getState(), tabId = state.demandPmoTabIds[saved.id]!, tab = state.tabs[tabId]!
+    const state = useAppStore.getState(), tabId = binding(saved.id).tabId, tab = state.tabs[tabId]!
     expect(state.selectedDemandId).toBe(saved.id); expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID)
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: 'Clarify goal', agentMuxNote: expect.stringContaining(`existing Goal ${saved.id}`) }), expect.objectContaining({ goalId: saved.id }))
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain('existing undefined Goal draft')
+    expect(starts()).toBe(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    expect((await discussionInput(saved.id))).toMatchObject({ userContent: 'Clarify this existing Goal.', systemContext: expect.stringContaining(`existing Goal ${saved.id}`) })
+    expect((await discussionInput(saved.id))?.systemContext).toContain('existing undefined Goal draft')
     expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
-    expect(state.tabs[originalTab.id]).toBe(originalTab); expect(state.layouts.repo).toBe(originalLayout)
+    expect(readPmoTeamsTopicFloatingState()?.reference?.regionId).toBe(binding(saved.id).regionId)
+    expect(state.mainSurface).toBe('board')
+    expect(state.tabs[originalTab.id]).toEqual({ ...originalWork, space: { spaceId: directoryIdentity('local', config.workspaces[0]!.path), zoneId: workspaceZoneId(directoryIdentity('local', config.workspaces[0]!.path), 'repo') } }); expect(state.layouts.repo).toEqual(originalLayout)
     expect(state.agentComposerDrafts.healthy).toBe('Original unsent draft'); expect(state.agentFocus.execution).toEqual(originalFocus.execution)
     expect(state.sessions.find(value => value.id === 'healthy')).toEqual(session('healthy')); expect(api.sessions.stop).not.toHaveBeenCalled()
     await click('Board view'); expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
@@ -115,8 +125,6 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect((await owner.list()).map(value => value.id)).toEqual([saved.id]); expect(creates()).toHaveLength(1)
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('owns one click across duplicate activation and a mounted board unload/return before the save receipt', async () => {
     const held = holdCreateReceipt()
     await mount(); const newGoal = button('New Goal')
@@ -126,11 +134,9 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().demands).toEqual({})
     await act(async () => root.render(null)); await mount(); expect(button('New Goal').disabled).toBe(true)
     await act(async () => held.release()); await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect((await owner.list()).map(value => value.id)).toEqual([saved.demand.id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
+    expect((await owner.list()).map(value => value.id)).toEqual([saved.demand.id]); expect(starts()).toBe(1)
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('recovers an actually saved but lost creation receipt only by reading the exact frozen ID', async () => {
     const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
     // The exact frozen-ID read (demand.show) fails once before reaching the original owner.
@@ -144,12 +150,10 @@ describe('Goals direct PMO creation and reading surface', () => {
     await act(async () => root.render(null)); await mount(); await click('重新读取目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.demandId === id).length).toBeGreaterThanOrEqual(2)
-    expect(useAppStore.getState().selectedDemandId).toBe(id); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
+    expect(useAppStore.getState().selectedDemandId).toBe(id); expect(starts()).toBe(1)
+    expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('saves again only after a complete owner read proves absence, using the same caller ID', async () => {
     host.once('demand.create', { kind: 'reject', error: new Error('Disk unavailable') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
@@ -161,8 +165,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     await act(async () => root.render(null)); await mount(); await click('保存这个目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(creates().map(request => request.demandId)).toEqual([id, id])
-    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
+    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(starts()).toBe(1)
+    expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
   it('keeps an unknown save read-only across repeated failed reads and never saves a new identity', async () => {
@@ -179,38 +183,38 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('button')].filter(node => node.textContent === '保存这个目标')).toEqual([])
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
-  it('retains the real Goal and failed mapped launcher, then retries the same Goal and Tab', async () => {
-    vi.mocked(api.sessions.launchAgent).mockRejectedValueOnce(Object.assign(new Error('PMO launch rejected before start'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
+  it('retains the same Goal, Tab and Agent after a lost dedicated discussion receipt and reconciles without another launch', async () => {
+    const lost = host.once('demand.discuss', { kind: 'lose-receipt', error: new Error('Original discussion receipt missing') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    const id = directGoalRequest()!.id, tabId = useAppStore.getState().demandPmoTabIds[id]!, tab = useAppStore.getState().tabs[tabId]!, regionId = tab.layout.activeRegionId
-    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(tab.regions[regionId]?.kind).toBe('launcher')
-    expect(tab.name).toBe('PMO · Untitled goal')
-    expect(useAppStore.getState().agentComposerDrafts[regionId]).toBe('Clarify goal'); expect(useAppStore.getState().agentComposerNotes[regionId]).toContain(`existing Goal ${id}`)
-    expect(useAppStore.getState().errorNoticeContext?.lifecycle).toMatchObject({ regionId, tabId, step: 'launch' })
-    expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tabId)
+    const committed = await lost.committed; expect(committed.operation).toBe('demand.discuss')
+    const id = directGoalRequest()!.id, original = binding(id), tab = useAppStore.getState().tabs[original.tabId]!
+    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(starts()).toBe(1)
+    expect(directGoalRequest()?.error).toBe('Original discussion receipt missing')
+    expect(tab.regions[original.regionId]?.kind).toBe('agent')
+    expect(useAppStore.getState().agentComposerDrafts.healthy).toBe('Original unsent draft')
     await act(async () => root.render(null)); await mount(); await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(useAppStore.getState().demandPmoTabIds[id]).toBe(tabId); expect(useAppStore.getState().tabs[tabId]!.regions[regionId]?.kind).toBe('agent')
-    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.agentMuxNote?.includes(`existing Goal ${id}`))).toEqual([true, true])
+    expect(binding(id)).toEqual(original); expect(creates()).toHaveLength(1); expect(starts()).toBe(1)
+    expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
-  it('keeps the saved Goal and its real dedicated launcher when the saved new-chat configuration is unavailable', async () => {
-    useAppStore.setState({ config: { ...config, executors: {} } })
-    await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
+  it('keeps the saved Goal and original input when the configured Agent is unavailable, then continues that same Goal after configuration recovers', async () => {
+    const configured = useAppStore.getState().config!
+    const held = holdCreateReceipt()
+    await mount(); await click('New Goal'); await held.committed
+    await act(async () => { useAppStore.setState({ config: { ...configured, executors: {} } }); held.release() })
+    await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const goals = await owner.list(); expect(goals).toHaveLength(1)
-    const id = goals[0]!.id, state = useAppStore.getState(), tab = state.tabs[state.demandPmoTabIds[id]!]!
-    expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
-    expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toBe('Clarify goal'); expect(state.agentComposerNotes[tab.layout.activeRegionId]).toContain(`existing Goal ${id}`)
-    expect(state.error).toContain('configured'); expect(state.error).toContain('unavailable'); expect(state.sessions.some(session => session.id === 'primary')).toBe(true)
-    expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
+    const id = goals[0]!.id
+    expect(directGoalRequest()).toMatchObject({ id, phase: 'pmo', pending: false })
+    expect(directGoalRequest()?.error).toMatch(/configured|unavailable/i)
+    expect(starts()).toBe(0); expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, id)).toBeNull()
+    expect(useAppStore.getState().sessions.some(session => session.id === 'primary')).toBe(true)
+    expect(useAppStore.getState().agentComposerDrafts.healthy).toBe('Original unsent draft')
+    useAppStore.setState({ config: configured })
+    await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
+    expect((await owner.list()).map(goal => goal.id)).toEqual([id]); expect(creates()).toHaveLength(1); expect(starts()).toBe(1)
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('preserves explicit Project and matching conditions while making the new shell visible', async () => {
     await mount(); await click('Goal filters')
     async function choose(label: string, value: string) { await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value) }
@@ -226,8 +230,6 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('clears only conditions that would hide the newly created Goal', async () => {
     await mount(); await click('Goal filters')
     for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value!)
@@ -238,21 +240,19 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
-  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
-  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('attaches the created PMO without stealing a newer Goal selection, PMO focus or floating target', async () => {
     let finish!: () => void
-    const launch = vi.mocked(api.sessions.launchAgent).getMockImplementation()!
-    vi.mocked(api.sessions.launchAgent).mockImplementationOnce(async input => { await new Promise<void>(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(); if (tearingDown) releaseHeldReceipt() }); return launch(input) })
+    const launch = discussion.core.core.createAgentWithDelivery.bind(discussion.core.core)
+    vi.spyOn(discussion.core.core, 'createAgentWithDelivery').mockImplementationOnce(async input => { await new Promise<void>(resolve => { finish = resolve; releaseHeldReceipt = resolve; if (tearingDown) resolve() }); return launch(input) })
     await mount(); await click('New Goal'); await eventually(() => expect(finish).toBeTypeOf('function'))
-    const saved = (await owner.list())[0]!, mapped = useAppStore.getState().demandPmoTabIds[saved.id]!
+    const saved = (await owner.list())[0]!, mapped = spatialAgentOpenRecord((await host.spatial.read())!.graph, saved.discussionOperationId!)!.address.tabId
     await act(async () => { useAppStore.setState(state => ({ selectedDemandId: 'later-goal', agentFocus: { ...state.agentFocus, pmo: { ...state.agentFocus.pmo, sessionId: 'later-pmo' } } })); requestPmoTeamsTopicFloatingOpen({ targetTabId: originalTab.id }) })
     const laterPmo = useAppStore.getState().agentFocus.pmo, laterFloating = readPmoTeamsTopicFloatingState()
     await act(async () => finish()); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(useAppStore.getState().selectedDemandId).toBe('later-goal'); expect(useAppStore.getState().agentFocus.pmo).toBe(laterPmo)
     expect(readPmoTeamsTopicFloatingState()).toBe(laterFloating)
     expect(useAppStore.getState().tabs[mapped]!.regions[useAppStore.getState().tabs[mapped]!.layout.activeRegionId]?.kind).toBe('agent')
-    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.stop).not.toHaveBeenCalled()
+    expect(creates()).toHaveLength(1); expect(starts()).toBe(1); expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
   it('publishes the real saved Goal without stealing a later selection or navigation', async () => {
