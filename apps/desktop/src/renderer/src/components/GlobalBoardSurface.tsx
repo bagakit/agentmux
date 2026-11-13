@@ -60,8 +60,8 @@ export function GlobalBoardSurface() {
   const assigneeIds = assigneeEntries.filter((_value, index) => index % 2 === 0)
   const assigneeName = (id: string) => { const index = assigneeIds.indexOf(id); return index < 0 ? `${id} · Unavailable` : assigneeEntries[index * 2 + 1]! }
   const [showHistory, setShowHistory] = useState(() => resolveGoalsPreferences(config?.goals).showFinished)
-  const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' }>>({})
-  const [motePending, setMotePending] = useState<Record<string, 'open' | 'grill' | 'grounding'>>({})
+  const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' | 'plan' }>>({})
+  const [motePending, setMotePending] = useState<Record<string, 'open' | 'grill' | 'grounding' | 'plan'>>({})
   const [acknowledgementFeedback, setAcknowledgementFeedback] = useState<Record<string, GoalAcknowledgementFeedback>>({})
   const moteRequests = useRef(new Set<string>())
   const newGoalRef = useRef<HTMLButtonElement>(null)
@@ -110,7 +110,7 @@ export function GlobalBoardSurface() {
     const row = surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]') ?? selectedRowRef.current
     setSelectedDemand(null); queueMicrotask(() => { if (row?.isConnected) row.focus(); else newGoalRef.current?.focus() })
   }
-  async function openMote(demandId: string, mode?: 'grill' | 'grounding') {
+  async function openMote(demandId: string, mode?: 'grill' | 'grounding' | 'plan') {
     if (moteRequests.current.has(demandId)) return
     moteRequests.current.add(demandId); setMotePending(current => ({ ...current, [demandId]: mode ?? 'open' }))
     try {
@@ -186,6 +186,7 @@ export function GlobalBoardSurface() {
       onOpenMote={() => void openMote(selectedDemand.id)}
       onGrill={() => void openMote(selectedDemand.id, 'grill')}
       onGrounding={() => void openMote(selectedDemand.id, 'grounding')}
+      onPlan={() => void openMote(selectedDemand.id, 'plan')}
       motePending={motePending[selectedDemand.id] ?? null}
       moteError={moteErrors[selectedDemand.id] ?? null}
       onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }}

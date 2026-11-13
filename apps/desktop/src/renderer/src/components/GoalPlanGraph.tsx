@@ -8,6 +8,7 @@ import type { DemandProjection } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { goalDiscussionRequestKey } from '../lib/goal-discussion-request'
 
 /** One distinct glyph per node state, so a node still reads without its color. */
 const STATE_ICON_NAMES = {
@@ -137,8 +138,12 @@ function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeProj
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * shared plan projection; this view never decides it.
  */
-export function GoalPlanGraph({ demand, onOpenDiscussion }: { demand: Pick<DemandProjection, 'id' | 'plan' | 'delegations' | 'alignment'>; onOpenDiscussion?: () => void }) {
+export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, requestLabel = 'Create execution plan', pending = false, busy = false }: {
+  demand: Pick<DemandProjection, 'id' | 'plan' | 'delegations' | 'alignment'>; onOpenDiscussion?: () => void
+  onRequestPlan?: () => void; requestLabel?: string; pending?: boolean; busy?: boolean
+}) {
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.delegations, demand.alignment])
+  const retainedRequest = useAppStore(state => Boolean(state.goalDiscussionRequests?.[goalDiscussionRequestKey(demand.id, 'plan')]))
   const [open, setOpen] = useState<string | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const canvas = useRef<HTMLDivElement>(null)
@@ -146,19 +151,27 @@ export function GoalPlanGraph({ demand, onOpenDiscussion }: { demand: Pick<Deman
   const empty: GoalPlanProjection = { revision: 0, nodes: [], done: 0, total: 0, next: [] }
   const { edges, width, height } = useEdges(canvas, projection ?? empty, open ?? '')
   useLayoutEffect(() => { if (open) reading.current?.scrollIntoView?.({ block: 'nearest' }) }, [open])
-  if (!projection) return onOpenDiscussion ? <section className="goal-plan goal-plan--empty" aria-label="Goal plan">
-    <div className="goals-inline-actions"><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /><span className="goals-caption">Plan</span>
-      <button type="button" className="small-button" onClick={onOpenDiscussion}>Plan in goal discussion</button></div>
-  </section> : null
+  const requestAction = onRequestPlan ? <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy} onClick={onRequestPlan}>
+    {pending ? 'Preparing planning request…' : retainedRequest ? 'Check planning request' : projection ? 'Discuss plan' : requestLabel}
+  </button> : null
+  if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
+    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Tasks and dependencies</span></div>
+    <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
+      <p className="goals-muted">{demand.alignment ? 'Turn this goal into tasks, dependencies and checks. The saved plan appears here as a dependency graph.' : 'Clarify the outcome and success criteria in the goal discussion, then plan the tasks and dependencies here.'}</p>
+      <div className="goals-inline-actions">{requestAction ?? (onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null)}
+        {onRequestPlan ? <span className="goals-caption">Planning does not start execution.</span> : null}</div>
+    </div>
+  </section>
   const columns = goalPlanColumns(projection), highlight = goalPlanHighlight(projection)
   const byId = new Map(projection.nodes.map(item => [item.node.id, item]))
   const selected = open ? byId.get(open) : undefined
   const ratio = projection.total ? projection.done / projection.total : 0
   return <section className="goal-plan" aria-label="Goal plan" data-goal-plan-revision={projection.revision}>
     <div className="goals-section-heading">
-      <h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Plan</h2>
+      <h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2>
       <span className="goals-caption" data-goal-plan-progress>{projection.done} of {projection.total} done · revision {projection.revision}</span>
     </div>
+    {requestAction ? <div className="goals-inline-actions goal-plan__revise">{requestAction}</div> : null}
     <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div>
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__canvas" ref={canvas}>
