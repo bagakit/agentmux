@@ -1289,6 +1289,8 @@ export type BrowserSnapshot = {
   capsuleActive?: boolean
   /** Current document artwork reported by Chromium, fetched through this original Profile session; transient. */
   faviconDataUrl?: string | undefined
+  /** Original native host capability; missing means unconfirmed. */
+  dialogTypes?: readonly import('@agentmux/core').AgentMuxBrowserDialogType[]
   navigationId: string
   profileId: string | null
   url: string

@@ -29,7 +29,7 @@ export type BrowserTaskAssertion =
 export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch'
+  kind: 'click' | 'fill' | 'upload' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
@@ -40,6 +40,10 @@ export type BrowserTaskStep = {
   /** Pinch only: final contact separation divided by its initial separation. */
   scale?: number
   parameterKey?: string
+  /** Upload paths are fresh invocation parameters, never saved file selections. */
+  parameterKeys?: string[]
+  /** Answer only the dialog opened during this click, in its original operation. */
+  dialog?: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; action: 'accept' | 'dismiss'; promptParameterKey?: string }
   label?: string
   branch?: BrowserTaskBranch
   wait?: BrowserTaskWait
@@ -56,6 +60,16 @@ export type BrowserTaskStep = {
   nextStepId?: string | null
   reviewed: boolean
   warning?: string
+}
+/** The original definition owns all fresh invocation bindings. */
+export function browserTaskStepParameterKeys(step: BrowserTaskStep): string[] {
+  return step.kind === 'upload' ? step.parameterKeys ?? [] : step.kind === 'fill' && step.parameterKey ? [step.parameterKey]
+    : step.kind === 'click' && step.dialog?.promptParameterKey ? [step.dialog.promptParameterKey] : []
+}
+export function renameBrowserTaskParameter(step: BrowserTaskStep, from: string, to: string): BrowserTaskStep {
+  return { ...step, ...(step.parameterKey === from ? { parameterKey: to } : {}),
+    ...(step.parameterKeys ? { parameterKeys: step.parameterKeys.map(key => key === from ? to : key) } : {}),
+    ...(step.dialog?.promptParameterKey === from ? { dialog: { ...step.dialog, promptParameterKey: to } } : {}) }
 }
 export type BrowserTaskCompletion = { criteria: (
   | { kind: 'download-readable'; stepId: string; path: string }

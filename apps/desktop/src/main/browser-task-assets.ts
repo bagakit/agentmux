@@ -1,3 +1,4 @@
+import { browserTaskStepParameterKeys } from '../shared/browser-task-assets.js'
 import { createHash } from 'node:crypto'
 import { parseBrowserTaskImportInput, parseBrowserTaskPortableBundle, parseBrowserTaskPortableBinding, type BrowserTaskImportInput, type BrowserTaskPortableBinding, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -27,7 +28,7 @@ import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROW
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
-const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch']
+const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch']
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -55,6 +56,8 @@ export class BrowserTaskAssetFileStore implements BrowserTaskAssetStore {
 
 /** Main is the one Browser control owner. This Client keeps progress, never a second approval bit. */
 export interface BrowserTaskAssetHost {
+  /** Original host capability, independent of review, permissions and page text. Absent is unknown. */
+  dialogTypes?: readonly import('@agentmux/core').AgentMuxBrowserDialogType[]
   /** Bind the actual cursor before its first durable/public projection. */
   onRunPrepared(runId: string): void
   runScript(browserId: string, script: string, execution: BrowserTaskStepExecution): Promise<BrowserScriptRunReport>
@@ -403,7 +406,7 @@ export class BrowserTaskAssets {
         }
         if (host.control(browserId) !== 'agent') throw new Error('The person has Browser control. Return control explicitly before running the task.')
         validateBrowserTaskPath(version.steps)
-        validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode)
+        validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode, host.dialogTypes)
         const batch = budget ? this.document.batches?.find(batch => batch.id === budget.batchId && batch.browserId === browserId && batch.assetId === asset.id && batch.version === version.version && batch.status === 'running') : undefined
         const batchItem = batch?.items[batch.nextItem]
         if (budget && (!batchItem || (batchItem.runId && batchItem.runId !== existing?.id) || this.activeBrowsers.get(browserId)?.batchId !== budget.batchId)) throw new Error('The original batch item changed before its task was prepared.')
@@ -463,7 +466,7 @@ export class BrowserTaskAssets {
         }
         // A selected path may need fresh parameters not known before its condition ran.
         // Retain that selected cursor and let the person supply them; never execute an earlier arm again.
-        try { validateTaskSegment(version, parameters, run.nextStep, input.mode) }
+        try { validateTaskSegment(version, parameters, run.nextStep, input.mode, host.dialogTypes) }
         catch (error) {
           await this.change(async () => { run!.status = 'ready'; run!.warning = error instanceof Error ? error.message : 'The selected path needs review before execution.'; await this.updateRun(run!) })
           return copy(this.projectRun(run))
@@ -770,7 +773,7 @@ function afterStepFailure(step: BrowserTaskStep, attempts: number, report: Brows
 }
 
 /** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
-const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll', drag: 'drag', tap: 'tap', longPress: 'longPress', swipe: 'swipe', pinch: 'pinch' } as const satisfies
+const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', upload: 'uploadFiles', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll', drag: 'drag', tap: 'tap', longPress: 'longPress', swipe: 'swipe', pinch: 'pinch' } as const satisfies
   Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert'>, string>
 
 function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
@@ -786,7 +789,7 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
     ...((step.kind === 'drag' || step.kind === 'swipe') ? { destination: step.destination } : {}),
     method: downloadPath ? 'download' : PAGE_STEP_METHOD[step.kind],
     url: step.url, ...(step.target ? { target: step.target } : {}),
-    args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url]
+    args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'upload' ? [step.parameterKeys!.map(key => parameters[key])] : step.kind === 'navigate' ? [step.url]
       : step.kind === 'press' ? [step.key] : step.kind === 'longPress' ? [{ durationMs: step.durationMs ?? 600 }]
       : step.kind === 'pinch' ? [{ scale: step.scale ?? 2 }] : []
   }
@@ -794,7 +797,7 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
   return `${compileBrowserSteps({ url: step.kind === 'navigate' ? 'about:blank' : step.url, steps: [replay] })}\nreturn { taskStepId: ${JSON.stringify(step.id)} }`
 }
 
-function validateTaskSegment(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step'): void {
+function validateTaskSegment(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step', dialogTypes?: BrowserTaskAssetHost['dialogTypes']): void {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Provide the task parameters for this invocation.')
   const first = version.steps[nextStep]
   if (first?.kind === 'branch') {
@@ -802,11 +805,12 @@ function validateTaskSegment(version: BrowserTaskVersion, values: Record<string,
     return
   }
   for (const step of browserTaskSegment(version.steps, nextStep)) {
-    if (step.kind === 'fill') {
-    const definition = version.parameters.find(item => item.key === step.parameterKey)
-    if (!definition || typeof values[definition.key] !== 'string' || !values[definition.key] || values[definition.key]!.length > 16_384) {
-      throw new Error(`A fresh value is required for parameter ${definition?.label ?? step.parameterKey ?? 'unknown'}.`)
-    }
+    if (step.dialog && dialogTypes && !dialogTypes.includes(step.dialog.type)) throw new AgentMuxError('This Browser host does not support the declared ' + step.dialog.type + ' dialog. No task action was sent; keep the definition for a compatible host.', 'HOST_CAPABILITY_UNAVAILABLE')
+    for (const key of browserTaskStepParameterKeys(step)) {
+      const definition = version.parameters.find(item => item.key === key)
+      if (!definition || typeof values[key] !== 'string' || !values[key] || values[key]!.length > 16_384) {
+        throw new Error(`A fresh value is required for parameter ${definition?.label ?? key}.`)
+      }
     }
     // Use the same compiler guards before any action in this invocation. A later blocked step
     // must not leave earlier actions applied with a cursor that still appears to be running.
@@ -823,7 +827,7 @@ function text(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 240)
 }
 function parameterKey(value: string): string {
-  if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) throw new Error('Parameter keys must start with a letter and contain only letters, digits, underscores or dashes.')
+  if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) throw new Error('Parameter keys must start with a letter and contain only letters, digits, underscores or dashes.')
   return value
 }
 function safeUrl(value: string): string {
@@ -893,10 +897,18 @@ function content(value: unknown): BrowserTaskContent {
   })
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
+    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'parameterKeys', 'dialog', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
     if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
     if (typeof step.url !== 'string' || typeof step.reviewed !== 'boolean' || (step.label !== undefined && typeof step.label !== 'string') || (step.warning !== undefined && typeof step.warning !== 'string')) throw new Error('Invalid task step field')
     const url = safeUrl(step.url)
+    if (step.parameterKeys !== undefined && (step.kind !== 'upload' || !Array.isArray(step.parameterKeys) || step.parameterKeys.length < 1 || step.parameterKeys.length > 4 || new Set(step.parameterKeys).size !== step.parameterKeys.length)) throw new Error('An upload declares 1–4 distinct fresh file parameters.')
+    if (step.kind === 'upload' && !step.parameterKeys) throw new Error('An upload needs fresh Workspace file parameters.')
+    if (step.dialog !== undefined) {
+      draftFields(step.dialog, ['type', 'action', 'promptParameterKey'])
+      if (step.kind !== 'click' || !['alert','confirm','prompt','beforeunload'].includes(step.dialog.type) || !['accept','dismiss'].includes(step.dialog.action)) throw new Error('A click dialog declares its expected type and answer.')
+      if (step.dialog.type === 'beforeunload' && step.dialog.action === 'accept') throw new Error('Only the person can approve leaving a page with unsaved input.')
+      if (step.dialog.promptParameterKey !== undefined && (step.dialog.type !== 'prompt' || step.dialog.action !== 'accept')) throw new Error('Only an accepted prompt takes a fresh answer parameter.')
+    }
     if (step.destination && step.kind !== 'drag' && step.kind !== 'swipe') throw new Error('Only drag and swipe steps have a destination.')
     if (step.durationMs !== undefined && (step.kind !== 'longPress' || !Number.isFinite(step.durationMs) || step.durationMs <= 0)) throw new Error('Only long press steps declare a positive finite contact duration.')
     if (step.scale !== undefined && (step.kind !== 'pinch' || !Number.isFinite(step.scale) || step.scale <= 0)) throw new Error('Only pinch steps declare a positive finite scale.')
@@ -904,6 +916,8 @@ function content(value: unknown): BrowserTaskContent {
       ...(step.destination ? { destination: target(step.destination) } : {}),
       ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
       ...(step.scale !== undefined ? { scale: step.scale } : {}),
+      ...(step.parameterKeys ? { parameterKeys: step.parameterKeys.map(parameterKey) } : {}),
+      ...(step.dialog ? { dialog: { type: step.dialog.type, action: step.dialog.action, ...(step.dialog.promptParameterKey !== undefined ? { promptParameterKey: parameterKey(step.dialog.promptParameterKey) } : {}) } } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
       ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
       ...(step.wait !== undefined ? { wait: waitCondition(step.wait) } : {}),
@@ -923,7 +937,10 @@ function content(value: unknown): BrowserTaskContent {
     if ((step.kind === 'press') !== (step.key !== undefined)) throw new Error('A press step declares its key; other steps cannot.')
     if ((step.kind === 'checkpoint' || step.kind === 'branch') && (step.onFail !== undefined || step.retry !== undefined)) throw new Error('Checkpoints and conditions keep their own continuation; failure handling belongs to page steps.')
   }
-  for (const step of steps) if (step.kind === 'fill' && !parameters.some(parameter => parameter.key === step.parameterKey)) throw new Error('Task fill parameter is not defined')
+  for (const step of steps) {
+    if (step.kind === 'fill' && !step.parameterKey) throw new Error('Task fill parameter is not defined')
+    for (const key of browserTaskStepParameterKeys(step)) if (!parameters.some(parameter => parameter.key === key)) throw new Error('Task parameter is not defined')
+  }
   let completion = raw.completion
   if (completion !== undefined) {
     if (!completion || typeof completion !== 'object' || Object.keys(completion).some(key => key !== 'criteria') || !Array.isArray(completion.criteria)) throw new Error('Invalid completion declaration')
@@ -939,7 +956,7 @@ function content(value: unknown): BrowserTaskContent {
     const producerIndex = steps.findIndex(step => step.id === producer)
     if (producerIndex < 0 || (steps[producerIndex]?.kind === 'checkpoint' || steps[producerIndex]?.kind === 'branch')) throw new Error('Completion needs a real page producer before its checkpoint.')
     for (const item of criteria) {
-      if (item.kind === 'download-readable' && (steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
+      if (item.kind === 'download-readable' && (steps[producerIndex]?.dialog !== undefined || steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
       if (item.kind === 'human-checkpoint' && !steps.some((step, index) => step.kind === 'checkpoint' && step.id === item.checkpointId && index > producerIndex)) throw new Error('Declare the checkpoint after its real producer.')
     }
     if (new Set(criteria.map(item => item.kind === 'download-readable' ? item.stepId : item.checkpointId)).size !== criteria.length) throw new Error('Duplicate completion condition')

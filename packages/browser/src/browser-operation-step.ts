@@ -26,7 +26,7 @@ export function safeBrowserUrl(value: string): string {
  * the journal, so a new private argument is redacted in both or in neither.
  */
 export function isSensitiveBrowserPageCall(method: string): boolean {
-  return method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp' ||
+  return method === 'uploadFiles' || method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp' ||
     method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests' ||
     method === 'routeRequests' || method === 'unrouteRequests' || method === 'setNetworkConditions' || method === 'clearNetworkConditions'
 }
@@ -41,6 +41,7 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
       : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
           .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
     ...(method === 'fillInput' || method === 'typeText' ? { inputKey: 'value', blockedReason: 'Sensitive input is requested again at replay time.' } : {}),
+    ...(method === 'uploadFiles' ? { blockedReason: 'File selections need fresh Workspace parameters; old upload paths are not replayed.' } : {}),
     ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {}),
     ...(['routeRequests','unrouteRequests','setNetworkConditions','clearNetworkConditions'].includes(method) ? { blockedReason: 'Network rules belong to their original program and document; apply a new explicit rule set instead of replaying old filters or mock content.' } : {}),
     ...(method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests'

@@ -89,6 +89,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   const id = text(row.id, 200)
   if (!sources.has(String(row.source)) || !statuses.has(String(row.status))) throw new AgentMuxError('Browser target identity or status is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (!Array.isArray(row.capabilities) || row.capabilities.length > capabilities.size || row.capabilities.some(item => typeof item !== 'string' || !capabilities.has(item))) throw new AgentMuxError('Browser target capabilities are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.dialogTypes !== undefined && (!Array.isArray(row.dialogTypes) || row.dialogTypes.length > 4 || new Set(row.dialogTypes).size !== row.dialogTypes.length || row.dialogTypes.some(type => typeof type !== 'string' || !['alert','confirm','prompt','beforeunload'].includes(type)))) throw new AgentMuxError('Browser target dialog types are invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (row.cdpMethods !== undefined && (!Array.isArray(row.cdpMethods) || row.cdpMethods.length > 128 || row.cdpMethods.some(item => typeof item !== 'string' || !/^[A-Z][A-Za-z]+\.[A-Za-z]+$/.test(item)))) throw new AgentMuxError('Browser target CDP subset is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const workspaceId = row.source !== 'external' && row.workspaceId === null ? null : text(row.workspaceId, 200)
   if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -114,6 +115,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
     ...(objectLink === undefined ? {} : { objectLink }),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
+    ...(row.dialogTypes === undefined ? {} : { dialogTypes: [...row.dialogTypes as import('./browser-targets.js').AgentMuxBrowserDialogType[]] }),
     ...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
     ...(row.control === undefined ? {} : { control: parseBrowserControl(row.control) }),

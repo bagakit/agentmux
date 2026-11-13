@@ -63,7 +63,7 @@ import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
-import { BrowserCdpSession } from './browser-cdp-session.js'
+import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
@@ -281,7 +281,7 @@ type PresentationCapture = {
   trackIds: readonly string[] | null
 }
 
-type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep }
+type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep; dialogPrompt?: string }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -642,6 +642,7 @@ export class BrowserViewManager {
       ...(sitePermissions ? { sitePermissions } : {}),
       url, ...(objectLink ? { objectLink } : {}), title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
+      dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
         !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
       ...(warnings ? { warning: warnings } : {}) }
@@ -3512,6 +3513,7 @@ export class BrowserViewManager {
         this.applyAgentControl(entry)
       }
       return await runBrowserTaskAsset(this.taskAssets!, input, {
+        dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
         yieldControl: id => this.yieldControl(id),
@@ -3525,7 +3527,11 @@ export class BrowserViewManager {
               execution.operationId = operation.id
               const version = await this.taskAssets!.executionVersion(cursor)
               const immutableStep = version?.steps.find(step => step.id === cursor.stepId)
-              if (immutableStep) taskPage.step = structuredClone(immutableStep)
+              if (immutableStep) {
+                taskPage.step = structuredClone(immutableStep)
+                const key = immutableStep.dialog?.promptParameterKey
+                if (key && input.parameters[key] !== undefined) taskPage.dialogPrompt = input.parameters[key]
+              }
               const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
               const declaration = version?.completion
               const download = declaration?.criteria.find(item => item.kind === 'download-readable')
@@ -3888,6 +3894,8 @@ export class BrowserViewManager {
     return async (name, args) => {
       requireLive()
       const step = startBrowserOperationStep(operation, name, args)
+      if (name === 'click' && taskPage?.step?.dialog && step.replay) step.replay.blockedReason =
+        'This click belongs to a reviewed task dialog decision. Run its immutable task version with fresh parameters; do not replay the trigger alone.'
       activeStep = step
       const effects = entry.activeRun?.operationId === operation.id ? entry.activeRun.effects : undefined
       effects?.begin(step.sequence, entry.navigationId)
@@ -3965,8 +3973,19 @@ export class BrowserViewManager {
               beforeAction(step)
             } } : {}) })
           // An answer is not raced: the page may open its next dialog before the answer's reply arrives.
-          value = interrupts && !isBrowserPageDialogAnswer(name, args) && !BROWSER_PAGE_MAIN_READS.has(name)
-            ? await interrupts.race(call, () => changesPage) : await call()
+          const decision = name === 'click' ? taskPage?.step?.dialog : undefined
+          const dialogNavigationId = entry.navigationId
+          const dialogUrl = observingView.webContents.getURL()
+          value = decision && interrupts
+            ? await interrupts.triggerAndAnswer(call, { type: decision.type, accept: decision.action === 'accept',
+              ...(taskPage?.dialogPrompt === undefined ? {} : { promptText: taskPage.dialogPrompt }) }, {
+              beforeAnswer: dialog => {
+                beforeAction(step)
+                if (entry.navigationId !== dialogNavigationId || dialog && dialog.url !== dialogUrl) throw new Error('The original task dialog document changed. Inspect the page before continuing.')
+              }, remainingMillis: () => deadlineMillis - performance.now()
+            })
+            : interrupts && !isBrowserPageDialogAnswer(name, args) && !BROWSER_PAGE_MAIN_READS.has(name)
+              ? await interrupts.race(call, () => changesPage) : await call()
           if (action !== undefined) await feedback?.completeAction(action)
         }
         catch (error) {
@@ -5307,6 +5326,7 @@ export class BrowserViewManager {
       ...(entry.source ? { source: entry.source } : {}),
       mode: entry.storage.mode,
       navigationId: entry.navigationId,
+      dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
       faviconDataUrl: entry.faviconDataUrl,
       profileId: entry.storage.profileId,
       ...('capsule' in entry.storage ? { capsuleId: entry.storage.capsule.record.capsuleId,

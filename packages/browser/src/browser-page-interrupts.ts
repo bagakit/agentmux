@@ -199,6 +199,45 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
       throw new BrowserLocalRecoveryFailure(`${name}() was not sent. ${describeBrowserPageDialog(open)}`, 'page-dialog', 'not-dispatched')
     },
 
+    /** A reviewed task click and its declared answer share this original dialog scope. */
+    async triggerAndAnswer<T>(trigger: () => Promise<T>, decision: {
+      type: BrowserPageDialogType; accept: boolean; promptText?: string
+    }, scope: { beforeAnswer(dialog?: BrowserPageDialog): void; remainingMillis(): number }): Promise<{ trigger: T; dialog: BrowserPageDialogAnswer }> {
+      if (disposed || options.signal.aborted || open || !observing) throw new BrowserLocalRecoveryFailure(
+        'The expected dialog cannot be observed for this click. Nothing was sent; inspect the original Browser or use its normal controls.', 'page-dialog', 'not-dispatched')
+      let active = true
+      let receive!: (dialog: BrowserPageDialog) => void
+      const opened = new Promise<BrowserPageDialog>(resolve => { receive = resolve })
+      let reject!: (error: Error) => void
+      const cancelled = new Promise<never>((_resolve, fail) => { reject = fail })
+      const unknown = () => new BrowserLocalRecoveryFailure('The click or its dialog answer is unconfirmed. Inspect the original page; neither action was replayed.', 'page-dialog', 'unknown')
+      const abort = () => reject(unknown())
+      const timer = setTimeout(abort, Math.max(1, scope.remainingMillis()))
+      waiters.add(receive)
+      options.signal.addEventListener('abort', abort, { once: true })
+      const complete = async () => {
+        scope.beforeAnswer()
+        const pending = trigger()
+        pending.catch(() => {})
+        // A successful click can open a dialog asynchronously. Its original program budget
+        // bounds the observation; a failed click never licenses a later unrelated answer.
+        const failed = pending.then(() => new Promise<never>(() => {}))
+        const dialog = await Promise.race([opened, failed])
+        if (!active || disposed || options.signal.aborted || open !== dialog || dialog.type !== decision.type) throw unknown()
+        scope.beforeAnswer(dialog)
+        let answered: BrowserPageDialogAnswer
+        try { answered = await answer(decision.accept, decision.promptText) } catch { throw unknown() }
+        return { trigger: await pending, dialog: answered }
+      }
+      try { return await Promise.race([complete(), cancelled]) }
+      finally {
+        active = false
+        clearTimeout(timer)
+        waiters.delete(receive)
+        options.signal.removeEventListener('abort', abort)
+      }
+    },
+
     answer,
     /** Raw CDP answers share this exact original dialog fact. Unknown accepts are not approvals. */
     async answerRaw(accept: boolean, promptText?: string): Promise<unknown> {

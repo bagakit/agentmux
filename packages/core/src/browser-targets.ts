@@ -40,6 +40,8 @@ export type AgentMuxBrowserControl = {
 /** The Browser Profile a normal page uses: its id and the label Main lists for it. */
 export type AgentMuxBrowserProfileRef = { id: string; label: string }
 
+export type AgentMuxBrowserDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+
 export type AgentMuxBrowserTarget = {
   id: string
   workspaceId: string | null
@@ -56,6 +58,8 @@ export type AgentMuxBrowserTarget = {
   /** Absent when an embedded durable description has no native document yet. */
   navigationId?: string
   openedFrom?: AgentMuxBrowserSource
+  /** Host-supported native dialog kinds; absent is unknown, not approval or current readiness. */
+  dialogTypes?: readonly AgentMuxBrowserDialogType[]
   capabilities: readonly string[]
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]
