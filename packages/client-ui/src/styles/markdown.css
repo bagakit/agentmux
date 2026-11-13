@@ -137,7 +137,7 @@
 .md-container[data-indent] { padding-left: var(--sp-6); }
 .md-image-frame { display: inline-block; max-width: 100%; vertical-align: middle; }
 .md-image-frame > * { display: block; max-width: 100%; }
-.md-image-frame img { width: 100%; height: auto; }
+.md-image-frame img { width: var(--md-image-width, 100%); height: var(--md-image-height, auto); }
 .md-container[data-align='center'] .md-image-frame { margin-inline: auto; }
 /* Centered README blocks wrap evenly in a narrow column instead of leaving one word on its own line. */
 .md-container[data-align='center'] .md-paragraph, .md-paragraph[data-align='center'], .md-heading[data-align='center'] { text-wrap: balance; }

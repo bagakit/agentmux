@@ -34,7 +34,7 @@ export function markdownImageReferences(content: string, blocks: readonly BlockN
         const reference = pastedMarkdownImageReference(node.href, node.alt)
         if (reference) references.push(reference)
       }
-      else if (node.kind === 'link' && (options.readOnlyImages || plainLink(node))) inline(node.children, Boolean(options.readOnlyImages))
+      else if (node.kind === 'link' && (options.readOnlyImages || plainLink(node))) inline(node.children, true)
       else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike' || node.kind === 'html-mark') inline(node.children, inLink)
     }
   }

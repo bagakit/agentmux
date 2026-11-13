@@ -43,7 +43,8 @@ function ThemedImage({ node, render }: { node: ImageNode; render(href: string): 
 /** A declared width/height only sizes the wrapper; it never reaches the image element as an attribute. */
 function imageFrame(node: ImageNode): CSSProperties | undefined {
   if (!node.width && !node.height) return undefined
-  return { ...(node.width ? { width: node.width } : {}), ...(node.height && !node.width ? { height: node.height } : {}) }
+  return { ...(node.width ? { width: node.width } : {}),
+    ...(node.height ? { height: node.height, '--md-image-height': node.height, '--md-image-width': node.width ? '100%' : 'auto' } : {}) }
 }
 
 // The Host owns file reads and link destinations; this renderer never opens a URL on its own.
@@ -189,7 +190,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       return <button key={key} type="button" className="md-link md-link--file md-link--authored" title={file.path}
         onClick={event => open(file.path, referenceRevealLocation(file), event)}><Inline nodes={node.children} context={labelContext} /></button>
     }
-    if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
+    if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={labelContext} /></Fragment>
     const url = target.url
     // Buttons route to the Host, so an untrusted href cannot navigate the Renderer.
     return <button key={key} type="button" className="md-link" title={url} onClick={event => context.openHttpLink(url, {
@@ -242,19 +243,17 @@ function MarkdownHtmlTable({ node, context, path }: { node: Extract<BlockNode, {
   const head = node.rows.filter(row => row.head), body = node.rows.filter(row => !row.head)
   // Layout cards read authored percentages as proportions: when every cell of a row names one and they
   // sum to less than 100 (33% x 3), the row fills the column. Anything else keeps the author's widths.
-  const share = (row: (typeof node.rows)[number], cell: (typeof row.cells)[number]) => {
-    const percents = row.cells.map(entry => entry.width?.endsWith('%') ? Number.parseFloat(entry.width) : NaN)
-    const total = percents.reduce((sum, value) => sum + value, 0)
-    if (!node.layout || !cell.width?.endsWith('%') || !(total > 0 && total < 100)) return cell.width
-    return `${(Number.parseFloat(cell.width) / total * 100).toFixed(3)}%`
+  const row = (entry: (typeof node.rows)[number], rowIndex: number, section: string) => {
+    const total = node.layout ? entry.cells.reduce((sum, cell) => sum + (cell.width?.endsWith('%') ? Number.parseFloat(cell.width) : NaN), 0) : NaN
+    return <tr key={rowIndex}>{entry.cells.map((cell, index) => {
+      const Cell = cell.header ? 'th' : 'td'
+      const width = cell.width && total > 0 && total < 100 ? `${(Number.parseFloat(cell.width) / total * 100).toFixed(3)}%` : cell.width
+      return <Cell key={index} className="md-html-cell" {...(cell.align ? { 'data-align': cell.align } : {})} {...(cell.valign ? { 'data-valign': cell.valign } : {})}
+        {...(cell.colspan ? { colSpan: cell.colspan } : {})} {...(cell.rowspan ? { rowSpan: cell.rowspan } : {})} style={width ? { width } : undefined}>
+        {cell.children.map((child, childIndex) => <Block key={childIndex} node={child} context={context} path={`${path}:${section}:${rowIndex}:${index}:${childIndex}`} />)}
+      </Cell>
+    })}</tr>
   }
-  const row = (entry: (typeof node.rows)[number], rowIndex: number, section: string) => <tr key={rowIndex}>{entry.cells.map((cell, index) => {
-    const Cell = cell.header ? 'th' : 'td'
-    return <Cell key={index} className="md-html-cell" {...(cell.align ? { 'data-align': cell.align } : {})} {...(cell.valign ? { 'data-valign': cell.valign } : {})}
-      {...(cell.colspan ? { colSpan: cell.colspan } : {})} {...(cell.rowspan ? { rowSpan: cell.rowspan } : {})} style={cell.width ? { width: share(entry, cell) } : undefined}>
-      {cell.children.map((child, childIndex) => <Block key={childIndex} node={child} context={context} path={`${path}:${section}:${rowIndex}:${index}:${childIndex}`} />)}
-    </Cell>
-  })}</tr>
   return <div className="md-table-scroll md-horizontal-reading" {...reading} aria-label={reading.tabIndex === 0 ? 'Scrollable table' : undefined}>
     <table ref={viewport.ref} className={`md-html-table${node.layout ? ' md-html-table--layout' : ''}`} {...(node.layout ? { role: 'presentation' } : {})}>
       {node.caption ? <caption><Inline nodes={node.caption} context={context} /></caption> : null}
@@ -482,8 +481,9 @@ function markdownReadingBlocks(blocks: BlockNode[] | null, content: string, cont
       if (node.kind === 'math' || node.kind === 'image' || node.kind === 'break') return [null]
       if (node.kind === 'footnote-reference') return [String(node.number)]
       if (node.kind === 'link') {
+        if (value.inLink) return inline(node.children, value)
         const target = resolveLink(node, value)
-        return target.kind === 'object' ? [null] : inline(node.children, target.kind === 'text' && !value.readOnly ? value : { ...value, inLink: true })
+        return target.kind === 'object' ? [null] : inline(node.children, { ...value, inLink: true })
       }
       return inline(node.children, value)
     })

@@ -79,7 +79,7 @@
 .file-markdown-image__loading { color:var(--text-3); font-size:var(--fs-meta); }
 /* An authored width sizes the frame; the image fills it and keeps its proportions. */
 .md-image-frame > [data-reading-find-boundary] > .file-markdown-image, .md-image-frame > .file-markdown-image { margin-block:0; }
-.md-image-frame .file-markdown-image > img { width:100%; max-height:none; }
+.md-image-frame .file-markdown-image > img { max-height:none; }
 .md-container[data-align='center'] .file-markdown-image > img, .md-paragraph[data-align='center'] .file-markdown-image > img { margin-inline:auto; }
 .md-html-table--layout .file-markdown-image { margin-block:0; }
 @container (max-width:360px) { .file-path-label__parent { display:none; } .file-path-label__name { flex:1; } }
