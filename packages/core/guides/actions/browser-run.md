@@ -33,6 +33,9 @@ A page function that AgentMux itself refuses or cannot confirm throws an error w
 "not-dispatched"` means nothing reached the page, so retrying is safe; `"unknown"` means the action
 may have happened, so read the page before trying again. Errors without these fields came from the
 page or your own code; decide from them only after looking.
+`click(ref, {count: 2})` double-clicks and `click(ref, {button: "right"})` right-clicks (or
+`"middle"`), as trusted input at the same checked point. Unknown options are refused before anything
+is pressed.
 `pressKey(ref, key)` takes one key or a chord written with `+`, such as `Control+a`, `Shift+Tab` or
 `Meta+z`; modifiers are held around the key and always released. On macOS use `Meta` for the system
 shortcuts (select all, copy, undo). A shifted letter types its capital; for other shifted
