@@ -4,6 +4,9 @@ import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import type { WorkspaceSourcePreview } from '../../../../shared/workspace-file-format'
 import { ImageContent } from '../FilePreviewPane'
 import { WorkspaceImage } from '../WorkspaceImage'
+import { MarkdownRemoteImage } from '@agentmux/client-ui/components/MarkdownRemoteImage'
+import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
+import { useMarkdownReadingLayout } from '../../lib/markdown-reading-layout'
 
 const FileDataPreview = lazy(async () => ({ default: (await import('../FileDataPreview')).FileDataPreview }))
 const HtmlFilePreview = lazy(async () => ({ default: (await import('../HtmlFilePreview')).HtmlFilePreview }))
@@ -25,6 +28,12 @@ function SourceImage({ content, name }: { content: string; name: string }) {
     return () => URL.revokeObjectURL(url)
   }, [content])
   return loaded?.content === content ? <ImageContent key={loaded.url} src={loaded.url} name={name} /> : null
+}
+
+/** Markdown documents read README badges like Note: lazy HTTPS, no referrer; local paths keep their own port. */
+function renderRemoteDocumentImage(href: string, alt: string) {
+  const url = parseHttpLinkUrl(href)
+  return url?.startsWith('https:') ? <MarkdownRemoteImage href={url} alt={alt} /> : undefined
 }
 
 export type SourceFilePreviewProps = {
@@ -57,11 +66,17 @@ export function SourceFilePreview(props: SourceFilePreviewProps) {
     case 'excalidraw': return <ExcalidrawFilePreview content={content} path={path} visible={visible} />
     case 'vega': case 'vega-lite': return <VegaFilePreview content={content} path={path} workspaceId={workspaceId} visible={visible} mode={kind} />
     case 'latex': case 'typst': return <BuildFilePreview regionId={props.regionId} kind={kind} path={path} visible={visible} />
-    case 'markdown': return <ReadingFind source={JSON.stringify([workspaceId, path])} active={visible} label="loaded Markdown preview"
-      bodySelector=".file-markdown-preview" scrollSelector=".file-markdown-preview"><AgentMarkdown documentMode outline className="file-markdown-preview" content={content} workspaceRoot={workspaceRoot} sourcePath={path}
-      renderWorkspaceImage={(image, alt, linked) => <WorkspaceImage key={`${workspaceId}:${image}`} workspaceId={workspaceId} path={image} alt={alt} linked={Boolean(linked)} openFile={() => openReference(image)} />}
-      openWorkspaceFile={openReference} openHttpLink={openHttpLink} /></ReadingFind>
+    case 'markdown': return <MarkdownFilePreview {...props} />
     case 'note': return null // Note's editable block owner stays with FileSurfaceView.
     default: { const exhaustive: never = kind; return exhaustive }
   }
+}
+
+/** The Markdown document reads its layout from the one Desktop preference owner. */
+function MarkdownFilePreview({ content, path, workspaceId, workspaceRoot, visible, openReference, openHttpLink }: SourceFilePreviewProps) {
+  const readingLayout = useMarkdownReadingLayout()
+  return <ReadingFind source={JSON.stringify([workspaceId, path])} active={visible} label="loaded Markdown preview"
+      bodySelector=".file-markdown-preview" scrollSelector=".file-markdown-preview"><AgentMarkdown documentMode outline className="file-markdown-preview" content={content} workspaceRoot={workspaceRoot} sourcePath={path}
+      renderWorkspaceImage={(image, alt, linked) => <WorkspaceImage key={`${workspaceId}:${image}`} workspaceId={workspaceId} path={image} alt={alt} linked={Boolean(linked)} openFile={() => openReference(image)} />}
+      renderImage={renderRemoteDocumentImage} openWorkspaceFile={openReference} openHttpLink={openHttpLink} {...(readingLayout ? { readingLayout } : {})} /></ReadingFind>
 }
