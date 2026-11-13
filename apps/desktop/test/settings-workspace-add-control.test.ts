@@ -1,3 +1,4 @@
+import { settingsWorkbenchWindows, settingsScratchTopics, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -10,12 +11,10 @@ import ts from 'typescript'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult, ExecutionHost } from '@agentmux/core'
-import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
   choose: vi.fn() }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() }, app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop', once: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() }, app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop', on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), once: vi.fn() },
   globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
@@ -23,7 +22,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { constructor(options: { execute: typeof ipc.execute }) { ipc.execute = options.execute } async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
@@ -43,6 +42,7 @@ const directories: string[] = []
 const envelope = { requestId: 'owned-workspace-add', schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION } as const
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-workspace-add-'));directories.push(root);ipc.root=root
+  await prepareSettingsIpcDirectory(root)
   const store = new ConfigStore(join(root, 'config.json'))
   const initial = await store.save({ ...structuredClone(DEFAULT_CONFIG), workspaces: [
     { id: '__scratch__', name: 'Owned Topics', hostId: 'local', path: join(root, 'topics'), kind: 'folder' }] })
@@ -60,7 +60,7 @@ async function fixture() {
   const window={setBackgroundColor:vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow
   ipc.handlers.clear();ipc.execute=undefined
   const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(),window,
-    configStore:store,runtime,progressLoops,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>window} as Parameters<typeof registerIpc>[0]['workbenchWindows'],scratchTopics:{setNameAudit:vi.fn(),normalizeDirectoryIdentities:vi.fn().mockResolvedValue(undefined)} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
+    configStore:store,runtime,progressLoops,workbenchWindows:settingsWorkbenchWindows(window),scratchTopics:settingsScratchTopics(),workspaceFiles:settingsWorkspaceFiles()})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{
     const handler=ipc.handlers.get(channel);expect(handler).toBeTypeOf('function')
