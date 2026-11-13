@@ -29,6 +29,8 @@ export type AgentInputSelector = { key: AgentPromptInputKey } | { kind: 'message
 export type AgentInputWaitReason =
   | { phase: 'runtime'; reason: 'runtime-unavailable'; wake: 'runtime-restored'; failure?: import('./delivery-attempt.js').DeliveryFailure }
   | { phase: 'session'; reason: 'session-resume-needed'; wake: 'session-restored'; failure?: import('./delivery-attempt.js').DeliveryFailure }
+  /** The Run's Provider has not reported its native conversation start yet; its first-start prompts are still on screen. */
+  | { phase: 'session'; reason: 'native-session-starting'; wake: 'session-restored'; failure?: never }
   | { phase: 'authorization'; reason: 'author-authorization-needed'; wake: 'explicit-rejoin'; failure?: import('./delivery-attempt.js').DeliveryFailure }
   | { phase: 'observer'; reason: 'observer-stopped'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
   | { phase: 'native-environment'; reason: 'original-environment-unconfirmed' | 'original-target-changed'; wake: 'explicit-rejoin';

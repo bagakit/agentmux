@@ -10,7 +10,8 @@ export function originalInputExplanation(status: AgentInputSubmissionReceipt['st
   if (status === 'terminal-confirmed' || status === 'bytes-accepted') return { title: 'Input written to terminal', detail: 'Agent acceptance is not yet confirmed. This message is not sent again.' }
   if (status === 'launch-carried') return { title: 'Recovery startup carried the original message', detail: 'Agent acceptance is unconfirmed. This original message will not be sent again.' }
   if (status === 'waiting') {
-    const title = waiting?.phase === 'runtime' ? 'Input waits for its Runtime' : waiting?.phase === 'session' ? 'Input waits for its session' :
+    const title = waiting?.phase === 'runtime' ? 'Input waits for its Runtime' : waiting?.reason === 'native-session-starting' ? 'Input waits for the Agent to finish starting' :
+      waiting?.phase === 'session' ? 'Input waits for its session' :
       waiting?.phase === 'authorization' ? 'Input waits for permission review' : waiting?.phase === 'observer' ? 'Input observation ended' :
       waiting?.reason === 'original-target-changed' ? 'Saved input target changed' : waiting?.phase === 'native-environment' ? 'Agent environment check incomplete' :
       waiting?.phase === 'input-environment' ? 'Input environment check incomplete' : waiting?.phase === 'service' ? 'Input service check failed' : 'Saved input is waiting'

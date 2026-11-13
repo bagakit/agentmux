@@ -36,7 +36,8 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   if (control.waiting !== undefined) {
     const waiting = wireRecord(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation'])
     if (waiting.phase === 'runtime') { if (waiting.reason !== 'runtime-unavailable' || waiting.wake !== 'runtime-restored') wireFail() }
-    else if (waiting.phase === 'session') { if (waiting.reason !== 'session-resume-needed' || waiting.wake !== 'session-restored') wireFail() }
+    else if (waiting.phase === 'session') { if (!['session-resume-needed', 'native-session-starting'].includes(String(waiting.reason)) || waiting.wake !== 'session-restored' ||
+      waiting.reason === 'native-session-starting' && waiting.failure !== undefined) wireFail() }
     else if (waiting.phase === 'authorization') { if (waiting.reason !== 'author-authorization-needed' || waiting.wake !== 'explicit-rejoin') wireFail() }
     else if (waiting.phase === 'observer') { if (waiting.reason !== 'observer-stopped' || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }
     else if (waiting.phase === 'input-environment') { if (!['original-input-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }

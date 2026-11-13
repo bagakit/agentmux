@@ -220,6 +220,8 @@ const unobservedTimestamp = 0
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
+// A native conversation reports its start within the composer readiness window; past it the start is unknown.
+const NATIVE_SESSION_START_WAIT_MS = 120_000
 // A local event annotation, never serialized or retained as another Session fact owner.
 const localSessionObservation = Symbol('local-session-observation')
 type LocalSessionObservation = 'terminalOutputChannel' | 'terminalCapability'
@@ -847,6 +849,9 @@ export class AgentMuxClient {
   // Only pending snapshot readers retain removals. No durable terminal registry or completed-Run set.
   private readonly pendingRunSnapshots = new Map<string | null, Set<Set<string>>>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
+  /** When each live Hook binding began observing its Run; bounds the native start wait. */
+  private readonly hookBindingActivatedAt = new Map<string, number>()
+  private readonly nativeStartRechecks = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly hookRestorations = new Map<string, { source: string; epoch: number; pending: Promise<void> }>()
   private readonly hookIngressObservations = new Map<string, NonNullable<AgentMuxAgentSession['hookIngressObservation']> & {
     nativeTarget?: AgentNativeSessionHandle
@@ -1145,12 +1150,12 @@ export class AgentMuxClient {
         pendingBinding: operationId => this.pendingLifecycleBindings.get(operationId),
         retainBinding: (operationId, binding) => { this.pendingLifecycleBindings.set(operationId, binding) },
         activateBinding: (runId, binding, operationId) => {
-          this.hookBindings.set(runId, binding)
+          this.activateHookBinding(runId, binding)
           if (operationId !== undefined) this.pendingLifecycleBindings.delete(operationId)
         },
         closeRunBinding: async (runId, binding = this.hookBindings.get(runId)) => {
           await binding?.close()
-          if (this.hookBindings.get(runId) === binding) this.hookBindings.delete(runId)
+          if (this.hookBindings.get(runId) === binding) this.forgetHookBinding(runId)
         },
         releaseUnusedBinding: async (binding, operationId, retainPending) => {
           if (![...this.hookBindings.values()].includes(binding) &&
@@ -5379,7 +5384,7 @@ export class AgentMuxClient {
         if (error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
           readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
           preservePreparedCreation = !persisted
-          this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+          this.activateHookBinding(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
           this.pendingLifecycleBindings.delete(lifecycleOperationId)
           await this.publishCurrentRunState(readySession)
           throw error
@@ -5404,7 +5409,7 @@ export class AgentMuxClient {
               throw observationError
             }
             readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
-            this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+            this.activateHookBinding(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
             this.pendingLifecycleBindings.delete(lifecycleOperationId)
             this.queueNativeIdentityCapture(readySession, input)
             await this.publishCurrentRunState(readySession)
@@ -5413,14 +5418,14 @@ export class AgentMuxClient {
         } else {
           preservePreparedCreation = !persisted
           readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
-          this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+          this.activateHookBinding(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
           this.pendingLifecycleBindings.delete(lifecycleOperationId)
           this.queueNativeIdentityCapture(readySession, input)
           await this.publishCurrentRunState(readySession)
           return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
         }
       }
-      this.hookBindings.set(run.runId, hookBinding)
+      this.activateHookBinding(run.runId, hookBinding)
       this.runPids.set(run.runId, run.pid)
       this.queueNativeIdentityCapture(readySession, input)
       this.publishSession(readySession)
@@ -5588,7 +5593,7 @@ export class AgentMuxClient {
       const binding = this.pendingLifecycleBindings.get(reservation.operationId) ?? this.hookBindings.get(run.runId) ??
         this.hookServer.createBinding(seed.agentSessionId, seed.providerId, seed.hookBindingId, seed.hookToken)
       this.pendingLifecycleBindings.set(reservation.operationId, binding)
-      this.hookBindings.set(run.runId, binding)
+      this.activateHookBinding(run.runId, binding)
       await binding.bindRun(run.runId)
       this.pendingLifecycleBindings.delete(reservation.operationId)
     } catch (error) { ready = await this.retainCreationFailure(ready, 'hook-bind', error, false) }
@@ -6682,6 +6687,54 @@ export class AgentMuxClient {
     return work
   }
 
+  /**
+   * A Run whose Provider reports its native conversation start through Hooks, whose Hook binding is
+   * live, and from which no Hook has arrived yet, may still show first-start prompts (folder trust,
+   * login). Typing a queued input there answers the prompt instead of the Agent, so it waits.
+   * Without a declared start event or a live binding the start cannot be observed, so the original
+   * terminal input path applies. The wait is bounded by the same window the composer readiness
+   * observation uses: after it the start is unknown, not denied, and the input goes through as
+   * before, so a Run whose Hooks never arrive is never kept from its input.
+   */
+  private nativeSessionStarting(session: AgentMuxStoredAgentSession): boolean {
+    if (!this.providers.get(session.providerId).hook.nativeSessionTransition) return false
+    const boundAt = this.hookBindingActivatedAt.get(session.run.runId)
+    if (!this.hookBindings.has(session.run.runId) || boundAt === undefined || Date.now() - boundAt > NATIVE_SESSION_START_WAIT_MS) return false
+    if (session.hookReceipt && sameRun(session.hookReceipt.run, session.run)) return false
+    if (session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run)) return false
+    return !(session.nativeBinding && sameRun(session.nativeBinding.run, session.run) && session.nativeBinding.source !== 'semantic-resume-target')
+  }
+
+  private activateHookBinding(runId: string, binding: AgentHookBinding): void {
+    if (this.hookBindings.get(runId) !== binding || !this.hookBindingActivatedAt.has(runId)) this.hookBindingActivatedAt.set(runId, Date.now())
+    this.hookBindings.set(runId, binding)
+  }
+
+  private forgetHookBinding(runId: string): void {
+    this.hookBindings.delete(runId)
+    this.hookBindingActivatedAt.delete(runId)
+    const timer = this.nativeStartRechecks.get(runId)
+    if (timer) { clearTimeout(timer); this.nativeStartRechecks.delete(runId) }
+  }
+
+  /** Wake the waiting inputs of this Run once its start window ends, so an unobserved start releases them. */
+  private scheduleNativeStartRecheck(session: AgentMuxStoredAgentSession): void {
+    const boundAt = this.hookBindingActivatedAt.get(session.run.runId)
+    if (boundAt === undefined || this.nativeStartRechecks.has(session.run.runId)) return
+    const timer = setTimeout(() => {
+      this.nativeStartRechecks.delete(session.run.runId)
+      const ids = this.inputWaitingByRecipient.get(session.agentSessionId)
+      let requested = false
+      for (const id of ids ?? []) {
+        const value = this.inputWaitingContexts.get(id)
+        if (value?.sessionWake) { value.requested = true; requested = true }
+      }
+      if (requested) void this.scheduleInputWaiting(session.agentSessionId)
+    }, Math.max(0, boundAt + NATIVE_SESSION_START_WAIT_MS - Date.now()) + 1)
+    timer.unref?.()
+    this.nativeStartRechecks.set(session.run.runId, timer)
+  }
+
   private canResumeInput(intent: AgentInputJournalIntent, session: AgentMuxAgentSession, recipientContinuation = false): boolean {
     const expected = intent.environment
     // External continuation requires a live authenticated original author or recipient.
@@ -6828,6 +6881,13 @@ export class AgentMuxClient {
         try { await authority?.assertCurrent() } catch (error) {
           if (context.controller.signal.aborted) throw error
           await waiting({ phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin', failure: deliveryFailure(error) })
+          const receipt = await this.inspectAgentInput({ key })
+          if (receipt) await this.publishInputReceipt(receipt)
+          return
+        }
+        if (!context.continueGate && this.nativeSessionStarting(current)) {
+          await waiting({ phase: 'session', reason: 'native-session-starting', wake: 'session-restored' })
+          this.scheduleNativeStartRecheck(current)
           const receipt = await this.inspectAgentInput({ key })
           if (receipt) await this.publishInputReceipt(receipt)
           return
@@ -7917,7 +7977,7 @@ export class AgentMuxClient {
     if (this.registry.has(agentSessionId) && !sameRun(this.registry.get(agentSessionId).run, session.run)) {
       throw new AgentMuxError('Agent Session changed before its original Stop cleanup.', 'STALE_AGENT_SESSION')
     }
-    this.hookBindings.delete(session.run.runId)
+    this.forgetHookBinding(session.run.runId)
     this.settleHookRestore(session)
     const cleanup = await Promise.allSettled([
       this.acp.unbind(agentSessionId),
@@ -8174,7 +8234,7 @@ export class AgentMuxClient {
   /** Both native exit events and reconnected terminal facts release the same exact Hook owner. */
   private releaseEndedRunHook(run: AgentMuxRunRef, session?: AgentMuxStoredAgentSession): void {
     const binding = this.hookBindings.get(run.runId)
-    this.hookBindings.delete(run.runId)
+    this.forgetHookBinding(run.runId)
     if (binding) void binding.close().catch(error => this.publisher.publish({ type: 'agent-error',
       ...(session ? { agentSessionId: session.agentSessionId } : {}), code: 'HOOK_BINDING_RELEASE_UNCONFIRMED',
       message: `The original Run ended, but draining its Hook binding is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
@@ -8217,7 +8277,7 @@ export class AgentMuxClient {
           await binding.close()
           return
         }
-        this.hookBindings.set(session.run.runId, binding)
+        this.activateHookBinding(session.run.runId, binding)
         this.settleHookRestore(session)
       } catch (error) {
         if (current()) this.observeHookRestoreFailure(session, 'binding', error)
