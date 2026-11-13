@@ -277,6 +277,8 @@
   height: 24px; padding: 0 var(--sp-2) 0 1px; border: 0; border-radius: var(--radius-sm);
   color: var(--text-2); background: transparent; font-size: var(--fs-meta); font-weight: 550; cursor: pointer;
 }
+/* A Profile is an identity chip, so the toolbar's square icon-button rule must not collapse its name. */
+.browser-toolbar > .browser-profile-chip { width: auto; flex: 0 1 auto; justify-content: flex-start; }
 .browser-profile-chip > .profile-mark { width: 20px; height: 20px; font-size: var(--fs-micro); }
 .browser-profile-chip > span:not(.profile-mark) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-profile-chip > svg { flex: none; color: var(--text-3); }
