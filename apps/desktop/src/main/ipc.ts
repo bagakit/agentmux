@@ -846,7 +846,8 @@ export async function registerIpc(args: {
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
   handle('config:get', () => config)
-  handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
+  // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
+  handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))

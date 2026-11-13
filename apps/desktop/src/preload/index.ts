@@ -181,7 +181,7 @@ const api: AgentMuxPreloadApi = {
   },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
-    save: (config: AppConfig, expected: AppConfig) => ipcRenderer.invoke('config:save', config, expected),
+    save: async (config: AppConfig, expected: AppConfig) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('config:save', config, expected)),
     onChange: (listener) => {
       const receive = (_event: unknown, config: AppConfig) => listener(config)
       ipcRenderer.on(CONFIG_CHANGED_CHANNEL, receive)
