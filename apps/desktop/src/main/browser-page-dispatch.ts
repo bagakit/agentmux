@@ -358,6 +358,15 @@ function quadCenter(quads: unknown): { x: number; y: number } | null {
   return null
 }
 
+/** waitForUrl's condition: a whole URL, a part of one, or a regex source. Anything else is refused. */
+function urlCondition(wanted: unknown): (url: string) => boolean {
+  if (typeof wanted === 'string') return url => url === wanted
+  const condition = wanted !== null && typeof wanted === 'object' ? wanted as { contains?: unknown; pattern?: unknown } : {}
+  if (typeof condition.contains === 'string') { const part = condition.contains; return url => url.includes(part) }
+  if (typeof condition.pattern === 'string') { const pattern = new RegExp(condition.pattern); return url => pattern.test(url) }
+  throw new TypeError('waitForUrl takes a URL string, {contains: text} or {pattern: regex source}')
+}
+
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string') throw new TypeError(`${name} must be a string, got ${typeof value}`)
   return value
@@ -1147,10 +1156,16 @@ export function createBrowserPageDispatch(
       case 'waitForElement': {
         // 按**名字**等，不按 ref：ref 是快照发出来的，还没出现的元素当然没有 ref。
         const wanted = requireString(args[0], 'name')
-        const timeoutMs = typeof args[1] === 'number' ? args[1] : DEFAULT_WAIT_MS
-        await until(`an element named ${JSON.stringify(wanted)}`, timeoutMs, async () => {
+        // waitForElement(name, timeoutMs) or waitForElement(name, {timeoutMs, exact, role}).
+        const options = args[1] !== null && typeof args[1] === 'object' && !Array.isArray(args[1]) ? args[1] as { timeoutMs?: unknown; exact?: unknown; role?: unknown } : {}
+        const timeoutMs = typeof args[1] === 'number' ? args[1] : typeof options.timeoutMs === 'number' ? options.timeoutMs : DEFAULT_WAIT_MS
+        const exact = options.exact === true
+        const role = typeof options.role === 'string' ? options.role : undefined
+        // A substring match takes "Save" for "Save draft"; exact and role say which one is meant.
+        const matches = (node: BrowserPageNode) => node.ref !== '' && (exact ? node.name === wanted : node.name.includes(wanted)) && (role === undefined || node.role === role)
+        await until(`${role ? `a ${role}` : 'an element'} named ${exact ? 'exactly ' : ''}${JSON.stringify(wanted)}`, timeoutMs, async () => {
           const snapshot = await takeSnapshot()
-          return snapshot.nodes.some((node) => node.ref !== '' && node.name.includes(wanted))
+          return snapshot.nodes.some(matches)
         })
         // 等到了才认领这批 ref：轮询途中那些快照的编号从没离开过这里，认领它们等于把还没
         // 交给 Agent 的 ref 当成已交付的。
@@ -1174,6 +1189,22 @@ export function createBrowserPageDispatch(
         })
         // The page that finished, so a program can tell which document it now acts on.
         return loaded
+      }
+      case 'waitForUrl': {
+        // The page Main reports, not the page's own location: a pushState that Main has not seen is
+        // not a navigation it can act on. A string matches the whole URL; {contains} or {pattern} match part of it.
+        const wanted = args[0]
+        const timeoutMs = typeof args[1] === 'number' ? args[1] : DEFAULT_WAIT_MS
+        const test = urlCondition(wanted)
+        let reached: { url: string; navigationId: string } | null = null
+        await until(`the page to reach ${JSON.stringify(wanted)}`, timeoutMs, async () => {
+          const page = context.pageInfo()
+          if (!test(page.url)) return false
+          reached = { url: page.url, navigationId: page.navigationId }
+          return true
+        })
+        // A new document voids every ref; the program takes a fresh snapshot of the page it reached.
+        return reached
       }
       case 'waitForNetworkIdle': {
         const timeoutMs = typeof args[0] === 'number' ? args[0] : DEFAULT_WAIT_MS
