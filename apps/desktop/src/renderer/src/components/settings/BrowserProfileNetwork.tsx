@@ -2,11 +2,69 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useContext, useEffect, useState } from 'react'
-import type { BrowserProfileSummary } from '../../../../shared/contracts'
+import type { BrowserProfileEdit, BrowserProfileSummary } from '../../../../shared/contracts'
+import { formatBrowserProfileProxyServer, normalizeBrowserProfileNetwork, type BrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { api } from '../../lib/api'
 import { SettingsNavigation } from '../SettingsNavigation'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+
+type RouteMode = BrowserProfileNetwork['mode']
+const ROUTE_LABELS: Readonly<Record<RouteMode, string>> = { system: 'System', direct: 'Direct', proxy: 'Proxy' }
+
+/**
+ * How this Profile's pages reach the network. One segmented choice, one Server field that takes a whole
+ * pasted line, and the Don't proxy list under More. Apply is the only way to change it: Main applies the
+ * route to the Profile's session before saving, so a route that cannot be applied leaves the old one in use.
+ */
+export function ProfileNetworkRoute({ profile, revision, openBrowsers, run }: {
+  profile: BrowserProfileSummary
+  revision: number
+  /** How many of this Profile's Browsers are open now; they reconnect through the new route. */
+  openBrowsers: number
+  run(key: string, action: () => Promise<unknown>): Promise<boolean>
+}) {
+  const saved = profile.network ?? { mode: 'system' as const }
+  const savedServer = saved.mode === 'proxy' ? formatBrowserProfileProxyServer(saved.server) : ''
+  const savedBypass = saved.mode === 'proxy' ? (saved.bypass ?? []).join(', ') : ''
+  const [mode, setMode] = useState<RouteMode>(saved.mode)
+  const [server, setServer] = useState(savedServer)
+  const [bypass, setBypass] = useState(savedBypass)
+  const [more, setMore] = useState(savedBypass !== '')
+  // The same parser Main uses decides here, so what Apply sends is exactly what Main will accept.
+  let draft: NonNullable<BrowserProfileEdit['network']> = { mode: mode === 'proxy' ? 'system' : mode }
+  let problem: string | null = null
+  try { draft = normalizeBrowserProfileNetwork(mode === 'proxy' ? { mode, server, bypass: bypass.split(/[\s,]+/) } : { mode }) }
+  catch (cause) { problem = cause instanceof Error ? cause.message : String(cause) }
+  const changed = mode !== saved.mode || (mode === 'proxy' && (server.trim() !== savedServer || bypass.trim() !== savedBypass))
+  const reconnect = openBrowsers ? ` · ${openBrowsers} open Browser${openBrowsers > 1 ? 's' : ''} reconnect` : ''
+  return (
+    <section className="browser-profile-editor__section" aria-label="Network">
+      <h4>Network</h4>
+      <div className="browser-profile-editor__route-modes" role="radiogroup" aria-label="Network route">
+        {(Object.keys(ROUTE_LABELS) as RouteMode[]).map(option => (
+          <button key={option} type="button" role="radio" aria-checked={mode === option} onClick={() => setMode(option)}>{ROUTE_LABELS[option]}</button>
+        ))}
+      </div>
+      {mode === 'proxy' ? <div className="browser-profile-editor__route-fields">
+        <TextInput aria-label="Proxy server" placeholder="host:port or socks5://host:port" value={server} spellCheck={false}
+          aria-invalid={problem !== null && server.trim() !== ''} onChange={event => setServer(event.target.value)} />
+        {more ? <TextInput aria-label="Don’t proxy" placeholder="*.corp.example, localhost" value={bypass} spellCheck={false} onChange={event => setBypass(event.target.value)} />
+          : <button type="button" className="browser-profile-editor__link" onClick={() => setMore(true)}>More</button>}
+      </div> : null}
+      <p className={problem && server.trim() ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={problem && server.trim() ? 'alert' : undefined}>
+        {problem && server.trim() ? problem
+          : mode === 'system' ? 'Pages use the proxy settings of this Mac.' : mode === 'direct' ? 'Pages connect without any proxy, even if this Mac has one.'
+          : 'Every page of this Profile goes through this server. If it cannot be reached, its pages do not open rather than connecting directly.'}
+      </p>
+      {changed ? <div className="browser-profile-editor__route-apply">
+        <button type="button" className="small-button" onClick={() => { setMode(saved.mode); setServer(savedServer); setBypass(savedBypass) }}>Revert</button>
+        <button type="button" className="primary-button" disabled={problem !== null}
+          onClick={() => void run('network', () => api.browser.updateProfile(profile.id, { network: draft.mode === 'system' ? null : draft }, revision))}>Apply network{reconnect}</button>
+      </div> : null}
+    </section>
+  )
+}
 
 /**
  * The sign-in for this Profile's proxy. Only the user name is ever read back; the password field

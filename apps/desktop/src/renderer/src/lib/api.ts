@@ -1424,6 +1424,11 @@ const mockApi: AgentMuxDesktopApi = {
       else if (edit.hue !== undefined) next.hue = edit.hue
       if (edit.notes === '') delete next.notes
       else if (edit.notes !== undefined) next.notes = edit.notes
+      // Same stored shapes as Main: only a turned-off Agent switch is kept, and the system route is absence.
+      if (edit.agentAccess === false) next.agentAccess = false
+      else if (edit.agentAccess === true) delete next.agentAccess
+      if (edit.network === null || edit.network?.mode === 'system') delete next.network
+      else if (edit.network !== undefined) next.network = structuredClone(edit.network)
       mockBrowserProfiles = mockBrowserProfiles.map((profile) => profile.id === profileId ? next : profile)
       publishMockBrowserProfiles()
       return structuredClone(next)

@@ -73,6 +73,14 @@
 .browser-profile-editor__route > span:first-child { color: var(--text-2); }
 .browser-profile-editor__route > button { margin-left: auto; }
 .browser-profile-editor__route-unknown { color: var(--text-3); }
+.browser-profile-editor__route-modes { display: inline-flex; width: fit-content; padding: 2px; gap: 2px; border-radius: var(--radius); background: var(--wash-1); }
+.browser-profile-editor__route-modes > button { min-height: 24px; padding: 0 var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.browser-profile-editor__route-modes > button[aria-checked='true'] { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
+.browser-profile-editor__route-modes > button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.browser-profile-editor__route-fields { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
+.browser-profile-editor__route-fields > .browser-profile-editor__link { justify-self: start; }
+.browser-profile-editor__route-apply { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+@container settings-resource (width < 720px) { .browser-profile-editor__route-fields { grid-template-columns: minmax(0, 1fr); } }
 .browser-profile-editor__sign-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); }
 @container settings-resource (width < 720px) { .browser-profile-editor__sign-in { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .browser-profile-editor__link { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }

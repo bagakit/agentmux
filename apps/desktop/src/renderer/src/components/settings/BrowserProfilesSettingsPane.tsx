@@ -13,7 +13,7 @@ import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
 import { PROFILE_HUES, ProfileMark, profileHue } from '../ProfileMark'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
-import { ProfileExitCheck, ProfileProxySignIn } from './BrowserProfileNetwork'
+import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import './settings-browser-profiles.css'
@@ -319,6 +319,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
       </section>
 
       {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
+      <ProfileNetworkRoute profile={profile} revision={revision} openBrowsers={open.length} run={run} />
       {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
 
       <ProfileExitCheck profile={profile} address={exitCheckUrl} />
