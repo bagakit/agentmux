@@ -408,9 +408,11 @@ function SortableWorkbenchTab({
 
   async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return
+    const original = pendingClose
+    if (!keepAgentSessions && lastViewCloseStops(original.confirmation)) setPendingClose(null)
     setClosing(true)
     try {
-      if (await closeTabs(pendingClose.tabIds, keepAgentSessions)) setPendingClose(null)
+      if (await closeTabs(original.tabIds, keepAgentSessions)) setPendingClose(current => current === original ? null : current)
     } finally {
       setClosing(false)
     }
@@ -868,12 +870,14 @@ function WorkbenchRegionContent({
 
   async function confirmRegionClose(keepAgentSessions: boolean): Promise<void> {
     if (closingRegion || !confirmingClose) return
+    const original = confirmingClose
+    if (!keepAgentSessions && lastViewCloseStops(original)) setConfirmingClose(null)
     setClosingRegion(true)
     try {
       await closeRegion(tab.workspaceId, tab.id, node.regionId, { keepAgentSessions })
     } finally {
       setClosingRegion(false)
-      setConfirmingClose(null)
+      setConfirmingClose(current => current === original ? null : current)
     }
   }
   const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose, 'split') : null
