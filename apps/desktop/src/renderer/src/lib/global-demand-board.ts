@@ -47,6 +47,7 @@ export type DemandRecord = {
   startObservations?: import('@agentmux/demand').GoalStartObservation[]
   progressUpdates?: import('@agentmux/demand').DemandProgress[]
   patrols?: import('@agentmux/demand').DemandPatrol[]
+  plan?: import('@agentmux/demand/goal-plan').GoalPlan
   patrolObservations?: import('@agentmux/core/goal-patrol').GoalPatrolObservation[]
   responsibility?: import('@agentmux/core/goal-responsibility').GoalResponsibilityObservation
   activities?: DemandActivity[]

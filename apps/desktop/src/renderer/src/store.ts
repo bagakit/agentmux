@@ -85,7 +85,8 @@ import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
-import {DesktopSpatialPersistence,SpatialConflictError,SpatialSaveStalledError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
+import {DesktopSpatialPersistence,SpatialConflictError,SpatialSaveStalledError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial} from './lib/desktop-spatial-state'
+import { sameSpatialValue } from './lib/spatial-merge'
 import { desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
 import { workfaceSaveRecorder } from './lib/workface-save-diagnostics'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
@@ -240,7 +241,7 @@ import type { BrowserOpinionDraft } from './lib/browser-opinion-draft'
 import { frozenBrowserInput, matchesBrowserInputMessage, type BrowserCapturedInput } from './lib/browser-contextual-input'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
-import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
+import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
 import { agentContinuityDetail, currentUnconfirmedResumeOperation } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
@@ -1861,6 +1862,7 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     ...(retained?.responsibility ? { responsibility: retained.responsibility } : {}),
     ...(demand.progressUpdates ? { progressUpdates: demand.progressUpdates } : {}),
     ...(demand.patrols ? { patrols: demand.patrols } : {}),
+    ...(demand.plan ? { plan: demand.plan } : {}),
     ...(retained?.patrolObservations ? { patrolObservations: retained.patrolObservations } : {}),
     dispatches: [...(demand.dispatches ?? [])],
     activities: demand.activities,
@@ -5258,8 +5260,10 @@ async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding
 }
 
 const savedGoalDiscussionNoticeKey = JSON.stringify(['saved-source'])
-function settleGoalDiscussionNotice(state: AppState, key: string): Partial<AppState> {
-  const matches = (context: ErrorNoticeContext | null | undefined) => context?.event?.source === 'goal-discussion-binding' && context.event.key === key
+/** Each placement scope names its own source; one launch operation settles whichever it raised. */
+const placementNoticeSources: ReadonlySet<string> = new Set(['goal-discussion-binding', 'launcher-position'])
+function settlePlacementNotice(state: AppState, key: string): Partial<AppState> {
+  const matches = (context: ErrorNoticeContext | null | undefined) => !!context?.event && placementNoticeSources.has(context.event.source) && context.event.key === key
   return { ...settleNotificationRecords(state, state.notificationEvents.filter(notice => matches(notice.context))),
     ...(matches(state.errorNoticeContext) ? { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false } : {}) }
 }
@@ -5272,7 +5276,7 @@ export async function handoffOriginalGoalDiscussions(goalId?: string): Promise<v
       useAppStore.setState(current => current.demandPmoTabIds[id] !== originalTabId ? {} : {
         demandPmoTabIds: Object.fromEntries(Object.entries(current.demandPmoTabIds).filter(([goal]) => goal !== id)) })
     } }, goalId)
-  if (!Object.keys(useAppStore.getState().demandPmoTabIds).length) useAppStore.setState(state => settleGoalDiscussionNotice(state, savedGoalDiscussionNoticeKey))
+  if (!Object.keys(useAppStore.getState().demandPmoTabIds).length) useAppStore.setState(state => settlePlacementNotice(state, savedGoalDiscussionNoticeKey))
   } catch (error) {
     useAppStore.getState().reportError(error, { kind: 'indeterminate', summary: 'Original Goal discussion relationships remain unconfirmed. Their saved sources, workfaces and healthy Agents are retained.',
       event: { source: 'goal-discussion-binding', key: savedGoalDiscussionNoticeKey, object: { kind: 'application', id: 'desktop' } } })
@@ -5743,12 +5747,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             event:{source:'workface-save-conflict',key:error.conflicts.map(conflict=>conflict.key).join('\n')}})
           if (error instanceof SpatialSaveStalledError) saveDiagnostics.stalled(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
           get().reportWorkbenchSaveFailure(error)
+          if (error instanceof SpatialSaveStalledError) stallWarning = workbenchSaveFailureRevision
         })
-        // A stall uses the existing unconfirmed-save warning and Retry; recovery clears only that warning.
+        // A stall uses the existing unconfirmed-save warning and Retry. Its recovery clears that warning only
+        // while it is still the stall's own: any failure reported since keeps its notice until its own retry.
+        let stallWarning: number | null = null
         spatialOwner.onRecovered = () => {
           saveDiagnostics.recovered(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
-          if (coreSpatialPersistence === spatialOwner && get().workbenchSaveWarningOwner === 'workbench')
+          if (coreSpatialPersistence === spatialOwner && stallWarning === workbenchSaveFailureRevision)
             useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
+          stallWarning = null
         }
         ownedSpatial = spatialOwner
         coreSpatialPersistence = spatialOwner
@@ -10240,11 +10248,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }, pmo?.intent)
       creationObserved = true
       const placementNoticeKey = JSON.stringify(['native-creation', createOperationId])
-      if (launched.placementIssue) get().reportError(new Error(launched.placementIssue), { kind: 'indeterminate',
-        summary: 'The Agent and its original input remain available. Its discussion placement is unconfirmed; retain the same creation operation.',
+      // A Launcher position is retried by the workface's own background save; a discussion binding by its owner.
+      const placement = launched.placementIssue
+      if (placement) get().reportError(new Error(placement.message), { kind: 'indeterminate',
+        summary: placement.scope === 'launcher-position'
+          ? 'The Agent and its original input remain available. Its place in this workface is not confirmed yet and is saved with the workface.'
+          : 'The Agent and its original input remain available. Its discussion placement is unconfirmed; retain the same creation operation.',
         subject: { kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run },
-        event: { source: 'goal-discussion-binding', key: placementNoticeKey, object: { kind: 'region', id: regionId, hostId: launched.created.hostId, workspaceId: workspace.id } } })
-      else set(current => settleGoalDiscussionNotice(current, placementNoticeKey))
+        event: { source: placement.scope === 'launcher-position' ? 'launcher-position' : 'goal-discussion-binding', key: placementNoticeKey,
+          object: { kind: 'region', id: regionId, hostId: launched.created.hostId, workspaceId: workspace.id } } })
+      else set(current => settlePlacementNotice(current, placementNoticeKey))
       if (launched.created.agentSessionId !== sessionId) {
         let timelineGapSessionId: string | undefined
         set((current) => {
@@ -11725,7 +11738,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               throw error
             }
           }
-          if (!entry.directInputBinding && session?.kind === 'agent' && entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
+          // Parks only what the queue will wake by itself; the queued row promises delivery from the same fact.
+          if (session?.kind === 'agent' && entry.execution !== undefined && session.pendingInteraction && steerEntryWakesItself(entry, session.control.run.runId)) {
             retainWaitingSelections(session.control.run.runId)
             return
           }

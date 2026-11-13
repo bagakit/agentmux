@@ -24,7 +24,7 @@ export function applyGoalDelegationResult(result: GoalDelegationResult, request 
       delegationReadCut: { goalUpdatedAt: result.goalUpdatedAt, request },
       delegationObservations: result.observations ?? [], ...(result.dispatches ? { dispatches: result.dispatches } : {}),
       ...(result.progressUpdates ? { progressUpdates: result.progressUpdates } : {}),
-      ...(result.patrols ? { patrols: result.patrols } : {}), ...(result.patrolObservations ? { patrolObservations: result.patrolObservations } : {}), ...(result.responsibility ? { responsibility: result.responsibility } : {}),
+      ...(result.plan ? { plan: result.plan } : {}), ...(result.patrols ? { patrols: result.patrols } : {}), ...(result.patrolObservations ? { patrolObservations: result.patrolObservations } : {}), ...(result.responsibility ? { responsibility: result.responsibility } : {}),
       ...(result.startObservations ? { startObservations: result.startObservations } : {}), ...(result.grounding ? { grounding: result.grounding } : {}) } }
     updateCurrentDemandIndex(state.demands, demands, [result.goalId])
     return { demands }

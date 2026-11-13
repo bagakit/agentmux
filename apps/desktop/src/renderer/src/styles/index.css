@@ -66,6 +66,7 @@
 @import './goals.css';
 @import './goal-continuation.css';
 @import './goal-delegation.css';
+@import './goal-plan.css';
 @import './goal-finite-start.css';
 @import './goal-responsibility.css';
 @import './focus-workspace-stage.css';

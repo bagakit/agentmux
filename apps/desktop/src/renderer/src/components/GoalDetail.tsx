@@ -8,6 +8,7 @@ import { GoalCommonProperties, GoalProperties } from './GoalProperties'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { GoalExecution } from './GoalExecution'
+import { GoalPlanGraph } from './GoalPlanGraph'
 import { GoalFiniteStartControl } from './GoalFiniteStartControl'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { GoalActivity } from './GoalActivity'
@@ -66,6 +67,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       {finished && !demand.grounding || !demand.alignment?.confirmedAt || demand.grounding && !finished ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={false} /> : null}
       {demand.alignment ? <details className="goals-original-intent goals-intent-body" open={intentOpen} onToggle={(event) => { if (event.target === event.currentTarget) setIntentOpen(event.currentTarget.open) }}><summary>Your original intent{descriptionDirty ? <span>Unsaved draft</span> : null}</summary>{intentBody}</details> : null}
       {moteError ? <div className="goals-service" role="status">{moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`} <span>{moteError.message}</span><button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onRetryMote}>{moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}</button></div> : null}
+      <GoalPlanGraph demand={demand} />
       <GoalExecution demand={demand} onUpdate={update} />
       <GoalProperties demand={demand} onUpdate={patch => void update(patch)} />
       <GoalActivity demand={demand} />
