@@ -1,5 +1,6 @@
 import type { DemandDispatch, DemandDelegation } from '@agentmux/demand'
 import type { DemandRecord } from './global-demand-board'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 
 type Goal = Pick<DemandRecord, 'id' | 'title' | 'status' | 'responsibility'> & { dispatches?: readonly DemandDispatch[]; delegations?: readonly DemandDelegation[] }
 export type CurrentGoalFact = {
@@ -40,7 +41,7 @@ function project(goal: Goal): Map<string, CurrentGoalFact> {
   }
   for (const delegation of goal.delegations ?? []) {
     const row = rows.get(`delegation:${delegation.operationId}`), confirmed = Boolean(row && row.binding !== 'unconfirmed')
-    add(currentDemandKey(delegation.hostId, delegation.workerAgentSessionId), delegation.operationId, confirmed, confirmed ? null : 'unknown', 'delegation')
+    add(currentDemandKey(delegationWorkerHostId(delegation), delegation.workerAgentSessionId), delegation.operationId, confirmed, confirmed ? null : 'unknown', 'delegation')
   }
   return targets
 }

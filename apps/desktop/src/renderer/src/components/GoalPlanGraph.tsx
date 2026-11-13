@@ -7,6 +7,7 @@ import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanThread } from './GoalPlanThread'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 
 /** One distinct glyph per node state, so a node still reads without its color. */
 const STATE_ICON_NAMES = {
@@ -86,7 +87,7 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
 }
 
 function NodeExecutor({ item }: { item: GoalPlanNodeProjection }) {
-  const executor = item.delegation ? { hostId: item.delegation.hostId, agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
+  const executor = item.delegation ? { hostId: delegationWorkerHostId(item.delegation), agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
   const place = presentation.toolExecution ? `Tools · ${presentation.toolExecution.resourceHostId}`
@@ -98,11 +99,11 @@ function NodeExecutor({ item }: { item: GoalPlanNodeProjection }) {
 
 function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeProjection; dependencyNames: string[]; onIssue(message: string | null): void }) {
   const report = item.delegation?.report
-  const open = async (agentSessionId: string) => {
+  const open = async (agentSessionId: string, hostId: string) => {
     try {
       onIssue(null)
       const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
-        operation: 'focus', target: { kind: 'focus-agent', hostId: item.delegation!.hostId, agentSessionId }, inputPolicy: 'preserve' })
+        operation: 'focus', target: { kind: 'focus-agent', hostId, agentSessionId }, inputPolicy: 'preserve' })
       if (result.operation === 'focus' && result.navigation.state === 'rejected') onIssue(result.issues.map(issue => issue.message).join(' '))
     }
     catch (error) { onIssue(error instanceof Error ? error.message : String(error)) }
@@ -120,8 +121,8 @@ function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeProj
       {item.staleCriteria.length ? <div><dt>Criteria</dt><dd className="goal-plan-node__stale">Changed or unavailable in the current goal: {item.staleCriteria.join(', ')}</dd></div> : null}
     </dl>
     {item.delegation ? <div className="goal-plan-node__actions">
-      <button type="button" className="small-button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId)}>Open executor</button>
-      <button type="button" className="small-button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId)}>Open owner</button>
+      <button type="button" className="small-button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId, delegationWorkerHostId(item.delegation!))}>Open executor</button>
+      <button type="button" className="small-button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId, item.delegation!.hostId)}>Open owner</button>
     </div> : null}
     {item.delegation ? <GoalPlanThread key={JSON.stringify([item.delegation.hostId, item.delegation.sourceMessageId])} delegation={item.delegation} /> : null}
   </div>

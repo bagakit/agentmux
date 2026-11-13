@@ -1,4 +1,5 @@
 import type { DemandDelegation, DemandDispatch } from '@agentmux/demand'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { RuntimeEvent } from '../../../shared/contracts'
 
 type Registration = { goalId: string; changed(): void }
@@ -30,8 +31,13 @@ export function createGoalDelegationEvents(ports: {
     add(goals, goalId)
     for (const delegation of delegations) {
       add(sources, key(delegation.hostId, delegation.sourceMessageId))
-      add(runs, key(delegation.hostId, delegation.workerRunId))
+      const workerHostId = delegationWorkerHostId(delegation)
+      add(runs, key(workerHostId, delegation.workerRunId))
       add(hosts, delegation.hostId)
+      if (workerHostId !== delegation.hostId) {
+        add(sources, key(workerHostId, delegation.sourceMessageId))
+        add(hosts, workerHostId)
+      }
     }
     for (const start of starts) if (start.execution === 'finite') {
       add(runs, key(start.hostId, start.runId))
