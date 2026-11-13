@@ -49,6 +49,10 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 
 命令扩展、缺省建议、现有 source 缺口与实施验收见 [Agent 操作桌面主画面与保留对话输入](#agent-操作桌面主画面与保留对话输入)；桌面语义导航 CLI 合同（本机过程资料：`docs/plans/desktop-focus-navigation-cli-design.md`）。本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。
 
+Settings 是原主画面之上的覆盖面，`app focus` 可按原 Settings catalog 的准确 section ID 打开分节，`app inspect` 发现候选并报告实际已选分节；不把 Settings 另造为主 Surface，不复制配置、页面草稿或目录。默认 preserve 只保留仍可用的真实输入，不能通过 Panel 自动聚焦搜索或关闭复焦破坏它；原主面输入因覆盖而不可用时如实报告，Mote 浮窗的可用输入继续保留。未知分节只拒绝本次导航并保留原页面与草稿。
+
+自举像素观察和可停止录制沿[工作面自截图与录制](capture-and-recording.md#工作面自截图与录制)，原语义操作、像素和权限决定各自沿原 owner。
+
 ## Agent 通过 CLI 打开文件与控制原工作面
 
 用户要求继续补齐「文件／Editor 打开、Region 展示模式切换、Region 交换」，让 Agent 能用本产品既有 CLI 操作原工作面。文件资源、Agent 的 Session 展示偏好与 Region 的空间表现必须按原 owner 分清，不复制文件服务、catalog、布局或 Runtime。
