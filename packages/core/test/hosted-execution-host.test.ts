@@ -88,6 +88,58 @@ describe('HostedExecutionHost through the real Core and official ctxmux', () => 
     expect((await client.listRuns()).find(run => run.runId === healthy.runId)).toMatchObject({ state: 'running', pid: healthy.pid })
   }, 20_000)
 
+  it('bounds a hanging connect by the timeout as not applied, and the next command connects again', async () => {
+    const { client } = await fixture()
+    let attempts = 0
+    const connect = vi.fn(() => ++attempts === 1 ? new Promise<typeof client>(() => {}) : Promise.resolve(client))
+    const host = new HostedExecutionHost({ id: 'remote', label: 'Remote', connect })
+    const started = Date.now()
+    await expect(host.run('/bin/echo', ['first'], { timeoutMs: 300 })).rejects.toMatchObject({ code: 'COMMAND_TIMEOUT', controlFailure: { disposition: 'not_applied' } })
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(await host.run('/bin/echo', ['second'], { timeoutMs: 20_000 })).toMatchObject({ stdout: 'second\n', exitCode: 0 })
+    expect(connect).toHaveBeenCalledTimes(2)
+  }, 20_000)
+
+  it('bounds a create that does not reply, and stops and removes its Run if it arrives later', async () => {
+    const { client, host } = await fixture()
+    const original = client.createPreparedTerminal.bind(client)
+    let release!: () => void
+    vi.spyOn(client, 'createPreparedTerminal').mockImplementation(async prepared => {
+      await new Promise<void>(resolve => { release = resolve })
+      return await original(prepared)
+    })
+    const started = Date.now()
+    const error = await host.run('/bin/sh', ['-c', 'sleep 60'], { timeoutMs: 300 }).catch(error => error)
+    expect(error).toMatchObject({ code: 'COMMAND_TIMEOUT', controlFailure: { disposition: 'unknown' } })
+    expect(Date.now() - started).toBeLessThan(5_000)
+    release()
+    await until(() => client.listRuns(), runs => runs.length === 0, 'late own Run stopped and removed')
+  }, 30_000)
+
+  it('removes a timed-out command Run once its stop is confirmed, keeping unrelated Runs', async () => {
+    const { scope, client, host } = await fixture()
+    const healthy = await client.createTerminal({ workspacePath: scope.root, command: '/bin/sh', args: ['-c', 'sleep 60'] })
+    const remove = vi.spyOn(client, 'removeTerminal')
+    for (const attempt of [1, 2, 3]) {
+      await expect(host.run('/bin/sh', ['-c', 'sleep 60'], { timeoutMs: 1_500 })).rejects.toMatchObject({ code: 'COMMAND_TIMEOUT' })
+      void attempt
+    }
+    await until(() => client.listRuns(), runs => runs.length === 1, 'timed-out own Runs removed')
+    expect((await client.listRuns())[0]).toMatchObject({ runId: healthy.runId, state: 'running' })
+    expect(remove).toHaveBeenCalledTimes(3)
+    expect(remove.mock.calls.every(([run]) => run.runId !== healthy.runId)).toBe(true)
+  }, 40_000)
+
+  it('keeps a Run whose stop is not confirmed, for recovery under its original identity', async () => {
+    const { client, host } = await fixture()
+    vi.spyOn(client, 'stopTerminal').mockRejectedValue(new AgentMuxError('The stop reply was lost.', 'CONTROL_CONNECTION_FAILED'))
+    const remove = vi.spyOn(client, 'removeTerminal')
+    await expect(host.run('/bin/sh', ['-c', 'sleep 60'], { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'COMMAND_TIMEOUT' })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    expect(remove).not.toHaveBeenCalled()
+    expect(await client.listRuns()).toHaveLength(1)
+  }, 20_000)
+
   it('rejects invalid command data before creating a connection', async () => {
     const connect = vi.fn()
     const host = new HostedExecutionHost({ id: 'remote', label: 'Remote', connect })
