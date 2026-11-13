@@ -35,3 +35,17 @@ it('names the Mote once and drops the duplicate wordmark when the name is Mote i
   expect(plain.querySelector('.mote-start__name')?.textContent).toBe('Mote')
   expect(plain.querySelector('.mote-start__wordmark')).toBeNull()
 })
+
+// Returning to a Mote shows its welcome settled; only the first showing plays the entrance.
+it('plays the entrance the first time the scene is shown and not when it is shown again', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const element = document.createElement('div'); document.body.append(element)
+  const root = createRoot(element)
+  roots.push(() => { act(() => root.unmount()); element.remove() })
+  const show = (active: boolean) => act(() => root.render(<MoteConversationStart name="文化人" active={active} portrait={<span />} composer={<textarea />} />))
+  const scene = () => element.querySelector<HTMLElement>('.mote-start')!
+  show(false); expect(scene().hasAttribute('data-entering')).toBe(false)
+  show(true); expect(scene().hasAttribute('data-entering')).toBe(true)
+  show(false); show(true); expect(scene().hasAttribute('data-entering')).toBe(false)
+  expect(scene().dataset.active).toBe('true')
+})
