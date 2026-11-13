@@ -43,6 +43,8 @@ const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
 const MapMotionContext = createContext(true)
+/** A direct camera gesture is in flight: faces swept past start no preview or read. */
+const MapCameraMoving = createContext(false)
 const TIER_LABELS = { active: 'Active', idle: 'Idle', closed: 'Closed', unknown: 'Unconfirmed' } as const
 const MapReadingProxyContext = createContext<(element: HTMLSpanElement | null) => (() => void) | undefined>(() => undefined)
 const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>) {
@@ -97,9 +99,15 @@ function AgentMark({ data, label, tier, glyph, overview = false, identityProgres
   const context = data.agent.context, { config } = useContext(ExecutorIdentityContext), zoom = useStore(state => state.transform[2])
   const providerId = data.agent.providerId ?? context?.providerId ?? undefined, executorId = data.agent.executorId ?? context?.executorId
   const appearance = executorId ? config?.executors[executorId]?.avatar ?? config?.appearance.agentAvatars?.[executorId] : undefined
+  const moving = useContext(MapCameraMoving)
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
+  // A face sliding under a still pointer during a camera gesture is not a hover: it starts no
+  // preview. An open or keyboard reading stays; the face still under the pointer previews on rest.
+  const swept = useRef(false), pointerEnter = preview.triggerEvents.onPointerEnter
+  const triggerEvents = moving ? { ...preview.triggerEvents, onPointerEnter: () => { swept.current = true }, onPointerLeave: () => { swept.current = false; preview.triggerEvents.onPointerLeave() } } : preview.triggerEvents
+  useEffect(() => { if (!moving && swept.current) { swept.current = false; if (preview.anchor.current?.matches(':hover')) pointerEnter() } }, [moving])
   const diameter = glyph.overviewRadius * 2
-  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: diameter, height: diameter } : undefined}
+  return <button type="button" ref={preview.anchor} {...triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: diameter, height: diameter } : undefined}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${TIER_LABELS[tier as keyof typeof TIER_LABELS] ?? tier} · ${collaborationRecencyLabel(data.agent)}`}>
     <span className="collaboration-agent__avatar" style={{ '--collaboration-avatar-scale': markScale + (1 - markScale) * identityProgress } as CSSProperties}>
       <ResolvedAgentAvatar label={label} providerId={providerId} executorId={executorId} appearance={appearance} size={glyph.icon} tintMark={!glyph.closed} />
@@ -132,7 +140,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const steps = useMemo(() => new Map([...agents].map(([id, agent]) => [id, collaborationRecencyStep(agent, now)])), [agents, now])
   const [readingProxies, setReadingProxies] = useState<readonly HTMLSpanElement[]>([])
   /** A direct user camera gesture is in flight (xyflow reports one only for real input). */
-  const [gesturing, setGesturing] = useState(false)
+  const [gesturing, setGesturing] = useState(false), moving = useRef(false)
   const registerReadingProxy = useCallback((element: HTMLSpanElement | null) => {
     if (!element) return
     setReadingProxies(previous => previous.includes(element) ? previous : [...previous, element])
@@ -253,7 +261,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
           id: nodeId, type: 'agent', parentId: areaId, position: { x: card.x - box.x, y: card.y - box.y }, width: card.width, height: card.height,
           measured: { width: card.width, height: card.height }, handles: emptyHandles, style: { width: card.width, height: card.height, pointerEvents: 'none' }, draggable: false, selectable: false,
           data: { box: card, agent, step, selected, identity, goals: links, activity: live,
-            onPreview: old?.onPreview ?? (enter => { if (enter) { actions.current.settle(); readingAnchor.current = nodeId } actions.current.onPreviewAgent?.(enter ? id : null) }),
+            onPreview: old?.onPreview ?? (enter => { if (enter && moving.current) return; if (enter) { actions.current.settle(); readingAnchor.current = nodeId } actions.current.onPreviewAgent?.(enter ? id : null) }),
             onSelect: old?.onSelect ?? (() => { actions.current.settle(); readingAnchor.current = nodeId; actions.current.onSelect({ kind: 'agent', id }) }),
             onOpen: old?.onOpen ?? (() => { const context = actions.current.agents.get(id)?.context; if (context) actions.current.onOpen(context) }) }
         }
@@ -332,11 +340,11 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     for (const [id, members] of hierarchy.members) if ([...peers].some(peer => members.includes(peer))) for (const owner of [id, ...hierarchy.ancestors.get(id) ?? []]) kept.add(owner)
     return kept
   }, [focusAgent, relations, hierarchy])
-  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><CollaborationFocusRegions.Provider value={focusRegions}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
+  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><CollaborationFocusRegions.Provider value={focusRegions}><MapCameraMoving.Provider value={gesturing}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
     tabIndex={0} aria-roledescription="map" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Shift+1" onKeyDown={keyboardCamera}>
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
-      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null; setGesturing(true) } }}
-      onMoveEnd={() => setGesturing(false)}
+      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null; moving.current = true; setGesturing(true) } }}
+      onMoveEnd={() => { moving.current = false; setGesturing(false) }}
       panOnScroll panOnScrollSpeed={1} paneClickDistance={4} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
       <CollaborationMapGround />
       <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} gesturing={gesturing} />
@@ -356,7 +364,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
-  </div></CollaborationFocusRegions.Provider></MapMotionContext.Provider></MapReadingProxyContext.Provider></CollaborationMapPreferences.Provider>
+  </div></MapCameraMoving.Provider></CollaborationFocusRegions.Provider></MapMotionContext.Provider></MapReadingProxyContext.Provider></CollaborationMapPreferences.Provider>
 }
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
