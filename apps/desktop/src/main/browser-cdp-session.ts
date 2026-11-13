@@ -3,12 +3,12 @@ import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import type { BrowserPageTransport, BrowserNetworkSession } from '@agentmux/browser/browser-page-transport'
 
 /**
- * 一次驱动期间的 CDP 会话：attach、拿到每个 frame 的 sender、用完 detach。
+ * 原生 CDP 连接：一个 WebContents 一个连接；调用者持有独立租约。
  *
- * **为什么是「一次驱动一个会话」而不是常驻 attach**：Electron 的 debugger 与 DevTools 互斥——
+ * **普通页面程序按次持有，已配置的 Profile 环境可持有持久租约**：Electron 的 debugger 与 DevTools 互斥——
  * attach 期间用户打不开这个页面的 DevTools，而用户开 DevTools 会把我们踢掉
- * （electron.d.ts:7480-7488，`detach` 事件自述这两种触发）。常驻就等于永久占着用户的 DevTools。
- * 按次 attach 把这个窗口收到「Agent 正在跑程序」的那几秒内。
+ * （electron.d.ts:7480-7488，`detach` 事件自述这两种触发）。DevTools 的真实 detach 使全部原租约失效，不能抢回连接；关闭后由原环境 owner 重应用配置。
+ * 没有环境租约时，最后一个普通消费者仍立即 detach。
  *
  * **被踢掉必须能说出来**。这是本文件存在的主要理由：detach 之后再 sendCommand，CDP 报的是一句
  * 与原因无关的泛化错误，Agent 只会看到"页面没反应"然后重试。而真相是「用户打开了 DevTools」——
@@ -18,7 +18,7 @@ import type { BrowserPageTransport, BrowserNetworkSession } from '@agentmux/brow
 /** 跨域 iframe 各自是独立 target，要各自 attach 才够得着。一层不够——iframe 里还能再套 iframe。 */
 const AUTO_ATTACH_PARAMS = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }
 
-export class BrowserCdpSession implements BrowserPageTransport {
+class BrowserCdpConnection implements BrowserPageTransport {
   /** sessionId → OOPIF target sender；同进程多个文档共用 sender。主 frame 不在这里（它就是 {@link sendCommand}）。 */
   private readonly frameSenders = new Map<string, BrowserCdpSender>()
   /** 非 null 表示会话已经没了，值是原因。之后每一次 send 都要拿它说话，而不是发出去等一句泛化错误。 */
@@ -67,8 +67,8 @@ export class BrowserCdpSession implements BrowserPageTransport {
    * attach 失败最常见的原因就是用户已经开着 DevTools。原样抛一句 CDP 的错误等于让 Agent 去猜，
    * 所以这里把它翻译成一句说得出下一步的话。
    */
-  static attach(contents: WebContents): BrowserCdpSession {
-    const session = new BrowserCdpSession(contents)
+  static attach(contents: WebContents): BrowserCdpConnection {
+    const session = new BrowserCdpConnection(contents)
     try {
       contents.debugger.attach()
     } catch (error) {
@@ -207,5 +207,58 @@ export class BrowserCdpSession implements BrowserPageTransport {
     return failures.length > 0
       ? `Browser debugger cleanup could not finish (${failures.join('; ')}). The program result is retained. Close DevTools or reopen this Browser before driving it again.`
       : null
+  }
+}
+
+
+/** A lease on this WebContents' original debugger. Profile environment and a page
+ * program share one native connection; releasing one consumer cannot detach the other. */
+export class BrowserCdpSession implements BrowserPageTransport {
+  private static readonly connections = new WeakMap<WebContents, { native: BrowserCdpConnection; leases: number }>()
+  private readonly observers = new Set<() => void>()
+  private released = false
+  private constructor(private readonly contents: WebContents, private readonly owner: { native: BrowserCdpConnection; leases: number }) {}
+
+  static attach(contents: WebContents): BrowserCdpSession {
+    let owner = this.connections.get(contents)
+    if (!owner || owner.native.endedReason !== null) {
+      owner = { native: BrowserCdpConnection.attach(contents), leases: 0 }
+      this.connections.set(contents, owner)
+    }
+    owner.leases++
+    return new BrowserCdpSession(contents, owner)
+  }
+
+  private assertActive(): void {
+    if (this.released) throw new Error('This Browser debugger lease was released. No command was sent; use the current original page owner.')
+  }
+  readonly sendCommand: BrowserCdpSender = (method, params) => {
+    this.assertActive()
+    return this.owner.native.sendCommand(method, params)
+  }
+  get frames(): Map<string, BrowserCdpSender> {
+    if (this.released) return new Map()
+    return new Map([...this.owner.native.frames].map(([id, send]) => [id, (method, params) => {
+      this.assertActive()
+      return send(method, params)
+    }]))
+  }
+  get endedReason(): string | null { return this.released ? 'This consumer released its debugger lease.' : this.owner.native.endedReason }
+  get frameDiscoveryFailure(): string | null { return this.owner.native.frameDiscoveryFailure }
+  observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
+    this.assertActive()
+    const remove = this.owner.native.observe(listener)
+    const release = () => { remove(); this.observers.delete(release) }
+    this.observers.add(release)
+    return release
+  }
+  detach(): string | null {
+    if (this.released) return null
+    this.released = true
+    for (const remove of this.observers) remove()
+    this.observers.clear()
+    if (--this.owner.leases !== 0) return null
+    if (BrowserCdpSession.connections.get(this.contents) === this.owner) BrowserCdpSession.connections.delete(this.contents)
+    return this.owner.native.detach()
   }
 }
