@@ -116,6 +116,8 @@ const mockExecutors: Record<string, AgentExecutorConfig> = Object.fromEntries(
     { label: builtInAgentProviderLabel(id), providerId: id, command: id, args: [], env: {}, injectAgentMuxGuide: true }
   ])
 )
+/** The demo project lives at an absolute preview path: Space identity accepts only absolute durable directories. */
+export const PREVIEW_WORKSPACE_PATH = new URL("home/preview/agentmux", new URL('/', new URL(import.meta.url))).pathname
 let mockConfig: AppConfig = {
   version: CONFIG_VERSION,
   hosts: [
@@ -130,7 +132,7 @@ let mockConfig: AppConfig = {
   ],
   executors: mockExecutors,
   workspaces: [
-    { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: 'home//agentmux', kind: 'folder' },
+    { id: 'workspace-demo', name: 'agentmux', hostId: 'local', path: PREVIEW_WORKSPACE_PATH, kind: 'folder' },
     { id: 'workspace-remote', name: 'render-lab', hostId: 'studio', path: new URL("srv/render-lab", new URL('/', new URL(import.meta.url))).pathname, kind: 'worktree', branch: 'feat/materials' }
   ],
   appearance: { terminalTheme: 'graphite' },
@@ -194,7 +196,7 @@ const mockSessions: SessionSnapshot[] = [
     executorId: 'codex',
     capabilities: mockStructuredCapabilities,
     hostId: 'local',
-    workspacePath: 'home//agentmux',
+    workspacePath: PREVIEW_WORKSPACE_PATH,
     label: 'Codex · runtime core',
     createdAt: now - 12 * 60_000,
     updatedAt: now,
