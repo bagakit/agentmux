@@ -4,7 +4,7 @@ import { Textarea } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
@@ -34,6 +34,12 @@ type AnnotationOutput = (input: ImageAnnotationInput) => void | Promise<boolean 
 // The last tool and style carry over to the next editor in this Renderer.
 let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number } = {
   tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32 }
+// Inline text and note inputs keep Enter as a newline; modifier Enter finishes and Escape abandons the edit.
+function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish: (value: string) => void, abandon: () => void) {
+  event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); finish(event.currentTarget.value) }
+  else if (event.key === 'Escape') { event.preventDefault(); abandon() }
+}
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
@@ -498,20 +504,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             aria-description="Enter inserts a new line. Command or Control plus Enter finishes. Escape discards this text edit."
             style={{ ...inlineEditorBox(pendingText.shape.at, textEditorWidth, textEditorHeight), maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
               color: 'var(--text)', fontSize: textEditorFont, lineHeight: 1.4, fontFamily: SCREENSHOT_TEXT_FONT }}
-            onPointerDown={event => event.stopPropagation()} onChange={event => { if (textDraftRef.current) textDraftRef.current = { ...textDraftRef.current, edited: true }; setTextRows(Math.max(2, screenshotTextLines(event.target.value).length)); onEdited?.() }} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => {
-              event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); finishText(event.currentTarget.value) }
-              else if (event.key === 'Escape') { event.preventDefault(); finishText('', true) }
-            }} /> : null}
+            onPointerDown={event => event.stopPropagation()} onChange={event => { if (textDraftRef.current) textDraftRef.current = { ...textDraftRef.current, edited: true }; setTextRows(Math.max(2, screenshotTextLines(event.target.value).length)); onEdited?.() }} onBlur={event => finishText(event.currentTarget.value)} onKeyDown={event => inlineEditorKey(event, finishText, () => finishText('', true))} /> : null}
           {selectedNote && noteEditor === selectedNote.id ? <Textarea autoFocus className="image-annotation-editor__text" aria-label="Marker note" value={noteDraft} placeholder={'Note ' + selectedNote.number}
             aria-description="Enter inserts a new line. Command or Control plus Enter finishes. Escape discards this note edit."
             style={{ ...inlineEditorBox({ x: selectedNote.from.x + selectedNote.radius, y: selectedNote.from.y - selectedNote.radius }, textEditorWidth, noteEditorHeight),
               minWidth: 0, minHeight: 0, maxWidth: 'none', color: 'var(--text)', lineHeight: 1.4 }}
-            onPointerDown={event => event.stopPropagation()} onChange={event => { setNoteDraft(event.target.value); onEdited?.() }} onBlur={() => closeNoteEditor(true)} onKeyDown={event => {
-              event.stopPropagation(); if (isImeOwnedKeyboardEvent(event)) return
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); closeNoteEditor(true) }
-              else if (event.key === 'Escape') { event.preventDefault(); closeNoteEditor(false) }
-            }} /> : null}
+            onPointerDown={event => event.stopPropagation()} onChange={event => { setNoteDraft(event.target.value); onEdited?.() }} onBlur={() => closeNoteEditor(true)} onKeyDown={event => inlineEditorKey(event, () => closeNoteEditor(true), () => closeNoteEditor(false))} /> : null}
           {imageError ? <p className="image-annotation-editor__image-error" role="alert">The image could not be loaded. Current annotations are kept.{onOpenOriginal ? ' Open another original or Cancel to return.' : ' Cancel to return.'}</p> : null}
         </div>
       </div>
