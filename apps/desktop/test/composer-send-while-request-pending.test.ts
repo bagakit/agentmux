@@ -89,23 +89,29 @@ it('keeps the message waiting when the next card is already open after the first
   expect(queue()).toEqual([])
 })
 
-it('a request that opens after the client check leaves the message for an explicit Send, never resent by itself', async () => {
-  // The store sees no request, so this Send takes the direct input path. Core's CAS then finds a request
-  // that opened meanwhile and refuses. Bytes may already be written by then, so the queue must not retry.
+it('a request that opens after the client check leaves the direct message in Core\'s explicit-rejoin wait, never resent', async () => {
+  // The store sees no request, so this Send binds the direct manual input. Core saves it and, finding a
+  // request that opened meanwhile, holds it as a wait that only an explicit rejoin continues.
   useAppStore.setState({ sessions: [idle] })
-  const late = Object.assign(new Error('Answer the pending Agent interaction before submitting another prompt.'), { code: 'AGENT_INTERACTION_PENDING' })
-  vi.mocked(api.sessions.submitPrompt).mockRejectedValueOnce(late)
+  vi.mocked(api.sessions.submitPrompt).mockImplementationOnce(async (_control, _text, submissionId, binding) => {
+    const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: { ...binding!.expectedRun }, submissionId: submissionId! }
+    const ref = { key, waitGeneration: 1 }
+    return { key, ref, persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+      control: { ref, state: 'enabled', at: 3, waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin',
+        failure: { name: 'AgentMuxError', message: 'Answer the pending Agent interaction before submitting another prompt.', code: 'AGENT_INTERACTION_PENDING' } } } } as never
+  })
+  const rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting')
   useAppStore.getState().send(sid, 'raced a new card', () => {}, 'manual')
-  await vi.waitFor(() => expect(queue()[0]?.status).toBe('deferred'))
-  expect(queue()[0]).toMatchObject({ text: 'raced a new card', awaitingExplicitSend: true, errorCode: 'AGENT_INTERACTION_PENDING' })
-  const attempts = vi.mocked(api.sessions.submitPrompt).mock.calls.length
-  // That request ends. The paused message stays put until the person sends it again.
+  await vi.waitFor(() => expect(queue()[0]?.inputReceipt?.status).toBe('waiting'))
+  expect(queue()[0]).toMatchObject({ text: 'raced a new card', inputIntakeStarted: true })
+  // That request ends. Neither the queue nor the receipt wakes the message; the person continues it.
   useAppStore.setState({ sessions: [pending('late-request')] })
   clearInteraction()
   await useAppStore.getState().flushAgentSteerQueue(sid)
-  expect(vi.mocked(api.sessions.submitPrompt).mock.calls.length).toBe(attempts)
+  expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
+  expect(rejoin).not.toHaveBeenCalled()
   expect(queue()).toHaveLength(1)
-  expect(queue()[0]!.awaitingExplicitSend).toBe(true)
+  expect(queue()[0]!.inputReceipt?.control.waiting?.wake).toBe('explicit-rejoin')
 })
 
 it('a queued message refused by a request Core saw first is paused, not retried when that request ends', async () => {
