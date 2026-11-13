@@ -78,8 +78,9 @@ export function ledgerFromSnapshot(snapshot: BrowserPageSnapshot): BrowserRefLed
 /**
  * 拿账本在一张新快照上把旧 ref 认回来。
  *
- * 三道关，每一道失败都说到下一步为止：地址换了（这批 ref 真作废）、账本里没这个 ref（Agent 拼错了
- * 或来自更早的一批）、页面上没有对得上的元素（东西没了）。
+ * 四道关，每一道失败都说到下一步为止：地址换了（这批 ref 真作废）、账本里没这个 ref（Agent 拼错了
+ * 或来自更早的一批）、记账的序号没了且剩下不止一个长得一样的（认不出是哪个）、页面上没有对得上的
+ * 元素（东西没了）。
  */
 export function healRef(
   ledger: BrowserRefLedger,
@@ -109,6 +110,17 @@ export function healRef(
     ({ node }) => node.role === entry.role && node.name === entry.name && node.backendNodeId !== 0
   )
   const exact = candidates.find((candidate) => candidate.nth === entry.nth)
+  // 记账的那个序号没了、而同名同角色的还有好几个：哪一个都可能是，也都可能不是。挑第一个就是
+  // 在一排「Next」里随手点一个，再事后说一句"可能认错了"——那时动作已经派发出去了。只剩一个
+  // 候选时它至少是唯一长这样的元素，仍按弱匹配认领并说明。
+  if (!exact && candidates.length > 1) {
+    return {
+      healed: false,
+      reason:
+        `${ref} pointed at ${entry.role} "${entry.name}" (#${entry.nth}), but that one is gone and ` +
+        `${candidates.length} others look the same, so nothing was done. Take a new snapshot() and pick one of them.`
+    }
+  }
   const chosen = exact ?? candidates[0]
   if (!chosen) {
     return {
@@ -122,7 +134,7 @@ export function healRef(
   // 同名按钮换了一行，都会让 role+name+nth 命中一个"看起来一样"的邻居。消不掉，只能说出来。
   const ordinalNote = exact
     ? ''
-    : ` The #${entry.nth} match is gone, so the #${chosen.nth} of ${candidates.length} was used instead —` +
+    : ` The #${entry.nth} match is gone, so the only remaining one was used instead —` +
       ' that is a weaker match than the ordinal it was recorded with.'
   return {
     healed: true,
