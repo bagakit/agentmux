@@ -338,6 +338,90 @@ describe('Agent fill and type are trusted native text input, read back after', (
   })
 })
 
+describe('Agent pressKey and hover are trusted native input', () => {
+  /** A page whose focus step reports success; key events and moves are recorded by `pagePeer`. */
+  function keyPeer(options: { focus?: boolean } = {}) {
+    const peer = pagePeer()
+    const send = peer.session.sendCommand
+    let restored = 0
+    Reflect.set(peer.session, 'sendCommand', async (method: string, params: Record<string, any> = {}) => {
+      if (method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('can take keyboard input')) {
+        peer.commands.push({ method, params })
+        return { result: { value: options.focus === false ? { ok: false, reason: 'did not take focus' } : { ok: true } } }
+      }
+      if (method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('restoreFocus(this, previous)')) {
+        peer.commands.push({ method, params }); restored += 1; return { result: { value: null } }
+      }
+      return await send(method, params)
+    })
+    return { peer, restored: () => restored }
+  }
+  const keys = (peer: ReturnType<typeof pagePeer>) => peer.commands.filter(command => command.method === 'Input.dispatchKeyEvent')
+    .map(({ params }) => [params.type, params.key, params.code, params.windowsVirtualKeyCode, params.text ?? null])
+
+  it('pressKey sends the hardware sequence with key, code and windowsVirtualKeyCode, under Main’s receipt, and returns focus', async () => {
+    const k = keyPeer(), contents = nativeContents()
+    const seen: boolean[] = []
+    k.peer.onInput(command => { if (command.method === 'Input.dispatchKeyEvent') seen.push(isOwnDispatch(contents, { type: 'keyDown' })) })
+    const { dispatch } = dispatchOn(k.peer, contents)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(dispatch('pressKey', [page.nodes[0]!.ref, 'Enter'])).resolves.toBeUndefined()
+    expect(keys(k.peer)).toEqual([['rawKeyDown', 'Enter', 'Enter', 13, null], ['char', 'Enter', 'Enter', 13, '\r'], ['keyUp', 'Enter', 'Enter', 13, null]])
+    expect(seen).toEqual([true, true, true])
+    expect(k.restored()).toBe(1)
+    expect(k.peer.commands.map(command => String(command.params.functionDeclaration ?? '')),
+      'the synthetic KeyboardEvent path is still used').not.toEqual(expect.arrayContaining([expect.stringContaining('new KeyboardEvent')]))
+  })
+
+  it('a key without text sends no char; one letter carries its code and text', async () => {
+    const tab = keyPeer()
+    const t = dispatchOn(tab.peer, nativeContents())
+    const page = await t.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await t.dispatch('pressKey', [page.nodes[0]!.ref, 'Tab'])
+    expect(keys(tab.peer)).toEqual([['rawKeyDown', 'Tab', 'Tab', 9, null], ['keyUp', 'Tab', 'Tab', 9, null]])
+    const letter = keyPeer()
+    const l = dispatchOn(letter.peer, nativeContents())
+    const letterPage = await l.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await l.dispatch('pressKey', [letterPage.nodes[0]!.ref, 'a'])
+    expect(keys(letter.peer)).toEqual([['rawKeyDown', 'a', 'KeyA', 65, null], ['char', 'a', 'KeyA', 65, 'a'], ['keyUp', 'a', 'KeyA', 65, null]])
+  })
+
+  it('another key name is sent as that key alone, never as a chord or text; an unfocusable target is refused before any key', async () => {
+    const unknown = keyPeer()
+    const u = dispatchOn(unknown.peer, nativeContents())
+    const page = await u.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await u.dispatch('pressKey', [page.nodes[0]!.ref, 'Ctrl+Enter'])
+    expect(keys(unknown.peer)).toEqual([['rawKeyDown', 'Ctrl+Enter', '', 0, null], ['keyUp', 'Ctrl+Enter', '', 0, null]])
+    expect(unknown.peer.commands.filter(command => command.method === 'Input.dispatchKeyEvent').map(command => command.params.modifiers ?? 0)).toEqual([0, 0])
+    const unfocused = keyPeer({ focus: false })
+    const f = dispatchOn(unfocused.peer, nativeContents())
+    const unfocusedPage = await f.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    const failure = await f.dispatch('pressKey', [unfocusedPage.nodes[0]!.ref, 'Enter']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(failure.fact).toEqual({ kind: 'locator-changed', effects: 'not-dispatched' })
+    expect(keys(unfocused.peer)).toEqual([])
+    expect(f.nativeInput).not.toHaveBeenCalled()
+  })
+
+  it('hover is one native move to the proven box, confirmed by Chromium’s :hover, and presses nothing', async () => {
+    const peer = pagePeer(), contents = nativeContents()
+    const { dispatch } = dispatchOn(peer, contents)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(dispatch('hover', [page.nodes[0]!.ref])).resolves.toBeUndefined()
+    expect(inputs(peer)).toEqual([['mouseMoved', 140, 55, 0]])
+    expect(peer.commands.map(command => String(command.params.functionDeclaration ?? '')),
+      'the synthetic MouseEvent path is still used').not.toEqual(expect.arrayContaining([expect.stringContaining('new MouseEvent')]))
+    const missed = pagePeer({ landed: false })
+    const m = dispatchOn(missed, nativeContents())
+    const missedPage = await m.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(m.dispatch('hover', [missedPage.nodes[0]!.ref])).rejects.toThrow(/did not land on/)
+    const covered = pagePeer({ topmost: 'cover' })
+    const c = dispatchOn(covered, nativeContents())
+    const coveredPage = await c.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(c.dispatch('hover', [coveredPage.nodes[0]!.ref])).rejects.toThrow(/covers it|not the topmost/)
+    expect(inputs(covered)).toEqual([])
+  })
+})
+
 describe('Main’s receipt is the only judge of who sent an input', () => {
   const managers: InstanceType<typeof BrowserViewManager>[] = []
   afterEach(() => { for (const manager of managers.splice(0)) manager.dispose() })

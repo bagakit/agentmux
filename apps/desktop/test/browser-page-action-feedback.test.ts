@@ -73,7 +73,8 @@ vi.mock('electron', async () => {
         if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
         if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
         // A native press is the click reaching the page.
-        if (method === 'Input.dispatchMouseEvent') { if (params.type === 'mousePressed') this.actions++; return {} }
+        // Each native pointer action (click or hover) begins with exactly one move to its target.
+        if (method === 'Input.dispatchMouseEvent') { if (params.type === 'mouseMoved') this.actions++; return {} }
         // Native text input: insertText is the action; prepare and read-back are its own checks.
         if (method === 'Input.insertText') { this.actions++; this.typedText = params.text; return {} }
         if (method === 'Input.dispatchKeyEvent') return {}
