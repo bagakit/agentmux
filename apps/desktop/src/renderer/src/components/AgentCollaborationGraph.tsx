@@ -1,5 +1,5 @@
 import { createContext, useContext, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Background, BaseEdge, EdgeLabelRenderer, ReactFlow, ViewportPortal, useReactFlow, useStore, type Node, type NodeHandle, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, ReactFlow, ViewportPortal, useReactFlow, useStore, type Node, type NodeHandle, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { collaborationSubjectKey, type CollaborationAgent, type CollaborationArea, type CollaborationRelation } from '../lib/agent-collaboration'
@@ -16,13 +16,14 @@ import { useAgentInformationPreview } from './AgentInformationPreview'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { CollaborationRegionLabels } from './CollaborationRegionLabels'
+import { CollaborationMapGround } from './CollaborationMapGround'
 import { useCollaborationMotion } from '../lib/use-collaboration-motion'
 import { ExecutorIdentityContext, ResolvedAgentAvatar } from './AgentAvatar'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
 import { resolveFocusMapPreferences } from '../../../shared/focus-map-preferences'
 import { useAppStore } from '../store'
-import { CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
+import { CollaborationFocusRegions, CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
 import { SettingsNavigation } from './SettingsNavigation'
 import { CollaborationCompactState, CollaborationEssentialState } from './CollaborationCompactState'
 import { COLLABORATION_LABELS, collaborationRelationSummary } from '../lib/collaboration-relation-presentation'
@@ -37,7 +38,7 @@ type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: st
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
-type RelationPath = { id: string; label: string; title: string; detail: string; unconfirmed: boolean; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
+type RelationPath = { id: string; label: string; title: string; detail: string; unconfirmed: boolean; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; weight: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
 const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
@@ -111,7 +112,8 @@ function AgentMark({ data, label, tier, glyph, overview = false, identityProgres
 const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
   const empty = data.memberGeometry.length === 0
   const overview = useStore(state => state.transform[2] < COLLABORATION_OVERVIEW_ZOOM)
-  return <div className="collaboration-area" data-kind={data.area.kind} data-depth={data.depth} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined}>
+  const focus = useContext(CollaborationFocusRegions), recede = focus !== null && !focus.has(data.area.id)
+  return <div className="collaboration-area" data-kind={data.area.kind} data-depth={data.depth} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined} data-recede={recede || undefined}>
     {!empty && !data.folded ? <svg className="collaboration-area__envelope" width={data.box.width} height={data.box.height} aria-hidden="true"><path d={data.envelope} /></svg> : null}
   </div>
 })
@@ -286,13 +288,15 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const sourceRadius = sourceGlyph.overviewRadius, targetRadius = targetGlyph.overviewRadius
       const sourcePointRadius = sourceGlyph.pointRadius, targetPointRadius = targetGlyph.pointRadius
       const count = connection.relations.reduce((count, relation) => count + relation.evidence.length, 0)
+      // The same saturated strength the layout uses: one message reads 0, sixteen or more read 1.
+      const weight = Math.min(1, Math.log2(collaborationConnectionStrength(connection)) / 4)
       const { title, unconfirmed } = old && sameItems(old.relations, connection.relations) ? old
         : collaborationRelationSummary(first.kind, first.kind === 'creation' ? connection.relations.flatMap(relation => relation.evidence) : [])
       const detail = `${from} → ${to} · ${count} original ${count === 1 ? 'record' : 'records'}`
       const label = `${title}: ${detail}`
-      const path: RelationPath = old?.route === route && old.sourceBox === sourceBox && old.targetBox === targetBox && old.label === label && old.sourceRadius === sourceRadius && old.targetRadius === targetRadius && old.sourcePointRadius === sourcePointRadius && old.targetPointRadius === targetPointRadius && old.active === (pulse?.id ?? 0) && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
+      const path: RelationPath = old?.route === route && old.sourceBox === sourceBox && old.targetBox === targetBox && old.label === label && old.sourceRadius === sourceRadius && old.targetRadius === targetRadius && old.sourcePointRadius === sourcePointRadius && old.targetPointRadius === targetPointRadius && old.active === (pulse?.id ?? 0) && old.weight === weight && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
         id: connection.id, label, title, detail, unconfirmed, route, sourceBox, targetBox, sourceRadius, targetRadius, sourcePointRadius, targetPointRadius, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
-        count
+        count, weight
       }
       next.set(connection.id, { path }); return [path]
     })
@@ -318,14 +322,24 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
   const areaNodes = useMemo(() => nodes.filter((node): node is AreaNode => node.type === 'area'), [nodes])
-  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
+  // A selected or previewed Agent keeps its own regions, its direct peers' regions and their
+  // ancestors present; every other region recedes. Members, relations and controls remain.
+  const focusAgent = selection?.kind === 'agent' ? selection.id : selection ? null : peeked ?? null
+  const focusRegions = useMemo(() => {
+    if (!focusAgent) return null
+    const peers = new Set([focusAgent, ...relations.flatMap(relation => relation.source === focusAgent ? [relation.target] : relation.target === focusAgent ? [relation.source] : [])])
+    const kept = new Set<string>()
+    for (const [id, members] of hierarchy.members) if ([...peers].some(peer => members.includes(peer))) for (const owner of [id, ...hierarchy.ancestors.get(id) ?? []]) kept.add(owner)
+    return kept
+  }, [focusAgent, relations, hierarchy])
+  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><CollaborationFocusRegions.Provider value={focusRegions}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
     tabIndex={0} aria-roledescription="map" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Shift+1" onKeyDown={keyboardCamera}>
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null; setGesturing(true) } }}
       onMoveEnd={() => setGesturing(false)}
       panOnScroll panOnScrollSpeed={1} paneClickDistance={4} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
+      <CollaborationMapGround />
       <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} gesturing={gesturing} />
-      <Background gap={22} size={1} />
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
     <div ref={hud} className="collaboration-canvas__hud"><div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -342,7 +356,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
-  </div></MapMotionContext.Provider></MapReadingProxyContext.Provider></CollaborationMapPreferences.Provider>
+  </div></CollaborationFocusRegions.Provider></MapMotionContext.Provider></MapReadingProxyContext.Provider></CollaborationMapPreferences.Provider>
 }
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
@@ -380,7 +394,7 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt, motion])
   return <><g className={`react-flow__edge selectable collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
-    style={{ pointerEvents: 'stroke' }} onMouseEnter={show} onMouseLeave={event => { if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
+    style={{ pointerEvents: 'stroke', '--edge-weight': record.weight } as CSSProperties} onMouseEnter={show} onMouseLeave={event => { if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear(); tooltip.hide() }
     }}>

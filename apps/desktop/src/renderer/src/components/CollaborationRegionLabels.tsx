@@ -6,7 +6,7 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { CollaborationArea } from '../lib/agent-collaboration'
 import type { CollaborationLayoutBox } from '../lib/collaboration-layout-engine'
 import { CollaborationBoundsIndex, collaborationBoundsOverlap, type CollaborationBounds } from '../lib/collaboration-spatial-index'
-import { CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
+import { CollaborationFocusRegions, CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
 import { collaborationVisibleHitBounds } from '../lib/collaboration-map-lod'
 import { createCollaborationHierarchy } from '../lib/collaboration-hierarchy'
 import { collaborationAreaNode } from '../lib/collaboration-presentation'
@@ -37,7 +37,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   /** A direct user camera gesture is in flight; placement waits for its end. */
   gesturing?: boolean
 }) {
-  const preferences = useContext(CollaborationMapPreferences)
+  const preferences = useContext(CollaborationMapPreferences), focus = useContext(CollaborationFocusRegions)
   // Placement reads the camera except during a direct user gesture; then names keep their slot
   // and travel with their territory, and are placed once the gesture ends.
   const camera = usePlacementCamera(gesturing)
@@ -211,7 +211,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   }, [store, camera, labels, geometry])
   // Names live inside the camera surface, so wheel, pinch and drag over them move the map.
   const surface = useStore(state => state.domNode?.querySelector<HTMLElement>('.react-flow__renderer') ?? null)
-  const layer = <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
+  const layer = <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-recede={focus !== null && !focus.has(data.area.id) || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
     <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + summaryBottom })} />
   </div>)}</div>
   return surface ? createPortal(layer, surface) : layer

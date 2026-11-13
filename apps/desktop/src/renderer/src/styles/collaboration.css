@@ -47,11 +47,19 @@
 .collaboration-endpoints small { flex: 0 0 30px; color: var(--text-2); font-size: var(--fs-micro); }
 .collaboration-endpoints span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .collaboration-endpoints svg { flex: 0 0 auto; color: var(--text-2); }
-.collaboration-map { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; overflow: hidden; color: var(--text); background: var(--surface-1); }
+.collaboration-map { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; overflow: hidden; color: var(--text); background: var(--map-ground); }
 .collaboration-map[hidden], .collaboration-inspector[hidden] { display: none; }
 .collaboration-map__body { position: relative; display: flex; flex: 1; min-height: 0; }
-.collaboration-canvas { container-type: inline-size; position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
-.collaboration-canvas .react-flow__background { opacity: .15; }
+/* Scene: ground, then up to three land bands by nesting depth, then raised discs. Each layer is
+ * lighter than the one below it in both themes; contours still carry nesting, never tone alone. */
+.collaboration-map { --map-ground: var(--surface-0); --map-band-0: var(--surface-1); --map-band-1: var(--surface-2); --map-band-2: color-mix(in srgb, var(--surface-2) 50%, var(--surface-3)); --map-grid: color-mix(in srgb, var(--text) 9%, transparent); --map-grid-major: color-mix(in srgb, var(--text) 15%, transparent); }
+:root[data-appearance="light"] .collaboration-map { --map-ground: color-mix(in srgb, var(--surface-2) 40%, var(--surface-3)); --map-band-0: var(--surface-1); --map-band-1: color-mix(in srgb, var(--surface-0) 45%, var(--surface-1)); --map-band-2: color-mix(in srgb, var(--surface-0) 80%, var(--surface-1)); --map-grid: color-mix(in srgb, var(--text) 10%, transparent); --map-grid-major: color-mix(in srgb, var(--text) 16%, transparent); }
+.collaboration-canvas { container-type: inline-size; position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--map-ground); }
+/* Ground grid: two levels of screen-sized dots, the minor fading in as its spacing opens up.
+ * It sits under the camera layers (xyflow's renderer is z 4) so land paints over it. */
+.collaboration-map-ground { position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image: radial-gradient(circle, var(--map-grid-major) 1.1px, transparent 1.6px), radial-gradient(circle, color-mix(in srgb, var(--map-grid) calc(var(--map-grid-minor-ink, 1) * 100%), transparent) .8px, transparent 1.3px);
+  background-size: var(--map-grid-major-spacing, 120px) var(--map-grid-major-spacing, 120px), var(--map-grid-minor-spacing, 24px) var(--map-grid-minor-spacing, 24px); }
 /* The canvas itself is the keyboard camera; it shows focus only for keyboard reach. */
 .collaboration-canvas:focus { outline: none; }
 .collaboration-canvas:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
@@ -62,8 +70,10 @@
 .collaboration-canvas .react-flow__node-agent:has(> .collaboration-agent > .collaboration-agent__focus-proxy) { z-index: 2 !important; }
 .collaboration-area { height: 100%; pointer-events: none; }
 .collaboration-area__envelope { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 6%, var(--surface-1)); stroke: color-mix(in srgb, var(--area-color) 30%, var(--line)); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.collaboration-area[data-kind=unplaced] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--surface-2) 65%, transparent); stroke-dasharray: 3 4; }
+.collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 5%, var(--map-band-2)); stroke: color-mix(in srgb, var(--area-color) 42%, var(--line)); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.collaboration-area[data-depth="0"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 5%, var(--map-band-0)); stroke-width: 1.5; }
+.collaboration-area[data-depth="1"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 5%, var(--map-band-1)); stroke-width: 1.15; }
+.collaboration-area[data-kind=unplaced] .collaboration-area__envelope path { fill: var(--map-band-0); stroke-dasharray: 3 4; }
 .collaboration-area[data-folded=true] { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .collaboration-area[data-empty=true] { border-radius: var(--radius-sm); }
 .collaboration-agent { position: relative; height: 100%; pointer-events: none; --focus-reply-lines: 2; }
@@ -85,10 +95,12 @@
 .collaboration-agent .focus-context__detail, .focus-map-preview__detail .focus-context__detail { font-size: max(var(--fs-micro), var(--collaboration-summary-size)); }
 .collaboration-agent .focus-context__state small, .focus-map-preview__detail .focus-context__state small { font-size: max(var(--fs-micro), var(--collaboration-state-size)); }
 .collaboration-agent .focus-context.is-selected { border-color: var(--green); background: var(--surface-2); }
-.collaboration-edge { stroke: var(--green); stroke-width: 1.25; opacity: .5; fill: none; }
+/* Resting weight follows the saturated message strength the layout uses (0 one message, 1 at 16+). */
+.collaboration-edge { stroke: var(--green); stroke-width: calc(1px + 1.25px * var(--edge-weight, 0)); opacity: calc(var(--edge-rest, .4) + .3 * var(--edge-weight, 0)); fill: none; }
+:root[data-appearance="light"] .collaboration-canvas { --edge-rest: .55; }
 .collaboration-edge--creation { stroke: var(--text-2); stroke-dasharray: 6 5; }
 .collaboration-edge--supervision { stroke: var(--amber); }
-.collaboration-edge.is-selected { opacity: 1; stroke-width: 2; }
+.collaboration-edge.is-selected { opacity: 1; stroke-width: 2.75; }
 .collaboration-edge__count { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--line); color: var(--text-2); border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .collaboration-edge__pulse { fill: none; stroke: var(--green); stroke-width: 3.5; vector-effect: non-scaling-stroke; stroke-linecap: round; animation: collaboration-message linear 1 both; pointer-events: none; }
 .collaboration-edge__pulse[data-kind=supervision] { stroke: var(--amber); stroke-dasharray: none; animation-name: collaboration-supervision; animation-timing-function: ease-out; }
@@ -156,8 +168,8 @@
 .collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); transition: filter 150ms ease-out, opacity 150ms ease-out; }
 .collaboration-agent--closed:is(:hover, :focus-within, [data-reading=true]) .agent-avatar { filter: none; opacity: 1; }
 /* A raised disc reads as a shape on any region fill; its absence is the closed signal. */
-.collaboration-canvas { --collaboration-closed-ink: .55; --collaboration-disc: color-mix(in srgb, var(--surface-3) 60%, var(--surface-2)); --collaboration-disc-line: color-mix(in srgb, var(--text) 14%, transparent); }
-:root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; --collaboration-disc: var(--surface-0); }
+.collaboration-canvas { --collaboration-closed-ink: .55; --collaboration-disc: color-mix(in srgb, var(--text) 12%, var(--surface-3)); --collaboration-disc-line: color-mix(in srgb, var(--text) 22%, transparent); }
+:root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; --collaboration-disc: var(--surface-0); --collaboration-disc-line: color-mix(in srgb, var(--text) 30%, transparent); }
 .collaboration-canvas__progress { position: absolute; top: 12px; right: 12px; color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
 
 @media (max-width: 850px) {
@@ -184,10 +196,10 @@
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .collaboration-agent__dot .collaboration-agent__avatar { grid-area: 1 / 1; }
-.collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2; opacity: .95; }
+.collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2.5; opacity: .95; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge { opacity: .16; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge__pulse { opacity: .2; }
-.collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2; }
+.collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2.5; }
 .collaboration-edge { vector-effect: non-scaling-stroke; }
 
 .collaboration-activity { position: absolute; top: -9px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--green); font-size: 10px; font-weight: 600; line-height: 16px; white-space: nowrap; pointer-events: none; animation: collaboration-activity linear 1 both; }
@@ -200,6 +212,14 @@
 .collaboration-area__activity[data-kind=supervision] { background: var(--amber); }
 @keyframes collaboration-activity { 0% { opacity: 0; } 8%, 88% { opacity: 1; } 100% { opacity: 0; } }
 
+/* A selected or previewed Agent keeps its own and its peers' regions present; others recede.
+ * Members, routes and controls stay; only land, contour and name ink step back. */
+.collaboration-area[data-recede=true] .collaboration-area__envelope path { opacity: .5; }
+.collaboration-area__overview-label[data-recede=true] .collaboration-area__name > strong { color: var(--text-2); }
+.collaboration-area__overview-label[data-recede=true] :is(.collaboration-area__meta, .collaboration-area__meta em) { color: var(--text-3); }
+.collaboration-area__overview-label[data-recede=true] .collaboration-area__identity { opacity: .6; }
+.collaboration-canvas[data-motion=on] :is(.collaboration-area__envelope path, .collaboration-area__name > strong, .collaboration-area__identity) { transition: opacity 150ms ease-out, color 150ms ease-out; }
+
 /* Stable territory colors identify kinds. Motion and health retain separate signals. */
 .collaboration-area, .collaboration-area__overview-label { --area-color: var(--text-2); }
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=project] { --area-color: var(--blue); }
@@ -207,9 +227,8 @@
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=category] { --area-color: var(--purple); }
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=mote] { --area-color: var(--amber); }
 .collaboration-area[data-kind=topic] .collaboration-area__envelope path { stroke-dasharray: 2 3; }
-.collaboration-area[data-kind=mote] .collaboration-area__envelope path { stroke-width: 1.6; }
-.collaboration-area[data-kind=category] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); stroke-width: 1; }
-.collaboration-area[data-depth="0"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); }
+.collaboration-area[data-kind=mote] .collaboration-area__envelope path { stroke-width: 1.8; }
+.collaboration-area[data-kind=category] .collaboration-area__envelope path { stroke-width: 1; }
 .collaboration-area__overview-label:not([data-depth="0"])::before { width: 2px; opacity: .65; }
 .collaboration-area__overview-label { position: absolute; display: flex; flex-direction: column; width: max-content; min-width: 148px; pointer-events: none; border-radius: 9px; background: color-mix(in srgb, var(--surface-1) 96%, var(--area-color)); border: 1px solid color-mix(in srgb, var(--area-color) 32%, var(--line)); box-shadow: 0 3px 12px color-mix(in srgb, var(--surface-1) 70%, transparent); }
 .collaboration-area__overview-label[data-internal-above=true] .collaboration-area__internal { order: -1; margin-top: 6px; margin-bottom: 0; }
@@ -265,7 +284,7 @@
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
 .collaboration-canvas[data-motion=on] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out; transition-duration: 150ms !important; }
 .collaboration-canvas[data-motion=off] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: none; }
-.collaboration-canvas[data-motion=off] .react-flow__edge[data-recent=true] .collaboration-edge { opacity: 1; stroke-width: 2.5; }
+.collaboration-canvas[data-motion=off] .react-flow__edge[data-recent=true] .collaboration-edge { opacity: 1; stroke-width: 2.75; }
 .collaboration-canvas__hud { position: absolute; z-index: 6; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
 @container (max-width: 680px) {
   .collaboration-canvas__legend { margin-right: auto; }
