@@ -1,12 +1,21 @@
+// @vitest-environment happy-dom
 import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BrowserProfilesPanel } from '../src/renderer/src/components/BrowserProfilesPanel'
+import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 
 // Data boundary: controlled list/request replies. The complete actual Panel, React effects,
 // event handlers, catalog and production error presenter execute; no Main/Native claim here.
-const methods = vi.hoisted(() => ({ listProfiles: vi.fn(), createProfile: vi.fn(), deleteProfile: vi.fn(),
-  switchProfile: vi.fn(), detectProfileImportSources: vi.fn(), importProfile: vi.fn() }))
+// listProfiles is the Main read the shared Profile list performs; push is its committed-change channel.
+const methods = vi.hoisted(() => {
+  const listProfiles = vi.fn()
+  const push = new Set<(list: unknown) => void>()
+  return { listProfiles, push, createProfile: vi.fn(), deleteProfile: vi.fn(),
+    switchProfile: vi.fn(), detectProfileImportSources: vi.fn(), importProfile: vi.fn(),
+    readProfiles: vi.fn(async () => ({ revision: 0, profiles: await listProfiles() })),
+    onProfilesChanged: vi.fn((listener: (list: unknown) => void) => { push.add(listener); return () => { push.delete(listener) } }) }
+})
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: methods } }))
 const profile = { id: '9e633a7d-bbfa-4f9c-aad7-6d968fa5b581', label: 'Original Profile', createdAt: 3, isDefault: true, source: null }
 const unused = { ...profile, id: 'f52c77ea-d5e3-40b1-9721-d6cd89439c49', label: 'Unused', isDefault: false }
@@ -32,7 +41,8 @@ function noReplay() {
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  for (const method of Object.values(methods)) method.mockReset()
+  for (const name of ['listProfiles', 'createProfile', 'deleteProfile', 'switchProfile', 'detectProfileImportSources', 'importProfile'] as const) methods[name].mockReset()
+  browserProfiles.reset(); methods.push.clear()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
@@ -85,24 +95,23 @@ it('repeated failed retry preserves the new actual reason and waits for a furthe
   noReplay()
 })
 
-it('a stale StrictMode failure cannot replace the newer successful Profile list', async () => {
-  const older = deferred<typeof profile[]>(), newer = deferred<typeof profile[]>()
-  methods.listProfiles.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+it('StrictMode mounts share Main reads and a late failure cannot hide the list Main pushed', async () => {
+  const first = deferred<typeof profile[]>()
+  methods.listProfiles.mockReturnValue(first.promise)
   await mount(true)
-  expect(methods.listProfiles).toHaveBeenCalledTimes(2)
-  await act(async () => newer.resolve([profile]))
-  await act(async () => older.reject(new Error('stale rejected metadata')))
-  expect(container.querySelector('[role="alert"]'), 'stale failure cannot commit').toBeNull()
-  expect(container.querySelector('[aria-label="Delete Original Profile"]')).not.toBeNull()
+  await act(async () => { for (const listener of methods.push) listener({ revision: 2, profiles: [profile] }) })
+  await act(async () => first.reject(new Error('stale rejected metadata')))
+  expect(container.querySelector('[aria-label="Delete Original Profile"]'), 'pushed list stays visible').not.toBeNull()
   noReplay()
 })
 
-it('a stale StrictMode success cannot replace the newer original Profile identity', async () => {
-  const older = deferred<typeof profile[]>(), newer = deferred<typeof profile[]>()
-  methods.listProfiles.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+it('a reply older than the pushed revision cannot replace the newer Profile identity', async () => {
+  const first = deferred<typeof profile[]>()
+  methods.listProfiles.mockReturnValue(first.promise)
   await mount(true)
-  await act(async () => newer.resolve([profile]))
-  await act(async () => older.resolve([{ ...profile, id: unused.id, label: 'Stale Profile' }]))
+  await act(async () => { for (const listener of methods.push) listener({ revision: 2, profiles: [profile] }) })
+  // The read answered revision 0, older than the pushed revision 2.
+  await act(async () => first.resolve([{ ...profile, id: unused.id, label: 'Stale Profile' }]))
   expect(container.querySelector('[aria-label="Delete Original Profile"]'), 'newer actual Profile identity is retained').not.toBeNull()
   expect(container.querySelector('[aria-label="Delete Stale Profile"]')).toBeNull()
   noReplay()

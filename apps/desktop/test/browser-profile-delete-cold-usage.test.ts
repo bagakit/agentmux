@@ -36,9 +36,10 @@ function productionDeleteHandler(dependencies: {
   expect(callbacks).toHaveLength(1)
   const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`,
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', compiled)(
+  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', 'publishProfiles', compiled)(
     { usesProfile: dependencies.usesProfile }, { read: dependencies.read }, savedBrowsersUsingProfile,
-    { deleteProfile: dependencies.deleteProfile }, { clearProfile: async () => ({ status: 'cleared' }) }
+    { deleteProfile: dependencies.deleteProfile }, { clearProfile: async () => ({ status: 'cleared' }) },
+    (change: Promise<unknown>) => change
   ) as ReturnType<typeof productionDeleteHandler>
 }
 

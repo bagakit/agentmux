@@ -8,6 +8,7 @@ import ts from 'typescript'
 import type { BrowserProfileSummary } from '../src/shared/contracts.js'
 import { BrowserProfilesPanel } from '../src/renderer/src/components/BrowserProfilesPanel.js'
 import { api } from '../src/renderer/src/lib/api.js'
+import { browserProfiles } from '../src/renderer/src/lib/browser-profiles.js'
 
 const profile: BrowserProfileSummary = {
   id: 'profile-work', label: 'Work', createdAt: 1, isDefault: false, source: null
@@ -18,6 +19,8 @@ let container: HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([profile, other])
+  vi.spyOn(api.browser, 'readProfiles').mockImplementation(async () => ({ revision: 0, profiles: await api.browser.listProfiles() }))
+  browserProfiles.reset()
   vi.spyOn(api.browser, 'deleteProfile').mockResolvedValue(undefined)
   container = document.createElement('div')
   document.body.append(container)
@@ -59,6 +62,10 @@ describe('Browser Profile current user approval', () => {
     expect(api.browser.deleteProfile).toHaveBeenCalledExactlyOnceWith(profile.id, {
       kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id
     })
+    // The row leaves when Main publishes the committed list, not when the click returns.
+    expect(container.querySelector('.browser-profiles__delete-confirm')).toBeNull()
+    vi.mocked(api.browser.listProfiles).mockResolvedValue([other])
+    await act(async () => { await browserProfiles.refresh() })
     expect(container.querySelector('[aria-label="Delete Work"]')).toBeNull()
     expect(container.querySelector('[aria-label="Delete Personal"]')).not.toBeNull()
   })
@@ -103,8 +110,9 @@ function productionDeleteHandler(dependencies: {
   const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 }
   }).outputText
-  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', compiled)(
-    dependencies.browsers, { read: async () => null }, () => [], dependencies.browserProfiles, { clearProfile: async () => ({ status: 'cleared' }) }
+  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', 'publishProfiles', compiled)(
+    dependencies.browsers, { read: async () => null }, () => [], dependencies.browserProfiles, { clearProfile: async () => ({ status: 'cleared' }) },
+    (change: Promise<unknown>) => change
   ) as ReturnType<typeof productionDeleteHandler>
 }
 
