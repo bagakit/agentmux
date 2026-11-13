@@ -40,6 +40,12 @@ function settingsPanelOwner(ast: ts.SourceFile): ts.FunctionDeclaration {
  * SECTIONS」失明（那时串在场而搜索用的是别的串），而这条走的就是组件真正调用的那个函数。
  */
 describe('设置搜索', () => {
+  it('proxy route and sign-in searches find the Profile editor', () => {
+    for (const query of ['profile', 'proxy', 'sign-in', 'network route']) {
+      expect(visibleSettingsSections(query).map(section => section.id), query).toContain('browser-profiles')
+    }
+  })
+
   it('每个内置 Provider 的 id 都能搜出 Agents 这一节', () => {
     // 挡板：id 全集读成空则下面循环一条不跑、整条静默通过。
     expect(BUILT_IN_AGENT_PROVIDER_IDS.length, '内置 id 全集为空，判据失效').toBeGreaterThanOrEqual(13)

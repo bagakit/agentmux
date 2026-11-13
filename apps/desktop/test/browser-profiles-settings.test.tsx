@@ -31,7 +31,7 @@ const port = vi.hoisted(() => {
     listProfileSites: vi.fn(async () => [{ site: 'github.com', cookies: 3 }, { site: 'example.com', cookies: 1 }]),
     clearProfileSite: vi.fn(async () => {}),
     readProfileProxySignIn: vi.fn(async (_id: string) => null as { username: string } | null),
-    setProfileProxySignIn: vi.fn(async (_id: string, _signIn: { username: string; password: string } | null) => {}),
+    setProfileProxySignIn: vi.fn(async (_id: string, _signIn: { username: string; password: string } | null) => ({ reconnected: true })),
     checkProfileExit: vi.fn(async () => ({ status: 'reachable' as const, httpStatus: 200, latencyMs: 184.4, ip: '203.0.113.7' })),
     detectProfileImportSources: vi.fn(async () => []),
     importProfile: vi.fn()
@@ -72,7 +72,8 @@ async function select(label: string) {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   browserProfiles.reset(); port.listeners.clear()
-  for (const fn of [port.readProfiles, port.updateProfile, port.setDefaultProfile, port.createProfile, port.deleteProfile]) fn.mockClear()
+  for (const fn of [port.readProfiles, port.updateProfile, port.setDefaultProfile, port.createProfile, port.deleteProfile,
+    port.readProfileProxySignIn, port.setProfileProxySignIn]) fn.mockClear()
   port.set({ revision: 4, profiles: [personal, client] })
   store.tabs = { t1: browserTab('b-open', 'p-client', false), t2: browserTab('b-saved', 'p-client', true) }
   store.layouts = { 'ws-1': { activeGroupId: 'g-1', groups: [{ id: 'g-1', tabOrder: ['t1'] }, { id: 'g-2', tabOrder: ['t2'] }] } }
@@ -500,6 +501,27 @@ describe('Settings › Browser Profiles exit check', () => {
     expect([...section().querySelectorAll('button')].map(button => button.textContent)).toEqual(['Check again'])
     delete store.config.browser.exitCheckUrl
   })
+
+  it('does not attribute an earlier or late check result to a changed route or check address', async () => {
+    store.config.browser.exitCheckUrl = 'https://ip.example.test/'
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    const check = () => [...section().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check')!
+    await act(async () => check().click())
+    expect(section().textContent).toContain('203.0.113.7')
+    port.set({ revision: 5, profiles: [{ ...personal, network: { mode: 'direct' } }, client] })
+    await act(async () => { await browserProfiles.refresh() })
+    expect(section().textContent).toContain('Connects directly')
+    expect(section().querySelector('[role="status"]')).toBeNull()
+    let finishCheck!: (value: Awaited<ReturnType<typeof port.checkProfileExit>>) => void
+    port.checkProfileExit.mockReturnValueOnce(new Promise(resolve => { finishCheck = resolve }))
+    await act(async () => check().click())
+    store.config.browser.exitCheckUrl = 'https://other.example.test/'
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await act(async () => finishCheck({ status: 'reachable', httpStatus: 200, latencyMs: 5, ip: '203.0.113.99' }))
+    expect(section().querySelector('[role="status"]')).toBeNull()
+    expect(check().disabled).toBe(false)
+    delete store.config.browser.exitCheckUrl
+  })
 })
 
 describe('Settings › Browser Profiles proxy sign-in', () => {
@@ -520,6 +542,35 @@ describe('Settings › Browser Profiles proxy sign-in', () => {
     expect(section()).toBeNull()
     await proxied()
     expect(section()?.textContent).toContain('No sign-in')
+  })
+
+  it('keeps a failed sign-in read unknown, allows setting it, and retries the same Profile', async () => {
+    port.readProfileProxySignIn.mockRejectedValueOnce(new Error('The keychain could not be read.'))
+    await proxied()
+    expect(section()?.textContent).toContain('Sign-in unknown')
+    expect(section()?.textContent).not.toContain('No sign-in')
+    expect(section()?.querySelector('[role="status"]')?.textContent).toContain('The keychain could not be read.')
+    const setSignIn = [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Set sign-in')!
+    expect(setSignIn.disabled).toBe(false)
+    port.readProfileProxySignIn.mockResolvedValueOnce({ username: 'alice' })
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry')!.click())
+    expect(port.readProfileProxySignIn).toHaveBeenLastCalledWith('p-personal')
+    expect(section()?.textContent).toContain('Signs in as alice')
+    expect(section()?.querySelector('[role="status"]')).toBeNull()
+  })
+
+  it('keeps a newer sign-in save when the original read finishes late', async () => {
+    let resolveRead!: (value: { username: string } | null) => void
+    port.readProfileProxySignIn.mockReturnValueOnce(new Promise(resolve => { resolveRead = resolve }))
+    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
+    await act(async () => { await browserProfiles.refresh() })
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Set sign-in')!.click())
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy user name"]')!, 'alice')
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!, SENTINEL)
+    await act(async () => section()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    await act(async () => resolveRead(null))
+    expect(section()?.textContent).toContain('Signs in as alice')
+    expect(section()?.textContent).not.toContain('No sign-in')
   })
 
   it('sends the password to Main once, then shows only the user name and an empty field', async () => {
@@ -545,5 +596,19 @@ describe('Settings › Browser Profiles proxy sign-in', () => {
     expect(section()!.querySelector('[role="alert"]')?.textContent).toContain('keychain is not available')
     expect(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!.value).toBe('')
     expect(container.innerHTML).not.toContain(SENTINEL)
+  })
+
+  it('reports a confirmed save separately from an unconfirmed connection update', async () => {
+    await proxied()
+    port.setProfileProxySignIn.mockResolvedValueOnce({ reconnected: false })
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add sign-in')!.click())
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy user name"]')!, 'alice')
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!, SENTINEL)
+    await act(async () => section()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    expect(section()?.textContent).toContain('Signs in as alice')
+    expect(section()?.querySelector('[role="status"]')?.textContent).toContain('Sign-in saved. Open connections could not be updated.')
+    expect(section()?.querySelector('[role="alert"]')).toBeNull()
+    expect(container.innerHTML).not.toContain(SENTINEL)
+    expect([...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Change')!.disabled).toBe(false)
   })
 })
