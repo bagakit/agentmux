@@ -3326,7 +3326,10 @@ function sessionStorageFailure(error: unknown, stage: string, cleanup: unknown[]
         ? { name: error.name, message: error.message, ...('code' in error ? { code: error.code } : {}), ...('errcode' in error ? { errcode: error.errcode } : {}) }
         : String(error) }))
   if (failure !== error) Object.defineProperty(failure, 'cause', { value: error, configurable: true })
-  if (cleanup.length) Object.defineProperty(failure, 'cleanup', { value: cleanup, configurable: true })
+  if (cleanup.length) {
+    const previous = (failure as { cleanup?: readonly unknown[] }).cleanup ?? []
+    Object.defineProperty(failure, 'cleanup', { value: [...previous, ...cleanup], configurable: true })
+  }
   return failure
 }
 
