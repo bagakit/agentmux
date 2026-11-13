@@ -11,6 +11,7 @@ import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } f
 import { NotificationGroup } from './NotificationGroup'
 import { groupNotifications, notificationCategories, notificationTimestamp, type NotificationCategory, type NotificationFilter, type NotificationSection, type NotificationSubject } from '../lib/notification-center'
 import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
+import { DORMANT_AGENT_INPUT_NOTICES, dormantByRecoveryPolicy } from '../lib/continuity-supervision'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -168,6 +169,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     !(endpointWarnings ?? []).some(warning => warning.hostId === session.control.hostId &&
       warning.observationOrigin !== undefined))
     .filter(item => item.id !== 'connection' || !(endpointWarnings ?? []).some(warning => warning.scope !== 'observation' && warning.hostId === session.hostId && warning.availability !== 'connected'))
+    // Not resumed by policy, so nothing is wrong: its own work surface keeps these notices and Resume.
+    .filter(item => DORMANT_AGENT_INPUT_NOTICES.has(item.id) || !dormantByRecoveryPolicy(session))
     .map(item => {
       let view = sessionNoticeViews.get(item)
       if (!view) {

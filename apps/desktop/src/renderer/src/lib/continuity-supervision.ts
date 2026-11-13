@@ -28,6 +28,25 @@ export function currentContinuitySupervision(session: Agent): { root: AgentMuxCo
   return { root, attempt, targetChanged, waitingForInitialAttempt }
 }
 
+/**
+ * Core confirmed the original Run ended or was lost, and its startup recovery stopped before the
+ * first attempt because the Agent was idle past the automatic recovery window, or for an unknown
+ * time. That is the policy working as intended, not a problem to raise: the Agent stays recoverable
+ * from its own work surface. Any carried input keeps the intent a problem worth surfacing.
+ */
+export function dormantByRecoveryPolicy(session: SessionSnapshot): boolean {
+  if (session.kind !== 'agent' || (session.processState !== 'interrupted' && session.processState !== 'exited')) return false
+  const joined = currentContinuitySupervision(session)
+  if (!joined?.waitingForInitialAttempt) return false
+  const { root } = joined
+  return root.trigger === 'startup' && root.supervision!.phase === 'paused' &&
+    (root.reason === 'idle-window-expired' || root.reason === 'idle-unknown') &&
+    !root.previousInput && !root.launchInput && !root.messageInput && !root.recoveryDelivery && !root.frontendReconnect && !root.standingIntent
+}
+
+/** Session notices that hold the person's own input or answer; they stay visible for a dormant Agent. */
+export const DORMANT_AGENT_INPUT_NOTICES: ReadonlySet<string> = new Set(['queue', 'delivery', 'initial-prompt', 'interaction-receipt'])
+
 export function continuitySupervisionPresentation(session: Agent) {
   const joined = currentContinuitySupervision(session)
   if (!joined) return null
