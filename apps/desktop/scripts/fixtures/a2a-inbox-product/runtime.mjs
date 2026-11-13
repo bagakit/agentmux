@@ -68,7 +68,7 @@ const facts = { frames, chain: { cliCalls, readEffects: [] }, cleanup: { userRun
   homeIsolation: { privateHome: process.env.HOME, initialSessionStore: initialStore, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 const mainLaunches = []
-let client, daemon, rpc, failure, mainExitConfirmed = false
+let client, daemon, rpc, failure, diagnosticApp, mainExitConfirmed = false
 assert.equal(process.platform, 'darwin', 'This private native actor proof qualifies the current macOS product')
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 async function waitFor(label, read, budget = 25_000) {
@@ -223,9 +223,10 @@ async function launch(label) {
   return { child, main, cdp, isolation, origin: await cdp.evaluate('({url:location.href,origin:location.origin})'), seedControlsAbsent: true }
 }
 async function activate(cdp, expression) {
-  const point = await cdp.evaluate(`(()=>{const element=${expression};if(!element)throw new Error('Missing original product action');const r=element.getBoundingClientRect();if(!r.width||!r.height)throw new Error('Original product action is not visible');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+  const point = await cdp.evaluate(`(()=>{const element=${expression};if(!element)throw new Error('Missing original product action');element.scrollIntoView({block:'center',inline:'nearest'});const r=element.getBoundingClientRect();if(!r.width||!r.height)throw new Error('Original product action is not visible');const x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(!hit||!element.contains(hit))throw new Error('Original product action is covered or outside its viewport: '+JSON.stringify({x,y,target:element.outerHTML.slice(0,300),hit:hit?.outerHTML.slice(0,300)}));return{x,y}})()`)
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseMoved', buttons: 0, ...point })
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...point })
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...point })
 }
 const region = regionId => `document.querySelector('[data-workbench-region-id="${regionId}"]')`
 async function openMailbox(cdp, regionId, folder) {
@@ -255,7 +256,7 @@ try {
   await waitFor('actual private ctxmux readiness', async () => ready.includes('\n') && (await stat(join(runtime, 'ctxmux.sock'))).isSocket())
   // The real Desktop starts the sole semantic Host. This worker is a public
   // Hosted consumer, so it cannot compete with that Host for Hook ownership.
-  const first = await launch('first')
+  const first = await launch('first'); diagnosticApp = first
   rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: core.defaultAgentMuxControlSocketPath() } })
   client = await core.connectHostedAgentMux({ rpc, expectedStorePath: storePath })
   const owner = client.runtimeOwnerIdentity()
@@ -265,7 +266,16 @@ try {
   assert.equal(executor.runtimeId, owner.runtimeId); assert.equal(executor.executor.executorId, 'proof')
   facts.semanticOwner.executor = executor
   await scenario({ client, first, sessions, facts, coreRoot, executable, workspace, nativeHome, controls, cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects })
-} catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
+} catch (error) {
+  failure = error; facts.error = { message: error.message, stack: error.stack }
+  if (diagnosticApp) {
+    try {
+      const path = join(evidence, 'failure-state.png'), capture = await diagnosticApp.cdp.call('Page.captureScreenshot', { format: 'png' })
+      const bytes = Buffer.from(capture.data, 'base64'); await writeFile(path, bytes)
+      facts.failurePage = { screenshot: { path, sha256: sha(bytes) }, observed: await diagnosticApp.cdp.evaluate(`({viewport:{width:innerWidth,height:innerHeight},text:document.body.innerText.slice(0,8000),actions:[...document.querySelectorAll('[aria-label="Copy message"]')].map(node=>{const r=node.getBoundingClientRect(),style=getComputedStyle(node);return{html:node.outerHTML.slice(0,500),rect:{x:r.x,y:r.y,width:r.width,height:r.height},visibility:style.visibility,display:style.display,opacity:style.opacity}})})`) }
+    } catch (diagnosticError) { facts.failureObservationError = diagnosticError.message }
+  }
+}
 finally {
   if (client) {
     for (const session of sessions) { try { await client.stopAgent(session.agentSessionId, session.run) } catch (error) { facts.cleanup.stopError ??= error.message } }
