@@ -39,7 +39,8 @@ it('uses the actual Activity process heading once and preserves the original res
   expect(result).not.toBeNull()
   expect(result.querySelector('.log-turn__who')).toBeNull()
   expect(result.textContent).not.toContain('Recorded activity')
-  await click(result.querySelector('.conversation-tool-trace__row')!)
+  // Opening the step reads it: its only tool part shows the payload without a third disclosure.
+  expect(result.querySelector('.conversation-tool-trace__row')?.getAttribute('aria-expanded')).toBe('true')
   expect(result.textContent).toContain('Exact original failed result.')
   expect(result.textContent).toContain('exact-call')
   await click(result.querySelector('[aria-label="Copy tool output"]')!)
