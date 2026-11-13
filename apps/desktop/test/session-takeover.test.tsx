@@ -765,6 +765,70 @@ it('converges on the Core creation when this Desktop lost its takeover record, w
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
 })
 
+it.each([false, true])('opens the live Core creation after lost placement, with missing snapshot %s, without another launch', async missingSnapshot => {
+  const bindings = coreOperationBindings(), launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  expect(first.outcome).toBe('opened')
+  // The takeover Agent is still running in Core; this Desktop lost the record and the Region.
+  useAppStore.setState({ spatialRequests: {} })
+  await useAppStore.getState().closeTab(first.to!.displayWorkspaceId, first.to!.groupId, first.to!.tabId, { keepAgentSessions: true })
+  expect(useAppStore.getState().tabs[first.to!.tabId]).toBeUndefined()
+  if (missingSnapshot) useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== first.agent!.agentSessionId) }))
+  const again = await takeOverSession(source, 'fixture', () => true)
+  expect(bindings).toHaveBeenCalledWith('local', first.requestId)
+  expect(launch).toHaveBeenCalledTimes(1)
+  expect(again).toMatchObject({ requestId: first.requestId, outcome: 'opened', agent: { agentSessionId: first.agent!.agentSessionId } })
+  expect(again.issues).toEqual([])
+  // The existing Agent is shown in the reserved Region, not merely reported.
+  const shown = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions))
+    .filter(region => region.kind === 'agent' && region.sessionId === first.agent!.agentSessionId)
+  expect(shown).toHaveLength(1)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('reuses the existing takeover workface when only its client request record is lost', async () => {
+  coreOperationBindings(); const launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  const before = useAppStore.getState().tabs
+  useAppStore.setState({ spatialRequests: {} })
+  const again = await takeOverSession(source, 'fixture', () => true)
+  expect(again).toMatchObject({ outcome: 'opened', to: first.to, agent: { agentSessionId: first.agent!.agentSessionId } })
+  expect(useAppStore.getState().tabs).toEqual(before)
+  expect(launch).toHaveBeenCalledOnce()
+})
+
+it('inspection preserves a missing takeover workface without placing or launching', async () => {
+  coreOperationBindings(); const launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  await useAppStore.getState().closeTab(first.to!.displayWorkspaceId, first.to!.groupId, first.to!.tabId, { keepAgentSessions: true })
+  expect(useAppStore.getState().tabs[first.to!.tabId]).toBeUndefined()
+  const before = useAppStore.getState().tabs
+  expect(await inspectTakeover(source)).toMatchObject({ outcome: 'unknown', to: null, agent: { agentSessionId: first.agent!.agentSessionId } })
+  expect(useAppStore.getState().tabs).toEqual(before)
+  expect(launch).toHaveBeenCalledOnce()
+})
+
+it('closing a submitted picker does not revoke presentation of its existing takeover', async () => {
+  coreOperationBindings(); const launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  await useAppStore.getState().closeTab(first.to!.displayWorkspaceId, first.to!.groupId, first.to!.tabId, { keepAgentSessions: true })
+  expect(useAppStore.getState().tabs[first.to!.tabId]).toBeUndefined()
+  useAppStore.setState({ spatialRequests: {} })
+  const before = useAppStore.getState().tabs
+  let current = true
+  vi.mocked(api.sessions.creation).mockImplementation(async (_host, id) => {
+    const created = creations.get(id)
+    if (!created) throw new Error('Original creation unavailable')
+    current = false
+    return structuredClone(created)
+  })
+  const again = await takeOverSession(source, 'fixture', () => current)
+  expect(again).toMatchObject({ outcome: 'opened', agent: { agentSessionId: first.agent!.agentSessionId } })
+  expect(useAppStore.getState().tabs).not.toEqual(before)
+  expect(launch).toHaveBeenCalledOnce()
+})
+
+
 it('repairs a request stuck on a never-created Session from the Core operation binding on Check again', async () => {
   coreOperationBindings(); const launch = launchBoundary()
   const first = await takeOverSession(source, 'fixture', () => true)

@@ -34,7 +34,7 @@ export async function runNative(requestedEvidence, options = {}) {
   await mkdir(evidence, { recursive: true })
   const privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-takeover-renderer-")))
   const out = join(privateRoot, 'renderer'), sourceBefore = {}, styleBefore = {}, logs = []
-  const receipt = { schema: options.agentOperations ? 'agentmux.agent-operations-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.nativeMutant ? 'agent-operations-mutation-v1' : options.agentOperations ? 'agent-operations-v1' : 'takeover-only', sourceMutations: [], passed: false, frames: [], processes: [],
+  const receipt = { schema: options.agentOperations ? 'agentmux.agent-operations-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.liveAdoption ? 'live-adoption-v1' : options.nativeMutant ? 'agent-operations-mutation-v1' : options.agentOperations ? 'agent-operations-v1' : 'takeover-only', sourceMutations: [], passed: false, frames: [], processes: [],
     userSessionTouched: false, independentVisualReview: 'pending',
     scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. A controlled Native retirement challenges a stale Renderer projection; trusted user choices create a distinct successor operation and both requests remain inspectable after restart. Native session facts/creation API remain controlled preview; this receipt does not prove vendor CLI or ctxmux process execution; Core exact Store/Hosted creation inspection has separate source-test evidence.',
     controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.', }
@@ -98,7 +98,7 @@ export async function runNative(requestedEvidence, options = {}) {
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
     for (const mode of options.nativeMutant ? ['first'] : ['first', 'second']) {
       const lines = []
-      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.agentOperations ? 'agent-operations' : 'takeover-only', options.nativeMutant ?? ''], {
+      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.liveAdoption ? 'live-adoption' : options.agentOperations ? 'agent-operations' : 'takeover-only', options.nativeMutant ?? ''], {
         temporaryRoot: privateRoot, cwd: repo, env, timeoutMs: 115000, onLine: line => lines.push(line)
       })
       await writeFile(join(evidence, mode + '-process.log'), lines.join('\n'))
@@ -117,7 +117,12 @@ export async function runNative(requestedEvidence, options = {}) {
     }
     assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
     assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)
-    if (options.agentOperations) {
+    if (options.liveAdoption) {
+      assert.equal(receipt.processes[0].rendered.liveReattached.noLaunch, true)
+      assert.equal(receipt.processes[1].rendered.restart.noReplay, true)
+      assert.equal(receipt.processes[0].rendered.liveReattached.agentSessionId,
+        receipt.processes[1].rendered.restart.inspection.request.report.agent.agentSessionId)
+    } else if (options.agentOperations) {
       for (const process of receipt.processes) assert.equal(process.rendered.agentOperations?.qualification, 'agent-operations-v1')
       assert.ok(receipt.processes[0].rendered.agentOperations.scenarios.length >= 8)
       assert.ok(receipt.processes[0].rendered.agentOperations.costSamples.length >= 6)

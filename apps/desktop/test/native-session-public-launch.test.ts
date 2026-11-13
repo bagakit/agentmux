@@ -68,7 +68,9 @@ it('continues one exact native conversation through the real CLI, public service
     launch, creation: (hostId, sessionId) => runtime.agentCreation(hostId, sessionId),
     creationSessionId: (hostId, operationId) => runtime.resolveCreationSessionId(hostId, operationId),
     attach: async (regionId, result) => {
-      expect(result.session).toBeDefined(); state.sessions.push(result.session!)
+      const session = result.session ?? state.sessions.find(session => session.kind === 'agent' && session.control.agentSessionId === result.created.agentSessionId)
+      expect(session).toBeDefined()
+      if (!state.sessions.includes(session!)) state.sessions.push(session!)
       const tab = Object.values(state.tabs).find(tab => regionId in tab.regions)!
       const region = tab.regions[regionId]!
       expect(region.kind).toBe('agent')
@@ -114,13 +116,24 @@ it('continues one exact native conversation through the real CLI, public service
     '--zone', zone, '--new-tab', '--operation-id', operationId], JSON.stringify(source))
   expect(stdinReplay.code, stdinReplay.stdout + stdinReplay.stderr).toBe(0)
   expect(start).toHaveBeenCalledOnce(); expect(launch).toHaveBeenCalledOnce()
+  // The public operation remains Core-owned after this client loses its local
+  // association and presentation. Opening it again only restores the workface.
+  state.tabs = {}; state.spatialRequests = {}
+  state.layouts = { 'original-workspace': createWorkspaceLayout('original-group') }
+  const reattached = await cli(['agent', 'open', '--executor', 'original', '--native-source', sourceFile,
+    '--execution-workspace', 'original-workspace', '--zone', zone, '--new-tab', '--operation-id', operationId])
+  expect(reattached.code, reattached.stdout + reattached.stderr).toBe(0)
+  const reattachedReport = JSON.parse(reattached.stdout).result
+  expect(reattachedReport).toMatchObject({ outcome: 'opened', agent: { agentSessionId: report.agent.agentSessionId, runId: report.agent.runId } })
+  expect(state.tabs[reattachedReport.to.tabId]!.regions[reattachedReport.to.regionId]).toMatchObject({ kind: 'agent', sessionId: report.agent.agentSessionId })
+  expect(start).toHaveBeenCalledOnce(); expect(launch).toHaveBeenCalledOnce()
   const managed = await rpc.call('agent.native.ls', { hostId: 'local', executorId: 'original' })
   expect(managed.sessions[0]!.managed).toMatchObject({ agentSessionId: report.agent.agentSessionId, executorId: 'original', run: { runId: 'private-public-native-run' }, state: 'active' })
   const refused = await cli(['agent', 'open', '--executor', 'original', '--native-source', sourceFile, '--execution-workspace', 'original-workspace',
     '--zone', zone, '--new-tab', '--operation-id', 'explicit-duplicate-native-resume'])
   expect(refused.code).not.toBe(0)
   expect(JSON.parse(refused.stdout).result.issues).toContainEqual(expect.objectContaining({ code: 'AGENT_NATIVE_SESSION_ALREADY_MANAGED' }))
-  const originalRegion = state.tabs[report.to.tabId]!.regions[report.to.regionId]!
+  const originalRegion = state.tabs[reattachedReport.to.tabId]!.regions[reattachedReport.to.regionId]!
   expect(originalRegion).toMatchObject({ kind: 'agent', phase: 'attached', sessionId: report.agent.agentSessionId })
   await writeFile(sourceFile, JSON.stringify({ ...source, workspacePath: join(root, 'wrong-directory') }))
   const wrongDirectory = await cli(['agent', 'open', '--executor', 'original', '--native-source', sourceFile, '--execution-workspace', 'original-workspace',
@@ -136,6 +149,7 @@ it('continues one exact native conversation through the real CLI, public service
     runtimeTransport: 'controlled test-owned ctxmux adapter; real process continuity is verified separately',
     layoutDurability: 'fixture receipt; product restart verifies real durability separately',
     source, success: report, inspected: JSON.parse(inspected.stdout).result, stdinReplay: JSON.parse(stdinReplay.stdout).result,
+    reattached: reattachedReport,
     refusedDuplicate: JSON.parse(refused.stdout).result, wrongDirectory: JSON.parse(wrongDirectory.stdout).result,
     nativeOwnership: managed.sessions[0]!.managed, launches: start.mock.calls.map(([launch]) => ({
       operationKey: launch.operationKey, program: launch.program, args: launch.args, cwd: launch.cwd })),

@@ -16,6 +16,11 @@ if (process.argv.includes('--native')) {
     const captured = JSON.parse(await readFile(join(evidence, 'receipt.json'), 'utf8'))
     const hash = value => createHash('sha256').update(value).digest('hex')
     assert.equal(captured.passed, true)
+    if (process.argv.includes('--live-adoption')) {
+      assert.equal(captured.qualification, 'live-adoption-v1')
+      assert.equal(captured.processes[0].rendered.liveReattached.noLaunch, true)
+      assert.equal(captured.processes[1].rendered.restart.noReplay, true)
+    }
     if (process.argv.includes('--agent-operations')) {
       assert.equal(captured.qualification, 'agent-operations-v1', 'A takeover-only receipt cannot certify agent operations')
       assert.equal(captured.schema, 'agentmux.agent-operations-native.v1')
@@ -41,7 +46,7 @@ if (process.argv.includes('--native')) {
     process.exit(0)
   } catch { /* Missing, failed or changed input requires fresh actual capture. */ }
   const { runNative } = await import('./fixtures/session-takeover/native.mjs')
-  await runNative(evidence, { agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) })
+  await runNative(evidence, { liveAdoption: process.argv.includes('--live-adoption'), agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) })
   process.exit(0)
 }
 const sha = value => createHash('sha256').update(value).digest('hex')

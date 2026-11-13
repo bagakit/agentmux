@@ -66,6 +66,12 @@ const initialSnapshot = boot?.snapshot ?? {
   browsers: []
 }
 let creations = boot?.creations ?? {}
+const resolveCreationSessionId = api.sessions.resolveCreationSessionId
+api.sessions.resolveCreationSessionId = async (hostId, operationId) => {
+  const retained = Object.values(creations).find((item: any) => item.hostId === hostId &&
+    (item.kind === 'retired-agent' ? item.history?.creation : item.creation)?.createOperationId === operationId) as any
+  return retained?.agentSessionId ?? resolveCreationSessionId(hostId, operationId)
+}
 if (agentOperationsMode) configureOperationSources(initialSnapshot, creations, Boolean(boot), boot?.operationFixture?.originals)
 let nativeSnapshot = structuredClone(initialSnapshot)
 let operationFixture: ReturnType<typeof installOperationFixture> | undefined
@@ -252,6 +258,28 @@ Object.assign(window, { takeoverProbe: {
     if (!result.applied) throw new Error(result.reason)
   }, failure(value: boolean) { failureMode = value },
   focusProjection(value: boolean) { focusProjection = value; render(); return true },
+  showRequest(requestId: string) {
+    const state = useAppStore.getState(), binding = state.spatialRequests[requestId]
+    const layout = state.layouts[config.workspaces[0]!.id]
+    const group = layout?.groups.find(group => group.tabOrder.includes(binding?.tabId ?? ''))
+    if (!binding || !group) throw new Error('Choose an exactly presented operation')
+    state.activateTab(config.workspaces[0]!.id, group.id, binding.tabId)
+    state.focusRegion(config.workspaces[0]!.id, binding.tabId, binding.regionId, 'keyboard', group.id)
+  },
+  async forgetPlacement(requestId: string) {
+    const binding = useAppStore.getState().spatialRequests[requestId]
+    if (!binding) throw new Error('An exact retained creation request is required')
+    const state = useAppStore.getState(), layout = state.layouts[config.workspaces[0]!.id]
+    const group = layout?.groups.find(group => group.tabOrder.includes(binding.tabId))
+    if (!group) throw new Error('The original presentation must be present before loss')
+    await state.closeTab(config.workspaces[0]!.id, group.id, binding.tabId, { keepAgentSessions: true })
+    if (useAppStore.getState().tabs[binding.tabId]) throw new Error('The presentation was not removed')
+    useAppStore.setState(state => {
+      const spatialRequests = { ...state.spatialRequests }; delete spatialRequests[requestId]
+      return { spatialRequests }
+    })
+    return facts()
+  },
   async retire(agentSessionId: string) {
     const created = creations[agentSessionId]
     if (!created || created.kind !== 'agent') throw new Error('Only an exact confirmed private Native creation can retire.')

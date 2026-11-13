@@ -138,6 +138,11 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await wait(`Boolean(window.takeoverProbe) && document.documentElement.dataset.takeoverReady`)
     result.nativeDevicePixelRatio = await evaluate('devicePixelRatio')
+    if (qualification === 'live-adoption') {
+      const { runLiveAdoption } = require('./live-adoption-main.cjs')
+      await runLiveAdoption({ result, evaluate, wait, click, open, frame, spatial, evidence, mode })
+      result.consoleErrors = errors; result.passed = true; return
+    }
     if (qualification === 'agent-operations') {
       const { runAgentOperations } = require('./agent-operations-main.cjs')
       // Live ordered output continually renews xterm's scrollbar transitions.
