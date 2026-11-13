@@ -57,7 +57,7 @@ await writeFile(${JSON.stringify(join(compiled, 'receipt.json'))}, JSON.stringif
   })
   const receipt = JSON.parse(await readFile(join(compiled, 'receipt.json'), 'utf8').catch(error => { throw new Error('Model child produced no receipt: ' + JSON.stringify(result), { cause: error }) }))
   if (mutation) { assert.equal(result.code, 1, JSON.stringify(receipt)); assert.equal(receipt.passed, false); assert.match(receipt.failure, mutation.failure) }
-  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14); assert.equal(receipt.enhancements.length, 4); assert.equal(receipt.pointing.length, 7); assert.equal(receipt.wand.length, 16) }
+  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14); assert.equal(receipt.enhancements.length, 4); assert.equal(receipt.pointing.length, 7); assert.equal(receipt.wand.length, 19) }
   if (receipt.png) { await writeFile(join(output, label + '.png'), Buffer.from(receipt.png.dataUrl.split(',')[1], 'base64')); delete receipt.png }
   await writeFile(join(output, label + '.json'), JSON.stringify({ ...receipt, process: result }, null, 2))
   evidence.cases.push({ label, result: mutation ? 'RED' : 'GREEN' }); console.log(label + ': ' + (mutation ? 'expected RED' : 'GREEN'))
@@ -84,6 +84,10 @@ try {
     await run('adjust-filter-omitted', { file: 'drawing-renderer.ts', find: '    target.filter = filter\n', replace: '\n', failure: /brightness must lift the actual dark stripe/ })
     await run('adjust-region-unclipped', { file: 'drawing-renderer.ts', find: "case 'adjust': drawAdjust(context, shape); break", replace: "case 'adjust': context.restore(); context.save(); drawAdjust(context, shape); break", failure: /region adjustment must keep every pixel outside/ })
     await run('adjust-after-callouts', { file: 'drawing-model.ts', find: "  if (shape.kind === 'adjust') return -1", replace: "  if (shape.kind === 'adjust') return 4", failure: /callout must magnify the adjusted pixels/ })
+    await run('region-highlight-omitted', { file: 'drawing-renderer.ts', find: "case 'region-highlight': {", replace: "case 'region-highlight': break; {", failure: /region highlight must tint the source/ })
+    await run('region-highlight-opaque', { file: 'drawing-renderer.ts', find: "case 'region-highlight': {\n        context.globalAlpha = HIGHLIGHT_ALPHA", replace: "case 'region-highlight': {\n        context.globalAlpha = 1", failure: /region highlight must tint the source/ })
+    await run('region-highlight-unclipped', { file: 'drawing-renderer.ts', find: "if ('outline' in shape && shape.outline && shape.kind !== 'spotlight') clipOutline(context, shape.outline)", replace: "if ('outline' in shape && shape.outline && shape.kind !== 'spotlight' && shape.kind !== 'region-highlight') clipOutline(context, shape.outline)", failure: /region highlight must leave its hole, notch and every outside pixel unchanged/ })
+
     await run('restored-source')
   }
   for (const [file, source] of Object.entries(sources)) assert.equal(await readFile(sourcePaths[file], 'utf8'), source, 'Model source changed during native verification: ' + file)

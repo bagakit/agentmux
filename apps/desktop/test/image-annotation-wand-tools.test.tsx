@@ -18,12 +18,13 @@ function originalColor(x: number, y: number): [number, number, number] {
   if (y >= 150 && y < 210 && x >= 200 && x < 260) return [200, 40, 40]
   return [255, 255, 255]
 }
-let reads = 0, strokes: Array<{ style: string; offset: number }>
+let reads = 0, strokes: Array<{ style: string; offset: number; points: Array<{ x: number; y: number }> }>
 /** Serves the original image's pixels only after the image element itself was drawn; any canvas, such as the marked
  * result, reads back black, so a wand that sampled marks would select the whole image. */
 class PixelContext {
   fillStyle = ''; strokeStyle = ''; lineWidth = 1; lineDashOffset = 0; font = ''; imageSmoothingEnabled = true
   private source: unknown = null
+  private path: Array<{ x: number; y: number }> = []
   drawImage(source: unknown) { this.source = source }
   getImageData(left: number, top: number, width: number, height: number) {
     reads++
@@ -31,9 +32,9 @@ class PixelContext {
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) data.set([...(original ? originalColor(left + x, top + y) : [0, 0, 0]), 255], (y * width + x) * 4)
     return { width, height, data }
   }
-  stroke() { strokes.push({ style: String(this.strokeStyle), offset: this.lineDashOffset }) }
+  stroke() { strokes.push({ style: String(this.strokeStyle), offset: this.lineDashOffset, points: [...this.path] }) }
   measureText(text: string) { return { width: text.length * 7 } }
-  save() {} restore() {} setLineDash() {} strokeRect() {} fillRect() {} beginPath() {} moveTo() {} lineTo() {} closePath() {} arc() {} fill() {} clearRect() {}
+  save() {} restore() {} setLineDash() {} strokeRect() {} fillRect() {} beginPath() { this.path = [] } moveTo(x: number, y: number) { this.path.push({ x, y }) } lineTo(x: number, y: number) { this.path.push({ x, y }) } closePath() {} arc() {} fill() {} clearRect() {}
 }
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
@@ -71,7 +72,7 @@ async function mount(shapes: ScreenshotShape[] = [], presentation: 'window' | 'c
     bubbles: true, pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, shiftKey }))
   const pick = async (x: number, y: number, shiftKey = false) => { await act(async () => { pointer('pointerdown', x, y, shiftKey); pointer('pointerup', x, y, shiftKey) }); await frame() }
   const press = async (control: HTMLElement) => { await act(async () => control.click()); await frame() }
-  const key = async (value: string) => { await act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })) }); await frame() }
+  const key = async (value: string, modifiers: { metaKey?: boolean; shiftKey?: boolean } = {}) => { await act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, ...modifiers })) }); await frame() }
   const shapes_ = async (): Promise<ScreenshotShape[]> => {
     await press(named(editor, 'button', presentation === 'capture' ? 'Done' : 'Copy PNG')); return props.onComplete.mock.lastCall![0].shapes
   }
@@ -130,6 +131,16 @@ describe('magic wand in the mounted editor', () => {
     }
   })
 
+  it('turns the picked color region into a highlight and removes it with one Undo', async () => {
+    const { pick, actions, press, shapes, undo } = await mount()
+    await pick(60, 60)
+    await press(named(actions()!, 'button', 'Highlight'))
+    expect(actions(), 'Highlight consumes the pending region').toBeNull()
+    expect(await shapes(), 'Highlight commits the exact picked range').toMatchObject([{ kind: 'region-highlight', from: { x: 40, y: 40 }, to: { x: 120, y: 100 }, outline: [ring(40, 40, 120, 100)] }])
+    await undo()
+    expect(await shapes(), 'one Undo removes the region highlight').toEqual([])
+  })
+
   it('reads the original pixels once per image, not on each click or pointer move', async () => {
     const { pick, pointer } = await mount()
     await pick(60, 60); await pick(220, 170, true)
@@ -162,15 +173,17 @@ describe('magic wand in the mounted editor', () => {
     expect(black().length, 'the dashes still show').toBeGreaterThan(0)
   })
 
-  it('offers the wand in a capture selection with the capture masks only', async () => {
+  it('offers the wand in a capture selection with its lightweight actions only', async () => {
     const { editor, pointer, pick, press, shapes, actions } = await mount([], 'capture')
     await act(async () => { pointer('pointerdown', 10, 10); pointer('pointermove', 200, 150); pointer('pointerup', 390, 290) }); await frame()
     await press(named(editor.querySelector('[aria-label="Capture tools"]')!, 'button', 'Magic wand'))
     await pick(60, 60)
-    expect([...actions()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Pixelate', 'Blur'])
+    expect([...actions()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Pixelate', 'Blur', 'Highlight'])
     expect(editor.querySelector('.image-annotation-editor__adjust'), 'the capture toolbar has no adjust entry').toBeNull()
     await press(named(actions()!, 'button', 'Pixelate'))
     expect((await shapes()).at(-1), 'the frozen frame is sampled').toMatchObject({ kind: 'pixelate', from: { x: 40, y: 40 }, to: { x: 120, y: 100 }, outline: [ring(40, 40, 120, 100)] })
+    await pick(60, 60); await press(named(actions()!, 'button', 'Highlight'))
+    expect((await shapes()).at(-1), 'the capture can highlight its picked range').toMatchObject({ kind: 'region-highlight', outline: [ring(40, 40, 120, 100)] })
   })
 })
 
@@ -224,6 +237,19 @@ describe('adjustments in the window property row', () => {
     strokes = []; await press(named(editor, 'button', 'Adjust'))
     expect(editor.querySelector('[aria-label="Region adjustments"]'), 'Adjust closes it').toBeNull()
     expect(strokes.filter(stroke => stroke.style === '#000000'), 'and its outline goes with it').toEqual([])
+  })
+
+  it('draws the current adjustment range after Select All and an arrow move', async () => {
+    const { editor, pick, press, key, shapes } = await mount()
+    await pick(60, 60); await press(named(editor, 'button', 'Adjust'))
+    await act(async () => slide(named(editor.querySelector('[aria-label="Region adjustments"]')!, 'input', 'Saturation'), 0.6)); await frame()
+    await key('v'); await key('a', { metaKey: true })
+    strokes = []; await key('ArrowRight')
+    const movedRing = ring(41, 40, 121, 100)
+    expect(strokes.filter(stroke => stroke.style === '#000000').at(-1)?.points, 'the open adjustment outlines its moved range').toEqual(movedRing)
+    expect(adjusts(await shapes())[0], 'the keyboard moved the actual adjustment').toMatchObject({ from: { x: 41, y: 40 }, to: { x: 121, y: 100 }, outline: [movedRing] })
+    await act(async () => slide(named(editor.querySelector('[aria-label="Region adjustments"]')!, 'input', 'Brightness'), 1.3)); await frame()
+    expect(adjusts(await shapes())[0], 'the next slider edits that same moved adjustment').toMatchObject({ brightness: 1.3, saturation: 0.6, outline: [movedRing] })
   })
 
   it('lists existing adjustments to edit or remove one after the wand selection is gone, each change one Undo step', async () => {

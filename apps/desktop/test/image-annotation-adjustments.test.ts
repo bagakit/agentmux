@@ -3,8 +3,8 @@ import { renderCommittedLayer } from '../src/renderer/src/components/image-annot
 import { outlineContains } from '../src/renderer/src/components/image-annotation/magic-wand'
 import { AnnotationDocumentError, createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
-import { createAdjustShape, moveShape, outlineExtent, outlineRects, scaleShape, screenshotOutputLayer, screenshotOutputShapes, withOutline,
-  type CoverShape, type NoteShape, type ScreenshotOutline, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import { createAdjustShape, isScreenshotMask, moveShape, outlineExtent, outlineRects, scaleShape, screenshotOutputLayer, screenshotOutputShapes, withOutline,
+  type CoverShape, type NoteShape, type RegionHighlightShape, type ScreenshotOutline, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
 
 // A complete PNG keeps the codec honest; shape geometry is not bounded by the image size.
 const image = { width: 1, height: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }
@@ -76,6 +76,20 @@ describe('wand outlines and adjust marks in the model', () => {
       createAdjustShape('whole', { x: 0, y: 0 }, { x: 400, y: 300 }, { contrast: 1.1 })]
     const reopened = parseEditableAnnotationDocument(encodeEditableAnnotationDocument(document(shapes), ANNOTATION_DOCUMENT_LIMITS), ANNOTATION_DOCUMENT_LIMITS)
     expect(reopened.shapes).toEqual(shapes)
+  })
+
+  it('keeps a region highlight editable through original, move and scale without hiding notes', () => {
+    const highlight = withOutline<RegionHighlightShape>({ id: 'highlight', kind: 'region-highlight', color: '#facc15', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
+    const note: NoteShape = { id: 'visible-note', kind: 'note', color: '#ef4444', width: 2, radius: 4, number: 1, note: 'keep this context', from: { x: 30, y: 50 }, to: { x: 30, y: 50 } }
+    const reopened = parseEditableAnnotationDocument(encodeEditableAnnotationDocument(document([highlight, note]), ANNOTATION_DOCUMENT_LIMITS), ANNOTATION_DOCUMENT_LIMITS)
+    expect(reopened.shapes, 'the original keeps the region highlight and its geometry').toEqual([highlight, note])
+    expect(isScreenshotMask(highlight), 'highlighting is not redaction').toBe(false)
+    expect(screenshotOutputShapes(reopened.shapes).map(shape => shape.id), 'a highlighted note remains in the processed output and context').toEqual(['highlight', 'visible-note'])
+    const moved = moveShape(reopened.shapes[0]!, 5, -3) as RegionHighlightShape
+    expect(moved.outline![0]![0], 'the highlight outline moves with its pixels').toEqual({ x: 25, y: 17 })
+    const scaled = scaleShape(moved, 2) as RegionHighlightShape
+    expect(scaled.outline![1]![2], 'the highlight outline scales with its pixels').toEqual({ x: 80, y: 64 })
+    expect({ from: scaled.from, to: scaled.to }, 'highlight bounds remain the outline extent').toEqual(outlineExtent(scaled.outline!))
   })
 
   it('rejects outlines that are open, non-finite, outside their region or over the limits', () => {
