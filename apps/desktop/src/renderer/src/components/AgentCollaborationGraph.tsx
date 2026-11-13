@@ -31,6 +31,7 @@ import { CollaborationRelationArrow, CollaborationRelationKey } from './Collabor
 import { agentInformationPreview } from '../lib/agent-information-preview'
 import { createPointerRestGate, PointerRestGateContext, type PointerRestGate } from '../lib/pointer-rest-gate'
 import '@xyflow/react/dist/base.css'
+import { CollaborationBoundsIndex } from '../lib/collaboration-spatial-index'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
@@ -393,11 +394,14 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
 const CollaborationRelations = memo(function CollaborationRelations({ paths, active, onSelect, onClear }: { paths: readonly RelationPath[]; active: boolean; onSelect(path: RelationPath): void; onClear(): void }) {
+  const index = useMemo(() => new CollaborationBoundsIndex(paths.flatMap((path, order) =>
+    [path.route.bounds, path.sourceBox, path.targetBox].map(box => ({ ...box, path, order })))), [paths])
   const visible = useStore(useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
     const [x, y, zoom] = state.transform, padding = 32 / zoom
     const left = -x / zoom - padding, top = -y / zoom - padding, right = (state.width - x) / zoom + padding, bottom = (state.height - y) / zoom + padding
-    return paths.filter(({ route: { bounds }, sourceBox, targetBox }) => [bounds, sourceBox, targetBox].some(box => box.x <= right && box.x + box.width >= left && box.y <= bottom && box.y + box.height >= top))
-  }, [paths]), sameItems)
+    const hits = index.query({ x: left, y: top, width: right - left, height: bottom - top })
+    return [...new Map(hits.map(hit => [hit.order, hit.path])).entries()].sort(([a], [b]) => a - b).map(([, path]) => path)
+  }, [index]), sameItems)
   const zoom = useStore(state => state.transform[2]), preferences = useContext(CollaborationMapPreferences)
   const markerId = useId().replace(/:/g, '')
   // At icon scale routes into one face clip to its small circle and their heads stack. One
@@ -474,15 +478,16 @@ function CollaborationViewport({ ready, geometry, areas, agents, locate, gesture
   const flow = useReactFlow(), initialized = useRef(false), applied = useRef<object | undefined>(undefined), pending = useRef<{ token: object | undefined; gesture: number }>({ token: undefined, gesture: gestures.current })
   const motion = useContext(MapMotionContext), preferences = useContext(CollaborationMapPreferences)
   const width = useStore(state => state.width), height = useStore(state => state.height)
+  const index = useMemo(() => new CollaborationBoundsIndex(areas.flatMap(area => area.members.flatMap(id => {
+    const box = geometry.get(collaborationAgentNode(area.id, id)), agent = agents.get(id)
+    const tier = agent?.tier ?? (agent?.context ? 'active' : 'unknown')
+    return agent && tier === 'active' && box ? [{ ...box, agentId: id }] : []
+  }))), [geometry, areas, agents])
   const visible = useStore(useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
     if (!ready || !collaborationMapReadsSummary(state.transform[2], preferences)) return [] as string[]
     const [x, y, zoom] = state.transform, left = -x / zoom, top = -y / zoom, right = (state.width - x) / zoom, bottom = (state.height - y) / zoom
-    return [...new Set(areas.flatMap(area => area.members.flatMap(id => {
-      const box = geometry.get(collaborationAgentNode(area.id, id)), agent = agents.get(id)
-      const tier = agent?.tier ?? (agent?.context ? 'active' : 'unknown')
-      return agent && tier === 'active' && box && box.x <= right && box.x + box.width >= left && box.y <= bottom && box.y + box.height >= top ? [id] : []
-    })))].sort()
-  }, [geometry, areas, agents, ready, preferences]), sameItems)
+    return [...new Set(index.query({ x: left, y: top, width: right - left, height: bottom - top }).map(box => box.agentId))].sort()
+  }, [index, ready, preferences]), sameItems)
   useEffect(() => { const timer = setTimeout(() => onVisibleAgents?.(visible), 120); return () => clearTimeout(timer) }, [visible, onVisibleAgents])
   if (pending.current.token !== locate?.token) pending.current = { token: locate?.token, gesture: gestures.current }
   useEffect(() => {
