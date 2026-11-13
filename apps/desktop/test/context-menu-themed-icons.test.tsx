@@ -6,6 +6,8 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/clien
 import { semanticIconHref, type SemanticIconName } from '@agentmux/client-ui/icons'
 import { WorkbenchTabContextMenu } from '../src/renderer/src/components/WorkbenchTabContextMenu'
 import { FileTreeContextMenu } from '../src/renderer/src/components/file-tree/FileTreeContextMenu'
+import { WorkspaceRowContextMenu } from '../src/renderer/src/components/WorkspaceRowContextMenu'
+import { revealInFileManagerLabel } from '../src/renderer/src/lib/host-platform'
 import { composerDOM } from './helpers/composer-dom-fixture'
 const dom=composerDOM();let cleanup:()=>void
 beforeEach(()=>{cleanup=mountThemeRuntime(window)})
@@ -16,10 +18,14 @@ function drawing(label:string,name:SemanticIconName){const svg=item(label).query
 async function custom(names:SemanticIconName[]){const theme=structuredClone(GRAPHITE_THEME);theme.id='custom.context-menus';theme.name='Context menu shapes';theme.icons=Object.fromEntries(names.map(name=>[name,{kind:'paths',paths:[{d:'M4 4H20V20H4Z'}]}]));await act(async()=>{expect(previewTheme(theme).applied).toBe(true)})}
 it('the actual tab portal consumes independent copy meanings, keeps disabled actions and executes the original relative-path callback',async()=>{
  const write=vi.fn(async(_text:string)=>{}),close=vi.fn(),rename=vi.fn()
- await dom.render(<WorkbenchTabContextMenu canCloseOthers={false} canCloseLeft={false} canCloseRight canMoveToNewGroup tabId="original-tab" copyableAgentSessionId="original-agent" fileActions={{path:'src/main.ts',workspaceRoot:_reshape_fixturePath("project"),home:_reshape_fixturePath("home/user"),revealLabel:'Reveal original file',onReveal:async()=>{},copyPathsAsAbsolute:true}} writeClipboardText={write} onRenameTab={rename} onClose={close} onCloseOthers={()=>{}} onCloseLeft={()=>{}} onCloseRight={()=>{}} onMoveToNewGroup={()=>{}} regionCount={2} onArrange={()=>{}} moveSessionViewTargets={[]} onMoveSessionView={()=>{}} displayTargets={[]} bindingPending={false} onOpenChange={()=>{}} onDisplayBindingChange={()=>{}}><button>Original file Tab</button></WorkbenchTabContextMenu>)
- await open();drawing('Copy Agent Link','action.copy-address');drawing('Copy Tab Link','action.copy-address');drawing('Copy Path','action.copy');drawing('Reveal original file','action.reveal-file');const relative=drawing('Copy Relative Path','action.copy-relative-path');drawing('Close','action.close');expect(item('Close Others').getAttribute('data-disabled')).toBe('')
+ await dom.render(<WorkbenchTabContextMenu canCloseOthers={false} canCloseLeft={false} canCloseRight canMoveToNewGroup tabId="original-tab" onOpenWindow={()=>{}} copyableAgentSessionId="original-agent" fileActions={{path:'src/main.ts',workspaceRoot:_reshape_fixturePath("project"),home:_reshape_fixturePath("home/user"),revealLabel:'Reveal original file',onReveal:async()=>{},copyPathsAsAbsolute:true}} writeClipboardText={write} onRenameTab={rename} onClose={close} onCloseOthers={()=>{}} onCloseLeft={()=>{}} onCloseRight={()=>{}} onMoveToNewGroup={()=>{}} regionCount={2} onArrange={()=>{}} moveSessionViewTargets={[]} onMoveSessionView={()=>{}} displayTargets={[]} bindingPending={false} onOpenChange={()=>{}} onDisplayBindingChange={()=>{}}><button>Original file Tab</button></WorkbenchTabContextMenu>)
+ await open();drawing('Copy Agent Link','action.copy-address');drawing('Copy Tab Link','action.copy-address');drawing('Copy Path','action.copy');drawing('Reveal original file','action.reveal-file');drawing('Open original Tab in window','action.open-external');const relative=drawing('Copy Relative Path','action.copy-relative-path');drawing('Close','action.close');expect(item('Close Others').getAttribute('data-disabled')).toBe('')
  await custom(['action.copy-relative-path','action.copy-address']);expect(item('Copy Relative Path').querySelector('svg')).toBe(relative);expect(document.getElementById(semanticIconHref('action.copy-relative-path').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z');expect(close).not.toHaveBeenCalled();expect(rename).not.toHaveBeenCalled()
  await act(async()=>item('Copy Relative Path').click());expect(write).toHaveBeenCalledExactlyOnceWith('src/main.ts');expect(dom.container.textContent).toBe('Original file Tab')
+})
+it('the actual project row portal reveals its folder with the shared file-manager meaning',async()=>{
+ await dom.render(<WorkspaceRowContextMenu path={_reshape_fixturePath("project")} branch="main" isLocal workspaceId="original-project"><button>Original project row</button></WorkspaceRowContextMenu>)
+ await open();drawing(revealInFileManagerLabel(),'action.reveal-file');expect(document.querySelector('[role="menu"] [data-semantic-icon="action.open-external"]')).toBeNull()
 })
 it('the actual file portal distinguishes create, open-existing and move meanings without changing original file operations',async()=>{
  const create=vi.fn(),copy=vi.fn(),project=vi.fn(),move=vi.fn(),remove=vi.fn()
