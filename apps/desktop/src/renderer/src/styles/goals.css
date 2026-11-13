@@ -315,10 +315,9 @@
   .goals-section-heading h2 { margin-bottom: 0; }
 }
 
-.goals-request-action { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
-.goals-request-action__art { width: 48px; height: 48px; flex: 0 0 auto; object-fit: contain; pointer-events: none; }
+.goals-request-action { display: flex; flex-basis: 100%; align-items: center; gap: var(--sp-3); min-width: 0; }
+.goals-request-action__art { width: 32px; height: 32px; flex: 0 0 auto; object-fit: contain; pointer-events: none; }
 .goals-request-action__art[hidden] { display: none; }
-.goals-request-action__content { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); min-width: 0; }
 .goals-clarification { margin-bottom: var(--sp-6); }
 .goals-no-results { padding: var(--sp-4) 0 var(--sp-5); }
 
@@ -348,7 +347,7 @@
 .goal-collaboration { padding: var(--sp-5) 0; border-top: 1px solid var(--line-soft); }
 .goal-collaboration .goals-section-heading { margin-bottom: var(--sp-4); }
 .goal-collaboration .goals-section-heading h2 { align-items: center; font-size: var(--fs-body); margin: 0; }
-.goal-collaboration__line { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; align-items: start; gap: var(--sp-4); margin-bottom: var(--sp-3); }
+.goal-collaboration__line { display: grid; grid-template-columns: 128px minmax(0, 1fr) auto; align-items: start; gap: var(--sp-4); margin-bottom: var(--sp-3); }
 .goal-collaboration__line > strong { padding-top: var(--sp-3); font-size: var(--fs-meta); font-weight: 500; color: var(--text-3); }
 .goal-collaboration__line > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-height: 28px; }
 .goal-collaboration__member { display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); max-width: 100%; color: var(--text-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; font: inherit; font-size: var(--fs-body); text-align: left; cursor: pointer; }
@@ -356,6 +355,7 @@
 .goal-collaboration__member:disabled { opacity: 1; cursor: default; }
 .goal-collaboration__member > span:not(.goal-agent-face) { min-width: 0; overflow-wrap: anywhere; }
 .goal-collaboration__member small { display: block; color: var(--text-3); font-size: var(--fs-meta); }
+.goal-collaboration__member[data-session-state='error'] small { color: var(--red-text); font-weight: 560; }
 .goal-agent-face { display: inline-flex; flex: none; }
 .goal-collaboration__recommendations { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: var(--sp-3) 0 var(--sp-5) 84px; }
 .goal-collaboration__recommendations .goals-button { gap: var(--sp-3); }
