@@ -54,6 +54,14 @@ describe('browser profile built CLI reaches the public Control owner', () => {
             if (request.expectedRevision !== revision) throw new AgentMuxError(`Browser Profiles changed since revision was read; current revision is ${revision}.`, 'BROWSER_PROFILE_REVISION_CONFLICT')
             const next = { ...find(request.profileId), ...(request.edit.label === undefined ? {} : { label: request.edit.label }), ...(request.edit.notes === undefined ? {} : { notes: request.edit.notes }) }
             if (request.edit.hue === null) delete next.hue; else if (request.edit.hue !== undefined) next.hue = request.edit.hue
+            // The owner's two route refusals, as Main raises them, so the public client keeps their codes.
+            if (request.edit.network?.mode === 'proxy' && request.edit.network.server.includes('@')) {
+              throw new AgentMuxError('Leave the user name and password out of the server line.', 'BROWSER_PROFILE_NETWORK_INVALID')
+            }
+            if (request.edit.network?.mode === 'proxy' && request.edit.network.server === 'unreachable.example:1') {
+              throw new AgentMuxError('The route could not be applied; the old one stays in use.', 'BROWSER_PROFILE_NETWORK_UNAVAILABLE')
+            }
+            if (request.edit.network?.mode === 'proxy') next.network = { mode: 'proxy', server: { scheme: 'http', host: 'proxy.example', port: 8080 } }
             profiles = profiles.map(profile => profile.id === next.id ? next : profile); revision += 1
             return { operation: request.operation, revision, profile: next }
           }
@@ -107,7 +115,9 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '4', '--label', 'Northwind', '--hue', '300', '--notes', ''])).body.result)
       .toMatchObject({ revision: 5, profile: { id: WORK_ID, label: 'Northwind', hue: 300, notes: '' } })
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '5', '--clear-hue'])).body.result.profile).not.toHaveProperty('hue')
-    expect((await run(['set-default', '--profile', WORK_ID])).body.result).toEqual({ revision: 7, profileId: WORK_ID })
+    expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '6', '--network', 'proxy.example:8080', '--no-proxy', 'intranet.example, localhost'])).body.result.profile)
+      .toMatchObject({ network: { mode: 'proxy', server: { host: 'proxy.example', port: 8080 } } })
+    expect((await run(['set-default', '--profile', WORK_ID])).body.result).toEqual({ revision: 8, profileId: WORK_ID })
 
     expect(requests()).toEqual([
       { operation: 'browser.profile.ls' },
@@ -115,8 +125,31 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       { operation: 'browser.profile.create', label: 'Release review' },
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 4, edit: { label: 'Northwind', hue: 300, notes: '' } },
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 5, edit: { hue: null } },
+      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 6,
+        edit: { network: { mode: 'proxy', server: 'proxy.example:8080', bypass: ['intranet.example', 'localhost'] } } },
       { operation: 'browser.profile.set-default', profileId: WORK_ID }
     ])
+  }, 20_000)
+
+  it('sends system and direct routes as modes, and refuses --no-proxy without a proxy before contacting the Host', async () => {
+    for (const mode of ['system', 'direct'] as const) {
+      expect((await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', mode])).code).toBe(0)
+      expect(requests().at(-1)).toEqual({ operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: revision - 1, edit: { network: { mode } } })
+    }
+    const before = requests().length
+    const refused = await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', 'direct', '--no-proxy', 'a.example'])
+    expect(refused.code).not.toBe(0)
+    expect(refused.body.error.message).toContain('--no-proxy applies only to a proxy route')
+    const alone = await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--no-proxy', 'a.example'])
+    expect(alone.body.error.message).toContain('--no-proxy goes with --network SERVER')
+    expect(requests().length, 'nothing reached the Host').toBe(before)
+  }, 20_000)
+
+  it('keeps the owner’s route refusal codes through the public client, so a caller can tell a bad line from a route that would not apply', async () => {
+    const bad = await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', 'user:secret@proxy.example:8080'])
+    expect(bad.body.error).toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
+    const unreachable = await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', 'unreachable.example:1'])
+    expect(unreachable.body.error).toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
   }, 20_000)
 
   it('carries per-reason skipped cookie counts through inspect, and rejects a count that is not a number', async () => {

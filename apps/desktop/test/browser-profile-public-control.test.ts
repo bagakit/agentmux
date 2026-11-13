@@ -26,7 +26,17 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
   await writeFile(path, JSON.stringify({ version: 1, defaultProfileId: DEFAULT_ID, pendingImports: [], profiles: [
     { id: DEFAULT_ID, label: 'Personal', createdAt: 1, source: null },
     { id: WORK_ID, label: 'Work', createdAt: 2, source: { browserLabel: 'Chrome', profileLabel: 'Person 1', importedAt: 3, importedCookies: 4, skippedCookies: 1 } }] }))
-  const profiles = new BrowserProfileManager(new BrowserProfileStore(path))
+  // Route edits apply to the Profile's session first; this records them, and can refuse one.
+  const applied: { profileId: string; network: unknown }[] = []
+  const route = { refuse: false }
+  const profiles = new BrowserProfileManager(new BrowserProfileStore(path), {
+    prepare: () => undefined,
+    apply: async (profileId: string, network: unknown) => {
+      if (route.refuse) throw Object.assign(new Error('The route could not be applied.'), { code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
+      applied.push({ profileId, network })
+    },
+    observe: () => undefined
+  } as never)
   const announced: number[] = []
   profiles.onChange(snapshot => announced.push(snapshot.revision))
   const clearPreviews = vi.fn(async () => ({ status: 'removed' as const }))
@@ -37,7 +47,7 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
     deleteProfile: (profileId, approval) => profiles.deleteProfile(profileId, approval),
     clearPreviews
   })
-  return { profiles, usage, announced, clearPreviews }
+  return { profiles, usage, announced, clearPreviews, applied, route }
 }
 
 // Build each request with the public codec, as the Core service does before Main sees it.
@@ -84,6 +94,28 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
       details: { browsers: [expect.objectContaining({ browserId: 'b-open', state: 'open' })] } })
     expect(ports.profiles.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID, WORK_ID])
     expect(ports.announced).toEqual([])
+  })
+
+  it('sets a Profile’s network route through the same manager the Settings page uses, applied before it is saved', async () => {
+    const ports = await owners()
+    const proxied = await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0,
+      edit: { network: { mode: 'proxy', server: 'socks5://proxy.example:1080', bypass: ['intranet.example'] } } })
+    expect(proxied).toMatchObject({ revision: 1, profile: { id: WORK_ID, network: { mode: 'proxy', server: { scheme: 'socks5', host: 'proxy.example', port: 1080 }, bypass: ['intranet.example'] } } })
+    expect(ports.applied).toEqual([{ profileId: WORK_ID, network: expect.objectContaining({ mode: 'proxy' }) }])
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 1, edit: { network: { mode: 'system' } } }))
+      .resolves.toMatchObject({ revision: 2 })
+    expect((await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID }) as { profile: object }).profile).not.toHaveProperty('network')
+  })
+
+  it('refuses a route line Main cannot read, and keeps the old route when the new one cannot be applied', async () => {
+    const ports = await owners()
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } } }))
+      .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID', message: expect.stringContaining('Leave the user name and password out') })
+    ports.route.refuse = true
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { network: { mode: 'direct' } } }))
+      .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
+    expect(ports.profiles.listProfiles().find(profile => profile.id === WORK_ID)).not.toHaveProperty('network')
+    expect(ports.announced, 'nothing was saved').toEqual([])
   })
 
   it('reports unreadable saved Tabs as unknown usage and refuses delete without removing anything', async () => {

@@ -298,6 +298,18 @@ describe('Control protocol', () => {
   // 联合的真成员、能原样过线：把它从 AGENTMUX_CONTROL_ERROR_CODES 删掉，controlErrorCode 会把它
   // 折成 CONTROL_FAILED，随后 `code === 'CONTROL_FAILED' && error.code !== 'CONTROL_FAILED'` 那道闸
   // 抛 'Control error receipt is invalid.'，这条 toMatchObject 转红。
+  // A Profile route refusal keeps its own recovery: a line that cannot be read is fixed, a route that
+  // would not apply is retried with the old one still in use. Both must cross as themselves.
+  it.each(['BROWSER_PROFILE_NETWORK_INVALID', 'BROWSER_PROFILE_NETWORK_UNAVAILABLE'])('carries %s through an error receipt as itself', code => {
+    expect(parseAgentMuxControlReceipt({
+      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+      requestId: 'profile-route',
+      ok: false,
+      operation: 'browser.profile.update',
+      error: { code, message: 'route refused' }
+    })).toMatchObject({ ok: false, error: { code } })
+  })
+
   it('carries REGION_ALREADY_SOLE through an error receipt as a distinct code, not CONTROL_FAILED', () => {
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
