@@ -169,7 +169,8 @@ it.each([batch, renderAgentMuxMessageEnvelope({ sender: { kind: 'agent-session',
     await render(message({ content: body, contentBoundary: 'body', speaker: { role: 'agent', id: 'recorded-author' }, conversationSessionId: 'recipient' }))
     expect(host.querySelector('.log-turn__references')).toBeNull()
     expect(host.querySelector('.log-turn__reminder')).toBeNull()
-    expect(host.querySelector('.log-turn__body')?.textContent).toContain(body)
+    expect(markdownInputs).toContain(body)
+    expect(host.querySelector('.log-turn__body')?.textContent).toContain('amux')
     await click('[aria-label="Copy message"]')
     expect(copy).toHaveBeenCalledExactlyOnceWith(body, expect.any(Function))
   })
@@ -234,13 +235,14 @@ it.each([{ contentBoundary: 'body' as const, partIndex: 0 }, { contentBoundary: 
       inputMode a2aNotificationId="independent-notice-input" />)
     await click('.conversation-resource-text__controls button')
     expect(host.querySelector('.log-turn__references')).toBeNull()
-    expect(host.querySelector('.log-turn__text')?.textContent).toContain(batch)
+    expect(markdownInputs).toContain(batch)
   })
 
 it('does not interpret a reference in a nonprimary text part', async () => {
   await render(message({ content: [{ kind: 'text', text: 'Original first part' }, { kind: 'text', text: batch }] }))
   expect(host.querySelector('.log-turn__references')).toBeNull()
-  expect(host.querySelectorAll('.log-turn__text')[1]?.textContent).toContain(batch)
+  expect(markdownInputs).toContain(batch)
+  expect(host.querySelectorAll('.log-turn__text')[1]?.textContent).toContain('referenced-first')
 })
 
 it('does not attach a late prior reference resource to the replacement original', async () => {
@@ -259,6 +261,7 @@ it('leaves a wrong read-via literal and never opens its destination', async () =
   const body = batch.replaceAll('message --skill', 'https://invalid.example/arbitrary')
   await render(message({ content: body }))
   expect(host.querySelector('.log-turn__references')).toBeNull()
-  expect(host.querySelector('.log-turn__body')?.textContent).toContain(body)
+  expect(markdownInputs).toContain(body)
+  expect(host.querySelector('.log-turn__body')?.textContent).toContain('https://invalid.example/arbitrary')
   expect(openHttp).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled()
 })
