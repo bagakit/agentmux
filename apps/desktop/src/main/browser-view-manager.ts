@@ -343,6 +343,8 @@ export interface BrowserProfileResolver {
   resolvePartition(profileId: string): string
   /** Main's committed list; absent or failing means the label is unknown, so targets omit profile. */
   listProfiles?(): readonly { id: string; label: string }[]
+  /** Applies this Profile's network route to its session before any of its pages is created; nothing to wait for without a route. */
+  prepareSession?(profileId: string): Promise<void> | undefined
 }
 
 /**
@@ -1339,6 +1341,13 @@ export class BrowserViewManager {
         capsule: saved.capsule, capsuleOrigin: origin, capsuleOpenOperationIds: [...new Set(saved.capsuleOpenOperationIds ?? [])] }
     } else {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
+      const routing = this.profiles.prepareSession?.(profileId)
+      if (routing) {
+        await routing
+        // Another request for this Browser may have created or released it while the route was applied.
+        if (this.entries.has(id) || this.releasedEntries.has(id)) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode, viewport, saved)
+      }
+      // Resolved after any wait, so a Profile deleted meanwhile is refused instead of reopened.
       storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
     }
     try { return await this.createEntry(id, url, storage, viewport, workspaceId, undefined, saved) }
@@ -1482,6 +1491,14 @@ export class BrowserViewManager {
     // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
     const storage: BrowserStorage = released.storage.mode === 'private' || 'capsule' in released.storage ? released.storage
       : { mode: 'normal', profileId: profileId!, partition: this.resolvePartition(profileId!) }
+    // A route that cannot be applied refuses here, while the retained descriptor still holds the Region.
+    const routing = storage.mode === 'normal' && storage.profileId ? this.profiles.prepareSession?.(storage.profileId) : undefined
+    if (routing) {
+      await routing
+      // Another restore or close took this Browser meanwhile; answer from its current owner.
+      if (this.releasedEntries.get(id) !== released) return await this.restore(id, input)
+      if (storage.mode === 'normal' && storage.profileId) this.resolvePartition(storage.profileId)
+    }
     this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
     try {
@@ -1948,6 +1965,13 @@ export class BrowserViewManager {
     const partition = this.resolvePartition(profileId)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded'))
     if (entry.storage.profileId === profileId) return this.snapshot(entry)
+    // The original page keeps its Profile if the other Profile's route cannot be applied.
+    const routing = this.profiles.prepareSession?.(profileId)
+    if (routing) {
+      await routing
+      if (!this.owns(entry, entry.view)) throw new Error('This Browser changed while its new Profile was being prepared. The original page is kept; switch again.')
+      this.resolvePartition(profileId)
+    }
     entry.certificateDecision?.settle(false)
 
     const authoritativeView = entry.view

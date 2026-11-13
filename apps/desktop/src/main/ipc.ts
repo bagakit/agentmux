@@ -447,6 +447,9 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
+  // Every page, child windows included, keeps WebRTC on its Profile's proxy; one hook instead of every creation site.
+  const observeProfileContents = (_event: unknown, contents: WebContents): void => browserProfiles.sessions.observe(contents)
+  app.on('web-contents-created', observeProfileContents)
   void browserProfiles.initialize().catch(error => {
     // Profile metadata is a Browser service failure, not authority to stop healthy Agents or
     // prevent the host from loading. The manager retains the cause for Browser requests below.
@@ -2346,6 +2349,7 @@ export async function registerIpc(args: {
     acceptingControl = false
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
+      { owner: 'browser-profile-contents', dispose: () => { app.off('web-contents-created', observeProfileContents) } },
       { owner: 'capture-surface', dispose: () => captureSurface.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'screenshot-pins', dispose: () => screenshotPins.dispose() },

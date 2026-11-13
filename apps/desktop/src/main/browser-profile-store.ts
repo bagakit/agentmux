@@ -6,6 +6,7 @@ import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS } from '../shared/browser-profile-import-skip.js'
+import { normalizeBrowserProfileNetwork, type BrowserProfileNetwork } from '../shared/browser-profile-network.js'
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
@@ -31,6 +32,10 @@ const nonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE
 // An identity hue, never a status color: hues near red, amber, green or blue would read as a state.
 const profileHueSchema = z.number().int().min(0).max(359).refine(clearsSemanticHues, 'Browser Profile hue must stay clear of status colors')
 const profileNotesSchema = z.string().max(BROWSER_PROFILE_NOTES_MAX_LENGTH)
+// A stored route must be one the parser would produce, so a hand-edited file cannot hide a malformed proxy.
+const profileNetworkSchema = z.custom<BrowserProfileNetwork>((value) => {
+  try { return JSON.stringify(normalizeBrowserProfileNetwork(value)) === JSON.stringify(value) } catch { return false }
+}, 'Browser Profile network route is not a valid route')
 
 const importedSourceSchema = z
   .object({
@@ -53,7 +58,8 @@ const profileRecordSchema = z
     createdAt: nonNegativeSafeIntegerSchema,
     source: importedSourceSchema.nullable(),
     hue: profileHueSchema.optional(),
-    notes: profileNotesSchema.optional()
+    notes: profileNotesSchema.optional(),
+    network: profileNetworkSchema.optional()
   })
   .strict()
 
@@ -150,7 +156,8 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     isDefault: profile.id === defaultProfileId,
     source: cloneImportedSource(profile.source),
     ...(profile.hue === undefined ? {} : { hue: profile.hue }),
-    ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes })
+    ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes }),
+    ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) })
   }
 }
 
@@ -204,6 +211,12 @@ export class BrowserProfileStore {
         const notes = profileNotesSchema.parse(edit.notes)
         if (notes === '') delete updated.notes
         else updated.notes = notes
+      }
+      if (edit.network === null) delete updated.network
+      else if (edit.network !== undefined) {
+        const network = normalizeBrowserProfileNetwork(edit.network)
+        if (network.mode === 'system') delete updated.network
+        else updated.network = network
       }
       const snapshot = await this.commit({
         ...metadata,

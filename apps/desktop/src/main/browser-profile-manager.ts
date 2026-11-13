@@ -1,5 +1,5 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
-import { BrowserWindow, session, type Session } from 'electron'
+import { BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
   BrowserProfileImportSourceSummary,
   BrowserProfileSummary,
@@ -18,6 +18,8 @@ import {
 } from './browser-profile-store.js'
 import type { BrowserProfileResolver } from './browser-view-manager.js'
 import { presentSkipCounts } from '../shared/browser-profile-import-skip.js'
+import { normalizeBrowserProfileNetwork } from '../shared/browser-profile-network.js'
+import { createBrowserProfileSessions, type BrowserProfileSessions } from './browser-profile-session.js'
 
 const PROFILE_IMPORT_SOURCE_TOKEN_TTL_MS = 5 * 60_000
 const IMPORT_DOCUMENT_URL = 'data:text/html,<!doctype html><title>AgentMux Browser Profile import</title>'
@@ -60,7 +62,22 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private disposed = false
   private disposePromise: Promise<void> | null = null
 
-  constructor(private readonly store = new BrowserProfileStore()) {}
+  /** Applies each Profile's route to its own session; the view manager awaits it before any page opens. */
+  readonly sessions: BrowserProfileSessions
+
+  constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions) {
+    this.sessions = sessions ?? createBrowserProfileSessions({
+      session: profileId => session.fromPartition(this.resolvePartition(profileId)),
+      network: profileId => this.profiles.get(profileId)?.network,
+      openContents: () => webContents.getAllWebContents()
+    })
+  }
+
+  /** Await before creating, restoring or switching any page into this Profile; nothing to await without a route. */
+  prepareSession(profileId: string): Promise<void> | undefined {
+    this.resolvePartition(profileId)
+    return this.sessions.prepare(profileId)
+  }
 
   async initialize(): Promise<void> {
     this.assertActive()
@@ -123,7 +140,25 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
+    // A route is applied before it is saved: one that cannot be applied leaves the old route saved and in use.
+    const network = edit.network === undefined ? undefined : edit.network === null ? null : normalizeBrowserProfileNetwork(edit.network)
     return await this.trackMutation((async () => {
+      if (network !== undefined) {
+        if (expectedRevision !== this.revision) {
+          throw Object.assign(new Error('Browser Profiles changed since revision was read. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+        }
+        const previous = this.profiles.get(profileId)?.network
+        await this.sessions.apply(profileId, network === null || network.mode === 'system' ? undefined : network)
+        try {
+          const { snapshot, profile } = await this.store.updateProfile(profileId, { ...edit, ...(network === null ? { network: null } : { network }) }, expectedRevision)
+          this.adopt(snapshot)
+          return cloneProfile(profile)
+        } catch (error) {
+          // The record kept the old route; put the session back on it too.
+          await this.sessions.apply(profileId, previous).catch(() => {})
+          throw error
+        }
+      }
       const { snapshot, profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
       this.adopt(snapshot)
       return cloneProfile(profile)

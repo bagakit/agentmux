@@ -1323,12 +1323,16 @@ export type BrowserProfileSummary = {
   /** Identity hue chosen by the person; absent means the hue derived from the id. Never a status color. */
   hue?: number
   notes?: string
+  /** How this Profile's pages reach the network; absent follows the system settings. Never holds a password. */
+  network?: import('./browser-profile-network.js').BrowserProfileNetwork
 }
 
 export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
-export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string }
+export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string
+  /** A new route, or null to follow the system settings again. */
+  network?: import('./browser-profile-network.js').BrowserProfileNetwork | null }
 
 export type BrowserProfileDeleteApproval = {
   kind: 'user-confirmed'
