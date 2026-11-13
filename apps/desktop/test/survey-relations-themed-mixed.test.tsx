@@ -26,3 +26,13 @@ it('shows unknown relationship as disabled mixed selection, independently themea
   expect(item.getAttribute('aria-checked')).toBe('mixed'); expect(item.getAttribute('data-disabled')).not.toBeNull()
   expect(link).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
 })
+
+it('opens a confirmed linked Topic from an entry identified as that Topic', async () => {
+  const open = vi.fn(), workspace = composerConfig.workspaces[0]!
+  const topic = { spaceId: 'linked-space', topicId: 'linked-topic', kind: 'topic' as const, name: 'Linked topic', hostId: workspace.hostId, directoryPath: workspace.path, projectId: workspace.id }
+  await dom.render(<Menu.Root open><Menu.Trigger>Linked relationships</Menu.Trigger><Menu.Content forceMount><SurveyTopicRelations zone={{ zoneId: 'linked-zone', workspaceId: workspace.id, kind: 'directory', hostId: workspace.hostId, directoryPath: workspace.path, branch: null }} topics={[topic]} relatedTopics={[topic]} pendingSpaceId={null} onLinkChange={vi.fn()} onOpenTopic={open}/></Menu.Content></Menu.Root>)
+  const entry = document.querySelector<HTMLElement>('[aria-label^="Open linked Topic: Linked topic"]')!
+  expect(entry.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.topic')
+  await act(async () => entry.click())
+  expect(open).toHaveBeenCalledExactlyOnceWith('linked-space')
+})

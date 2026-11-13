@@ -125,6 +125,7 @@ async function selectOriginalDiff() {
   await until(() => expect(button('Open diff for story.txt')).toBeDefined())
   await click('Open diff for story.txt')
   await until(() => expect(host.querySelector('[data-loaded-diff]')?.textContent).toContain('Version 119'))
+  expect(host.querySelector('[aria-label="Open diff in separate tab"] [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.tab')
   const surface = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'git')!
   if (surface.kind !== 'git') throw new Error('The production selection did not open a Git Region')
   return { surface, diff: useAppStore.getState().editorRegionDiffs[surface.regionId], visibleDiff: host.querySelector('[data-loaded-diff]')!.textContent }

@@ -214,6 +214,7 @@ describe('Knowledge observation presentation keeps authoritative status and orig
     const openOriginal = host.querySelector<HTMLButtonElement>('[aria-label="Open original file"]')
     expect(openOriginal).not.toBeNull()
     expect(openOriginal!.disabled).toBe(false)
+    expect(openOriginal!.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.file')
     expect(vi.mocked(api.topics.call).mock.calls.filter(([method]) => method === 'topic.knowledge.ls')).toHaveLength(1)
   })
 })
