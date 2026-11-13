@@ -17,8 +17,6 @@ const sourceIcon = join(sourceDirectory, DEFAULT_APP_ICON + '.png')
 const sharedAssets = join(brandRoot, 'src/assets/app-icons')
 const resourcesDir = join(desktopRoot, 'resources')
 const outDockIcon = join(resourcesDir, 'icon.png')
-const outRendererIcon = join(resourcesDir, 'icon-128.png')
-const outBotIcon = join(resourcesDir, 'icon-512.png')
 const outShellIcon = join(resourcesDir, 'icon.icns')
 const iconsetDir = join(repositoryRoot, '.tmp', 'brand-iconset', 'agentmux.iconset')
 
@@ -90,13 +88,11 @@ async function main() {
   }
   // The signed bundle has one static default. Runtime selections never rewrite it.
   await writeFile(outDockIcon, renderMacOSAppIcon(await readFile(sourceIcon)))
-  await resizeTo(128, outRendererIcon)
-  await resizeTo(512, outBotIcon)
   await buildIcns()
   await resizeTo(1024, join(repositoryRoot, 'apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png'))
   const relSource = relative(desktopRoot, sourceIcon)
   const relResources = relative(desktopRoot, resourcesDir)
-  process.stdout.write(`brand assets derived from ${relSource} -> ${relResources}/{icon.png, icon-128.png, icon-512.png, icon.icns}\n`)
+  process.stdout.write(`brand assets derived from ${relSource} -> ${relResources}/{icon.png, icon.icns, app-icons}\n`)
 }
 
 main().catch((error) => {
