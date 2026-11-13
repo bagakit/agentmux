@@ -181,12 +181,19 @@ async function restart() {
   assert.deepEqual(actual.tabs, expected.tabs); assert.deepEqual(actual.layouts, expected.layouts); assert.equal(actual.activeWorkspaceId, expected.activeWorkspaceId)
   await wait(`mediaPlaybackProbe.player("promo.mp4")?.decode === 'ready'`)
   const again = await player('promo.mp4'); assert.ok(again.width > 0)
-  // The restored player shows a picture, not an empty stage: sample the painted stage, not only the decoded fact.
-  await paint()
-  const stage = await evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id] .media-player__stage').getBoundingClientRect();return{x:Math.round(r.x+r.width*0.3),y:Math.round(r.y+r.height*0.3),width:Math.max(8,Math.round(r.width*0.2)),height:Math.max(8,Math.round(r.height*0.2))}})()`)
-  const pixels = (await win.webContents.capturePage(stage)).toBitmap()
-  let sum = 0; for (let index = 0; index < pixels.length; index += 4) sum += pixels[index] + pixels[index + 1] + pixels[index + 2]
-  const brightness = sum / (pixels.length / 4) / 3
+  // The restored player shows a picture, not an empty stage. Sample the painted stage away from the centre play
+  // disc and the bottom controls (its upper-left quarter), so only the picture itself can make it bright.
+  const pictureBrightness = async () => {
+    await paint()
+    const area = await evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id] .media-player__stage').getBoundingClientRect();return{x:Math.round(r.x+r.width*0.08),y:Math.round(r.y+r.height*0.1),width:Math.max(8,Math.round(r.width*0.22)),height:Math.max(8,Math.round(r.height*0.2))}})()`)
+    const pixels = (await win.webContents.capturePage(area)).toBitmap()
+    let sum = 0; for (let index = 0; index < pixels.length; index += 4) sum += pixels[index] + pixels[index + 1] + pixels[index + 2]
+    return sum / (pixels.length / 4) / 3
+  }
+  // A restored workface reaches the compositor a moment after the engine reports a decoded frame; wait for the
+  // picture itself, bounded, rather than accepting the decoded fact or a first sample taken before it is painted.
+  let brightness = 0
+  for (const until = Date.now() + 10000; Date.now() < until && (brightness = await pictureBrightness()) <= 24;) await sleep(250)
   report.checks.restart = { src: again.src, readyState: again.readyState, stageBrightness: Math.round(brightness) }
   await frame('restart-dark')
   assert.ok(brightness > 24, `The restored player paints its picture, not an empty stage: mean ${brightness.toFixed(1)}`)
