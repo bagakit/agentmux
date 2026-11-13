@@ -549,6 +549,20 @@ const isBlockNode = (node: RootContent | PhrasingContent) => !PHRASING.has(node.
 
 /** Block siblings that contain HTML: Markdown between the tags stays Markdown. */
 export function htmlBlocks(nodes: readonly RootContent[], projection: HtmlProjection): BlockNode[] {
+  // A CommonMark type-1 HTML block that opens with an unclosed raw-text tag (<script>, <style>, <textarea>,
+  // <pre>) runs to the end of the document. Its characters are not markup, so they stay readable as written,
+  // line breaks included, instead of being reflowed into one paragraph.
+  const opensRawBlock = (node: RootContent) => {
+    if (node.type !== 'html') return false
+    const first = tokenizeHtml(node.value).find(token => token.kind !== 'text' || token.text.trim())
+    return first?.kind === 'literal' && Boolean(first.rawText) && node.value.trimStart().startsWith(first.source) && /\n[\t ]*\n/u.test(node.value)
+  }
+  const index = nodes.findIndex(opensRawBlock)
+  if (index >= 0) {
+    const raw = nodes[index] as Extract<RootContent, { type: 'html' }>
+    return [...(index ? htmlBlocks(nodes.slice(0, index), projection) : []), { kind: 'code', language: null, text: raw.value },
+      ...(index + 1 < nodes.length ? htmlBlocks(nodes.slice(index + 1), projection) : [])]
+  }
   return createMapper(projection).blocks(buildTree(nodes, true, projection.sourceOf).children)
 }
 
