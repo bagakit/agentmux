@@ -5,8 +5,11 @@ import type { MediaLease } from '../components/MediaPlayer'
 
 type Failure = { status: string; message: string }
 
-function resourceKey(workspaceId: string): string {
-  const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)
+type AppConfig = ReturnType<typeof useAppStore.getState>['config']
+
+/** The exact Workspace resource a lease was opened against: same id, Host and path. */
+function resourceKey(workspaceId: string, config: AppConfig = useAppStore.getState().config): string {
+  const workspace = config?.workspaces.find(item => item.id === workspaceId)
   return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
 }
 
@@ -15,10 +18,15 @@ function resourceKey(workspaceId: string): string {
  * release it, so a lease never outlives the view that asked for it and a URL is never reused.
  */
 export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean) {
-  const resource = useAppStore(state => {
-    const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
-    return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
-  })
+  // Recompute only when config changes; every other store update returns the cached key in O(1).
+  const selectResource = useMemo(() => {
+    let config: AppConfig | undefined, key = ''
+    return (state: ReturnType<typeof useAppStore.getState>) => {
+      if (state.config !== config) { config = state.config; key = resourceKey(workspaceId, config) }
+      return key
+    }
+  }, [workspaceId])
+  const resource = useAppStore(selectResource)
   const [attempt, setAttempt] = useState(0)
   const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt])
   const [lease, setLease] = useState<{ owner: typeof owner; value: MediaLease } | null>(null)
