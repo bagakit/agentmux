@@ -4,11 +4,11 @@
 // /proc/<pid>/exe is /run/rosetta/rosetta and Node's cmdline gains
 // "--no-opt -r /proc/.reset". The shim maps only those two facts back to what a
 // native x86_64 kernel reports; every other inspection runs unmodified.
-import { readdirSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 const home = process.env.HOME, server = join(home, '.agentmux/server')
-const release = join(server, 'state/core-releases', readdirSync(join(server, 'state/core-releases')).find(name => /^[a-f0-9]{64}$/.test(name)))
+const release = realpathSync(join(server, 'state/core-releases/current'))
 const { RemoteCoreUpgradeManager, LocalExecutionHost, connectAgentMuxRpc, createPortableCoreArtifact } = await import(join(release, 'dist/index.js'))
 const socket = join(server, 'runtime/control.sock')
 const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
