@@ -1459,6 +1459,11 @@ const mockApi: AgentMuxDesktopApi = {
       publishMockBrowserProfiles()
     },
     listProfileSites: async (profileId) => structuredClone(mockBrowserProfileSites.get(profileId) ?? []),
+    // Preview: a fixed answer through the Profile's route, so the check line can be seen without a network.
+    checkProfileExit: async (profileId) => {
+      if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)
+      return { status: 'reachable' as const, httpStatus: 200, latencyMs: 184, ip: '203.0.113.7' }
+    },
     clearProfileSite: async (profileId, site, approval: BrowserProfileClearSiteApproval) => {
       if (approval.kind !== 'user-confirmed' || approval.operation !== 'clear-site-data' || approval.scope !== 'profile-site' || approval.profileId !== profileId || approval.site !== site) {
         throw Object.assign(new Error('Clearing a site’s data requires your confirmation for this Profile and site.'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })

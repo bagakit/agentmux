@@ -2,7 +2,8 @@ import { TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { SettingsNavigation } from '../SettingsNavigation'
 import type { BrowserProfileSite, BrowserProfileSummary } from '../../../../shared/contracts'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
@@ -96,6 +97,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const tabs = useAppStore(state => state.tabs)
   // The Profile switch only narrows the global one, so the editor says when the global switch already keeps Agents out.
   const automation = useAppStore(state => state.config?.browser?.agentAutomation === true)
+  const exitCheckUrl = useAppStore(state => state.config?.browser?.exitCheckUrl ?? '')
   const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab)
     .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
   const profiles = list.profiles ?? []
@@ -167,7 +169,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
-            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation}
+            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
             onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setNotice(pending) }} />
@@ -178,7 +180,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, editName, onNameEdited, onDeleted, onShow, onOpen }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen }: {
   profile: BrowserProfileSummary
   revision: number
   uses: Use[]
@@ -188,6 +190,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
   errorCode: string | null
   /** Settings › Browser › Agent browser automation. */
   automation: boolean
+  /** Settings › Browser › Exit check address; empty means no check is offered. */
+  exitCheckUrl: string
   editName: boolean
   onNameEdited(): void
   /** `pending` names site data that is still being cleared after the Profile was deleted. */
@@ -313,6 +317,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
         </label>
       </section>
 
+      <ProfileExitCheck key={profile.id} profile={profile} address={exitCheckUrl} />
+
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
         {uses.length ? <ul className="browser-profile-editor__uses">
@@ -350,6 +356,41 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
         </div>
       </div> : null}
     </article>
+  )
+}
+
+/**
+ * Where this Profile's route reaches, checked only when the person asks. It runs one request
+ * through the Profile's own session to the address chosen in Settings › Browser and reports what
+ * that request saw; it is a reading, so a failed check is unknown and changes nothing.
+ */
+function ProfileExitCheck({ profile, address }: { profile: BrowserProfileSummary; address: string }) {
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'checking' } | { kind: 'done'; result: Awaited<ReturnType<typeof api.browser.checkProfileExit>> } | { kind: 'failed'; message: string }>({ kind: 'idle' })
+  const settings = useContext(SettingsNavigation)
+  const route = profile.network?.mode === 'proxy' ? `${profile.network.server.scheme}://${profile.network.server.host}:${profile.network.server.port}`
+    : profile.network?.mode === 'direct' ? 'Direct' : 'System settings'
+  const check = async () => {
+    setState({ kind: 'checking' })
+    try { setState({ kind: 'done', result: await api.browser.checkProfileExit(profile.id) }) }
+    catch (cause) { setState({ kind: 'failed', message: presentError(cause) }) }
+  }
+  let host = ''
+  try { host = address ? new URL(address).host : '' } catch { host = '' }
+  return (
+    <section className="browser-profile-editor__section" aria-label="Exit check">
+      <h4>Exit check</h4>
+      <p className="browser-profile-editor__route">
+        <span>{route}</span>
+        {state.kind === 'done' && state.result.status === 'reachable'
+          ? <span role="status">→ {state.result.ip ?? host} · HTTP {state.result.httpStatus} · {Math.round(state.result.latencyMs)} ms</span>
+          : state.kind === 'done' && state.result.status === 'unknown' ? <span role="status" className="browser-profile-editor__route-unknown">→ unknown · {state.result.reason}</span>
+          : state.kind === 'failed' ? <span role="alert" className="browser-profile-editor__route-unknown">{state.message}</span> : null}
+        {address
+          ? <button type="button" className="small-button" disabled={state.kind === 'checking'} onClick={() => void check()}>
+            {state.kind === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}{state.kind === 'done' ? 'Check again' : 'Check'}</button>
+          : <button type="button" className="browser-profile-editor__link" onClick={() => settings?.open('browser')}>Set a check address</button>}
+      </p>
+    </section>
   )
 }
 

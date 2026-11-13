@@ -7,12 +7,20 @@ import type { SettingsModule } from '../settings-catalog'
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 
 
+/** An empty check address is no check at all, so it is stored as absent rather than as an empty string. */
+function withPreferences(browser: import('../../../../../shared/contracts').BrowserConfig, value: BrowserPreferences) {
+  const { exitCheckUrl, ...rest } = value
+  const { exitCheckUrl: _old, ...kept } = browser
+  const url = exitCheckUrl.trim()
+  return { ...kept, ...rest, ...(url ? { exitCheckUrl: url } : {}) }
+}
+
 async function saveBrowser(value: BrowserPreferences, expected: BrowserPreferences): Promise<void> {
   const current = useAppStore.getState().config
   if (!current) return
   await api.config.save(
-    { ...current, browser: { ...current.browser, ...value } },
-    { ...current, browser: { ...current.browser, ...expected } }
+    { ...current, browser: withPreferences(current.browser, value) },
+    { ...current, browser: withPreferences(current.browser, expected) }
   )
 }
 
@@ -26,6 +34,7 @@ export const browserSettingsModule = {
   searchTargets: [
     { id: 'agent-automation', title: 'Agent automation', keywords: 'browser script page permission enable disable' },
     { id: 'browser-resources', title: 'Browser resources', keywords: 'memory process release restore idle pages' },
+    { id: 'exit-check', title: 'Exit check', keywords: 'proxy exit ip address route network check' },
   ],
   savedSummary: (config) => config.browser.agentAutomation === true ? 'Automation on' : 'Automation off',
   Pane({ config, active }) {

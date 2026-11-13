@@ -374,6 +374,8 @@ export type BrowserToolbarConfig = {
 export type BrowserConfig = {
   /** Absence keeps automatic memory release enabled; manual safe actions are independent. */
   automaticMemoryRelease?: boolean
+  /** An https address a person chose for checking where a Profile's route reaches; absent means off. */
+  exitCheckUrl?: string
   /** Optional presentation-only preferences; absence uses shared effective defaults. */
   agentControl?: Partial<import('./browser-agent-control').BrowserAgentControlPreferences>
   /** Optional start-page presentation consumed by a caller that opts into it. */
@@ -1355,6 +1357,14 @@ export type BrowserProfileClearSiteApproval = {
   site: string
 }
 
+/**
+ * What one request through a Profile's session saw. Reachable carries the HTTP status, the time and,
+ * only when the body is nothing but an address, that address. A failure is unknown, never an error.
+ */
+export type BrowserProfileExitCheck =
+  | { status: 'reachable'; httpStatus: number; latencyMs: number; ip?: string }
+  | { status: 'unknown'; reason: string; latencyMs: number }
+
 /** A site that holds cookies in a Profile; names and counts only, never cookie names or values. */
 export type BrowserProfileSite = { site: string; cookies: number }
 
@@ -2071,6 +2081,8 @@ export type AgentMuxDesktopApi = {
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>
     clearProfileSite(profileId: string, site: string, approval: BrowserProfileClearSiteApproval): Promise<void>
+    /** One request through this Profile's own session to the saved check address. */
+    checkProfileExit(profileId: string): Promise<BrowserProfileExitCheck>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     /** Explicit human address/search submissions only; page navigation never records here. */

@@ -220,6 +220,7 @@ import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
 import { createBrowserProfileUsage } from './browser-profile-usage.js'
 import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
+import { createBrowserProfileExitCheck } from './browser-profile-exit-check.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
@@ -1984,6 +1985,16 @@ export async function registerIpc(args: {
   handleWithEvent('browser:clearProfileSite', (event, profileId: string, site: string, approval: BrowserProfileClearSiteApproval) => ipcResult(async () => {
     await browserProfiles.initialize()
     await profileSites.clear(profileId, site, approval)
+  }))
+  // The saved address is read at call time; the Renderer names only the Profile, never the URL.
+  const profileExitCheck = createBrowserProfileExitCheck({
+    session: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)),
+    prepare: profileId => browserProfiles.prepareSession(profileId),
+    now: () => performance.now()
+  })
+  handleWithEvent('browser:checkProfileExit', (event, profileId: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return await profileExitCheck(profileId, config.browser.exitCheckUrl ?? '')
   }))
   handleWithEvent('browser:detectProfileImportSources', (event) => ipcResult(() => browserProfiles.detectImportSources()))
   handleWithEvent('browser:importProfile', (event, sourceToken: string, label: string) =>

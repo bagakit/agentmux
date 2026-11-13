@@ -214,6 +214,8 @@ const browserSchema = z.object({
    */
   agentAutomation: z.boolean().optional(),
   automaticMemoryRelease: z.boolean().optional(),
+  /** An https address a person chose to check where a Profile's route reaches; absent means no check is offered. */
+  exitCheckUrl: z.string().max(2048).optional(),
   /**
    * 用户对每个 scheme 记住的答案。`.optional()` 同 `agentAutomation`（既有磁盘 config 没有这个字段，
    * 写成必需会让 browser 整块判失败）——但这一个**不**回填：空对象与缺席语义完全一样（都是「一个

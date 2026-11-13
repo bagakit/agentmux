@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from '../../config-store.js'
 import { booleanSetting, textSetting, invalid } from '../scalar-setting.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
+import { validBrowserProfileExitCheckUrl } from '../../browser-profile-exit-check.js'
 import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../shared/browser-start-page.js'
 
 const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: BrowserStartPageConfig[K]) =>
@@ -34,6 +35,11 @@ export const browserSettings = [
   },
   booleanSetting('browser.startPage.interactiveBackground', DEFAULT_BROWSER_START_PAGE.interactiveBackground,
     config => resolveBrowserStartPage(config.browser.startPage).interactiveBackground, (config, value) => writeStartPage(config, 'interactiveBackground', value)),
+  textSetting('browser.exitCheckUrl', config => config.browser.exitCheckUrl ?? '',
+    (config, value) => {
+      const { exitCheckUrl: _old, ...browser } = config.browser
+      return { ...config, browser: value ? { ...browser, exitCheckUrl: value } : browser }
+    }, validBrowserProfileExitCheckUrl),
   booleanSetting('browser.agentAutomation', DEFAULT_CONFIG.browser.agentAutomation === true,
     (config) => config.browser.agentAutomation === true,
     (config, agentAutomation) => ({ ...config, browser: { ...config.browser, agentAutomation } })),

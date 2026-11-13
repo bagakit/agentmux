@@ -1,0 +1,65 @@
+import type { Session } from 'electron'
+import type { BrowserProfileExitCheck } from '../shared/contracts.js'
+
+/**
+ * One explicit request through a Profile's own session, to see where its route actually reaches.
+ *
+ * The person names an HTTPS address in Settings › Browser (nothing is checked until they do). Check
+ * sends one GET through the Profile's session, so it takes the same proxy, connections and certificates
+ * as that Profile's pages. The result is what the request saw: reachable or not, the HTTP status, the
+ * time it took, and the address only when the body is nothing but an IP address. There is no history,
+ * no country or timezone guess, and a failed check is reported as unknown; it never blocks a page.
+ */
+
+const CHECK_TIMEOUT_MS = 10_000
+const BODY_LIMIT = 256
+
+export class BrowserProfileExitCheckInvalid extends Error {
+  readonly code = 'BROWSER_PROFILE_EXIT_CHECK_INVALID'
+}
+
+/** The check address must be HTTPS without credentials, so nothing secret travels in it. */
+export function validBrowserProfileExitCheckUrl(value: string): boolean {
+  if (!value) return true
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password && value.length <= 2048
+  } catch { return false }
+}
+
+function plainAddress(body: string): string | undefined {
+  const text = body.trim()
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text) && text.split('.').every(part => Number(part) <= 255)) return text
+  if (/^[0-9a-fA-F:]+$/.test(text) && text.includes(':') && text.length <= 39) return text.toLowerCase()
+  return undefined
+}
+
+export type BrowserProfileExitCheckPorts = {
+  session(profileId: string): Session
+  /** Applies the Profile's route first, so the check never runs on a route its pages would not use. */
+  prepare(profileId: string): Promise<void> | undefined
+  now(): number
+}
+
+export function createBrowserProfileExitCheck(ports: BrowserProfileExitCheckPorts) {
+  return async (profileId: string, address: string): Promise<BrowserProfileExitCheck> => {
+    if (!address) throw new BrowserProfileExitCheckInvalid('Set a check address in Settings › Browser first, then Check.')
+    if (!validBrowserProfileExitCheckUrl(address)) throw new BrowserProfileExitCheckInvalid('The check address must be an https:// address without a user name or password.')
+    const target = ports.session(profileId)
+    await ports.prepare(profileId)
+    const started = ports.now()
+    try {
+      const response = await target.fetch(address, { method: 'GET', cache: 'no-store', redirect: 'follow', signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })
+      const latencyMs = ports.now() - started
+      let ip: string | undefined
+      try { ip = plainAddress((await response.text()).slice(0, BODY_LIMIT)) } catch { /* the status alone is still the answer */ }
+      return { status: 'reachable', httpStatus: response.status, latencyMs, ...(ip ? { ip } : {}) }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      const reason = /TimeoutError|aborted/i.test(cause instanceof Error ? cause.name + ' ' + message : message)
+        ? `No answer within ${CHECK_TIMEOUT_MS / 1000} seconds.` : message.replace(/^net::/, '')
+      return { status: 'unknown', reason, latencyMs: ports.now() - started }
+    }
+  }
+}
+export type BrowserProfileExitChecker = ReturnType<typeof createBrowserProfileExitCheck>

@@ -63,6 +63,10 @@
 /* The Agents switch reuses the shared toggle; inside the editor it sits on the section's edge, not in a card. */
 .browser-profile-editor__agents { padding: 0; }
 .browser-profile-editor__agents:has(input:disabled) { cursor: default; opacity: .55; }
+.browser-profile-editor__route { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+.browser-profile-editor__route > span:first-child { color: var(--text); }
+.browser-profile-editor__route > button { margin-left: auto; }
+.browser-profile-editor__route-unknown { color: var(--text-3); }
 .browser-profile-editor__link { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .browser-profile-editor__link:hover:not(:disabled) { color: var(--text); }
 .browser-profile-editor__link:disabled { color: var(--text-3); cursor: default; }
