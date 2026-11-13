@@ -78,7 +78,8 @@ const probe = {
   accent(path: string) {
     const slider = regionOf(path)?.querySelector<HTMLElement>('.media-player__slider')
     if (!slider) return null
-    const probe = document.createElement('span'); probe.style.color = 'var(--media-accent)'; slider.append(probe)
+    // An input renders no children, so the probe sits beside it, under the same player variables.
+    const probe = document.createElement('span'); probe.style.color = 'var(--media-accent)'; slider.parentElement!.append(probe)
     const color = getComputedStyle(probe).color; probe.remove()
     return color
   },
