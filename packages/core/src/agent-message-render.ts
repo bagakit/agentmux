@@ -428,7 +428,7 @@ const protocolExamples = {
     { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
     { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
   ],
-  'capsule-answer': () => [{ label: 'Confirmed page answer', wire: formatCapsuleAnswer({ capsuleId: 'PAGE', interactionId: 'QUESTION', question: 'Which icon?', answer: 'B, with a lighter shadow' }) }],
+  'capsule-answer': () => [{ label: 'Confirmed page answer', wire: formatCapsuleAnswer({ capsuleId: 'Kd7mQ2xRb9Wp', interactionId: 'Q4nT8vHc2Jzs', question: 'Which icon?', answer: 'B, with a lighter shadow' }) }],
   continue: () => [{ label: 'Continuation declaration', wire: AMUX_CONTINUE_MARKER }],
   reaction: () => [
     { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },

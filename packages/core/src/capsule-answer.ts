@@ -1,8 +1,13 @@
 import { AMUX_PROTOCOL_DEFINITIONS, type CapsuleAnswer } from './amux-protocol-definition.js'
+import { isObjectId } from './object-id.js'
 
 export type { CapsuleAnswer }
 
 const FIELDS = ['capsuleId', 'interactionId', 'question', 'answer'] as const
+
+/** Exact object IDs address the page and question; the texts only need to be present. */
+const valid = (value: Record<string, unknown>): boolean => isObjectId(value.capsuleId) && isObjectId(value.interactionId) &&
+  typeof value.question === 'string' && !!value.question && typeof value.answer === 'string' && !!value.answer
 const tag = AMUX_PROTOCOL_DEFINITIONS['capsule-answer'].tag
 const opening = `<${tag} version="1">\n`, closing = `\n</${tag}>`
 
@@ -13,7 +18,7 @@ function json(value: CapsuleAnswer): string {
 
 /** Readable wire only. The trusted confirmation and Core input receipt own human source and delivery. */
 export function formatCapsuleAnswer(value: CapsuleAnswer): string {
-  if (FIELDS.some(field => typeof value[field] !== 'string' || !value[field])) throw new TypeError('A Capsule answer needs its page, question, question text and answer.')
+  if (!valid(value)) throw new TypeError('A Capsule answer needs its exact page and question IDs, question text and answer.')
   return opening + json(value) + closing
 }
 
@@ -26,7 +31,7 @@ export function parseCapsuleAnswer(text: string): CapsuleAnswer | null {
   try { parsed = JSON.parse(line) } catch { return null }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const record = parsed as Record<string, unknown>
-  if (Object.keys(record).join() !== FIELDS.join() || FIELDS.some(field => typeof record[field] !== 'string' || !record[field])) return null
+  if (Object.keys(record).join() !== FIELDS.join() || !valid(record)) return null
   const value = record as CapsuleAnswer
   return json(value) === line ? value : null
 }
