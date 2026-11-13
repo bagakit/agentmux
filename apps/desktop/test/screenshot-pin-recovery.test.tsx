@@ -45,21 +45,51 @@ it('retains the original pin after a lost response and checks it without another
   const error = await rejected(() => current.pin(image)), operationId = ports.pin.mock.lastCall![0].operationId
   expect(current.uncertain, 'a lost reader must preserve an inspectable original pin').toBe(true)
   expect(error.message).toContain(operationId)
-  await rejected(() => current.pin(image)); expect(ports.pin).toHaveBeenCalledOnce()
   ports.inspect.mockResolvedValue(result(operationId))
   await act(async () => { expect((await current.checkPin())?.recordedOperation?.effect).toBe('opened') })
   expect(ports.inspect, 'inspection must read that exact original operation').toHaveBeenCalledExactlyOnceWith(operationId)
   expect(ports.pin).toHaveBeenCalledOnce(); expect(current.uncertain).toBe(false)
 })
 
-it.each(['missing', 'pending', 'unknown', 'another-operation'] as const)('keeps %s evidence unknown and never grants another pin', async state => {
+it.each(['missing', 'pending', 'unknown', 'another-operation'] as const)('keeps %s evidence unknown without replaying the original pin', async state => {
   const ports = await mount(); ports.pin.mockRejectedValue(new Error('Reply lost'))
   await rejected(() => current.pin(image)); const id = ports.pin.mock.lastCall![0].operationId
   ports.inspect.mockResolvedValue(state === 'missing' ? { ...result(id), recordedOperation: null } : result(state === 'another-operation' ? 'other-original' : id, state === 'pending' || state === 'unknown' ? state : 'completed'))
   await rejected(() => current.checkPin())
   expect(current.uncertain, 'missing, pending, unknown or another operation cannot confirm the original effect').toBe(true)
-  await rejected(() => current.pin(image)); expect(ports.pin).toHaveBeenCalledOnce()
+  expect(ports.pin, 'queries never replay the original creation').toHaveBeenCalledOnce()
   expect(ports.inspect).toHaveBeenCalledExactlyOnceWith(id)
+})
+
+it('an explicit new image pin preserves the earlier unknown operation and checks only that original once', async () => {
+  const ports = await mount(); ports.pin.mockRejectedValueOnce(new Error('First capture pin reader lost'))
+  await rejected(() => current.pin(image)); const originalId = ports.pin.mock.lastCall![0].operationId
+  const laterImage = { ...image, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }
+  ports.pin.mockImplementation(async input => result(input.operationId))
+  await act(async () => { await expect(current.pin(laterImage)).resolves.toMatchObject({ recordedOperation: { state: 'completed' } }) })
+  expect(ports.pin).toHaveBeenCalledTimes(2)
+  const later = ports.pin.mock.lastCall![0]
+  expect(later.operationId).not.toBe(originalId); expect(later.image).toBe(laterImage)
+  expect(current.uncertain, 'a successful later image pin must not erase the earlier unknown operation').toBe(true)
+  ports.inspect.mockResolvedValue(result(originalId))
+  await act(async () => { expect((await current.checkPin())?.recordedOperation?.operationId).toBe(originalId) })
+  expect(ports.inspect, 'Check pin reads only the earliest original, never creates a pin').toHaveBeenCalledExactlyOnceWith(originalId)
+  expect(ports.pin).toHaveBeenCalledTimes(2); expect(current.uncertain).toBe(false)
+})
+
+it('a missing earlier pin cannot starve another unknown operation from explicit inspection', async () => {
+  const ports = await mount(); ports.pin.mockRejectedValue(new Error('Pin reader disconnected'))
+  await rejected(() => current.pin(image)); const firstId = ports.pin.mock.lastCall![0].operationId
+  await rejected(() => current.pin(image)); const secondId = ports.pin.mock.lastCall![0].operationId
+  expect(secondId).not.toBe(firstId)
+  ports.inspect.mockImplementation(async id => id === secondId ? result(secondId) : { ...result(firstId), recordedOperation: null })
+  await rejected(() => current.checkPin())
+  expect(current.uncertain).toBe(true)
+  await act(async () => { await expect(current.checkPin()).resolves.toMatchObject({ recordedOperation: { operationId: secondId, state: 'completed' } }) })
+  expect(current.uncertain, 'confirming the second operation must retain the missing first receipt').toBe(true)
+  await rejected(() => current.checkPin())
+  expect(ports.inspect.mock.calls, 'each explicit check advances while every original remains available').toEqual([[firstId], [secondId], [firstId]])
+  expect(ports.pin, 'inspection cannot replay either original creation').toHaveBeenCalledTimes(2)
 })
 
 it('an authoritative failed creation clears uncertainty without reporting successful opening', async () => {
@@ -84,15 +114,23 @@ it('the actual System host exposes Check pin while retaining Copy and Cancel, th
   await act(async () => button('Pin image').click())
   const id = vi.mocked(api.pin).mock.lastCall![1]
   expect(vi.mocked(api.pin).mock.lastCall).toEqual(['original-request', id, image])
-  expect(button('Pin image').disabled, 'only another uncertain creation is held').toBe(true)
+  expect(button('Pin image').disabled, 'a missing receipt cannot take away a healthy explicit new reference').toBe(false)
+  expect(button('Pin image').textContent).toContain('Pin another')
+  expect(button('Pin image').title).toContain('separate reference')
   expect(button('Copy').disabled, 'healthy independent Copy stays available').toBe(false)
   expect(button('Cancel').disabled, 'healthy cancellation stays available').toBe(false)
   expect(node.querySelector('[role="alert"]')!.textContent).toContain(id)
+  vi.mocked(api.pin).mockImplementation(async (_requestId, operationId) => result(operationId))
+  await act(async () => button('Pin image').click())
+  expect(api.pin).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(api.pin).mock.lastCall![1]).not.toBe(id)
+  expect(button('Pin image').textContent, 'the successful new pin does not erase the earlier unknown receipt').toContain('Pin another')
   vi.mocked(api.inspectPin).mockResolvedValue(result(id))
   await act(async () => button('Check pin').click())
   expect(api.inspectPin).toHaveBeenCalledExactlyOnceWith('original-request', id)
-  expect(api.pin).toHaveBeenCalledOnce()
+  expect(api.pin).toHaveBeenCalledTimes(2)
   expect(button('Pin image').disabled).toBe(false)
+  expect(button('Pin image').textContent).toBe('Pin')
   expect([...node.querySelectorAll('button')].some(value => value.textContent?.trim() === 'Check pin')).toBe(false)
   expect(node.textContent).toContain('Original reference pinned')
   await act(async () => button('Copy').click())
