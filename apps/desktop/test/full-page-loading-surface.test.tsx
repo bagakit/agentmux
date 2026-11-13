@@ -26,7 +26,8 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain('Starting the local Runtime.')
     expect(markup.includes('full-page-loading__activity')).toBe(busy === 'true')
     expect(markup).toContain('full-page-loading__atmosphere')
-    expect(markup).toContain('startup-background.png')
+    // The launch art renders in app scope; which bitmap it loads is the brand owner's choice.
+    expect(markup).toMatch(/<img class="full-page-loading__art" src="[^"]+"/)
     if (phase === 'failed') expect(markup).toContain('Retry startup')
   })
 
@@ -42,7 +43,7 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain('Loading branches')
     expect(markup).toContain('Reading Git truth from Alpha.')
     expect(markup).not.toContain('full-page-loading__atmosphere')
-    expect(markup).not.toContain('startup-background.png')
+    expect(markup).not.toContain('full-page-loading__art')
     expect(markup).not.toContain('sessionId')
     expect(markup).not.toContain('runId')
   })
