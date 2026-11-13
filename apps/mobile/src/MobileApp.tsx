@@ -62,6 +62,8 @@ import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-obser
 
 import { deferMobileSurface } from './navigation/defer-mobile-surface'
 import { MobileLocalDraftsOwner } from './conversation/local-drafts-owner'
+import { useEdgeBack } from './navigation/use-edge-back'
+import { MobileSheetHandle } from './navigation/MobileSheetHandle'
 
 const MobileTerminalViewer = deferMobileSurface('终端', async () => ({ default: (await import('./terminal/MobileTerminalViewer')).MobileTerminalViewer }))
 const MobileSpatialNavigation = deferMobileSurface('目录', async () => ({ default: (await import('./navigation/MobileSpatialNavigation')).MobileSpatialNavigation }), { menu: true })
@@ -345,6 +347,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     setWorkface(value => ({ ...value, panel: 'conversation' }))
   }, [])
   const backRef = useRef(requestBack)
+  // Left-edge swipe back runs the same Back as the header button, only while something is behind.
+  const mainRef = useRef<HTMLElement>(null)
+  const swipeBack = useCallback(() => backRef.current(), [])
+  useEdgeBack(mainRef, (connected || hasConnected) && hasBack, swipeBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [chatStartIssue, setChatStartIssue] = useState<string | null>(restoreWorkface && !initial.current.workface.selectedSessionId ? '已回到上次的位置，可以选择 Mote 或已有对话。' : null)
@@ -580,7 +586,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         return <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" {...(waiting ? { 'aria-description': `${waiting} 个需要你` } : {})} onClick={() => setSheet('team')}>
           <ThemeObjectNetworkIcon size={16} /><span>团队</span>{waiting ? <span className="mobile-tab-badge" aria-hidden="true" data-count={waiting}>{waiting}</span> : null}</button> })()}
     </nav> : null}
-    <main className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-key': screenMotion.key } : {})}>
+    <main ref={mainRef} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-key': screenMotion.key } : {})}>
       {!workspaceVisible && <section className="mobile-connect-page"><BrandIcon icon={hostAppearance.appIcon} className="mobile-connect-dragon" size={150} alt="AgentMux" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
         <MobileNotice owner={client} identity={[connection.state,connection.issue]} className="mobile-spatial-notice">{connection.message}</MobileNotice>{connectionPanel}
@@ -683,7 +689,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好，请稍后再试。')
       }}>
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
+        <MobileSheetHandle onClose={() => setSheet(null)} /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
         {sheet === 'team' ? <>
           <Dialog.Description id="mobile-sheet-description">团队的当前工作与请求</Dialog.Description>
           <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}

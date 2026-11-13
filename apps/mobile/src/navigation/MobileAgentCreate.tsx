@@ -9,6 +9,7 @@ import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileAgentCreateIntent } from '../recovery/agent-create-intents'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
+import { MobileSheetHandle } from './MobileSheetHandle'
 
 export type MobileAgentCreateTarget =
   | { spaceId?: string; zoneId?: string; tabId?: never; regionId?: never }
@@ -99,7 +100,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   const feedback = issue.message && <MobileNotice kind="feedback" owner={client} identity={[target.spaceId,target.zoneId,target.tabId,target.regionId,issue.operationId,issue.message]} className="mobile-spatial-notice" role="status">{issue.message}</MobileNotice>
   return <Dialog.Root open={visible} onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={platform.overlayContainer()}>
     <Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-create" aria-describedby="mobile-create-description">
-      <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>新建 Agent</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭新建 Agent"><SemanticIcon name="action.close" size={18} /></Dialog.Close></div>
+      <MobileSheetHandle onClose={onClose} /><div className="mobile-sheet-title"><Dialog.Title>新建 Agent</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭新建 Agent"><SemanticIcon name="action.close" size={18} /></Dialog.Close></div>
       <Dialog.Description id="mobile-create-description">{launcher ? '在选定的启动位中创建 Agent。' : '选择工作空间与执行器，在新 Tab 中开始。'}</Dialog.Description>
       {launcher && <div className="mobile-create-target"><strong>{targetTab?.name || '空启动位'}</strong><details><summary>查看位置</summary><dl><dt>Space</dt><dd>{target.spaceId}</dd><dt>Zone</dt><dd>{target.zoneId}</dd><dt>Tab</dt><dd>{target.tabId}</dd><dt>Region</dt><dd>{target.regionId}</dd></dl></details></div>}
       {intents.filter(intent => intent.phase !== 'confirmed' || intent === intents.at(-1) || intent.input.operationId === issue.operationId).map(intent => <section className="mobile-create-receipt" data-pending={intent.phase !== 'confirmed' || undefined} aria-label={intent.phase === 'confirmed' ? '已确认的创建' : '待核对的创建'} key={intent.input.operationId}>
