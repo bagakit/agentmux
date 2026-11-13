@@ -352,7 +352,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const swipeBack = useCallback(() => backRef.current(), [])
   useEdgeBack(mainRef, (connected || hasConnected) && hasBack, swipeBack, navigationRevision.current)
   backRef.current = requestBack
-  const [notice, setNotice] = useState<string | null>(initial.current.issue)
+  const [notice, setNoticeValue] = useState<string | null>(initial.current.issue)
+  const [noticeDetail, setNoticeDetail] = useState<string | undefined>()
+  const setNotice = useCallback((message: string | null, technical?: string) => { setNoticeValue(message); setNoticeDetail(technical) }, [])
   const [chatStartIssue, setChatStartIssue] = useState<string | null>(restoreWorkface && !initial.current.workface.selectedSessionId ? '已回到上次的位置，可以选择 Mote 或已有对话。' : null)
   const [chatStartRevision, retryChatStart] = useState(0)
   const chatStartDone = useRef(restoreWorkface || initial.current.workface.selectedSessionId !== null)
@@ -672,7 +674,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
-      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
+      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,noticeDetail,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{notice && noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
     {workspaceVisible && <footer className="mobile-navigation-bar"><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} /></footer>}
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />

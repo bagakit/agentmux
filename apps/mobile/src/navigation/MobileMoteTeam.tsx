@@ -71,7 +71,7 @@ export function MobileMoteTeamPanel({ team, issue, currentSessionId, currentHost
   }
   return <section className="mobile-mote-team-panel" aria-label="本 Mote 团队">
     <div className="mobile-mote-team-actions"><span>{team ? `${known} 位 Agent${unknown ? ` · ${unknown} 处待确认` : ''}` : '团队待确认'}</span><button type="button" aria-label="刷新本 Mote 团队" onClick={onRefresh}><SemanticIcon name="action.refresh" size={14} />刷新</button></div>
-    {issue && <MobileNotice identity={[team?.spaceId,issue]} role="status">{issue} 已有呈现保留，可继续原对话。</MobileNotice>}
+    {issue && <MobileNotice identity={[team?.spaceId,issue]} role="status">{issue} 已有工作面保留，可继续对话。</MobileNotice>}
     {team?.facts?.issue && <MobileNotice identity={[team.spaceId,team.facts.issue]} role="status">{team.facts.issue}</MobileNotice>}
     {!membersOnly && (team?.main ? <button type="button" className="mobile-mote-main-action" aria-label={team.main.confirmed ? '回到主对话' : '打开上次主对话'} onClick={onMain}><SemanticIcon name="object.conversation" size={17} /><span><strong>{team.main.confirmed ? '回到主对话' : '打开上次主对话'}</strong><small>{team.main.confirmed ? team.members.find(member => member.sessionId === team.main!.reference.sessionId && member.hostId === team.main!.reference.hostId)?.name ?? '主 Agent' : '上次保存的主对话 · 角色待核对'}</small></span><SemanticIcon name="navigation.disclosure" size={14} /></button>
       : <button type="button" className="mobile-mote-main-action" aria-label="核对主 Agent" onClick={onConfigure}><SemanticIcon name="object.conversation" size={17} /><span><strong>核对主 Agent</strong><small>成员与对话不受影响</small></span></button>)}

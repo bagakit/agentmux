@@ -151,7 +151,9 @@ export function createMobileTerminalControl({ client, agentSessionId, report, st
       try {
         const facts = currentFacts(), next = facts.run
         if ((queue.length || unresolved) && !sameOwner(facts.identity)) {
-          problem('identity', { mode: 'watch', message: '未确认或未发送的输入属于另一台 Mac，不会发给当前这台。' }); return false
+          problem('identity', { mode: 'watch', message: owner?.hostId !== facts.identity.hostId
+            ? '未确认或未发送的输入属于另一台 Mac，不会发给当前这台。'
+            : 'Mac 上的终端服务已重新启动，不会把之前的输入发给当前终端。请先复制或放弃这些输入。' }); return false
         }
         if (queue.length && queue[0]!.run.runId !== next.runId) {
           problem('identity', { mode: 'watch', message: '未发送输入属于上一次运行。请先复制或放弃这些输入，再控制终端。' }); return false

@@ -56,7 +56,7 @@ export function MobileMoteFileEditor({ target, client, visible, copyText, onClos
     {!!model.copies.length && <details><summary>保全的冲突稿 · {model.copies.length}</summary>{model.copies.map((value, index) => <article key={index}>
       <pre>{value.body}</pre><button type="button" className="mobile-text-button" onClick={() => copy(value.body)}>复制冲突的稿</button>
       <pre>{JSON.stringify(value.attempts, null, 2)}</pre></article>)}</details>}
-    {!!model.localCopies.length && <details><summary>采用前保留的本页原稿 · {model.localCopies.length}</summary>{model.localCopies.map((value, index) => <article key={index}>
+    {!!model.localCopies.length && <details><summary>采用前保留的本页稿件 · {model.localCopies.length}</summary>{model.localCopies.map((value, index) => <article key={index}>
       <pre>{value.body}</pre><button type="button" className="mobile-text-button" onClick={() => copy(value.body)}>复制采用前的稿</button>
       <pre>{JSON.stringify(value, null, 2)}</pre></article>)}</details>}
   </section>

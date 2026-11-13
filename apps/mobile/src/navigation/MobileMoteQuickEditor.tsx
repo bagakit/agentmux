@@ -101,7 +101,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
     {model.notice && <details><summary>本次操作详情</summary><p>{model.notice}</p></details>}
     {copyIssue && <details open><summary>复制未完成</summary><p>{copyIssue}</p></details>}
     {read && <details><summary>当前原文与修订</summary><p>当前读取不确认旧保存。</p><pre>{JSON.stringify(read.source, null, 2)}</pre>{read.issue && <p>{read.issue}</p>}</details>}
-    {!!draft.attempts.length && <details><summary>原保存请求 · {draft.attempts.length}</summary>{draft.attempts.map(a => <article key={a.input.operationId}>
+    {!!draft.attempts.length && <details><summary>上次保存请求 · {draft.attempts.length}</summary>{draft.attempts.map(a => <article key={a.input.operationId}>
       <p>{a.phase} · {a.input.operationId}</p>{a.issue && <p>{a.issue}</p>}<pre>{JSON.stringify(a.input, null, 2)}</pre>{a.result && <pre>{JSON.stringify(a.result, null, 2)}</pre>}</article>)}</details>}
     {!!model.copies.length && <details><summary>保全的本页配置 · {model.copies.length}</summary>{model.copies.map((value, index) => <button type="button" className="mobile-text-button" key={index} onClick={() => copy(value)}>复制第 {index + 1} 份配置与请求</button>)}</details>}
   </section>

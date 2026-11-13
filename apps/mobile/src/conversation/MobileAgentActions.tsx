@@ -16,7 +16,8 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
   copyText: ClientUiPlatform['copyText']; visible?: boolean; beforeAction?(): boolean
   statusSource?: Pick<MobileAgentMenuTarget, 'presentation' | 'refreshStatus'> | undefined
 }) {
-  const [notice, setNotice] = useState(''), [showLink, setShowLink] = useState(false)
+  const [notice, setNoticeValue] = useState(''), [noticeDetail, setNoticeDetail] = useState(''), [showLink, setShowLink] = useState(false)
+  const setNotice = useCallback((message: string, technical = '') => { setNoticeValue(message); setNoticeDetail(technical) }, [])
   const busy = useSyncExternalStore(useCallback(notify => subscribeMobileAgentRecovery(client, agentSessionId, notify), [client, agentSessionId]),
     useCallback(() => mobileAgentRecoveryBusy(client, agentSessionId), [client, agentSessionId]), () => false)
   const [, redraw] = useState(0)
@@ -55,6 +56,6 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
     </div>
     {showLink && <input aria-label="Agent 身份链接" value={link} readOnly onFocus={event => event.target.select()} />}
     {pending && <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover('continue')}><span>继续同一恢复操作</span></button>}
-    {notice && <MobileNotice kind="feedback" owner={client} identity={[agentSessionId,pending?.input.operationId,notice]} className="mobile-spatial-notice" role="status">{notice}</MobileNotice>}
+    {notice && <MobileNotice kind="feedback" owner={client} identity={[agentSessionId,pending?.input.operationId,notice,noticeDetail]} className="mobile-spatial-notice" role="status"><p>{notice}</p>{noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}</MobileNotice>}
   </div>
 }

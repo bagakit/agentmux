@@ -30,7 +30,7 @@ export type MobileAgentRecoveryRequest = {
   client: AgentMuxHostedClient; agentSessionId: string; expectedHostId?: string
   /** Opening an existing main Agent inspects any pending operation; only Continue may redispatch that same request. */
   mode?: 'open' | 'new' | 'inspect' | 'continue'
-  isCurrent(): boolean; onNotice(message: string): void
+  isCurrent(): boolean; onNotice(message: string, technical?: string): void
   /** A confirmed reattach or resume is a normal state. Callers that open a conversation stay quiet;
    *  explicit recovery actions keep the confirmation visible. Failures and unknowns always notify. */
   quietWhenConfirmed?: boolean
@@ -47,7 +47,7 @@ export async function recoverMobileAgent({ client, agentSessionId, expectedHostI
   const scope = { runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId, deviceHostId: owner.snapshot().record.host?.hostId ?? null }
   const unchanged = () => isCurrent() && owner.recordIdentity() === recordId && client.runtimeOwnerIdentity?.()?.runtimeId === scope.runtimeId &&
     (owner.snapshot().record.host?.hostId ?? null) === scope.deviceHostId
-  const notice = (message: string) => { if (unchanged()) onNotice(message) }
+  const notice = (message: string, technical?: string) => { if (unchanged()) technical ? onNotice(message, technical) : onNotice(message) }
   const confirmedNotice = (message: string) => { if (!quietWhenConfirmed) notice(message) }
   const pending = pendingMobileAgentRecovery(client, agentSessionId)
   const action = mode === 'open' ? pending ? 'inspect' : 'new' : mode
@@ -71,7 +71,7 @@ export async function recoverMobileAgent({ client, agentSessionId, expectedHostI
         await owner.retainAgentResume({ ...intent, phase: 'confirmed' }, recordId)
         if (!unchanged()) return
         confirmedNotice(operation.kind === 'resumed' ? '恢复已开始，Agent 可以继续工作时会显示。' : '可以重新连回这个 Agent。')
-      } else notice(`恢复没有完成：${operation.kind}。${operation.error ?? operation.reason}`)
+      } else notice('恢复还没完成，可以核对结果或继续这次恢复。', `${operation.kind}\n${operation.error ?? operation.reason}`)
       return
     }
     if (intent && action === 'new') throw new Error('上一次恢复还没确认结果，不会再发起一次。')
@@ -86,9 +86,10 @@ export async function recoverMobileAgent({ client, agentSessionId, expectedHostI
     await owner.retainAgentResume({ ...intent, phase: confirmed ? 'confirmed' : superseded ? 'superseded' : 'unknown' }, recordId)
     if (!unchanged()) return
     if (confirmed) confirmedNotice(restored.kind === 'resumed' ? '恢复已开始，Agent 可以继续工作时会显示。' : '可以重新连回这个 Agent。')
-    else notice(superseded ? '这个 Agent 已被其他操作重新启动，不会自动重试。可以再恢复一次。' : `恢复没有完成：${restored.kind}。可以核对恢复结果。`)
+    else if (superseded) notice('这个 Agent 已被其他操作重新启动，不会自动重试。可以再恢复一次。')
+    else notice('恢复还没完成，可以核对结果或继续这次恢复。', [restored.kind, 'error' in restored ? restored.error : null, 'reason' in restored ? restored.reason : null].filter(Boolean).join('\n'))
   } catch (error) {
     if (intent && action !== 'inspect') { try { await owner.retainAgentResume({ ...intent, phase: 'unknown' }, recordId) } catch { /* Replacement records never accept old receipts. */ } }
-    if (unchanged()) notice(`恢复未确认：${error instanceof Error ? error.message : String(error)}`)
+    if (unchanged()) notice('恢复未确认，可以稍后核对；仍可阅读对话。', error instanceof Error ? error.message : String(error))
   } finally { flight.delete(agentSessionId); if (!flight.size) flights.delete(client); notifyFlight(client, agentSessionId) }
 }

@@ -64,7 +64,7 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
       cursor = Math.max(cursor, snapshot.run.latestOutputBytes)
       resizeRevision = snapshot.resizeRevision
       ready = true
-      problem('原终端历史策略观察', new Error(historyPolicy.message))
+      problem('终端历史读取', new Error(historyPolicy.message))
       return
     }
     const distance = canvas.buffer.active.baseY - canvas.buffer.active.viewportY
@@ -117,7 +117,7 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     if (known && distance > 0) canvas.scrollToLine(Math.max(0, canvas.buffer.active.baseY - distance))
     ready = true
     if (historyPolicy?.status === 'unavailable') {
-      problem('原终端历史策略观察', new Error(historyPolicy.message))
+      problem('终端历史读取', new Error(historyPolicy.message))
       boundary()
       return
     }

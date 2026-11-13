@@ -226,7 +226,13 @@ export function MobileAttachments({ client, session, agentSessionId, connected, 
   useImperativeHandle(controls, () => ({ choose, stageFile, stageFiles, captureForSend }))
 
   async function add(upload: MobileFileUpload): Promise<void> {
-    if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null) || !upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('附件属于另一个对话或另一台 Mac，当前草稿没有改变。')
+    if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null)) throw new Error('这台手机上的记录已替换，当前草稿没有改变。可以核对附件。')
+    if (!upload.path) throw new Error('Mac 还没确认附件的保存位置，当前草稿没有改变。可以核对上传结果。')
+    const current = scope()
+    if (!fileUploadScopeMatches(upload, current)) throw new Error(upload.identity.expectedRun.runId !== current.runId
+      && upload.runtimeId === current.runtimeId && upload.identity.hostId === current.hostId && upload.identity.agentSessionId === current.sessionId
+      ? 'Agent 已重新启动，当前草稿没有改变。请核对附件后再添加。'
+      : '附件与当前对话或 Mac 连接不匹配，当前草稿没有改变。可以核对附件。')
     await insert(async () => upload.path!, upload)
     await retain({ ...upload, phase: 'inserted' })
     if (!exportedCopies.current.has(upload.identity.operationId)) bytes.current.delete(upload.identity.operationId)

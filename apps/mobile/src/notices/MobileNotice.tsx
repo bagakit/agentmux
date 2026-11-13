@@ -126,7 +126,7 @@ export function MobileNoticeRestore({ onRestored }: { onRestored?(): void }) {
   const notices = useMobileNotices()
   return <div className="mobile-notice-settings">
     <p>{notices?.hasDismissed ? '有已收起的提醒。恢复后可在原位置查看原因和恢复操作。' : '提醒可随时收起；收起后可从这里恢复显示。'}</p>
-    <p>此操作只恢复显示，保留原草稿和请求，不会重试、发送或确认操作结果。</p>
+    <p>此操作只恢复显示，保留草稿和请求，不会重试、发送或确认操作结果。</p>
     <button type="button" className="mobile-secondary" onClick={() => { notices?.restore(); onRestored?.() }}>恢复已收起提醒</button>
   </div>
 }

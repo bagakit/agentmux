@@ -149,7 +149,7 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
       const params = moteFileReadParams(old.scope), read = parseFileReadResult(await originalClient.forwardRpc('file.read', params), params)
       if (!read.resource || !sameMoteFileResource(read.resource, old.scope.resource)) throw new Error('文件位置已改变，这次读取的不是同一个文件。')
       if (valid(originalClient, epoch, original)) { setChecked({ read, ...original }); setNotice('已核对当前文件，上次保存仍未确认。') }
-    } catch (error) { if (valid(originalClient, epoch, original)) setNotice('核对未完成：' + message(error) + '') }
+    } catch (error) { if (valid(originalClient, epoch, original)) setNotice('核对未完成：' + message(error) + '。可以稍后再核对。') }
   }
   async function adoptChecked() {
     const old = current.current, originalClient = context.current.client, original = connection(), epoch = context.current.epoch
