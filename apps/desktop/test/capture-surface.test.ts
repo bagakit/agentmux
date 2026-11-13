@@ -167,14 +167,28 @@ it('a failed primary delivery keeps every overlay and reports the reason', async
   expect(overlays.some(row => row.window.dead)).toBe(false)
 })
 
-it('Pin and Save PNG act on the selection and keep the overlays', async () => {
+it('Save PNG and an unconfirmed Pin act on the selection and keep the overlays', async () => {
   const { overlays } = await opened()
   await overlays[0]!.call('select')
-  await overlays[0]!.call('pin', { operationId: 'pin-1', image: result, selection })
-  expect(ports.pin).toHaveBeenCalledExactlyOnceWith(result, 'pin-1', { x: 1, y: 1, width: 2, height: 1 })
   expect(await overlays[0]!.call('save-png', { image: result })).toEqual({ status: 'saved', path: '/chosen/shot.png' })
   expect(electron.saves).toEqual([[result, overlays[0]!.window, { capturedAt: 1_700_000_000_000 }]])
-  expect(overlays.some(row => row.window.dead)).toBe(false)
+  for (const recordedOperation of [{ state: 'failed', message: 'The pin window did not open' }, { state: 'unknown', message: null }, null]) {
+    ports.pin.mockResolvedValueOnce({ state: 'unknown', recordedOperation } as never)
+    expect(await overlays[0]!.call('pin', { operationId: 'pin-1', image: result, selection }), 'the receipt reaches the overlay status').toMatchObject({ recordedOperation })
+  }
+  expect(ports.pin).toHaveBeenLastCalledWith(result, 'pin-1', { x: 1, y: 1, width: 2, height: 1 })
+  expect(overlays.some(row => row.window.dead), 'Save PNG and a pin without a completed receipt keep the selection').toBe(false)
+})
+
+it('a confirmed Pin opens on the selection and closes the capture surface like Done', async () => {
+  const { overlays, outcome } = await opened(session({ returnFocus: true }))
+  await overlays[0]!.call('select')
+  ports.pin.mockResolvedValueOnce({ state: 'open', recordedOperation: { state: 'completed', effect: 'opened', message: null } } as never)
+  expect(await overlays[0]!.call('pin', { operationId: 'pin-1', image: result, selection })).toMatchObject({ recordedOperation: { state: 'completed' } })
+  expect(ports.pin).toHaveBeenCalledExactlyOnceWith(result, 'pin-1', { x: 1, y: 1, width: 2, height: 1 })
+  expect(overlays.every(row => row.window.dead), 'the pin is the final output; the surface no longer shows the same selection under it').toBe(true)
+  expect(await outcome).toEqual({ state: 'completed' })
+  expect(ports.returnFocus, 'focus returns as for Done').toHaveBeenCalledOnce()
 })
 
 it('expand ends the surface with the full frozen frame, the selection and the marks', async () => {
