@@ -54,7 +54,10 @@ function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Plac
       if (prior && next && prior.version === next.version && prior.parent === next.parent) continue
       const protectedNode = readingNode(node) ?? node
       try { if (range?.intersectsNode(protectedNode)) return 'selection' } catch { return 'selection' }
-      if (focused && focused !== document?.body && protectedNode.contains(focused)) return 'focus'
+      // A new version keeps the same keyed node mounted, so focus inside it survives the
+      // frame. Hold only when the focused node would be removed or move to another parent;
+      // otherwise a click on a running turn's controls would freeze every later update.
+      if (focused && focused !== document?.body && protectedNode.contains(focused) && (!next || prior?.parent !== next.parent)) return 'focus'
     }
   }
   const anchor = preserveAnchor ? currentAnchor(root) : null
