@@ -13,6 +13,7 @@
   border-radius: var(--radius-lg); background: color-mix(in srgb, var(--bg) 20%, black); box-shadow: inset 0 0 0 1px var(--wash-1); }
 :root[data-appearance="light"] .media-player__stage { box-shadow: var(--elev-2); }
 .media-player__stage > video { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
+.media-player__stage[hidden] { display: none; }
 .media-player[data-fullscreen] { padding: 0; background: black; }
 .media-player[data-fullscreen] .media-player__stage { border-radius: 0; box-shadow: none; }
 .media-player[data-fullscreen] > .media-player__metadata { display: none; }

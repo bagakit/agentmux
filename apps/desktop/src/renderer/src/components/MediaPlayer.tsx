@@ -23,6 +23,8 @@ const IDLE_HIDE_MS = 2_000
 /** Waiting shorter than this is ordinary seeking; only longer stalls show the spinner. */
 const BUFFERING_DELAY_MS = 500
 const INDICATOR_MS = 800
+/** HTMLMediaElement.HAVE_CURRENT_DATA, spelled out: the first frame is decoded. */
+const HAVE_CURRENT_DATA = 2
 
 export type MediaLease = { id: string; url: string; kind: WorkspaceMediaStreamKind; byteLength: number }
 
@@ -87,6 +89,16 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
       released.current = true
       element?.pause(); element?.removeAttribute('src'); element?.load()
     }
+  }, [lease.id])
+
+  // A cached or fast source can deliver its first frame before React attaches listeners. The element
+  // keeps that fact in readyState, so read it once on mount instead of waiting for an event already gone.
+  useEffect(() => {
+    const element = media.current
+    if (!element || !(element.readyState >= HAVE_CURRENT_DATA)) return
+    setFacts(previous => readFacts(element, previous))
+    setDecode(current => current !== 'loading' ? current
+      : element instanceof HTMLVideoElement && (element.videoWidth === 0 || element.videoHeight === 0) ? 'no-picture' : 'ready')
   }, [lease.id])
 
   useEffect(() => () => { if (idle.current) clearTimeout(idle.current); if (waiting.current) clearTimeout(waiting.current) }, [])
