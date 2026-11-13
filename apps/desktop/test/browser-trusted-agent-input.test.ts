@@ -397,7 +397,9 @@ describe('Agent pressKey and hover are trusted native input', () => {
     const send = peer.session.sendCommand
     let restored = 0
     Reflect.set(peer.session, 'sendCommand', async (method: string, params: Record<string, any> = {}) => {
-      if (method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('can take keyboard input')) {
+      // The key focus step saves focus like the text prepare step, but takes no replace argument.
+      if (method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('__agentMuxTextFocus = previous') &&
+        !String(params.functionDeclaration).includes('function (replace)')) {
         peer.commands.push({ method, params })
         return { result: { value: options.focus === false ? { ok: false, reason: 'did not take focus' } : { ok: true } } }
       }

@@ -39,7 +39,7 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
   </div>
   <div style="position:absolute;left:240px;top:200px">
     <select id="num" aria-label="Number"><option value="0">1</option><option value="1">2</option><option value="2">3</option></select>
-    <fieldset disabled style="display:inline;border:0;padding:0;margin:0"><input id="off" type="date" aria-label="Off date"></fieldset>
+    <fieldset disabled style="display:inline;border:0;padding:0;margin:0"><input id="off" type="date" aria-label="Off date"><input id="offtext" aria-label="Off text" style="width:40px"></fieldset>
     <input id="stuck" type="range" min="0" max="10" value="8" readonly aria-label="Stuck">
     <input id="tint" type="color" aria-label="Tint">
     <input id="agree" type="checkbox" aria-label="Agree">
@@ -51,6 +51,13 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <x-switch id="sw" role="switch" aria-label="Wifi"></x-switch>
     <input id="bounce" aria-label="Bounce"><input id="elsewhere" aria-label="Elsewhere">
     <div id="fruits" role="listbox" tabindex="0" aria-label="Fruits" style="display:inline-flex;gap:4px"><div id="opt1" role="option" tabindex="-1">Apple</div><div id="opt2" role="option" tabindex="-1">Pear</div></div>
+  </div>
+  <div style="position:absolute;left:420px;top:90px;width:150px;display:flex;flex-wrap:wrap;gap:2px;font-size:10px">
+    <input id="rotext" readonly value="keep" aria-label="Read-only text" style="width:60px">
+    <input id="later" aria-label="Later" style="width:60px">
+    <input id="rodate" type="date" readonly value="2026-01-01" aria-label="Read-only date" style="width:120px">
+    <select id="pet" aria-label="Pet"><option value="cat">Cat</option><option value="dog" disabled>Dog</option><optgroup disabled label="Wild"><option value="fox">Fox</option></optgroup></select>
+    <input id="doc" type="file" aria-label="Document" style="width:120px">
   </div>
   <dialog id="modal"><button>Modal button</button></dialog>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
@@ -162,10 +169,24 @@ app.whenReady().then(async () => {
     await act('rovingKey', 'pressKey', [ref('Fruits'), 'ArrowDown'], () => contents.executeJavaScript('document.activeElement && document.activeElement.id'))
     await contents.executeJavaScript('document.getElementById("under").focus()')
     await act('bounce', 'fillInput', [ref('Bounce'), 'Dee'], () => contents.executeJavaScript('({ bounce: document.getElementById("bounce").value, elsewhere: document.getElementById("elsewhere").value, focus: document.activeElement && document.activeElement.id })'))
+    // Every other refusal, each before anything reaches the field.
+    const nothing = (id) => () => contents.executeJavaScript('document.getElementById(' + JSON.stringify(id) + ').value')
+    await act('offText', 'fillInput', [ref('Off text'), 'x'], nothing('offtext'))
+    await act('roText', 'fillInput', [ref('Read-only text'), 'x'], nothing('rotext'))
+    await contents.executeJavaScript('document.getElementById("later").disabled = true')
+    await act('laterText', 'fillInput', [ref('Later'), 'x'], nothing('later'))
+    await act('roDate', 'fillInput', [ref('Read-only date'), '2026-03-04'], nothing('rodate'))
+    await act('noOption', 'fillInput', [ref('Number'), 'nine'], () => value('num'))
+    await act('petDog', 'fillInput', [ref('Pet'), 'dog'], nothing('pet'))
+    await act('petFox', 'fillInput', [ref('Pet'), 'Fox'], nothing('pet'))
+    await act('tintBad', 'fillInput', [ref('Tint'), 'red'], () => value('tint'))
+    await act('notField', 'fillInput', [ref('Continue'), 'x'])
+    await act('fileText', 'fillInput', [ref('Document'), 'x'])
     // A modal dialog makes the rest of the page inert; a field there cannot take focus or a value.
     await contents.executeJavaScript('document.getElementById("modal").showModal()')
     await act('inertDate', 'fillInput', [ref('When'), '2026-05-06'], () => value('when'))
     await act('inertName', 'fillInput', [ref('Name'), 'Bea'], () => value('name'))
+    await act('inertKey', 'pressKey', [ref('Name'), 'b'], () => value('name'))
     await contents.executeJavaScript('document.getElementById("modal").close()')
     report.notes = notes
     report.throttlingAfter = contents.getBackgroundThrottling()
@@ -323,6 +344,26 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(actions.tint, actions.tint?.error).toMatchObject({ ok: true, value: '#ff0000', notes: [] })
     expect(actions.agree, actions.agree?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: false })
     expect(actions.agree!.error).toContain('checkbox input, which takes a click')
+  }, 240_000)
+
+  it('every field that cannot take this input is refused before it changes, and says what to do instead', async () => {
+    const { actions } = await probe()
+    const refused = (label: string, value: unknown, reason: string) => {
+      expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: false, effects: 'not-dispatched', ...(value === undefined ? {} : { value }) })
+      expect(actions[label]!.error, label).toContain(reason)
+      expect(actions[label]!.events.filter((event) => ['input', 'change', 'beforeinput'].includes(event.type)), `${label} fired an edit`).toEqual([])
+    }
+    refused('offText', '', 'is disabled')
+    refused('roText', 'keep', 'is read-only')
+    refused('laterText', '', 'is disabled')
+    refused('roDate', '2026-01-01', 'is read-only')
+    refused('noOption', '2', 'has no option with the value or label "nine"; its options are')
+    refused('petDog', 'cat', 'has the option "dog" turned off')
+    refused('petFox', 'cat', 'has the option "Fox" turned off')
+    refused('tintBad', '#ff0000', 'takes a color written #rrggbb')
+    refused('notField', undefined, 'is not a text field or editable element')
+    refused('fileText', undefined, 'is a file input; use uploadFiles')
+    refused('inertKey', 'Ada', 'inert (behind a modal dialog)')
   }, 240_000)
 
   it('fields in open and closed shadow roots and a focus-delegating host take input and give focus back; a field behind a modal or one that sends focus away is refused', async () => {
