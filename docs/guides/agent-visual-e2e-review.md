@@ -2,7 +2,7 @@
 
 所有界面设计改动的高审美独立评审、修正复拍直至明确满意／可交付的约束唯一见交互 SSOT[《Agent 主观审美的端到端验证》](../design/behavior/shared-rules.md#agent-主观审美的端到端验证)。交付前在真实产品场景里操作、采图，由独立 Agent 实际打开完整截图并判断；两份设计 SSOT 定义约束，截图、意见、修正和最终满意结论保留在同一轮证据中。测试全绿或采图成功不能代替审美评审。
 
-首个实际场景是 [Message Tool 的 composer-visual probe](../../apps/desktop/scripts/fixtures/agent-region-identity-menu/composer-visual.md)：正常与窄双分屏，输入短草稿，依次打开工具行和长文本输入，打开再关闭连续推进详情，最后收回一行。场景说明列出真实入口、当前 SSOT 章节、操作、观察对象和 preview 数据边界。
+首个实际场景是 [Message Tool 的 composer-visual probe](../../apps/desktop/scripts/fixtures/agent-region-identity-menu/composer-visual.md)：正常与窄双分屏，输入短草稿，依次打开工具行和长文本输入，再打开 Mailbox，填写并关闭持续推进设置，收回一行后查看持续推进各状态，最后检查 Mailbox 的悬停访问与最近顺序。场景说明列出真实入口、当前 SSOT 章节、操作、观察对象和 preview 数据边界。
 
 ```sh
 pnpm --filter @agentmux/desktop capture:visual
