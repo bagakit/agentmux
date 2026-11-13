@@ -36,6 +36,21 @@ import { agentSessionPresentationIndex } from './session-presentation'
 
 export type SessionViewMode = 'terminal' | 'activity'
 
+type ContinuityFacts = Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'continuity' | 'continuityOperations'>
+/** One isolated client graph. Call only after accepting the original Session owner. */
+export function projectContinuityFacts(source: ContinuityFacts, previous?: ContinuityFacts): ContinuityFacts {
+  if (!source.continuity && !source.continuityOperations) return {}
+  if (previous && configValuesEqual(previous.continuity, source.continuity) &&
+    configValuesEqual(previous.continuityOperations, source.continuityOperations)) return {
+    ...(previous.continuity ? { continuity: previous.continuity } : {}),
+    ...(previous.continuityOperations ? { continuityOperations: previous.continuityOperations } : {})
+  }
+  const operation = source.continuity && source.continuityOperations?.[source.continuity.operationId]
+  const continuity = operation && configValuesEqual(source.continuity, operation) ? operation : source.continuity
+  return structuredClone({ ...(continuity ? { continuity } : {}),
+    ...(source.continuityOperations ? { continuityOperations: source.continuityOperations } : {}) })
+}
+
 /** Renderer-only live provenance on the original timeline slot. Never persisted or transported by Core. */
 export type RendererAgentTimelineSnapshot = AgentTimelineSnapshot & {
   liveTool?: { itemId: string; hostId: string; runId: string; epoch: number; observedAt: number; startedAt: number }
@@ -607,13 +622,16 @@ export function reduceAgentMembershipSnapshot(
   const existingIds = new Set(state.sessions.map((session) => session.id))
   const sessions = state.sessions.map(session => {
     const incoming = canonicalById.get(session.id)
-    const next = incoming && session.kind === 'agent' && sameRun(session.control.run, incoming.control.run)
+    let next = incoming && session.kind === 'agent' && sameRun(session.control.run, incoming.control.run)
       ? { ...incoming, status: retainContinuityFailure(session.status, incoming.status, incoming.processState === 'running') }
       : incoming ?? session
+    if (incoming && session.kind === 'agent') next = { ...next, ...projectContinuityFacts(incoming,
+      session.hostId === incoming.hostId && session.control.hostId === incoming.control.hostId &&
+      session.control.agentSessionId === incoming.control.agentSessionId ? session : undefined) }
     return configValuesEqual(session, next) ? session : next
   })
   for (const [id, session] of canonicalById) {
-    if (!existingIds.has(id)) sessions.push(session)
+    if (!existingIds.has(id)) sessions.push({ ...session, ...projectContinuityFacts(session) })
   }
   const projected = projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings)
   const retained = projected.length === state.sessions.length && projected.every((session, index) => session === state.sessions[index]) ? state.sessions : projected
@@ -865,8 +883,8 @@ export function projectRuntimeEvent(
         ? { currentActivity: structuredClone(core.session.currentActivity) }
         : {}),
       ...(core.session.terminalFrontend ? { terminalFrontend: structuredClone(core.session.terminalFrontend) } : {}),
-      ...(core.session.continuity ? { continuity: structuredClone(core.session.continuity) } : {}),
-      ...(core.session.continuityOperations ? { continuityOperations: structuredClone(core.session.continuityOperations) } : {}),
+      ...projectContinuityFacts(core.session, item.hostId === core.session.hostId &&
+        item.control.hostId === core.session.hostId ? item : undefined),
       ...(core.session.terminalCapability
         ? { terminalCapability: structuredClone(core.session.terminalCapability) }
         : {}),

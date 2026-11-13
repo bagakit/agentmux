@@ -356,6 +356,7 @@ import {
   bufferPendingAgentEvent,
   discardPendingAgentLaunch,
   projectRuntimeEvent,
+  projectContinuityFacts,
   runtimeDiagnosticNotice,
   runtimeEventSession,
   removeSessionProjection,
@@ -1925,7 +1926,11 @@ function projectRecoveredSession(
   previousSessionId: string,
   session: SessionSnapshot
 ): Pick<AppState, 'sessions' | 'tabs' | 'agentFocus'> {
-  session = retainTimelineObservation(state.sessions.find(item => item.id === previousSessionId), session)
+  const previous = state.sessions.find(item => item.id === previousSessionId)
+  session = retainTimelineObservation(previous, session)
+  if (session.kind === 'agent') session = { ...session, ...projectContinuityFacts(session,
+    previous?.kind === 'agent' && previous.hostId === session.hostId && previous.control.hostId === session.control.hostId &&
+    previous.control.agentSessionId === session.control.agentSessionId ? previous : undefined) }
   const tabs = session.id === previousSessionId ? state.tabs : { ...state.tabs }
   if (session.id !== previousSessionId) {
     for (const tab of Object.values(state.tabs)) {
@@ -2036,10 +2041,9 @@ export function recoveryCandidateSession(
     capabilities: candidate.capabilities,
     agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
-    ...(continuity ? { continuity: structuredClone(continuity) } : {}),
-    ...(candidate.continuityOperations || continuity
-      ? { continuityOperations: { ...structuredClone(candidate.continuityOperations),
-          ...(continuity ? { [continuity.operationId]: structuredClone(continuity) } : {}) } } : {}),
+    ...projectContinuityFacts({ ...(continuity ? { continuity } : {}),
+      ...(candidate.continuityOperations || continuity ? { continuityOperations: {
+        ...candidate.continuityOperations, ...(continuity ? { [continuity.operationId]: continuity } : {}) } } : {}) }),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }
       : {}),
@@ -12511,8 +12515,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (recovery.kind === 'pending') {
         set(state => {
           const next = { sessions: state.sessions.map(session => session.id === sessionId && session.kind === 'agent' && sessionOwnsControl(session, current.control)
-            ? { ...session, ...(recovery.continuity ? { continuity: recovery.continuity,
-                continuityOperations: { ...session.continuityOperations, [recovery.continuity.operationId]: structuredClone(recovery.continuity) } } : {}),
+            ? { ...session, ...(recovery.continuity ? projectContinuityFacts({ continuity: recovery.continuity,
+                continuityOperations: { ...session.continuityOperations, [recovery.continuity.operationId]: recovery.continuity } }, session) : {}),
                 status: { ...session.status, detail: agentContinuityDetail(recovery.continuity) } } : session) }
           return { ...next, ...projectResumeInputReceipts({ ...state, ...next }, sessionId) }
         })
@@ -12549,8 +12553,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             session.id === sessionId && sessionOwnsControl(session, current.control)
               ? {
                   ...session,
-                  ...(session.kind === 'agent' && recovery.continuity ? { continuity: structuredClone(recovery.continuity),
-                    continuityOperations: { ...session.continuityOperations, [recovery.continuity.operationId]: structuredClone(recovery.continuity) } } : {}),
+                  ...(session.kind === 'agent' && recovery.continuity ? projectContinuityFacts({ continuity: recovery.continuity,
+                    continuityOperations: { ...session.continuityOperations, [recovery.continuity.operationId]: recovery.continuity } }, session) : {}),
                   status: {
                     ...session.status,
                     state: 'error' as const,
