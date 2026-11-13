@@ -15,12 +15,14 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   DEFAULT_SCREENSHOT_FONT_SIZE, DEFAULT_SCREENSHOT_WIDTH, redoShape, SCREENSHOT_COLORS, SCREENSHOT_FONT_SIZES,
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, intersectRect, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
+  alignShapes, distributeShapes, duplicateShapes, groupBounds, moveShapes, pasteShapes, reorderShapes, restyleShapes,
+  toggleShapeLock, unlockAllShapes, type ShapeAlignment, type ShapeOrder,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
-import { selectionHandles, hitSelectionHandle, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
+import { selectionHandles, hitSelectionHandle, lockedMarkAt, marqueeSelection, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
 import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE, type SnapFeatures, type SnapLines } from './snapping'
 import { fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport } from './view'
 import type { AnnotationImage, ImageAnnotationInput, ImageAnnotationOutputResult } from './types'
@@ -30,11 +32,30 @@ const icon = semanticIconComponent
 const CancelIcon = icon('action.cancel'), ClipboardIcon = icon('object.clipboard'), CheckIcon = icon('status.copied')
 const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
 const SaveIcon = icon('action.save'), PinIcon = icon('action.pin'), RetakeIcon = icon('action.capture')
+const LockIcon = icon('status.locked'), UnlockIcon = icon('drawing.unlock')
+// The window editor's arrange row; a capture reaches the same commands only through shortcuts.
+const ALIGNMENTS: readonly { id: ShapeAlignment; label: string; Icon: ReturnType<typeof icon> }[] = [
+  { id: 'left', label: 'Align left', Icon: icon('drawing.align-left') }, { id: 'center', label: 'Align centers', Icon: icon('drawing.align-center') },
+  { id: 'right', label: 'Align right', Icon: icon('drawing.align-right') }, { id: 'top', label: 'Align top', Icon: icon('drawing.align-top') },
+  { id: 'middle', label: 'Align middles', Icon: icon('drawing.align-middle') }, { id: 'bottom', label: 'Align bottom', Icon: icon('drawing.align-bottom') }]
+const DISTRIBUTIONS: readonly { id: 'horizontal' | 'vertical'; label: string; Icon: ReturnType<typeof icon> }[] = [
+  { id: 'horizontal', label: 'Distribute horizontally', Icon: icon('drawing.distribute-horizontal') },
+  { id: 'vertical', label: 'Distribute vertically', Icon: icon('drawing.distribute-vertical') }]
+// Stacking shortcuts by bracket; Shift turns forward and backward into front and back, whichever character it types.
+const BRACKETS: Readonly<Record<string, 'forward' | 'backward'>> = { ']': 'forward', '}': 'forward', '[': 'backward', '{': 'backward' }
 type Size = { width: number; height: number; dpr: number }
 const NO_SELECTION: ReadonlySet<string> = new Set()
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 // `bubble` drags only a magnifier's bubble; its source region and leader origin stay in place.
 type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId; bubble?: true }
+// Dragging any mark of a multi-mark selection moves every member; `moved` is the live preview, committed once on release.
+type GroupGesture = { start: ScreenshotPoint; ids: ReadonlySet<string>; pressed: string; base: ScreenshotShape[]; moved: ScreenshotShape[] }
+// `base` is the selection a Shift-marquee adds to; a plain marquee starts from none.
+type MarqueeGesture = { start: ScreenshotPoint; at: ScreenshotPoint; base: ReadonlySet<string> }
+const toggled = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => { const next = new Set(ids); if (!next.delete(id)) next.add(id); return next }
+// Masks and the spotlight paint fixed colors; a magnifier's color is its frame and leader line.
+const colorable = (shape: ScreenshotShape) => !isScreenshotMask(shape) && shape.kind !== 'spotlight'
+const widthable = (shape: ScreenshotShape) => colorable(shape) && shape.kind !== 'text' && shape.kind !== 'callout'
 // Region marks need travel; a press that moves less than this many screen pixels creates none of them.
 type AnnotationOutput = (input: ImageAnnotationInput) => ImageAnnotationOutputResult
 // The last tool and style carry over to the next editor in this Renderer.
@@ -144,6 +165,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const editorRef = useRef<HTMLDivElement>(null), containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null), canvasRef = useRef<HTMLCanvasElement>(null), textInputRef = useRef<HTMLTextAreaElement>(null)
   const currentGestureRef = useRef<ScreenshotShape | null>(null), transformRef = useRef<TransformGesture | null>(null)
+  const groupRef = useRef<GroupGesture | null>(null), marqueeRef = useRef<MarqueeGesture | null>(null)
+  // Marks copied with Command-Shift-C; they live only in this editor and never reach the system clipboard.
+  const copiedRef = useRef<ScreenshotShape[]>([]), lockBadgeRef = useRef<HTMLButtonElement>(null)
   const cropRef = useRef<CropGesture | null>(null), downRef = useRef<{ at: ScreenshotPoint; deselected: boolean; dragged?: true } | null>(null)
   const eraseRef = useRef<Set<string> | null>(null), lastErasePoint = useRef<ScreenshotPoint | null>(null)
   const panRef = useRef<{ start: ScreenshotPoint; view: AnnotationView; fitted: boolean } | null>(null)
@@ -176,9 +200,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // cursor, and the laid-out widths of the toolbar and size chip.
   const [hover, setHover] = useState<{ at: ScreenshotPoint; sample: LoupeSample | null } | null>(null), [gesture, setGesture] = useState<'selection' | 'mark' | null>(null)
   const [cursor, setCursor] = useState('crosshair'), [measured, setMeasured] = useState({ bar: 0, chip: 0 })
+  // The locked mark under the pointer, which shows its lock; locked marks are never hit or selected.
+  const [lockHover, setLockHover] = useState<string | null>(null)
   const viewRef = useRef(view)
-  // Every selected mark, in stacking order; property controls, handles and text editing need exactly one.
-  const selectedShapes = documentState.shapes.filter(shape => selectedIds.has(shape.id))
+  // Every selected mark, in stacking order; handles and text editing need exactly one. A locked mark never counts.
+  const selectedShapes = documentState.shapes.filter(shape => selectedIds.has(shape.id) && !shape.locked)
+  const groupIds: ReadonlySet<string> = new Set(selectedShapes.map(shape => shape.id))
+  const hasLocked = documentState.shapes.some(shape => shape.locked)
   const selected = selectedShapes.length === 1 ? selectedShapes[0]! : null
   const selectOnly = (id: string | null) => setSelectedIds(id ? new Set([id]) : NO_SELECTION)
   const selectedNote = selected?.kind === 'note' ? selected : null
@@ -194,9 +222,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const sizeText = capture && selection ? Math.round(selection.width) + ' × ' + Math.round(selection.height) + ' px' : null
   // The loupe shows the frozen pixel under the pointer while a selection is made or adjusted, never at rest or while drawing.
   const loupe = capture && hover?.sample && (gesture === 'selection' || (!documentState.crop && gesture === null)) ? { at: hover.at, sample: hover.sample } : null
-  const live = useRef({ size, documentState, loaded, selected, tool, active, pendingText, loupe })
-  live.current = { size, documentState, loaded, selected, tool, active, pendingText, loupe }
-  const cache = useRef<{ document: ScreenshotDocument; view: AnnotationView; size: Size; loaded: boolean;
+  const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe })
+  live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe }
+  const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean;
     excluded: string | undefined; erased: number; masks: ScreenshotShape[] } | null>(null)
   const scale = view.scale
 
@@ -227,13 +255,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (!state.active || !canvas || !committed || !state.size.width || !state.size.height) return
       const viewport: ImageViewport = { ...state.size, imageWidth: image.width, imageHeight: image.height, view: currentView }
       const excluded = transformRef.current?.original.id ?? (state.pendingText?.existing ? state.pendingText.shape.id : undefined)
-      const erased = eraseRef.current?.size ?? 0, previous = cache.current
+      const erased = eraseRef.current?.size ?? 0, previous = cache.current, shapes = groupRef.current?.moved ?? state.documentState.shapes
       try {
         if (!previous || previous.document !== state.documentState || previous.view !== currentView || previous.size !== state.size ||
-          previous.loaded !== state.loaded || previous.excluded !== excluded || previous.erased !== erased) {
-          const output = screenshotOutputShapes(state.documentState.shapes.filter(shape => shape.id !== excluded && !eraseRef.current?.has(shape.id)), state.documentState.crop)
+          previous.loaded !== state.loaded || previous.excluded !== excluded || previous.erased !== erased || previous.shapes !== shapes) {
+          const output = screenshotOutputShapes(shapes.filter(shape => shape.id !== excluded && !eraseRef.current?.has(shape.id)), state.documentState.crop)
           renderCommittedLayer(committed, output, viewport, state.loaded ? imageRef.current! : undefined)
-          cache.current = { document: state.documentState, view: currentView, size: state.size, loaded: state.loaded, excluded, erased,
+          cache.current = { document: state.documentState, shapes, view: currentView, size: state.size, loaded: state.loaded, excluded, erased,
             masks: output.filter(isScreenshotMask) }
         }
         renderScreenshotScene(canvas, committed, currentGestureRef.current, viewport, cache.current?.masks)
@@ -261,6 +289,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             context.strokeRect(handle.point.x - 4 / fit, handle.point.y - 4 / fit, 8 / fit, 8 / fit)
           }
         }
+        const group = groupRef.current, marquee = marqueeRef.current
+        const members = group ? group.moved.filter(shape => group.ids.has(shape.id)) : state.selectedShapes
+        if (members.length > 1 && !state.pendingText) paintGroup(context, members, fit)
+        if (marquee) paintMarquee(context, marquee, state.documentState, fit)
         // While a gesture snaps, each engaged line runs 1 px across the frame.
         const guides = capture ? guidesRef.current : null
         if (guides) {
@@ -275,6 +307,35 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       } catch (error) { onError?.(error) }
     })
   }, [image.width, image.height, onError, ownerWindow, capture])
+  /** Each member's dashed bounds, and the group's bounds as one thin solid outline around them. */
+  function paintGroup(context: CanvasRenderingContext2D, members: readonly ScreenshotShape[], fit: number) {
+    context.strokeStyle = '#3b82f6'; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
+    for (const shape of members) {
+      const box = shapeBounds(shape, measureText)
+      context.strokeRect(box.x - 3 / fit, box.y - 3 / fit, box.width + 6 / fit, box.height + 6 / fit)
+    }
+    const box = groupBounds(members, measureText)
+    if (!box) return
+    context.setLineDash([]); context.globalAlpha = .6
+    context.strokeRect(box.x - 7 / fit, box.y - 7 / fit, box.width + 14 / fit, box.height + 14 / fit)
+    context.globalAlpha = 1
+  }
+  /** The dashed marquee with a faint fill, and the marks its release would select. */
+  function paintMarquee(context: CanvasRenderingContext2D, marquee: MarqueeGesture, doc: ScreenshotDocument, fit: number) {
+    const area = normalizeRect(marquee.start, marquee.at), ids = new Set([...marquee.base, ...marqueeHits(doc, area)])
+    context.fillStyle = 'rgba(59, 130, 246, .08)'; context.fillRect(area.x, area.y, area.width, area.height)
+    context.strokeStyle = '#3b82f6'; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
+    context.strokeRect(area.x, area.y, area.width, area.height)
+    for (const shape of doc.shapes) {
+      if (!ids.has(shape.id)) continue
+      const box = shapeBounds(shape, measureText)
+      context.strokeRect(box.x - 3 / fit, box.y - 3 / fit, box.width + 6 / fit, box.height + 6 / fit)
+    }
+  }
+  // A marquee selects what it shows: visible, unlocked marks.
+  function marqueeHits(doc: ScreenshotDocument, area: NormalizedRect): string[] {
+    return marqueeSelection(screenshotOutputShapes(doc.shapes, doc.crop), area, measureText)
+  }
   /**
    * Dims the frozen frame outside the selection and draws its border and handles. Before one exists it dims all of it.
    * Either way it lights the window a click would select, if any; true while that highlight still fades in.
@@ -316,8 +377,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const requestView = useCallback((next: AnnotationView) => { viewRef.current = next; schedulePaint() }, [schedulePaint])
   const resetGesture = useCallback(() => {
     currentGestureRef.current = null; transformRef.current = null; cropRef.current = null; eraseRef.current = null
+    groupRef.current = null; marqueeRef.current = null
     lastErasePoint.current = null; panRef.current = null; downRef.current = null; guidesRef.current = null; litWindowRef.current = null; setGesture(null)
   }, [])
+  const gestureActive = () => Boolean(currentGestureRef.current || cropRef.current || eraseRef.current || groupRef.current || marqueeRef.current)
   const edit = useCallback((update: (current: ScreenshotDocument) => ScreenshotDocument) => { onEdited?.(); setDocumentState(update) }, [onEdited])
   const undo = useCallback(() => { resetGesture(); edit(undoShape); schedulePaint() }, [edit, resetGesture, schedulePaint])
   const redo = useCallback(() => { resetGesture(); edit(redoShape); schedulePaint() }, [edit, resetGesture, schedulePaint])
@@ -418,7 +481,31 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function requestRetake() { if (!onRetake || busy) return; if (unexported) setDiscarding('retake'); else onRetake() }
   // The confirmed discard: the marks go only once the person confirms, and a retake keeps this editor until the new capture completes.
   function discard() { if (confirmingDiscard === 'retake') { setDiscarding(false); onRetake?.() } else onCancel() }
-  function removeSelected() { if (selectedIds.size) { edit(doc => removeShapes(doc, selectedIds)); selectOnly(null) } }
+  function removeSelected() { if (groupIds.size) { edit(doc => removeShapes(doc, groupIds)); selectOnly(null) } }
+  // One command over the marks is one Undo step; a command that changes nothing records none.
+  function editShapes(next: ScreenshotShape[]) { if (next !== documentState.shapes) edit(doc => setShapes(doc, next)) }
+  function addShapes(result: { shapes: ScreenshotShape[]; ids: string[] }) { editShapes(result.shapes); setSelectedIds(new Set(result.ids)) }
+  /** Object shortcuts with Command or Control; true when the key named one. Command-C stays the screenshot copy, so marks
+   * copy and paste with Shift, only inside this editor and never through the system clipboard. */
+  function objectCommand(event: KeyboardEvent, key: string): boolean {
+    const shapes = documentState.shapes, distance = 10 / viewRef.current.scale
+    const offset = capture ? { x: Math.round(distance), y: Math.round(distance) } : { x: distance, y: distance }
+    if (key === 'a' && !event.shiftKey) { setSelectedIds(new Set(shapes.filter(shape => !shape.locked).map(shape => shape.id))); return true }
+    if (key === 'd' && !event.shiftKey) { if (groupIds.size) addShapes(duplicateShapes(shapes, groupIds, offset, mintObjectId)); return true }
+    if (key === 'c' && event.shiftKey) { if (selectedShapes.length) copiedRef.current = selectedShapes; return true }
+    if (key === 'v' && event.shiftKey) {
+      // Each paste cascades from the last one, so repeated pastes do not stack exactly.
+      const pasted = pasteShapes(shapes, copiedRef.current, offset, mintObjectId)
+      if (pasted.ids.length) { addShapes(pasted); copiedRef.current = pasted.shapes.filter(shape => pasted.ids.includes(shape.id)) }
+      return true
+    }
+    // Locking keeps the ids selected but inert, so a second press unlocks them; with nothing selected it unlocks every mark.
+    if (key === 'l' && !event.shiftKey) { editShapes(selectedIds.size ? toggleShapeLock(shapes, selectedIds) : unlockAllShapes(shapes)); return true }
+    const bracket = BRACKETS[event.key]
+    if (!bracket) return false
+    const order: ShapeOrder = event.shiftKey ? bracket === 'forward' ? 'front' : 'back' : bracket
+    editShapes(reorderShapes(shapes, groupIds, order)); return true
+  }
   useEffect(() => {
     if (!active) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -429,10 +516,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         // Each Escape undoes one layer of editing state before the editor itself closes.
         if (textDraftRef.current) finishText('', true)
         else if (noteEditorRef.current) closeNoteEditor(false)
-        else if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture()
+        else if (gestureActive() || panRef.current) cancelGesture()
         else if (confirmingDiscard === 'retake') setDiscarding(false)
         else if (confirmingDiscard) onCancel()
-        else if (selectedIds.size) selectOnly(null)
+        // Locked ids stay selected only so Command-L can unlock them again; they never consume an Escape.
+        else if (groupIds.size) selectOnly(null)
         else if (tool !== openingTool) { resetGesture(); setTool(openingTool) }
         else requestClose()
         return
@@ -450,6 +538,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       const command = event.metaKey || event.ctrlKey, key = event.key.toLowerCase()
       if (!textDraftRef.current && !noteEditorRef.current) {
         if (event.key === 'Enter' && !command && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); complete(); return }
+        if (command && objectCommand(event, key)) { event.preventDefault(); return }
         if (command && key === 'c') { event.preventDefault(); complete(); return }
         if (command && key === 's' && onSavePng) { event.preventDefault(); complete('save-png'); return }
         if (capture && command && key === 'p') { event.preventDefault(); complete('pin'); return }
@@ -458,15 +547,15 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       }
       if (command && key === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); return }
-      if (selected && target === canvasRef.current && event.key.startsWith('Arrow')) {
+      if (groupIds.size && target === canvasRef.current && event.key.startsWith('Arrow')) {
         const delta = event.shiftKey ? 10 : 1
         const dx = event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0
         const dy = event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0
-        if (dx || dy) { event.preventDefault(); edit(doc => replaceShape(doc, moveShape(selected, dx, dy))); return }
+        if (dx || dy) { event.preventDefault(); editShapes(moveShapes(documentState.shapes, groupIds, dx, dy)); return }
       }
       // With no mark selected, arrows nudge a capture selection by one frame pixel, or ten with Shift.
       const crop = documentState.crop
-      if (capture && crop && !selected && target === canvasRef.current && event.key.startsWith('Arrow')) {
+      if (capture && crop && !groupIds.size && target === canvasRef.current && event.key.startsWith('Arrow')) {
         event.preventDefault()
         const delta = Math.round((event.shiftKey ? 10 : 1) * pixelRatio), still = { x: 0, y: 0 }
         const at = { x: event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0, y: event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0 }
@@ -512,7 +601,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   function onPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
     beginGesture(event)
-    if (capture) { setGesture(cropRef.current ? 'selection' : currentGestureRef.current || eraseRef.current ? 'mark' : null); track(event) }
+    if (capture) { setGesture(cropRef.current ? 'selection' : gestureActive() ? 'mark' : null); track(event) }
   }
   // A default bubble stays inside the selection or image, a fixed number of screen points from its source at any zoom.
   const bubblePlacement = () => ({ bounds: documentState.crop ?? originalBounds, gap: CALLOUT_GAP / viewRef.current.scale })
@@ -531,7 +620,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (capture && (!crop || !((selected && hitSelectionHandle(selected, at, 9 / viewRef.current.scale)) || hit(at)))) {
       const handle = crop ? hitCropHandle(crop, at, CROP_HANDLE_HIT / viewRef.current.scale) : null
       const inside = crop !== null && rectContains(crop, at)
-      if (handle || !inside || tool === 'select') {
+      if (handle || !inside || (tool === 'select' && !event.shiftKey)) {
         const mode = handle ?? (inside ? 'move' : !crop || !documentState.shapes.length ? 'create' : null)
         selectOnly(null)
         if (mode) { event.currentTarget.setPointerCapture(event.pointerId); cropRef.current = { mode, start: at, at, original: crop } }
@@ -544,6 +633,21 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (tool !== 'erase' && tool !== 'crop') {
       const handle = selected ? hitSelectionHandle(selected, at, 9 / viewRef.current.scale) : null
       const shape = handle ? selected : hit(at)
+      // Shift-click adds a mark to the selection or removes it; a press on a member of several drags them all as one edit.
+      if (shape && !handle && event.shiftKey) { setSelectedIds(toggled(groupIds, shape.id)); schedulePaint(); return }
+      if (shape && !handle && groupIds.size > 1 && groupIds.has(shape.id)) {
+        event.currentTarget.setPointerCapture(event.pointerId); downRef.current = { at: localPoint(event), deselected: false }
+        groupRef.current = { start: at, ids: groupIds, pressed: shape.id, base: documentState.shapes, moved: documentState.shapes }
+        schedulePaint(); return
+      }
+      // Select draws a marquee from empty canvas; Shift adds what it catches to the selection. A capture needs Shift,
+      // since its plain Select drag moves the capture selection.
+      if (!shape && tool === 'select' && (!capture || event.shiftKey)) {
+        event.currentTarget.setPointerCapture(event.pointerId); downRef.current = { at: localPoint(event), deselected: false }
+        marqueeRef.current = { start: at, at, base: event.shiftKey ? groupIds : NO_SELECTION }
+        if (!event.shiftKey) selectOnly(null)
+        schedulePaint(); return
+      }
       selectOnly(shape?.id ?? null)
       if (shape || tool === 'select') {
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -553,12 +657,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       }
     }
     if (tool === 'text') {
-      if (!textDraftRef.current && !selected) {
+      if (!textDraftRef.current && !groupIds.size) {
         event.preventDefault(); beginText(undefined, at)
       }
       return
     }
-    event.currentTarget.setPointerCapture(event.pointerId); downRef.current = { at: localPoint(event), deselected: Boolean(selected) }
+    event.currentTarget.setPointerCapture(event.pointerId); downRef.current = { at: localPoint(event), deselected: groupIds.size > 0 }
     if (tool === 'erase') {
       eraseRef.current = new Set(); lastErasePoint.current = at; const shape = hit(at); if (shape) eraseRef.current.add(shape.id)
     } else if (tool === 'crop') cropRef.current = { mode: 'create', start: at, at, original: documentState.crop }
@@ -581,6 +685,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   /** `unsnapped`: ⌘ is held, so a capture gesture follows the pointer exactly. */
   function updateGesture(at: ScreenshotPoint, constrained = false, unsnapped = false) {
     guidesRef.current = null
+    const group = groupRef.current, marquee = marqueeRef.current
+    if (group || marquee) {
+      if (group) group.moved = moveShapes(group.base, group.ids, at.x - group.start.x, at.y - group.start.y)
+      else marquee!.at = at
+      schedulePaint(); return
+    }
     if (capture && !unsnapped) at = snapPoint(at, constrained)
     const transform = transformRef.current
     if (transform) currentGestureRef.current = transform.handle ? resizeShapeFromHandle(transform.original, transform.handle, at, constrained)
@@ -649,7 +759,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (locked) return
     const at = localPoint(event), crop = documentState.crop
     setHover(cropRef.current || !crop ? { at, sample: sampleLoupe(at) } : null)
-    if (cropRef.current || currentGestureRef.current || eraseRef.current) {
+    if (gestureActive()) {
       // A press keeps showing the window its release selects until the pointer travels into a drag, which it stays.
       const down = downRef.current
       if (down && Math.hypot(at.x - down.at.x, at.y - down.at.y) >= CLICK_DISTANCE) down.dragged = true
@@ -675,16 +785,22 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (capture) track(event)
     const pan = panRef.current
     if (pan) { const at = localPoint(event); requestView({ ...pan.view, x: pan.view.x + at.x - pan.start.x, y: pan.view.y + at.y - pan.start.y }); return }
-    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey, event.metaKey)
+    if (gestureActive()) updateGesture(point(event), event.shiftKey, event.metaKey)
+    // At rest the pointer finds a locked mark to show its lock; with none locked a move does no work here.
+    else if (hasLocked && !locked) setLockHover(lockedMarkAt(documentState.shapes, point(event), 4 / viewRef.current.scale, measureText)?.id ?? null)
   }
   function onPointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
     if (panRef.current) { onPointerMove(event); resetGesture(); return }
-    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey, event.metaKey)
+    if (gestureActive()) updateGesture(point(event), event.shiftKey, event.metaKey)
     const finished = currentGestureRef.current, transform = transformRef.current, crop = cropRef.current, erased = eraseRef.current
+    const group = groupRef.current, marquee = marqueeRef.current
     const down = downRef.current, up = localPoint(event)
     const click = down !== null && Math.hypot(up.x - down.at.x, up.y - down.at.y) < CLICK_DISTANCE
     resetGesture()
-    if (crop) {
+    // A click on a member of several selects only it; a drag moves them all.
+    if (group) { if (click) selectOnly(group.pressed); else editShapes(group.moved) }
+    else if (marquee) { if (!click) setSelectedIds(new Set([...marquee.base, ...marqueeHits(documentState, normalizeRect(marquee.start, marquee.at))])) }
+    else if (crop) {
       // Before any selection, a press that never travelled selects the window it lit, as this display shows it.
       const untouched = opening.current !== null && crop.original !== null && crop.original === opening.current.crop
       const target = crop.mode === 'create' && click && !down.dragged && (!crop.original || untouched) ? windowAt(crop.start) : null
@@ -754,32 +870,37 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (result instanceof Promise) void result.then(confirmed => { if (confirmed === true) { setExported(kept); setDiscarding(false) } })
   }
   function expand() { if (documentState.crop) onExpand?.({ shapes: currentShapes(), crop: documentState.crop, tool }) }
+  // A change applies to every selected mark that shows the property, as one Undo; with none selected it sets the next mark's.
   function setProperty(property: 'color' | 'width' | 'fontSize', value: string | number) {
     if (property === 'color') setColor(String(value)); else if (property === 'width') setWidth(Number(value)); else setFontSize(Number(value))
-    if (selected && property in selected) edit(doc => replaceShape(doc, { ...selected, [property]: property === 'color' ? value : Number(value) / viewRef.current.scale } as ScreenshotShape))
+    const applies = property === 'color' ? colorable : property === 'width' ? widthable : (shape: ScreenshotShape) => shape.kind === 'text'
+    const next = property === 'color' ? value : Number(value) / viewRef.current.scale
+    editShapes(restyleShapes(documentState.shapes, groupIds, shape => applies(shape) && (shape as unknown as Record<string, unknown>)[property] !== next
+      ? { ...shape, [property]: next } as ScreenshotShape : shape))
   }
-  const properties = selected
-  // A selected pointing mark shows and changes its own strength; otherwise the control sets the next one's.
-  const strengthKind = properties ? (isPointingKind(properties.kind) ? properties.kind : null) : isPointingKind(tool) ? tool : null
+  // Selected marks show their own values, a group its first member's that has each one; otherwise the controls show the next mark's.
+  const properties = selectedShapes.length ? selectedShapes : null
+  const colorShape = properties?.find(colorable), widthShape = properties?.find(widthable), fontShape = properties?.find(shape => shape.kind === 'text')
+  // Strength units differ by kind, so the control shows only while the selected pointing marks share one kind.
+  const pointingKinds = [...new Set(properties?.map(shape => shape.kind).filter(isPointingKind))]
+  const strengthKind = properties ? (pointingKinds.length === 1 ? pointingKinds[0]! : null) : isPointingKind(tool) ? tool : null
   const strength = strengthKind && POINTING_STRENGTHS[strengthKind]
-  const strengthValue = !strength ? 0 : properties && properties.kind === strengthKind
-    ? Number((properties as unknown as Record<string, number>)[strength.property]!.toFixed(2)) : strengths[strength.style]
+  const strengthShape = properties?.find(shape => shape.kind === strengthKind)
+  const strengthValue = !strength ? 0 : strengthShape
+    ? Number((strengthShape as unknown as Record<string, number>)[strength.property]!.toFixed(2)) : strengths[strength.style]
   function setStrength(value: number) {
     if (!strength) return
     setStrengths(current => ({ ...current, [strength.style]: value }))
-    if (properties && properties.kind === strengthKind) {
-      const next = { ...properties, [strength.property]: value } as ScreenshotShape
-      edit(doc => replaceShape(doc, next))
-    }
+    const restyled = restyleShapes(documentState.shapes, groupIds, shape => shape.kind === strengthKind ? { ...shape, [strength.property]: value } as ScreenshotShape : shape)
+    editShapes(restyled)
   }
-  const propertyColor = properties?.color ?? color
+  const propertyColor = colorShape?.color ?? color
   const customColor = propertyColor.length === 4 ? '#' + propertyColor.slice(1).split('').map(value => value + value).join('') : propertyColor
-  // Masks and the spotlight paint fixed colors; a magnifier's color is its frame and leader line.
-  const showColor = properties ? !isScreenshotMask(properties) && properties.kind !== 'spotlight' : !['select', 'crop', 'pixelate', 'cover', 'blur', 'spotlight', 'erase', 'pan'].includes(tool)
-  const showWidth = showColor && (properties ? properties.kind !== 'text' && properties.kind !== 'callout' : tool !== 'text' && tool !== 'note' && tool !== 'callout')
-  const showFont = properties ? properties.kind === 'text' : tool === 'text'
-  const displayedWidth = Number((properties && 'width' in properties ? properties.width * scale : width).toFixed(2))
-  const displayedFont = Number((properties?.kind === 'text' ? properties.fontSize * scale : fontSize).toFixed(2))
+  const showColor = properties ? colorShape !== undefined : !['select', 'crop', 'pixelate', 'cover', 'blur', 'spotlight', 'erase', 'pan'].includes(tool)
+  const showWidth = properties ? widthShape !== undefined : showColor && tool !== 'text' && tool !== 'note' && tool !== 'callout'
+  const showFont = properties ? fontShape !== undefined : tool === 'text'
+  const displayedWidth = Number((widthShape && 'width' in widthShape ? widthShape.width * scale : width).toFixed(2))
+  const displayedFont = Number((fontShape?.kind === 'text' ? fontShape.fontSize * scale : fontSize).toFixed(2))
   const widthOptions = [...new Set<number>([...SCREENSHOT_WIDTHS, displayedWidth])].sort((a, b) => a - b)
   const fontOptions = [...new Set<number>([...SCREENSHOT_FONT_SIZES, displayedFont])].sort((a, b) => a - b)
   // This is an editing control, independent of the annotation's original geometry and type size.
@@ -792,8 +913,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // Color, size and pixelation controls; the window shows them in its property row, a capture in a popover on its toolbar.
   const propertyControls = <>
       {showColor ? <div className="image-annotation-toolbar__colors" aria-label="Markup color">{SCREENSHOT_COLORS.map(option => <button key={option} type="button" aria-label={'Color ' + option} title={option}
-        aria-pressed={(properties?.color ?? color) === option} className={(properties?.color ?? color) === option ? 'selected' : ''} style={{ backgroundColor: option }} disabled={busy}
-        onClick={() => setProperty('color', option)}>{(properties?.color ?? color) === option ? <CheckIcon size={10} /> : null}</button>)}</div> : null}
+        aria-pressed={propertyColor === option} className={propertyColor === option ? 'selected' : ''} style={{ backgroundColor: option }} disabled={busy}
+        onClick={() => setProperty('color', option)}>{propertyColor === option ? <CheckIcon size={10} /> : null}</button>)}</div> : null}
       {showColor ? <label className="image-annotation-editor__custom-color" title="Choose an opaque annotation color"><input type="color" aria-label="Custom color" value={customColor} disabled={busy} onChange={event => setProperty('color', event.target.value)} /><span>Custom</span></label> : null}
       {showWidth ? <label>Width<select aria-label="Stroke width" value={displayedWidth} disabled={busy} onChange={event => setProperty('width', Number(event.target.value))}>{widthOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {showFont ? <label>Size<select aria-label="Text size" value={displayedFont} disabled={busy} onChange={event => setProperty('fontSize', Number(event.target.value))}>{fontOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
@@ -808,6 +929,18 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         <label>Blocks<select aria-label="Pixel size" value={blockSize} disabled={busy} onChange={event => setBlockSize(Number(event.target.value))}>{[8,16,24,32].map(option => <option key={option} value={option}>{option}px</option>)}</select></label>
       </> : null}
   </>
+  // The hovered locked mark's lock, at its bounds' top-right corner and kept inside the viewport.
+  const lockedMark = lockHover ? documentState.shapes.find(shape => shape.id === lockHover && shape.locked) : undefined
+  const lockBox = lockedMark ? shapeBounds(lockedMark, measureText) : null
+  const lockBadge = lockedMark && lockBox ? { id: lockedMark.id, style: {
+    left: Math.max(0, Math.min(size.width - 20, view.x + (lockBox.x + lockBox.width) * scale - 10)), top: Math.max(0, Math.min(size.height - 20, view.y + lockBox.y * scale - 10)) } } : null
+  // Window only: align with two or more selected, distribute with three or more; a capture reaches neither by button.
+  const arrangeControls = selectedShapes.length > 1 ? <div className="image-annotation-editor__arrange" role="group" aria-label="Arrange annotations">
+    {ALIGNMENTS.map(({ id, label, Icon }) => <button key={id} type="button" aria-label={label} title={label} disabled={busy}
+      onClick={() => editShapes(alignShapes(documentState.shapes, groupIds, id, measureText))}><Icon size={14} /></button>)}
+    {selectedShapes.length > 2 ? DISTRIBUTIONS.map(({ id, label, Icon }) => <button key={id} type="button" aria-label={label} title={label} disabled={busy}
+      onClick={() => editShapes(distributeShapes(documentState.shapes, groupIds, id, measureText))}><Icon size={14} /></button>) : null}
+  </div> : null
   // The in-place discard confirmation; both presentations show it in place of Cancel.
   const discardControl = confirmingDiscard ? <span className="image-annotation-editor__discard" role="alert">
           <span>{(documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') : 'Discard the crop') + (confirmingDiscard === 'retake' ? ' and retake?' : '?')}</span>
@@ -824,17 +957,17 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         </span>
         <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : label}</button>
   </>
-  const toolbar = <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={!!selected}
+  const toolbar = <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={groupIds.size > 0}
     clearable={!!documentState.shapes.length || !!documentState.crop} onTool={next => { resetGesture(); setTool(next); schedulePaint() }}
     onUndo={undo} onRedo={redo} onDelete={removeSelected} onClear={() => { resetGesture(); textDraftRef.current = null; setPendingText(null); selectOnly(null); edit(clearShapes); schedulePaint() }} />
   const canvasViewport = <>
         <div className="image-annotation-editor__viewport" style={{ width: size.width, height: size.height }}>
           <img ref={imageRef} src={image.dataUrl} alt="Captured image" draggable={false} onLoad={() => { setLoaded(true); setImageError(false) }}
             onError={() => { setLoaded(false); setImageError(true); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
-          <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? locked ? 'default' : cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? selected ? 'move' : 'default' : 'crosshair' }}
+          <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? locked ? 'default' : cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? groupIds.size ? 'move' : 'default' : 'crosshair' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
-            onPointerLeave={capture ? () => { setHover(null); lightWindow(null) } : undefined} onContextMenu={onContextMenu}
-            onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
+            onPointerLeave={event => { if (capture) { setHover(null); lightWindow(null) } if (event.relatedTarget !== lockBadgeRef.current) setLockHover(null) }} onContextMenu={onContextMenu}
+            onLostPointerCapture={() => { if (gestureActive() || panRef.current) cancelGesture() }}
             onDoubleClick={event => {
               if (busy) return
               const at = point(event), shape = hit(at), crop = documentState.crop
@@ -842,6 +975,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
               // A double-click inside a capture selection while adjusting it is the primary delivery.
               else if (capture && !shape && tool === 'select' && crop && rectContains(crop, at)) complete()
             }} />
+          {lockBadge ? <button ref={lockBadgeRef} type="button" className="image-annotation-editor__lock" aria-label="Unlock annotation" title="Locked · Click to unlock"
+            style={lockBadge.style} disabled={busy} onPointerLeave={event => { if (event.relatedTarget !== canvasRef.current) setLockHover(null) }}
+            onClick={() => { editShapes(toggleShapeLock(documentState.shapes, new Set([lockBadge.id]))); setLockHover(null) }}><LockIcon size={11} /></button> : null}
           {pendingText ? <Textarea key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} wrap="off"
             aria-description="Enter inserts a new line. Command or Control plus Enter finishes. Escape discards this text edit."
             style={{ ...inlineEditorBox(pendingText.shape.at, textEditorWidth, textEditorHeight), maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
@@ -903,9 +1039,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     <div className="image-annotation-editor__properties">
       <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
       {propertyControls}
-      {tool === 'cover' || properties?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
+      {arrangeControls}
+      {hasLocked ? <button type="button" disabled={busy} onClick={() => editShapes(unlockAllShapes(documentState.shapes))}><UnlockIcon size={13} />Unlock all</button> : null}
+      {tool === 'cover' || selected?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
       {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
-      {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span> : null}
+      {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : selectedShapes.length > 1 ? selectedShapes.length + ' selected · Drag one to move all' : 'Click an annotation · Drag to select several'}</span> : null}
       {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}
       {tool === 'erase' ? <span className="image-annotation-editor__hint">Drag over annotations to remove them</span> : null}
       {tool === 'note' ? <span className="image-annotation-editor__hint">Click a point or drag a region</span> : null}
