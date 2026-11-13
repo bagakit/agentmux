@@ -109,7 +109,7 @@ try {
     selectedMode: 'embedded-tui-durable-queue', qualification: 'pending-original-native-records' }
   assert.equal(version.stderr, '')
   // This is the explicitly selected finite sample, not a new Provider version claim.
-  assert.equal(receipt.nativeExecutable.version, 'codex-cli 0.166.0', 'The actual native executable differs from the selected qualification sample')
+  assert.equal(receipt.nativeExecutable.version, 'codex-cli 0.167.0', 'The actual native executable differs from the selected qualification sample')
   const runtime = environment.AGENTMUX_RUNTIME_DIRECTORY, state = environment.AGENTMUX_STATE_DIRECTORY
   daemon = spawn(join(coreRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { env: environment, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
@@ -152,7 +152,7 @@ catch(error){failed(error);receipt.identityError=error.message;try{save()}catch(
     args: [join(config.fixturesRoot, 'a2a-agent-behavior/peer.mjs'), join(privateRoot, 'peer.bytes'), join(privateRoot, 'peer-process.json'), join(privateRoot, 'peer-private-auth.json'), coreRoot], env: environment, injectAgentMuxGuide: false })
   sessions.push(peer)
   const peerAuth = await until(() => readFile(join(privateRoot, 'peer-private-auth.json'), 'utf8').then(JSON.parse, () => null), Boolean, 'Core-issued peer credential', 10_000); secrets.add(peerAuth.capability)
-  const task = `You have accepted a bounded arithmetic delegation from independent AgentMux Session ${peer.agentSessionId}. Your user authorizes computing its upcoming request and reporting one result to that same Session. No other work is authorized. The request has not arrived yet; do not invent or guess it. Reply Ready and finish this turn. When an AgentMux message notification later arrives, handle it within this accepted responsibility and report the result to the user as well.`
+  const task = `You have accepted a bounded arithmetic delegation from independent AgentMux Session ${peer.agentSessionId}. Your user authorizes computing its upcoming request and reporting one result to that same Session. Both Sessions belong to this same local Runtime; address the result with agent send --to-session ${peer.agentSessionId}. No other work is authorized. The request has not arrived yet; do not invent or guess it. Reply Ready and finish this turn. When an AgentMux message notification later arrives, handle it within this accepted responsibility and report the result to the user as well.`
   const modelSession = await client.createAgent({ agentSessionId: 'model-' + suffix, createOperationId: 'model-create-' + suffix,
     providerId: 'codex', executorId: 'private-real-model', workspacePath: workspace, commandOverride: wrapper,
     args: ['--model', model, '--sandbox', 'workspace-write', '--ask-for-approval', 'never', '--no-alt-screen'], env: environment, prompt: task, injectAgentMuxGuide: true })
