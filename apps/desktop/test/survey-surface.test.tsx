@@ -1791,6 +1791,38 @@ it('consumes the reported original Browser favicon through the real event reduce
   expect(useAppStore.getState().surveyZoneSelection).toBe(selected); healthy()
 })
 
+it('keeps a Survey page icon through release and restore and shows the last-seen icon of a cold page from Main', async () => {
+  const seen = 'data:image/png;base64,iVBORw0KGgo=', address = 'https://example.test/seen'
+  const read = vi.spyOn(api.browser, 'getLastSeenFavicons').mockResolvedValue({})
+  const restore = vi.spyOn(api.browser, 'restore').mockImplementation(async id => ({ ...browser, id, url: address, navigationId: 'restored-document' }))
+  await renderApp(); await enterSurvey(); await dom.click('[aria-label="New webpage"]')
+  const first = useAppStore.getState().surveyZoneSelection!, ref = first.active!
+  const surface = () => useAppStore.getState().tabs[ref.tabId]!.regions[ref.regionId]!
+  const created = surface()
+  if (created.kind !== 'browser') throw new Error('Actual Browser creation required')
+  const page = { ...created, url: address }
+  const row = () => [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === first.zoneId)!
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...page, faviconDataUrl: seen } }))
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'released', id: page.id, navigationId: page.navigationId }))
+  await vi.waitFor(() => expect(surface()).toMatchObject({ navigationId: 'restored-document', url: address }))
+  expect(restore).toHaveBeenCalledExactlyOnceWith(page.browserId, expect.anything())
+  expect(surface()).toMatchObject({ faviconDataUrl: seen, faviconRemembered: true })
+  expect(row().querySelector('img')?.getAttribute('src'), 'the restored page keeps its icon until its document reports one').toBe(seen)
+
+  await dom.click('[aria-label="New webpage"]')
+  expect(useAppStore.getState().surveyZoneSelection?.zoneId).not.toBe(first.zoneId)
+  read.mockResolvedValue({ [page.browserId]: { url: address, faviconDataUrl: seen } })
+  await act(async () => useAppStore.setState(state => {
+    const tab = state.tabs[ref.tabId]!, page = tab.regions[ref.regionId]!
+    if (page.kind !== 'browser') return state
+    const { faviconDataUrl: _icon, faviconRemembered: _remembered, ...cold } = page
+    return { tabs: { ...state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, [page.regionId]: { ...cold, navigationId: '', nativeOwnerDeferred: true } } } } }
+  }))
+  await vi.waitFor(() => expect(row().querySelector('img')?.getAttribute('src'), 'a cold page shows the icon Main last saw at its address').toBe(seen))
+  expect(read).toHaveBeenCalledWith([page.browserId])
+  healthy()
+})
+
 async function surveyContext(zoneId: string, gesture: 'pointer' | 'key' | 'shift-f10' = 'pointer') {
   const button = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)?.querySelector<HTMLButtonElement>('.survey-item')
   expect(button).toBeDefined()
