@@ -27,7 +27,8 @@ export class ScreenshotCountdown {
       focusable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true, show: false,
       webPreferences: { preload: join(import.meta.dirname, '../preload/screenshot-countdown.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } })
     window.setAlwaysOnTop(true, 'screen-saver')
-    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    // Without skipTransformProcessType macOS turns the whole app into a UIElement: the Dock icon and ⌘Tab entry vanish.
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     let timer: ReturnType<typeof setTimeout> | undefined, escape = false, settle!: (started: boolean) => void
     const result = new Promise<boolean>(resolve => { settle = resolve })
     let theme: ThemeBootstrap
