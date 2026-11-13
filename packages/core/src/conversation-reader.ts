@@ -399,7 +399,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (!state.viewId) return fail('This read does not name an original accepted view.')
     const retained = port.state.get(state.viewId, ref, state.scope)
     const frame = [...retained.snapshots].find(([, snapshot]) => snapshot.committed && snapshot.revision === retained.revision)
-    if (!frame) return fail('The original accepted view frame is unavailable. Its source and displayed originals are retained.')
+    if (!frame) return fail('The original accepted view frame is unavailable. Its source and displayed originals are retained.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
     state = { ...state, checkpoint: frame[1].checkpoint, snapshotId: frame[0], batch: { index: 0, offset: 0 } }
   } else if (mode === 'changes') {
     const checkpoint = (input as ConversationChangesInput).checkpoint.frontier
@@ -415,14 +415,14 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   }
   if (input.cursor || input.view) {
     const prior = input.cursor ? state : decode(input.view!, ref, 'inspect')
-    if (prior.processDetails !== input.processDetails) return fail('The continuation changed its original process detail representation.')
+    if (prior.processDetails !== input.processDetails) return fail('The continuation changed its original process detail representation.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
   }
   if (input.processDetails) state.processDetails = input.processDetails
   const requestedPreservation = mode === 'inspect' && 'preserveCurrent' in input && input.preserveCurrent === true
   if (state.snapshotId) {
-    if (Boolean(state.preserveCurrent) !== requestedPreservation) return fail('The wire continuation changed its original window preservation policy.')
+    if (Boolean(state.preserveCurrent) !== requestedPreservation) return fail('The wire continuation changed its original window preservation policy.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
   } else if (requestedPreservation) {
-    if (!state.viewId || state.pageIndex === undefined || state.direction || state.batch || state.anchor) return fail('Window preservation requires the original older-page adjacency.')
+    if (!state.viewId || state.pageIndex === undefined || state.direction || state.batch || state.anchor) return fail('Window preservation requires the original older-page adjacency.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     state.preserveCurrent = true
   }
   const preserveCurrent = state.preserveCurrent === true
@@ -432,7 +432,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (!state.viewId) { state.viewId = token.viewId; state.viewRevision = token.viewRevision! }
   }
   const view = state.viewId ? port.state.get(state.viewId, ref, state.scope) : port.state.create(ref, state.checkpoint!, state.processDetails)
-  if (view.processDetails !== state.processDetails) return fail('The accepted view changed its original process detail representation.')
+  if (view.processDetails !== state.processDetails) return fail('The accepted view changed its original process detail representation.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
   const releaseRead = port.state.holdRead(view)
   try {
     state.viewId = view.id
@@ -445,10 +445,10 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     let snapshot: Snapshot
     if (state.snapshotId) {
       const retained = view.snapshots.get(state.snapshotId)
-      if (!retained || !state.batch) return fail('The original frozen window expired. Retain its exact anchor and displayed originals.')
+      if (!retained || !state.batch) return fail('The original frozen window expired. Retain its exact anchor and displayed originals.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
       snapshot = retained
     } else {
-      if (state.viewRevision !== undefined && state.viewRevision !== view.revision || mode === 'changes' && view.revision > 0 && !same(view.checkpoint, state.checkpoint)) return fail('This operation does not continue the accepted window revision and original source cut.')
+      if (state.viewRevision !== undefined && state.viewRevision !== view.revision || mode === 'changes' && view.revision > 0 && !same(view.checkpoint, state.checkpoint)) return fail('This operation does not continue the accepted window revision and original source cut.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
       const history = [...view.history], pageIndex = state.pageIndex ?? history.length, previousPosition = history[pageIndex]
       const originalPort = previousPosition?.head ? { ...port, nativePage: async () => previousPosition.head!.page } : port
       const records = new Map(view.rows.map(record => [record.id, record]))
@@ -602,7 +602,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const parsed = mode === 'changes' ? parseConversationChangesPageForWindow(page, { ...input, ...target, checkpoint: { ...(input as ConversationChangesInput).checkpoint, ...target } } as ConversationChangesInput) : parseConversationReadPageForWindow(page, { ...input, ...target })
     port.signal?.throwIfAborted()
     if (page.window.complete && !snapshot.committed) {
-      if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
+      if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
       view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputWitnesses.accept(snapshot.inputRecords); snapshot.committed = true
     }
     return parsed
