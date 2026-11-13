@@ -1,8 +1,8 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { AgentMuxError, durableWriteFile, parseDeviceConnection, type TrustedDevice, type DeviceConnection, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
+import { mkdir, open, readFile } from 'node:fs/promises'
+import { basename, dirname, extname, join } from 'node:path'
+import { AgentMuxError, DEVICE_OPERATION_WINDOW, durableWriteFile, parseDeviceConnection, type TrustedDevice, type DeviceConnection, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
 
 /** Devices that may hold live authorization at once. Revoked records stay to refuse their keys and do not count. */
 const MAX_DEVICES = 100
@@ -29,6 +29,22 @@ function publicDevice(device: DeviceRecord): TrustedDevice {
     ...(device.revokedAt === undefined ? {} : { revokedAt: device.revokedAt }),
     ...(device.credentialKind === 'relay-key' ? { keyFingerprint: `sha256:${device.credentialHash}` } : {}),
     ...(connection ? { connection } : {}) }
+}
+/** Append-only home of operations that left the device.ls window: one JSON line per record, never rewritten. */
+function operationArchivePath(path: string): string { return join(dirname(path), `${basename(path, extname(path))}-operations.jsonl`) }
+
+/** Append whole lines, then flush the file and the directory entry that names it. */
+async function appendDurably(path: string, text: string): Promise<void> {
+  const handle = await open(path, 'a+', 0o600)
+  try {
+    const { size } = await handle.stat(), last = Buffer.alloc(1)
+    if (size > 0) await handle.read(last, 0, 1, size - 1)
+    // A torn earlier append must not glue its fragment onto the first new line.
+    await handle.writeFile(size > 0 && last[0] !== 0x0a ? '\n' + text : text)
+    await handle.sync()
+  } finally { await handle.close() }
+  const directory = await open(dirname(path), 'r')
+  try { await directory.sync() } finally { await directory.close() }
 }
 function denied(): AgentMuxError { return new AgentMuxError('Device authorization is unavailable or no longer valid.', 'CONTROL_PERMISSION_DENIED') }
 function stateFrom(value: unknown): AuthorityState {
@@ -61,9 +77,11 @@ export class DeviceAuthority {
   private diskUnconfirmed = false
   private readonly readers = new Map<string, Set<AbortController>>()
   private saveTail: Promise<void> = Promise.resolve()
+  private readonly operationArchive: string
 
   private constructor(private readonly path: string, private state: AuthorityState,
     private readonly now: () => number) {
+    this.operationArchive = operationArchivePath(path)
     for (const device of state.devices) if (device.connection !== undefined && !connectionFrom(device.connection)) {
       this.connectionIssues.set(device.deviceId, '设备连接信息无法读取；原身份、授权和连接保留。重新连接可记录当前信息。')
     }
@@ -86,7 +104,7 @@ export class DeviceAuthority {
   get hostId(): string { return this.state.hostId }
   devices(): readonly TrustedDevice[] { return this.state.devices.map(device => ({ ...publicDevice(this.observedDevice(device)),
     online: (this.readers.get(device.deviceId)?.size ?? 0) > 0,
-    ...(device.lastSeenAt === undefined ? {} : { lastSeenAt: device.lastSeenAt }), operations: device.operations ?? [],
+    ...(device.lastSeenAt === undefined ? {} : { lastSeenAt: device.lastSeenAt }), operations: (device.operations ?? []).slice(-DEVICE_OPERATION_WINDOW),
     ...(this.connectionIssues.has(device.deviceId) ? { connectionIssue: this.connectionIssues.get(device.deviceId)! } : {}),
     ...(this.activityIssues.has(device.deviceId) ? { operationIssue: this.activityIssues.get(device.deviceId)! } : {}) })) }
 
@@ -189,15 +207,26 @@ export class DeviceAuthority {
     const target = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
       : first && typeof first === 'object' && 'runId' in first ? String(first.runId)
       : typeof first === 'string' && !/^(write|paste)/.test(method) ? first.slice(0, 160) : 'Host'
-    await this.change(state => ({ ...state, devices: state.devices.map(device => {
-      if (device.deviceId !== source.deviceId) return device
+    await this.change(async state => {
+      const device = state.devices.find(value => value.deviceId === source.deviceId)
+      if (!device) return state
       const operations = [...(device.operations ?? [])]
-      const id = operationId
-      const operation: DeviceOperation = { id, method, target, at: this.now(), result }
-      const index = operations.findIndex(o => o.id === id)
+      const operation: DeviceOperation = { id: operationId, method, target, at: this.now(), result }
+      const index = operations.findIndex(o => o.id === operationId)
       if (index >= 0) operations[index] = operation; else operations.push(operation)
-      return { ...device, lastSeenAt: this.now(), operations: operations.slice(-100) }
-    }) }))
+      let kept = operations
+      // A record leaves the device.ls window for the archive only once the archive holds it, so no write
+      // deletes one. Moving a whole window at a time keeps the extra flush to one per window of operations;
+      // while the archive cannot be written every record stays here and the next operation moves them.
+      if (operations.length > 2 * DEVICE_OPERATION_WINDOW) {
+        try {
+          await appendDurably(this.operationArchive, operations.slice(0, -DEVICE_OPERATION_WINDOW)
+            .map(value => JSON.stringify({ deviceId: device.deviceId, ...value }) + '\n').join(''))
+          kept = operations.slice(-DEVICE_OPERATION_WINDOW)
+        } catch { /* Nothing is lost: the records stay in the authority file. */ }
+      }
+      return { ...state, devices: state.devices.map(value => value.deviceId === device.deviceId ? { ...value, lastSeenAt: this.now(), operations: kept } : value) }
+    })
   }
 
   /** Admission follows a completed encrypted handshake; never accepts a business-supplied identity. */
@@ -239,13 +268,13 @@ export class DeviceAuthority {
     return device
   }
 
-  private async change(update: (state: AuthorityState) => AuthorityState): Promise<void> {
+  private async change(update: (state: AuthorityState) => AuthorityState | Promise<AuthorityState>): Promise<void> {
     const save = this.saveTail.then(async () => {
       if (this.diskUnconfirmed && !await this.reconcileDisk()) {
         for (const device of this.state.devices) this.noteConnectionStorageIssue(device.deviceId)
         throw new AgentMuxError('The original device file has an unconfirmed write and cannot be read. Existing connections remain available; inspect storage and read the original device state before another write.', 'CONTROL_UNAVAILABLE')
       }
-      const next = update(this.state)
+      const next = await update(this.state)
       try { await durableWriteFile(this.path, JSON.stringify(next) + '\n', { requireDirectorySync: true }) }
       catch (error) {
         this.diskUnconfirmed = true
