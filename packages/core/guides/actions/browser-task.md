@@ -1,9 +1,19 @@
 # browser task
 
 <!-- amux:content -->
-Read and run saved Browser task versions
+Edit, publish and run saved Browser task versions
 
 Read `browser task assets --browser <id>` to select an existing immutable version.
+To replace an existing draft, use `browser task edit --browser <id> --asset <id>
+--expected-revision <n> --input <file|->` with its full draft definition. Publish
+that exact saved revision with `browser task publish --browser <id> --asset <id>
+--expected-revision <n>`. Both return the exact asset identity and its new revision;
+publish also reports the actual immutable version number. Definitions and retained
+history are read separately; they are never copied into a write receipt. All
+older versions and runs remain unchanged. These actions only save definitions:
+they cannot approve a human checkpoint, grant Browser access or execute a page.
+On a revision conflict or unconfirmed save, read the original assets again. A
+storage failure retains the live draft with a warning; inspect before retrying.
 Use `browser task reliability --browser <id> --asset <id> --version <n>` to read
 retained version/run/outcome evidence. A completed script is not proof of a successful
 outcome, and zero samples have no pass rate.
