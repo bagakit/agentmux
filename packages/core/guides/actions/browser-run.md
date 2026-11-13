@@ -29,6 +29,12 @@ Elements are addressed by the refs a snapshot hands you — never coordinates.
 Profile or the browser (cookies, site storage, certificate checks, permissions, download behavior,
 creating or closing targets) is refused before it is sent, with what to use instead. Raw `Input.*`
 counts as this program's own input, like `click()`.
+When the page opens an alert, confirm, prompt or leave-page dialog, the page call in flight fails at
+once with a message that names the dialog, instead of waiting out the budget. Calls that need the
+page are refused unsent until it is answered: `dismissDialog()` closes it, `acceptDialog()` says OK
+(`acceptDialog(text)` only for a prompt), and `gotoUrl()` leaves the page. Agreeing to leave a page
+that asks to stay open is the person's decision. A dialog still open when the program ends is
+dismissed, and the outcome is indeterminate, so look at the page first.
 `snapshot(options)` and `snapshotText(options)` accept `scope: "page"|"viewport"`,
 `within` (a unique CSS region in the main document), `withinRef` (an issued ref's actual document),
 `interactiveOnly`, and `maxNodes` (default 200, maximum 1000). Use either within or withinRef.
