@@ -214,16 +214,16 @@ test('callers cannot rewrite the retained original business receipt', async () =
   }, () => ({ action: { verification: { state: 'unverified' } } }))
 })
 
-test('native convenience methods preserve clipboard text and typed cancellation', async () => {
+test('native convenience methods preserve clipboard text and a typed capture failure', async () => {
   await fixture(async ({ connection, calls }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
     assert.equal(await desktop.readClipboardText(), ' \n原文\n ')
     await desktop.writeClipboardText(' \n原文\n ')
     assert.equal(calls.at(-1).params.data, ' \n原文\n ')
-    assert.deepEqual(await desktop.captureScreenshot({ mode: 'display', displayId: 1 }), { state: 'cancelled' })
+    assert.deepEqual(await desktop.captureScreenshot({ mode: 'display', displayId: 1 }), { state: 'failed', error: { code: 'display_not_found', message: 'the requested display is not active' } })
     await desktop.dispose()
-  }, request => request.method === 'clipboardRead' ? { format: 'text', state: 'read', data: ' \n原文\n ', changeCount: 7 } : request.method === 'captureScreenshot' ? { state: 'cancelled' } : { state: 'written', format: 'text', byteLength: Buffer.byteLength(request.params.data), changeCount: 8 })
+  }, request => request.method === 'clipboardRead' ? { format: 'text', state: 'read', data: ' \n原文\n ', changeCount: 7 } : request.method === 'captureScreenshot' ? { state: 'failed', error: { code: 'display_not_found', message: 'the requested display is not active' } } : { state: 'written', format: 'text', byteLength: Buffer.byteLength(request.params.data), changeCount: 8 })
 })
 
 test('clipboard conveniences reject wrong-format and unconfirmed writes', async () => {
@@ -257,9 +257,11 @@ test('invalid capture receipt does not become a cancellation', async () => {
   }, () => ({ state: 'failed' }))
 })
 
-test('capture conveniences reject contradictory cancellation and wrong image format', async () => {
+test('capture conveniences reject a cancellation native cannot produce, pixels on a failure and wrong image format', async () => {
   for (const result of [
+    { state: 'cancelled' },
     { state: 'cancelled', error: { code: 'capture_failed', message: 'failed' } },
+    { state: 'failed', error: { code: 'capture_failed', message: 'failed' }, screenshot: { format: 'png', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 } },
     { state: 'captured', screenshot: { format: 'jpeg', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 } }
   ]) {
     await fixture(async ({ connection }) => {
@@ -280,21 +282,10 @@ test('capture outcome is a machine string, not string-coerced display data', asy
   }, () => ({ state: ['cancelled'] }))
 })
 
-test('selection reports that the host capture surface owns it', async () => {
-  const failure = { state: 'failed', error: { code: 'selection_moved_to_host', message: 'Region selection is provided by the AgentMux Desktop capture surface.' } }
-  await fixture(async ({ connection, calls }) => {
-    const desktop = new NativeDesktop({})
-    desktop.launch = async () => connection
-    assert.deepEqual(await desktop.captureScreenshot({ mode: 'selection' }), failure)
-    assert.deepEqual(calls.at(-1).params, { mode: 'selection' })
-    await desktop.dispose()
-  }, () => failure)
-})
-
 test('display frames keep each display exact and isolate a failed one', async () => {
   const pixels = { png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }
-  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, isMain: true, ...pixels }
-  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, isMain: false, issue: 'display_not_found: gone' }
+  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, ...pixels }
+  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, issue: 'display_not_found: gone' }
   const frames = { state: 'captured', capturedAt: 1000, displays: [main, failed] }
   await fixture(async ({ connection, calls }) => {
     const desktop = new NativeDesktop({})
@@ -317,7 +308,6 @@ test('display frames keep each display exact and isolate a failed one', async ()
     { ...frames, displays: [{ ...main, frame: { ...main.frame, x: null } }] },
     { ...frames, displays: [{ ...main, frame: { ...main.frame, width: 0 } }] },
     { ...frames, displays: [{ ...main, scale: 0 }] },
-    { ...frames, displays: [{ ...main, isMain: 1 }] },
     { ...frames, displays: [{ ...main, issue: 'both' }] },
     { ...frames, displays: [main, { ...withoutPixels, displayId: 3 }] },
     { ...frames, displays: [main, { ...failed, png }] },
@@ -334,6 +324,18 @@ test('display frames keep each display exact and isolate a failed one', async ()
       await desktop.dispose()
     }, () => reply)
   }
+})
+
+test('display capture waits past the default request timeout for slow grabs', async () => {
+  // The fixture connection times requests out after 1000 ms; native may grab several displays for longer.
+  const frames = { state: 'captured', capturedAt: 1000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 }, scale: 1,
+    png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }] }
+  await fixture(async ({ connection }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    assert.deepEqual(await desktop.captureDisplays(), frames)
+    await desktop.dispose()
+  }, (_request, send) => { setTimeout(() => send(frames), 1200) })
 })
 
 test('fragmented UTF8 frames and coalesced responses preserve request boundaries', async () => {

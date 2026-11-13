@@ -79,7 +79,7 @@ private struct SocketPublicationProducer {
               capture["expectedInstanceId"] as? String == instanceId else {
             throw Failure(stage: "capture_identity", code: EINVAL)
         }
-        try response(peer, request: capture, instanceId: instanceId, result: ["state": "cancelled"])
+        try response(peer, request: capture, instanceId: instanceId, result: ["state": "failed", "error": ["code": "display_not_found", "message": "fixture display"]])
         try event("served", extra: ["requestCount": 2, "instanceId": instanceId, "operationId": operationId])
         let closing = readLine()
         guard closing == nil || closing == "close" else { throw Failure(stage: "close_barrier", code: EINVAL) }

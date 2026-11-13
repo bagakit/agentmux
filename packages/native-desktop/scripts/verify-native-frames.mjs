@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 if (process.argv.includes('--help')) {
-  console.log('verify-native-frames.mjs [--keep]\nCompiles the Core display lease and the exact production captureDisplays/displayPixels/BlockingAsync source against a controlled display list, ScreenCaptureKit and PNG encoder, runs the checks and one-branch mutants. No AppKit, real pixels, permission prompt, App assembly or installation. The run directory is removed unless --keep.')
+  console.log('verify-native-frames.mjs [--keep]\nCompiles the Core frame reader and display lease and the exact production capture dispatch and captureDisplays/displayPixels/BlockingAsync source against a controlled display list, ScreenCaptureKit, PNG encoder and exact-source grabs, runs the checks and one-branch mutants. No AppKit, real pixels, permission prompt, App assembly or installation. The run directory is removed unless --keep.')
   process.exit(0)
 }
 assert.equal(process.platform, 'darwin', 'The production capture source compiles only on macOS')
@@ -38,6 +38,7 @@ function slice(source, from, until) {
   return source.slice(start, end)
 }
 const production = {
+  dispatch: slice(operations, '    static func capture(_ params: [String: JSONValue]) -> [String: Any] {', '    private static func capturedRectangle(_ rect:'),
   frames: slice(operations, '    static func captureDisplays() throws', '    private static func captureRect(_ rect:'),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
   lease: readFileSync(core[2], 'utf8'),
@@ -57,7 +58,8 @@ function build(name, mutation) {
   writeFileSync(lease, loaded.lease)
   swiftc([...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', core[0], core[1], lease,
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core.log'))
-  const checks = replaceOnce(replaceOnce(fixture, '/* PRODUCTION_DISPLAY_FRAMES */', loaded.frames), '/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking)
+  const checks = [['/* PRODUCTION_CAPTURE_DISPATCH */', loaded.dispatch], ['/* PRODUCTION_DISPLAY_FRAMES */', loaded.frames],
+    ['/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking]].reduce((source, [marker, code]) => replaceOnce(source, marker, code), fixture)
   const source = join(directory, 'CompiledDisplayFramesChecks.swift')
   writeFileSync(source, checks)
   swiftc([...options, '-parse-as-library', '-I', directory, '-L', directory, '-lAgentMuxNativeMacOSCore',
@@ -72,12 +74,17 @@ function build(name, mutation) {
 }
 
 const mutations = [
+  { name: 'unknown-mode-falls-back-to-main-display', part: 'dispatch', before: 'throw ProviderError.coded("invalid_argument", "mode must be display, rect or window")', after: 'rect = CGDisplayBounds(CGMainDisplayID())', kills: 'selection is an unknown native mode and starts no capture' },
   { name: 'drop-issue', part: 'frames', before: 'entry["issue"] = ', after: '_ = ', kills: 'a display that cannot be captured carries its issue and no pixels' },
   { name: 'empty-success', part: 'frames', before: 'guard displays.contains(where: { $0["png"] != nil }) else {', after: 'guard true else {', kills: 'no captured display is a typed failure, not an empty success' },
-  { name: 'every-display-main', part: 'frames', before: '"isMain": screen.id == CGMainDisplayID()', after: '"isMain": true', kills: 'main display is the OS main display only' },
   { name: 'ignore-scale', part: 'frames', before: 'let width = ceil(frame.width * scale), height = ceil(frame.height * scale)', after: 'let width = ceil(frame.width), height = ceil(frame.height)', kills: "pixels follow each display's own scale" },
   { name: 'show-cursor', part: 'frames', before: 'configuration.showsCursor = false', after: '', kills: 'grabs never include the cursor' },
   { name: 'producer-drops-ownership', part: 'frames', before: 'defer { withExtendedLifetime(ownership) {} }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
+  { name: 'no-frame-budget', part: 'frames', before: 'guard encodedBytes <= remainingFrameBytes else {', after: 'guard true else {', kills: 'a display whose pixels overflow the response frame carries its own issue' },
+  { name: 'budget-not-cumulative', part: 'frames', before: 'remainingFrameBytes -= encodedBytes', after: '_ = encodedBytes', kills: 'a display whose pixels overflow the response frame carries its own issue' },
+  { name: 'ignore-configuration-change', part: 'frames', before: 'guard display.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
+  { name: 'enumerate-per-display', part: 'frames', before: 'content: content.get()', after: 'content: BlockingAsync.run(timeout: 10) { try await SCShareableContent.current }', kills: "one window enumeration serves every display's grab" },
+  { name: 'timestamp-after-grabs', part: 'frames', before: '"capturedAt": capturedAt', after: '"capturedAt": Date().timeIntervalSince1970 * 1000', kills: 'capturedAt is taken before the first grab' },
   { name: 'lease-never-busy', part: 'lease', before: 'guard !occupied else { lock.unlock(); throw Failure.busy }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
 ]
 const receipt = { schema: 'agentmux.native-frames-verification.v1', passed: false, mutants: [] }

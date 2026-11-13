@@ -20,11 +20,13 @@ const mutations = [
   { file: 'client.js', before: '|| ids.has(display.displayId)', after: '', test: 'display frames keep' },
   { file: 'client.js', before: '|| frame.width <= 0', after: '', test: 'display frames keep' },
   { file: 'client.js', before: '|| display.scale <= 0', after: '', test: 'display frames keep' },
-  { file: 'client.js', before: "typeof display.isMain !== 'boolean'", after: 'false', test: 'display frames keep' },
   { file: 'client.js', before: '(display.png === undefined) === (display.issue === undefined)', after: 'false', test: 'display frames keep' },
   { file: 'client.js', before: '|| display.width !== undefined', after: '', test: 'display frames keep' },
   { file: 'client.js', before: "typeof display.engine !== 'string' || !display.engine", after: 'false', test: 'display frames keep' },
   { file: 'client.js', before: 'if (!result.displays.some(display => display.png !== undefined))', after: 'if (false)', test: 'display frames keep' },
+  { file: 'client.js', before: "this.request('captureDisplays', {}, { timeoutMs: 120_000 })", after: "this.request('captureDisplays')", test: 'display capture waits' },
+  { file: 'client.js', before: "!['captured', 'failed'].includes(raw.state)", after: "!['captured', 'cancelled', 'failed'].includes(raw.state)", test: 'capture conveniences reject' },
+  { file: 'client.js', before: "throw invalid('Failed capture contains pixels')", after: '{}', test: 'capture conveniences reject' },
   { file: 'protocol.js', before: "'scroll', 'drag'\n]", after: "'scroll', 'drag', 'captureDisplays'\n]", test: 'display frames keep' }
 ]
 for (const mutation of mutations) {
