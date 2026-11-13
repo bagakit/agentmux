@@ -9,7 +9,7 @@ import { surveySettingsModule } from '../src/renderer/src/components/settings/mo
 
 const ui = vi.hoisted(() => ({ inspect: vi.fn(), open: vi.fn(), save: vi.fn() }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { ui: { inspectDefaultBrowser: ui.inspect, openDefaultBrowserSettings: ui.open }, config: { save: ui.save } } }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: { getState: () => ({ config: null }) } }))
+vi.mock('../src/renderer/src/store', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/store')>(), useAppStore: { getState: () => ({ config: null }) } }))
 const current = (matched = false): BrowserDefaultInspection => ({ platform: 'darwin', outcome: matched ? 'default' : 'not-default', protocols: { http: { state: 'known', isCurrentApplication: matched, application: { name: matched ? 'AgentMux' : 'Another browser', path: 'application-bundle' } }, https: { state: 'known', isCurrentApplication: matched, application: { name: matched ? 'AgentMux' : 'Another browser', path: 'application-bundle' } } } })
 const config = { browser: { startPage: { title: 'Original title', subtitle: 'Original subtitle', icon: '', backgroundImage: '', showHistory: true } } } as AppConfig
 const Pane = surveySettingsModule.Pane
