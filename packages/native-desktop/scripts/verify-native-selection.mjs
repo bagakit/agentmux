@@ -307,8 +307,9 @@ async function exercise(directory, capture) {
     verify(redrawResult.completionAction === undefined, 'Pure capture completion does not leak a host editing intent')
     await host.request('begin', { allowEditing: true })
     await host.request('key', { keyCode: 14 })
+    await host.request('key', { keyCode: 15 })
     await delay(40)
-    verify(host.completions.length === 4, 'Edit shortcut cannot complete an empty selection')
+    verify(host.completions.length === 4, 'Edit and quick-mark shortcuts cannot complete an empty selection')
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
     const editableControls = (await host.request('inspect')).controls
     verify(editableControls.some(button => button.identifier === 'native-selection-edit' && button.enabled), 'Opt-in exposes a real enabled Edit button for the selected image')
@@ -334,25 +335,39 @@ async function exercise(directory, capture) {
     await image('narrow', { width: 280, height: 360, marks: 'collapsed' })
     await image('short', { width: 640, height: 240, marks: 'inline' })
     await host.request('button', { identifier: 'native-selection-edit' })
-    verify((await host.completion(5)).completionAction === 'edit', 'Real Edit button passes the typed editing intent with original geometry')
+    const expanded = await host.completion(5)
+    verify(expanded.completionAction === 'edit' && expanded.editTool === undefined, 'Real Expand button opens the full editor without a start tool')
     await host.request('begin', { allowEditing: true })
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
     await host.request('key', { keyCode: 14 })
-    verify((await host.completion(6)).completionAction === 'edit', 'E shortcut passes the same typed editing intent')
+    const shortcutEdit = await host.completion(6)
+    verify(shortcutEdit.completionAction === 'edit' && shortcutEdit.editTool === undefined, 'E shortcut passes the same full-editor intent')
     await host.request('begin', { allowEditing: true })
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
     await host.request('key', { keyCode: 36 })
-    verify((await host.completion(7)).completionAction === 'capture', 'Return keeps direct completion for an opt-in request')
+    const directReturn = await host.completion(7)
+    verify(directReturn.completionAction === 'capture' && directReturn.editTool === undefined, 'Return keeps direct completion without a start tool for an opt-in request')
+    await host.request('begin', { allowEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('button', { identifier: 'native-selection-mark-arrow' })
+    const arrowMark = await host.completion(8)
+    verify(arrowMark.completionAction === 'edit' && arrowMark.editTool === 'arrow', 'The Arrow quick mark opens the editor with the arrow tool')
+    await host.request('begin', { allowEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('key', { keyCode: 15 })
+    const rectMark = await host.completion(9)
+    verify(rectMark.completionAction === 'edit' && rectMark.editTool === 'rect', 'R starts the editor with the rectangle tool')
     await host.request('begin')
     await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
     const pureControls = (await host.request('inspect')).controls
-    verify(!pureControls.some(button => button.identifier === 'native-selection-edit'), 'No opt-in means no edit control without a consumer')
+    verify(!pureControls.some(button => button.identifier === 'native-selection-edit' || markIds.includes(button.identifier)), 'No opt-in means no edit or quick-mark control without a consumer')
     await host.request('key', { keyCode: 14 })
+    await host.request('key', { keyCode: 15 })
     await delay(40)
-    verify(host.completions.length === 7, 'No opt-in means E cannot open an editor or complete selection')
+    verify(host.completions.length === 9, 'No opt-in means E and R cannot open an editor or complete selection')
     await host.request('key', { keyCode: 53 })
-    verify((await host.completion(8)).state === 'cancelled', 'Pure capture retains cancellation after an unused edit shortcut')
-    let count = 8
+    verify((await host.completion(10)).state === 'cancelled', 'Pure capture retains cancellation after unused edit shortcuts')
+    let count = 10
     const globalDrag = async (display, from, to) => host.request('drag', { displayId: display.displayId,
       from: point(from.x - display.frame.x, from.y - display.frame.y), to: point(to.x - display.frame.x, to.y - display.frame.y) })
     const confirmGlobal = async expected => {
@@ -451,6 +466,11 @@ const mutations = [
   { name: 'color-copy-worker', path: view, before: 'colorCopyQueue.async { [weak self] in', after: 'DispatchQueue.main.async { [weak self] in' },
   { name: 'color-copy-receipt', path: view, before: 'failure == nil ? "Copied \\(hex)" : "Copy unconfirmed · press C to retry"', after: '"Copied \\(hex)"' },
   { name: 'color-copy-key', path: view, before: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: copyPointerColor()', after: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: break' },
+  { name: 'mark-button-tool', path: view, before: 'complete(action: .edit, tool: Self.quickMarks[index].tool)', after: 'complete(action: .edit)' },
+  { name: 'mark-key-tool', path: view, before: 'if confirmButton.isEnabled { complete(action: .edit, tool: mark.tool) }', after: 'if confirmButton.isEnabled { complete(action: .edit) }' },
+  { name: 'mark-key-opt-in', path: view, before: 'if allowEditing, plain, let mark = Self.quickMarks.first', after: 'if plain, let mark = Self.quickMarks.first' },
+  { name: 'capture-carries-tool', path: view, before: 'editTool: action == .edit ? tool : nil', after: 'editTool: tool ?? "rect"' },
+  { name: 'consumer-capture-tool', path: operationsSource, before: 'if allowEditing, selection.completionAction == .edit, let tool = selection.editTool', after: 'if allowEditing, let tool = selection.editTool' },
   { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
   { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbarFrame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
   { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },

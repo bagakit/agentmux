@@ -307,6 +307,16 @@ test('editable selection requires the original opt-in and exact completion inten
       await desktop.dispose()
     }, () => ({ state: 'captured', screenshot: image, completionAction: action }))
   }
+  for (const tool of ['rect', 'arrow', 'note', 'pixelate', 'text']) {
+    await fixture(async ({ connection }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true })
+      assert.equal(result.completionAction, 'edit')
+      assert.equal(result.editTool, tool)
+      await desktop.dispose()
+    }, () => ({ state: 'captured', screenshot: image, completionAction: 'edit', editTool: tool }))
+  }
   for (const [params, result] of [
     [{ mode: 'selection' }, { state: 'captured', screenshot: image, completionAction: 'edit' }],
     [{ mode: 'selection', allowEditing: false }, { state: 'captured', screenshot: image, completionAction: 'capture' }],
@@ -315,7 +325,12 @@ test('editable selection requires the original opt-in and exact completion inten
     [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'annotate' }],
     [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: ['edit'] }],
     [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', completionAction: 'edit' }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'failed', error: { code: 'pixels_failed', message: 'Original capture failed' }, completionAction: 'capture' }]
+    [{ mode: 'selection', allowEditing: true }, { state: 'failed', error: { code: 'pixels_failed', message: 'Original capture failed' }, completionAction: 'capture' }],
+    [{ mode: 'selection' }, { state: 'captured', screenshot: image, editTool: 'rect' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'capture', editTool: 'arrow' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: 'ellipse' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: ['rect'] }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', editTool: 'rect' }]
   ]) {
     await fixture(async ({ connection }) => {
       const desktop = new NativeDesktop({})

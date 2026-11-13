@@ -52,11 +52,12 @@ private enum NativeSelectionRequest {
         ControlledIO.shared.selectorCall()
         try copyColor("#1A2B3C")
         let pixels = try load(NativeSelectionLoading())
-        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: allowEditing ? .edit : .capture, pixels: pixels)
+        let forced = ControlledIO.shared.takeChoice()
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: forced?.action ?? (allowEditing ? .edit : .capture), editTool: forced?.tool, pixels: pixels)
     }
 }
 private enum NativeSelectionCompletionAction: String { case capture, edit }
-private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let pixels: NativeSelectionPixels }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; let pixels: NativeSelectionPixels }
 private final class NativeSelectionLoading: @unchecked Sendable {}
 private final class NativeSelectionPixels: @unchecked Sendable {
     func compose(_ rect: CGRect) throws -> (image: String, scale: Double, engine: String) {
@@ -74,6 +75,9 @@ private final class ControlledIO: @unchecked Sendable {
     func copied(format: String?, value: String?) { lock.lock(); colors.append((format, value)); lock.unlock() }
     func validColorCopies() -> Bool { lock.lock(); defer { lock.unlock() }; return !colors.isEmpty && colors.allSatisfy { $0.0 == "text" && $0.1 == "#1A2B3C" } }
     private var firstCaptured = false
+    private var choice: (action: NativeSelectionCompletionAction, tool: String?)?
+    func force(_ action: NativeSelectionCompletionAction, tool: String?) { lock.lock(); choice = (action, tool); lock.unlock() }
+    func takeChoice() -> (action: NativeSelectionCompletionAction, tool: String?)? { lock.lock(); defer { choice = nil; lock.unlock() }; return choice }
     func selectorCall() { lock.lock(); selectors += 1; lock.unlock() }
     func selectorCount() -> Int { lock.lock(); defer { lock.unlock() }; return selectors }
     func pixelCall() -> Int { lock.lock(); defer { lock.unlock() }; pixels += 1; return pixels }
@@ -106,6 +110,16 @@ private struct SelectionCaptureConsumerChecks {
         check("production pure capture omits host editing intent", next["completionAction"] == nil)
         let editable = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)])
         check("production editable capture retains exact selector editing intent", editable["state"] as? String == "captured" && editable["completionAction"] as? String == "edit")
+        check("production full-editor intent carries no start tool", editable["editTool"] == nil)
+        io.force(.edit, tool: "arrow")
+        let marked = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)])
+        check("production quick mark passes its exact start tool", marked["completionAction"] as? String == "edit" && marked["editTool"] as? String == "arrow")
+        io.force(.capture, tool: "rect")
+        let direct = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)])
+        check("production direct capture never emits a start tool", direct["completionAction"] as? String == "capture" && direct["editTool"] == nil)
+        io.force(.edit, tool: "text")
+        let unopted = NativeDesktopOperations.capture(["mode": .string("selection")])
+        check("production start tool requires the host editing opt-in", unopted["state"] as? String == "captured" && unopted["editTool"] == nil && unopted["completionAction"] == nil)
         let disabled = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(false)])
         check("production explicit false remains a pure capture", disabled["state"] as? String == "captured" && disabled["completionAction"] == nil)
         let invalid = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .string("true")])

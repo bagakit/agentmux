@@ -77,6 +77,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                                "rect": choice.map { self.rect($0.rectangle) } as Any? ?? NSNull(), "count": self.completions,
                                "visiblePickerWindows": self.pickerViews().count]
                     if allowEditing, let choice { receipt["completionAction"] = choice.completionAction.rawValue }
+                    // Reported without the opt-in gate so a leaked tool is visible.
+                    if let tool = choice?.editTool { receipt["editTool"] = tool }
                     self.emit(receipt)
                 case let .failure(error):
                     var receipt: [String: Any] = ["event": "completion", "state": "failed", "message": String(describing: error),

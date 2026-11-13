@@ -36,7 +36,7 @@ private func nativeErrorPayload(_ error: Error) -> [String: String] {
     return ["code": "fixture_unexpected", "message": String(describing: error)]
 }
 private enum NativeSelectionCompletionAction: String { case capture, edit }
-private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let pixels: NativeSelectionPixels }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; let pixels: NativeSelectionPixels }
 private enum NativeSelectionRequest {
     static func run(allowEditing: Bool = false,
         copyColor: @escaping @Sendable (String) throws -> Void,
@@ -46,7 +46,7 @@ private enum NativeSelectionRequest {
         guard pixels.displays.contains(where: { $0.image != nil }) else {
             throw NativeScreenSelectionError(code: "display_capture_unavailable", message: pixels.displays.compactMap(\.issue).joined(separator: "\n"))
         }
-        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: .capture, pixels: pixels)
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: .capture, editTool: nil, pixels: pixels)
     }
 }
 private func onMain<T>(_ body: () throws -> T) rethrows -> T { try body() }
