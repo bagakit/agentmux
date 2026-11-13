@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { DemandAlignment } from '@agentmux/demand/goals'
 import type { DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlan, GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { projectGoalPlan } from '@agentmux/demand/goal-plan'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { goalPlanColumns, goalPlanHighlight } from '../src/renderer/src/components/GoalPlanGraph'
+import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight } from '../src/renderer/src/components/GoalPlanGraph'
+import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
@@ -104,5 +105,37 @@ describe('plan graph projection helpers', () => {
     const projection = projectGoalPlan(plan(nodes), [], criteria)
     expect(goalPlanColumns(projection).map(column => column.map(item => item.node.id))).toEqual([['api', 'docs'], ['ui'], ['release']])
     expect(goalPlanHighlight(projection)).toBe('api')
+  })
+})
+
+describe('plan graph navigation and list progress', () => {
+  it('opens the exact executor and owner Agents of a node attempt, and names a failed open in place', async () => {
+    seed(goal({ plan: plan(nodes), delegations: [reported('api')] }))
+    await dom.render(<GlobalBoardSurface />)
+    const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined as never)
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-node="api"] .goal-plan-node__head')!.click())
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-open="executor"]')!.click())
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-open="owner"]')!.click())
+    expect(open.mock.calls.map(call => call[0])).toEqual([expect.stringContaining('worker-api'), expect.stringContaining('mote')])
+    open.mockRejectedValueOnce(new Error('The original Agent is not open on this Mac.'))
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-open="executor"]')!.click())
+    expect(graph()!.querySelector('[role="status"]')!.textContent).toBe('The original Agent is not open on this Mac.')
+    // A node without an attempt offers no Agent to open.
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-node="docs"] .goal-plan-node__head')!.click())
+    expect(graph()!.querySelector('[data-goal-plan-detail="docs"] [data-goal-plan-open]')).toBeNull()
+    open.mockRestore()
+  })
+
+  it('shows done over live nodes as a ring in the Goal row', async () => {
+    useAppStore.setState({ demands: { goal: goal({ plan: plan([...nodes, node('gone', [], { cancelled: true })], [pass('api')]), delegations: [reported('api')] }) }, selectedDemandId: null, mainSurface: 'board' })
+    await dom.render(<GlobalBoardSurface />)
+    const ring = dom.container.querySelector<HTMLElement>('[data-demand-id="goal"] [data-goal-plan-ring]')!
+    expect(ring.dataset.goalPlanRing).toBe('1/4')
+    expect(ring.getAttribute('aria-label')).toBe('Plan 1 of 4 done')
+  })
+
+  it('draws a dependency as a smooth left-to-right curve between its anchors', () => {
+    expect(goalPlanEdgePath({ x: 10, y: 20 }, { x: 110, y: 60 })).toBe('M 10 20 C 60 20, 60 60, 110 60')
+    expect(goalPlanEdgePath({ x: 0, y: 0 }, { x: 20, y: 0 })).toBe('M 0 0 C 24 0, -4 0, 20 0')
   })
 })
