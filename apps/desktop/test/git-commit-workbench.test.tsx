@@ -284,3 +284,16 @@ it('mounts only the rows near the viewport for a large commit and filters every 
   expect(element.querySelector('[aria-label="Open diff for src/needle.ts"]')).not.toBeNull()
   expect(element.querySelector('.changed-file-list__count')?.textContent).toBe('1 of 5001')
 })
+
+it('shows rows when commit details open with an already read large commit', async () => {
+  // Product reads arrive after the article mounts, so the workbench above never mounts both at once.
+  // A ready result does: the list must still get its scroll element after that first commit.
+  const large = details()
+  large.entries = Array.from({ length: 2000 }, (_, index) => ({ path: `icons/glyph-${index}.svg`, origPath: null, change: 'added' as const }))
+  const { GitCommitDetails } = await import('../src/renderer/src/features/git/commit/GitCommitDetails')
+  element = document.createElement('div'); document.body.append(element); root = createRoot(element)
+  await act(async () => root!.render(<GitCommitDetails regionId="opened-ready" selection={{ commitOid: large.commit.oid, parentOid: large.snapshot.parentOid }}
+    result={large} loading={false} error={null} onReload={() => {}} onSelectParent={() => {}} onSelectFile={() => {}} />))
+  await vi.waitFor(() => expect(element.querySelectorAll('.git-workbench__files button').length).toBeGreaterThan(0))
+  expect(element.querySelectorAll('.git-workbench__files button').length).toBeLessThan(100)
+})
