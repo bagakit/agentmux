@@ -185,6 +185,21 @@ describe('mounted player', () => {
     expect(container.textContent).not.toContain('Format not supported')
   })
 
+  it('fits the stage to the picture so the controls sit on it, not on letterbox black', async () => {
+    const observers: Array<() => void> = []
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback) } observe() {} disconnect() {} })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1000)
+    await render(<MediaPlayer lease={lease()} name="wide.mp4" onRetry={() => {}} />)
+    define(media(), { videoWidth: 1920, videoHeight: 1080, duration: 30 })
+    await act(async () => { media().dispatchEvent(new Event('loadedmetadata')) })
+    const stage = container.querySelector<HTMLElement>('.media-player__stage')!
+    expect(stage.hasAttribute('data-fitted')).toBe(true)
+    expect(stage.style.getPropertyValue('--media-fit-width')).toBe('1000px')
+    expect(stage.style.getPropertyValue('--media-fit-height')).toBe('562px')
+    expect(stage.querySelector('.media-player__controls')).not.toBeNull()
+  })
+
   it('video with no decodable picture says so and moves to the audio card without reloading the element', async () => {
     await render(<MediaPlayer lease={lease()} name="voice.mp4" onRetry={() => {}} />)
     const video = media()
