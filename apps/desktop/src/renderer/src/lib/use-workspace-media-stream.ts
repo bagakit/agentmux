@@ -1,32 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
-import { useAppStore } from '../store'
+import { workspaceResourceKey, useWorkspaceResourceKey } from './workspace-resource-key'
 import type { MediaLease, MediaResume } from '../components/MediaPlayer'
 
 type Failure = { status: string; message: string }
 
-type AppConfig = ReturnType<typeof useAppStore.getState>['config']
-
-/** The exact Workspace resource a lease was opened against: same id, Host and path. */
-function resourceKey(workspaceId: string, config: AppConfig = useAppStore.getState().config): string {
-  const workspace = config?.workspaces.find(item => item.id === workspaceId)
-  return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
-}
 
 /**
  * One playback lease for one visible File view. Hidden, retried, retargeted or unmounted views
  * release it, so a lease never outlives the view that asked for it and a URL is never reused.
  */
 export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean) {
-  // Recompute only when config changes; every other store update returns the cached key in O(1).
-  const selectResource = useMemo(() => {
-    let config: AppConfig | undefined, key = ''
-    return (state: ReturnType<typeof useAppStore.getState>) => {
-      if (state.config !== config) { config = state.config; key = resourceKey(workspaceId, config) }
-      return key
-    }
-  }, [workspaceId])
-  const resource = useAppStore(selectResource)
+  const resource = useWorkspaceResourceKey(workspaceId)
   const [attempt, setAttempt] = useState(0)
   const reload = useCallback(() => setAttempt(value => value + 1), [])
   // One per File target: hiding, retrying or a new lease of the same File resume here; another File starts fresh.
@@ -37,7 +22,7 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
   useEffect(() => {
     if (!enabled) return
     let cancelled = false, id: string | null = null
-    const current = () => !cancelled && resourceKey(workspaceId) === owner.resource
+    const current = () => !cancelled && workspaceResourceKey(workspaceId) === owner.resource
     void api.files.openMediaStream(workspaceId, path).then(result => {
       if (result.status === 'ready') {
         id = result.id

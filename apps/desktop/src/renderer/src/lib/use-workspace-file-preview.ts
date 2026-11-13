@@ -2,30 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import type { WorkspaceFilePreviewReadOptions } from '../../../shared/workspace-file-preview'
 import { useAppStore } from '../store'
+import { workspaceResourceKey, useWorkspaceResourceKey } from './workspace-resource-key'
 
 type PreviewResult = Awaited<ReturnType<typeof api.files.readPreview>>
 export type ReadyFilePreview = Extract<PreviewResult, { status: 'ready' }>
 type Failure = { status: string; message: string }
 
-function resourceKey(workspaceId: string): string {
-  const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)
-  return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
-}
 
 /** Main owns file bytes. A read is admitted only by its original resource and lifecycle. */
 export function useWorkspaceFilePreview(workspaceId: string, path: string, enabled = true, expectedResource?: WorkspaceFilePreviewReadOptions['expectedResource']) {
-  const selectResource = useMemo(() => {
-    let config: ReturnType<typeof useAppStore.getState>['config'] | undefined, key = ''
-    return (state: ReturnType<typeof useAppStore.getState>) => {
-      if (state.config !== config) {
-        config = state.config
-        const workspace = config?.workspaces.find(item => item.id === workspaceId)
-        key = JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
-      }
-      return key
-    }
-  }, [workspaceId])
-  const resource = useAppStore(selectResource)
+  const resource = useWorkspaceResourceKey(workspaceId)
   const [attempt, setAttempt] = useState(0)
   const [epoch, setEpoch] = useState(0)
   const owner = useMemo(() => ({ valid: true, resource }), [resource, path, enabled, attempt, epoch, expectedResource?.hostId, expectedResource?.workspacePath])
@@ -38,13 +24,13 @@ export function useWorkspaceFilePreview(workspaceId: string, path: string, enabl
     // Observe transitions, including A → B → A inside one React batch. Unrelated store updates are O(1).
     const unsubscribe = useAppStore.subscribe((next, previous) => {
       if (next.config === previous.config) return
-      const current = resourceKey(workspaceId)
+      const current = workspaceResourceKey(workspaceId, next.config)
       if (current === observed) return
       observed = current
       owner.valid = false
       setEpoch(value => value + 1)
     })
-    const current = () => !cancelled && owner.valid && resourceKey(workspaceId) === owner.resource
+    const current = () => !cancelled && owner.valid && workspaceResourceKey(workspaceId) === owner.resource
     void api.files.readPreview(workspaceId, path, expectedResource ? { expectedResource } : undefined).then(result => {
       if (!current()) return
       if (result.status === 'ready') setLoaded({ owner, result })
