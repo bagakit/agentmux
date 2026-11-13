@@ -184,7 +184,7 @@ app.whenReady().then(async () => {
           if (narrow) { win.setContentSize(520,980);await until('innerWidth===520') }
           await until(exists(dialog + ' [data-entity-kind="group"]'))
           await until('(()=>{const image=document.querySelector(' + JSON.stringify(dialog + ' [data-entity-kind="group"] img') + ');return image?.complete&&image.naturalWidth>0})()')
-          result.avatarFixture = { asset: 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png', source: 'Repository brand artwork supplied as a synthetic observed group profile; no live platform or person identity claim', decoded: true }
+          result.avatarFixture = { asset: 'packages/client-ui/brand/app-icons/classic.png', source: 'Repository brand artwork supplied as a synthetic observed group profile; no live platform or person identity claim', decoded: true }
           await capture('entity-group-overview-' + (narrow ? 'narrow-light' : 'wide-dark'))
           assert.equal(await read('document.querySelector(' + JSON.stringify(dialog + ' [data-direction="incoming"]') + ')!==null&&document.querySelector(' + JSON.stringify(dialog + ' [data-direction="outgoing"]') + ')!==null'),true)
           await click('[aria-label="Close group setup"]');await until('!document.querySelector(' + JSON.stringify(dialog) + ')')

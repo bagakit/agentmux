@@ -76,7 +76,7 @@ app.whenReady().then(async () => {
         await topics.ensureMote(scratch, id); await topics.renameTitle(scratch, id, title)
         fs.writeFileSync(path.join(directory(id), 'refs/retained.txt'), 'Original notes for ' + id + '\n')
         fs.mkdirSync(path.join(directory(id), '.agentmux', 'avatars'))
-        fs.copyFileSync(path.join(repository, 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png'), path.join(directory(id), '.agentmux', 'avatars', 'retained.png'))
+        fs.copyFileSync(path.join(repository, 'packages/client-ui/brand/app-icons/classic.png'), path.join(directory(id), '.agentmux', 'avatars', 'retained.png'))
       }
       await topics.ensure(scratch, ordinary, 'Ordinary Topic')
     } else {

@@ -13,7 +13,7 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
 import type { ConnectionHostingTarget } from '../../../src/shared/contracts'
 import { fixturePath } from '../../lib/fixture-values.mjs'
-import observedGroupAvatar from '../../../src/renderer/src/assets/pmo-teams-topic-avatar.png'
+import observedGroupAvatar from '../../../../../packages/client-ui/brand/app-icons/classic.png'
 import '../../../src/renderer/src/styles/index.css'
 
 const settingsCatalog = createSettingsCatalog([larkSettingsModule, discordSettingsModule])

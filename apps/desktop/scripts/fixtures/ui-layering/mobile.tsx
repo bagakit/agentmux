@@ -5,7 +5,7 @@ import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import type { AgentMuxAgentSession, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
 import { MobileMailbox } from '../../../../mobile/src/conversation/MobileMailbox'
 import { createBrowserPlatform } from '../../../../mobile/src/platform/browser'
-import originalImage from '../../../../mobile/src/assets/dragon.png?inline'
+import originalImage from '../../../../../packages/client-ui/brand/app-icons/classic.png?inline'
 import '@agentmux/client-ui/styles.css'
 import '../../../../mobile/src/mobile.css'
 

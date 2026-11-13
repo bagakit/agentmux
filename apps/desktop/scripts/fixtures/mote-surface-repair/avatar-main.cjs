@@ -11,7 +11,7 @@ app.whenReady().then(async()=>{
   const workspacePath=path.join(privateRoot,'workspace','.agentmux','scratch'),original=path.join(workspacePath,'topic--launcher--leader')
   await fs.mkdir(original,{recursive:true})
   const originalFiles=require(path.join(path.dirname(html),'avatar-files.cjs'))
-  const png=await fs.readFile(path.resolve(__dirname,'../../../src/renderer/src/assets/pmo-teams-topic-avatar.png'))
+  const png=await fs.readFile(path.resolve(__dirname,'../../../../../packages/client-ui/brand/app-icons/classic.png'))
   const ref=await originalFiles.saveObjectAvatarFile(original,png)
   ipcMain.handle('fixture:read-immutable-avatar',async(_event,requested)=>{
    assert.deepEqual(requested,ref)

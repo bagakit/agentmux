@@ -25,7 +25,7 @@ assert.match(guard, /(['"])\.\.\/shared\/mote-avatars\.js\1/)
 guard = guard.replace(/(['"])\.\.\/shared\/mote-avatars\.js\1/, JSON.stringify(shared))
 const { decodeMoteAvatar, moteAvatarPng } = await import(dataModule(guard))
 const { controlledNativeImage, imagePng } = await import(dataModule(compiledModule('apps/desktop/test/fixtures/mote-identity-image.ts')))
-const originalFile = path.join(repository, 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png')
+const originalFile = path.join(repository, 'packages/client-ui/brand/app-icons/classic.png')
 const originalBytes = fs.readFileSync(originalFile), originalSha256 = hash(originalBytes)
 assert.ok(originalBytes.length > 0)
 const receipt = { schema: 'agentmux.mote-paperdoll-image-seed-source.v1', passed: false, source: { path: path.relative(repository, main), sha256: hash(source) }, sources,

@@ -1,5 +1,5 @@
 import { moteConfig, moteTopics } from '../../../test/fixtures/mote-workface'
-import defaultAvatar from '../../../src/renderer/src/assets/pmo-teams-topic-avatar.png'
+import defaultAvatar from '../../../../../packages/client-ui/brand/app-icons/classic.png'
 
 // Visual-only bridge for the AgentMux Browser preview of the maintained real App fixture.
 // The isolated native probe keeps the real ScratchTopics file owner and restart proof.

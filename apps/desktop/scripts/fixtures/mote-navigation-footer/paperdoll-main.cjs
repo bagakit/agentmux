@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
       assert.equal(await topics.read(scratch, primary), null, 'Ordinary initialization creates the absent primary')
       for (const [id, title] of [[custom, 'Analyst with a long persistent name'], [quiet, 'Quiet collaborator']]) { await topics.ensureMote(scratch, id); await topics.renameTitle(scratch, id, title) }
       await topics.ensure(scratch, ordinary, 'Ordinary Topic')
-      const originalImageFile = path.join(repository, 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png')
+      const originalImageFile = path.join(repository, 'packages/client-ui/brand/app-icons/classic.png')
       const originalPng = fs.readFileSync(originalImageFile), originalImage = nativeImage.createFromBuffer(originalPng)
       assert.ok(originalPng.length > 0 && !originalImage.isEmpty(), 'The original user image is nonempty and decodable')
       const crop = originalImage.resize({ width: 256, height: 256, quality: 'best' }), png = crop.toPNG()
@@ -339,7 +339,7 @@ app.whenReady().then(async () => {
     assert.equal(initial.bridgeSubscriptions, 1, 'The original router has one transport subscription')
     if (phase === 'seed') {
       await open(); const baseline = await facts()
-      assert.equal(baseline.ui.entry.source, 'automatic'); assert.match(baseline.ui.entry.image, /pmo-teams-topic-avatar/)
+      assert.equal(baseline.ui.entry.source, 'automatic'); assert.match(baseline.ui.entry.image, /classic/)
       await capture('paperdoll-primary-default')
       if(moteAmbient){await click(button('Open Mote Space'));await until('!window.motePaperdollProof.facts().ui.visible','original Space entry');await call('showSpaceNavigation');await pause(180);await ambientProof('space-original-assets');await open()}
       const originalColors=await colorProof('opened-original')

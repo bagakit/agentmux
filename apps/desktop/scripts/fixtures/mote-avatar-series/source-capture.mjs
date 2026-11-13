@@ -91,7 +91,7 @@ try {
   await fs.mkdir(amplified)
   const retainedFace = { id:'retained',title:'Retained original face',definition:{kind:'face2d',face:{kind:'face',shape:'soft',palette:'mint',eyes:'round',brows:'soft',mouth:'smile',accessory:'tuft'}} }
   await fs.writeFile(path.join(amplified,'series.json'),JSON.stringify({schema:'agentmux.avatar-series.v1',entries:[...Array(200000).fill(null),retainedFace]}))
-  const imageBytes = await fs.readFile(path.join(root,'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png'))
+  const imageBytes = await fs.readFile(path.join(root,'packages/client-ui/brand/app-icons/classic.png'))
   function texturedGlb(png) {
     const position = Buffer.from(new Float32Array([-1,-1,0,1,-1,0,0,1,0]).buffer)
     const binary=Buffer.concat([position,png,Buffer.alloc((4-png.length%4)%4)])

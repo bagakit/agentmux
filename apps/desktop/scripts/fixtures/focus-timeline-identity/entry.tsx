@@ -11,7 +11,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } f
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
-import originalMoteAsset from '../../../src/renderer/src/assets/pmo-teams-topic-avatar.png?inline'
+import originalMoteAsset from '../../../../../packages/client-ui/brand/app-icons/classic.png?inline'
 import '../../../src/renderer/src/styles/index.css'
 declare const __AGENTMUX_FOCUS_IDENTITY_SLICE__: string
 
