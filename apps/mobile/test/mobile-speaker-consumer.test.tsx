@@ -19,9 +19,9 @@ it.each(['exact', 'wrong-SID'] as const)('reads the recorded peer speaker throug
   const view = await mount(<MobileConversationSurface {...props} />)
   const message = view.element.querySelector('[data-message-id="captured:original-peer-message"]')!
   expect(message).not.toBeNull()
-  expect(message.querySelector('.log-turn__who')?.textContent).toBe(result === 'exact' ? 'claude Agent' : 'Agent')
+  expect(message.querySelector('.log-turn__who')?.textContent).toBe(result === 'exact' ? 'Claude' : 'Agent')
   expect(message.querySelector('.log-turn__sender-id')?.textContent).toContain('peer')
-  expect(message.textContent).not.toContain('gemini Agent')
+  expect(message.textContent).not.toContain('Gemini')
   pointRead.mockClear(); fullRead.mockClear()
   await view.render(<MobileConversationSurface {...props} />)
   expect(pointRead.mock.calls.map(([id]) => id)).toContain('peer')

@@ -99,7 +99,10 @@ it('keeps one toolbar mode switch and exposes PTY size and keys only during expl
   expect(view.node.querySelector('.mobile-terminal-actions')).toBeNull()
   expect(view.node.querySelector('.mobile-terminal-keys')).toBeNull()
   await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
-  const size = view.node.querySelector<HTMLButtonElement>('.mobile-terminal-keys > button')!
+  // Movement and stop keys lead the fixed keypad; PTY size is its last, quieter entry.
+  const keys = [...view.node.querySelectorAll<HTMLButtonElement>('.mobile-terminal-keys > button')]
+  expect(keys[0]?.getAttribute('aria-label')).toBe('终端 Esc')
+  const size = keys.at(-1)!
   expect(size.textContent).toBe('PTY 尺寸'); expect(size.disabled).toBe(false)
   expect(view.node.querySelector('[aria-label="终端 Esc"]')).not.toBeNull()
   await act(async () => size.click())
