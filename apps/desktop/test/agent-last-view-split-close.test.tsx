@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useMemo } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -20,6 +20,10 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { sessionStopReceipt } from './helpers/session-stop-receipt'
+import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
+import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
+import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
+import { regionExecutionHost } from '../src/renderer/src/lib/region-execution-host'
 
 const initial = useAppStore.getState()
 let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
@@ -38,7 +42,8 @@ beforeEach(() => {
   useAppStore.setState({ config: composerConfig, sessions: [lonely, shared], loading: false, mainSurface: 'workbench', activeWorkspaceId: 'workspace',
     tabs: { [split.id]: split, [elsewhere.id]: elsewhere }, layouts: { workspace: createWorkspaceLayout('group', [split.id, elsewhere.id]) },
     agentNames: { [lonely.id]: 'Lonely Reviewer' },
-    closingWorkbenchViews: {}, closeTabRequest: null, closeRegionRequest: null, error: null, dirtyDocuments: {}, prewarmTerminal: vi.fn() })
+    closingWorkbenchViews: {}, closeTabRequest: null, closeRegionRequest: null, error: null, dirtyDocuments: {},
+    agentOperations: {}, agentComposerDrafts: { [lonely.id]: 'Original unsent draft' }, prewarmTerminal: vi.fn() })
   useAppStore.getState().activateTab('workspace', 'group', split.id)
   vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) =>
     control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
@@ -48,7 +53,21 @@ afterEach(async () => {
   await act(async () => root.unmount()); element.remove(); overlay.remove()
   vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
 })
-async function mount() { await act(async () => root.render(<WorkspaceWorkbench workspaceId="workspace" />)) }
+// Real presentation consumers read the original Store operation independently of the isolated PTY body.
+function FeedbackConsumers() {
+  const project = useMemo(createFocusProjectionSelector, [])
+  const { contexts } = useAppStore(project)
+  return <aside>
+    {contexts.filter(context => context.id === lonely.id).map(context => <FocusContextRow key={context.id} context={context} selected={false} onSelect={() => {}} />)}
+    <div data-original-region-header=""><AgentRegionHeader name="Lonely Reviewer" executorLabel="Codex"
+      sessionId={lonely.id} sessionKind="agent" executionHost={regionExecutionHost(lonely)}
+      regionId="lonely-region" readOnly={false} onHistory={undefined} /></div>
+    <input aria-label="Neighboring work" defaultValue="Keep working" />
+  </aside>
+}
+async function mount(feedback = false) {
+  await act(async () => root.render(<><WorkspaceWorkbench workspaceId="workspace" />{feedback ? <FeedbackConsumers /> : null}</>))
+}
 async function closeSplit(regionId: string) {
   const close = element.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"] .workbench-region__close`)
   expect(close, `Close split on ${regionId}`).not.toBeNull(); await act(async () => close!.click())
@@ -60,6 +79,74 @@ async function click(label: string) {
 }
 const dialog = () => document.querySelector('[role="dialog"]')
 const regions = () => Object.keys(useAppStore.getState().tabs[split.id]!.regions)
+
+async function askClose(kind: 'tab' | 'region') {
+  if (kind === 'region') await closeSplit('lonely-region')
+  else {
+    const close = element.querySelector<HTMLElement>(`.workbench-tab[data-workbench-tab-id="${split.id}"] .workbench-tab__close`)
+    expect(close).not.toBeNull()
+    await act(async () => close!.click())
+  }
+  expect(dialog()?.textContent).toContain('Stop Agent Session?')
+}
+
+it.each(['tab', 'region'] as const)('%s Stop & Close dismisses immediately while its original Stop and both feedback consumers remain pending', async kind => {
+  let release!: () => void
+  vi.mocked(api.sessions.stop).mockImplementationOnce((control, operationId) => new Promise(resolve => {
+    release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
+  }))
+  await mount(true); await askClose(kind); await click('Stop & Close')
+  const neighbor = element.querySelector<HTMLInputElement>('[aria-label="Neighboring work"]')!
+  try {
+    expect(dialog()).toBeNull()
+    expect(regions()).toContain('lonely-region')
+    expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
+    expect(element.querySelector('.focus-context-card .agent-operation-feedback[data-phase="pending"]')?.textContent).toContain('停止中')
+    expect(element.querySelector('[data-original-region-header] .agent-operation-feedback[data-phase="pending"]')?.textContent).toContain('停止中')
+    expect(useAppStore.getState().agentComposerDrafts[lonely.id]).toBe('Original unsent draft')
+    neighbor.focus(); neighbor.value = 'Continue neighboring work'
+    expect(document.activeElement).toBe(neighbor)
+  } finally { await act(async () => release()) }
+  expect(dialog()).toBeNull()
+  expect(useAppStore.getState().tabs[elsewhere.id]).toEqual(elsewhere)
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+  expect(neighbor.value).toBe('Continue neighboring work')
+  expect(document.activeElement).toBe(neighbor)
+  expect(api.sessions.stop).toHaveBeenCalledTimes(1)
+})
+
+it.each(['tab', 'region'] as const)('%s Stop & Close retains the original View and nonmodal feedback after an unconfirmed Stop', async kind => {
+  let reject!: (error: Error) => void
+  vi.mocked(api.sessions.stop).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+  await mount(true); await askClose(kind); await click('Stop & Close')
+  try { expect(dialog()).toBeNull() }
+  finally { await act(async () => reject(new Error('Original Stop observation unavailable'))) }
+  expect(dialog()).toBeNull()
+  expect(regions()).toContain('lonely-region')
+  expect(useAppStore.getState().agentComposerDrafts[lonely.id]).toBe('Original unsent draft')
+  expect(element.querySelector('.focus-context-card .agent-operation-feedback[data-phase="unconfirmed"]')?.textContent).toContain('停止未确认')
+  expect(element.querySelector('[data-original-region-header] .agent-operation-feedback[data-phase="unconfirmed"]')?.textContent).toContain('停止未确认')
+  expect(String(useAppStore.getState().error?.message ?? useAppStore.getState().error)).toContain('Original Stop observation unavailable')
+  expect(api.sessions.stop).toHaveBeenCalledTimes(1)
+})
+
+it.each(['tab', 'region'] as const)('%s Stop & Close cannot remove a replacement Region after the original Stop returns', async kind => {
+  let release!: () => void
+  vi.mocked(api.sessions.stop).mockImplementationOnce((control, operationId) => new Promise(resolve => {
+    release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
+  }))
+  await mount(true); await askClose(kind); await click('Stop & Close')
+  const replacement = { ...split.regions['lonely-region']!, sessionId: shared.id }
+  try {
+    expect(dialog()).toBeNull()
+    await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs,
+      [split.id]: { ...state.tabs[split.id]!, regions: { ...state.tabs[split.id]!.regions, 'lonely-region': replacement } } } })))
+  } finally { await act(async () => release()) }
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toEqual(replacement)
+  expect(useAppStore.getState().tabs[elsewhere.id]).toEqual(elsewhere)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
+  expect(dialog()).toBeNull()
+})
 
 it('split X on an Agent’s last View asks first and names it; Stop & Close stops that exact Run, then closes', async () => {
   await mount(); await closeSplit('lonely-region')
