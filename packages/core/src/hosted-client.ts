@@ -24,6 +24,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedMessageQueuePath, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
+import { parseHostEnvironment } from './host-environment.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -256,6 +257,7 @@ export async function connectHostedAgentMux(options: {
     })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'hostEnvironment') return parseHostEnvironment(decoded)
     if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
     if (method === 'continueAgentCreation') return parseCreationContinueReceipt(decoded, parseCreationContinueInput(wireArgs[0]))
     if (method === 'recoverTerminal') return parseTerminalRecoveryResult(decoded, parseTerminalRecoveryInput(wireArgs[0]))

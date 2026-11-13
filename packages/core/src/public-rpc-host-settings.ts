@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { parseHostRuntimeObservation, type HostRuntimeObservation } from './host-runtime-observation.js'
 import { parseHostNetworkObservation, type HostNetworkObservation } from './host-network-observation.js'
 import { settingsResourceRecord } from './settings-resource-json.js'
@@ -11,6 +12,7 @@ import type { AgentMuxHostExecutorInventory, AgentMuxHostExecutorConfiguration, 
 import { isAgentMuxExecutorAvailability } from './control.js'
 
 export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
+  'settings.hosts.home': 'long',
   'settings.hosts.inspect': 'long',
   'settings.hosts.network': 'long',
   'settings.executors.discover': 'long',
@@ -20,6 +22,7 @@ export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
 } as const
 export type HostSettingsMethod = keyof typeof AGENTMUX_RPC_HOST_SETTINGS_METHODS
 export type HostSettingsParameterMap = {
+  'settings.hosts.home': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.hosts.inspect': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.hosts.network': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.executors.discover': { hostId: string; refresh?: boolean }
@@ -28,6 +31,7 @@ export type HostSettingsParameterMap = {
   'settings.hosts.trust-source': { hostId: string; input: AgentMuxCreationTrustInput }
 }
 export type HostSettingsResultMap = {
+  'settings.hosts.home': AgentMuxHostEnvironment & { routeHostId: string }
   'settings.hosts.inspect': HostRuntimeObservation
   'settings.hosts.network': HostNetworkObservation
   'settings.executors.discover': AgentMuxHostExecutorInventory & { routeHostId: string }
@@ -39,7 +43,7 @@ export function isHostSettingsMethod(method: unknown): method is HostSettingsMet
   return typeof method === 'string' && Object.hasOwn(AGENTMUX_RPC_HOST_SETTINGS_METHODS, method)
 }
 export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M, value: unknown): HostSettingsParameterMap[M] {
-  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network') {
+  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') {
     const p = rpcRecord(value, ['hostId', 'expected'])
     return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.expected === undefined ? {} : { expected: settingsResourceRecord(p.expected, 'INVALID_CONTROL_REQUEST') }) } as HostSettingsParameterMap[M]
   }
@@ -63,6 +67,11 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
 }
 export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M, value: unknown,
   input: HostSettingsParameterMap[M]): HostSettingsResultMap[M] {
+  if (method === 'settings.hosts.home') {
+    const p = rpcRecord(value, ['routeHostId', 'homeDirectory'], 'CONTROL_PROTOCOL_ERROR')
+    if (p.routeHostId !== input.hostId) throw new AgentMuxError('The home directory belongs to another Host route.', 'CONTROL_PROTOCOL_ERROR')
+    return { routeHostId: input.hostId, ...parseHostEnvironment({ homeDirectory: p.homeDirectory }) } as HostSettingsResultMap[M]
+  }
   if (method === 'settings.hosts.network') {
     const result = parseHostNetworkObservation(value, input.hostId)
     const expected = (input as HostSettingsParameterMap['settings.hosts.network']).expected

@@ -1,4 +1,6 @@
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
+import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
+import { homedir } from 'node:os'
 import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
@@ -639,6 +641,12 @@ export class AgentMuxClient {
   async listHostExecutors(input?: { refresh?: boolean }) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     return await this.hostExecutorOwner.list(input)
+  }
+
+  /** Read this Core process's OS user home without preparing Native or Sessions. */
+  async hostEnvironment(): Promise<AgentMuxHostEnvironment> {
+    try { return parseHostEnvironment({ homeDirectory: homedir() }) }
+    catch { throw new AgentMuxError('The original Host could not read its home directory. Existing work is retained; retry this Host read.', 'HOST_ENVIRONMENT_UNAVAILABLE') }
   }
 
   /** The original target Executor owns its Provider and environment; no secrets leave this owner. */

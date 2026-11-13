@@ -60,7 +60,7 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['expected', 'candidate'].includes(key))) invalid('Host update input requires complete expected and candidate Host records.')
       return { method: 'settings.hosts.update', params: { ...body as Record<string, unknown>, id } }
     }
-    if ((action === 'inspect' || action === 'network') && args.length === 4 && id === '--host' && args[3]?.length) {
+    if ((action === 'inspect' || action === 'network' || action === 'home') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { method: `settings.hosts.${action}`, params: { hostId: args[3] } }
     }
     if (action === 'trusted-sources' && args.length === 4 && id === '--host' && args[3]?.length) {

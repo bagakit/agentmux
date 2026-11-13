@@ -155,7 +155,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
+  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
@@ -1202,7 +1202,7 @@ export class AgentMuxRpcService {
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
-      if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
+      if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
         'No existing Host Runtime client is available to observe. This read did not start a Runtime.', 'CONTROL_UNAVAILABLE')
       if (method === 'settings.hosts.trust-source' &&
           (context.caller !== undefined || context.principal?.kind !== 'user')) {
@@ -1217,11 +1217,19 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
-      if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network') {
+      if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') {
         const query = parseHostSettingsParams(method, params)
         const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)
         if (query.expected !== undefined && !isDeepStrictEqual(query.expected, configuration)) throw new AgentMuxError(
           'The original Host configuration changed or could not be confirmed. Reload this connection before observing it.', 'HOST_CONFIGURATION_CHANGED')
+        if (method === 'settings.hosts.home') {
+          const result = { routeHostId: input.hostId,
+            ...await observeRead(Promise.resolve().then(() => client.hostEnvironment()), context.signal) }
+          const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+          if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
+            'The original Host route changed during its home read. Read the current saved Host again.', 'HOST_CONFIGURATION_CHANGED')
+          return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+        }
         const readOwner = async () => {
           if (client.runtimeOwnerIdentity) return client.runtimeOwnerIdentity()
           const owner = await this.ports.hostedRuntime?.()

@@ -244,6 +244,8 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'hostEnvironment' && invocation.args.length !== 0)
+      throw new AgentMuxError('Host environment reads take no arguments.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'continueAgentCreation') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Creation continuation accepts one original target.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseCreationContinueInput(invocation.args[0])

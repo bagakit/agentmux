@@ -7,6 +7,7 @@ import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
+  'hostEnvironment',
   'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'readAgentInputActivity', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
   'inspectAgentInput', 'inspectMoteInput', 'readAgentInputResource', 'readAgentInputMailbox', 'readAgentInputChanges', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
   'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
@@ -28,6 +29,7 @@ export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 /** Preparation belongs to this finite transport surface; each operation keeps its own business prerequisites. */
 type AgentMuxHostedPreparation = 'owner' | 'runtime' | 'session-observation' | 'input-admission'
 export const AGENTMUX_HOSTED_PREPARATION = {
+  hostEnvironment: 'owner',
   clientPerformanceDiagnostics: 'owner',
   connectRuntime: 'runtime',
   readDeliveryAttempt: 'owner',
