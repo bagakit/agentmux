@@ -84,7 +84,9 @@ export class ScreenCapture {
           const attaching = attachToDraft && !originalDelivered
           const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete })
           if (outcome.state !== 'expanded') return outcome.state
-          const editing = this.ports.edit(outcome.image, attaching, complete,
+          // The window editor's first confirmed delivery makes this selection the one the next capture opens on.
+          const deliverHere = (final: BrowserPng) => complete(final).then(() => outcome.delivered())
+          const editing = this.ports.edit(outcome.image, attaching, deliverHere,
             { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool,
               ...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })
           // After the editor's first Copy this capture has returned and nobody awaits a retaken editor, so its failure is reported here.

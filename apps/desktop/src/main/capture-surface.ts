@@ -29,7 +29,9 @@ export type CaptureSurfaceOutcome =
   | { state: 'completed' }
   | { state: 'cancelled' }
   /** The marks move to the window editor on this display's full frozen frame; `source.rect` is the selection. */
-  | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff }
+  | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff
+      /** Called once the window editor delivers this selection, so the next capture opens on it. */
+      delivered(): void }
 
 type Ports = {
   native(): Pick<NativeDesktop, 'captureDisplays'>
@@ -192,7 +194,8 @@ export class CaptureSurface {
       if (!active.session.expandable) throw new Error('This capture returns its selection directly. Finish it with Done or cancel it.')
       const handoff = params.handoff
       if (!handoff || !Array.isArray(handoff.shapes) || typeof handoff.tool !== 'string' || !handoff.crop) throw new Error('Keep the original marks and selection to expand.')
-      active.end({ state: 'expanded', image: overlay.input.image!, source: this.source(active, overlay, handoff.crop), handoff })
+      const source = this.source(active, overlay, handoff.crop), remembered = this.remember(overlay, source.rect)
+      active.end({ state: 'expanded', image: overlay.input.image!, source, handoff, delivered: () => { this.recall = remembered } })
       return
     }
     pngBytes(params.image!)
@@ -209,12 +212,16 @@ export class CaptureSurface {
     try { await active.session.complete(params.image!, source, overlay.engine!) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
-    this.recall = { displayId: overlay.input.displayId, frame: overlay.input.frame, scale: overlay.input.scale, rect: source.rect }
+    this.recall = this.remember(overlay, source.rect)
     active.end({ state: 'completed' })
     return { status: 'completed' } satisfies SystemScreenshotEditorFinish
   }
 
   /** The remembered selection in this frame's pixels, only on its own display while that display's frame and scale are unchanged. */
+  /** The selection a delivery confirms, with its display as it was then. */
+  private remember(overlay: Overlay, rect: CaptureSurfaceRect): Recall {
+    return { displayId: overlay.input.displayId, frame: overlay.input.frame, scale: overlay.input.scale, rect }
+  }
   private recalled({ displayId, frame, scale }: NativeDisplayFrame): CaptureSurfaceHandoff['crop'] | undefined {
     const last = this.recall
     if (!last || last.displayId !== displayId || last.scale !== scale || !sameRect(last.frame, frame)) return undefined
