@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
+import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import { BROWSER_RESULT_INLINE_BYTES, BROWSER_RESULT_MAX_BYTES, type BrowserResultArtifactReference } from '../shared/browser-result-artifact.js'
 
 /**
@@ -139,7 +140,15 @@ if (sendToHost) {
     pending.delete(message.callId)
     // 主进程报的失败要在脚本里长成一个真的异常——脚本作者用 try/catch 接它，
     // 而不是去检查一个 { ok: false } 对象（那种约定没人会记得遵守）。
-    if (message.failed) slot.reject(new Error(message.message))
+    if (message.failed) {
+      // The typed fact travels with the error, so a program decides a retry from it, not from the words.
+      const error = new Error(message.message)
+      if (message.fact) {
+        error.kind = message.fact.kind
+        error.effects = message.fact.effects
+      }
+      slot.reject(error)
+    }
     else slot.resolve(message.value)
   })
 }
@@ -326,7 +335,9 @@ async function executeBrowserScript(input: BrowserScriptRunInput, resultPath: st
               kind: 'page-call-result',
               callId,
               failed: true,
-              message: error instanceof Error ? error.message : String(error)
+              message: error instanceof Error ? error.message : String(error),
+              // Only Main's own typed failure carries a fact: what failed, and whether the page was touched.
+              ...(error instanceof BrowserLocalRecoveryFailure ? { fact: { kind: error.fact.kind, effects: error.fact.effects } } : {})
             })
           }
         )
