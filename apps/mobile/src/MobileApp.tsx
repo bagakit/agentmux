@@ -43,6 +43,7 @@ import { MobilePrimaryNavigation } from './navigation/MobilePrimaryNavigation'
 import { MobileHeaderMenuContext } from './navigation/MobileHeaderMenu'
 import { mobileNeedsYou, mobileNeedsYouElsewhere } from './navigation/needs-you'
 import { useMobileAttentionCatalog } from './navigation/use-mobile-attention-catalog'
+import { useMobileScreenMotion } from './navigation/use-mobile-screen-motion'
 import './navigation/shell.css'
 import './conversation/chrome.css'
 import type { MobileSpatialContext } from './navigation/MobileSpatialNavigation'
@@ -451,6 +452,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   </IconButton>
 
   const exposed = sheet === null
+  // Depth only orders layers for motion: directory < conversation < goal/terminal.
+  const screenLayer = !showSession ? `directory:${secondary ?? home}` : showGoalWork ? 'goal' : workface.panel === 'terminal' ? 'terminal' : 'conversation'
+  const screenDepth = !showSession ? 0 : showGoalWork || workface.panel === 'terminal' ? 2 : 1
+  const screenMotion = useMobileScreenMotion(screenLayer, screenDepth, navigationRevision.current)
   const focusDirectoryVisible = exposed && !showSession && secondary === null && home === 'focus'
   const attention = useMobileAttentionCatalog(client, connected && workspaceVisible, focusDirectoryVisible)
   const needsYou = useMemo(() => mobileNeedsYou(attention.rows), [attention.rows])
@@ -572,7 +577,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       <button type="button" role="tab" aria-selected={moteSection === 'threads'} onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) }}>Threads</button>
       <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" onClick={() => setSheet('team')}>团队{team?.members.some(member => member.request) ? ' · 需要你' : ''}</button>
     </nav> : null}
-    <main className="mobile-main" tabIndex={-1}>
+    <main className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-key': screenMotion.key } : {})}>
       {!workspaceVisible && <section className="mobile-connect-page"><BrandIcon icon={hostAppearance.appIcon} className="mobile-connect-dragon" size={150} alt="AgentMux" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
         <MobileNotice owner={client} identity={[connection.state,connection.issue]} className="mobile-spatial-notice">{connection.message}</MobileNotice>{connectionPanel}

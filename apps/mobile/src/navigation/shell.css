@@ -66,3 +66,10 @@
 .mobile-drawer .mobile-menu-row small { font-weight: 400; }
 .mobile-drawer .mobile-home-select { min-height: 52px; font-size: var(--fs-body); font-weight: 550; }
 .mobile-drawer .mobile-home-select select { border: 0; background-color: var(--mobile-group-press); }
+
+/* Screen motion, declared by navigation only: push slides the next layer in from the right,
+ * pop returns from the left. Mounted workfaces are never remounted to animate. */
+.mobile-main[data-motion='push'] { animation: mobile-screen-push var(--dur-screen) var(--ease-enter); }
+.mobile-main[data-motion='pop'] { animation: mobile-screen-pop var(--dur-screen) var(--ease-enter); }
+@keyframes mobile-screen-push { from { transform: translateX(24px); opacity: .55; } to { transform: none; opacity: 1; } }
+@keyframes mobile-screen-pop { from { transform: translateX(-24px); opacity: .55; } to { transform: none; opacity: 1; } }
