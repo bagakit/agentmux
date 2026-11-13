@@ -31,7 +31,7 @@ For messages between independent AgentMux Sessions, use "$AGENTMUX_CLI" agent se
 
 Pass only the original body. Core authenticates the sender and saves the original Inbox message. Core owns the amux/a2a reference or full-message envelope; do not write it yourself or add a second Agent-authored envelope.
 
-Ordinary peer sends enter the Inbox without injecting their body or interrupting current work. Core combines original-MID references at a confirmed idle opportunity. Each self-closing a2a reference carries read-via="message --skill".
+Ordinary peer sends enter the Inbox without injecting their body or interrupting current work. Core combines original-MID references at the recipient's next automatic opportunity: a native idle queue, or the end of its current turn, depending on its Provider. A recipient that is already idle, or whose Provider has no automatic path, is not reminded until then; when the sender needs attention now, use message notify on the saved MID. Each self-closing a2a reference carries read-via="message --skill".
 
 [Original-message reference reading](./reference-reminder.md "amux:include")
 
