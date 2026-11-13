@@ -58,17 +58,18 @@ node="$node_dir/bin/node"
 
 staged="$("$node" "$here/stage.mjs" --core "$here/core" --state "$state" --node "$node")"
 release_dir="$(printf '%s' "$staged" | sed -n 1p)"
-command="$release_dir/launcher/amux"
-[ -x "$command" ] || { echo "install.sh: staging did not produce $command" >&2; exit 1; }
+[ -x "$release_dir/launcher/amux" ] || { echo "install.sh: staging did not produce $release_dir/launcher/amux" >&2; exit 1; }
+current="$state/core-releases/current"
 
-# One stable entry for SSH clients. It names the release that this installer
-# staged; the App's Core upgrade saves its own exact release command instead.
+# One stable entry for SSH clients. It follows the current release, which a first
+# install names and a confirmed App Core upgrade moves.
 mkdir -p "$prefix/bin"
-printf "#!/bin/sh\nexec '%s' \"\$@\"\n" "$command" > "$prefix/bin/amux.partial"
+printf "#!/bin/sh\nexec '%s/launcher/amux' \"\$@\"\n" "$current" > "$prefix/bin/amux.partial"
 chmod 755 "$prefix/bin/amux.partial"
 mv "$prefix/bin/amux.partial" "$prefix/bin/amux"
 
-# Only the environment that the App's Core upgrade can reconstruct later.
+# Only the environment that the App's Core upgrade can reconstruct later. The Core is
+# started from the resolved release path: the upgrade check reads the program's real path.
 cat > "$prefix/start.sh" <<EOF
 #!/bin/sh
 # Starts this machine's AgentMux headless Core unless one is already serving.
@@ -77,11 +78,17 @@ socket='$runtime/control.sock'
 if '$prefix/bin/amux' --endpoint "unix:\$socket" system endpoint --inspect >/dev/null 2>&1; then
   echo "AgentMux Core is already serving at \$socket"; exit 0
 fi
+release="\$(readlink -f '$current')"
+name="\${release##*/}"
+case "\$name" in *[!0-9a-f]*|'') name='' ;; esac
+if [ "\${#name}" -ne 64 ]; then
+  echo "start.sh: '$current' does not name an installed release" >&2; exit 1
+fi
 cd "\$HOME"
 env -i HOME="\$HOME" PATH='$node_dir/bin':"\$PATH" SHELL="\${SHELL:-/bin/sh}" LANG="\${LANG:-C.UTF-8}" \\
   AGENTMUX_STATE_DIRECTORY='$state' AGENTMUX_RUNTIME_DIRECTORY='$runtime' \\
   AGENTMUX_AGENT_SESSION_STORE='$state/agent-sessions.json' \\
-  setsid '$node' '$release_dir/dist/headless-runtime-cli.js' serve >> '$state/serve.log' 2>&1 < /dev/null &
+  setsid '$node' "\$release/dist/headless-runtime-cli.js" serve >> '$state/serve.log' 2>&1 < /dev/null &
 attempt=0
 while [ \$attempt -lt 60 ]; do
   if '$prefix/bin/amux' --endpoint "unix:\$socket" system endpoint --inspect >/dev/null 2>&1; then

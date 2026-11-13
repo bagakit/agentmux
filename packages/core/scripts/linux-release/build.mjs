@@ -84,6 +84,7 @@ export async function buildLinuxRelease({ out, nodeArchive: supplied, release = 
       ownerProtocolVersion: artifact.ownerProtocolVersion, requiredNativeProtocolVersion: artifact.requiredNativeProtocolVersion
     }, null, 2) + '\n')
     await writeFile(join(root, 'stage-core.cjs'), programs.STAGE_CORE)
+    await writeFile(join(root, 'select-core.cjs'), programs.SELECT_CORE_RELEASE)
     for (const file of ['install.sh', 'stage.mjs']) await cp(join(here, file), join(root, file))
     await chmod(join(root, 'install.sh'), 0o755)
 
