@@ -4,10 +4,10 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
-import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, SELECT_CORE_RELEASE } from '../src/remote-core-upgrade-programs.js'
+import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, SELECT_CORE_RELEASE, REPLACE_NATIVE } from '../src/remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -33,11 +33,20 @@ async function fixture() {
   let receiptStatus = 'matching', physicalDrift = false
   const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
   let shutdownUnknown = false, startUnknown = false, selectUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
+  let replacementOutcome: 'replaced' | 'lost' | 'copy-failed' | 'no-copy' | 'refused' = 'replaced', replacementSpace: 'enough' | 'short' = 'enough', replaced = false, extraRunning = false
+  // What the replaced Native reports, so verification can be shown wrong in each way.
+  let afterReplacement: 'kept' | 'new-runtime' | 'still-running' | 'history-lost' = 'kept'
   let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
   // Every Run of the serving Native, as its own SDK reports it.
-  const inventory = () => [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, durableOutputBytes: 100, inputBytes: 3 }]),
-    { runId: 'ordinary-terminal', pid: owner.processId !== 101 && naturalExit ? null : owner.processId !== 101 && changedTerminal ? 506 : 505,
-      state: owner.processId !== 101 && naturalExit ? 'exited' : 'running', outputBytes: 50, durableOutputBytes: 50, inputBytes: owner.processId !== 101 && naturalExit ? null : 6 }]
+  const inventory = () => replaced
+    // After a cold replacement the new Native reports the retained history, ended.
+    ? [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: afterReplacement === 'still-running' ? 404 : null, state: afterReplacement === 'still-running' ? 'running' : 'interrupted',
+        outputBytes: afterReplacement === 'history-lost' ? 40 : 100, durableOutputBytes: afterReplacement === 'history-lost' ? 40 : 100, inputBytes: null }]),
+      { runId: 'ordinary-terminal', pid: null, state: 'interrupted', outputBytes: 50, durableOutputBytes: 50, inputBytes: null }]
+    : [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, durableOutputBytes: 100, inputBytes: 3 }]),
+      { runId: 'ordinary-terminal', pid: owner.processId !== 101 && naturalExit ? null : owner.processId !== 101 && changedTerminal ? 506 : 505,
+        state: owner.processId !== 101 && naturalExit ? 'exited' : 'running', outputBytes: 50, durableOutputBytes: 50, inputBytes: owner.processId !== 101 && naturalExit ? null : 6 },
+      ...(extraRunning ? [{ runId: 'started-after-review', pid: 707, state: 'running', outputBytes: 0, durableOutputBytes: 0, inputBytes: 0 }] : [])]
   let stagePause: Promise<void> | undefined, resumeStage: (() => void) | undefined
   const compatibility = { daemonInstanceId: native.instanceId, runtimeId: launch.nativeRuntimeId, protocolGeneration: PROTOCOL_VERSION,
     runtimeIdPersistence: 'state_dir', buildId: native.buildIdentity, platform: 'linux', arch: 'x86_64',
@@ -73,11 +82,37 @@ async function fixture() {
       if (changedWhileStaging) owner = { ...owner, ownerInstanceId: 'replacement' }
       output = { releaseDirectory: fixturePath("scope/state/core-releases/") + digest, remoteCommand: stageCommand, digest }
     } else if (args[1] === START_CORE) {
-      effects.push('start-new-core'); expect(p.env).toEqual(launch.env); expect(p.cwd).toBe(fixturePath("original/work"))
+      expect(p.env).toEqual(launch.env); expect(p.cwd).toBe(fixturePath("original/work"))
+      if (p.releaseDirectory === fixturePath('original/core')) {
+        // The original release starts again with its own deployment.
+        effects.push('restart-original-core'); owner = { ...owner, ownerInstanceId: 'restored', processId: 404 }
+        launch = { ...launch, processId: owner.processId, startTicks: '6666' }
+        output = { processId: owner.processId }
+        return { stdout: JSON.stringify(output), stderr: '', exitCode: 0 }
+      }
+      effects.push('start-new-core')
       owner = { ...owner, ownerInstanceId: 'updated', processId: 303 }
       launch = { ...launch, cli: fixturePath("scope/state/core-releases/") + digest + '/dist/headless-runtime-cli.js', processId: owner.processId, startTicks: '5555', deploymentDigest: digest }
       if (startUnknown) throw new Error('start response lost')
       output = { processId: owner.processId }
+    } else if (args[1] === REPLACE_NATIVE) {
+      expect(p.pid).toBe(launch.nativeProcessId); expect(p.startTicks).toBe(launch.nativeStartTicks); expect(p.nativeStateDirectory).toBe(fixturePath('scope/state/ctxmux'))
+      if (!p.stop) { if (replacementSpace === 'short') throw new Error('Keeping a copy of the Native state needs more free space.'); output = { stateBytes: 4096, availableBytes: 1 << 30 } }
+      else {
+        effects.push('replace-native')
+        if (replacementOutcome === 'lost') throw new Error('replace response lost')
+        if (replacementOutcome === 'copy-failed') output = { outcome: 'copy-failed', detail: 'The Native state copy differs from state.sqlite3' }
+        else if (replacementOutcome === 'refused') output = { outcome: 'refused', detail: 'Keeping a copy of the Native state needs more free space.' }
+        else if (replacementOutcome === 'no-copy') output = { outcome: 'replaced', stateCopy: fixturePath('elsewhere'), stateBytes: 4096, survivingProcessIds: [] }
+        else {
+          // The replaced Native keeps the durable Runtime; its running Runs end without an owner.
+          native.instanceId = 'native-replacement'; native.protocolVersion = PROTOCOL_VERSION; compatibility.daemonInstanceId = 'native-replacement'
+          if (afterReplacement === 'new-runtime') compatibility.runtimeId = 'another-native-runtime'
+          launch = { ...launch, nativeProcessId: 909, nativeStartTicks: '9090', nativeInstanceId: 'native-replacement' }
+          replaced = true
+          output = { outcome: 'replaced', stateCopy: p.copyDirectory, stateBytes: 4096, survivingProcessIds: [] }
+        }
+      }
     } else if (args[1] === SELECT_CORE_RELEASE) {
       effects.push('select-current-release'); expect(_command).toBe(fixturePath("original/bin/node")); expect(p.stateDirectory).toBe(fixturePath("scope/state")); expect(p.digest).toBe(digest)
       if (selectUnknown) throw new Error('select response lost')
@@ -97,6 +132,9 @@ async function fixture() {
     setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setSelectUnknown: (value = true) => { selectUnknown = value }, setChangedWhileStaging: () => { changedWhileStaging = true },
     setChangedTerminal: () => { changedTerminal = true }, setNaturalExit: () => { naturalExit = true },
     setSavedRunMissing: () => { savedRunMissing = true },
+    setReplacementOutcome: (value: 'replaced' | 'lost' | 'copy-failed' | 'no-copy' | 'refused') => { replacementOutcome = value },
+    setAfterReplacement: (value: 'new-runtime' | 'still-running' | 'history-lost') => { afterReplacement = value },
+    setReplacementSpaceShort: () => { replacementSpace = 'short' }, setExtraRunning: () => { extraRunning = true },
     pauseStage: () => { stagePause = new Promise(resolve => { resumeStage = resolve }) }, resumeStage: () => resumeStage?.() }
 }
 
@@ -179,7 +217,8 @@ it('qualifies the exact observed Native process when the normal owner DTO has no
 })
 
 it('refuses Native mismatch and stale owner without stopping any Core or Run', async () => {
-  const f = await fixture(); f.native.protocolVersion = 21
+  // A newer Native than the candidate needs has no forward replacement.
+  const f = await fixture(); f.native.protocolVersion = PROTOCOL_VERSION + 1
   const unavailable = await f.manager.check(host)
   expect(unavailable.eligible).toBe(false); expect(unavailable.expected).toBeUndefined(); expect(unavailable.reason).toBe('runtime-update-required'); expect(f.effects).toEqual([])
   f.native.protocolVersion = PROTOCOL_VERSION
@@ -310,13 +349,13 @@ it('refuses the exact remote maintenance when current process changes after publ
 })
 
 it('observes current version and separate owner/Native protocols despite incompatibility and an uncertain old operation', async () => {
-  const f = await fixture(); f.setOwnerProtocol(1); f.native.protocolVersion = 21
+  const f = await fixture(); f.setOwnerProtocol(1); f.native.protocolVersion = 21; f.compatibility.runtimeIdPersistence = 'process'
   const incompatible = await f.manager.check(host)
   expect(incompatible).toMatchObject({ eligible: false, reason: 'runtime-update-required',
     current: { state: 'available', version: '0.1.0', sourceCommit: 'old-source', deploymentDigest: 'd'.repeat(64), ownerProtocolVersion: 1, native: { protocolVersion: 21 } },
     candidate: { version: '0.1.0', sourceCommit: 'source', digest, ownerProtocolVersion: 2, requiredNativeProtocolVersion: PROTOCOL_VERSION } })
   expect(f.effects).toEqual([])
-  f.native.protocolVersion = PROTOCOL_VERSION
+  f.native.protocolVersion = PROTOCOL_VERSION; f.compatibility.runtimeIdPersistence = 'state_dir'
   const ready = await f.manager.check(host); f.setShutdownUnknown()
   const original = await f.manager.upgrade(host, ready.expected!, 'old-uncertain')
   const reading = await f.manager.check(host)
@@ -562,4 +601,97 @@ it('keeps an upgrade unknown when the new Core no longer reports an original Ses
   expect(receipt).toMatchObject({ status: 'unknown', stage: 'verifying' })
   expect(receipt.detail).toContain('Session/Run binding')
   expect(f.effects).not.toContain('select-current-release')
+})
+
+describe('reviewed Native replacement', () => {
+  async function older() { const f = await fixture(); f.native.protocolVersion = PROTOCOL_VERSION - 3; return f }
+
+  it('reviews what ends, replaces the Native on the same state and keeps the durable Runtime and Sessions', async () => {
+    const f = await older(), check = await f.manager.check(host)
+    expect(check).toMatchObject({ eligible: true, reason: 'native-replacement',
+      nativeReplacement: { stateBytes: 4096, ending: [{ runId: 'original-run', agentSessionId: 'original-session' }, { runId: 'ordinary-terminal', agentSessionId: null }] },
+      expected: { nativeReplacement: { endingRunIds: ['original-run', 'ordinary-terminal'] } } })
+    expect(parseRemoteCoreUpgradeCheck(JSON.parse(JSON.stringify(check)))).toEqual(check)
+    expect(f.effects).toEqual([])
+    const receipt = await f.manager.upgrade(host, check.expected!, 'replace')
+    expect(receipt, receipt.detail).toMatchObject({ status: 'completed', stage: 'completed',
+      nativeReplacement: { stateCopy: fixturePath('scope/state/core-releases/replace.native-state'), endedRunIds: ['original-run', 'ordinary-terminal'], survivingProcessIds: [] } })
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native', 'start-new-core', 'select-current-release'])
+    // The same operation ID only reads the original result.
+    expect(await f.manager.upgrade(host, check.expected!, 'replace')).toEqual(receipt)
+    expect(f.effects).toHaveLength(5)
+  })
+
+  it('refuses before stopping anything when a Run started after the review', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setExtraRunning()
+    const receipt = await f.manager.upgrade(host, check.expected!, 'unreviewed')
+    expect(receipt).toMatchObject({ status: 'failed', stage: 'preparing' })
+    expect(receipt.detail).toContain('started after the review')
+    expect(f.effects).toEqual([])
+  })
+
+  it('a reviewed Run that ended on its own does not block the replacement', async () => {
+    const f = await older(), check = await f.manager.check(host)
+    const pinned = { ...check.expected!, nativeReplacement: { endingRunIds: [...check.expected!.nativeReplacement!.endingRunIds, 'already-ended'] } }
+    expect((await f.manager.upgrade(host, pinned, 'ended-alone')).status).toBe('completed')
+  })
+
+  it('restores the original Core when the state copy fails before the new Native starts', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setReplacementOutcome('copy-failed')
+    const receipt = await f.manager.upgrade(host, check.expected!, 'copy-failed')
+    expect(receipt).toMatchObject({ status: 'failed', stage: 'replacing-native' })
+    expect(receipt.detail).toContain('原 Native 已停止')
+    expect(receipt.detail).toContain('原 Core 已用原发行恢复服务')
+    // The original Core starts again from its own release; the candidate never starts.
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native', 'restart-original-core'])
+  })
+
+  it('restores the original Core on the still-running original Native when the stop is refused', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setReplacementOutcome('refused')
+    const receipt = await f.manager.upgrade(host, check.expected!, 'stop-refused')
+    expect(receipt).toMatchObject({ status: 'failed', stage: 'replacing-native' })
+    expect(receipt.detail).toContain('原 Native 未停止')
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native', 'restart-original-core'])
+  })
+
+  it('keeps a lost replacement reply unknown and never starts a new Native or replays the stop', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setReplacementOutcome('lost')
+    const receipt = await f.manager.upgrade(host, check.expected!, 'replace-lost')
+    expect(receipt).toMatchObject({ status: 'unknown', stage: 'replacing-native' })
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native'])
+    expect(await new RemoteCoreUpgradeManager(f.options).inspect(host, 'replace-lost')).toMatchObject({ status: 'unknown' })
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native'])
+  })
+
+  it('offers no replacement when the state copy would not fit', async () => {
+    const f = await older(); f.setReplacementSpaceShort()
+    const check = await f.manager.check(host)
+    expect(check).toMatchObject({ eligible: false, reason: 'unverified' })
+    expect(check.detail).toContain('free space')
+    expect(f.effects).toEqual([])
+  })
+
+  it('offers no replacement for a Native whose Runtime identity does not persist in its state', async () => {
+    const f = await older(); f.compatibility.runtimeIdPersistence = 'process'
+    expect(await f.manager.check(host)).toMatchObject({ eligible: false, reason: 'runtime-update-required' })
+  })
+
+  it.each(['new-runtime', 'still-running', 'history-lost'] as const)('keeps the replacement unknown when the new Native shows %s', async shape => {
+    const f = await older(), check = await f.manager.check(host); f.setAfterReplacement(shape)
+    const receipt = await f.manager.upgrade(host, check.expected!, `after-${shape}`)
+    expect(receipt).toMatchObject({ status: 'unknown', stage: 'verifying' })
+    expect(f.effects).not.toContain('select-current-release')
+  })
+
+  it('treats a stop reply without the exact state copy as unknown and starts no new Native', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setReplacementOutcome('no-copy')
+    expect(await f.manager.upgrade(host, check.expected!, 'no-copy')).toMatchObject({ status: 'unknown', stage: 'replacing-native' })
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native'])
+  })
+
+  it('rejects a review whose ending Runs differ from its admission', async () => {
+    const f = await older(), check = JSON.parse(JSON.stringify(await f.manager.check(host)))
+    check.nativeReplacement.ending = check.nativeReplacement.ending.slice(1)
+    expect(() => parseRemoteCoreUpgradeCheck(check)).toThrow('does not match its admission')
+  })
 })
