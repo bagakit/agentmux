@@ -124,6 +124,21 @@ it('range expansion starts only one three-page supplement and shrinking cancels 
   expect(f.calls.filter(call => !call.cursor)).toHaveLength(1); expect(f.current().historyBoundary).toBeNull()
 })
 
+it('automatic coverage never evicts the newest records; a full window ends the batch without an error', async () => {
+  // ~110 KiB bodies: three 100-record pages exceed the 32 MiB window, so an unpreserved
+  // older read would slide the window and drop the newest records the reader is watching.
+  const f = await fixture({ total: 1000, bodySize: 110 * 1024 })
+  await f.render(Infinity)
+  await wait(() => { expect(f.current().loading).toBe(false); expect(f.calls.length).toBeGreaterThanOrEqual(2) })
+  await pause()
+  const ids = f.current().page!.items.map(item => item.id)
+  expect(ids).toContain('original-999')
+  expect(f.current().hasNewer).toBe(false); expect(f.current().historical).toBe(false)
+  expect(f.current().error).toBeNull(); expect(f.current().automaticReadError).toBeNull()
+  // The batch ended at the budget: the reader can still go further back explicitly.
+  expect(f.current().hasMore).toBe(true)
+})
+
 it('wire fragments do not spend semantic pages and untimed originals remain honest and explicitly continuable', async () => {
   const f = await fixture({ total: 8, timed: false, pageSize: 1, bodySize: 80000 })
   f.fragment(64 * 1024)
