@@ -14,7 +14,7 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'snapping', 'pointing'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|snapping|pointing')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'snapping', 'pointing', 'objects'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|snapping|pointing')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
@@ -25,7 +25,82 @@ const windowHost = 'apps/desktop/src/renderer/screenshot-editor/SystemScreenshot
 const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
 const snapping = 'apps/desktop/test/image-annotation-snapping.test.ts'
 const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.tsx'
+const objects = 'apps/desktop/test/image-annotation-objects.test.ts'
+const objectsEditor = 'apps/desktop/test/image-annotation-objects-editor.test.tsx'
 const specifications = {
+  objects: {
+    tests: [objects, objectsEditor],
+    mutations: [
+      { label: "marquee-unwired", source: component + 'ImageAnnotationEditor.tsx',
+        find: "else if (marquee) { if (!click) setSelectedIds(new Set([...marquee.base, ...marqueeHits(documentState, normalizeRect(marquee.start, marquee.at))])) }", replace: "else if (marquee) { void click }", test: objectsEditor,
+        consumer: "a marquee from empty canvas selects the unlocked marks it touches; a click there clears the selection", failure: /the marquee caught a and b/ },
+      { label: "marquee-takes-locked", source: component + 'selection-geometry.ts',
+        find: "    if (shape.locked) return false\n", replace: "\n", test: objects,
+        consumer: "locks marks out of hit testing and marquee selection and toggles or clears the lock", failure: /to deeply equal \[ 'b', 'c', 'd' \]/ },
+      { label: "shift-click-replaces", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (shape && !handle && event.shiftKey) { setSelectedIds(toggled(groupIds, shape.id)); schedulePaint(); return }", replace: "if (shape && !handle && event.shiftKey) { selectOnly(shape.id); schedulePaint(); return }", test: objectsEditor,
+        consumer: "Shift-click adds a mark to the selection and Shift-click again removes it", failure: /Shift-click adds b to a/ },
+      { label: "group-drag-moves-one", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (group) group.moved = moveShapes(group.base, group.ids, at.x - group.start.x, at.y - group.start.y)", replace: "if (group) group.moved = moveShapes(group.base, new Set([group.pressed]), at.x - group.start.x, at.y - group.start.y)", test: objectsEditor,
+        consumer: "dragging one selected mark moves the whole group as one Undo step", failure: /both members move by the drag/ },
+      { label: "group-drag-per-step-undo", source: component + 'ImageAnnotationEditor.tsx',
+        find: "    if (group) { if (click) selectOnly(group.pressed); else editShapes(group.moved) }", replace: "    if (group) { if (click) selectOnly(group.pressed); else for (const shape of group.moved) if (group.ids.has(shape.id)) edit(doc => replaceShape(doc, shape)) }", test: objectsEditor,
+        consumer: "dragging one selected mark moves the whole group as one Undo step", failure: /one Undo restores the whole group move/ },
+      { label: "delete-removes-one", source: component + 'ImageAnnotationEditor.tsx',
+        find: "function removeSelected() { if (groupIds.size) { edit(doc => removeShapes(doc, groupIds)); selectOnly(null) } }", replace: "function removeSelected() { if (groupIds.size) { edit(doc => removeShapes(doc, new Set([...groupIds].slice(-1)))); selectOnly(null) } }", test: objectsEditor,
+        consumer: "Delete removes every selected mark and arrows nudge them all", failure: /Delete removes the group/ },
+      { label: "nudge-moves-one", source: component + 'ImageAnnotationEditor.tsx',
+        find: "editShapes(moveShapes(documentState.shapes, groupIds, dx, dy))", replace: "editShapes(moveShapes(documentState.shapes, new Set([...groupIds].slice(0, 1)), dx, dy))", test: objectsEditor,
+        consumer: "Delete removes every selected mark and arrows nudge them all", failure: /Shift-arrow nudges each selected mark by ten/ },
+      { label: "align-unwired", source: component + 'ImageAnnotationEditor.tsx',
+        find: "onClick={() => editShapes(alignShapes(documentState.shapes, groupIds, id, measureText))}", replace: "onClick={() => void id}", test: objectsEditor,
+        consumer: "align and distribute in the property row act on the group as one Undo step", failure: /align top uses the group bounds/ },
+      { label: "align-against-first-mark", source: component + 'drawing-model.ts',
+        find: "  if (!group || members.length < 2) return shapes", replace: "  if (!group || members.length < 2) return shapes\n  Object.assign(group, shapeBounds(members.at(-1)!, textWidth))", test: objectsEditor,
+        consumer: "align and distribute in the property row act on the group as one Undo step", failure: /align top uses the group bounds/ },
+      { label: "distribute-offered-for-two", source: component + 'ImageAnnotationEditor.tsx',
+        find: "{selectedShapes.length > 2 ? DISTRIBUTIONS.map(", replace: "{selectedShapes.length > 1 ? DISTRIBUTIONS.map(", test: objectsEditor,
+        consumer: "align and distribute in the property row act on the group as one Undo step", failure: /two marks cannot distribute/ },
+      { label: "front-is-forward", source: component + 'ImageAnnotationEditor.tsx',
+        find: "const order: ShapeOrder = event.shiftKey ? bracket === 'forward' ? 'front' : 'back' : bracket", replace: "const order: ShapeOrder = bracket", test: objectsEditor,
+        consumer: "stacking shortcuts reorder only the marks, and a mask never moves under a mark", failure: /Shift forward brings a to the front of the marks/ },
+      { label: "hit-takes-locked", source: component + 'drawing-model.ts',
+        find: "    if (shape.locked) continue\n    if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {", replace: "    if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /a drag on a locked mark does not move it/ },
+      { label: "select-all-takes-locked", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (key === 'a' && !event.shiftKey) { setSelectedIds(new Set(shapes.filter(shape => !shape.locked).map(shape => shape.id))); return true }", replace: "if (key === 'a' && !event.shiftKey) { setSelectedIds(new Set(shapes.map(shape => shape.id))); return true }", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /a mark locked before Select All stays locked/ },
+      { label: "locked-counts-as-selected", source: component + 'ImageAnnotationEditor.tsx',
+        find: "const selectedShapes = documentState.shapes.filter(shape => selectedIds.has(shape.id) && !shape.locked)", replace: "const selectedShapes = documentState.shapes.filter(shape => selectedIds.has(shape.id))", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /a locked mark leaves the selection/ },
+      { label: "lock-shortcut-unwired", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (key === 'l' && !event.shiftKey) { editShapes(selectedIds.size ? toggleShapeLock(shapes, selectedIds) : unlockAllShapes(shapes)); return true }", replace: "if (key === 'l' && !event.shiftKey) return true", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /Command-L locks the selected mark/ },
+      { label: "lock-badge-never-shown", source: component + 'ImageAnnotationEditor.tsx',
+        find: "    else if (hasLocked && !locked) setLockHover(lockedMarkAt(documentState.shapes, point(event), 4 / viewRef.current.scale, measureText)?.id ?? null)", replace: "    else if (hasLocked && !locked) setLockHover(null)", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /real Unlock annotation control/ },
+      { label: "unlock-all-unwired", source: component + 'ImageAnnotationEditor.tsx',
+        find: "{hasLocked ? <button type=\"button\" disabled={busy} onClick={() => editShapes(unlockAllShapes(documentState.shapes))}><UnlockIcon size={13} />Unlock all</button> : null}", replace: "{hasLocked ? <button type=\"button\" disabled={busy} onClick={() => undefined}><UnlockIcon size={13} />Unlock all</button> : null}", test: objectsEditor,
+        consumer: "locking keeps a mark out of hit, erase, marquee and moves until it is unlocked", failure: /Unlock all clears the lock/ },
+      { label: "duplicate-keeps-ids", source: component + 'drawing-model.ts',
+        find: "const moved = { ...moveShape(source, offset.x, offset.y), id: mintId() }", replace: "const moved = { ...moveShape(source, offset.x, offset.y), id: source.id }", test: objectsEditor,
+        consumer: "duplicate and session paste give fresh ids and next note numbers without touching the system clipboard", failure: /every copy has its own id/ },
+      { label: "duplicate-keeps-note-number", source: component + 'drawing-model.ts',
+        find: "    return moved.kind === 'note' ? { ...moved, number: number++ } : moved", replace: "    return moved", test: objectsEditor,
+        consumer: "duplicate and session paste give fresh ids and next note numbers without touching the system clipboard", failure: /the copied note takes the next number/ },
+      { label: "mark-copy-is-screenshot-copy", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (key === 'c' && event.shiftKey) { if (selectedShapes.length) copiedRef.current = selectedShapes; return true }", replace: "if (key === 'c' && event.shiftKey) return false", test: objectsEditor,
+        consumer: "duplicate and session paste give fresh ids and next note numbers without touching the system clipboard", failure: /pasted marks have fresh ids/ },
+      { label: "restyle-first-only", source: component + 'ImageAnnotationEditor.tsx',
+        find: "editShapes(restyleShapes(documentState.shapes, groupIds, shape => applies(shape) && (shape as unknown as Record<string, unknown>)[property] !== next", replace: "editShapes(restyleShapes(documentState.shapes, new Set([...groupIds].slice(0, 1)), shape => applies(shape) && (shape as unknown as Record<string, unknown>)[property] !== next", test: objectsEditor,
+        consumer: "color and width apply to every selected mark that has them, as one Undo step", failure: /every selected mark takes the color/ },
+      { label: "reopen-drops-lock", source: component + 'document.ts',
+        find: "const common = { id, color, ...(base.locked ? { locked: true as const } : {}) }", replace: "const common = { id, color }", test: objectsEditor,
+        consumer: "a reopened document keeps a locked mark locked in the editor and in its output", failure: /the reopened locked mark is not selectable/ },
+      { label: "object-shortcuts-window-only", source: component + 'ImageAnnotationEditor.tsx',
+        find: "if (command && objectCommand(event, key)) { event.preventDefault(); return }", replace: "if (command && !capture && objectCommand(event, key)) { event.preventDefault(); return }", test: objectsEditor,
+        consumer: "a capture keeps the object shortcuts and adds no object buttons to its bar", failure: /Command-A then Command-D duplicates every mark in a capture/ }]
+  },
   pointing: {
     tests: [pointing, pointingTools, 'apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-geometry.test.ts'],
     mutations: [{ label: 'blur-not-a-mask', source: component + 'drawing-model.ts',
@@ -58,7 +133,7 @@ const specifications = {
       find: "const bubble = !handle && shape?.kind === 'callout' && rectContains(calloutBubble(shape), at)", replace: 'const bubble = false', test: pointingTools,
       consumer: 'keeps the magnifier bubble beside its source while drawing, then drags only the bubble after release', failure: /dragging inside the bubble moves only the bubble/ },
     { label: 'strength-ignores-selection', source: component + 'ImageAnnotationEditor.tsx',
-      find: '      edit(doc => replaceShape(doc, next))', replace: '      void next', test: pointingTools,
+      find: '    editShapes(restyled)', replace: '    void restyled', test: pointingTools,
       consumer: 'changes a selected pointing mark through its strength control as one Undo step, else sets the next one', failure: /the selected mark takes the new strength/ },
     { label: 'renumber-unwired', source: component + 'ImageAnnotationEditor.tsx',
       find: 'onRenumber={() => { commitNote(); edit(doc => setShapes(doc, renumberNotes(doc.shapes))) }}', replace: 'onRenumber={() => { commitNote() }}', test: pointingTools,
@@ -136,7 +211,7 @@ const specifications = {
       find: "    if (locked) return\n    const at = localPoint(event)", replace: '    const at = localPoint(event)', test: capture,
       consumer: 'a locked display keeps its dimmed frozen frame and Cancel but makes no selection, loupe or color copy', failure: /locked display shows no loupe/ },
     { label: 'capture-lock-keeps-earlier-selection', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'resetGesture(); setSelectedId(null); setHover(null); setDocumentState(createScreenshotDocument()); schedulePaint()', replace: 'resetGesture(); setSelectedId(null); setHover(null); schedulePaint()', test: capture,
+      find: 'resetGesture(); selectOnly(null); setHover(null); setDocumentState(createScreenshotDocument()); schedulePaint()', replace: 'resetGesture(); selectOnly(null); setHover(null); schedulePaint()', test: capture,
       consumer: 'a lock that arrives after a selection or during its drag drops it', failure: /selection made before the lock is dropped/ },
     { label: 'capture-selection-not-claimed', source: component + 'ImageAnnotationEditor.tsx',
       find: "edit(doc => setCrop(doc, box)); if (crop.mode === 'create') onSelect?.()", replace: 'edit(doc => setCrop(doc, box))', test: capture,
@@ -283,7 +358,7 @@ const specifications = {
       find: "if (tool !== 'erase' && tool !== 'crop') {", replace: "if (tool === 'select') {", test: modeless,
       consumer: 'a drawing tool moves the existing mark it presses instead of drawing over it', failure: /must not add a rectangle/ },
     { label: 'auto-select-omitted', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'edit(doc => commitShape(doc, shape)); setSelectedId(shape.id)', replace: 'edit(doc => commitShape(doc, shape))', test: modeless,
+      find: 'edit(doc => commitShape(doc, shape)); selectOnly(shape.id)', replace: 'edit(doc => commitShape(doc, shape))', test: modeless,
       consumer: 'a new rectangle stays selected so Color recolors it without switching to Select', failure: /actual new rectangle is selected/ },
     { label: 'click-threshold-omitted', source: component + 'ImageAnnotationEditor.tsx',
       find: 'const click = down !== null && Math.hypot(up.x - down.at.x, up.y - down.at.y) < CLICK_DISTANCE', replace: 'const click = false', test: modeless,
