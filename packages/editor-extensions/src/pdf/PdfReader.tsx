@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
-import { FilePreviewState } from './FilePreviewState'
+import { FilePreviewState } from '../ui/FilePreviewState'
+import type { RandomAccessSource } from '../bytes'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import 'pdfjs-dist/web/pdf_viewer.css'
 import '../styles/pdf-content.css'
@@ -19,7 +20,7 @@ const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
 
 type ScaleMode = 'page-width' | 'page-fit' | 'custom'
 type Reading = {
-  owner: Uint8Array
+  owner: RandomAccessSource
   phase: 'loading' | 'rendering' | 'ready' | 'password' | 'cancelled' | 'error'
   pages: number; page: number; scale: number; mode: ScaleMode
   message?: string | undefined
@@ -27,8 +28,8 @@ type Reading = {
 const MIN_SCALE = 0.1, MAX_SCALE = 5
 type OutlineNode = Awaited<ReturnType<PDFDocumentProxy['getOutline']>>[number]
 type OutlineEntry = { title: string; dest: OutlineNode['dest']; depth: number; external: boolean }
-type OutlineReading = { owner: Uint8Array; phase: 'loading' | 'ready' | 'error'; entries: OutlineEntry[]; limited: boolean; message?: string }
-type SearchReading = { owner: Uint8Array; query: string; caseSensitive: boolean; current: number; total: number; state: number }
+type OutlineReading = { owner: RandomAccessSource; phase: 'loading' | 'ready' | 'error'; entries: OutlineEntry[]; limited: boolean; message?: string }
+type SearchReading = { owner: RandomAccessSource; query: string; caseSensitive: boolean; current: number; total: number; state: number }
 
 function outlineEntries(items: OutlineNode[], entries: OutlineEntry[] = [], depth = 0): { entries: OutlineEntry[]; limited: boolean } {
   let limited = false
@@ -40,8 +41,8 @@ function outlineEntries(items: OutlineNode[], entries: OutlineEntry[] = [], dept
   return { entries, limited }
 }
 
-/** Owns the reader, never the File or its byte snapshot. Hidden readers release their worker. */
-export function PdfContent({ data, name, visible = true }: { data: Uint8Array; name: string; visible?: boolean }) {
+/** Owns the reader, never the File or its original byte source. Hidden readers release their worker. */
+export function PdfReader({ source, name, visible = true }: { source: RandomAccessSource; name: string; visible?: boolean }) {
   const container = useRef<HTMLDivElement>(null), pages = useRef<HTMLDivElement>(null)
   const viewer = useRef<PDFViewer | null>(null)
   const password = useRef<((value: string) => void) | null>(null)
@@ -53,11 +54,11 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
   const [search, setSearch] = useState<SearchReading | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const outlineButton = useRef<HTMLButtonElement>(null)
-  const finder = useRef<{ owner: Uint8Array; execute(query: string, caseSensitive: boolean, again?: boolean, previous?: boolean): void; close(): void } | null>(null)
-  const outlineNavigation = useRef<{ owner: Uint8Array; go(dest: string | unknown[]): Promise<void> } | null>(null)
-  const current = visible && reading?.owner === data ? reading : null
-  const currentOutline = visible && outline?.owner === data ? outline : null
-  const currentSearch = visible && search?.owner === data ? search : null
+  const finder = useRef<{ owner: RandomAccessSource; execute(query: string, caseSensitive: boolean, again?: boolean, previous?: boolean): void; close(): void } | null>(null)
+  const outlineNavigation = useRef<{ owner: RandomAccessSource; go(dest: string | unknown[]): Promise<void> } | null>(null)
+  const current = visible && reading?.owner === source ? reading : null
+  const currentOutline = visible && outline?.owner === source ? outline : null
+  const currentSearch = visible && search?.owner === source ? search : null
   const ready = current?.phase === 'ready'
   const readable = !!current?.pages
 
@@ -71,19 +72,19 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
     const lifetime = new AbortController()
     mode.current = 'page-width'
     setOutlineOpen(false)
-    setOutline({ owner: data, phase: 'loading', entries: [], limited: false })
-    setSearch({ owner: data, query: '', caseSensitive: false, current: 0, total: 0, state: 0 })
+    setOutline({ owner: source, phase: 'loading', entries: [], limited: false })
+    setSearch({ owner: source, query: '', caseSensitive: false, current: 0, total: 0, state: 0 })
     const update = (facts: Partial<Omit<Reading, 'owner'>>) => {
-      if (!disposed) setReading(previous => ({ phase: 'loading', pages: 0, page: 1, scale: 1, mode: 'page-width', ...(previous?.owner === data ? previous : {}), ...facts, owner: data }))
+      if (!disposed) setReading(previous => ({ phase: 'loading', pages: 0, page: 1, scale: 1, mode: 'page-width', ...(previous?.owner === source ? previous : {}), ...facts, owner: source }))
     }
-    setReading({ owner: data, phase: 'loading', pages: 0, page: 1, scale: 1, mode: 'page-width' })
+    setReading({ owner: source, phase: 'loading', pages: 0, page: 1, scale: 1, mode: 'page-width' })
     const release = () => {
       if (disposed) return
       disposed = true
       password.current = null; cancel.current = null
       finder.current?.close()
-      if (finder.current?.owner === data) finder.current = null
-      if (outlineNavigation.current?.owner === data) outlineNavigation.current = null
+      if (finder.current?.owner === source) finder.current = null
+      if (outlineNavigation.current?.owner === source) outlineNavigation.current = null
       removeListeners?.(); observer?.disconnect()
       // The runtime accepts null for teardown; PDF.js 6's declaration omits it.
       reader?.setDocument(null as unknown as PDFDocumentProxy)
@@ -105,9 +106,9 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
       const findController = new components.PDFFindController({ eventBus, linkService })
       let query = '', caseSensitive = false
       const updateSearch = (facts: Partial<Omit<SearchReading, 'owner'>>) => {
-        if (!disposed) setSearch(previous => ({ owner: data, query, caseSensitive, current: 0, total: 0, state: 0, ...(previous?.owner === data ? previous : {}), ...facts }))
+        if (!disposed) setSearch(previous => ({ owner: source, query, caseSensitive, current: 0, total: 0, state: 0, ...(previous?.owner === source ? previous : {}), ...facts }))
       }
-      finder.current = { owner: data, execute(value, sensitive, again = false, previous = false) {
+      finder.current = { owner: source, execute(value, sensitive, again = false, previous = false) {
         if (disposed) return
         query = value; caseSensitive = sensitive
         updateSearch({ query, caseSensitive, ...(!again ? { current: 0, total: 0 } : {}) })
@@ -117,7 +118,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
         // setDocument(null) cancels PDF.js's pending find timeout and text extraction publication.
         findController.setDocument(null as unknown as PDFDocumentProxy)
       } }
-      outlineNavigation.current = { owner: data, go: dest => linkService.goToDestination(dest) }
+      outlineNavigation.current = { owner: source, go: dest => linkService.goToDestination(dest) }
       const options = {
         container: viewport, viewer: pageContainer, eventBus, linkService, findController,
         textLayerMode: 1, annotationMode: 1, removePageBorders: true,
@@ -163,8 +164,25 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
         if (!disposed && reader?.pdfDocument && mode.current !== 'custom') initialized()
       })
       observer.observe(viewport)
+      class SourceTransport extends engine.PDFDataRangeTransport {
+        constructor() { super(source.size, new Uint8Array(), true) }
+        override requestDataRange(begin: number, end: number) {
+          void source.read(begin, end - begin, lifetime.signal).then(bytes => {
+            if (disposed || lifetime.signal.aborted) return
+            if (bytes.length !== end - begin) throw new Error('The original PDF source returned an incomplete span.')
+            this.onDataRange(begin, bytes)
+          }).catch(error => {
+            if (disposed || lifetime.signal.aborted) return
+            update({ phase: 'error', pages: 0, message: error instanceof Error ? error.message : 'The original PDF bytes could not be read. Reload the File to retry.' })
+            release()
+          })
+        }
+        override abort() { lifetime.abort() }
+      }
       loading = engine.getDocument({
-        data: data.slice(), cMapUrl: new URL('pdfjs/cmaps/', document.baseURI).href, cMapPacked: true,
+        // PDF.js's 64 KiB default also limits over-read when page dictionaries are far apart.
+        range: new SourceTransport(), rangeChunkSize: 64 * 1024, disableAutoFetch: true, disableStream: true,
+        cMapUrl: new URL('pdfjs/cmaps/', document.baseURI).href, cMapPacked: true,
         standardFontDataUrl: new URL('pdfjs/standard_fonts/', document.baseURI).href,
         iccUrl: new URL('pdfjs/iccs/', document.baseURI).href,
         wasmUrl: new URL('pdfjs/wasm/', document.baseURI).href, stopAtErrors: true,
@@ -186,15 +204,15 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
         reader.setDocument(document)
         // Outline metadata can fail without disabling a healthy page reader.
         void Promise.resolve().then(() => document.getOutline()).then(items => {
-          if (!disposed) setOutline({ owner: data, phase: 'ready', ...outlineEntries(items ?? []) })
-        }, () => { if (!disposed) setOutline({ owner: data, phase: 'error', entries: [], limited: false, message: 'The PDF outline could not be read. Pages and text search remain available.' }) })
+          if (!disposed) setOutline({ owner: source, phase: 'ready', ...outlineEntries(items ?? []) })
+        }, () => { if (!disposed) setOutline({ owner: source, phase: 'error', entries: [], limited: false, message: 'The PDF outline could not be read. Pages and text search remain available.' }) })
       })
     }).catch(error => {
       update({ phase: 'error', pages: 0, message: error?.name === 'PasswordException' ? 'This PDF is password protected.' : 'The PDF engine could not decode this file. Reload the file preview or open it in a system application.' })
       release()
     })
     return release
-  }, [data, visible])
+  }, [source, visible])
 
   const scale = (value: number | Exclude<ScaleMode, 'custom'>) => {
     const reader = viewer.current
@@ -210,7 +228,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
   }
   const phase = current?.phase ?? (visible ? 'loading' : 'inactive')
   const find = (query: string, sensitive = currentSearch?.caseSensitive ?? false, again = false, previous = false) => {
-    if (finder.current?.owner === data && readable) finder.current.execute(query, sensitive, again, previous)
+    if (finder.current?.owner === source && readable) finder.current.execute(query, sensitive, again, previous)
   }
   return <div className="pdf-content" data-decode-state={phase} onKeyDownCapture={event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f' && readable) { event.preventDefault(); event.stopPropagation(); searchInput.current?.focus(); searchInput.current?.select() }
@@ -227,8 +245,8 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
       {outlineOpen && currentOutline ? <nav className="pdf-content__outline" aria-label="PDF outline"><div className="pdf-content__outline-heading"><strong>Contents</strong><button className="icon-button" aria-label="Close PDF outline" onClick={() => { setOutlineOpen(false); outlineButton.current?.focus() }}><ThemeActionCloseIcon size={13} /></button></div>
         {currentOutline.phase === 'loading' ? <p>Reading outline…</p> : currentOutline.phase === 'error' ? <p role="status">{currentOutline.message}</p> : !currentOutline.entries.length ? <p>No outline in this PDF.</p> : <ol>{currentOutline.entries.map((entry, index) => <li key={index} style={{ paddingLeft: Math.min(120, entry.depth * 12) }}>{entry.dest ? <button title={entry.title} onClick={() => {
           const navigation = outlineNavigation.current
-          if (navigation?.owner !== data || !entry.dest) return
-          void navigation.go(entry.dest).catch(() => { if (outlineNavigation.current === navigation) setOutline(previous => previous?.owner === data ? { ...previous, message: 'This section could not be located. Use page navigation to continue.' } : previous) })
+          if (navigation?.owner !== source || !entry.dest) return
+          void navigation.go(entry.dest).catch(() => { if (outlineNavigation.current === navigation) setOutline(previous => previous?.owner === source ? { ...previous, message: 'This section could not be located. Use page navigation to continue.' } : previous) })
         }}>{entry.title}</button> : <span>{entry.title}{entry.external ? ' · external destination' : ''}</span>}</li>)}</ol>}
         {currentOutline.message && currentOutline.phase !== 'error' ? <p role="status">{currentOutline.message}</p> : null}{currentOutline.limited ? <p>The outline is limited to 500 entries and 20 levels.</p> : null}
       </nav> : null}
@@ -253,7 +271,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
           if (typeof value !== 'string' || !value || !password.current) return
           const unlock = password.current
           password.current = null
-          setReading(previous => previous?.owner === data ? { ...previous, phase: 'loading', message: undefined } : previous)
+          setReading(previous => previous?.owner === source ? { ...previous, phase: 'loading', message: undefined } : previous)
           form.reset(); unlock(value)
         }}>
           <label>Password<TextInput name="password" type="password" autoComplete="off" required aria-label="PDF password" /></label>

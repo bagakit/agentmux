@@ -8,10 +8,11 @@ import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
 import { usePreviewObjectUrl, useWorkspaceFilePreview } from '../lib/use-workspace-file-preview'
 import { useWorkspaceMediaStream } from '../lib/use-workspace-media-stream'
-import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
+import { useWorkspaceFileSource } from '../lib/use-workspace-file-source'
+import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import { FilePathLabel } from './FilePathLabel'
-import { FilePreviewState } from './FilePreviewState'
-import { formatFileBytes } from '../lib/format-file-bytes'
+import { FilePreviewState } from '@agentmux/editor-extensions/ui/FilePreviewState'
+import { formatFileBytes } from '@agentmux/editor-extensions/format-file-bytes'
 
 const ThemeActionZoomOutIcon = semanticIconComponent('action.zoom-out')
 const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
@@ -20,8 +21,8 @@ const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external'
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 
 
-const PdfContent = lazy(async () => ({ default: (await import('./PdfContent')).PdfContent }))
-const MediaPlayer = lazy(async () => ({ default: (await import('./MediaPlayer')).MediaPlayer }))
+const PdfReader = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/pdf')).PdfReader }))
+const MediaPlayer = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/MediaPlayer')).MediaPlayer }))
 
 
 /** Image viewing only. Decode, zoom and failure state belong to one content mount;
@@ -120,11 +121,13 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
   const reportError = useAppStore(state => state.reportError)
   const playable = workspaceFilePreviewFormat(surface.path)
   const isMedia = playable?.kind === 'audio' || playable?.kind === 'video'
-  const snapshot = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary && !isMedia)
+  const isPdf = playable?.kind === 'pdf'
+  const snapshot = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary && !isMedia && !isPdf)
   const stream = useWorkspaceMediaStream(surface.workspaceId, surface.path, visible && !binary && isMedia)
+  const pdf = useWorkspaceFileSource(surface.workspaceId, surface.path, visible && !binary && isPdf)
   const { preview } = snapshot
-  const failure = isMedia ? stream.failure : snapshot.failure
-  const reload = isMedia ? stream.reload : snapshot.reload
+  const failure = isMedia ? stream.failure : isPdf ? pdf.failure : snapshot.failure
+  const reload = isMedia ? stream.reload : isPdf ? pdf.reload : snapshot.reload
   const url = usePreviewObjectUrl(preview)
   const external = async (action: 'openSystem' | 'reveal') => {
     try { await api.files[action](surface.workspaceId, surface.path) } catch (error) { reportError(error) }
@@ -142,10 +145,11 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
     </header>
     {binary ? <div className="file-preview-state"><strong>Binary file</strong><span>This file has no editable text content. Open it in a system application to inspect it.</span>{binary.kind === 'binary' ? <span className="file-preview__metadata">{formatFileBytes(binary.byteLength)}</span> : null}</div>
       : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => reload()}>Retry</button></div>
-      : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} resume={stream.resume} /></Suspense>
+      : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer readStatus={api.files.mediaStreamStatus} key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} resume={stream.resume} /></Suspense>
         : <div className="file-preview-state" role="status">{visible ? 'Opening media…' : 'Playback paused while hidden'}</div>
+      : isPdf ? pdf.source ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfReader source={pdf.source} name={surface.path} visible={visible} /></Suspense>
+        : <div className="file-preview-state" role="status">{visible ? 'Opening PDF…' : 'Preview paused while hidden'}</div>
       : !preview ? <div className="file-preview-state" role="status">{visible ? 'Reading file…' : 'Preview paused while hidden'}</div>
-      : preview.kind === 'pdf' ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfContent data={preview.bytes} name={surface.path} visible={visible} /></Suspense>
       : !url ? <FilePreviewState title="Preparing file preview" />
       : <ImageContent key={url} src={url} name={surface.path} byteLength={preview.byteLength} />}
   </section>
