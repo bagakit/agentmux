@@ -11,6 +11,8 @@ import { createMoteConversationStartFixture } from '../../host/test/helpers/mote
 import { moteQuickBaseline } from '@agentmux/core/mote-preferences'
 import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const closing: Array<() => Promise<unknown>> = []
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -20,6 +22,11 @@ afterEach(async () => {
   document.body.replaceChildren(); vi.restoreAllMocks()
 })
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 15000, interval: 20 }) }
+// The Core fixture deliberately clears AgentMux runtime env before opening its private owner.
+const retentionEvidenceDirectory = process.env.AGENTMUX_MOTE_RETENTION_EVIDENCE
+function retentionEvidence(surface: 'welcome' | 'profile', result: unknown, body: string | null) {
+  if (retentionEvidenceDirectory) writeFileSync(join(retentionEvidenceDirectory, surface + '-fixture.json'), JSON.stringify({ surface, result, body }, null, 2))
+}
 async function actual(providerId?: 'claude') {
   const host = await createMoteConversationStartFixture(providerId ? { providerId } : undefined); closing.push(host.close)
   const f = fixture(), owner = getDeviceWorkface(), content = { ...host.target.expectedResource, zoneId: host.target.zoneId }
@@ -96,6 +103,80 @@ it('a delayed original A receipt cannot clear later B or steal the later Mobile 
   expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query')
   expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+})
+
+it('the actual welcome keeps delivered A and its independent setup issue visible beside later draft B', async () => {
+  const f = await actual(), hold = f.hold()
+  const retention = vi.spyOn(f.host.spatial, 'recordMoteMainBindingResult').mockRejectedValue(Error('Original metadata disk unavailable'))
+  await paste(f.scene(), 'Original A Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
+  await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.advance')).toBe(true))
+  await wait(() => expect(f.host.h.inner.kernel.input).toHaveBeenCalled())
+  await act(async () => { editor(f.scene()).replaceChildren(document.createElement('p')); editor(f.scene()).dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })) })
+  await paste(f.scene(), 'Later B Query')
+  await act(async () => hold.resolve())
+  const index = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
+  const result = await f.rpc.mock.results[index]!.value
+  expect(result.binding).toBe('confirmed'); expect(result.issue).toContain('retention is unconfirmed')
+  expect(['admitted', 'terminal-confirmed']).toContain(agentPromptSubmissionOutcome(result.deferredInput?.record ?? null))
+  await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.inspect')).toBe(true))
+  const observed = await f.rpc.mock.results[f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.inspect')]!.value
+  await act(async () => {})
+  expect(observed.binding).toBe('confirmed'); expect(observed.issue).toBeTruthy()
+  await wait(() => { expect(f.scene().textContent).toContain('首条消息已送达。'); expect(f.scene().textContent).toContain(observed.issue) })
+  expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
+  expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query')
+  expect(editor(f.scene()).getAttribute('contenteditable')).toBe('true')
+  retentionEvidence('welcome', observed, f.scene().textContent)
+  await click(f.scene().querySelector('.mobile-mote-start-details > summary')!)
+  const inputs = f.host.h.inner.kernel.input.mock.calls.length
+  await wait(() => expect(button(f.scene(), '核对这次开始').disabled).toBe(false)); await click(button(f.scene(), '核对这次开始'))
+  await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.inspect').length).toBeGreaterThan(1))
+  await wait(() => expect(button(f.scene(), '核对这次开始').disabled).toBe(false))
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.inspect').at(-1)![1]).toEqual({ target: f.host.target, creation: { hostId: 'local', operationId: result.operationId } })
+  await wait(() => expect(f.scene().textContent).toContain(observed.issue))
+  retention.mockRestore()
+  await wait(() => expect(button(f.scene(), '继续这次开始').disabled).toBe(false)); await click(button(f.scene(), '继续这次开始'))
+  await wait(() => expect(f.scene().textContent).not.toContain(observed.issue))
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance').at(-1)![1]).toEqual({ target: f.host.target, creation: { hostId: 'local', operationId: result.operationId } })
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+  expect(f.host.h.inner.kernel.input).toHaveBeenCalledTimes(inputs)
+  expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query')
+  expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
+})
+
+it('the actual Profile parent retains confirmed Main and its independent setup issue on the original request', async () => {
+  const f = await actual()
+  const retention = vi.spyOn(f.host.spatial, 'recordMoteMainBindingResult').mockRejectedValue(Error('Original Profile metadata disk unavailable'))
+  await click(f.view.element.querySelector<HTMLButtonElement>('.mobile-session-identity.mobile-mote-heading')!)
+  const profile = () => document.body.querySelector<HTMLElement>('.mobile-mote-profile')!
+  await wait(() => expect(profile()?.querySelector('.mobile-mote-setup')).toBeTruthy())
+  await wait(() => expect(button(profile(), '新建 Main Agent').disabled).toBe(false)); await click(button(profile(), '新建 Main Agent'))
+  await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.advance')).toBe(true))
+  const index = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
+  const result = await f.rpc.mock.results[index]!.value
+  expect(result.binding).toBe('confirmed'); expect(result.issue).toContain('retention is unconfirmed')
+  expect(result.record.moteMain.deferredInput).toBeUndefined()
+  await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.inspect')).toBe(true))
+  const observed = await f.rpc.mock.results[f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.inspect')]!.value
+  await act(async () => {})
+  expect(observed.binding).toBe('confirmed'); expect(observed.issue).toBeTruthy()
+  await wait(() => { expect(profile().textContent).toContain('Main 已绑定，可回到主对话。'); expect(profile().textContent).toContain(observed.issue) })
+  expect(button(profile(), '打开主对话').disabled).toBe(false)
+  retentionEvidence('profile', observed, profile().textContent)
+  await click([...profile().querySelectorAll('summary')].find(node => node.textContent === '本次设置请求')!)
+  expect(profile().textContent).toContain(result.operationId)
+  const inputs = f.host.h.inner.kernel.input.mock.calls.length
+  await wait(() => expect(button(profile(), '核对主 Agent 创建').disabled).toBe(false)); await click(button(profile(), '核对主 Agent 创建'))
+  await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.inspect').length).toBeGreaterThan(1))
+  await wait(() => expect(button(profile(), '核对主 Agent 创建').disabled).toBe(false))
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.inspect').at(-1)![1]).toEqual({ target: f.host.target, creation: { hostId: 'local', operationId: result.operationId } })
+  await wait(() => expect(profile().textContent).toContain(observed.issue))
+  retention.mockRestore()
+  await wait(() => expect(button(profile(), '继续设置主 Agent').disabled).toBe(false)); await click(button(profile(), '继续设置主 Agent'))
+  await wait(() => expect(profile().textContent).not.toContain(observed.issue))
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance').at(-1)![1]).toEqual({ target: f.host.target, creation: { hostId: 'local', operationId: result.operationId } })
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+  expect(f.host.h.inner.kernel.input).toHaveBeenCalledTimes(inputs)
 })
 
 it('unknown setup outcome remounts through Core readonly inspection without creating or replaying a Query', async () => {

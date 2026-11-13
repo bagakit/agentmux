@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const files = ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileMoteConversationStart.tsx', 'apps/mobile/src/navigation/MobileMoteMainActions.tsx',
   'apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', 'apps/mobile/src/conversation/mote-main-input.ts', 'apps/mobile/src/navigation/MobileMoteStartPortrait.tsx',
 'apps/mobile/src/conversation/MobileMoteSourceNotice.tsx', 'apps/mobile/src/conversation/MobileMoteConversation.tsx',
-  'packages/client-ui/src/components/MoteConversationStart.tsx']
+  'packages/client-ui/src/components/MoteConversationStart.tsx', 'packages/core/src/mote-main-setup.ts']
 const mutations: Record<string, { file: string; edits: [string, string][] }> = {
   'welcome-wire': { file: files[0]!, edits: [['welcomeVisible && moteTarget && objectIdentity && !historyVisible &&', 'false && welcomeVisible && moteTarget && objectIdentity && !historyVisible &&']] },
   'first-query': { file: files[2]!, edits: [['deferredInput: { operationId: query.operationId, prompt: query.prompt }', "deferredInput: { operationId: query.operationId, prompt: 'Wrong original question' }"]] },
@@ -21,7 +21,10 @@ const mutations: Record<string, { file: string; edits: [string, string][] }> = {
   'late-due': { file: files[4]!, edits: [["producer && draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft && mounted.current", 'producer && mounted.current']] },
   'archive': { file: files[4]!, edits: [['attempts.current.delete(producer.key)', '/* stale active attempt retained */']] },
   'source-reason': { file: files[7]!, edits: [['{configurationIssue && <><dt>配置</dt><dd>{configurationIssue}</dd></>}', '{false && <><dt>配置</dt><dd>{configurationIssue}</dd></>}']] },
-  'period-wire': { file: files[0]!, edits: [['source={moteHistory} client={client}', 'source={{ ...moteHistory, period: undefined }} client={client}']] }
+  'period-wire': { file: files[0]!, edits: [['source={moteHistory} client={client}', 'source={{ ...moteHistory, period: undefined }} client={client}']] },
+  'profile-setup-issue': { file: files[2]!, edits: [['{result?.issue && <p role="status">{result.issue}</p>}', '{false && <p role="status">{result?.issue}</p>}']] },
+  'welcome-setup-issue': { file: files[1]!, edits: [['{state.result?.issue && <p role="status">{state.result.issue}</p>}', '{false && <p role="status">{state.result?.issue}</p>}']] },
+  'setup-observation-unretained': { file: files[10]!, edits: [["else result.issue = 'The original Main binding is observed; retaining this observation in its original admission is unconfirmed. Explicitly advance this same setup operation to confirm it. The original Agent and request are kept.'", 'else result.issue = null']] }
 }
 export default { ...base, cacheDir: resolve(root, '.tmp/mobile-mote-start-vitest'),
   plugins: [...base.plugins ?? [], { name: 'loaded-mobile-mote-start', enforce: 'pre' as const, transform(source: string, id: string) {
