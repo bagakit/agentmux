@@ -47,6 +47,8 @@ export type SpatialControlPorts = {
   surveyPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
+  /** Core's binding for an operation identity: an existing creation, a queued message, or its deterministic derivation. Never minted here. */
+  creationSessionId(hostId: string, createOperationId: string): Promise<string>
   creation(hostId: string, sessionId: string): Promise<AgentMuxAgentCreationInspection>
   attach(regionId: string, result: AgentLaunchResult): Promise<void>
   save(layoutApplied: boolean): Promise<AgentMuxSpatialSave>
@@ -336,7 +338,43 @@ function observedAgent(sessions: readonly SessionSnapshot[], agentSessionId: str
     session.control.agentSessionId === agentSessionId && (hostId === undefined || session.control.hostId === hostId))
   return matches.length === 1 ? matches[0] : undefined
 }
+/**
+ * Core's confirmed creation of this exact operation on that Session, live or retired.
+ * Null covers both "Core holds none" and an unreadable answer: only a positive receipt
+ * changes the flow, and Core's own idempotent creation still refuses any duplicate.
+ */
+async function operationCreation(ports: SpatialControlPorts, hostId: string, agentSessionId: string, requestId: string): Promise<AgentMuxAgentCreationInspection | null> {
+  let created: AgentMuxAgentCreationInspection
+  try { created = await ports.creation(hostId, agentSessionId) } catch { return null }
+  if (created?.agentSessionId !== agentSessionId) return null
+  const creation = created.kind === 'retired-agent' ? created.history?.creation : created.creation
+  return creation?.createOperationId === requestId ? created : null
+}
+/**
+ * A request admitted before Core resolved operation identities may hold a Session ID that
+ * Core never created while Core binds the operation to another one. Only Core's binding for
+ * this exact operation can correct it; a read failure keeps the original record untouched.
+ */
+async function rebindToOperationSession(ports: SpatialControlPorts, binding: SpatialRequestBinding): Promise<SpatialRequestBinding> {
+  const hostId = binding.executionHostId
+  if (!binding.createAgent || binding.operation !== 'agent.open' || !hostId || !binding.originalFailure) return binding
+  if (observedAgent(ports.get().sessions, binding.agentSessionId, hostId)) return binding
+  let agentSessionId: string
+  try { agentSessionId = await ports.creationSessionId(hostId, binding.requestId) } catch { return binding }
+  if (agentSessionId === binding.agentSessionId || !await operationCreation(ports, hostId, agentSessionId, binding.requestId)) return binding
+  const current = ports.get().spatialRequests[binding.requestId]
+  if (current !== binding) return current ?? binding
+  const tab = ports.get().tabs[binding.tabId], surface = tab?.regions[binding.regionId]
+  // The reserved Region still names the never-created identity; it now names the exact one.
+  const tabs = tab && surface?.kind === 'agent' && surface.sessionId === binding.agentSessionId
+    ? { tabs: { ...ports.get().tabs, [tab.id]: { ...tab, regions: { ...tab.regions, [surface.regionId]: { ...surface, sessionId: agentSessionId } } } } } : {}
+  const rebound = { ...binding, agentSessionId }
+  ports.patch({ spatialRequests: { ...ports.get().spatialRequests, [binding.requestId]: rebound }, ...tabs })
+  try { await ports.save(Boolean(tabs.tabs)) } catch { /* The in-memory correction stands; its save stays unconfirmed like any other. */ }
+  return rebound
+}
 async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTopicSnapshot[], binding: SpatialRequestBinding): Promise<AgentMuxSpaceMutationReport> {
+  binding = await rebindToOperationSession(ports, binding)
   const currentLocation = () => {
     const state = ports.get(), catalog = spatialCatalog(state, topics)
     const region = catalog.regions.find(item => item.regionId === binding.regionId && item.agentSessionId === binding.agentSessionId)
@@ -583,6 +621,15 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     const executionHostId = forkExecutionHostId ?? (operation === 'agent.open' && request.content.kind === 'new-agent'
       ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
       : existingAgent?.control.hostId)
+    let adopted: AgentMuxAgentCreationInspection | null = null
+    if (operation === 'agent.open' && (request.content.kind === 'new-agent' || request.content.kind === 'fork-agent')) {
+      // A deterministic operation ID (Take over, a derived action) outlives this client's
+      // request record. Core's operation binding names its only Session; a locally minted
+      // second identity would collide with that binding and could never start.
+      if (!executionHostId) failure('SPACE_RESOURCE_UNKNOWN', 'The original execution Host is unconfirmed. No Agent identity was reserved and nothing was started.')
+      sessionId = await ports.creationSessionId(executionHostId, request.requestId)
+      adopted = await operationCreation(ports, executionHostId, sessionId, request.requestId)
+    }
     if (operation === 'agent.open' && request.content.kind === 'new-agent' &&
       !toolWorkspace && ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
       failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact saved local Executor template ID.')
@@ -615,6 +662,10 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       } : {}) })
     const admitted = await ports.save(false)
     if (!admitted.clientStateWritten) { report.save = admitted; failure('SPACE_INTENT_SAVE_FAILED', 'The request association could not be written; creation has not been dispatched.') }
+    // Core already holds this operation's creation: converge on it. Its reserved placement
+    // is not observed here, so reconcile reports the exact Agent or retirement as it is,
+    // without placing a Region, launching, or replaying the first input.
+    if (adopted) return { operation, ...await reconcile(ports, topics, binding) }
     if (selfMove) {
       report.outcome = 'unchanged'; report.to = from!; report.save = { ...admitted, layoutApplied: true }
       if (request.focus) { ports.focus(from!); report.save = await ports.save(true) }

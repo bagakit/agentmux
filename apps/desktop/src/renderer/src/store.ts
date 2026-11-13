@@ -6358,6 +6358,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           } }))
           return api.sessions.launchAgent(input)
         },
+        creationSessionId: (hostId, createOperationId) => api.sessions.resolveCreationSessionId(hostId, createOperationId),
         creation: (hostId, sessionId) => api.sessions.creation(hostId, sessionId),
         attach: async (regionId, result) => {
           const canonical = await get().canonicalizeAgentLaunch(result) ?? result

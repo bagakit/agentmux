@@ -8,6 +8,7 @@ import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
 import { serializeThemeFile } from '@agentmux/client-ui/theme'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { deriveAgentSessionId } from '@agentmux/core/agent-session-id'
 import { unwrapSessionInputWriteResult, unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
 import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
@@ -1019,7 +1020,7 @@ const mockApi: AgentMuxDesktopApi = {
     }),
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
     continueCreation: async () => { throw new Error('Continuing the original creation requires the Desktop host.') },
-    resolveCreationSessionId: async () => { throw new Error('A Core creation binding requires the Desktop host.') },
+    resolveCreationSessionId: async (_hostId, createOperationId) => deriveAgentSessionId(createOperationId),
     snapshot: async () => structuredClone(mockSnapshot),
     endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),
     executionBinding: async () => null,
