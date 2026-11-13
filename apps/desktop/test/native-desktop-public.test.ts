@@ -70,7 +70,7 @@ async function publicFixture(captureResults = new Map<string, unknown>()) {
   async function cli(action: string[], input?: unknown) {
     return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
-      const child = spawn(process.execPath, [cliEntry!, '--endpoint', `unix:${endpoint}`, 'native', ...action, ...(input === undefined ? [] : ['--data', '-'])], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+      const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', cliEntry!, '--endpoint', `unix:${endpoint}`, 'native', ...action, ...(input === undefined ? [] : ['--data', '-'])], { env, stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
       child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr })); child.stdin.end(input === undefined ? '' : JSON.stringify(input))
     })
