@@ -420,6 +420,11 @@ export function reconcileCollaborationLayout(input: CollaborationLayoutInput, pr
   return work.nodes ? project() : projection
 }
 const expand = (box: CollaborationLayoutBounds, amount: number) => ({ x: box.x - amount, y: box.y - amount, width: box.width + amount * 2, height: box.height + amount * 2 })
+/** Graphviz prints positions with five significant digits, so a pinned box far from the
+ * origin reads back up to half a unit of its last printed digit away. That rounding is not a
+ * move; a real move is larger. The box and the source offset are each rounded, so a check
+ * allows one last-digit unit for each (with a .1 floor for coordinates near the origin). */
+const printedPrecision = (value: number) => Math.max(.1, 10 ** (Math.floor(Math.log10(Math.max(1, Math.abs(value)))) - 4))
 function routeNode(box: Obstacle) {
   return { name: box.id, attributes: { pos: `${box.x + box.width / 2},${-box.y - box.height / 2}!`, width: box.width / 72, height: box.height / 72 } }
 }
@@ -545,7 +550,7 @@ async function route(obstacles: Obstacles, connection: CollaborationLayoutConnec
     for (const item of result.objects ?? []) {
       if (item.name === sourceId || item.name === targetId) continue
       const box = obstacles.byId.get(item.name), [px, py] = (item.pos ?? '').split(',').map(Number)
-      if (!box || !Number.isFinite(px) || !Number.isFinite(py) || Math.abs(px! + dx - box.x - box.width / 2) > .1 || Math.abs(py! + dy - box.y - box.height / 2) > .1)
+      if (!box || !Number.isFinite(px) || !Number.isFinite(py) || Math.abs(px! + dx - box.x - box.width / 2) > printedPrecision(px!) + printedPrecision(x!) || Math.abs(py! + dy - box.y - box.height / 2) > printedPrecision(py!) + printedPrecision(y!))
         throw Error('Connection routing moved an original fixed box. Existing connections are kept.')
     }
     const points = result.edges?.find(edge => edge.id === connection.id)?._draw_?.find(draw => draw.op === 'b')?.points?.map(point => ({ x: point[0]! + dx, y: point[1]! + dy }))
