@@ -35,8 +35,9 @@ beforeEach(() => {
 afterEach(async () => { await app.dispose() })
 const profile = async () => {
   useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } }); await app.mount()
+  await moteClick(app.container.querySelector('[aria-label="Mote pages"] [data-surface-mode="profile"]')!)
   const panel = app.container.querySelector<HTMLElement>('[aria-label="This Mote’s work"]')!
-  expect(panel).not.toBeNull(); return panel
+  expect(panel).not.toBeNull(); expect(panel.closest('[hidden]')).toBeNull(); return panel
 }
 describe('original Mote Goal composition and current-work caller', () => {
   it('includes all own discussions and excludes another Mote, ordinary Topic and unlinked Goal', () => {
