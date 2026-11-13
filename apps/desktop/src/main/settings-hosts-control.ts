@@ -4,6 +4,7 @@ import { hostSchema } from './config-store.js'
 import { configValuesEqual } from '../shared/config-edit.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { RuntimeController } from './runtime-controller.js'
+import type { SettingsHostsInstallOwner } from './settings-hosts-install.js'
 import type { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
 
 /** IPC and public Control share this explicit diagnostic; no configuration transaction is held. */
@@ -25,7 +26,8 @@ export async function executeSettingsHostsControl(
   request: AgentMuxControlSettingsHostsRequest,
   owner: ConfigOwner,
   runtime: Pick<RuntimeController, 'checkHost'>,
-  upgrades?: SettingsHostsUpgradeOwner
+  upgrades?: SettingsHostsUpgradeOwner,
+  installs?: SettingsHostsInstallOwner
 ): Promise<AgentMuxControlSettingsHostsResult> {
   if (request.operation === 'settings.hosts.list') {
     return { operation: request.operation, hosts: structuredClone(owner.current.hosts) as AgentMuxControlSettingsResourceFields[] }
@@ -46,6 +48,12 @@ export async function executeSettingsHostsControl(
   }
   const input = request.id !== undefined ? owner.current.hosts.find(host => host.id === request.id) : 'input' in request ? request.input : undefined
   if (input === undefined) throw Object.assign(new Error(`Host not found: ${request.id}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
+  if (request.operation === 'settings.hosts.install-check' || request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.install-inspect') {
+    if (!installs) throw Object.assign(new Error('The original service has no first Core install owner.'), { code: 'CONTROL_UNAVAILABLE' })
+    if (request.operation === 'settings.hosts.install-check') return { operation: request.operation, check: await installs.check(input) }
+    if (request.operation === 'settings.hosts.install') return { operation: request.operation, receipt: await installs.install(input, request.expected, request.requestId) }
+    return { operation: request.operation, receipt: await installs.inspect(input, request.requestId) }
+  }
   if (request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') {
     if (!upgrades) throw Object.assign(new Error('The original service has no Core maintenance owner.'), { code: 'CONTROL_UNAVAILABLE' })
     if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await upgrades.check(input) }

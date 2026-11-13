@@ -84,6 +84,7 @@ import { parseBrowserControl, parseBrowserProfileRef, parseBrowserTarget, parseB
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
+import { parseRemoteCoreInstallCheck, parseRemoteCoreInstallExpected, parseRemoteCoreInstallReceipt } from './remote-core-install-codec.js'
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
@@ -390,6 +391,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       input: settingsResourceRecord(source.input, code) }
     settingsResourceBudget(request, code)
     return request
+  }
+  if (source.operation === 'settings.hosts.install-check' || source.operation === 'settings.hosts.install' || source.operation === 'settings.hosts.install-inspect') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', ...(source.operation === 'settings.hosts.install' ? ['expected'] : [])], code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, id: text(source.id, 'Host ID', code) }
+    return source.operation === 'settings.hosts.install' ? { ...base, operation: source.operation, expected: parseRemoteCoreInstallExpected(source.expected) }
+      : { ...base, operation: source.operation }
   }
   if (source.operation === 'settings.hosts.upgrade' || source.operation === 'settings.hosts.upgrade-inspect' || source.operation === 'settings.hosts.upgrade-reconnect') {
     const code = 'INVALID_CONTROL_REQUEST'
@@ -1370,6 +1378,19 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { item: resourceItem(result.item), changed: result.changed } })
+  }
+  if (operation === 'settings.hosts.install-check' || operation === 'settings.hosts.install' || operation === 'settings.hosts.install-inspect') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    settingsResourceBudget(source, code)
+    const fields = settingsResourceRecord(result, code)
+    if (operation === 'settings.hosts.install-check') {
+      settingsResourceEnvelope(fields, ['check'], code)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { check: parseRemoteCoreInstallCheck(fields.check) } }
+    }
+    settingsResourceEnvelope(fields, ['receipt'], code)
+    if (operation === 'settings.hosts.install') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: parseRemoteCoreInstallReceipt(fields.receipt) } }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: fields.receipt === null ? null : parseRemoteCoreInstallReceipt(fields.receipt) } }
   }
   if (operation === 'settings.hosts.upgrade-check' || operation === 'settings.hosts.upgrade' || operation === 'settings.hosts.upgrade-inspect' || operation === 'settings.hosts.upgrade-reconnect') {
     const code = 'CONTROL_PROTOCOL_ERROR'

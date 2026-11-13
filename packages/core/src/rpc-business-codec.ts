@@ -58,7 +58,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if ((method === 'goal.activity.append' || method === 'goal.activity.inspect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Goal activity append/check requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
-  if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect') && typeof source.operationId !== 'string') {
+  if ((method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
   if (method === 'space.mote.preferences.save' && typeof source.operationId !== 'string') {
@@ -315,16 +315,16 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'inspect.tab': case 'arrange': if (request.target.kind === 'tab' && (actual.tab as Record<string, unknown>).tabId !== request.target.tabId) fail(); break
     case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key || actual.requestId !== undefined && actual.requestId !== request.requestId) fail(); break
     case 'settings.hosts.update': if (!isDeepStrictEqual(actual.host, request.candidate) || (actual.host as Record<string, unknown>).id !== request.id) fail(); break
-    case 'settings.hosts.upgrade-check': {
+    case 'settings.hosts.install-check': case 'settings.hosts.upgrade-check': {
       const check = actual.check as { input: Record<string, unknown> }
       if (request.id !== undefined ? check.input.id !== request.id : !isDeepStrictEqual(check.input, request.input)) fail()
       break
     }
-    case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': case 'settings.hosts.upgrade-reconnect': {
+    case 'settings.hosts.install': case 'settings.hosts.install-inspect': case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': case 'settings.hosts.upgrade-reconnect': {
       const receipt = actual.receipt as { input: { id: string }; operationId: string; expected: unknown } | null
-      if (request.operation === 'settings.hosts.upgrade' && !receipt) fail()
+      if ((request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.upgrade') && !receipt) fail()
       if (receipt && (receipt.input.id !== request.id || receipt.operationId !== request.requestId ||
-        request.operation === 'settings.hosts.upgrade' && !isDeepStrictEqual(receipt.expected, request.expected))) fail()
+        (request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.upgrade') && !isDeepStrictEqual(receipt.expected, request.expected))) fail()
       break
     }
     case 'settings.browser.links.forget': if (actual.scheme !== request.scheme) fail(); break
@@ -413,7 +413,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
   // Maintenance receipts already own operationId; it is not a Control requestId.
-  const legacy = method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
+  const legacy = method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
     : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business

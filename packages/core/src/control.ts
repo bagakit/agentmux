@@ -365,6 +365,9 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.update'; id: string; expected: AgentMuxControlSettingsResourceFields; candidate: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; id: string; input?: never }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
+  | { operation: 'settings.hosts.install-check'; id: string }
+  | { operation: 'settings.hosts.install'; id: string; expected: import('./remote-core-install.js').RemoteCoreInstallExpected }
+  | { operation: 'settings.hosts.install-inspect'; id: string }
   | { operation: 'settings.hosts.upgrade-check'; id: string; input?: never }
   | { operation: 'settings.hosts.upgrade-check'; input: AgentMuxControlSettingsResourceFields; id?: never }
   | { operation: 'settings.hosts.upgrade'; id: string; expected: import('./remote-core-upgrade.js').RemoteCoreUpgradeExpected }
@@ -376,6 +379,9 @@ export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
   | { operation: 'settings.hosts.update'; host: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
+  | { operation: 'settings.hosts.install-check'; check: import('./remote-core-install.js').RemoteCoreInstallCheck }
+  | { operation: 'settings.hosts.install'; receipt: import('./remote-core-install.js').RemoteCoreInstallReceipt }
+  | { operation: 'settings.hosts.install-inspect'; receipt: import('./remote-core-install.js').RemoteCoreInstallReceipt | null }
   | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
   | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
   | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
@@ -1130,6 +1136,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'settings.hosts.list': 'short',
   'settings.hosts.update': 'long',
   'settings.hosts.test': 'long',
+  'settings.hosts.install-check': 'long',
+  'settings.hosts.install': 'long',
+  'settings.hosts.install-inspect': 'long',
   'settings.hosts.upgrade-check': 'long',
   'settings.hosts.upgrade': 'long',
   'settings.hosts.upgrade-inspect': 'long',

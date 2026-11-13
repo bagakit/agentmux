@@ -113,7 +113,8 @@ export class RemoteCoreUpgradeManager {
   private readonly active = new Map<string, Promise<RemoteCoreUpgradeReceipt>>()
   private readonly targets = new Set<string>()
   constructor(private readonly options: RemoteCoreUpgradeOptions) {}
-  private async artifact(): Promise<PortableCoreArtifact> {
+  /** Shared offline candidate used by first installation and upgrade. */
+  async artifact(): Promise<PortableCoreArtifact> {
     const pending = this.candidate ??= (async () => {
       if (this.options.artifact) return await this.options.artifact()
       await mkdir(this.options.stateDirectory, { recursive: true, mode: 0o700 })

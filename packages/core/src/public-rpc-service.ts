@@ -1890,7 +1890,7 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Deleting a Browser Profile requires a person or device, not a managed Agent. The Profile, its Browsers and the Agent remain available; ask the person to delete it.',
           'BROWSER_PROFILE_DELETE_REQUIRES_PERSON')
       }
-      if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-reconnect') &&
+      if ((method === 'settings.hosts.install' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-reconnect') &&
           (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
             typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0'))) {
         throw new AgentMuxError('Core maintenance writes require a transport-approved user or device without a managed Agent caller. Original operations, read-only diagnostics and Runs were retained.', 'CONTROL_PERMISSION_DENIED')

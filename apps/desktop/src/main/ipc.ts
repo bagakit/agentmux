@@ -256,8 +256,9 @@ import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
 import { readHostCreationTrust, approveHostCreationTrust } from './settings-host-creation-trust.js'
+import { SettingsHostsInstallOwner } from './settings-hosts-install.js'
 import { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
-import { RemoteCoreUpgradeManager, type RemoteCoreUpgradeExpected } from '@agentmux/core'
+import { RemoteCoreUpgradeManager, RemoteCoreInstallManager, type RemoteCoreInstallExpected, type RemoteCoreUpgradeExpected } from '@agentmux/core'
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
@@ -410,9 +411,11 @@ export async function registerIpc(args: {
   const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { await notesStorageOwner.confirmResources(await notesStorage.inspect()); for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
   const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notesStorage:changed', snapshot) }, notesStorage)
   const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
-  const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
-    stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
-  }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-upgrade-adoptions.json'))
+  const maintenance = new RemoteCoreUpgradeManager({ stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades') })
+  const hostUpgrades = new SettingsHostsUpgradeOwner(maintenance, configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-upgrade-adoptions.json'))
+  const hostInstalls = new SettingsHostsInstallOwner(new RemoteCoreInstallManager({
+    stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades'), artifact: () => maintenance.artifact()
+  }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-install-adoptions.json'))
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
@@ -735,7 +738,7 @@ export async function registerIpc(args: {
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
-    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
+    if (request.operation === 'settings.hosts.install-check' || request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.install-inspect' || request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades, hostInstalls)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, runtimeIncidents ?? args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
@@ -861,6 +864,9 @@ export async function registerIpc(args: {
   handleWithEvent('hosts:trustCreationSource', async (event, input: HostConfig, expected: import('../shared/contracts.js').HostCreationTrustSnapshot) => {
     return approveHostCreationTrust(input, expected, creationTrustPorts)
   })
+  handle('hosts:installCheck', async (input: HostConfig) => await hostInstalls.check(input))
+  handle('hosts:install', async (input: HostConfig, expected: RemoteCoreInstallExpected, operationId: string) => await hostInstalls.install(input, expected, operationId))
+  handle('hosts:installInspect', async (input: HostConfig, operationId: string) => await hostInstalls.inspect(input, operationId))
   handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
   handle('hosts:upgrade', async (input: HostConfig, expected: RemoteCoreUpgradeExpected, operationId: string) => await hostUpgrades.upgrade(input, expected, operationId))
   handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))

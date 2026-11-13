@@ -1708,6 +1708,9 @@ export type AgentMuxDesktopApi = {
     check(host: HostConfig): Promise<HostCheckResult>
     creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
     trustCreationSource(host: HostConfig, expected: HostCreationTrustSnapshot): Promise<HostCreationTrustSnapshot>
+    installCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreInstallCheck>
+    install(host: HostConfig, expected: import('@agentmux/core').RemoteCoreInstallExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreInstallReceipt>
+    installInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreInstallReceipt | null>
     upgradeCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreUpgradeCheck>
     upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
