@@ -23,7 +23,10 @@ export type CaptureSurfaceInput = {
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean
   theme: ThemeBootstrap
-} & ({ image: BrowserPng; issue?: undefined } | { image?: undefined; issue: string })
+} & (
+  /** `windows`: the application windows on this display when it froze, front to back, in frozen-frame pixels clipped to the frame. */
+  | { image: BrowserPng; windows: CaptureSurfaceRect[]; issue?: undefined }
+  | { image?: undefined; windows?: undefined; issue: string })
 
 export type CaptureSurfaceEvent = { kind: 'locked' } | { kind: 'notice'; message: string }
 

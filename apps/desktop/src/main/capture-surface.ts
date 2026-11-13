@@ -254,7 +254,17 @@ function overlayInput(frame: NativeDisplayFrame, session: CaptureSurfaceSession,
   if (frame.issue !== undefined) return { ...base, issue: frame.issue }
   const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + frame.png, width: frame.width, height: frame.height, byteLength: Buffer.byteLength(frame.png, 'base64') }
   pngBytes(image)
-  return { ...base, image }
+  return { ...base, image, windows: displayWindows(frame, image) }
+}
+
+/** Native's global window bounds as this frame's pixels, clipped to the frame; windows off it are dropped and the order is kept. */
+function displayWindows({ frame, scale, windows }: NativeDisplayFrame, image: BrowserPng): CaptureSurfaceRect[] {
+  return windows.flatMap(({ frame: bounds }) => {
+    const x = Math.max(0, (bounds.x - frame.x) * scale), y = Math.max(0, (bounds.y - frame.y) * scale)
+    const width = Math.min(image.width, (bounds.x + bounds.width - frame.x) * scale) - x
+    const height = Math.min(image.height, (bounds.y + bounds.height - frame.y) * scale) - y
+    return width > 0 && height > 0 ? [{ x, y, width, height }] : []
+  })
 }
 /** Above full-screen apps and the menu bar on every Space; set again after the first paint because mixed-scale displays can misplace the first bounds. */
 function raise(window: BrowserWindow, bounds: CaptureSurfaceRect): void {
