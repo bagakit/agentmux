@@ -30,6 +30,12 @@ export async function bundleGoalOwnerStoreReader(root, directory) {
 const manager = 'apps/host/src/continuous-progress-loop-manager.ts'
 const observers = ['goal-delegation-attention', 'goal-start-responsibility', 'goal-responsibility-owner', 'goal-patrol-owner'].map(name => `apps/host/src/${name}.ts`)
 export const goalOwnerRecoveryMutations = {
+  'goal-source-gap-pauses': { pattern: 'Goal read gaps', edits: [[manager,
+    "} catch (error) { return { action: 'defer', reason: 'Reading the original Goal is unconfirmed.",
+    "} catch (error) { return { action: 'pause', reason: 'Reading the original Goal is unconfirmed."]] },
+  'goal-source-mismatch-defers': { pattern: 'confirmed Goal session-removed', edits: [[manager,
+    "if (goal && !goal.sessionIds.includes(loop.agentSessionId)) return { action: 'pause'",
+    "if (goal && !goal.sessionIds.includes(loop.agentSessionId)) return { action: 'defer'"]] },
   'memory-ack': { pattern: 'public create retries', edits: [[manager,
     '          await this.persist(original.loopId)\n          return { loop: this.require(original.loopId), diskDurability:',
     '          return { loop: this.require(original.loopId), diskDurability:']] },

@@ -212,15 +212,36 @@ it('an unconfirmed source is read again after growing waits, not on every tick',
   expect(reads.mock.calls.length).toBeLessThanOrEqual(12)
   expect(f.loop().status).toBe('active');expect(f.sent).toHaveLength(0)
 })
-it('a slow Agent read in background maintenance does not delay a due occurrence',async()=>{
+it('a held maintenance read does not prevent the next scheduler tick',async()=>{
   const f=await managedFixture(), due=f.loop().nextCheckAt
   const original=await f.f.client.statusAgent('main'), held:Array<()=>void>=[]
   const status=vi.spyOn(f.f.client,'statusAgent').mockImplementation(()=>new Promise(resolve=>{held.push(()=>resolve(original))}))
   const checking=f.manager.check(f.at(due))
-  await vi.waitFor(()=>expect(f.sent).toHaveLength(1))
-  expect(held.length).toBeGreaterThan(0)
-  // Later reads answer at once; release the held ones and let this check finish.
-  status.mockResolvedValue(original);for(const release of held)release();await checking
+  let second:Promise<void>|undefined
+  try {
+    await vi.waitFor(()=>expect(f.sent).toHaveLength(1))
+    expect(held.length).toBeGreaterThan(0)
+    const originalSession=f.f.client.agentSession('main')
+    const added=await f.manager.call('schedule.create',{target:{hostId:'local',agentSessionId:'main',providerId:originalSession.providerId,workspacePath:originalSession.workspacePath},everyMs:60000,prompt:'Another original arrangement',operationId:'other-maintenance-independent'})
+    second=f.manager.check(f.at(added.schedule.nextCheckAt))
+    await vi.waitFor(()=>expect(f.sent.some(value=>value.loop.loopId===added.schedule.loopId)).toBe(true),{timeout:1000,interval:10})
+    expect(status).toHaveBeenCalledOnce()
+  } finally {
+    status.mockResolvedValue(original);for(const release of held)release();await checking;await second
+  }
+})
+it('a maintenance rejection reaches its caller after due work and does not pause the arrangement',async()=>{
+  const f=await managedFixture(), due=f.loop().nextCheckAt
+  f.presence.dispose()
+  const failure=new Error('Original maintenance observation failed')
+  const release=f.manager.setMaintenanceOwner({qualify:async()=>({action:'continue'}),maintain:async()=>{throw failure}})
+  try {
+    await expect(f.manager.check(f.at(due))).rejects.toBe(failure)
+    expect(f.sent).toHaveLength(1);expect(f.loop().status).toBe('active')
+  } finally { release() }
+  const recovered=f.manager.setMaintenanceOwner({qualify:async()=>({action:'continue'}),maintain:async()=>{}})
+  try { await expect(f.manager.check(f.at(due+60000))).resolves.toBeUndefined() }
+  finally { recovered() }
 })
 it('a changed role generation cannot receive a due occurrence even when its Host and SID are the same',async()=>{
   const f=await managedFixture();f.snapshot.roleRevision='new-generation-same-sid'

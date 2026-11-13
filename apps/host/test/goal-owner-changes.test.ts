@@ -214,3 +214,57 @@ it.each(['local', 'external'] as const)('Goal progress reads only its changed Go
     expect(manager.list({ hostId: 'local', agentSessionId: 'unrelated-session' })).toMatchObject([{ loopId: unrelated.loopId, status: 'active' }])
   } finally { release.resolve(); off() }
 })
+
+it('Goal read gaps skip one occurrence without pausing the durable arrangement and recover on the next due check', async () => {
+  const f = await fixture(), store = ContinuousProgressLoopStore.forUserData(f.root)
+  let now = 0, unavailable = false, reads = 0
+  const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 }
+  const session = { agentSessionId: 'manager', hostId: 'local', providerId: 'codex', workspacePath: f.root, run: { runId: 'manager-run' }, semanticStatus }
+  const delivered = vi.fn(async () => 'sent' as const)
+  const manager = new ContinuousProgressLoopManager(store, delivered, () => now,
+    async (_loop, tickId, time) => ({ session, observation: observeAgent({ process: 'running', status: semanticStatus, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, time), tickId, now: time, inputByte: 0 }), undefined,
+    { read: async id => { reads++; if (unavailable) throw new Error('Temporary Goal read failure'); return f.demands.get(id) }, inspectInitial: async () => 'confirmed' })
+  cleanup.push(() => manager.stop())
+  const loop = await manager.prepareGoal({ ...session, goalId: 'goal-a', alignmentRevision: 1, intervalMs: 60_000, operationId: 'goal-gap-start', prompt: 'goal-a' })
+  await manager.initialGoalInput(session, loop.loopId, 'goal-gap-start', 'confirm')
+  expect(manager.inspectLoop(loop.loopId)?.status).toBe('active')
+  unavailable = true; now = 60_000
+  await manager.check(now)
+  expect(delivered).not.toHaveBeenCalled()
+  expect(manager.inspectLoop(loop.loopId)).toMatchObject({ status: 'active', lastDecision: expect.stringContaining('unconfirmed') })
+  expect(await store.load()).toMatchObject([{ loopId: loop.loopId, status: 'active' }])
+  const readsAtGap = reads
+  unavailable = false; now = 120_000
+  await manager.check(now)
+  expect(reads).toBeGreaterThan(readsAtGap)
+  expect(delivered).toHaveBeenCalledTimes(1)
+  expect(manager.inspectLoop(loop.loopId)).toMatchObject({ status: 'active', lastOutcome: 'sent' })
+})
+
+it.each(['cancelled', 'blocked', 'scope-changed', 'session-removed'] as const)('confirmed Goal %s still ends or pauses its exact arrangement', async change => {
+  const f = await fixture(), store = ContinuousProgressLoopStore.forUserData(f.root)
+  let now = 0
+  const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 }
+  const session = { agentSessionId: 'manager', hostId: 'local', providerId: 'codex', workspacePath: f.root, run: { runId: 'manager-run' }, semanticStatus }
+  const read = async (id: string) => {
+    const goal = (await f.demands.get(id))!
+    if (now === 0) return goal
+    return change === 'cancelled' ? { ...goal, status: 'cancelled' }
+      : change === 'blocked' ? { ...goal, status: 'blocked' }
+      : change === 'scope-changed' ? { ...goal, alignment: { ...goal.alignment!, revision: goal.alignment!.revision + 1 } }
+      : { ...goal, sessionIds: goal.sessionIds.filter(id => id !== session.agentSessionId) }
+  }
+  const delivered = vi.fn(async () => 'sent' as const)
+  const manager = new ContinuousProgressLoopManager(store, delivered, () => now,
+    async (_loop, tickId, time) => ({ session, observation: observeAgent({ process: 'running', status: semanticStatus, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, time), tickId, now: time, inputByte: 0 }), undefined,
+    { read, inspectInitial: async () => 'confirmed' })
+  cleanup.push(() => manager.stop())
+  const loop = await manager.prepareGoal({ ...session, goalId: 'goal-a', alignmentRevision: 1, intervalMs: 60_000, operationId: 'confirmed-goal-change', prompt: 'goal-a' })
+  await manager.initialGoalInput(session, loop.loopId, 'confirmed-goal-change', 'confirm')
+  now = 60_000
+  await manager.check(now)
+  expect(delivered).not.toHaveBeenCalled()
+  const status = change === 'cancelled' ? 'stopped' : 'paused'
+  expect(manager.inspectLoop(loop.loopId)?.status).toBe(status)
+  expect(await store.load()).toMatchObject([{ loopId: loop.loopId, status }])
+})
