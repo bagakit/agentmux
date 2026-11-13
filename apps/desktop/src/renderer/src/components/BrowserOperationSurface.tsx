@@ -1,7 +1,8 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import type { AgentMuxBrowserControl, AgentProviderId } from '@agentmux/core'
+import type { AgentDisplayState, AgentMuxBrowserControl, AgentProviderId, AgentMuxRunState } from '@agentmux/core'
+import { agentPresentationState } from '@agentmux/client-ui/agent-presentation'
 import { BROWSER_PAGE_CAPABILITIES } from '@agentmux/core/browser-page-capability'
 import type {
   BrowserActivityState,
@@ -22,6 +23,9 @@ import { prepareBrowserOperatorAvatar, readBrowserOperatorAvatar, type BrowserOp
 import { api } from '../lib/api'
 import { browserAssociatedAgentSession, browserTabAgentCandidates, sameBrowserAgent, type BrowserAgentSession } from '../lib/browser-agent-handoff'
 import { sessionStatusLabel } from '../lib/session-presentation'
+import { observeAgentSession } from '../lib/agent-observation'
+import { useSessionStop } from './SessionStop'
+import { AgentOperationFeedback } from './AgentOperationFeedback'
 
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
@@ -46,6 +50,9 @@ export type BrowserAgentChoice = {
   status: string
   providerId?: AgentProviderId | undefined
   appearance?: AgentAvatarAppearance | undefined
+  state?: AgentDisplayState | undefined
+  processState?: AgentMuxRunState | undefined
+  runUnobserved?: boolean | undefined
 }
 export type BrowserAgentLocationChoice = { key: string; label: string; open(): void }
 
@@ -74,6 +81,7 @@ type BrowserOperationStatusProps = {
   onOpenAgent?: (() => readonly BrowserAgentLocationChoice[]) | undefined
   onViewAgent?: (() => void) | undefined
   onRefreshControl?: (() => void) | undefined
+  onStopAgent?: ((agent: BrowserAgentChoice, origin: HTMLElement | null) => void) | undefined
   onStop?: () => void
   onOpenTimeline?: () => void
   onOpenChange?: (open: boolean) => void
@@ -87,6 +95,7 @@ function controlsOperation(operation: BrowserOperation | null, control: AgentMux
 
 /** The actual BrowserPane consumer starts cosmetic work only after Main publishes its operation. */
 export function BrowserOperatorPresence(props: Omit<BrowserOperationStatusProps, 'operatorProviderId' | 'operatorAppearance'> & { browserId: string }) {
+  const stop = useSessionStop()
   const document = useWorkbenchDocument()
   const operation = props.activity.operation
   const session = useAppStore(state => operation ? browserOperatorSession(operation.operator.id, state.sessions) : undefined)
@@ -104,7 +113,9 @@ export function BrowserOperatorPresence(props: Omit<BrowserOperationStatusProps,
   const choices = candidates.map((candidate, index): BrowserAgentChoice => ({ control: candidate.control, name: names[index] ?? candidate.label,
     status: sessionStatusLabel(candidate), providerId: candidate.providerId, appearance: appearances[index] }))
   const associatedChoice: BrowserAgentChoice | undefined = associated ? { control: associated.control, name: names[candidates.length] ?? associated.label,
-    status: sessionStatusLabel(associated), providerId: associated.providerId, appearance: appearances[candidates.length] } : undefined
+    status: sessionStatusLabel(associated), providerId: associated.providerId, appearance: appearances[candidates.length],
+    state: associated.runUnobserved ? undefined : agentPresentationState(associated, observeAgentSession(associated, Date.now()), false).state,
+    processState: associated.processState, runUnobserved: associated.runUnobserved } : undefined
   const control = props.control
   const live = controlsOperation(operation, control, props.browserId) && Boolean(operation && ['preparing', 'running', 'waiting'].includes(operation.phase))
   useEffect(() => {
@@ -131,7 +142,12 @@ export function BrowserOperatorPresence(props: Omit<BrowserOperationStatusProps,
     // Freeze the original appearance for this accepted operation. Step/config updates do not
     // restart decoding or cancel its first image; exact owner changes and unmount do cancel it.
   }, [props.browserId, operation?.id, operation?.operator.id, live, document, session?.id])
-  return <BrowserOperationStatus {...props} agents={choices} candidatesUnconfirmed={candidatesUnconfirmed} associatedAgent={associatedChoice} operatorProviderId={session?.providerId} operatorAppearance={appearance} />
+  return <><BrowserOperationStatus {...props} agents={choices} candidatesUnconfirmed={candidatesUnconfirmed} associatedAgent={associatedChoice}
+    onStopAgent={(agent, origin) => {
+      if (associated && sameBrowserAgent(agent.control, associated.control)) stop.requestStop(
+        { id: associated.id, hostId: associated.control.hostId, control: agent.control }, agent.name, origin)
+    }} operatorProviderId={session?.providerId} operatorAppearance={appearance} />
+    {props.control?.agent ? <AgentOperationFeedback compact subject={props.control.agent} /> : null}{stop.dialog}</>
 }
 
 /** One toolbar disclosure owns Browser operation state and its optional actions. */
@@ -159,10 +175,12 @@ export function BrowserOperationStatus({
   onOpenAgent,
   onViewAgent,
   onRefreshControl,
+  onStopAgent,
   onStop,
   onOpenTimeline,
   onOpenChange
 }: BrowserOperationStatusProps) {
+  const trigger = useRef<HTMLButtonElement | null>(null)
   const [agentLocations, setAgentLocations] = useState<readonly BrowserAgentLocationChoice[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => { if (controlMenuRequest) setMenuOpen(true) }, [controlMenuRequest])
@@ -209,6 +227,8 @@ export function BrowserOperationStatus({
   const canReturnControl = control?.owner === 'human' && control.agent !== undefined && control.agent !== null
   const associationUnknown = control !== undefined && control.agent === undefined
   const linked = control?.agent
+  const linkedObservationUnknown = Boolean(linked && (!associatedAgent || associatedAgent.runUnobserved || associatedAgent.processState === undefined))
+  const linkedEnded = !associatedAgent?.runUnobserved && (associatedAgent?.processState === 'exited' || associatedAgent?.processState === 'interrupted')
   const linkedName = linked ? associatedAgent?.name : undefined
   const otherAgents = agents.filter(agent => !sameBrowserAgent(agent.control, linked))
   const canGiveControl = control?.owner === 'human' && otherAgents.length > 0 && onGiveControl !== undefined
@@ -222,8 +242,9 @@ export function BrowserOperationStatus({
   const presenceProviderId = showsOperation ? providerId : associatedAgent?.providerId
   const presenceName = showsOperation ? operation?.operator.name : linkedName
   const presenceAppearance = showsOperation ? operatorAppearance : associatedAgent?.appearance
-  const cue = phaseCue ?? (associationUnknown ? 'Unconfirmed' : null)
-  const presenceDescription = [description, linkedName ? `Linked Agent: ${linkedName}` : associationUnknown ? 'Agent association unconfirmed' : null].filter(Boolean).join(' · ')
+  const cue = phaseCue ?? (associationUnknown || linkedObservationUnknown ? 'Unconfirmed' : null)
+  const presenceDescription = [description, linkedName ? `Linked Agent: ${linkedName} · ${associatedAgent?.status}` : associationUnknown ? 'Agent association unconfirmed' : null,
+    linkedObservationUnknown ? 'Linked Agent observation unconfirmed' : null].filter(Boolean).join(' · ')
   const phaseGlyph = phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
     : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" />
     : action ? <SemanticIcon name={action.icon} size={13} /> : <PhaseGlyph phase={phase} current={Boolean(controlled && !terminal)} />
@@ -232,10 +253,10 @@ export function BrowserOperationStatus({
       data-task-run-id={taskRun?.id} data-task-version={taskRun?.version}>
       <DropdownMenu.Root open={menuOpen} onOpenChange={open => { setMenuOpen(open); if (!open) setAgentLocations([]); onOpenChange?.(open) }}>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className={`browser-operation-status__trigger${cue || linkedName ? ' browser-operation-status__trigger--presence' : ''}`} aria-label={`Browser activity: ${presenceDescription}`} title={presenceDescription}>
+          <button ref={trigger} type="button" className={`browser-operation-status__trigger${cue || linkedName ? ' browser-operation-status__trigger--presence' : ''}`} aria-label={`Browser activity: ${presenceDescription}`} title={presenceDescription}>
             {presenceName && presenceProviderId ? <span className="browser-operation-status__face">
-              <ResolvedAgentAvatar label={presenceName} providerId={presenceProviderId} appearance={presenceAppearance} />
-              <span className="browser-operation-status__phase">{phaseGlyph}</span>
+              <ResolvedAgentAvatar label={presenceName} providerId={presenceProviderId} appearance={presenceAppearance} state={showsOperation ? undefined : associatedAgent?.state} />
+              {showsOperation ? <span className="browser-operation-status__phase">{phaseGlyph}</span> : null}
             </span>
               : phaseGlyph}
             {presenceName ? <span className="browser-operation-status__agent" title={presenceName}>{presenceName}</span> : null}
@@ -263,7 +284,11 @@ export function BrowserOperationStatus({
             {agentLocations.map(location => <DropdownMenu.Item className="browser-menu__item" key={location.key} onSelect={location.open}>
               <ThemeNavigationDisclosureIcon size={13} aria-hidden="true" /><span>{location.label}</span></DropdownMenu.Item>)}
             {linked && onViewAgent ? <DropdownMenu.Item className="browser-menu__item" onSelect={onViewAgent}><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><span>View linked Agent details</span></DropdownMenu.Item> : null}
-            {associationUnknown && onRefreshControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={onRefreshControl}><ThemeActionReplayIcon size={13} aria-hidden="true" /><span>Check Agent association</span></DropdownMenu.Item> : null}
+            {linked && associatedAgent && onStopAgent ? <DropdownMenu.Item className="browser-menu__item"
+              onSelect={() => onStopAgent(associatedAgent, trigger.current)}>
+              {linkedEnded ? <ThemeActionCloseIcon size={13} aria-hidden="true" /> : <ThemeActionStopIcon size={13} aria-hidden="true" />}<span>{linkedEnded ? 'Close Agent' : 'Stop Agent'}</span>
+            </DropdownMenu.Item> : null}
+            {(associationUnknown || linkedObservationUnknown) && onRefreshControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={onRefreshControl}><ThemeActionReplayIcon size={13} aria-hidden="true" /><span>Check Agent association</span></DropdownMenu.Item> : null}
             {taskRun && onOpenTaskRun ? <DropdownMenu.Item className="browser-menu__item" aria-label={`Review and continue task v${taskRun.version}`}
               onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><ThemeObjectUserIcon size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
             {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><ThemeActionPanIcon size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
