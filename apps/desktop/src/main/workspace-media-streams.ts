@@ -46,6 +46,8 @@ const PLAYLIST_RESOURCE_TYPES: Readonly<Record<string, string>> = {
 /** RFC 8216 tags whose URI attribute a client may fetch. */
 const URI_ATTRIBUTE_TAGS = new Set(['EXT-X-MAP', 'EXT-X-MEDIA', 'EXT-X-KEY', 'EXT-X-SESSION-KEY', 'EXT-X-I-FRAME-STREAM-INF',
   'EXT-X-PART', 'EXT-X-PRELOAD-HINT', 'EXT-X-RENDITION-REPORT'])
+/** Records that are a verdict on a pinned file itself; every other record explains one failed attempt. */
+const FILE_VERDICTS: ReadonlySet<WorkspaceMediaStreamFact['state']> = new Set(['released', 'deleted', 'changed', 'outside-workspace'])
 /** Bytes read per positional read while serving a range. */
 const MEDIA_READ_CHUNK_BYTES = 256 * 1024
 /** An unchanged live playlist is re-checked at this interval while its reply is held. */
@@ -236,7 +238,8 @@ export class WorkspaceMediaStreams {
       try { path = previewRequestPath(match[2]!) } catch { fail(404, 'Media resource not found.'); return }
       // A probe for anything a served playlist never named is this request's 404 only; the lease keeps playing.
       if (lease.kind === 'playlist' ? !lease.referenced.has(path) : path !== lease.path) { fail(404, 'Media resource not found.'); return }
-      if (lease.kind !== 'playlist' && lease.fact.state !== 'active') { fail(410, 'This media lease is no longer serving bytes. Reload to play the current file.'); return }
+      // Only a verdict on the pinned file closes it; a failed probe or read is retried on the next request.
+      if (lease.kind !== 'playlist' && FILE_VERDICTS.has(lease.fact.state)) { fail(410, 'This media lease is no longer serving bytes. Reload to play the current file.'); return }
       if (!this.workspaceMatches(lease)) {
         lease.fact = { state: 'changed', path }
         fail(410, 'The original Workspace changed. Reload to play the current file.')
@@ -262,7 +265,7 @@ export class WorkspaceMediaStreams {
           visible === 'deleted' ? 'This file no longer exists.' : visible === 'outside-workspace' ? 'This path now leaves the Workspace.' : 'This file changed. Reload to play the current file.')
         return
       }
-      await this.serveBytes(lease, path, lease.media, lease.mimeType, request, response, fail)
+      if (await this.serveBytes(lease, path, lease.media, lease.mimeType, request, response, fail) && !FILE_VERDICTS.has(lease.fact.state)) lease.fact = { state: 'active' }
     } catch (error) {
       // An unexpected failure is recorded as unknown-but-retryable, never left looking like a served lease.
       const lease = this.leases.get(/^\/([A-Za-z0-9_-]{43})\//.exec(request.url ?? '')?.[1] ?? '')
