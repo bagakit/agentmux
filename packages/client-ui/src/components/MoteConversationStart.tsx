@@ -6,11 +6,13 @@ import '../styles/mote-conversation-start.css'
 /** A scene over the original identity, Composer and history owners; no launch or role state lives here.
  * The backdrop is pure CSS around this Mote's portrait: no decoded artwork, no paint containment band,
  * and at most one composited layer in motion. The app brand stays a small mark beside the wordmark. */
-export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, mode = 'start', active = true }: {
+export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, mode = 'start', active = true, drafting = false }: {
   name: string; portrait: ReactNode; brand?: ReactNode; composer: ReactNode; history?: ReactNode
   notice?: ReactNode; actions?: ReactNode; mode?: 'start' | 'new' | 'unconfirmed'; active?: boolean
+  /** True while the host's draft has text; the scene recedes without searching the composer subtree. */
+  drafting?: boolean
 }) {
-  return <section className="mote-start" data-mode={mode} data-active={active} aria-label={`${name} · 开始对话`}>
+  return <section className="mote-start" data-mode={mode} data-active={active} data-drafting={drafting || undefined} aria-label={`${name} · 开始对话`}>
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
       <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}

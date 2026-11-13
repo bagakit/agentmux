@@ -96,6 +96,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
       mode={state.reading?.dialogue.main.status === 'ready' && state.reading.preferences.status === 'ready' ? mode : 'unconfirmed'} active={visible}
       portrait={<MobileMoteStartPortrait identity={identity} client={client} visible={visible} />}
       brand={<BrandIcon icon={appIcon} />}
+      drafting={Boolean(draft.trim())}
       composer={<AgentComposer value={draft} disabled={false} active={visible} placeholder="写下你想聊的事…"
         onChange={body => { edits.current++; local.drafts.set(key, body); redraw(value => value + 1); void local.save().then(() => redraw(value => value + 1)) }}
         {...(state.ready && !state.busy && !starting && visible && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => { void begin(state) } } : {})} />}
