@@ -173,6 +173,18 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 只有一个引用且无容器提醒时，其简写固定为 `<amux:a2a from="SID" msg-id="MID" read-via="message --skill" />`。两种写法都只表达引用；成对原信里的同形标签仍属于不透明原正文，不被提升为新的引用。无固定入口、未知属性或节点、不完整和含糊的文本保持原文可读，不据此触发操作或猜授权。
 
+## Capsule 答复
+
+```text
+<amux:capsule-answer version="1">
+{"capsuleId":"PAGE","interactionId":"QUESTION","question":"Which icon?","answer":"B, with a lighter shadow"}
+</amux:capsule-answer>
+```
+
+人在可信 App 确认 Capsule 页面问题的答案后，原输入以该信封作为完整 prompt 投递给页面的接收 Agent。开头固定为 `<amux:capsule-answer version="1">` 后接一个 LF，结尾为一个 LF 与 `</amux:capsule-answer>`，之后没有尾文。中间是一行确定性 JSON，字段依次为 `capsuleId`、`interactionId`、`question`、`answer`，均为非空原字符串；`<`、`>`、`&` 使用 Unicode 转义，问题与答案中的同形标签不能闭合信封。未知版本、未知字段或非确定性编码不作为该信封识别，原文继续可读。
+
+`capsuleId` 与 `interactionId` 是原页面和原问题身份，可原样用于 `amux capsule interaction inspect`。信封只是可读格式：人工来源、接收者和投递事实分别由原可信确认、Capsule 记录与 Core 输入回执持有，同形文本不能自称人工答复或补发答案。生成与读取沿 [Core formatter／reader](../../packages/core/src/capsule-answer.ts)，阅读目录登记于[协议定义](../../packages/core/src/amux-protocol-definition.ts)；页面接收者与确认流程归 [Capsule HITL](../design/behavior/local-page-hosting.md#hitl-请求人工来源与恢复)。
+
 ## 业务标记
 
 ### continue
