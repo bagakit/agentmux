@@ -1484,7 +1484,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     listProfileSites: async (profileId) => structuredClone(mockBrowserProfileSites.get(profileId) ?? []),
     readProfileProxySignIn: async (profileId) => mockProxySignIns.has(profileId) ? { username: mockProxySignIns.get(profileId)! } : null,
-    setProfileProxySignIn: async (profileId, signIn) => { if (signIn) mockProxySignIns.set(profileId, signIn.username.trim()); else mockProxySignIns.delete(profileId) },
+    setProfileProxySignIn: async (profileId, signIn) => { if (signIn) mockProxySignIns.set(profileId, signIn.username.trim()); else mockProxySignIns.delete(profileId); return { reconnected: true } },
     // Preview: a fixed answer through the Profile's route, so the check line can be seen without a network.
     checkProfileExit: async (profileId) => {
       if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)

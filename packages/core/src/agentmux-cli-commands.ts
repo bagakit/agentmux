@@ -51,6 +51,7 @@ import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 import { parseAppWindowParams } from './public-rpc-windows.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 import { parseAgentInputSubmit } from './agent-input-submit.js'
+import { parseBrowserProfileProxySignIn } from './browser-profile-control.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS } from './native-desktop-cli.js'
@@ -743,6 +744,13 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Existing Browsers keep their Profile; only Browsers opened later without --profile use the new default.'),
   command('browser.profile.delete', '--profile ID', 'Delete one Browser Profile and clear its sign-ins and site data.', { '--profile': 'data' },
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Requires a person or device; a managed Agent caller is refused with BROWSER_PROFILE_DELETE_REQUIRES_PERSON and should ask the person. The default Profile cannot be deleted. A Profile still used by an open or saved Browser is refused with BROWSER_PROFILE_IN_USE, listing those Browsers in details; if saved Tabs cannot be read the answer is BROWSER_PROFILE_USAGE_UNKNOWN and nothing is deleted.'),
+  command('browser.profile.proxy-sign-in.set', '--profile ID --input FILE|-', 'Keep a sign-in for one Profile’s own proxy without exposing its password.', { '--profile': 'data', '--input': 'data' },
+    async f => ({ profileId: id(f, '--profile', true), signIn: parseBrowserProfileProxySignIn(await readControlJsonInput(value(f, '--input', true)!, 'Proxy sign-in')) }),
+    'JSON contains only username and password. Passwords are accepted only from a file or stdin, never arguments. Only a transport-approved person or device may set a sign-in; managed Agents receive BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON. Main uses the same encrypted credential owner as Settings. Receipts never return the password. After an unknown reply, read the Profile in Settings before deciding whether another write is needed.'),
+  command('browser.profile.proxy-sign-in.clear', '--profile ID', 'Forget the saved sign-in for one Profile’s proxy.', { '--profile': 'data' },
+    f => ({ profileId: id(f, '--profile', true) }), 'Only a transport-approved person or device may clear a sign-in; managed Agents receive BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON. The Profile, its route and existing Browsers are kept. An unknown reply does not authorize an automatic repeat.'),
+  command('browser.profile.network.check', '--profile ID', 'Check the configured address through this Profile’s own network route.', { '--profile': 'data' },
+    f => ({ profileId: id(f, '--profile', true) }), 'Uses the HTTPS check address saved in Settings › Browser; no built-in address or region inference. Returns the original Profile session’s reachable or unknown observation, HTTP status and latency. A failed check never changes the Profile or closes its pages.'),
   command('browser.inspect', '--operation-id ID', 'Inspect one exact retained Browser operation.', OP, f => ({ operationId: id(f, '--operation-id') })),
   command('browser.stop', '--operation-id ID', 'Stop an active Browser operation; return retained state if finished.', OP, f => ({ operationId: id(f, '--operation-id') }), 'For an embedded Browser, Stop cancels execution while Agent control and input isolation remain; only the person can Take control through the trusted UI. For an active operation on an external shared tab, explicit stop ends only that original tab\'s sharing grant; other targets retain their grants. The original tab stays open. Another action on it requires an explicit share. A finished operation returns its retained terminal state without ending its sharing grant. Reader cancellation only detaches the reader and does not stop the operation or end sharing.'),
   { ...command('browser.follow', '--operation-id ID [--after-sequence N]', 'Follow retained operation progress and Gap facts.', { ...OP, '--after-sequence': 'value' }, f => ({ operationId: id(f, '--operation-id'), ...numbers(f, { '--after-sequence': 'afterSequence' }) })), stream: true },

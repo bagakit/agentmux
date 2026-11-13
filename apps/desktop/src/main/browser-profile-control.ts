@@ -4,6 +4,7 @@ import { ZodError } from 'zod'
 import type { BrowserProfileSummary } from '../shared/contracts.js'
 import type { BrowserProfileManager } from './browser-profile-manager.js'
 import type { BrowserProfileUsageOwner } from './browser-profile-usage.js'
+import type { BrowserProfileNetworkControl } from './browser-profile-network-control.js'
 
 type ProfileRequest = Extract<AgentMuxControlRequest, { operation: BrowserProfileControlOperation }>
 type ProfileResult = Extract<AgentMuxControlResult, { operation: BrowserProfileControlOperation }>
@@ -15,6 +16,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 export type BrowserProfileControlPorts = {
   profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'createProfile' | 'updateProfile' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
+  network: BrowserProfileNetworkControl
 }
 
 function existing(ports: BrowserProfileControlPorts, profileId: string): BrowserProfileSummary {
@@ -41,6 +43,21 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
   actor: AgentMuxNameActor | undefined): Promise<ProfileResult> {
   await ports.profiles.initialize()
   switch (request.operation) {
+    case 'browser.profile.proxy-sign-in.set':
+    case 'browser.profile.proxy-sign-in.clear': {
+      if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) {
+        throw new AgentMuxError('Proxy sign-in changes require a person or device. The Profile, its route and Browsers remain available; ask the person to change the sign-in.',
+          'BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON')
+      }
+      existing(ports, request.profileId)
+      const { reconnected } = await ports.network.setProxySignIn(request.profileId, request.operation === 'browser.profile.proxy-sign-in.set' ? request.signIn : null)
+      return request.operation === 'browser.profile.proxy-sign-in.set'
+        ? { operation: request.operation, profileId: request.profileId, saved: true, reconnected }
+        : { operation: request.operation, profileId: request.profileId, cleared: true, reconnected }
+    }
+    case 'browser.profile.network.check':
+      existing(ports, request.profileId)
+      return { operation: request.operation, profileId: request.profileId, check: await ports.network.checkExit(request.profileId) }
     case 'browser.profile.ls':
       return { operation: request.operation, revision: ports.profiles.listRevision(), profiles: ports.profiles.listProfiles() }
     case 'browser.profile.inspect': {

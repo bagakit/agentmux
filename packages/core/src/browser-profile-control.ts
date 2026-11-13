@@ -3,10 +3,11 @@ import { AgentMuxError } from './errors.js'
 /**
  * Public Browser Profile control. The Desktop Main Profile owner holds every fact; Core only carries
  * typed requests and checks the shape of the owner's answers. No partition, cookie path or
- * credential is part of this contract.
+ * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
 export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
-  'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete'] as const
+  'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
+  'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
 
 /**
@@ -24,6 +25,16 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.update'; profileId: string; expectedRevision: number; edit: BrowserProfileControlEdit }
   | { operation: 'browser.profile.set-default'; profileId: string }
   | { operation: 'browser.profile.delete'; profileId: string }
+  | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; signIn: BrowserProfileProxySignIn }
+  | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string }
+  | { operation: 'browser.profile.network.check'; profileId: string }
+
+/** Password input is transient; no read operation or receipt returns it. */
+export type BrowserProfileProxySignIn = { username: string; password: string }
+/** One observation through the original Profile session; failure is unknown and changes no page. */
+export type BrowserProfileNetworkCheck =
+  | { status: 'reachable'; httpStatus: number; latencyMs: number; ip?: string }
+  | { status: 'unknown'; reason: string; latencyMs: number }
 
 /**
  * skippedByReason counts skipped cookies per reason; never cookie names or values. Reason names belong
@@ -58,12 +69,19 @@ export type BrowserProfileControlResult =
   | { operation: 'browser.profile.update'; revision: number; profile: BrowserProfileControlProfile }
   | { operation: 'browser.profile.set-default'; revision: number; profileId: string }
   | { operation: 'browser.profile.delete'; revision: number; profileId: string; deleted: true }
+  | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; saved: true; reconnected: boolean }
+  | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string; cleared: true; reconnected: boolean }
+  | { operation: 'browser.profile.network.check'; profileId: string; check: BrowserProfileNetworkCheck }
 
 /** A hue a person can pick: an integer degree on the color wheel. Main also keeps it clear of status colors. */
 export const BROWSER_PROFILE_HUE_MAX = 359
 
 export function isBrowserProfileControlOperation(value: unknown): value is BrowserProfileControlOperation {
   return typeof value === 'string' && (BROWSER_PROFILE_CONTROL_OPERATIONS as readonly string[]).includes(value)
+}
+
+export function isBrowserProfileProxySignInWrite(value: string): boolean {
+  return value === 'browser.profile.proxy-sign-in.set' || value === 'browser.profile.proxy-sign-in.clear'
 }
 
 function fail(code: string, message: string): never { throw new AgentMuxError(message, code) }
@@ -93,6 +111,17 @@ function hue(value: unknown, code: string): number {
   return value as number
 }
 
+/** Fixed validation messages never echo secret input, including unknown field names. */
+export function parseBrowserProfileProxySignIn(value: unknown): BrowserProfileProxySignIn {
+  const code = 'INVALID_CONTROL_REQUEST'
+  const row = record(value, ['username', 'password'], code, 'Proxy sign-in')
+  if (typeof row.username !== 'string' || !row.username.trim() || row.username.length > 256 || row.username.includes('\0') ||
+      typeof row.password !== 'string' || !row.password || row.password.length > 1024 || row.password.includes('\0')) {
+    fail(code, 'Proxy sign-in requires a user name and password within the supported lengths.')
+  }
+  return { username: row.username, password: row.password }
+}
+
 /** Request payload after the Control envelope fields; one owner for both the CLI params and the wire request. */
 export function parseBrowserProfileControlPayload(source: Record<string, unknown>, envelope: readonly string[]): BrowserProfileControlPayload {
   const code = 'INVALID_CONTROL_REQUEST'
@@ -100,11 +129,13 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   if (!isBrowserProfileControlOperation(operation)) fail(code, 'Browser Profile operation is invalid.')
   const fields: Record<BrowserProfileControlOperation, readonly string[]> = {
     'browser.profile.ls': [], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'],
-    'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId']
+    'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId'],
+    'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId']
   }
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
   for (const key of fields[operation]) if (!Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
   switch (operation) {
+    case 'browser.profile.proxy-sign-in.set': return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), signIn: parseBrowserProfileProxySignIn(source.signIn) }
     case 'browser.profile.ls': return { operation }
     case 'browser.profile.create': {
       const label = text(source.label, code, 'Browser Profile label', 512)
@@ -197,10 +228,35 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
   const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
     'browser.profile.ls': ['revision', 'profiles'], 'browser.profile.inspect': ['revision', 'profile', 'usage'],
     'browser.profile.create': ['revision', 'profile'], 'browser.profile.update': ['revision', 'profile'],
-    'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'profileId', 'deleted']
+    'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'profileId', 'deleted'],
+    'browser.profile.proxy-sign-in.set': ['profileId', 'saved', 'reconnected'], 'browser.profile.proxy-sign-in.clear': ['profileId', 'cleared', 'reconnected'],
+    'browser.profile.network.check': ['profileId', 'check']
   }
   const row = record(value, keys[operation], code, 'Browser Profile result')
   for (const key of keys[operation]) if (!Object.hasOwn(row, key)) fail(code, `Browser Profile result ${key} is required.`)
+  if (operation === 'browser.profile.proxy-sign-in.set') {
+    if (row.saved !== true || typeof row.reconnected !== 'boolean') fail(code, 'Proxy sign-in save receipt is invalid.')
+    return { profileId: identity(row.profileId, code, 'Browser Profile ID'), saved: true, reconnected: row.reconnected }
+  }
+  if (operation === 'browser.profile.proxy-sign-in.clear') {
+    if (row.cleared !== true || typeof row.reconnected !== 'boolean') fail(code, 'Proxy sign-in clear receipt is invalid.')
+    return { profileId: identity(row.profileId, code, 'Browser Profile ID'), cleared: true, reconnected: row.reconnected }
+  }
+  if (operation === 'browser.profile.network.check') {
+    const check = record(row.check, ['status', 'httpStatus', 'latencyMs', 'ip', 'reason'], code, 'Profile network check')
+    if (typeof check.latencyMs !== 'number' || !Number.isFinite(check.latencyMs) || check.latencyMs < 0) fail(code, 'Profile network check latency is invalid.')
+    const profileId = identity(row.profileId, code, 'Browser Profile ID')
+    if (check.status === 'reachable' && check.reason === undefined) {
+      const httpStatus = count(check.httpStatus, code, 'Network check HTTP status')
+      if (httpStatus < 100 || httpStatus > 599) fail(code, 'Network check HTTP status is invalid.')
+      return { profileId, check: { status: 'reachable', httpStatus, latencyMs: check.latencyMs,
+        ...(check.ip === undefined ? {} : { ip: text(check.ip, code, 'Network check address', 256) }) } }
+    }
+    if (check.status === 'unknown' && check.httpStatus === undefined && check.ip === undefined) {
+      return { profileId, check: { status: 'unknown', reason: text(check.reason, code, 'Network check reason'), latencyMs: check.latencyMs } }
+    }
+    fail(code, 'Profile network check is invalid.')
+  }
   const revision = count(row.revision, code, 'Browser Profile revision')
   switch (operation) {
     case 'browser.profile.ls': {

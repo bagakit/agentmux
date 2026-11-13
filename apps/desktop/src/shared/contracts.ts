@@ -1381,9 +1381,7 @@ export type BrowserProfileClearSiteApproval = {
  * What one request through a Profile's session saw. Reachable carries the HTTP status, the time and,
  * only when the body is nothing but an address, that address. A failure is unknown, never an error.
  */
-export type BrowserProfileExitCheck =
-  | { status: 'reachable'; httpStatus: number; latencyMs: number; ip?: string }
-  | { status: 'unknown'; reason: string; latencyMs: number }
+export type BrowserProfileExitCheck = import('@agentmux/core/control').BrowserProfileNetworkCheck
 
 /** A site that holds cookies in a Profile; names and counts only, never cookie names or values. */
 export type BrowserProfileSite = { site: string; cookies: number }
@@ -2132,7 +2130,7 @@ export type AgentMuxDesktopApi = {
     /** The user name of this Profile's proxy sign-in, or null; the password never comes back. */
     readProfileProxySignIn(profileId: string): Promise<{ username: string } | null>
     /** Keep or forget this Profile's proxy sign-in. The password goes to Main once and is encrypted there. */
-    setProfileProxySignIn(profileId: string, signIn: { username: string; password: string } | null): Promise<void>
+    setProfileProxySignIn(profileId: string, signIn: { username: string; password: string } | null): Promise<{ reconnected: boolean }>
     /** One request through this Profile's own session to the saved check address. */
     checkProfileExit(profileId: string): Promise<BrowserProfileExitCheck>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>

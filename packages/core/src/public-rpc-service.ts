@@ -21,6 +21,7 @@ import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResu
 import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 import { isConnectionApplicationAccessMethod, parseConnectionApplicationAccessParams } from './connection-application-access-codec.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
+import { isBrowserProfileProxySignInWrite } from './browser-profile-control.js'
 import { isConnectionReceiverMethod, parseConnectionReceiverParams } from './connection-receiver-codec.js'
 import { homedir } from 'node:os'
 import { discoverAgentSkills } from './agent-skills.js'
@@ -1941,6 +1942,11 @@ export class AgentMuxRpcService {
       return parsed as AgentMuxRpcResult<M>
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      if (isBrowserProfileProxySignInWrite(method) && (context.caller !== undefined || !context.principal ||
+          !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' || !context.principal.id.trim())) {
+        throw new AgentMuxError('Proxy sign-in changes require a person or device. The Profile, its route and Browsers remain available; ask the person to change the sign-in.',
+          'BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON')
+      }
       // Deleting a Profile clears its sign-ins and site data. Only a transport-approved person or device
       // may do it; Main builds the approval from that trusted caller, never from business params.
       if (method === 'browser.profile.delete' && (context.caller !== undefined || !context.principal ||

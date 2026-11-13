@@ -267,6 +267,7 @@ import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from '
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from './browser-profile-control.js'
+import { createBrowserProfileNetworkControl } from './browser-profile-network-control.js'
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
@@ -750,7 +751,7 @@ export async function registerIpc(args: {
       return await executeSettingsBrowserControl(request, configOwner)
     }
     if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
-      { profiles: browserProfiles, usage: profileUsage }, nameChangeRequests.getStore()?.context.actor)
+      { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl }, nameChangeRequests.getStore()?.context.actor)
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
@@ -2053,6 +2054,9 @@ export async function registerIpc(args: {
     prepare: profileId => browserProfiles.prepareSession(profileId),
     now: () => performance.now()
   })
+  const profileNetworkControl = createBrowserProfileNetworkControl({ profiles: browserProfiles, proxyAuth: profileProxyAuth,
+    checkExit: profileExitCheck, checkAddress: () => config.browser.exitCheckUrl ?? '',
+    reconnect: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)).closeAllConnections() })
   handleWithEvent('browser:readProfileProxySignIn', (event, profileId: string) => ipcResult(async () => {
     await browserProfiles.initialize()
     browserProfiles.resolvePartition(profileId)
@@ -2060,20 +2064,10 @@ export async function registerIpc(args: {
     return username === null ? null : { username }
   }))
   handleWithEvent('browser:setProfileProxySignIn', (event, profileId: string, signIn: { username: string; password: string } | null) => ipcResult(async () => {
-    await browserProfiles.initialize()
-    browserProfiles.resolvePartition(profileId)
-    if (signIn === null) return await profileProxyAuth.clear(profileId)
-    if (!browserProfiles.proxyOf(profileId)) {
-      throw Object.assign(new Error('Set this Profile’s network to a proxy first; a sign-in is kept only for its own proxy.'), { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
-    }
-    if (!signIn || typeof signIn.username !== 'string' || typeof signIn.password !== 'string') throw Object.assign(new Error('Enter a user name and a password for the proxy.'), { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
-    await profileProxyAuth.set(profileId, signIn)
-    // Pages already waiting on the proxy reconnect and are asked again with the new sign-in.
-    await session.fromPartition(browserProfiles.resolvePartition(profileId)).closeAllConnections()
+    return await profileNetworkControl.setProxySignIn(profileId, signIn)
   }))
   handleWithEvent('browser:checkProfileExit', (event, profileId: string) => ipcResult(async () => {
-    await browserProfiles.initialize()
-    return await profileExitCheck(profileId, config.browser.exitCheckUrl ?? '')
+    return await profileNetworkControl.checkExit(profileId)
   }))
   handleWithEvent('browser:detectProfileImportSources', (event) => ipcResult(() => browserProfiles.detectImportSources()))
   handleWithEvent('browser:importProfile', (event, sourceToken: string, label: string) =>
