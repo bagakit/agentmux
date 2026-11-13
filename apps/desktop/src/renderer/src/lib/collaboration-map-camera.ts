@@ -55,7 +55,16 @@ export function collaborationCameraTarget(
     const box = occurrence(owner, id)
     return box ? [{ id, box }] : []
   }))
-  const foldedSummary = descendants.map(owner => geometry.get(collaborationAreaNode(owner.id))).find(box => box?.folded)
-  const anchor = (occurrences.find(({ id }) => agents.get(id)?.tier === 'active') ?? occurrences[0])?.box ?? foldedSummary
+  const foldedSummary = descendants.map(owner => geometry.get(collaborationAreaNode(owner.id))).find(b => b?.folded)
+  // Prefer active first; among equals, prefer the occurrence closest to the area's centroid
+  // so the camera lands near the main cluster rather than the first node in layout order.
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+  const dist = (b: CollaborationLayoutBox) => Math.hypot(b.x + b.width / 2 - cx, b.y + b.height / 2 - cy)
+  const sorted = [...occurrences].sort((a, b) => {
+    const aActive = agents.get(a.id)?.tier === 'active', bActive = agents.get(b.id)?.tier === 'active'
+    if (aActive !== bActive) return aActive ? -1 : 1
+    return dist(a.box) - dist(b.box)
+  })
+  const anchor = sorted[0]?.box ?? foldedSummary
   return anchor ? { x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2, zoom: Math.max(.85, readable), anchor: anchor.id } : null
 }
