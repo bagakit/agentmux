@@ -164,7 +164,7 @@ describe('Desktop Control owner', () => {
     const retained = structuredClone({ tabs: before.tabs, layouts: before.layouts, sessions: before.sessions,
       activeWorkspaceId: before.activeWorkspaceId, drafts: before.browserOpinionDrafts, launches: before.pendingAgentLaunches })
     const effects = [
-      vi.spyOn(api.browser, 'create'), vi.spyOn(api.browser, 'setProfileProxySignIn'), vi.spyOn(api.browser, 'checkProfileExit'),
+      vi.spyOn(api.browser, 'create'), vi.spyOn(api.browser, 'copyProfile'), vi.spyOn(api.browser, 'setProfileProxySignIn'), vi.spyOn(api.browser, 'checkProfileExit'),
       vi.spyOn(api.sessions, 'launchTerminal'),
       vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'interrupt'),
       vi.spyOn(api.spatial, 'openAgent'), vi.spyOn(api.spatial, 'commit')
@@ -173,9 +173,10 @@ describe('Desktop Control owner', () => {
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-set', operation: 'browser.profile.proxy-sign-in.set', profileId: 'default', signIn: { username: 'tester', password: 'fixture-only' } },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-clear', operation: 'browser.profile.proxy-sign-in.clear', profileId: 'default' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-check', operation: 'browser.profile.network.check', profileId: 'default' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-copy', operation: 'browser.profile.copy', profileId: 'default', expectedRevision: 1, label: 'Copied Profile' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-list', operation: 'browser.profile.ls' }
     ]
-    expect(requests).toHaveLength(4)
+    expect(requests).toHaveLength(5)
     for (const input of requests) {
       await expect(useAppStore.getState().executeControl(input), input.operation).rejects.toMatchObject({
         code: 'CONTROL_FAILED', message: 'Browser Profiles belong to the Main Profile owner.'
