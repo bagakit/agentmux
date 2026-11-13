@@ -29,10 +29,16 @@
 .file-media audio { width:min(100%, 560px); }
 .file-media video { width:100%; max-height:calc(100% - 32px); object-fit:contain; }
 .file-media > .file-preview-state { flex:0 1 auto; }
-.file-markdown-preview { height:100%; overflow:auto; padding:var(--sp-6) max(var(--sp-7), calc((100% - 78ch) / 2)); color:var(--text); font-size:var(--fs-prose); line-height:1.65; overflow-wrap:anywhere; }
-.file-markdown-preview > * { width:100%; max-width:100%; margin-inline:0; }
-.file-markdown-preview[data-reading-width='wide'] { padding-inline:max(var(--sp-7), calc((100% - 104ch) / 2)); }
-.file-markdown-preview[data-reading-width='full'] { padding-inline:var(--sp-7); }
+/* The reading gutter is computed once on the preview from the Editor pane width and the preview's own ch, so
+   descendants (the document tools) read the same length instead of resolving % and ch against themselves. */
+@property --md-gutter { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.file-markdown-preview { --md-gutter:max(var(--sp-7), calc((100cqi - 60ch) / 2)); --md-tools-width:136px; height:100%; overflow:auto; padding:var(--sp-6) var(--md-gutter); color:var(--text); font-size:var(--fs-prose); line-height:1.65; overflow-wrap:anywhere; }
+.file-markdown-preview > :not(.md-document-tools) { width:100%; max-width:100%; margin-inline:0; }
+/* The zero-height tool row hangs its controls into the right gutter when there is room for them. */
+.file-markdown-preview > .md-document-tools { width:auto; max-width:none; margin-inline:0 calc(-1 * clamp(0px, var(--md-gutter) - var(--sp-5), var(--md-tools-width))); }
+/* ch is the width of "0"; prose averages about 0.77ch per glyph, so 60ch and 80ch hold about 78 and 104 visible Latin characters. */
+.file-markdown-preview[data-reading-width='wide'] { --md-gutter:max(var(--sp-7), calc((100cqi - 80ch) / 2)); padding-inline:var(--md-gutter); }
+.file-markdown-preview[data-reading-width='full'] { --md-gutter:var(--sp-7); padding-inline:var(--md-gutter); }
 .file-markdown-preview[style*='--md-reading-size'] { font-size:var(--md-reading-size); }
 .file-html-preview { height:100%; min-height:0; display:flex; flex-direction:column; background:#fff; }
 .file-html-preview > iframe { flex:1; min-height:0; width:100%; border:0; }

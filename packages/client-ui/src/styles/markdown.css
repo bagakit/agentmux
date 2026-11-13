@@ -53,6 +53,9 @@
 .md-image-attachment { padding: 0; border: 0; background: none; color: var(--green-2); font: inherit; cursor: pointer; }
 .md-image-attachment:hover { color: var(--green); }
 .md-image-attachment--unavailable, .md-image-attachment--unavailable:hover { color: var(--text-3); cursor: default; }
+/* An image that is not shown reads as a compact pill of its alternative text, about a badge's height. */
+.md-image-attachment--unavailable { display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%; padding: 0 var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); font-size: .84em; line-height: 1.7; vertical-align: middle; }
+.md-image-attachment--unavailable > svg { flex: none; }
 
 .md-footnote-reference { line-height: 0; font-size: .8em; }
 .md-footnote-reference .md-link { padding: 0 1px; text-decoration: none; font-variant-numeric: tabular-nums; }
@@ -62,20 +65,23 @@
 .md-footnote-backlinks { display: inline-flex; gap: var(--sp-2); margin-left: var(--sp-2); }
 .md-footnote-backlinks .md-link { text-decoration: none; }
 
-.md-document { gap: var(--sp-4); }
+.md-document { gap: var(--sp-6); }
 /* A bounded document scrolls as a whole; its tables and code retain their content height. */
 .md-document > * { flex-shrink: 0; }
 .md-document .md-paragraph { white-space: normal; }
 .md-document .md-heading { scroll-margin-top: var(--sp-6); margin-top: var(--sp-6); line-height: 1.35; }
 .md-document .md-heading[data-level='1'] { font-size: 1.65em; font-weight: 720; letter-spacing: -.025em; }
-.md-document .md-heading[data-level='2'] { font-size: 1.25em; font-weight: 680; letter-spacing: -.015em; }
+.md-document .md-heading[data-level='2'] { font-size: 1.3em; font-weight: 680; letter-spacing: -.015em; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
 .md-document .md-heading[data-level='3'] { font-size: 1.1em; }
 .md-document > :first-child { margin-top: 0; }
 .md-document .md-heading:focus, .md-footnotes [data-md-footnote]:focus { outline: none; }
 .md-document .md-list { gap: var(--sp-2); }
 .md-document .md-quote { padding: var(--sp-2) var(--sp-4); border-color: var(--line); }
+.md-document .md-rule { margin: var(--sp-5) 0; border-top-color: var(--line); }
+/* Headings stay clear of the sticky document tools when navigated to. */
+.md-document .md-heading { scroll-margin-top: var(--sp-8); }
 .md-document .md-table { min-width: 100%; }
-.md-document .md-table th { background: var(--surface-1); }
+.md-document .md-table th { background: var(--surface-1); color: var(--text); font-weight: 650; }
 .md-document .md-table th, .md-document .md-table td { padding: var(--sp-3) var(--sp-4); vertical-align: top; }
 /* Document tables wrap prose cells as GitHub does; short label columns stay on one line, code never splits mid-token. */
 .md-document .md-table td { white-space: normal; overflow-wrap: break-word; min-width: 8ch; }
@@ -133,6 +139,8 @@
 .md-image-frame > * { display: block; max-width: 100%; }
 .md-image-frame img { width: 100%; height: auto; }
 .md-container[data-align='center'] .md-image-frame { margin-inline: auto; }
+/* Centered README blocks wrap evenly in a narrow column instead of leaving one word on its own line. */
+.md-container[data-align='center'] .md-paragraph, .md-paragraph[data-align='center'], .md-heading[data-align='center'] { text-wrap: balance; }
 .md-kbd { display: inline-block; min-width: 1.6em; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line), var(--hl); font-family: var(--font-mono); font-size: .86em; line-height: 1.6; text-align: center; }
 .md-sub, .md-sup { font-size: .82em; line-height: 0; }
 .md-mark { padding: 0 var(--sp-1); border-radius: var(--radius-sm); background: var(--amber-wash); color: inherit; }
@@ -154,13 +162,18 @@ th.md-html-cell { color: var(--text-2); font-weight: 620; }
 .md-html-cell { min-width: 0; overflow-wrap: anywhere; }
 /* A td-only table is layout: equal or authored columns that wrap instead of scrolling. */
 .md-html-table--layout { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: var(--sp-4) 0; }
-.md-table-scroll:has(> .md-html-table--layout) { overflow-x: visible; margin-inline: calc(var(--sp-4) * -1); }
+/* Layout cards wrap instead of scrolling. In a document the outer card spacing sits in the page gutter so the
+   card edges line up with the text column; a conversation bubble has no gutter, so its cards stay inside it. */
+.md-table-scroll:has(> .md-html-table--layout) { overflow-x: visible; }
+.md-document .md-table-scroll:has(> .md-html-table--layout) { margin-inline: calc(var(--sp-4) * -1); width: calc(100% + var(--sp-4) * 2); max-width: none; }
+.md:not(.md-document) .md-html-table--layout { border-spacing: var(--sp-2) 0; }
+.md:not(.md-document) .md-html-table--layout .md-html-cell { padding: var(--sp-3); background: var(--surface-2); }
 .md-html-table--layout .md-html-cell { padding: var(--sp-4); border: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .md-html-table--layout .md-html-cell .md-image-frame { margin-bottom: var(--sp-3); }
 .md-html-table--layout .md-html-cell img { border-radius: var(--radius-sm); }
 /* Card captions follow GitHub's <sub>: smaller and quieter than the title, but a readable paragraph, not a footnote. */
 .md-html-table--layout .md-sub { display: block; margin-top: var(--sp-2); color: var(--text-2); font-size: .86em; line-height: 1.55; vertical-align: baseline; }
-.md-html-table--layout .md-html-cell > .md-paragraph > strong:first-of-type { display: inline-block; margin-top: var(--sp-1); color: var(--text); font-size: 1.04em; line-height: 1.35; }
+.md-html-table--layout .md-html-cell > .md-paragraph > strong:first-of-type { display: inline-block; margin-top: var(--sp-1); color: var(--text); line-height: 1.4; }
 .md-html-table--layout .md-html-cell .md-link { color: var(--green-2); }
 
 .md-details { min-width: 0; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); }
@@ -170,7 +183,7 @@ th.md-html-cell { color: var(--text-2); font-weight: 620; }
 .md-details__body { display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-4); }
 
 /* GitHub alerts: the quote band carries the type color; icon and label carry the meaning. */
-.md-alert { --md-alert-ink: var(--blue); display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--md-alert-ink); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--md-alert-ink) 7%, transparent); color: var(--text); }
+.md-alert { --md-alert-ink: var(--blue); display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5); border-left: 2px solid var(--md-alert-ink); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--md-alert-ink) 7%, transparent); color: var(--text); }
 .md-alert[data-alert-type='tip'] { --md-alert-ink: var(--green); }
 .md-alert[data-alert-type='important'] { --md-alert-ink: var(--purple); }
 .md-alert[data-alert-type='warning'] { --md-alert-ink: var(--amber); }
@@ -185,3 +198,6 @@ th.md-html-cell { color: var(--text-2); font-weight: 620; }
 .md-document { --font-reading-serif: "New York", "Iowan Old Style", Charter, Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
 .md-document[data-reading-typeface='serif'] { font-family: var(--font-reading-serif); }
 .md-document[data-reading-typeface='serif'] .md-heading { letter-spacing: 0; }
+/* Code follows the document text size so the reading size scales headings, code and tables together. */
+.md-document .md-code, .md-document .md-block-code code { font-size: .92em; }
+.md-document .md-code-toolbar { font-size: .85em; }
