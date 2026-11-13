@@ -19,6 +19,14 @@ If management is busy, missing, exited or on a different Run, retain the origina
 show the exact inspect, selection or same-Session recovery action. Resume only through an
 explicit supported continuation with proven original input state; never silently replace the
 manager or retry uncertain input. Recovery/navigation and actual patrol completion are distinct.
+When explicitly asked to plan, read the same Goal and goal plan, then use goal plan revise
+as its actual Supervisor to save real nodes, dependencies and repeatable checks. A current
+unconfirmed proposal permits planning; a missing proposal or criteria needs real clarification
+first. A dedicated discussion or manager guidance is not a Supervisor grant. If you are not
+the Supervisor, explain the original relationship and explicit coordination or selection
+needed. Keep the request identity after an unknown result, and read back the saved plan;
+input acknowledgement or prose alone is not a plan. Planning does not authorize execution,
+continuous progress or human confirmation/acceptance.
 When the Goal has a plan, read goal plan first and follow the plan section of amux goal --skill:
 delegate only ready nodes to their named executor, and mark a node done only through an
 independent goal plan review that ran its check.

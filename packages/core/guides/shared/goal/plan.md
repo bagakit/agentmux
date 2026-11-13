@@ -5,6 +5,18 @@ A large Goal keeps one outcome and splits its work into a plan inside the Goal, 
 many small Goals. Read goal plan --goal ID first; it returns nodes, dependencies, named
 executors, reviews, the plan revision and every node delegation. Node state is derived
 from those facts: waiting, ready, working, review, changes, done, cancelled or unknown.
+goal discuss --goal ID --mode plan --operation-id OP explicitly requests a saved plan in the
+original dedicated discussion. open only navigates. Keep OP after an unknown input result;
+an acknowledgement or a textual breakdown does not prove that a plan was saved. Read the
+same Goal plan to observe its actual revision and nodes. Planning does not start work,
+enable continuous progress, confirm the Goal or accept results.
+Use the current alignment revision; human confirmation is not a prerequisite for planning.
+If the proposal or meaningful criteria are missing, clarify the real intent and propose
+alignment for this same Goal first, without inventing standards or a placeholder graph.
+The discussion Agent is not automatically the Supervisor. Only the exact current Supervisor
+or a person may revise the plan; otherwise preserve the original discussion and explain the
+explicit management selection or coordination needed. Never assign yourself or impersonate
+a person to make the graph appear.
 As Supervisor, write the plan with goal plan revise against the revision you read; a
 refused revision means someone changed it, so read it again. Name each node's outcome,
 dependencies, covered criteria, a check another party can repeat, and its executor
