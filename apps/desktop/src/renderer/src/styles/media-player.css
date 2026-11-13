@@ -105,8 +105,10 @@
 .media-player__indicator[data-side="left"] { left: 18%; }
 .media-player__indicator[data-side="right"] { right: 18%; }
 @keyframes media-player-indicator { 0% { opacity: 0; transform: scale(.85); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; } }
-/* Reduced motion: shown at once, held, then gone, with no movement; it still ends so it can unmount. */
-@keyframes media-player-indicator-still { 0%, 99% { opacity: 1; } 100% { opacity: 0; } }
+/* Reduced motion: shown at once, held, then gone, with no movement. The global reduced-motion rule forces every
+   animation duration to 0s, so the hold is a delay: a zero-length animation that lands on its last frame and ends,
+   which unmounts the indicator. */
+@keyframes media-player-indicator-still { to { opacity: 0; } }
 
 .media-player__failure { position: absolute; max-width: min(420px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: center; gap: var(--sp-3);
   padding: var(--sp-6); border-radius: var(--radius-lg); text-align: center; color: var(--text-2); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl);
@@ -166,7 +168,7 @@
 @media (prefers-reduced-motion: reduce) {
   .media-player__controls, .media-player__scrim, .media-player__start, .media-player__button, .media-player--video .media-player__volume { transition: none; }
   .media-player--video[data-controls="hidden"] .media-player__controls { transform: none; }
-  .media-player__indicator { animation: media-player-indicator-still var(--dur-indicator) step-end forwards; }
+  .media-player__indicator { animation: media-player-indicator-still 0s var(--dur-indicator) forwards; }
   .media-player__start:hover { transform: none; }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
