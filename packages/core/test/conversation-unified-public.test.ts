@@ -798,6 +798,6 @@ it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the compiled CLI report
   expect(JSON.parse(result.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
   const help = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--help'], objectCliEnvironment(f.root))
   expect(help.code).toBe(0)
-  expect(help.stdout).toContain('cannot be combined with through or view')
-  expect(help.stdout).toContain('Every cursor continuation must retain the same checkpoint and rewrite value')
+  expect(help.stdout).toContain('A matching record cannot prove complete coverage')
+  expect(help.stdout).not.toContain('rewrite {anchors:')
 }, 30_000)

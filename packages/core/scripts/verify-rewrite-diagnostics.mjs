@@ -13,6 +13,7 @@ const tsc = join(root, 'node_modules/typescript/bin/tsc')
 const config = join(temporary, 'vitest.config.mts')
 const tests = ['packages/core/test/native-rewrite-anchor.test.ts', 'packages/core/test/pi-native-changes.test.ts', 'packages/core/test/providers/grok-session-analysis.test.ts']
 const cliTest = 'packages/core/test/conversation-unified-public.test.ts'
+const publicContracts = 'actual SDK and public RPC preserve source order|route-scoped checkpoint, anchor and signed continuation|the routed codec roundtrips'
 const compiledCli = join(root, 'packages/core/bin/amux')
 const setup = join(root, 'vitest.setup.ts')
 const result = (args, env = {}) => {
@@ -41,9 +42,9 @@ const mutations = [
     after: "failure('SOURCE_CHANGED', 'The original conversation was rewritten before the saved reading position.')",
     includes: tests.slice(1), pattern: 'reports a same-file' },
   { name: 'changed-continuation', path: 'packages/core/src/conversation-reader.ts',
-    before: "fail('The continuation changed its original upper frontier or rewrite anchor.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')",
-    after: "fail('The continuation changed its original upper frontier or rewrite anchor.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')",
-    includes: tests.slice(0, 1), pattern: 'reports a changed rewrite continuation' }
+    before: "fail('The continuation changed its original upper frontier.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')",
+    after: "fail('The continuation changed its original upper frontier.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')",
+    includes: tests.slice(0, 1), pattern: 'reports a changed upper frontier continuation' }
 ]
 try {
   const build = result([tsc, '-p', 'packages/core/tsconfig.build.json'])
@@ -51,6 +52,7 @@ try {
   await writeFile(config, makeConfig(tests))
   const baseline = runTests(config); requireGreen(baseline, 1)
   await writeFile(config, makeConfig([cliTest]))
+  requireGreen(runTests(config, publicContracts), 3)
   const cliBaseline = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1', AGENTMUX_TEST_OBJECT_CLI: compiledCli }); requireGreen(cliBaseline, 1)
   for (const mutation of mutations) {
     await writeFile(config, makeConfig(mutation.includes, mutation))
@@ -66,8 +68,8 @@ try {
   await cp(join(root, 'packages/core/package.json'), join(privateCore, 'package.json'))
   await symlink(join(root, 'packages/core/node_modules'), join(privateCore, 'node_modules'), 'dir')
   const privateCodec = join(privateCore, 'dist/conversation-changes.js'), original = await readFile(privateCodec, 'utf8')
-  const before = "A rewrite anchor requires the original record ID and digest from its changes read.', 'INVALID_CONTROL_REQUEST'"
-  const after = "A rewrite anchor requires the original record ID and digest from its changes read.', 'CONTROL_PROTOCOL_ERROR'"
+  const before = "['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])"
+  const after = "['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'], 'CONTROL_PROTOCOL_ERROR')"
   assert.equal(original.split(before).length, 2, 'Compiled CLI mutation target must be unique')
   await writeFile(privateCodec, original.replace(before, after))
   await writeFile(config, makeConfig([cliTest]))
@@ -78,6 +80,7 @@ try {
   await writeFile(config, makeConfig(tests))
   const restored = runTests(config); requireGreen(restored, 1)
   await writeFile(config, makeConfig([cliTest]))
+  requireGreen(runTests(config, publicContracts), 3)
   const cliRestored = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1', AGENTMUX_TEST_OBJECT_CLI: compiledCli }); requireGreen(cliRestored, 1)
   console.log('Rewrite diagnostics: actual Provider/Core suites and compiled CLI passed; three loaded mutations failed their business assertions; restored consumers passed.')
 } finally {
