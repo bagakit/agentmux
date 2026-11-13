@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
 import { writeFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
+import { request as httpRequest } from 'node:http'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client.js'
 import type { AgentMuxHostedRpcPort, AgentMuxHostedStreamInitial, AgentMuxHostedStreamMethod } from '../../../packages/core/src/hosted-client-contract.js'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service.js'
+import { AgentMuxClient } from '../../../packages/core/src/client.js'
+import { AgentMuxMemoryAgentSessionStore } from '../../../packages/core/src/agent-session-store.js'
+import type { AgentHookServer } from '../../../packages/core/src/hook-server.js'
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port.js'
 import { hookClientFixture, hookSession, hookRun } from '../../../packages/core/test/helpers/hook-ingress-fixture.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -15,7 +19,7 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
-import { hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice.js'
+import { hookIngressServiceOutcome, hookDeliveryServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice.js'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices.js'
 import { composerSubmitMode } from '../src/renderer/src/lib/composer-submit-mode.js'
 import { TerminalServiceNotices } from '../src/renderer/src/components/TerminalServiceNotices.js'
@@ -112,4 +116,79 @@ it('ignores a Hook failure for another Run and keeps unknown Runtime viability e
   const notice = classifyServiceNotice(hookIngressServiceOutcome(unknown))
   expect(notice.kind).toBe('indeterminate')
   expect(notice.kind === 'indeterminate' && notice.notice.step).toContain('EADDRINUSE')
+})
+
+it('carries one Run\'s Hook delivery loss through Hosted bootstrap, Main snapshot, Renderer events and the Terminal service window until delivery resumes', async () => {
+  const lossy = hookSession('lossy'), healthy = hookSession('healthy-neighbor')
+  const store = new AgentMuxMemoryAgentSessionStore()
+  for (const record of [lossy, healthy]) await store.compareAndSwap(null, record)
+  // The production Core Hook server and observer wiring; only the listener port and Runtime are private.
+  const client = new AgentMuxClient({ store })
+  const inner = client as unknown as { connected: boolean; hookServer: AgentHookServer; registry: { load(hostId: string): Promise<void> }
+    kernel: { isConnected(): boolean; identity(): unknown; list(): Promise<unknown[]>; status(id: string): Promise<unknown> }
+    acceptHookEvent(event: unknown, signal: AbortSignal): Promise<void>; ensureNativeStatusObservation(): Promise<void> }
+  Object.defineProperty(inner.hookServer, 'port', { value: 0 })
+  await inner.registry.load('local')
+  inner.connected = true; inner.kernel.isConnected = () => true
+  inner.kernel.identity = () => ({ daemonInstanceId: 'private-daemon', buildIdentity: 'private', protocolVersion: 18 })
+  inner.kernel.list = async () => [hookRun(lossy), hookRun(healthy)]
+  inner.kernel.status = async id => [hookRun(lossy), hookRun(healthy)].find(value => value.runId === id)
+  vi.spyOn(inner, 'ensureNativeStatusObservation').mockResolvedValue()
+  let failing = true
+  inner.acceptHookEvent = async () => { if (failing) throw new Error('private store unavailable') }
+  const service = new AgentMuxHostedRuntimeService(client, null, () => hostedTestOwner(client))
+  const rpc = {
+    call: async (method: string, params: unknown, context?: { signal?: AbortSignal }) =>
+      JSON.parse(JSON.stringify(await service.call(method, JSON.parse(JSON.stringify(params)), context))),
+    subscribe: async (method: string, params: unknown, handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
+      const stream = await service.subscribe(method, JSON.parse(JSON.stringify(params)), event => handlers.onEvent(event),
+        handlers.signal ? { signal: handlers.signal } : {})
+      handlers.onInitial(stream.initial as AgentMuxHostedStreamInitial<AgentMuxHostedStreamMethod>); await stream.start?.()
+      return { dispose: async () => { await stream.dispose() } }
+    }
+  } as AgentMuxHostedRpcPort
+  const hosted = await connectHostedAgentMux({ rpc }), controller = new RuntimeController(store, async () => hosted)
+  let detach = () => {}
+  cleanups.push(async () => { detach(); await controller.dispose(); await service.dispose(); await client.dispose() })
+  controller.commit(await controller.prepare(composerConfig))
+  await inner.hookServer.start()
+  const binding = inner.hookServer.createBinding(lossy.agentSessionId, lossy.providerId); await binding.bindRun(lossy.run.runId)
+  // happy-dom's fetch applies browser CORS; the native Hook sender is a plain Node client.
+  const post = (receiptId: string) => new Promise<number>((resolve, reject) => {
+    const request = httpRequest(binding.endpoint.url, { method: 'POST', agent: false,
+      headers: { authorization: `Bearer ${binding.endpoint.token}`, 'content-type': 'application/json' } }, response => {
+      response.resume(); response.once('end', () => resolve(response.statusCode ?? 0))
+    })
+    request.once('error', reject)
+    request.end(JSON.stringify({ receiptId, eventName: 'observation', payload: {} }))
+  })
+  for (let index = 0; index < 5; index++) expect(await post(`lost-${index}`)).toBe(503)
+  // Main's own snapshot copy carries the fact; the neighbor is untouched.
+  const snapshot = await controller.snapshot(composerConfig)
+  const lossyView = snapshot.sessions.find(value => value.id === lossy.agentSessionId)!
+  expect(lossyView.kind === 'agent' && lossyView.hookDeliveryObservation).toMatchObject({ run: lossy.run, accepted: 'unknown', code: 'HOOK_DELIVERY_FAILED' })
+  const neighbor = snapshot.sessions.find(value => value.id === healthy.agentSessionId)!
+  expect(neighbor.kind === 'agent' && neighbor.hookDeliveryObservation).toBeUndefined()
+  useAppStore.setState({ sessions: snapshot.sessions, noticeReadReceipts: {}, notificationEvents: [] })
+  const webContents = Object.assign(new EventEmitter(), { id: 186, isDestroyed: () => false,
+    send: (_channel: string, event: RuntimeEvent) => { useAppStore.getState().applyEvent(event) } })
+  detach = controller.attach(webContents as unknown as WebContents)
+  function Notice() {
+    const current = useAppStore(state => state.sessions.find(value => value.id === lossy.agentSessionId)!)
+    return <TerminalServiceNotices scope={`terminal:local:${current.id}:${current.control.run.runId}`}
+      reveal={null} replayGeometry={null} viewportSync={null} continuation={null}
+      hookDelivery={serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(current)))} />
+  }
+  await dom.render(<Notice />)
+  expect(dom.container.textContent).toContain('Native Hook observations (HOOK_DELIVERY_FAILED)')
+  expect(dom.container.textContent, 'the window shows the delivery explanation, not only its title').toContain('This clears when the next Hook observation from this Run is delivered.')
+  expect(sessionServiceNotices(useAppStore.getState().sessions.find(value => value.id === lossy.agentSessionId)).map(value => value.id)).toContain('hook-delivery')
+  expect(useAppStore.getState().notificationEvents).toEqual([])
+  failing = false
+  await act(async () => { expect(await post('delivered')).toBe(204) })
+  await vi.waitFor(() => expect(dom.container.querySelector('.terminal-service-window')).toBeNull())
+  const recovered = useAppStore.getState().sessions.find(value => value.id === lossy.agentSessionId)!
+  expect(recovered.kind === 'agent' && recovered.hookDeliveryObservation).toBeUndefined()
+  expect(recovered.control).toEqual(lossyView.control)
+  expect(useAppStore.getState().notificationEvents).toEqual([])
 })

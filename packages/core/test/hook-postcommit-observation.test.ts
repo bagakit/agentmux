@@ -110,7 +110,9 @@ it('acknowledges_confirmed_hook_before_auxiliary_setup_settles', async () => {
   expect(f.cancel).toHaveBeenCalledWith(SID) // Original prompt handling is inside this ACK.
   await wait(HOOK_OWNER_TIMEOUT_MS + 30)
   expect(f.observed).toHaveBeenCalledTimes(1); expect(f.inner.nativeStatusWatches.size).toBe(1)
-  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'HOOK_DELIVERY_TIMEOUT')).toBe(false)
+  // Slow auxiliary setup after the ACK is not a delivery loss of this Run.
+  expect(f.client.agentSession(SID).hookDeliveryObservation).toBeUndefined()
+  expect(f.events.some(event => event.type === 'agent-session' && event.session.hookDeliveryObservation !== undefined)).toBe(false)
   const before = await f.stored(); expect((await f.post('confirmed-setup')).status).toBe(204)
   expect(await f.stored()).toEqual(before); expect(f.observed).toHaveBeenCalledTimes(1)
 })

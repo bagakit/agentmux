@@ -1,6 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentHookServer, type AgentHookBinding, type HookDeliveryFailure } from '../src/hook-server.js'
+import { AgentHookServer, type AgentHookBinding } from '../src/hook-server.js'
 import { sendHookReceipt } from '../src/agent-hook-delivery.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
@@ -103,13 +103,13 @@ describe('Hook admission, receipt and observation recovery', () => {
   })
 
   it('retains original receipt uncertainty and conflicts while a timed-out owner drains', async () => {
-    const receipts: string[] = [], failures: HookDeliveryFailure[] = []
+    const receipts: string[] = [], changes: string[] = []
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
     const server = new AgentHookServer(async event => {
       receipts.push(event.receiptId)
       if (event.receiptId === 'unknown-draining') await gate
-    }, 0, failure => { failures.push(failure) })
+    }, 0, { deliveryChanged: (_session, runId) => { changes.push(runId) } })
     servers.push(server); await server.start()
     const binding = server.createBinding('draining-session', 'codex'); await binding.bindRun('draining-run')
     try {
@@ -124,10 +124,9 @@ describe('Hook admission, receipt and observation recovery', () => {
       const fresh = await post(binding, 'not-admitted')
       expect(await fresh.json()).toMatchObject({ error: 'HOOK_BINDING_RECOVERING', stage: 'admission', accepted: false })
       expect(receipts).toEqual(['unknown-draining'])
-      expect(failures.filter(failure => failure.receiptId === 'unknown-draining')).toEqual([
-        expect.objectContaining({ stage: 'owner', accepted: 'unknown' }),
-        expect.objectContaining({ stage: 'owner', accepted: 'unknown' })
-      ])
+      // The timeout, its replays and the recovering refusal are one loss of this Run.
+      expect(server.deliveryObservation('draining-session', 'draining-run')).toMatchObject({ accepted: 'unknown', code: 'HOOK_DELIVERY_TIMEOUT' })
+      expect(changes).toEqual(['draining-run'])
       release(); await wait(10)
       expect((await post(binding, 'unknown-draining', { original: true })).status).toBe(503)
       expect((await post(binding, 'new-after-drain')).status).toBe(204)
@@ -156,7 +155,6 @@ describe('Hook admission, receipt and observation recovery', () => {
   })
 
   it('expires queued work before execution, keeps other bindings usable and reopens after aborted work drains', async () => {
-    const failures: HookDeliveryFailure[] = []
     const receipts: string[] = []
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
@@ -166,7 +164,7 @@ describe('Hook admission, receipt and observation recovery', () => {
       if (event.receiptId !== 'blocked') return
       signal.addEventListener('abort', () => { aborted = true }, { once: true })
       await gate // Delayed cleanup must not let another owner race it.
-    }, 0, failure => { failures.push(failure) })
+    }, 0)
     servers.push(server); await server.start()
     const busy = server.createBinding('busy-session', 'codex'); await busy.bindRun('busy-run')
     const healthy = server.createBinding('healthy-session', 'claude'); await healthy.bindRun('healthy-run')
@@ -181,13 +179,14 @@ describe('Hook admission, receipt and observation recovery', () => {
     expect(expired.status).toBe(503) // Old owner still draining: binding temporarily unavailable.
     expect(await expired.json()).toMatchObject({ error: 'HOOK_QUEUE_TIMEOUT', stage: 'admission', accepted: false })
     expect(receipts).toEqual(['blocked', 'healthy'])
+    expect(server.deliveryObservation('busy-session', 'busy-run'), 'both losses of the busy Run are one fact').toMatchObject({ accepted: 'unknown', code: 'HOOK_DELIVERY_TIMEOUT' })
+    expect(server.deliveryObservation('healthy-session', 'healthy-run')).toBeUndefined()
     release(); await wait(10)
     expect((await post(busy, 'not-started')).status).toBe(204)
     expect(receipts).toEqual(['blocked', 'healthy', 'not-started'])
-    expect(failures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ receiptId: 'blocked', stage: 'owner', accepted: 'unknown' }),
-      expect.objectContaining({ receiptId: 'not-started', stage: 'admission', accepted: false })
-    ]))
+    // The retried receipt was admitted after both losses, so its delivery is recovery evidence.
+    expect(server.deliveryObservation('busy-session', 'busy-run')).toBeUndefined()
+    expect(server.deliveryObservation('healthy-session', 'healthy-run')).toBeUndefined()
     } finally { release() }
   }, 7_000)
 
@@ -215,14 +214,21 @@ describe('Hook admission, receipt and observation recovery', () => {
     try {
       const oversized = await post(binding, 'oversized', { text: 'x'.repeat(128 * 1024) })
       expect(oversized.status).toBe(413)
-      expect((await post(binding, 'owner-failure')).status).toBe(503)
+      for (let index = 0; index < 20; index++) expect((await post(binding, `owner-failure-${index}`)).status).toBe(503)
+      // The unreadable body is one lost observation without a receipt; it stays one event.
       expect(events.filter(event => event.type === 'agent-error')).toEqual([
-        expect.objectContaining({ agentSessionId: 'sdk-session', code: 'HOOK_BODY_TOO_LARGE', evidence: expect.objectContaining({ run: { runId: 'run-sdk-session' } }) }),
-        expect.objectContaining({ agentSessionId: 'sdk-session', code: 'HOOK_DELIVERY_FAILED', message: expect.stringContaining('durable delivery is unconfirmed') })
+        expect.objectContaining({ agentSessionId: 'sdk-session', code: 'HOOK_BODY_TOO_LARGE', evidence: expect.objectContaining({ run: { runId: 'run-sdk-session' } }) })
       ])
+      // Twenty receipt losses of the Run are one fact on its Session, published once.
+      const delivery = { run: { runId: 'run-sdk-session' }, since: expect.any(Number), accepted: 'unknown', code: 'HOOK_DELIVERY_FAILED' }
+      const published = events.filter(event => event.type === 'agent-session')
+      expect(published).toEqual([expect.objectContaining({ session: expect.objectContaining({ agentSessionId: 'sdk-session', hookDeliveryObservation: delivery }) })])
+      expect(client.agentSession('sdk-session').hookDeliveryObservation).toEqual(delivery)
+      expect((await client.statusAgent('sdk-session')).session.hookDeliveryObservation).toEqual(delivery)
       await vi.waitFor(() => expect(rpcEvents).toHaveLength(2), { timeout: 1_000, interval: 5 })
       expect(rpcEvents).toEqual(events)
       expect(await store.load()).toEqual([expect.objectContaining({ agentSessionId: 'sdk-session', run: { runId: 'run-sdk-session' } })])
+      expect(JSON.stringify(await store.load())).not.toContain('hookDeliveryObservation')
       expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { await subscription.dispose(); await hosted.dispose(); await h.close() }
   })
