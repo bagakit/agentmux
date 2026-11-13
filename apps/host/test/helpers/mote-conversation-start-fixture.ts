@@ -34,7 +34,23 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  const content=createHostContent({configurationPath,spatial}),main=createHostMoteMainReader({configurationPath,spatial,files:content.files!}),store=new MoteDialogueStore(join(h.root,'dialogue.sqlite'))
  const dialogue=createHostMoteDialogue({main,spatial,store,clientForHost:()=>h.client})
  const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:async()=>[{id:'saved',name:'Saved',providerId}]})
- const creator=createHostSpatialAgentControl({configurationPath,spatial,runtime:()=>({client:h.client}) as never})
+ const createSpatial=createHostSpatialAgentControl({configurationPath,spatial,runtime:()=>({client:h.client}) as never})
+ const startedNativeRuns=new Set<string>()
+ const creator:typeof createSpatial=async(request,context)=>{
+  const result=await createSpatial(request,context)
+  if(providerId==='claude'&&result?.operation==='agent.open'&&result.agent){
+   const session=await h.client.readAgentSession(result.agent.agentSessionId)
+   if(session&&!startedNativeRuns.has(session.run.runId)){
+    startedNativeRuns.add(session.run.runId)
+    // The deterministic launch port has completed. Publish this original Run's
+    // native start before its first Query; later idle Hooks cannot stand in for it.
+    await h.inner.acceptHookEvent({agentSessionId:session.agentSessionId,providerId:'claude',runId:session.run.runId,
+     receiptId:'mote-start-'+session.run.runId,eventName:'SessionStart',payload:{hook_event_name:'SessionStart',source:'startup',
+      session_id:'native-'+session.agentSessionId,cwd:session.workspacePath,sourceId:'mote-native-'+session.agentSessionId,sequence:0}},AbortSignal.timeout(5000))
+   }
+  }
+  return result
+ }
  const options={coreClients:()=>[...h.coreClients(),...(input.extraClients??[])],spatialState:spatial,spatialAgentControl:creator,moteDialogue:dialogue,moteQuickPreferences:quick}
  const server=new AgentMuxControlServer({socketPath:join(h.root,'main-start.sock'),...options});await server.start();closes.push(()=>server.stop())
  const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});closes.push(()=>rpc.dispose())
