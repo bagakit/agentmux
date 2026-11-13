@@ -3,12 +3,19 @@ import { AgentMuxError } from './errors.js'
 export type BrowserTaskRunStatus = 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
 
-/** Typed Client facts only. Core neither interprets steps nor owns workflow execution. */
+/**
+ * Typed Client facts only. Core neither interprets steps nor owns workflow execution.
+ * Saved steps are click, fill, navigate, checkpoint, branch and the testing steps wait,
+ * assert, press, hover and scroll, with optional per-step onFail and retry; their schema
+ * and validation belong to the Browser Client.
+ */
 export type AgentMuxBrowserTaskRun = {
   id: string; assetId: string; version: number; browserId: string; nextStep: number
   status: BrowserTaskRunStatus; operationIds: string[]; pendingCheckpointId?: string
   stepExecutions?: { stepId: string; operationId: string }[]
   branchDecisions?: { stepId: string; operationId: string; navigationId: string; result: 'true' | 'false' | 'unknown'; nextStepId?: string | null }[]
+  /** Steps whose known script failure was recorded so the path could continue or jump; a run with any entry never completes. */
+  failedSteps?: { stepId: string; operationId: string }[]
   executedMillis?: number
   startedAt: number; updatedAt: number; warning?: string; completionWarning?: string
 }
@@ -151,9 +158,18 @@ function run(value: unknown): AgentMuxBrowserTaskRun {
       ...(fact.nextStepId === undefined ? {} : { nextStepId: fact.nextStepId === null ? null : identifier(fact.nextStepId) }) }
   })
   if (branchDecisions && new Set(branchDecisions.map(fact => fact.stepId)).size !== branchDecisions.length) bad('Browser task condition identity is duplicated.')
+  const failedSteps = source.failedSteps === undefined ? undefined : bounded(source.failedSteps, 128).map(value => {
+    const fact = record(value)
+    const stepId = identifier(fact.stepId), operationId = identifier(fact.operationId)
+    if (!stepExecutions?.some(step => step.operationId === operationId && step.stepId === stepId)) bad('Browser task failed step is not bound to its executed operation.')
+    return { stepId, operationId }
+  })
+  if (failedSteps && new Set(failedSteps.map(fact => fact.stepId)).size !== failedSteps.length) bad('Browser task failed step identity is duplicated.')
+  if (failedSteps?.length && source.status === 'completed') bad('Browser task run with failed steps cannot be completed.')
   return { id: identifier(source.id), browserId: identifier(source.browserId), assetId: identifier(source.assetId), version: integer(source.version, false, 1),
     nextStep: integer(source.nextStep), status: source.status as BrowserTaskRunStatus, operationIds, startedAt, updatedAt,
     ...(stepExecutions === undefined ? {} : { stepExecutions }), ...(branchDecisions === undefined ? {} : { branchDecisions }),
+    ...(failedSteps === undefined ? {} : { failedSteps }),
     ...(source.executedMillis === undefined ? {} : { executedMillis: time(source.executedMillis) }),
     ...(source.pendingCheckpointId === undefined ? {} : { pendingCheckpointId: identifier(source.pendingCheckpointId) }), ...notices(source) }
 }
