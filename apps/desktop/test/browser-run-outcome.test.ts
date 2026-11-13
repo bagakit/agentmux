@@ -71,34 +71,19 @@ function message(failure: BrowserScriptFailure): string {
 }
 
 describe('Agent 驱动页面的授权闸', () => {
-  // 闸必须在 Main 的 handler 里，不在调用方。那是所有入口的必经之路；放在调用方的话，
-  // 每多一个入口就要记得再写一遍同样的检查，而漏写是静默的——新入口会在开关关着时照样跑。
-  //
-  // 这条用源码判据而不是跑一次 handler：ipc.ts 的 registerIpc 要一整套 Electron 替身才能起来，
-  // 而这里要守的性质（闸在哪一层、拒绝说不说得出去哪开）恰好是结构性的。
+  // 闸必须在 Main 的 handler 里，不在调用方：那是所有入口的必经之路，漏写一处是静默的。
+  // 判定本身归 browser-automation-gate.ts，那里有按调用方的行为测试（browser-profile-agent-access）；
+  // 这里只守「runScript 这条入口真的在派发之前问了那道闸」。源码判据而非跑 handler，
+  // 因为 registerIpc 要一整套 Electron 替身才能起来，而要守的恰好是结构。
   const ipc = readFileSync(join(MAIN_ROOT, 'ipc.ts'), 'utf8')
 
-  it('闸在 browser:runScript 这一层，而且拒绝时说得出去哪开', () => {
-    // 先证扫描面真的读到了东西，否则路径写错时下面全部恒绿。
+  it('browser:runScript 在派发程序之前先问自动化闸，并把调用方交给它', () => {
     expect(ipc, 'ipc.ts 没读到内容，这条在对空气生效').toContain('browser:runScript')
-
     const handler = ipc.slice(ipc.indexOf("handleWithEvent('browser:runScript'"))
     const body = handler.slice(0, handler.indexOf('\n  })'))
-    // 自检：真的切到了一段有内容的 handler，而不是空串。
     expect(body.length, 'handler 切片是空的').toBeGreaterThan(50)
-
-    expect(body, '授权开关没有在这一层被检查——关着的时候程序照样会跑').toContain('agentAutomation')
-    // `!== true` 而不是 `=== false`：字段是可选的，缺席必须也算关（config-store 会补成 false 落盘，
-    // 但这一层不该依赖那个补齐动作有没有发生过）。
-    expect(body, '缺席被当成了开——可选字段的 undefined 会绕过 === false 那种写法').toContain(
-      'agentAutomation !== true'
-    )
-    expect(body, '拒绝没有指明去哪开，Agent 和用户都卡住').toMatch(/Settings/)
-    // 必须是抛，不是返回一个空结果。静默降级正是 AGENTS.md:32-52 的唯一硬规则所禁止的。
-    // 判 `throw` 与「抛的是个 Error」，不钉死 `throw new Error` 这个拼法：拒绝后来挂上了
-    // `BROWSER_AUTOMATION_DISABLED` 这个码（`throw Object.assign(new Error(…), { code })`），
-    // 而那是把这条拒绝变得**更**诚实，不该由这条判据挡着。
-    expect(body, '关着的时候没有抛，而是静默返回了什么东西').toMatch(/throw\s/)
-    expect(body, '抛的不是 Error——下游按 message 取原因会拿到 "[object Object]"').toContain('new Error(')
+    const gate = body.indexOf('await browserAutomation(id, caller)')
+    expect(gate, '这条入口没有问闸，或者没把调用方交给它——按 Profile 的 Agent 开关就拦不住 Agent').toBeGreaterThan(-1)
+    expect(gate, '闸问在了程序派发之后——关着的时候程序已经开始跑').toBeLessThan(body.indexOf('browsers.runScript('))
   })
 })
