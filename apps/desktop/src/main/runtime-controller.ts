@@ -9,7 +9,7 @@ import type { ToolkitRunPort } from './toolkit-run-port.js'
 
 import { isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
+import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxAgentStopReceipt, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { agentPromptSubmissionOutcome, type MoteDialogueInputReference } from '@agentmux/core/mote-dialogue'
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
@@ -2326,7 +2326,13 @@ export class RuntimeController {
     })
   }
 
-  async stopSession(control: SessionControl): Promise<void> {
+  /**
+   * An Agent Stop answers with Core's receipt. The caller's `operationId` is the Stop's identity, so
+   * an explicit retry with the same id continues that Stop and `amux agent stop inspect
+   * --operation-id` reads it. A failure keeps Core's own error and adds that identity and the stage
+   * Core recorded as failed; the failed stage is read from Core's inspect, never guessed.
+   */
+  async stopSession(control: SessionControl, operationId?: string): Promise<AgentMuxAgentStopReceipt | undefined> {
     const attachmentKey = sessionAttachmentKey(control)
     // 停止**不排队**，其余附着操作照旧排队。
     //
@@ -2344,10 +2350,19 @@ export class RuntimeController {
     this.forgetSessionAttachmentOwner(attachmentKey)
     const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') {
-      await client.stopAgent(control.agentSessionId, control.run)
-    } else {
-      await client.stopTerminal(control.run)
+      try {
+        return await client.stopAgent(control.agentSessionId, control.run, operationId === undefined ? {} : { operationId })
+      } catch (error) {
+        if (!(error instanceof Error) || operationId === undefined) throw error
+        // Inspect is read-only; when it is unavailable the original error stays the answer.
+        const inspection = await client.inspectAgentStop({ agentSessionId: control.agentSessionId, expectedRun: control.run, operationId })
+          .catch(() => undefined)
+        throw Object.assign(error, { stopOperationId: operationId,
+          ...(inspection?.operationIdMatched && inspection.failure ? { stopStage: inspection.failure.stage } : {}) })
+      }
     }
+    await client.stopTerminal(control.run)
+    return undefined
   }
 
   async dispose(): Promise<void> {

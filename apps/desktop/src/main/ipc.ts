@@ -98,6 +98,7 @@ import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/session-input-result.js'
 import { sessionObservationResult } from '../shared/session-observation-result.js'
+import { sessionStopReply } from '../shared/session-stop-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
@@ -1889,7 +1890,10 @@ export async function registerIpc(args: {
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
     return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
   })
-  handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
+  handle('sessions:stop', async (session: SessionControl, operationId?: string) => {
+    pauseUserProgress(session, 'Paused because you stopped the Agent.')
+    return await sessionStopReply(() => args.runtime.stopSession(session, operationId))
+  })
   handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
     if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {
       throw Object.assign(new Error('The displayed app-link choice is required.'), { code: 'INVALID_SETTING_VALUE' })

@@ -2,6 +2,7 @@ import { createRendererSessionRecovery } from './session-recovery-api'
 import { SCREENSHOT_SHORTCUT_ACCELERATOR } from '../../../shared/screenshot-shortcut'
 import { createConversationReadApi } from './conversation-read-api'
 import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
+import { unwrapSessionStopReply } from '../../../shared/session-stop-result'
 import { createToolkitConfigurationApi } from './toolkit-configuration-api'
 import { conversationRevision } from '@agentmux/core/conversation'
 import { createConversationLandmarksApi } from './conversation-landmarks-api'
@@ -1299,7 +1300,8 @@ const mockApi: AgentMuxDesktopApi = {
       mockOutput.set(session.id, '$ ')
       return { kind: 'terminal-restarted' as const, session }
     },
-    stop: async (control) => {
+    // The preview has no Core lifecycle owner, so it has no Stop receipt to return.
+    stop: async (control): Promise<undefined> => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       mockSnapshot.sessions = mockSnapshot.sessions.filter((item) => item.id !== sessionId)
       delete mockSnapshot.timelines[sessionId]
@@ -1318,6 +1320,7 @@ const mockApi: AgentMuxDesktopApi = {
           }
         }
       }))
+      return undefined
     },
     onEvent: mockSessionEvents
   },
@@ -1659,6 +1662,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       refreshAttachment: (...args) => preload.sessions.refreshAttachment(...args).then(unwrapSessionObservationResult),
       replay: (...args) => preload.sessions.replay(...args).then(unwrapSessionObservationResult),
       restart: (...args) => preload.sessions.restart(...args).then(unwrapSessionObservationResult),
+      stop: (...args) => preload.sessions.stop(...args).then(unwrapSessionStopReply),
       controlContinuity: (...args) => preload.sessions.controlContinuity(...args).then(unwrapSessionObservationResult),
       write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       paste: (...args) => preload.sessions.paste(...args).then(result => { unwrapSessionInputWriteResult(result) }),

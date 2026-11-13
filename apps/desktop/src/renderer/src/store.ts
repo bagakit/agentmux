@@ -6958,7 +6958,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { operation: request.operation, agentSessionId: session.id }
       }
       if (request.operation === 'stop') {
-        await api.sessions.stop(session.control)
+        // The control request is the Stop's identity: a retried request continues the same Stop.
+        await api.sessions.stop(session.control, request.requestId)
         return { operation: request.operation, agentSessionId: session.id }
       }
       const resumed = await api.sessions.resume(session.control, request.text, request.requestId)
