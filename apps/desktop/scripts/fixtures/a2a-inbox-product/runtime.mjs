@@ -259,10 +259,22 @@ async function launch(label) {
   await waitFor('actual App hydration', () => cdp.evaluate("Boolean(document.querySelector('.app-shell'))"))
   const nativeHome = await cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, process.env.HOME, 'The production snapshot must confirm the actual private Electron home')
+  // Renderer hydration cannot sign the independently registered semantic Host.
+  const hostService = await import(pathToFileURL(hostServiceOwner.modulePath).href), observations = []
+  const hostReadiness = await waitFor('the original private semantic Host owner', async () => {
+    try {
+      const original = await hostService.inspectMacosHostService(hostServiceOwner.service)
+      assert.equal(original.storePath, storePath); assert.equal(original.owner.availability, 'connected')
+      return original
+    } catch (error) {
+      if (!['HOST_SERVICE_UNCONFIRMED', 'CONTROL_UNAVAILABLE'].includes(error.code)) throw error
+      observations.push({ code: error.code, message: error.message }); return null
+    }
+  })
   const catalog = (await cli(['space', 'ls'])).result.catalog
   if (originalHome !== home) assert.ok(!JSON.stringify(catalog).includes(originalHome), 'The actual spatial catalog must not reference the original system home')
   assert.ok((await stat(endpoint)).isSocket(), 'The actual public Desktop endpoint must exist in the private runtime')
-  const isolation = { label, pid: child.pid, originalHome, home, nativeHome, userData, catalog, endpoint,
+  const isolation = { label, pid: child.pid, originalHome, home, nativeHome, userData, catalog, endpoint, hostReadiness: { original: hostReadiness, observations },
     presentationOverlay: { mainSHA256: sha(await readFile(mainPath)), homeExpressionSHA256: sha(homeExpression), windowExpressionSHA256: sha(windowExpression),
       activationPolicy: isolated.result.value.activationPolicy, window: windowIsolation.result.value,
       clipboardGuardPath, electronGuardPath, nativeClipboard: { installation: nativeIsolation.result.value, expressionSHA256: sha(nativeExpression),

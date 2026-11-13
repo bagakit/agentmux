@@ -393,6 +393,10 @@ async function verifyProductBuild(product, { root }) {
     assert.equal(launch.home, product.homeIsolation.privateHome); assert.equal(launch.nativeHome, launch.home)
     assert.equal(launch.userData, join(product.privateRoot, 'user-data'))
     assert.equal(launch.endpoint, join(product.privateRoot, 'runtime/control.sock.desktop'))
+    assert.equal(launch.hostReadiness.original.storePath, join(product.privateRoot, 'user-data/agent-sessions.json'))
+    assert.equal(launch.hostReadiness.original.owner.runtimeId, product.semanticOwner.owner.runtimeId)
+    assert.equal(launch.hostReadiness.original.owner.processId, product.semanticOwner.owner.processId)
+    assert.equal(launch.hostReadiness.original.owner.availability, 'connected')
     if (launch.originalHome !== launch.home) assert.ok(!JSON.stringify(launch.catalog).includes(launch.originalHome))
     const overlay = launch.presentationOverlay
     assert.equal(overlay.activationPolicy, 'prohibited')
