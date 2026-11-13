@@ -1,4 +1,4 @@
-import { createContext, useContext, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, type RefObject, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { BaseEdge, EdgeLabelRenderer, ReactFlow, ViewportPortal, useReactFlow, useStore, type Node, type NodeHandle, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
@@ -372,7 +372,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       onMoveStart={onMoveStart} onMoveEnd={onMoveEnd}
       panOnScroll panOnScrollSpeed={1} paneClickDistance={4} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
       <CollaborationMapGround />
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} gate={gate} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} />
+      <CollaborationViewport canvas={canvas} ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} gate={gate} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} />
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
     <div ref={hud} className="collaboration-canvas__hud">{layout.issues.size ? <CollaborationLayoutNotice issues={layout.issues} onRetry={layout.retry} /> : null}<div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -474,7 +474,7 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   </g>{tooltip.content}</>
 })
 
-function CollaborationViewport({ ready, geometry, areas, agents, locate, gestures, readingAnchor, cameraAnimation, gate, onVisibleAgents }: { ready: boolean; geometry: ReadonlyMap<string, CollaborationBox>; areas: readonly CollaborationArea[]; agents: ReadonlyMap<string, CollaborationAgent>; locate?: CollaborationLocate | undefined; gestures: { current: number }; readingAnchor: { current: string | null }; cameraAnimation: { current: object | null }; gate: PointerRestGate; onVisibleAgents?: ((ids: readonly string[]) => void) | undefined }) {
+function CollaborationViewport({ canvas, ready, geometry, areas, agents, locate, gestures, readingAnchor, cameraAnimation, gate, onVisibleAgents }: { canvas: RefObject<HTMLDivElement | null>; ready: boolean; geometry: ReadonlyMap<string, CollaborationBox>; areas: readonly CollaborationArea[]; agents: ReadonlyMap<string, CollaborationAgent>; locate?: CollaborationLocate | undefined; gestures: { current: number }; readingAnchor: { current: string | null }; cameraAnimation: { current: object | null }; gate: PointerRestGate; onVisibleAgents?: ((ids: readonly string[]) => void) | undefined }) {
   const flow = useReactFlow(), initialized = useRef(false), applied = useRef<object | undefined>(undefined), pending = useRef<{ token: object | undefined; gesture: number }>({ token: undefined, gesture: gestures.current })
   const motion = useContext(MapMotionContext), preferences = useContext(CollaborationMapPreferences)
   const width = useStore(state => state.width), height = useStore(state => state.height)
@@ -495,16 +495,20 @@ function CollaborationViewport({ ready, geometry, areas, agents, locate, gesture
     const gesture = pending.current.gesture
     const frame = requestAnimationFrame(() => {
       if (gestures.current !== gesture) { if (locate) applied.current = locate.token; initialized.current = true; return }
-      const target = collaborationCameraTarget(geometry, areas, agents, { width, height }, locate, preferences)
+      // The inspector can resize the canvas before xyflow's ResizeObserver publishes it.
+      // Read the actual host for this explicit intent; later ordinary resizes keep the camera.
+      const bounds = canvas.current?.getBoundingClientRect()
+      const viewportWidth = bounds?.width || width, viewportHeight = bounds?.height || height
+      const target = collaborationCameraTarget(geometry, areas, agents, { width: viewportWidth, height: viewportHeight }, locate, preferences)
       if (!target) return
       if (target.anchor) readingAnchor.current = target.anchor
       const duration = collaborationCameraDuration(motion, !initialized.current), animation = {}
       if (duration) { cameraAnimation.current = animation; gate.begin('camera-animation') }
-      void flow.setCenter(target.x, target.y, { zoom: target.zoom, duration }).finally(() => { if (cameraAnimation.current === animation) { cameraAnimation.current = null; gate.end('camera-animation') } })
+      void flow.setViewport({ x: viewportWidth / 2 - target.x * target.zoom, y: viewportHeight / 2 - target.y * target.zoom, zoom: target.zoom }, { duration }).finally(() => { if (cameraAnimation.current === animation) { cameraAnimation.current = null; gate.end('camera-animation') } })
       if (locate) applied.current = locate.token
       initialized.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [ready, geometry, locate, width, height, areas, agents, flow, readingAnchor, motion, cameraAnimation, gate, preferences])
+  }, [canvas, ready, geometry, locate, width, height, areas, agents, flow, readingAnchor, motion, cameraAnimation, gate, preferences])
   return null
 }
