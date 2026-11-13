@@ -59,6 +59,7 @@ import type { AgentMuxSpatialGraph, AgentMuxSpatialState } from '@agentmux/core/
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
+import { NotesStorageOwner } from '../src/main/notes-storage-owner.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import '../src/preload/index.js'
@@ -95,6 +96,7 @@ async function fixture() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 632, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
+  const notesStartup = vi.spyOn(NotesStorageOwner.prototype, 'initialize')
   const stop = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, applicationAccess: {} as never,
@@ -102,6 +104,8 @@ async function fixture() {
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: new ScratchTopics(),
     workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
+  // Startup Notes reconciliation reads the spatial document in the background; let it settle before a test counts reads.
+  await Promise.allSettled(notesStartup.mock.results.map(result => result.value))
   const invoke = async (channel: string, values: unknown[], source: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Missing production handler ${channel}`).toBeTypeOf('function')
