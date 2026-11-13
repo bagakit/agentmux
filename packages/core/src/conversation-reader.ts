@@ -558,7 +558,10 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
         if (prior && prior.order.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&
             (prior.order.epoch !== record.order.epoch || prior.order.firstSequence !== record.order.firstSequence)) return fail('An accepted captured record changed its original source position.')
         if (!prior && record.original.kind === 'native') additions.push(record.id)
-        records.set(record.id, prior ? { ...record, order: prior.order } : record)
+        if (prior && prior.order.kind === 'native-page' && record.order.kind === 'native-page') {
+          const { recordDigest: _oldDigest, ...position } = prior.order
+          records.set(record.id, { ...record, order: { ...position, ...(record.order.recordDigest ? { recordDigest: record.order.recordDigest } : {}) } })
+        } else records.set(record.id, prior ? { ...record, order: prior.order } : record)
       }
       let nativeIds = mode === 'changes' || state.direction === 'newer' ? [...native, ...additions] : [...additions, ...native]
       if (mode === 'inspect' && history.length) {
