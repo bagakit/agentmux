@@ -126,7 +126,7 @@ function pmoConfig(root: string): AppConfig {
     { id: 'private-project', name: 'Original Project', hostId: 'local', path: ("" + (root) + _hygiene_fixturePath("project")), kind: 'folder' }] }
 }
 const originalGoal = { id: 'private-goal', title: 'Keep original Goal', description: 'Original <Goal> & context', status: 'backlog' as const,
-  priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
+  priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
 function bindRendererBridge() {
   vi.spyOn(api.demands, 'list').mockImplementation(() => bridge.api!.demands.list())
   vi.spyOn(api.sessions, 'submitPrompt').mockImplementation((...args) => bridge.api!.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult))

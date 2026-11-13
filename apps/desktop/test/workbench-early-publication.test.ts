@@ -100,7 +100,7 @@ it('merges only unchanged Goals from a late filesystem read while preserving a n
   useAppStore.setState({ demands: { [edited.id]: edited, [created.id]: created } })
   const filesystem = (id: string) => ({ id, title: 'Earlier filesystem title', description: '', status: 'backlog' as const, priority: 'normal' as const,
     projectId: null, projectName: null, assigneeSessionIds: [], supervisorSessionId: null, participations: [], tags: [], plannedStartAt: null,
-    targetAt: null, parentDemandId: null, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), phaseIndex: 0, activities: [], decisions: [], sessionIds: [], executorId: null })
+    targetAt: null, parentDemandId: null, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), activities: [], decisions: [], sessionIds: [], executorId: null })
   goals.resolve([filesystem(original.id), filesystem(created.id), filesystem('observed-neighbor')])
   await vi.waitFor(() => expect(useAppStore.getState().demands['observed-neighbor']).toBeDefined())
   expect(useAppStore.getState().demands[edited.id]).toBe(edited)

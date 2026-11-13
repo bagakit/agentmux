@@ -78,7 +78,7 @@ api.scratch.ensureMote = async () => {
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
   title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
   description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
-  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [] }))
+  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [] }))
 api.demands.list = async () => goals
 api.continuousProgress.goals = async () => []
 api.sessions.attach = async () => ({attachmentId: 'controlled-original-attachment', session, currentSize: null, terminal: {type: 'unknown', reason: 'origin_unknown'}, resizeRevision: 0, replay: [], gap: null})

@@ -79,7 +79,7 @@ api.sessions.historyPage = async (control, options) => {
 api.demands.list = async () => {
   calls.push({ operation: 'demands.list' })
   const goal = (id: string, sessionIds: string[]): Demand => ({ id, title: id, description: 'A small inspectable experiment with an original Goal source.', sessionIds,
-    status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: 10, updatedAt: 20 })
+    status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [], createdAt: 10, updatedAt: 20 })
   return [goal('renderer-linked-idea-goal', [contextSession.id]), goal('core-alias-not-linked', [contextSession.control.agentSessionId]), goal('background-goal-not-selected', ['other-renderer-session'])]
 }
 

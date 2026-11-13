@@ -61,7 +61,7 @@ api.scratch.listTopics = async () => [quickTopic(), secondTopic]; api.scratch.re
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
   title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
   description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
-  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: 1, updatedAt: 2, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [] }))
+  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: 1, updatedAt: 2, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [] }))
 api.demands.list = async () => goals
 api.continuousProgress.goals = async () => []
 api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'fixture', nativeSessionId: 'original-controlled-native' }, nextCursor: null,

@@ -68,7 +68,7 @@ const restored = restorePersistedWorkbench({ config, sessions: current.sessions,
   createTabGroupId: () => 'goal-responsibility-preview-restored-group', retiredSessionIds: new Set() })
 if (restored.repairs.length) throw new Error('The original private workface did not restore exactly.')
 const filesystemGoal = (goal: DemandRecord): Demand => ({ ...goal, executorId: null, tags: goal.tags ?? [], plannedStartAt: goal.plannedStartAt ?? null,
-  targetAt: goal.targetAt ?? null, parentDemandId: goal.parentDemandId ?? null, phaseIndex: goal.phaseIndex ?? null,
+  targetAt: goal.targetAt ?? null, parentDemandId: goal.parentDemandId ?? null,
   assigneeSessionIds: goal.assigneeSessionIds ?? [], supervisorSessionId: goal.supervisorSessionId ?? null,
   participations: goal.participations ?? [], activities: goal.activities ?? [], decisions: goal.decisions ?? [] })
 const record = (call: Call) => { calls.push(structuredClone(call)); save() }

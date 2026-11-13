@@ -61,7 +61,7 @@ const topics = [topicFor(PMO_TEAMS_TOPIC_ID, 'Mote'), topicFor(customId, customN
 const topicById = id => topics.find(one => one.id === id)
 // Controlled external Goal content is not another product UI owner.
 const goalTitleKey = 'private-mote-proof-goal-title'
-const goal = { id: 'private-goal', title: localStorage.getItem(goalTitleKey) ?? title, description: 'Return to the same work after restarting the application.', status: 'in_progress', priority: 'normal', projectId: project.id, projectName: project.name, executorId: null, plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], tags: [], activities: [], decisions: [], createdAt: 1000, updatedAt: 1000 }
+const goal = { id: 'private-goal', title: localStorage.getItem(goalTitleKey) ?? title, description: 'Return to the same work after restarting the application.', status: 'in_progress', priority: 'normal', projectId: project.id, projectName: project.name, executorId: null, plannedStartAt: null, targetAt: null, parentDemandId: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], tags: [], activities: [], decisions: [], createdAt: 1000, updatedAt: 1000 }
 api.config.get = async () => structuredClone(config)
 api.demands.list = async () => [goal]
 api.scratch.listTopics = async () => {

@@ -20,7 +20,7 @@ async function originalGoals() {
     id: `original-goal-${index}`, title: `Goal ${index}`, description: 'Original durable content',
     status: index === 102 ? 'done' : 'backlog', priority: 'normal', projectId: null, projectName: null,
     executorId: null, assigneeSessionIds: [], supervisorSessionId: null, participations: [], tags: [],
-    plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null,
+    plannedStartAt: null, targetAt: null, parentDemandId: null,
     activities: [], activityLog: [], decisions: [], sessionIds: [], source: 'default-topic',
     createdAt: fixtureEpoch(0, 0, index + 1), updatedAt: fixtureEpoch(0, 0, index + 1)
   }))

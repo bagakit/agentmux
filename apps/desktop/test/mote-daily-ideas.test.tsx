@@ -233,7 +233,7 @@ describe('original sourced idea intent preparation', () => {
     const page: AgentSessionHistoryPage = { agentSessionId: 'core-history-exact', source: { providerId: session.providerId, nativeSessionId: 'original-native' }, nextCursor: null,
       items: [{ id: 'original-entry', kind: 'user-message', contentParts: [{ kind: 'text', text: 'My original scoped decision.' }] }] }
     const history = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-    const goal = (id: string, sessionIds: string[]): Demand => ({ id, title: id, description: 'Original confirmed goal.', sessionIds, status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: _batchFixtureEpoch(0, 0, 10), updatedAt: _batchFixtureEpoch(0, 0, 20) })
+    const goal = (id: string, sessionIds: string[]): Demand => ({ id, title: id, description: 'Original confirmed goal.', sessionIds, status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [], createdAt: _batchFixtureEpoch(0, 0, 10), updatedAt: _batchFixtureEpoch(0, 0, 20) })
     const goals = vi.spyOn(api.demands, 'list').mockResolvedValue([goal('renderer-linked', [session.id]), goal('wrong-core-linked', [session.control.agentSessionId]), goal('neighbor-linked', ['neighbor-agent'])])
     const plain = await prepareMoteIdeaSchedule(scope(), reference(), input, null, () => true)
     expect(history).not.toHaveBeenCalled(); expect(goals).not.toHaveBeenCalled(); expect(plain.frozenContext).toContain('not included')

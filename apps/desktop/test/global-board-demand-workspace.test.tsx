@@ -58,7 +58,7 @@ describe('Goal reading workspace', () => {
     } finally { await host.dispose() }
   })
   it('keeps all properties reachable in one closed disclosure and avoids zero-Session filler', async () => {
-    useAppStore.setState({ selectedDemandId: 'demand:one', sessions: [], demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: [], tags: ['design'], phaseIndex: 1 } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
+    useAppStore.setState({ selectedDemandId: 'demand:one', sessions: [], demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: [], tags: ['design'] } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     // Status, priority and Project are the always-visible common row; everything else stays in one closed disclosure.
     const common = container.querySelector<HTMLElement>('[aria-label="Common Goal properties"]')!
     expect([...common.querySelectorAll<HTMLElement>('.selection-field')].map(node => node.getAttribute('aria-label'))).toEqual(['Goal work status', 'Goal priority', 'Goal project'])
@@ -66,7 +66,7 @@ describe('Goal reading workspace', () => {
     expect(container.querySelectorAll('.goals-properties')).toHaveLength(1)
     await act(async () => { properties.open = true; properties.dispatchEvent(new Event('toggle')) })
     expect([...properties.querySelectorAll<HTMLElement>('.selection-field')].map(node => node.getAttribute('aria-label'))).toEqual(['Parent goal'])
-    expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2); expect(properties.querySelector('input[type="number"]')).toBeTruthy()
+    expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2); expect(properties.querySelector('input[type="number"]')).toBeNull()
     // Assignment is chosen in Collaboration, not as a property select.
     expect(properties.querySelector('[aria-label="Goal assignee"]')).toBeNull(); expect(container.querySelector('[aria-label="Choose Goal assignees"]')).toBeTruthy()
     // No zero-Session filler: with no linked Session there is no arrangement disclosure or topology.

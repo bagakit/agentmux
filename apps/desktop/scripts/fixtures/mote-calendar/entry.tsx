@@ -61,7 +61,7 @@ const initialDrafts = { [sessions[0]!.id]: '先保留这个手动草稿：等我
 const goal: Demand = { id: 'mote-workspace-experiment', title: '把第一个小实验做好', description: '比较两份有来源的调研，留下可以检查的选择。',
   sessionIds: [sessions[0]!.id], assigneeSessionIds: [], supervisorSessionId: null, participations: [],
   status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null,
-  tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: now, updatedAt: now,
+  tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, activities: [], decisions: [], createdAt: now, updatedAt: now,
   alignment: { revision: 1, confirmedAt: now, summary: '先做一个可验证的结果，再决定下一步。', criteria: [{ id: 'sources', text: '保留原始证据和仍需确认的问题。' }], openQuestions: [] } }
 const calls: { method: string; params: unknown }[] = [], opened: string[] = []
 const listeners = new Set<(schedule: ContinuousProgressLoop) => void>()

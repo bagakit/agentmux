@@ -205,7 +205,7 @@ describe('Demand dedicated PMO Tab context', () => {
   it('retains a real queued Mote task on a healthy busy Run and sends it on retry', async () => {
     const session = { id: 'session-one', kind: 'agent', hostId: 'local', workspacePath: _hygiene_fixturePath("scratch/topic--launcher--leader"), control: { kind: 'agent', hostId: 'local', agentSessionId: 'session-one', run: { runId: 'healthy-run' } }, status: { state: 'working', observedAt: 1 }, processState: 'running', promptSubmissionPredecessor: null, capabilities: { promptExecution: { immediate: 'native-steer' } } }
     const quotedDemand = { ...demand, projectId: workspaceProjectId(projectRoot), id: "goal's-id", alignment: { revision: 1, summary: 'User goal', criteria: [{ id: "criterion's-id", text: 'Current criterion' }], openQuestions: [], confirmedAt: 1 } }
-    vi.spyOn(api.demands, 'list').mockResolvedValue([{ ...quotedDemand, assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, contentRefs: [] } as never])
+    vi.spyOn(api.demands, 'list').mockResolvedValue([{ ...quotedDemand, assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, contentRefs: [] } as never])
     const tab = { ...createWorkbenchTab('pmo-tab-one', { regionId: 'region-one', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.id }, 'PMO'), topicId: PMO_TEAMS_TOPIC_ID }
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session as never)
     vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
