@@ -55,7 +55,13 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   useEffect(() => {
     const controller = new AbortController()
     let owned: AgentMuxHostedClient | undefined, release: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
-    let attempt = 0, working = false, bindingNotice = ''
+    let attempt = 0, working = false, bindingNotice = '', offerNotice = ''
+    // Saving the verified link only lets this device reconnect later without opening it again.
+    // A failed save is reported beside the connection; it never stops the connection itself.
+    const keepOffer = (value: ConnectionOffer) => {
+      try { localStorage.setItem(OFFER_KEY, JSON.stringify(value)); offerNotice = '' }
+      catch { offerNotice = '这次的连接链接没有保存到这台设备；当前连接可继续使用，下次请从 Mac 重新打开连接链接。' }
+    }
     let selected: ConnectionOffer | undefined
     try {
       if (linkIssue) throw new Error(linkIssue)
@@ -70,7 +76,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
       const previous = getDeviceWorkface().snapshot().record.host
       if (previous && previous.hostId !== selected.serverId) throw new Error('链接属于另一台 Mac，原会话和草稿保留。请打开原 Mac 的连接链接。')
       if (offer && original && original.serverId === offer.serverId && original.daemonPublicKeyB64 !== offer.daemonPublicKeyB64) throw new Error('原 Mac 的加密身份发生变化，原连接记录保留。请恢复原 Mac 的身份。')
-      if (offer && (native || location.hash !== mobileUpdateFragment)) localStorage.setItem(OFFER_KEY, JSON.stringify(offer))
+      if (offer && (native || location.hash !== mobileUpdateFragment)) keepOffer(offer)
     } catch (error) { setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) }); return }
     const connect = async () => {
       if (controller.signal.aborted || working) return
@@ -81,7 +87,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         const keyPair = updating ? await existingDeviceRelayIdentity() : await deviceRelayIdentity()
         if (!keyPair || updating && !matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('更新后的原设备身份、工作面或 Mac 连接不匹配；原交接记录保留。请恢复原设备密钥、工作面和原 Mac 连接后重试。')
         if (controller.signal.aborted) return
-        if (updating && offer) localStorage.setItem(OFFER_KEY, JSON.stringify(offer))
+        if (updating && offer) keepOffer(offer)
         if (updating) {
           // All DeviceWorkface writers take this same cross-page lock. React's
           // first read is committed inside its synchronous transaction callback.
@@ -114,7 +120,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         const publish = () => {
           if (controller.signal.aborted || binding.current?.client !== value) return
           binding.current.state = observation.state
-          const issue = [observation.issue, bindingNotice].filter(Boolean).join('\n')
+          const issue = [observation.issue, bindingNotice, offerNotice].filter(Boolean).join('\n')
           setConnection({ ...observation, ...(issue ? { issue } : {}) })
         }
         release = value.onEvent(event => {
