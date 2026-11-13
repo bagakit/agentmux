@@ -866,11 +866,18 @@ export type AgentSessionControl = {
   run: AgentMuxRunRef
 }
 
-/** One trusted person-facing transfer, fenced to the original page and Core-created Run. */
+/** One trusted person-facing transfer, fenced to the original page and exact Core Run. */
 export type BrowserControlHandoff = {
   agent: AgentSessionControl
   navigationId: string
   expectedRevision: number
+  /** Explicit replacement of this exact association after the person takes control. */
+  expectedAgent?: Pick<AgentSessionControl, 'hostId' | 'agentSessionId'> | 'unknown'
+} | {
+  /** Return to the retained association without requiring a new Run authorization. */
+  navigationId: string
+  expectedRevision: number
+  expectedAgent: Pick<AgentSessionControl, 'hostId' | 'agentSessionId'>
 }
 
 /** Reading a retained conversation needs identity, never a live Run lease. */

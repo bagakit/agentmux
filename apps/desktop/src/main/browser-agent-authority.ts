@@ -38,15 +38,27 @@ export function parseBrowserControlHandoff(input: unknown): BrowserControlHandof
   const invalid = () => new AgentMuxError('An exact Browser navigation, revision and Agent Session/Run are required for this handoff.', 'INVALID_CONTROL_REQUEST')
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalid()
   const value = input as Record<string, unknown>, source = value.agent
-  if (Object.keys(value).some(key => !['agent', 'navigationId', 'expectedRevision'].includes(key)) ||
-    typeof value.navigationId !== 'string' || !value.navigationId.trim() || !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0 ||
-    !source || typeof source !== 'object' || Array.isArray(source)) throw invalid()
+  if (Object.keys(value).some(key => !['agent', 'navigationId', 'expectedRevision', 'expectedAgent'].includes(key)) ||
+    typeof value.navigationId !== 'string' || !value.navigationId.trim() || !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0) throw invalid()
+  const expected = value.expectedAgent
+  if (expected !== undefined && expected !== 'unknown' && (!expected || typeof expected !== 'object' || Array.isArray(expected) ||
+    Object.keys(expected).some(key => !['hostId', 'agentSessionId'].includes(key)) ||
+    typeof (expected as Record<string, unknown>).hostId !== 'string' || !(expected as { hostId: string }).hostId.trim() ||
+    typeof (expected as Record<string, unknown>).agentSessionId !== 'string' || !(expected as { agentSessionId: string }).agentSessionId.trim())) throw invalid()
+  const condition = { navigationId: value.navigationId, expectedRevision: Number(value.expectedRevision) }
+  const expectedAgent = expected === 'unknown' ? 'unknown' : expected === undefined ? undefined
+    : { hostId: (expected as BrowserAgent).hostId, agentSessionId: (expected as BrowserAgent).agentSessionId }
+  if (!Object.hasOwn(value, 'agent')) {
+    if (!expectedAgent || expectedAgent === 'unknown') throw invalid()
+    return { ...condition, expectedAgent }
+  }
+  if (!source || typeof source !== 'object' || Array.isArray(source)) throw invalid()
   const agent = source as Record<string, unknown>, run = agent.run
   if (Object.keys(agent).some(key => !['kind', 'hostId', 'agentSessionId', 'run'].includes(key)) || agent.kind !== 'agent' ||
     typeof agent.hostId !== 'string' || !agent.hostId.trim() || typeof agent.agentSessionId !== 'string' || !agent.agentSessionId.trim() ||
     !run || typeof run !== 'object' || Array.isArray(run) || Object.keys(run).some(key => key !== 'runId') ||
     typeof (run as Record<string, unknown>).runId !== 'string' || !(run as { runId: string }).runId.trim()) throw invalid()
-  return { navigationId: value.navigationId, expectedRevision: Number(value.expectedRevision), agent: {
+  return { ...condition, ...(expectedAgent ? { expectedAgent } : {}), agent: {
     kind: 'agent', hostId: agent.hostId, agentSessionId: agent.agentSessionId, run: { runId: (run as { runId: string }).runId }
   } }
 }

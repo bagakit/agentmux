@@ -2361,7 +2361,16 @@ export class BrowserViewManager {
     if (caller) {
       let agent: AgentMuxBrowserControl['agent']
       try { agent = this.agents?.resolve(caller.agentSessionId) } catch { /* Optional actor observation cannot stop the accepted program. */ }
-      if (agent) { entry.agent = agent; entry.agentWarning = undefined }
+      if (agent && (entry.agent === null || entry.agent?.hostId === agent.hostId && entry.agent.agentSessionId === agent.agentSessionId)) {
+        entry.agent = agent
+        entry.agentWarning = undefined
+      } else if (agent) {
+        // The admitted program's actor is recorded on the operation. Its existing automation
+        // permission does not silently replace the page's collaborator or message recipient.
+        entry.agentWarning = entry.agent
+          ? 'This program has a different operator from this Browser’s associated Agent. The existing association and message recipient are retained. Take control and choose Switch Agent to change the collaborator.'
+          : 'This program’s operator is confirmed, but the original Browser Agent association is still unknown. The program and page remain usable; check the original association before handing over or sending a new opinion.'
+      }
       else {
         // A Core observation gap cannot revoke an existing confirmed relationship. For a fresh
         // page this actor is unknown, rather than proof that no Agent is associated.
@@ -2369,6 +2378,7 @@ export class BrowserViewManager {
         entry.agentWarning = 'This Browser program’s Agent identity could not be confirmed from its original Core owner. The page and any confirmed Browser Agent association are retained; reconnect that owner to confirm the actor.'
       }
     }
+    if (entry.agentWarning) operation.warning = appendWarning(operation.warning, entry.agentWarning)
     entry.activity = { operation, control: 'agent', ...(operation.warning ? { warning: operation.warning } : {}) }
     const previousFeedback = entry.feedback
     const feedbackView = entry.view
@@ -3184,22 +3194,32 @@ export class BrowserViewManager {
    */
   async returnControl(id: string, input?: BrowserControlHandoff): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    if (input !== undefined) return await this.transferControl(entry, input)
+    if (input !== undefined) {
+      input = parseBrowserControlHandoff(input)
+      if ('agent' in input) return await this.transferControl(entry, input)
+      if (entry.navigationId !== input.navigationId || entry.controlRevision !== input.expectedRevision ||
+        entry.agent?.hostId !== input.expectedAgent.hostId || entry.agent.agentSessionId !== input.expectedAgent.agentSessionId) {
+        throw Object.assign(new Error('The original Browser page or associated Agent changed before returning control. Your page and Agents are kept; check the current association before handing it back.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+      }
+    }
     if (this.agentOwnsInput(entry)) return this.snapshot(entry)
     const agent = entry.agent
     if (!agent) throw Object.assign(new Error(agent === null
-      ? 'This Browser has no associated Agent. Create an Agent on its right to hand it over.'
+      ? 'This Browser has no associated Agent. Choose an existing Agent or create one on its right to hand it over.'
       : 'The original Browser Agent association is unconfirmed. Keep the page and restore its original association before returning control.'), { code: 'CONTROL_UNAVAILABLE' })
-    const revision = entry.controlRevision
+    const revision = entry.controlRevision, navigationId = entry.navigationId, view = entry.view
     const original = await this.inspectAssociatedAgent(agent)
-    if (this.entries.get(entry.id) !== entry || entry.controlRevision !== revision || entry.agent !== agent) {
+    if (!this.owns(entry, view) || entry.navigationId !== navigationId || entry.controlRevision !== revision || entry.agent !== agent) {
       throw Object.assign(new Error('This Browser changed while Core confirmed its Agent. You keep control; inspect the current page before handing it over.'), { code: 'CONTROL_REQUEST_CONFLICT' })
     }
     if (original === 'retired') {
       this.releaseRetiredAgent(agent)
-      throw Object.assign(new Error('The Agent associated with this Browser has been stopped, so it can no longer take control. You keep control; create a new Agent on its right to hand it over.'), { code: 'STALE_AGENT_SESSION_BINDING' })
+      throw Object.assign(new Error('The Agent associated with this Browser has retired, so it can no longer take control. You keep control; choose another Agent or create a new Agent on its right to hand it over.'), { code: 'STALE_AGENT_SESSION_BINDING' })
     }
     // An unconfirmed read is not a stopped Agent: the association still stands and the hand-back proceeds.
+    entry.agentWarning = original === 'unconfirmed'
+      ? 'The associated Agent’s current Core status could not be confirmed. Its original association and Browser control remain available; reconnect its Core owner or inspect the original Agent to confirm its status.'
+      : undefined
     return this.applyAgentControl(entry)
   }
 
@@ -3235,22 +3255,26 @@ export class BrowserViewManager {
     for (const released of this.releasedEntries.values()) if (same(released.agent)) { released.agent = null; released.agentWarning = undefined }
   }
 
-  /** A trusted click may establish one new relationship only after Core confirms its exact Run. */
-  private async transferControl(entry: BrowserEntry, input: BrowserControlHandoff): Promise<BrowserSnapshot> {
-    input = parseBrowserControlHandoff(input)
+  /** A trusted click establishes or explicitly replaces one relationship after exact Core verification. */
+  private async transferControl(entry: BrowserEntry, input: Extract<BrowserControlHandoff, { agent: unknown }>): Promise<BrowserSnapshot> {
     const { agent } = input
+    const previousAgent = entry.agent
     const matches = () => this.entries.get(entry.id) === entry && entry.navigationId === input.navigationId &&
-      entry.controlRevision === input.expectedRevision && !entry.view.webContents.isDestroyed()
-    if (!matches()) throw Object.assign(new Error('This Browser changed before the handoff. The original page and created Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
-    if (entry.agent === undefined || entry.agent && (entry.agent.hostId !== agent.hostId || entry.agent.agentSessionId !== agent.agentSessionId)) {
-      throw Object.assign(new Error('This handoff cannot replace an unknown or different Browser Agent. The original association and created Agent are kept.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+      entry.controlRevision === input.expectedRevision && entry.agent === previousAgent && !entry.view.webContents.isDestroyed()
+    if (!matches()) throw Object.assign(new Error('This Browser changed before the handoff. The original page and selected Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    const expected = input.expectedAgent
+    const expectedMatches = expected === 'unknown' ? previousAgent === undefined
+      : previousAgent && expected && previousAgent.hostId === expected.hostId && previousAgent.agentSessionId === expected.agentSessionId
+    const replacing = previousAgent !== null && !(previousAgent?.hostId === agent.hostId && previousAgent.agentSessionId === agent.agentSessionId)
+    if (previousAgent === undefined && expected !== 'unknown' || expected !== undefined && !expectedMatches || replacing && (!expectedMatches || this.agentOwnsInput(entry))) {
+      throw Object.assign(new Error('This handoff cannot replace an unknown or changed Browser Agent, or switch while an Agent has control. Take control and choose the collaborator again; the original association and selected Agent are kept.'), { code: 'CONTROL_REQUEST_CONFLICT' })
     }
-    if (!this.agents) throw Object.assign(new Error('The original Core Agent authority is unavailable. The page and created Agent are kept; retry this exact handoff after reconnecting.'), { code: 'CONTROL_UNAVAILABLE' })
+    if (!this.agents) throw Object.assign(new Error('The original Core Agent authority is unavailable. The page and selected Agent are kept; retry this exact handoff after reconnecting.'), { code: 'CONTROL_UNAVAILABLE' })
     const original = await this.agents.inspect(agent)
     if (original.kind !== 'agent' || original.hostId !== agent.hostId || original.agentSessionId !== agent.agentSessionId || original.run.runId !== agent.run.runId) {
-      throw Object.assign(new Error('Core has not confirmed this exact Agent Session/Run. The original page and created Agent are kept; inspect the original creation without repeating it.'), { code: 'STALE_AGENT_SESSION_BINDING' })
+      throw Object.assign(new Error('Core has not confirmed this exact Agent Session/Run. The original page and selected Agent are kept; inspect that original Agent before choosing again.'), { code: 'STALE_AGENT_SESSION_BINDING' })
     }
-    if (!matches()) throw Object.assign(new Error('This Browser changed while Core confirmed the Agent. The original page and created Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    if (!matches()) throw Object.assign(new Error('This Browser changed while Core confirmed the Agent. The original page and selected Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
     entry.agent = { hostId: agent.hostId, agentSessionId: agent.agentSessionId }
     entry.agentWarning = undefined
     return this.applyAgentControl(entry)
@@ -4721,7 +4745,9 @@ export class BrowserViewManager {
     const url = contents.getURL() || entry.requestedUrl
     const objectLink = this.objectLink(entry, url)
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
-    const currentWarnings = [entry.agentWarning, entry.activity.warning ?? persistenceWarning].filter(Boolean).join(' ')
+    const currentWarnings = entry.agentWarning
+      ? appendWarning(entry.activity.warning ?? persistenceWarning, entry.agentWarning)
+      : entry.activity.warning ?? persistenceWarning
     const warning = this.closingWarning(entry.id, currentWarnings || undefined)
     return {
       id: entry.id,
