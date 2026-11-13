@@ -657,7 +657,8 @@ export class DurableIngressHost implements ConnectionIngressPort {
       sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     let refusal: AgentMuxError | undefined
     try {
-      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(retained))
+      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message',
+        ...(retained.conversationKind ? { conversationKind: retained.conversationKind } : {}) }, this.context(retained))
     } catch (error) {
       // No reply proves neither absence nor a new effect right. Inspect this exact operation.
       // A local transport absence never reached Core and stays unknown, as in the public RPC service; other AgentMuxErrors are stated outcomes.
