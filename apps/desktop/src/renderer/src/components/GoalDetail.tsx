@@ -12,6 +12,8 @@ import { GoalFiniteStartControl } from './GoalFiniteStartControl'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { GoalActivity } from './GoalActivity'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
+import { goalNextStepFact } from '../lib/goal-presentation'
+import { GOAL_GROUP_LABELS, GoalStageMark } from '../lib/goal-groups'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
@@ -42,9 +44,13 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const recipient = useGoalDiscussionRecipient(demand.id)
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   const finished = demand.status === 'done' || demand.status === 'cancelled'
+  const fact = goalNextStepFact(demand)
+  const stage = acknowledgementFeedback.failure ? 'you' : fact.stage
+  const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
     <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ThemeNavigationBackIcon size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ThemeActionOpenExternalIcon size={13} />{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="goals-button goals-detail__menu" aria-label="Goal actions"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger><DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><ThemeActionRemoveIcon size={13} />Delete goal</Menu.Item></Menu.Content></div></DocumentOverlayPortal></Menu.Root></header>
     <article className="goals-document">
+      <p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
       <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />
       {!demand.alignment ? <section className="goals-intent-body"><div className="goals-section-heading"><h2>Goal definition</h2><span className="goals-caption">Your intent · Not outlined yet</span></div>{intentBody}</section> : null}
