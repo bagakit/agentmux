@@ -24,7 +24,8 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: Math.round(rect.x), y: Math.round(rect.y) })
     }
     const capture = async name => {
-      await read('Promise.all([...document.querySelectorAll("[data-host-upgrade] button")].flatMap(button=>button.getAnimations()).filter(animation=>animation.effect.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))')
+      // Settle finite button transitions; a paused or detached one never finishes, so the wait is bounded.
+      await read('Promise.race([Promise.all([...document.querySelectorAll("[data-host-upgrade] button")].flatMap(button=>button.getAnimations()).filter(animation=>animation.effect.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{}))),new Promise(done=>setTimeout(done,1000))])')
       await read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
       await new Promise(done => setTimeout(done, 100))
       const file = name + '.png'; fs.writeFileSync(path.join(evidence, file), (await win.capturePage()).toPNG())
@@ -78,11 +79,44 @@ app.whenReady().then(async () => {
           if (mode === 'refusal') {
             await click('[data-copy-upgrade-diagnostics]')
             await until('document.querySelector(".host-upgrade__copy-feedback")?.innerText.includes("Diagnostics copied")')
-            assert.match(await read('window.remoteUpgradePreview.copied.at(-1)'), /Required Native protocol: 22/)
+            assert.match(await read('window.remoteUpgradePreview.copied.at(-1)'), /Required Native protocol: 25/)
             assert.equal(await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length'), before + 1)
             await read('document.querySelector(".host-upgrade__details > summary").click()')
             await capture('diagnostics-copied-' + width)
           }
+        }
+        await click('[aria-label="Close settings"]')
+        await until('!document.querySelector(".settings-page")')
+      }
+      // A remote upgrade that also replaces an older Native Runtime: review, idle review,
+      // in progress and completed. The preview never changes a service.
+      for (const mode of ['replacement', 'replacement-idle']) {
+        await read(`window.remoteUpgradePreview.setMode(${JSON.stringify(mode)})`)
+        await click('.global-system-notices__trigger')
+        await until('document.querySelector(".global-system-notices__details")?.matches(":popover-open")')
+        await click(`.notification-item[data-notice-id='${JSON.stringify(['build', 'Connecting to Runtime'])}'] .notification-item__action`)
+        await until('document.querySelector("[data-resource-editor=build]")?.checkVisibility()')
+        await read('window.remoteUpgradePreview.releaseCheck()')
+        await until('document.querySelector("[data-host-upgrade]")?.innerText.includes("Native Runtime restart")')
+        await capture(mode + '-ready-' + width)
+        await click('[data-upgrade-action]')
+        await until('document.querySelector("[data-upgrade-native-replacement]")?.checkVisibility()')
+        const reviewFacts = await read(`(()=>{const block=document.querySelector("[data-upgrade-native-replacement]"),button=block.querySelector("[data-upgrade-confirm]");
+          return {text:block.innerText,confirm:button.textContent,className:button.className,focus:document.activeElement===block.querySelector("[data-upgrade-cancel]"),
+            overflow:block.scrollWidth>block.clientWidth+1,background:getComputedStyle(button).backgroundColor}})()`)
+        assert.equal(reviewFacts.focus, true)
+        assert.equal(reviewFacts.overflow, false)
+        if (mode === 'replacement') { assert.equal(reviewFacts.className, 'danger-button'); assert.equal(reviewFacts.confirm, 'Upgrade and end 5 processes'); assert.match(reviewFacts.text, /3 in Agent Sessions, 2 in terminals/) }
+        else { assert.equal(reviewFacts.className, 'primary-button'); assert.match(reviewFacts.text, /nothing ends/) }
+        result.replacementReviews ??= []; result.replacementReviews.push({ width, mode, ...reviewFacts, text: undefined })
+        await capture(mode + '-review-' + width)
+        if (mode === 'replacement') {
+          await click('[data-upgrade-confirm]')
+          await until('document.querySelector("[data-host-upgrade] [role=status]")?.textContent === "Upgrading Core and Native Runtime"')
+          await capture('replacement-upgrading-' + width)
+          await read('window.remoteUpgradePreview.releaseUpgrade()')
+          await until('document.querySelector("[data-upgrade-ended-runs]")?.checkVisibility()')
+          await capture('replacement-completed-' + width)
         }
         await click('[aria-label="Close settings"]')
         await until('!document.querySelector(".settings-page")')

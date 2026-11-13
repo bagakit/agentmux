@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { aliases, desktopRequire, installedDependency, root } from './fixtures/settings-connections/environment.mjs'
+import { aliases, browserInstalledDependency, desktopRequire, root } from './fixtures/settings-connections/environment.mjs'
 const exec = promisify(execFile), { build } = await import(desktopRequire.resolve('vite'))
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/remote-core-upgrade')
 const evidence = resolve(root, process.argv[2] ?? ".local/state/remote-core-upgrade-fixture/visual")
@@ -16,13 +16,13 @@ try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'warn', worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
     resolve: { alias: [{ find: /^@agentmux\/client-ui\/note\/(.+)$/u, replacement: resolve(root, 'packages/client-ui/src/note') + '/$1.ts' }, ...aliases] }, plugins: [{ name: 'owned-dependencies', enforce: 'pre', resolveId(source, importer) {
       if (builtinModules.includes(source) || source.startsWith('node:')) return
-      return installedDependency(source, importer)
+      return browserInstalledDependency.call(this, source, importer)
     },
       transform(code, id) {
         if (id.startsWith(root + '/') && !id.includes('/node_modules/')) inputs.set(id, createHash('sha256').update(code).digest('hex'))
       } }], esbuild: { jsx: 'automatic' }, build: { outDir: join(privateRoot, 'dist'), emptyOutDir: true } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  await exec(desktopRequire('electron'), [join(fixture, 'main.cjs'), join(privateRoot, 'dist/index.html'), privateRoot, evidence], { env, timeout: 60000, maxBuffer: 1024 * 1024 })
+  await exec(desktopRequire('electron'), [join(fixture, 'main.cjs'), join(privateRoot, 'dist/index.html'), privateRoot, evidence], { env, timeout: 240000, maxBuffer: 1024 * 1024 })
   const capture = JSON.parse(await readFile(join(evidence, 'capture.json'), 'utf8'))
   if (!capture.passed) throw new Error(capture.error)
   for (const image of capture.images) image.sha256 = createHash('sha256').update(await readFile(join(evidence, image.path))).digest('hex')
