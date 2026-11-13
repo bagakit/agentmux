@@ -13,6 +13,7 @@ const tsc = join(root, 'node_modules/typescript/bin/tsc')
 const config = join(temporary, 'vitest.config.mts')
 const tests = ['packages/core/test/native-rewrite-anchor.test.ts', 'packages/core/test/pi-native-changes.test.ts', 'packages/core/test/providers/grok-session-analysis.test.ts']
 const cliTest = 'packages/core/test/conversation-unified-public.test.ts'
+const compiledCli = join(root, 'packages/core/bin/amux')
 const setup = join(root, 'vitest.setup.ts')
 const result = (args, env = {}) => {
   const r = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', env: { ...process.env, ...env }, maxBuffer: 24 * 1024 * 1024 })
@@ -50,7 +51,7 @@ try {
   await writeFile(config, makeConfig(tests))
   const baseline = runTests(config); requireGreen(baseline, 1)
   await writeFile(config, makeConfig([cliTest]))
-  const cliBaseline = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1' }); requireGreen(cliBaseline, 1)
+  const cliBaseline = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1', AGENTMUX_TEST_OBJECT_CLI: compiledCli }); requireGreen(cliBaseline, 1)
   for (const mutation of mutations) {
     await writeFile(config, makeConfig(mutation.includes, mutation))
     const red = runTests(config, mutation.pattern)
@@ -77,7 +78,7 @@ try {
   await writeFile(config, makeConfig(tests))
   const restored = runTests(config); requireGreen(restored, 1)
   await writeFile(config, makeConfig([cliTest]))
-  const cliRestored = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1' }); requireGreen(cliRestored, 1)
+  const cliRestored = runTests(config, 'compiled CLI reports invalid rewrite input', { AGENTMUX_UNIFIED_COMPILED: '1', AGENTMUX_TEST_OBJECT_CLI: compiledCli }); requireGreen(cliRestored, 1)
   console.log('Rewrite diagnostics: actual Provider/Core suites and compiled CLI passed; three loaded mutations failed their business assertions; restored consumers passed.')
 } finally {
   await rm(temporary, { recursive: true, force: true })
