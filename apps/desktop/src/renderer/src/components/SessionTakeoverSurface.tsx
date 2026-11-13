@@ -31,7 +31,13 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
   const inventory = useAppStore(state => source.hostId ? state.hostExecutorInventories[source.hostId] : undefined)
   const detect = useAppStore(state => state.detectExecutors)
   const host = config?.hosts.find(item => item.id === source.hostId)
-  const executors = useMemo(() => executorsForHost(config, source.hostId ?? undefined, detections, inventory), [config?.executors, detections, inventory, host, source.hostId])
+  // A derived action's default Agent comes first and takes the initial focus; choosing still submits once.
+  const preferred = source.derived ? (useAppStore.getState().config?.agentDerivedActions?.actions ?? []).find(action => action.id === source.derived!.id)?.executorId : undefined
+  const executors = useMemo(() => {
+    const all = executorsForHost(config, source.hostId ?? undefined, detections, inventory)
+    const first = all.find(item => item.id === preferred)
+    return first ? [first, ...all.filter(item => item !== first)] : all
+  }, [config?.executors, detections, inventory, host, source.hostId, preferred])
   const surface = useRef<HTMLElement>(null)
   const admitted = useRef(false)
   const mounted = useRef(true)
@@ -165,7 +171,8 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
     requestAnimationFrame(() => { if (mounted.current && activeRef.current) surface.current?.querySelector<HTMLButtonElement>('.agent-pick:not(:disabled)')?.focus({ preventScroll: true }) })
   }
   const sourceExecutor = source.executorId ? config?.executors[source.executorId] : undefined
-  return <section ref={surface} className="session-takeover" aria-label="Take over this work" hidden={!active} inert={closing || !active}
+  const actionLabel = source.derived?.label ?? 'Next Agent'
+  return <section ref={surface} className="session-takeover" aria-label={source.derived ? `${source.derived.label}: choose an Agent` : 'Take over this work'} data-derived-action={source.derived?.id} hidden={!active} inert={closing || !active}
     data-motion-active={active} data-state={closing ? 'closing' : 'open'} aria-busy={busy}
     onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() }
@@ -174,12 +181,13 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
       <div className="session-takeover__origin">
         <AgentAvatar executorId={source.executorId} providerId={sourceExecutor?.providerId} label={source.label} size={22} />
         <span title={source.label}>{source.label}</span><ThemeNavigationForwardIcon size={14} aria-hidden="true" />
-        <span className="session-takeover__destination">Next Agent</span>
+        <span className="session-takeover__destination">{actionLabel}</span>
       </div>
       <header className="session-takeover__heading">
-        <div><h2>Keep the work moving.</h2><p>{previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
+        <div><h2>{source.derived ? source.derived.label : 'Keep the work moving.'}</h2><p>{source.derived ? 'Choose an Agent to start this from the original work.' : previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
         <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
+      {source.derived ? <p className="session-takeover__instruction" title={source.derived.instruction}>{source.derived.instruction.trim()}</p> : null}
       {source.kind === 'session' ? <>
         <SelectionField label="Takeover destination" value={destinationKey} onValueChange={setDestinationKey} disabled={busy || unconfirmed || closedRequest !== null}
           options={[{ value: '', label: 'Choose an existing destination' }, ...destinations]} />
@@ -189,7 +197,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
         {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed || closedRequest ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
-          : <span>Context follows automatically. Your original session stays here.</span>}
+          : <span>{source.derived ? 'The original work is read automatically. Your original session stays here.' : 'Context follows automatically. Your original session stays here.'}</span>}
         <button type="button" className="session-takeover__back" onClick={() => close()}>Back<span aria-hidden="true">Esc</span></button>
       </div>
       {issue ? <div className="session-takeover__issue" role="status">

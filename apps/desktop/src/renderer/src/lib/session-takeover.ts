@@ -1,4 +1,5 @@
 import { agentTakeoverPrompt } from '@agentmux/core/mote-dialogue'
+import { agentDerivedActionPrompt, type AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AgentNativeResumeSource, AgentSessionHistoryDescriptor, AgentMuxRunRef } from '@agentmux/core'
@@ -16,6 +17,8 @@ type TakeoverSourceDetails = {
   executorId: string | undefined
   diagnostic: string
   origin: Partial<OpenHttpLinkOrigin>
+  /** A user's new-agent derived action; absent means Take over, whose identity, prompt and name are unchanged. */
+  derived?: Pick<AgentDerivedAction, 'id' | 'label' | 'instruction'>
 }
 
 export type TakeoverSource = TakeoverSourceDetails & (
@@ -46,9 +49,11 @@ export async function takeoverRequestId(source: TakeoverSource, previousRequestI
   const identity = source.kind === 'session' ? ['session', source.agentSessionId, source.expectedRun.runId] : source.kind === 'saved' ? ['saved', source.agentSessionId ?? null, source.nativeSource?.nativeHandle.providerId ?? null, source.nativeSource?.nativeHandle.sessionId ?? null] : source.agentSessionId
   const parts: unknown[] = [source.hostId, identity, source.origin.tabId, source.origin.regionId]
   if (previousRequestId !== undefined) parts.push(previousRequestId)
+  // A derived action is its own intent on the same source, frozen with the instruction it was started with.
+  if (source.derived) parts.push(['derived', source.derived.id, source.derived.instruction])
   const key = JSON.stringify(parts)
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key))
-  return `takeover:${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')}`
+  return `${source.derived ? 'derived' : 'takeover'}:${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')}`
 }
 
 /** Follow only this source's retained intent chain; no second ledger or write on reads. */
@@ -149,7 +154,7 @@ async function exactTakeoverSource(source: TakeoverSource): Promise<TakeoverSour
 export function takeoverPrompt(source: TakeoverSource): string {
   const state = useAppStore.getState(), sessionId = source.agentSessionId
   const initial = sessionId ? state.pendingAgentLaunches[sessionId]?.request?.prompt ?? firstPromptFromTimeline(state.timelines[sessionId]) : undefined
-  return agentTakeoverPrompt(source, initial ?? undefined)
+  return source.derived ? agentDerivedActionPrompt(source.derived, source, initial ?? undefined) : agentTakeoverPrompt(source, initial ?? undefined)
 }
 
 /** Display naming follows the confirmed creation; inspection never overwrites a later edit. */
@@ -175,7 +180,8 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
     if (!Number.isFinite(time.getTime())) throw new Error('The new Agent creation time is unconfirmed.')
     const suffix = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())} ${pad(time.getHours())}:${pad(time.getMinutes())}`
     const original = source.label.replace(/ - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, '')
-    await useAppStore.getState().renameAgent(agentSessionId, `${original} - ${suffix}`, 0)
+    // A derived Agent says where it came from and what it does; only Take over carries the time.
+    await useAppStore.getState().renameAgent(agentSessionId, source.derived ? `${original} - ${source.derived.label}` : `${original} - ${suffix}`, 0)
   } catch (error) {
     useAppStore.setState({ nameEditFailure: { operationId: `takeover-name:${report.requestId}`,
       target: { kind: 'agent-session', id: agentSessionId },

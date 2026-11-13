@@ -16,6 +16,7 @@ import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import '../styles/agent-current-fork.css'
 
 const ConversationForkIcon = semanticIconComponent('action.fork-conversation')
+const DerivedActionIcon = semanticIconComponent('action.derived-action')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
@@ -23,13 +24,13 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 type ForkState = { review: CurrentForkReview | null; operationId: string | null; busy: boolean; dispatching: boolean;
   report: AgentMuxSpaceMutationReport | null; notice: string | null; destinations?: ReturnType<typeof agentNewTabDestinations> }
 const emptyState = (): ForkState => ({ review: null, operationId: null, busy: false, dispatching: false, report: null, notice: null })
-type Controls = { reason: string | null; readOnly: boolean; state: ForkState; begin(): void; cancel(): void;
+type Controls = { reason: string | null; readOnly: boolean; state: ForkState; derived?: CurrentForkReview['derived'] | undefined; begin(): void; cancel(): void;
   select(destination: OpenDestination, newTab?: AgentNewTabDestination): void; inspect(): void }
 
 /** Lives with SessionPane, outside the dismissible menu, so an unknown operation is retained. */
 export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, sessionSource = false }: {
   session: CurrentForkSession | null; linkOrigin: Partial<OpenHttpLinkOrigin>; readOnly: boolean; sessionSource?: boolean
-}): (origin?: Partial<OpenHttpLinkOrigin>) => ReactNode {
+}): (origin?: Partial<OpenHttpLinkOrigin>, derived?: CurrentForkReview['derived']) => ReactNode {
   function restoredState(): ForkState {
     const current = useAppStore.getState()
     const operationId = retainedCurrentForkOperation(session, current.spatialRequests ?? {})
@@ -118,12 +119,14 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
     } catch (cause) { publish(operationId, { notice: presentError(cause) }) }
     finally { publish(operationId, { busy: false }) }
   }
-  return (origin = linkOrigin) => {
+  return (origin = linkOrigin, derived) => {
     if (!session) return null
     const reason = currentForkUnavailableReason(session, origin, readOnly, sessionSource)
-    return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={state} begin={() => {
+    // One controller per Session: the official Fork and each fork-based action share its operation and receipt.
+    const mine = (state.review?.derived?.id ?? null) === (derived?.id ?? null)
+    return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={mine ? state : { ...emptyState(), busy: state.busy, dispatching: state.dispatching }} derived={derived} begin={() => {
       if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
-      const review = reviewCurrentFork(session, origin, mintObjectId(), sessionSource)
+      const review = reviewCurrentFork(session, origin, mintObjectId(), sessionSource, derived)
       const current = useAppStore.getState()
       update({ ...emptyState(), operationId: review.operationId, review, ...(sessionSource ? { destinations: agentNewTabDestinations(spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? []), current.layouts, { hostId: session.control.hostId }) } : {}) })
     }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
@@ -132,7 +135,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
 }
 
 /** Menu presentation only. Closing/Escape unmounts this view, not its operation controller. */
-export function AgentCurrentForkControls({ reason, readOnly, state, begin, cancel, select, inspect }: Controls) {
+export function AgentCurrentForkControls({ reason, readOnly, state, derived, begin, cancel, select, inspect }: Controls) {
   const DropdownMenu = useContext(WorkbenchMenuScope)
   const reviewRef = useRef<HTMLDivElement>(null)
   const [destinationKey, setDestinationKey] = useState('')
@@ -157,14 +160,15 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
   }
   const pending = state.operationId && !state.review && state.report?.outcome !== 'opened'
   return <>
-    <DropdownMenu.Item className="tab-context-menu__item" data-current-fork-action=""
+    <DropdownMenu.Item className="tab-context-menu__item" data-current-fork-action={derived ? undefined : ''} data-derived-action={derived?.id}
       disabled={Boolean(reason || state.busy || state.dispatching || pending)} onSelect={event => { event.preventDefault(); begin() }}>
-      <ConversationForkIcon size={14} /><span>Fork current conversation…</span>
+      {derived ? <DerivedActionIcon size={14} /> : <ConversationForkIcon size={14} />}<span>{derived ? `${derived.label}…` : 'Fork current conversation…'}</span>
     </DropdownMenu.Item>
-    {reason ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span>{reason}</span></DropdownMenu.Label> : null}
+    {reason && !derived ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span>{reason}</span></DropdownMenu.Label> : null}
     {state.review ? <div className="agent-current-fork agent-current-fork__review" data-current-fork-review="" ref={reviewRef}
       onKeyDown={event => { if (event.key === 'Escape' && !state.busy) { cancelReview(); event.preventDefault(); event.stopPropagation() } }}>
-      <strong>Fork current conversation</strong>
+      <strong>{state.review.derived ? state.review.derived.label : 'Fork current conversation'}</strong>
+      {state.review.derived ? <span className="agent-current-fork__instruction">{state.review.derived.instruction.trim()}</span> : null}
       <span>Source: {state.review.source.expectedNativeHandle.sessionId}</span>
       <span>Run: {state.review.source.expectedRun.runId}</span>
       <span>{state.review.placement === 'session' ? 'Choose an existing Space, Zone and Group for a new Tab. The original Agent stays here.' : 'Choose a new Tab or split. The original Agent stays here.'}</span>

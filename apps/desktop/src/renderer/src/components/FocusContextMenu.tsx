@@ -1,5 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
+import { SettingsNavigation } from './SettingsNavigation'
 import { useShallow } from 'zustand/react/shallow'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
@@ -36,6 +38,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
   const active = useWorkbenchPresentationActive()
+  const settings = useContext(SettingsNavigation)
   const activeRef = useRef(active); activeRef.current = active
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
@@ -69,7 +72,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
     tabId: location.reference.tabId, regionId: location.reference.regionId, sessionId: context.id } : { sessionId: context.id }
   const forkAt = useAgentCurrentForkControls({ session: session ?? null, linkOrigin: forkOrigin, readOnly: false, sessionSource: !location?.reference })
   /** With one confirmed location the action opens in its own Region; only placeless cards ask where. */
-  function openInRegion(actionId: 'take-over' | 'pass-on-experience'): boolean {
+  function openInRegion(actionId: string): boolean {
     const state = useAppStore.getState(), reference = location?.reference
     const current = agentMenuSession(state.sessions, context)
     if (!reference || !current || !context.control) return false
@@ -79,17 +82,18 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
     state.requestRegionDerivedAction({ tabId: reference.tabId, regionId: reference.regionId, sessionId: current.id, runId: current.control.run.runId, actionId })
     return true
   }
-  function openTakeover() {
+  function openTakeover(derived?: AgentDerivedAction) {
     const current = agentMenuSession(useAppStore.getState().sessions, context)
     if (!current || !context.control || !agentMenuRunMatches(current, context.control)) {
       useAppStore.getState().reportError(new Error('The original Agent or Run changed. Reopen this Agent menu to review its current source.'), { kind: 'indeterminate', ...(context.control ? { subject: context.control } : {}) })
       return
     }
-    if (openInRegion('take-over')) return
+    if (openInRegion(derived ? derived.id : 'take-over')) return
     actionOwnsFocus.current = true
     setTakeover({ kind: 'session', hostId: current.control.hostId, agentSessionId: current.control.agentSessionId, presentationSessionId: current.id,
       expectedRun: { ...current.control.run }, cwd: current.workspacePath, label: context.name, executorId: current.executorId,
-      diagnostic: current.status.detail ?? context.detail, origin: { sessionId: current.id } })
+      diagnostic: current.status.detail ?? context.detail, origin: { sessionId: current.id },
+      ...(derived ? { derived: { id: derived.id, label: derived.label, instruction: derived.instruction } } : {}) })
   }
   function openReading(mode: 'history' | 'learn') {
     if (!context.control) return
@@ -144,12 +148,14 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
               executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'} Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} />}
             onHistory={context.control ? () => openReading('history') : undefined}
             onLearn={context.control ? () => openReading('learn') : undefined}
-            onTakeOver={session ? openTakeover : undefined}
+            onTakeOver={session ? () => openTakeover() : undefined}
+            onDerived={session ? action => openTakeover(action) : undefined}
+            onCustomize={settings ? () => { actionOwnsFocus.current = true; settings.open('derived-actions') } : undefined}
             nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
             onRefreshObservation={session ? refreshObservation : undefined} refreshing={refreshing}
             onRestart={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}
             onStop={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(context, context.name, origin.current) }}
-            extensions={{ controls: forkAt(), workspace: location ? <FocusAgentWorkspaceMenu target={context} references={location.references} issue={location.issue} /> : null,
+            extensions={{ controls: forkAt(), forkAction: action => forkAt(undefined, { id: action.id, label: action.label, instruction: action.instruction }), workspace: location ? <FocusAgentWorkspaceMenu target={context} references={location.references} issue={location.issue} /> : null,
               connections: connector.group ? <RegionMenuEntryView entry={{ kind: 'connector-group', group: connector.group }} index={0} nested
                 Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} Separator={ContextMenu.Separator}
                 Sub={ContextMenu.Sub} SubTrigger={ContextMenu.SubTrigger} SubContent={ContextMenu.SubContent} Portal={ContextMenu.Portal} /> : null,

@@ -12,6 +12,8 @@
 .session-takeover__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .session-takeover__heading h2 { margin: 0; color: var(--text); font-size: clamp(20px, 2.5vw, 25px); font-weight: 600; line-height: 1.25; letter-spacing: -.035em; }
 .session-takeover__heading p { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+/* The exact instruction the new Agent receives; three lines in view, the whole text on hover. */
+.session-takeover__instruction { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: -8px 0 24px; padding: 10px 12px; border-left: 2px solid color-mix(in srgb, var(--green) 55%, transparent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--wash-1); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; white-space: pre-wrap; }
 .session-takeover__cancel { flex: none; width: 28px; height: 28px; color: var(--text-3); }
 .session-takeover .agent-catalog { max-height: none; padding-bottom: 20px; margin-bottom: 0; }
 .session-takeover .agent-picks { gap: 8px; }

@@ -1,10 +1,15 @@
-import { useContext, type ReactNode } from 'react'
+import { Fragment, useContext, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { resolveAgentDerivedActions, type AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
+import { useAppStore } from '../store'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { WorkbenchMenuScope } from './WorkbenchMenuScope'
 import { WorkbenchMenuSubmenu } from './WorkbenchMenuSubmenu'
 
-const Forward = semanticIconComponent('navigation.forward')
+const TakeOver = semanticIconComponent('action.take-over')
+const PassOn = semanticIconComponent('action.pass-on-experience')
+const Derived = semanticIconComponent('action.derived-action')
+const Customize = semanticIconComponent('object.derived-actions')
 const History = semanticIconComponent('object.history')
 const Information = semanticIconComponent('status.info')
 const Restart = semanticIconComponent('action.restart-session')
@@ -16,7 +21,10 @@ const Connections = semanticIconComponent('object.conversations')
 export type AgentMenuExtensions = {
   context?: ReactNode
   identityActions?: ReactNode
+  /** The Fork entry and its review; placed in the derived group's official order. */
   controls?: ReactNode
+  /** Renders a user's fork-based action through the same Fork controller and receipt. */
+  forkAction?: ((action: AgentDerivedAction) => ReactNode) | undefined
   workspace?: ReactNode
   connections?: ReactNode
   maintenance?: ReactNode
@@ -24,12 +32,15 @@ export type AgentMenuExtensions = {
 
 /** One Agent menu body for cards, Region context menus and Header More. */
 export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind = 'agent', executionHost, readOnly = false,
-  links, onHistory, onTakeOver, onLearn, onRestart, onStop, onRefreshObservation, refreshing = false,
+  links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onRestart, onStop, onRefreshObservation, refreshing = false,
   nativeSourceDetails, nativeSourceCheck, extensions = {} }: {
   name: string; executorLabel: string; sessionId: string | undefined; sessionKind?: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly?: boolean
   links: ReactNode
   onHistory?: (() => void) | undefined; onTakeOver?: (() => void) | undefined; onLearn?: (() => void) | undefined
+  /** Starts one user-defined derived action from this exact Agent; absent where none can start here. */
+  onDerived?: ((action: AgentDerivedAction) => void) | undefined
+  onCustomize?: (() => void) | undefined
   onRestart?: (() => void) | undefined; onStop?: (() => void) | undefined
   onRefreshObservation?: (() => void) | undefined; refreshing?: boolean
   nativeSourceDetails?: ReactNode; nativeSourceCheck?: ReactNode
@@ -37,7 +48,17 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
 }) {
   const Menu = useContext(WorkbenchMenuScope)
   const canControl = !readOnly && sessionKind === 'agent'
-  const controls = extensions.controls || canControl && (onTakeOver || onLearn || onRestart || onStop)
+  const derivedActions = useAppStore(state => state.config?.agentDerivedActions)
+  // One order for every menu: visible official actions, then the user's own, as Settings shows them.
+  const derived = sessionKind === 'agent' ? resolveAgentDerivedActions(derivedActions).flatMap(item => {
+    if (item.kind === 'custom' && item.action.base === 'fork') return canControl && extensions.forkAction ? [<Fragment key={`custom:${item.action.id}`}>{extensions.forkAction(item.action)}</Fragment>] : []
+    if (item.kind === 'custom') return canControl && onDerived ? [<Menu.Item key={`custom:${item.action.id}`} className="tab-context-menu__item"
+      data-derived-action={item.action.id} onSelect={() => onDerived(item.action)}><Derived size={14} /><span>{item.action.label}</span></Menu.Item>] : []
+    if (item.id === 'take-over') return canControl && onTakeOver ? [<Menu.Item key="take-over" className="tab-context-menu__item" onSelect={onTakeOver}><TakeOver size={14} /><span>Take over</span></Menu.Item>] : []
+    if (item.id === 'fork') return extensions.controls ? [<Fragment key="fork">{extensions.controls}</Fragment>] : []
+    return canControl && onLearn ? [<Menu.Item key="pass-on-experience" className="tab-context-menu__item" onSelect={onLearn}><PassOn size={14} /><span>Pass on experience</span></Menu.Item>] : []
+  }) : []
+  const lifecycle = canControl && (onRestart || onStop)
   const maintenance = nativeSourceCheck || onRefreshObservation || extensions.maintenance
   return <>
     {extensions.context}
@@ -67,14 +88,19 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
         {nativeSourceDetails}
       </WorkbenchMenuSubmenu>
     </Menu.Group>
-    {controls ? <>
+    {derived.length ? <>
       <Menu.Separator className="tab-context-menu__separator" />
-      <Menu.Group aria-label="Agent controls">
-        {canControl && onTakeOver ? <Menu.Item className="tab-context-menu__item" onSelect={onTakeOver}><Forward size={14} /><span>Take over</span></Menu.Item> : null}
-        {canControl && onLearn ? <Menu.Item className="tab-context-menu__item" onSelect={onLearn}><Forward size={14} /><span>Pass on experience</span></Menu.Item> : null}
-        {extensions.controls}
-        {canControl && onRestart ? <Menu.Item className="tab-context-menu__item" onSelect={onRestart}><Restart size={14} /><span>Restart Session…</span></Menu.Item> : null}
-        {canControl && onStop ? <Menu.Item className="tab-context-menu__item" onSelect={onStop}><Stop size={14} /><span>Stop Agent</span></Menu.Item> : null}
+      <Menu.Group aria-label="Derived actions">
+        {derived}
+        {canControl && onCustomize ? <Menu.Item className="tab-context-menu__item tab-context-menu__item--quiet" data-derived-customize="" onSelect={onCustomize}>
+          <Customize size={14} /><span>Customize…</span></Menu.Item> : null}
+      </Menu.Group>
+    </> : null}
+    {lifecycle ? <>
+      <Menu.Separator className="tab-context-menu__separator" />
+      <Menu.Group aria-label="Session lifecycle">
+        {onRestart ? <Menu.Item className="tab-context-menu__item" onSelect={onRestart}><Restart size={14} /><span>Restart Session…</span></Menu.Item> : null}
+        {onStop ? <Menu.Item className="tab-context-menu__item" onSelect={onStop}><Stop size={14} /><span>Stop Agent</span></Menu.Item> : null}
       </Menu.Group>
     </> : null}
     {extensions.workspace ? <>

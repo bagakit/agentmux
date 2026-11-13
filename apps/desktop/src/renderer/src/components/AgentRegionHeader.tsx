@@ -3,7 +3,9 @@ import { AgentConnections } from './AgentConnections'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
+import { SettingsNavigation } from './SettingsNavigation'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { RegionCopyLinkRow, regionCopyLinkActions, RegionMenuEntryView, useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
@@ -22,7 +24,7 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onLearn, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onLearn, onDerived, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions, forkAction }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -33,14 +35,17 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   onHistory: ((trigger?: HTMLButtonElement) => void) | undefined
   onTakeOver?: ((trigger?: HTMLButtonElement) => void) | undefined
   onLearn?: ((trigger?: HTMLButtonElement) => void) | undefined
+  onDerived?: ((action: AgentDerivedAction, trigger?: HTMLButtonElement) => void) | undefined
   onRefreshObservation?: (() => void) | undefined
   refreshing?: boolean
   /** One precise owner may present its existing controls in the Focus bar. */
   portalTargetId?: string | null
   resultReview?: ReactNode
   currentConversationActions?: ReactNode
+  forkAction?: ((action: AgentDerivedAction) => ReactNode) | undefined
   nativeSession?: AgentNativeSourceReference | undefined
 }) {
+  const settings = useContext(SettingsNavigation)
   const connectorSession = useAppStore(state => {
     const session = sessionKind === 'agent' ? sessionPresentationById(state.sessions).get(sessionId) : undefined
     return session?.kind === 'agent' ? session : undefined
@@ -96,10 +101,12 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     } : undefined}
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
     onLearn={onLearn ? () => { handoffFocus.current = true; onLearn(moreTrigger.current ?? undefined) } : undefined}
+    onDerived={onDerived ? action => { handoffFocus.current = true; onDerived(action, moreTrigger.current ?? undefined) } : undefined}
+    onCustomize={settings ? () => settings.open('derived-actions') : undefined}
     onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined}
     onRefreshObservation={onRefreshObservation} refreshing={refreshing}
     nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
-    extensions={{ context: contextual?.tools, controls: currentConversationActions,
+    extensions={{ context: contextual?.tools, controls: currentConversationActions, forkAction,
       workspace: entries.some(entry => ['layout', 'swaps', 'promote', 'window'].includes(entry.kind)) ? entries
         .filter(entry => ['layout', 'swaps', 'promote', 'window'].includes(entry.kind))
         .map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index}

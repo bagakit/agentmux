@@ -12,6 +12,8 @@ export type CurrentForkReview = {
   source: AgentMuxAgentForkSource
   origin: Partial<OpenHttpLinkOrigin> & { sessionId: string }
   placement: 'region' | 'session'
+  /** A user's fork action: the first message the forked conversation receives. */
+  derived?: { id: string; label: string; instruction: string }
 }
 export const CURRENT_FORK_DESTINATIONS = OPEN_DESTINATIONS.filter(destination => destination !== 'system')
 
@@ -45,12 +47,12 @@ export function currentForkUnavailableReason(session: CurrentForkSession | null,
   return null
 }
 
-export function reviewCurrentFork(session: CurrentForkSession, origin: Partial<OpenHttpLinkOrigin>, operationId: string, sessionSource = false): CurrentForkReview {
+export function reviewCurrentFork(session: CurrentForkSession, origin: Partial<OpenHttpLinkOrigin>, operationId: string, sessionSource = false, derived?: CurrentForkReview['derived']): CurrentForkReview {
   const reason = currentForkUnavailableReason(session, origin, false, sessionSource)
   if (reason) throw new Error(reason)
   return { operationId, hostId: session.control.hostId,
     source: { agentSessionId: session.control.agentSessionId, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(session.nativeHandle!) as AgentMuxAgentForkSource['expectedNativeHandle'] },
-    origin: { ...origin, sessionId: session.id }, placement: sessionSource ? 'session' : 'region' }
+    origin: { ...origin, sessionId: session.id }, placement: sessionSource ? 'session' : 'region', ...(derived ? { derived: { ...derived } } : {}) }
 }
 
 export function currentForkSourceMatches(review: CurrentForkReview, session: CurrentForkSession | null): boolean {
@@ -61,6 +63,10 @@ export function currentForkSourceMatches(review: CurrentForkReview, session: Cur
     handle.sessionId === expected.sessionId && handle.transcriptPath === expected.transcriptPath)
 }
 
+function forkContent(review: CurrentForkReview): Extract<Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content'], { kind: 'fork-agent' }> {
+  return { kind: 'fork-agent', source: structuredClone(review.source), ...(review.derived ? { prompt: review.derived.instruction } : {}) }
+}
+
 /** Both new Tabs and splits retain the exact original display occurrence and resource Zone. */
 export function currentForkRequest(review: CurrentForkReview, session: CurrentForkSession | null,
   catalog: AgentMuxSpaceCatalog, destination: OpenDestination, focus: boolean, newTab?: AgentNewTabDestination): Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }> {
@@ -69,7 +75,7 @@ export function currentForkRequest(review: CurrentForkReview, session: CurrentFo
   if (review.placement === 'session') {
     if (destination !== 'tab' || !newTab) throw new Error('Choose an exact existing Space, Zone and Group for the new Tab. Splits require an original Region.')
     return { schemaVersion: 5, requestId: review.operationId, operation: 'agent.open',
-      content: { kind: 'fork-agent', source: structuredClone(review.source) }, destination: { ...newTab }, focus: false }
+      content: forkContent(review), destination: { ...newTab }, focus: false }
   }
   const origin = review.origin
   if (!origin.tabId || !origin.regionId || !origin.tabGroupId || !origin.workspaceId) throw new Error('The original fork Region address is incomplete. Its Agent is kept.')
@@ -84,7 +90,7 @@ export function currentForkRequest(review: CurrentForkReview, session: CurrentFo
     throw new Error('The original display location or resource Zone is unknown. Inspect the original Region before forking.')
   }
   return { schemaVersion: 5, requestId: review.operationId, operation: 'agent.open',
-    content: { kind: 'fork-agent', source: structuredClone(review.source) },
+    content: forkContent(review),
     destination: { ...(location.spaceId ? { spaceId: location.spaceId } : {}), zoneId: location.zoneId,
       displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
       ...(destination === 'tab' ? { newTab: true } : { tabId: origin.tabId, regionId: origin.regionId,

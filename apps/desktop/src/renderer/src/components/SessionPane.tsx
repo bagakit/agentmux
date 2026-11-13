@@ -14,6 +14,7 @@ import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
 import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
+import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { retainActivityControls } from '../lib/retained-activity'
@@ -142,7 +143,7 @@ export function SessionPane({
   useObservedConsumerCommit('sessionPane', observationVisible)
   const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
-  const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null } | null>(null)
+  const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; derived?: AgentDerivedAction } | null>(null)
   const [learningSelection, setLearningSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; open: boolean } | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const primaryReference = primaryPresentation.reference
@@ -641,6 +642,11 @@ export function SessionPane({
   const takeOverAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && origin.tabId && origin.regionId
     ? (trigger?: HTMLButtonElement) => setTakeoverSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null }) : undefined
   const onTakeOver = takeOverAt(mailboxOrigin)
+  // A user's new-agent action uses the same in-place surface and creation path as Take over.
+  const derivedAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && origin.tabId && origin.regionId
+    ? (action: AgentDerivedAction, trigger?: HTMLButtonElement) => {
+      setTakeoverSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null, derived: action })
+    } : undefined
   const learnAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && takeoverOriginal?.hostId && origin.tabId && origin.regionId
     ? (trigger?: HTMLButtonElement) => setLearningSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null, open: true }) : undefined
   // A Focus card hands its derived action to this exact Region; only a matching Session and Run opens it here.
@@ -655,8 +661,11 @@ export function SessionPane({
       useAppStore.getState().reportError(new Error('The original Agent or Run in this Region changed. Its work is kept; reopen the Agent menu to review its current source.'), { kind: 'indeterminate' })
       return
     }
-    const open = derivedRequest.actionId === 'pass-on-experience' ? learnAt(mailboxOrigin) : takeOverAt(mailboxOrigin)
-    open?.()
+    if (derivedRequest.actionId === 'pass-on-experience') { learnAt(mailboxOrigin)?.(); return }
+    if (derivedRequest.actionId === 'take-over') { takeOverAt(mailboxOrigin)?.(); return }
+    const action = useAppStore.getState().config?.agentDerivedActions?.actions?.find(item => item.id === derivedRequest.actionId && item.base === 'new-agent')
+    if (action) derivedAt(mailboxOrigin)?.(action)
+    else useAppStore.getState().reportError(new Error('This derived action changed or was removed. Nothing was started; the original Agent is kept.'), { kind: 'indeterminate' })
   }, [derivedRequest?.nonce, visible])
   const takeoverAt = (origin: OpenHttpLinkOrigin, active: boolean, displayId: string | null = null) => <>{learningSelection?.key === takeoverKey && learningSelection.displayId === displayId &&
     JSON.stringify(learningSelection.origin) === JSON.stringify(origin) && takeoverOriginal?.hostId ? <SessionLearningSurface key={takeoverKey} active={active && learningSelection.open}
@@ -664,6 +673,7 @@ export function SessionPane({
       returnTrigger={learningSelection.trigger} onClose={() => setLearningSelection(value => value ? { ...value, open: false } : null)} /> : null}{takeoverSelection?.key === takeoverKey && takeoverSelection.displayId === displayId &&
     JSON.stringify(takeoverSelection.origin) === JSON.stringify(origin) ? <SessionTakeoverSurface key={takeoverKey} active={active}
     returnTrigger={takeoverSelection.trigger} onClose={() => setTakeoverSelection(null)} source={{
+    ...(takeoverSelection.derived ? { derived: { id: takeoverSelection.derived.id, label: takeoverSelection.derived.label, instruction: takeoverSelection.derived.instruction } } : {}),
     agentSessionId: sessionId, hostId: takeoverOriginal?.hostId, cwd: takeoverOriginal?.cwd,
     label: agentInputIdentity ?? userName ?? tabName ?? session?.label ?? sessionId,
     executorId: takeoverOriginal?.executorId, origin,
@@ -859,8 +869,8 @@ export function SessionPane({
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
       regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={takeOverAt(origin, displayId)}
-      onLearn={learnAt(origin, displayId)}
-      currentConversationActions={currentConversationActions(origin)} resultReview={resultReview}
+      onLearn={learnAt(origin, displayId)} onDerived={derivedAt(origin, displayId)}
+      currentConversationActions={currentConversationActions(origin)} forkAction={action => currentConversationActions(origin, { id: action.id, label: action.label, instruction: action.instruction })} resultReview={resultReview}
       onRefreshObservation={session?.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined} refreshing={refreshing}
       nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {
         id: recoveryCandidate.agentSessionId, ...projectNativeSourceFacts(recoveryCandidate),

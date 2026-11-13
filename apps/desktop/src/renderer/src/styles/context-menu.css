@@ -44,6 +44,8 @@
 .tab-context-menu__item[data-highlighted], .tab-context-menu__item:hover:where(:not([data-disabled])) { color: var(--text); background: var(--wash-2); }
 .tab-context-menu__item[data-highlighted] > svg, .tab-context-menu__item:hover:where(:not([data-disabled])) > svg { color: var(--green); }
 .tab-context-menu__item[data-disabled] { opacity: .35; }
+/* A low-frequency way into settings: readable and reachable, a step below the actions beside it. */
+.tab-context-menu__item--quiet:where(:not([data-highlighted]):not(:hover)) { color: var(--text-3); }
 .tab-context-menu__item kbd { margin-left:auto; color: var(--text-3); font: 10px/1.2 var(--font-mono); }
 
 @keyframes menu-in {
