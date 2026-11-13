@@ -208,7 +208,7 @@ amux message pending stop --session '<session-id>' --pending-id '<pending-id>'
 
 `stop` 经公开 `message.pending.stop` 调用与界面「停止等待」相同的 owner，只结束本条自动准备退避；原文、操作号、目标 Run 和手动发送入口保留。回执的 `preparationWait.state: "stopped"` 与 `changed` 说明等待事实，不表示撤回已写入输入或停止 Agent。没有活跃退避、目标不存在或已进入提交时，拒绝这一次停止，保留消息、原会话与终端；对已停止的原记录再次调用返回 `changed: false`。修改、发送和停止人工待发意图需要服务认证的 user／device，managed Agent 不能借此操作人工草稿。具体参数与当前执行版本的 `--help`／`--skill` 保持一致。
 
-Agent 有待答的问题或权限时，对一条从未投递的人工待发消息执行 `pending.send` 不会写入输入，也不会回答该请求：回执为 `disposition: "unconfirmed"`，原消息留在 Desktop 队列，Core 确认该请求结束后自动发送。要立即处理请求，请回到原卡片或原终端。
+Agent 有待答的问题或权限时，对一条从未投递的人工待发消息执行 `pending.send` 不会写入输入，也不会回答该请求。回执为 `disposition: "unconfirmed"`，其中 `message.delivery` 为 `"not-submitted"`：本次没有写入任何输入，原消息留在 Desktop 队列，Core 确认该请求结束后自动发送，不要重发。`disposition: "unconfirmed"` 只说明本次调用没有确认提交；是否已写入看 `message.delivery`，只有 `"unconfirmed"` 表示结果未知，需先用 `message pending ls` 与原对话核对。要立即处理请求，请回到原卡片或原终端。
 
 当 `pending.send` 返回 `AGENT_PROMPT_CONDITION_CHANGED`，原发送条件已经变化；本次调用未写入输入，不代表原消息此前一定未投递。先用 `message pending ls --session <id>` 与原对话核对全文及投递记录。可用 `message pending archive --session <id> --pending-id <id> --expected-text '<完整原文>'` 保留原记录并退出 Pending；归档不会撤回输入。之后明确编写新消息时使用普通 `agent send`，不要复用旧 operation/message identity。Desktop 的「移至草稿」会将正文追加到同 Session 的已有草稿并归档原条目，等待下一次明确发送。
 
