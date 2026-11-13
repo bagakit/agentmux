@@ -777,6 +777,24 @@ it('re-steps a recency face on the map clock without another layout job, node mo
   } finally { vi.useRealTimers() }
 })
 
+it('draws activity newer than the minute map clock at the most recent step', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+  try {
+    const now = 2_000_000_000; vi.setSystemTime(now)
+    const scene = scenario(2), [first, second] = [...scene.agents.keys()] as [string, string]
+    const idle = (at: number) => new Map([[first, { ...scene.agents.get(first)!, tier: 'idle' as const, lastActivityAt: at }], [second, { ...scene.agents.get(second)!, tier: 'idle' as const, lastActivityAt: now - 40 * 3_600_000 }]])
+    scene.agents = idle(now - 40 * 3_600_000)
+    scene.areas = [{ id: 'clock', name: 'Clock', kind: 'project', members: [first, second] }]
+    await loaded(scene)
+    const step = () => nodeElement(collaborationAgentNode('clock', first))!.querySelector('[data-recency]')?.getAttribute('data-recency')
+    expect(step()).toBe('older')
+    // Thirty seconds pass without a clock tick; the Agent then finishes a turn with a fresh time.
+    vi.setSystemTime(now + 30_000)
+    await dom.render(graph(scene, null, scene.relations, [], idle(now + 30_000)))
+    expect(step()).toBe('recent')
+  } finally { vi.useRealTimers() }
+})
+
 it('renders and selects an actual Worker detour while both original endpoint cards are offscreen', async () => {
   const scene = await loadedDetourScene()
   const candidate = detour(); expect(candidate, 'The actual force scene must contain a curve outside the endpoint rectangle').toBeDefined()
