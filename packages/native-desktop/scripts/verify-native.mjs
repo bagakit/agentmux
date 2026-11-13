@@ -55,10 +55,13 @@ function swiftFiles(directory) {
   assert(files.length > 0, `Swift syntax selection is empty: ${directory}`)
   return files
 }
+// Module directories parse as one batch so main.swift alone may hold top-level
+// code. Each Verification file is its own script, so it parses as its own main.
 function parseSources() {
-  for (const directory of ['Sources/AgentMuxNativeMacOS', 'Sources/AgentMuxNativeMacOSCore', 'Tests/AgentMuxNativeMacOSTests', 'Verification']) {
+  for (const directory of ['Sources/AgentMuxNativeMacOS', 'Sources/AgentMuxNativeMacOSCore', 'Tests/AgentMuxNativeMacOSTests']) {
     command('swiftc', ['-frontend', '-parse', ...swiftFiles(join(root, directory))])
   }
+  for (const file of swiftFiles(join(root, 'Verification'))) command('swiftc', ['-frontend', '-parse', file])
 }
 function testCounts(report) {
   const count = xpath => Number(command('/usr/bin/xmllint', ['--nonet', '--xpath', xpath, report], { capture: true }).stdout.trim())
