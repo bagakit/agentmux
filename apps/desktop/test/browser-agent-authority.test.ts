@@ -41,6 +41,21 @@ describe('Browser exact Agent facts at Core and cold resource boundaries', () =>
     }
   })
 
+  it('keeps an exact original association condition separate from a new Run authorization', () => {
+    const condition = { navigationId: 'original-navigation', expectedRevision: 4, expectedAgent: identity }
+    expect(parseBrowserControlHandoff(condition)).toEqual(condition)
+    expect(parseBrowserControlHandoff({ ...condition, agent: { kind: 'agent', hostId: 'next-host', agentSessionId: 'next-agent', run: { runId: 'next-run' } } }))
+      .toMatchObject({ expectedAgent: identity, agent: { agentSessionId: 'next-agent' } })
+    expect(parseBrowserControlHandoff({ ...condition, expectedAgent: 'unknown', agent: { kind: 'agent', ...identity, run: { runId: 'chosen-run' } } }))
+      .toMatchObject({ expectedAgent: 'unknown', agent: { agentSessionId: identity.agentSessionId } })
+    for (const bad of [{ navigationId: condition.navigationId, expectedRevision: 4 },
+      { ...condition, agent: undefined }, { ...condition, expectedAgent: null },
+      { ...condition, expectedAgent: { ...identity, run: { runId: 'not-a-condition' } } },
+      { ...condition, expectedAgent: { ...identity, hostId: '' } }, { ...condition, expectedAgent: 'unknown' }, { ...condition, approval: true }]) {
+      expect(() => parseBrowserControlHandoff(bad)).toThrow('exact Browser')
+    }
+  })
+
   it('preserves durable association without restoring permission and keeps a malformed optional association nonblocking', () => {
     const graph = { regions: [{ kind: 'browser', browserId: 'browser', regionId: 'region', tabId: 'tab' }],
       tabs: [{ tabId: 'tab', regionIds: ['region'] }], resources: { 'region:region': { browserId: 'browser', workspaceId: 'workspace', url: 'https://example.invalid/', title: 'Saved', agent: identity } } } as unknown as AgentMuxSpatialGraph

@@ -278,6 +278,109 @@ describe('Browser exact Agent association and trusted handoff', () => {
     manager.close('handoff')
   })
 
+  it('atomically switches an existing collaborator after human takeover without checking the old Agent liveness', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('switch', 'https://example.invalid/original', 'workspace-a')
+    await manager.returnControl('switch', input(manager, 'switch'))
+    const next = { ...recipient, hostId: 'next-host', agentSessionId: 'existing-agent', run: { runId: 'existing-run' } }
+    const request = () => ({ ...input(manager, 'switch'), agent: next, expectedAgent: identity })
+    read.mockClear()
+    await expect(manager.returnControl('switch', request())).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    expect(read).not.toHaveBeenCalled()
+    manager.takeControl('switch')
+    read.mockResolvedValue(next)
+    const result = await manager.returnControl('switch', request())
+    expect(read).toHaveBeenCalledExactlyOnceWith(next)
+    expect(result).toMatchObject({ id: 'switch', url: 'https://example.invalid/original', control: { owner: 'agent', agent: { hostId: next.hostId, agentSessionId: next.agentSessionId } } })
+    expect(manager.targets().map(target => target.id)).toEqual(['switch'])
+    expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    manager.dispose()
+  })
+
+  it('refuses stale original association conditions before inspecting a replacement', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('switch-stale', 'https://example.invalid/original', 'workspace-a')
+    await manager.returnControl('switch-stale', input(manager, 'switch-stale'))
+    manager.takeControl('switch-stale')
+    read.mockClear()
+    const next = { ...recipient, agentSessionId: 'different-agent' }
+    await expect(manager.returnControl('switch-stale', { ...input(manager, 'switch-stale'), agent: next,
+      expectedAgent: { ...identity, hostId: 'wrong-host' } })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    expect(read).not.toHaveBeenCalled()
+    expect(manager.target('switch-stale')?.control).toMatchObject({ owner: 'human', agent: identity })
+    manager.dispose()
+  })
+
+  it('conditions an original hand-back without a new Run grant, retains availability and explains an unavailable status read', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('return-original', 'https://example.invalid/original', 'workspace-a')
+    await manager.returnControl('return-original', input(manager, 'return-original'))
+    manager.takeControl('return-original')
+    const condition = { navigationId: manager.target('return-original')!.navigationId!, expectedRevision: manager.target('return-original')!.control!.revision, expectedAgent: identity }
+    read.mockRejectedValueOnce(new Error('Core unavailable'))
+    const returned = await manager.returnControl('return-original', condition)
+    expect(returned.control).toMatchObject({ owner: 'agent', agent: identity })
+    expect(returned.activity?.warning).toContain('current Core status could not be confirmed')
+    manager.takeControl('return-original')
+    await expect(manager.returnControl('return-original', condition)).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    const fresh = { ...condition, expectedRevision: manager.target('return-original')!.control!.revision }
+    const confirmed = await manager.returnControl('return-original', fresh)
+    expect(confirmed.control).toMatchObject({ owner: 'agent', agent: identity })
+    expect(confirmed.activity?.warning).not.toContain('current Core status could not be confirmed')
+    manager.dispose()
+  })
+
+  it('runs a permitted second operator without silently replacing the collaborator or its message recipient', async () => {
+    const f = fakeWindow(), other = { hostId: 'other-host', agentSessionId: 'other-operator' }
+    const manager = browserManager(f.window, undefined, { resolve: id => id === identity.agentSessionId ? identity : other, inspect: inspect() })
+    await manager.create('caller-page', 'https://example.invalid/original', 'workspace-a')
+    let attached = false
+    Object.assign(f.children[0]!.webContents, { debugger: {
+      attach() { attached = true }, detach() { attached = false }, isAttached: () => attached,
+      on() {}, off() {}, sendCommand: async () => ({})
+    } })
+    const first = await manager.runScript('caller-page', 'return 7', { id: identity.agentSessionId, name: 'Original collaborator' },
+      undefined, 'original-caller', undefined, false, undefined, { agentSessionId: identity.agentSessionId })
+    expect(first.outcome.kind).toBe('completed')
+    expect(manager.target('caller-page')?.control?.agent).toEqual(identity)
+    const second = await manager.runScript('caller-page', 'return 9', { id: other.agentSessionId, name: 'Other operator' },
+      undefined, 'other-caller', undefined, false, undefined, { agentSessionId: other.agentSessionId })
+    expect(second).toMatchObject({ result: 9, outcome: { kind: 'completed' }, runOperation: { operator: { id: other.agentSessionId }, control: { agent: identity } } })
+    expect(second.runOperation.warning).toContain('different operator')
+    expect(manager.target('caller-page')).toMatchObject({ control: { owner: 'agent', agent: identity }, warning: expect.stringContaining('different operator') })
+    expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    await manager.dispose()
+  })
+
+  it('does not hand a later document to the Agent when navigation changes during the original return check', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('return-document', 'https://example.invalid/original', 'workspace-a')
+    await manager.returnControl('return-document', input(manager, 'return-document'))
+    manager.takeControl('return-document')
+    let settle!: (value: typeof recipient) => void
+    read.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+    const pending = manager.returnControl('return-document', { navigationId: manager.target('return-document')!.navigationId!,
+      expectedRevision: manager.target('return-document')!.control!.revision, expectedAgent: identity })
+    const refused = expect(pending).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    await manager.navigate('return-document', 'https://example.invalid/later')
+    settle(recipient)
+    await refused
+    expect(manager.target('return-document')).toMatchObject({ url: 'https://example.invalid/later', control: { owner: 'human', agent: identity } })
+    await manager.dispose()
+  })
+
+  it('recovers an unknown association only through an explicit human choice of an exact new Agent', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.ensure('unknown-choice', async () => ({ id: 'unknown-choice', workspaceId: 'workspace-a', url: 'https://example.invalid/original', title: '', mode: 'normal' }))
+    const request = input(manager, 'unknown-choice')
+    await expect(manager.returnControl('unknown-choice', request)).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    expect(read).not.toHaveBeenCalled()
+    const result = await manager.returnControl('unknown-choice', { ...request, expectedAgent: 'unknown' })
+    expect(result.control).toMatchObject({ owner: 'agent', agent: identity })
+    expect(read).toHaveBeenCalledExactlyOnceWith(recipient)
+    await manager.dispose()
+  })
+
   for (const wrong of ['hostId', 'agentSessionId', 'run', 'retired'] as const) it(`rejects a Core ${wrong} mismatch while keeping the created Agent and original page`, async () => {
     const f = fakeWindow(), read = inspect()
     read.mockResolvedValue({ ...recipient, ...(wrong === 'retired' ? { kind: 'retired-agent' } : wrong === 'run' ? { run: { runId: 'newer-run' } } : { [wrong]: 'another-identity' }) } as never)
@@ -374,7 +477,9 @@ describe('Browser exact Agent association and trusted handoff', () => {
   })
 
   it('carries exact Main association, confirmed-none and unknown through public RPC and the actual Browser targets CLI', async () => {
-    const f = fakeWindow(), manager = browserManager(f.window)
+    const next = { ...recipient, agentSessionId: 'chosen-existing-agent', run: { runId: 'chosen-existing-run' } }
+    const read = vi.fn(async (agent: { agentSessionId: string }) => agent.agentSessionId === next.agentSessionId ? next : recipient)
+    const f = fakeWindow(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
     const directory = mkdtempSync(join(tmpdir(), 'amx-browser-agent-cli-')); privateLedgerRoots.push(directory)
     await manager.create('none', 'https://example.invalid/none', 'workspace-a')
     const descriptor = { workspaceId: 'workspace-a', url: 'https://example.invalid/saved', title: '', mode: 'normal' as const }
@@ -392,12 +497,22 @@ describe('Browser exact Agent association and trusted handoff', () => {
       expect(decoded).toMatchObject({ coverage: 'partial', warning: 'An unrelated external owner is unavailable.' })
       expect(decoded.targets.map(target => [target.id, target.control?.agent])).toEqual([['none', null], ['unknown', undefined], ['associated', identity]])
       expect(decoded.targets[1]!.control).not.toHaveProperty('agent')
+      await manager.returnControl('associated', { navigationId: manager.target('associated')!.navigationId!,
+        expectedRevision: manager.target('associated')!.control!.revision, expectedAgent: identity, agent: next })
+      manager.takeControl('associated')
+      read.mockRejectedValueOnce(new Error('Core observation unavailable'))
+      await manager.returnControl('associated', { navigationId: manager.target('associated')!.navigationId!,
+        expectedRevision: manager.target('associated')!.control!.revision,
+        expectedAgent: { hostId: next.hostId, agentSessionId: next.agentSessionId } })
+      const updated = await rpc.call('browser.targets', {})
+      expect(updated.targets[2]!.control).toMatchObject({ owner: 'agent', agent: { hostId: next.hostId, agentSessionId: next.agentSessionId } })
+      expect(updated.targets[2]!.warning).toContain('current Core status could not be confirmed')
       const result = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'targets'], objectCliEnvironment(directory))
       expect(result.code, result.stderr).toBe(0)
       const actual = JSON.parse(result.stdout).result
-      expect(actual).toEqual(decoded)
+      expect(actual).toEqual(updated)
       expect(actual.targets[1].control).not.toHaveProperty('agent')
-      expect(actual.targets[2].control.agent).toEqual(identity)
+      expect(actual.targets[2].control.agent).toEqual({ hostId: next.hostId, agentSessionId: next.agentSessionId })
     } finally { await rpc.dispose(); await server.stop(); manager.dispose() }
   })
 })
