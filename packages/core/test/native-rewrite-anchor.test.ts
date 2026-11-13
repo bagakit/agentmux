@@ -137,6 +137,38 @@ it('matches an unchanged record that carries a large signed resource across read
   expect(ids(resumed)).toEqual(['msg-after-resume'])
 })
 
+it('reads and resumes past a consumed record larger than one physical read', async () => {
+  const f = await codex(), start = await f.checkpoint()
+  // One record above the 4 MiB single-read budget, as a long tool result can be.
+  await append(f.path, [assistant('msg-huge', 'y'.repeat(5 * 1024 * 1024))])
+  const kept = Buffer.from(await readFile(f.path))
+  await append(f.path, [call('call-lost')])
+  const before = await consumed(f, start)
+  expect(anchorsOf(before.records).map(anchor => anchor.recordId)).toContain('msg-huge')
+  await rewriteInPlace(f.path, kept, [assistant('msg-after-resume', 'reply after resume')])
+  const resumed = await f.client.readConversationChanges({ ...f.ref, checkpoint: before.page.checkpoint, limit: 100, rewrite: { anchors: anchorsOf(before.records) } })
+  expect(nativeCoverage(resumed).gaps).toEqual([])
+  expect(ids(resumed)).toEqual(['msg-after-resume'])
+})
+
+it('finds the newest unchanged consumed record however many unconsumed records follow it', async () => {
+  const f = await codex(), start = await f.checkpoint()
+  await append(f.path, [assistant('msg-published', 'published before the interruption')])
+  const before = await consumed(f, start)
+  // A long interrupted turn: thousands of records after the last delivered one, none of them anchors.
+  const firstCall = (await readFile(f.path)).length
+  await append(f.path, Array.from({ length: 5000 }, (_, index) => call('call-' + index)))
+  const kept = Buffer.from(await readFile(f.path))
+  await append(f.path, [output('call-4999', 'only in the old bytes')])
+  const cut = await f.checkpoint()
+  await rewriteInPlace(f.path, kept, [assistant('msg-after-resume', 'reply after resume')])
+  const resumed = await f.client.readConversationChanges({ ...f.ref, checkpoint: cut, limit: 10, rewrite: { anchors: anchorsOf(before.records) } })
+  expect(nativeCoverage(resumed).gaps).toEqual([])
+  // Resumes right after the delivered reply, at the first record of the long turn.
+  expect(ids(resumed)[0]).toBe('codex-record:' + firstCall)
+  expect(resumed.more).toBe(true)
+})
+
 it('refuses as a rewrite, not a different source, when no consumed record remains in the same file', async () => {
   const f = await codex(), start = await f.checkpoint()
   const kept = Buffer.from(await readFile(f.path))
