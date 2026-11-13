@@ -6,6 +6,9 @@ import type { DemandAlignment, DemandGrounding } from '@agentmux/demand/goals'
 
 export const DEMAND_STATUS_IDS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as const
 export type DemandStatus = (typeof DEMAND_STATUS_IDS)[number]
+export const DEMAND_STATUS_LABELS: Record<DemandStatus, string> = {
+  backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
+}
 export const DEMAND_PRIORITY_IDS = ['low', 'normal', 'high', 'urgent'] as const
 export type DemandPriority = (typeof DEMAND_PRIORITY_IDS)[number]
 export const DEMAND_ARRANGEMENT_IDS = ['columns', 'grid', 'balanced'] as const

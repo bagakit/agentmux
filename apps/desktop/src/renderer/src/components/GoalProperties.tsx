@@ -2,7 +2,7 @@ import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useState } from 'react'
 import type { DemandProjection, DemandPriority, DemandStatus } from '../lib/global-demand-board'
-import { DEMAND_STATUS_IDS } from '../lib/global-demand-board'
+import { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS } from '../lib/global-demand-board'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { projectWorkspaces } from '../lib/workspace-projects'
@@ -17,13 +17,12 @@ function localDateInput(timestamp: number | null | undefined): string {
 }
 
 type Props = { demand: DemandProjection; onUpdate: (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1]) => void }
-const STATUS_LABELS = ['Backlog', 'Todo', 'In progress', 'In review', 'Blocked', 'Done', 'Cancelled']
 export function GoalCommonProperties({ demand, onUpdate }: Props) {
   const workspaces = useAppStore(state => state.config?.workspaces)
   const projects = useMemo(() => projectWorkspaces((workspaces ?? []).filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID)), [workspaces])
   const unavailableProject = Boolean(demand.projectId && !projects.some(project => project.id === demand.projectId))
   return <div className="goals-common-properties" aria-label="Common Goal properties">
-    <label>Work status<SelectionField label="Goal work status" value={demand.status} options={DEMAND_STATUS_IDS.map((value, index) => ({ value, label: STATUS_LABELS[index]! }))} onValueChange={status => onUpdate({ status: status as DemandStatus })} /></label>
+    <label>Work status<SelectionField label="Goal work status" value={demand.status} options={DEMAND_STATUS_IDS.map(value => ({ value, label: DEMAND_STATUS_LABELS[value] }))} onValueChange={status => onUpdate({ status: status as DemandStatus })} /></label>
     <label>Priority<SelectionField label="Goal priority" value={demand.priority} options={['low', 'normal', 'high', 'urgent'].map(value => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }))} onValueChange={priority => onUpdate({ priority: priority as DemandPriority })} /></label>
     <label>Project<SelectionField key={demand.id} label="Goal project" value={demand.projectId ?? ''} options={[{ value: '', label: 'Unassigned' }, ...(unavailableProject ? [{ value: demand.projectId!, label: `${demand.projectName ?? 'Bound Project'} · Unavailable`, disabled: true }] : []), ...projects.map(project => ({ value: project.id, label: project.name }))]}
       onValueChange={id => { if (!id) onUpdate({ projectId: null, projectName: null }); else { const project = projects.find(project => project.id === id); if (project) onUpdate({ projectId: project.id, projectName: project.name }) } }} /></label>
