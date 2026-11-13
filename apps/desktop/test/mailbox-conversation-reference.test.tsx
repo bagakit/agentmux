@@ -3,9 +3,8 @@ import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-valu
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { join, resolve } from 'node:path'
-import { AgentMuxControlServer, agentInputSubmissionStatus, type AgentInputSubmissionReceipt, type AgentSessionUserMessage, type AgentTimelineItem } from '@agentmux/core'
+import { AgentMuxControlServer, agentInputSubmissionStatus, type AgentInputSubmissionReceipt, type AgentTimelineItem } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { createHistoryQueryFixture } from '../../../packages/core/test/helpers/session-history-query'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { fixture, raw } from './helpers/native-async-question-fixture'
@@ -20,10 +19,12 @@ const dom = composerDOM(), cleanups: Array<() => Promise<unknown>> = []
 const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
 const body = Array.from({ length: 32 }, (_, index) => `Original line ${index}: every word retained`).join('\n')
 const panel = () => dom.container.querySelector<HTMLElement>('.composer-mailbox')!
-async function open(folder: 'inbox' | 'outbox' | 'system') {
-  const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
-  await act(async () => panel().dispatchEvent(event))
-  await dom.click(`[role="tab"][id$="-${folder}-tab"]`)
+async function open() {
+  for (const type of ['beforetoggle', 'toggle']) {
+    const event = new Event(type); Object.defineProperty(event, 'newState', { value: 'open' })
+    await act(async () => panel().dispatchEvent(event))
+  }
+  await dom.click('[role="tab"][id$="-user-tab"]')
 }
 async function read(key: string) {
   const row = [...panel().querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(row => row.dataset.recordKey === key)
@@ -45,43 +46,26 @@ beforeEach(() => {
 })
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.unstubAllEnvs() })
 
-it('mounted original Mailbox preserves Core author, unknown delivery, exact record refs and native question answers', async () => {
+it('mounted original Mailbox keeps unknown delivery, exact record refs and native question answers on Inputs', async () => {
   const f = await fixture(), page = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
   const session = { ...composerSession(f.input.agentSessionId), control: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.input.agentSessionId, run: f.input.expectedRun } }
   const incoming = { ...captured(session.id, 'incoming'), authorAgentSessionId: 'original-peer' }
   const uncertain = captured(session.id, 'uncertain', 'streaming')
-  const timeline = { agentSessionId: session.id, revision: 1, items: [incoming, uncertain] }
+  const timeline = { agentSessionId: session.id, revision: 1, sourceHostId: 'local', items: [incoming, uncertain] }
   const native = projectSessionUserMessages({ agentSessionId: session.id, historyPage: page })
   const reply = native.find(message => message.questionAnswers)!
   const projected = createMailboxMessagesSelector()(session.id, timeline, native, 'local')
   expect(projected.find(item => item.message.rawId === incoming.id)!.original).toBe(incoming)
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([incoming.authorAgentSessionId, incoming.content, incoming.createdAt, incoming.status])))
-  const marker = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
-  useAppStore.setState({ sessions: [session], noticeReadReceipts: { [`mail:${session.id}`]: { incoming: marker } } })
+  useAppStore.setState({ sessions: [session] })
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-  const copy = vi.fn(async () => true), reveal = vi.fn(async (_message: AgentSessionUserMessage) => ({ kind: 'unavailable' as const, message: 'Original location unavailable; record retained.' }))
-  await dom.render(<SessionMailbox control={session.control} system={system} queued={[]} timeline={timeline} userMessages={native} onCopyQueued={copy} onRevealMessage={reveal} />)
-  await act(async () => { await vi.waitFor(() => expect(dom.container.querySelector('.composer__mailbox')?.getAttribute('aria-label')).toContain('Inbox 0 unread')) })
-  await open('inbox'); await read('timeline:incoming')
-  let detail = panel().querySelector<HTMLElement>('.log-turn')!
-  expect(detail.dataset.conversationItemRef).toBe(JSON.stringify({ hostId: 'local', agentSessionId: session.id, source: { kind: 'captured', recordId: incoming.id } }))
-  expect(detail.dataset.messageSourceKey).toBe(conversationMessageSourceKey(session.id, { kind: 'captured', recordId: incoming.id }))
-  expect(detail.textContent).toContain('original-peer')
-  const originalBody = detail.querySelector('.log-turn__body')!
-  expect(originalBody.textContent).toBe(body)
-  const text = originalBody.querySelector('p')!.firstChild!, range = document.createRange()
-  range.setStart(text, 0); range.setEnd(text, 8)
-  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
-  await dom.click('.composer-mailbox__record-actions .composer-mailbox__reveal')
-  expect(reveal.mock.calls[0]![0]).toMatchObject({ agentSessionId: session.id, source: { kind: 'captured', submissionId: incoming.id }, author: { kind: 'agent', agentSessionId: incoming.authorAgentSessionId } })
-  expect(useAppStore.getState().noticeReadReceipts[`mail:${session.id}`]!.incoming).toBe(marker)
-  expect(panel().querySelector('.log-turn__body')).toBe(originalBody)
-  expect(window.getSelection()!.toString()).toBe('Original')
-  await dom.click(`[role="tab"][id$="-outbox-tab"]`)
+  const copy = vi.fn(async () => true)
+  await dom.render(<SessionMailbox control={session.control} system={system} queued={[]} timeline={timeline} userMessages={native} onCopyQueued={copy} />)
+  await open()
+  expect(panel().querySelector('[data-record-key="timeline:incoming"]')).toBeNull()
   const unknown = panel().querySelector('[data-record-key="timeline:uncertain"]')!
   expect(unknown.parentElement!.textContent).toContain('Delivery not confirmed')
   await read(`native:${reply.id}`)
-  detail = panel().querySelector<HTMLElement>('.log-turn')!
+  const detail = panel().querySelector<HTMLElement>('.log-turn')!
   expect(detail.dataset.conversationItemRef).toBe(JSON.stringify({ hostId: 'local', agentSessionId: session.id, source: { ...reply.source } }))
   expect(detail.textContent).toContain(reply.questionAnswers![0]!.prompt!)
   expect(detail.textContent).toContain('Keep original')
@@ -104,7 +88,7 @@ it.each(['enabled', 'dispatch-authorized'] as const)('original Composer and comp
   vi.spyOn(api.sessions, 'historyPage').mockImplementation((_control, options) => f.client.sessionHistoryPage(sid, options))
   vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.client.readAgentSessionHistory({ ...input, ...reference }, context))
   const submit = vi.spyOn(api.sessions, 'submitPrompt')
-  await dom.render(<AgentSessionComposer sessionId={sid} />); await open('outbox')
+  await dom.render(<AgentSessionComposer sessionId={sid} />); await open()
   const originalRow = panel().querySelector<HTMLElement>(`[data-operation-id="${operationId}"]`)!
   expect(originalRow).not.toBeNull()
   await read(`queue:${operationId}`)
@@ -145,25 +129,18 @@ it('unknown Host retains original mail and opaque question data without inventin
   useAppStore.setState({ sessions: [] })
   const readNative = vi.spyOn(api.sessions, 'historyPage')
   await dom.render(<SessionMailbox system={system} queued={[]} timeline={{ agentSessionId: f.input.agentSessionId, revision: 0, items: [] }} userMessages={source} />)
-  await open('outbox'); await read(`native:${source[0]!.id}`)
+  await open(); await read(`native:${source[0]!.id}`)
   const detail = panel().querySelector<HTMLElement>('.log-turn')!
   expect(detail.dataset.conversationItemRef).toBeUndefined()
   expect(detail.textContent).toContain('Keep original')
   expect(detail.querySelector('[aria-label="Copy message"]')).not.toBeNull()
-  expect(readNative).not.toHaveBeenCalled()
-  // The original input-history reader can still supply a known record without a current Host binding.
-  await dom.render(<SessionMailbox system={system} queued={[]} inputHistory={readMessage => readMessage(source[0]!)} />)
-  await open('outbox')
-  const retained = panel().querySelector<HTMLElement>('.log-turn')!
-  expect(retained.textContent).toContain('Keep original')
-  expect(retained.dataset.conversationItemRef).toBeUndefined()
   expect(readNative).not.toHaveBeenCalled()
   // Pure presentation preserves typed data with an incomplete source; this does not assert native reader qualification.
   const partial = { ...source[0]!, source: { kind: 'native' as const, providerId: page.source.providerId, nativeSessionId: '', recordId: source[0]!.rawId } }
   const [unknown] = createMailboxMessagesSelector()(f.input.agentSessionId, undefined, [partial], 'local')
   expect(unknown!.message).toBe(partial); expect(unknown!.reference).toBeNull()
   await dom.render(<SessionMailbox system={system} queued={[]} timeline={{ agentSessionId: f.input.agentSessionId, revision: 0, items: [] }} userMessages={[partial]} />)
-  await open('outbox'); await read(`native:${partial.id}`)
+  await open(); await read(`native:${partial.id}`)
   expect(panel().querySelector<HTMLElement>('.log-turn')!.textContent).toContain('Keep original')
   expect(panel().querySelector<HTMLElement>('.log-turn')!.dataset.conversationItemRef).toBeUndefined()
 })
