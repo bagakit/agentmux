@@ -2,8 +2,11 @@ import type { BrowserTaskStep, BrowserTaskStepExecution } from '../shared/browse
 import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
 import type { BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 
-export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'user-rejected' |
-  'permission-denied' | 'credential-denied' | 'human-control' | 'cdp-scope' | 'page-dialog'
+/**
+ * What Main refused or could not confirm. Only locator-changed and navigation-failed can earn a
+ * bounded local retry; every other kind, and every error that is not this one, has none.
+ */
+export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'cdp-scope' | 'page-dialog'
 
 /** Only Main creates this error. Script/page error text never grants retry authority. */
 export class BrowserLocalRecoveryFailure extends Error {
