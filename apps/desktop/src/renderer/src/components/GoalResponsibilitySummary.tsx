@@ -6,7 +6,6 @@ import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { GoalPatrolControl } from './GoalPatrolControl'
 import { GoalContinuationAgent } from './GoalContinuationControl'
-import '../styles/goal-responsibility.css'
 
 export const GOAL_RESPONSIBILITY_LABELS: Record<GoalResponsibilityPhase, string> = {
   executing: '执行中', 'idle-grace': '等待回报', stalled: '执行停滞', 'needs-input': '等待回应', blocked: '阻塞待处理',

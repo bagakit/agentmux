@@ -13,7 +13,6 @@ import { resolveAutomationPreferences } from '../../../shared/automation-prefere
 import type { ProgressUpdateRequest } from '../../../shared/continuous-progress'
 import { useLauncherState, checkpointLauncherState, initializeLauncherState } from '../lib/launcher-state'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import '../styles/automation.css'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 

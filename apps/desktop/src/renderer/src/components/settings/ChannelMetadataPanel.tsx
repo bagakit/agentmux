@@ -5,7 +5,6 @@ import { ConnectorEntityIdentity, ConnectorIdentityField } from '../ConnectorEnt
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import type { ConnectionSettingsPort } from '../../lib/connection-settings-port'
-import '../../styles/channel-metadata.css'
 
 const LoadingIcon = semanticIconComponent('status.loading'), RefreshIcon = semanticIconComponent('action.refresh')
 

@@ -9,7 +9,6 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { NotebookHome, NotebookNavigation, NotebookCreateDialog } from './NotebookNavigation'
 import type { NotebookDirectoryView } from './NotebookViews'
 import { NotebookSelector } from './NotebookSelector'
-import '../styles/recall.css'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { useNotebookOperation } from './NotebookOperation'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'

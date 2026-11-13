@@ -12,7 +12,6 @@ import { SettingsNavigation } from '../SettingsNavigation'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { RemoteExecutionGuide } from './RemoteExecutionGuide'
 import type { SettingsPaneProps } from './settings-catalog'
-import '../../styles/remote-execution-settings.css'
 
 const AgentIcon = semanticIconComponent('object.agent')
 const ToolsIcon = semanticIconComponent('object.terminal')

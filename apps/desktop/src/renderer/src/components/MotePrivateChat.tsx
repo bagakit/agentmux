@@ -20,7 +20,6 @@ import { MoteChatPeople } from './MoteChatPeople'
 import { MoteChatActivity } from './MoteChatActivity'
 import { MoteChatRequests } from './MoteChatRequests'
 import { MoteQuickModeDialog } from './MoteQuickMode'
-import '../styles/mote-private-chat.css'
 
 const ChatIcon = semanticIconComponent('object.conversation'), LoadingIcon = semanticIconComponent('status.loading')
 const choice = (record: ConnectionRecord) => JSON.stringify([record.config.connectionId, record.config.application.domain, record.config.application.appId])

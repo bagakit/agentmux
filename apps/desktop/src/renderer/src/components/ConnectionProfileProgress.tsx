@@ -1,5 +1,4 @@
 import type { ConnectionProfileOperation, ProfileEffectState } from '@agentmux/core/connections'
-import '../styles/bot-setup-guide.css'
 
 export const profileEffectLabels: Record<ProfileEffectState, string> = {
   'not-required': 'Not requested', 'not-dispatched': 'Not sent', dispatching: 'In progress',

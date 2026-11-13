@@ -1,7 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import type { ConnectorGroupSummary, ConnectorProblem, ConnectorProblemActions, ConnectorProblemKind } from '../lib/connector-group-status'
-import '../styles/connector-traffic-summary.css'
 
 const OutgoingIcon = semanticIconComponent('conversation.outgoing'), IncomingIcon = semanticIconComponent('conversation.incoming')
 const PausedIcon = semanticIconComponent('status.paused'), DisabledIcon = semanticIconComponent('status.disabled'), PermissionIcon = semanticIconComponent('status.permission'), WaitingIcon = semanticIconComponent('status.waiting'), DocumentIcon = semanticIconComponent('object.document'), AgentIcon = semanticIconComponent('object.agent'), UnknownIcon = semanticIconComponent('status.unknown')

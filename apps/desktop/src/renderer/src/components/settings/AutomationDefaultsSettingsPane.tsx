@@ -4,7 +4,6 @@ import { useId } from 'react'
 import { resolveAutomationPreferences, validateAutomationPreferences, type AutomationDefaults, type AutomationPreferences } from '../../../../shared/automation-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
-import '../../styles/settings-continuity.css'
 import './settings-automation.css'
 import { readableSettingsDuration } from './settings-duration'
 

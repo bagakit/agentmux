@@ -13,7 +13,6 @@ import { SelectionField } from './SelectionField'
 import { agentNewTabDestinations, requireAgentNewTabDestination, type AgentNewTabDestination } from '../lib/agent-new-tab-destination'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import '../styles/agent-current-fork.css'
 
 const ConversationForkIcon = semanticIconComponent('action.fork-conversation')
 const DerivedActionIcon = semanticIconComponent('action.derived-action')

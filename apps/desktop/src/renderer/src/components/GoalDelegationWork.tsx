@@ -12,7 +12,6 @@ import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations, useGoalDelegationObservation } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
-import '../styles/goal-delegation.css'
 
 /** Same original Goal reports and actions in Goal details and a Mote's current work. */
 export function GoalDelegationWork({ demand, active = true, compact = false }: {

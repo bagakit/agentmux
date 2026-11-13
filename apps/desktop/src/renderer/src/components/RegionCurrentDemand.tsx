@@ -5,7 +5,6 @@ import { useAppStore } from '../store'
 import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { GOAL_RESPONSIBILITY_LABELS } from './GoalResponsibilitySummary'
 import { useGoalNavigation } from '../lib/use-goal-navigation'
-import '../styles/region-current-demand.css'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 

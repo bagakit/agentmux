@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { ConnectionProfileObservation, ConnectionProfileOperation } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
-import '../styles/bot-profile.css'
 
 export function ProfileManagementLink({ url }: { url?: string | undefined }) {
   const [issue, setIssue] = useState(''), epoch = useRef(0)

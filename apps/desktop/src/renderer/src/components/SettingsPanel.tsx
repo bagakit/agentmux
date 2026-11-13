@@ -13,8 +13,6 @@ import { SettingsSearchResults } from './settings/SettingsSearchResults'
 import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
 import { SETTINGS_GROUPS, type SettingsModule } from './settings/settings-catalog'
 import { settingsCatalog, settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
-import '../styles/settings-search.css'
-import '../styles/settings-groups.css'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')

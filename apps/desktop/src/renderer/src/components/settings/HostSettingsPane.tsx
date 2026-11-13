@@ -26,7 +26,6 @@ import { HostNetworkMap } from './HostNetworkMap'
 import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
-import '../../styles/remote-management.css'
 import './hosts-settings.css'
 
 const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')

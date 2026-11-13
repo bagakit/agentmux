@@ -1,6 +1,5 @@
 import { useRef, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import '../styles/connector-group-details.css'
 
 export type ConnectorGroupSection = 'overview' | 'members' | 'sharing' | 'joining' | 'diagnostics'
 const sections = [

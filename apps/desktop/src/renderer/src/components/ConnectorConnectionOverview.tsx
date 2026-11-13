@@ -6,7 +6,6 @@ import { api } from '../lib/api'
 import type { GroupDiagnosis } from '../lib/group-diagnosis'
 import { connectorConnectionPresentation } from '../lib/connector-connection-presentation'
 import { ConnectorReceiverControl } from './ConnectorReceiverControl'
-import '../styles/connector-connection-overview.css'
 
 const OnlineIcon = semanticIconComponent('action.confirm'), UnknownIcon = semanticIconComponent('status.unknown'), LinkIcon = semanticIconComponent('object.connection')
 /** One action surface over original owners. Local state is only this click's feedback, never connection health. */

@@ -1,4 +1,3 @@
-import '../../styles/bot-setup-guide.css'
 
 export type BotSetupGuideStage = 'prepare' | 'scan' | 'account' | 'create' | 'connect' | 'bind' | 'ready' | 'attention'
 const stepForStage: Record<BotSetupGuideStage, 1 | 2 | 3 | 4> = {

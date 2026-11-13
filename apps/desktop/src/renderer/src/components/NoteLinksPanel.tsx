@@ -14,7 +14,6 @@ import { NoteUseContextReader, NoteUseLocations } from './NoteUseLocations'
 import { noteSharedRelations } from '../lib/note-shared-relations'
 import { noteGraphReferenceKey, noteGraphReferenceLabel, projectNoteLinks } from '../lib/note-graph-references'
 import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
-import '../styles/note-links.css'
 
 const Disclosure = semanticIconComponent('navigation.disclosure'), Refresh = semanticIconComponent('action.refresh')
 const NoteIcon = semanticIconComponent('object.note'), LinkIcon = semanticIconComponent('object.link')

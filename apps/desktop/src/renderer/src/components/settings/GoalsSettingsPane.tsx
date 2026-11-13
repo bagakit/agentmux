@@ -4,7 +4,6 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import { GoalsIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-workflows.css'
-import '../../styles/settings-workview-layout.css'
 
 
 export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals }: {

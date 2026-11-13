@@ -7,7 +7,6 @@ import { ScheduleArrangementRow } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
 import { useAppStore } from '../store'
 import { resolveAutomationPreferences, automationCalendarTimezone } from '../../../shared/automation-preferences'
-import '../styles/mote-calendar.css'
 
 export type CalendarScheduleStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 const CreateIcon = semanticIconComponent('action.create')

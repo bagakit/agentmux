@@ -4,7 +4,6 @@ import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ActivityView } from './ActivityView'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import '../styles/agent-session-action-surface.css'
 
 /** Explicit reading host; the original conversation reader owns its data. */
 function AgentSessionActionSurface({ title, description, returnTrigger, onClose, children }: {

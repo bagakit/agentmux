@@ -17,7 +17,6 @@ import { SelectionField } from './SelectionField'
 import { MoteBotSetup } from './MoteBotSetup'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import '../styles/mote-connection-identity.css'
 
 const BotIcon = semanticIconComponent('object.conversation')
 const CloseIcon = semanticIconComponent('action.close')

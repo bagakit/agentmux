@@ -1,7 +1,5 @@
 import { ConnectionHostingSettings } from '../ConnectionHostingSettings'
 import type { SettingsModule } from '../settings-catalog'
-import '../../../styles/settings-lark.css'
-import '../../../styles/settings-discord.css'
 
 // Official unmodified platform artwork: https://discord.com/branding (blurple Symbol).
 const artwork = new URL('../../../assets/connector-icons/discord.svg', import.meta.url).href

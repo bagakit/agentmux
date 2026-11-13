@@ -8,7 +8,6 @@ import type { MetricsObservation } from '@agentmux/core/control'
 import type { useBrowserDirectory } from '../../lib/use-browser-directory'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { browserProcessReadings, eligibleForRelease, memory, pageAddress, pageName, processKey, retentionReason, stateLabel, type BrowserDirectoryRow } from '../../lib/browser-resource-view'
-import '../../styles/browser-resources.css'
 
 type DirectoryRow = BrowserDirectoryRow
 

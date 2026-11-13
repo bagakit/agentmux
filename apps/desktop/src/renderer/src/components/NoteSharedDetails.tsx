@@ -11,7 +11,6 @@ import { noteSharedRelations } from '../lib/note-shared-relations'
 import { writeNoteShareClipboard } from '../lib/note-share-staging'
 import type { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import '../styles/note-shared-details.css'
 import { NoteUseContextReader, NoteUseLocations } from './NoteUseLocations'
 
 type Props = { note: NoteDocument; target: NoteFileTarget; host: NoteFileTarget; include: NoteInclude; active: boolean;

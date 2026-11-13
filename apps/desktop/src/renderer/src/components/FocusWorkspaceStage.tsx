@@ -1,6 +1,5 @@
 import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import '../styles/focus-workspace-stage.css'
 
 /**
  * A derived action for a Focus card without one confirmed Region opens over the Focus workspace

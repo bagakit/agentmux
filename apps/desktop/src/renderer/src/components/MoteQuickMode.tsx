@@ -18,7 +18,6 @@ import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import '../styles/mote-quick-mode.css'
 import { api } from '../lib/api'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 

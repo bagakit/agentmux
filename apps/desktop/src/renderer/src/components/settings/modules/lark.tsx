@@ -1,6 +1,5 @@
 import { ConnectionHostingSettings } from '../ConnectionHostingSettings'
 import type { SettingsModule } from '../settings-catalog'
-import '../../../styles/settings-lark.css'
 const feishuArtwork = new URL('../../../assets/connector-icons/feishu.ico', import.meta.url).href
 function ChannelIcon({ size = 14 }: { size?: number | undefined }) { return <img src={feishuArtwork} width={size} height={size} alt="" /> }
 const platform = { adapterId: 'feishu', title: 'Lark' } as const

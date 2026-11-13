@@ -29,7 +29,6 @@ import { COLLABORATION_LABELS, collaborationRelationSummary } from '../lib/colla
 import { CollaborationRelationArrow, CollaborationRelationKey } from './CollaborationRelationMark'
 import { agentInformationPreview } from '../lib/agent-information-preview'
 import '@xyflow/react/dist/base.css'
-import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }

@@ -4,7 +4,6 @@ import type { ConnectionSetupAccount } from '@agentmux/core/connections'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import '../styles/connector-entity-identity.css'
 
 const PersonIcon = semanticIconComponent('object.user')
 const GroupIcon = semanticIconComponent('object.team')

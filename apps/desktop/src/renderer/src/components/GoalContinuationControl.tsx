@@ -11,7 +11,6 @@ import { agentDisplayName } from '../lib/workbench-tabs'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { AgentAvatar } from './AgentAvatar'
 import { useAppStore } from '../store'
-import '../styles/goal-continuation.css'
 
 const ThemeObjectOrbitIcon = semanticIconComponent('object.orbit')
 

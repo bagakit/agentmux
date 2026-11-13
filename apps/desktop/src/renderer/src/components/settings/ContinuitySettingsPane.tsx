@@ -5,7 +5,6 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsConceptSummary } from './SettingsConceptSummary'
 import { executionSettings, type ExecutionSettings } from './continuity-settings-fields'
-import '../../styles/settings-continuity.css'
 import './settings-recovery.css'
 import { readableSettingsDuration as readableDuration, settingsDurationSeconds as seconds } from './settings-duration'
 

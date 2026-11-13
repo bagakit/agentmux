@@ -19,7 +19,6 @@ import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
-import '../styles/mote-calendar.css'
 
 const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')

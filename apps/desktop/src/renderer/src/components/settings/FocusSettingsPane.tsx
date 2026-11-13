@@ -12,7 +12,6 @@ import { DEFAULT_FOCUS_MAP_PREFERENCES, focusMapPreferencesIssue } from '../../.
 import { FocusMapSettings } from './FocusMapSettings'
 import { FocusIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-focus.css'
-import '../../styles/settings-workview-layout.css'
 
 const PreviewIcon = semanticIconComponent('action.preview')
 export type FocusSettingsValues = Required<FocusPreferences>

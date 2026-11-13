@@ -26,7 +26,6 @@ import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { noteGraphReferenceKey, noteGraphReferenceSelectionKey, noteGraphReferenceLabel } from '../lib/note-graph-references'
 import { NotebookDirectoryContextMenu, type NoteTalkHandler } from './NotebookDirectoryContextMenu'
 import '@xyflow/react/dist/base.css'
-import '../styles/note-canvas.css'
 
 const NotebookIcon = semanticIconComponent('object.notebook'), NoteIcon = semanticIconComponent('object.note')
 const NoteBlockIcon = semanticIconComponent('object.note-block'), SharedBlockIcon = semanticIconComponent('object.shared-block')

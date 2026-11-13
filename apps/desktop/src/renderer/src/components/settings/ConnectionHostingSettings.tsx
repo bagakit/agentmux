@@ -11,7 +11,6 @@ import { botTaskSelectionKey, readBotTaskLocator, restoredManagementTask } from 
 import { ChannelHeaderControl } from './ChannelHeaderControl'
 import { ConnectorServiceControl } from './ConnectorServiceControl'
 import { ExternalConnectionsSettings } from './ExternalConnectionsSettings'
-import '../../styles/channel-settings.css'
 
 const HostIcon = semanticIconComponent('object.host')
 

@@ -8,8 +8,6 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { BotSignInPrompt } from './BotConfirmationCode'
 import { ConnectionRequestTrace } from './settings/ConnectionRequestTrace'
-import '../styles/bot-setup-guide.css'
-import '../styles/mote-profile-task.css'
 
 type Progress = NonNullable<ConnectionSetupView['profileUpdate']>
 type Action = ConnectionSetupAuthenticationAction | Progress['actions'][number] | ConnectionSetupConfigurationAction

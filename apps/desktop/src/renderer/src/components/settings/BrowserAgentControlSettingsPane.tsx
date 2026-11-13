@@ -8,7 +8,6 @@ import { BrowserAgentControlPreview } from './BrowserAgentControlPreview'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingsPreviewReturn } from './use-settings-preview-return'
-import '../../styles/browser-agent-control-settings.css'
 import './agent-takeover-settings.css'
 
 const PreviewIcon = semanticIconComponent('action.preview')

@@ -6,7 +6,6 @@ import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { StartPageImageField } from './StartPageImageField'
 import { SurveyIntroduction } from './SettingsConceptIntro'
-import '../../styles/settings-survey.css'
 
 const SearchIcon = semanticIconComponent('action.search')
 const PreviewIcon = semanticIconComponent('action.preview')

@@ -25,7 +25,6 @@ import { MoteConnectionPanel } from '../MoteConnectionIdentity'
 import { botTaskSelectionKey, managementTaskScope, readBotTaskLocator, restoredManagementTask } from '../../lib/bot-task-selection'
 import { MoteIdentityCards, useMoteIdentityReadings } from './MoteIdentityCards'
 import { ConnectionBotList } from './ConnectionBotList'
-import '../../styles/connector-identity-cards.css'
 import '../../styles/connector-experience.css'
 import { useConnectionManagementSetup } from './useConnectionManagementSetup'
 

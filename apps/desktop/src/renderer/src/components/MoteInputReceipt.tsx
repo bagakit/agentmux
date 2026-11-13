@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { MoteInputInspection } from '@agentmux/core'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import '../styles/mote-primary-agent.css'
 
 /** Read only on an explicit detail/refresh action, using this original input's Host and ID. */
 export function MoteInputReceipt(props: { reference: SessionHistoryReference; observationId: string }) {

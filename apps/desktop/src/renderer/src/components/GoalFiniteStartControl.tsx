@@ -1,4 +1,3 @@
-import '../styles/goal-finite-start.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'

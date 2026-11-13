@@ -2,7 +2,6 @@ import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, DEFAULT_AGENT_CONTINUITY_POLICY,
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { continuationSettings, type ContinuationSettings } from './continuity-settings-fields'
-import '../../styles/settings-continuity.css'
 import './settings-automation.css'
 
 export function ContinuationSettingsPane({ preferences, onSave }: {

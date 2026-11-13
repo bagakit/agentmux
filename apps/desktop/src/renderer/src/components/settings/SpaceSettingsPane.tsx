@@ -4,7 +4,6 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SpaceIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-workflows.css'
-import '../../styles/settings-workview-layout.css'
 
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')

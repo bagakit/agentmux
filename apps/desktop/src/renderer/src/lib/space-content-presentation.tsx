@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store'
-import '../styles/space-content-presentation.css'
 
 export type SpaceContentPresentation = {
   expanded: boolean

@@ -11,7 +11,6 @@ import topicArt from '../assets/mote-origin/topic-work.png'
 import moteArt from '../assets/mote-origin/grown-team.png'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { MoteIcon } from './MoteIcon'
-import '../styles/topic-promotion.css'
 
 export type TopicPromotionTarget = { topicId: string; title: string }
 type Props = { target: TopicPromotionTarget | null; onClose(): void; onPromoted(receipt: TopicPromotionReceipt): void }

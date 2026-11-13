@@ -2,7 +2,6 @@ import { useId, useState } from 'react'
 import roleTeam from '../../assets/mote-origin/role-team.png'
 import topicWork from '../../assets/mote-origin/topic-work.png'
 import grownTeam from '../../assets/mote-origin/grown-team.png'
-import '../../styles/mote-origin-story.css'
 
 const chapters = [
   {

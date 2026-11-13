@@ -3,7 +3,6 @@ import type { ConnectionRecord, RoomBinding } from '@agentmux/core/connections'
 import type { ConnectorEntityProfileRead } from '../lib/use-connector-room-name'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ConnectorEntityIdentity } from './ConnectorEntityIdentity'
-import '../styles/connector-sharing.css'
 
 const LinkIcon = semanticIconComponent('object.link')
 const MentionIcon = semanticIconComponent('object.user')

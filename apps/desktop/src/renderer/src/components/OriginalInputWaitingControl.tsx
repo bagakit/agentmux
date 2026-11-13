@@ -4,7 +4,6 @@ import { agentPromptInputId } from '@agentmux/core/prompt-condition'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { api } from '../lib/api'
-import '../styles/original-input-waiting.css'
 import { originalInputExplanation } from '../lib/original-input-presentation'
 
 type Props = { hostId: string; receipt: AgentInputSubmissionReceipt; onRefresh?: (() => void | Promise<unknown>) | undefined; showReceipt?: boolean }

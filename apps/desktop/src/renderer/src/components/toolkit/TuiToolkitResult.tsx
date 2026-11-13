@@ -13,7 +13,6 @@ import { ToolkitPopoverResizeHandle } from '../performance/ToolkitPopoverResizeH
 import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
-import '../../styles/toolkit-tui.css'
 
 const CloseIcon = semanticIconComponent('action.close')
 const StartIcon = semanticIconComponent('action.start')

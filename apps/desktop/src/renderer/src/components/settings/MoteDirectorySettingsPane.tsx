@@ -5,7 +5,6 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { MoteOriginStory } from './MoteOriginStory'
 import '../../styles/mote-directory.css'
-import '../../styles/settings-mote.css'
 
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 const ThemeObjectListIcon = semanticIconComponent('object.list')

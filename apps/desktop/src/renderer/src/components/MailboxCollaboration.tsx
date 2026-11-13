@@ -9,7 +9,6 @@ import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { MailboxEmpty, MailboxSourceNotice, MailboxTime } from './MailboxReading'
 import { SelectionField } from './SelectionField'
-import '../styles/mailbox-collaboration.css'
 
 type Page = AgentMuxRpcResult<'message.dispatch.ls'>
 type Observation = AgentMuxRpcResult<'message.dispatch.read'>
