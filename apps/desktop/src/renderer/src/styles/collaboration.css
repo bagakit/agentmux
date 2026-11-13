@@ -52,13 +52,15 @@
 .collaboration-map__body { position: relative; display: flex; flex: 1; min-height: 0; }
 /* Scene: ground, then up to three land bands by nesting depth, then raised discs. Each layer is
  * lighter than the one below it in both themes; contours still carry nesting, never tone alone. */
-.collaboration-map { --map-ground: var(--surface-0); --map-band-0: var(--surface-1); --map-band-1: var(--surface-2); --map-band-2: color-mix(in srgb, var(--surface-2) 50%, var(--surface-3)); --map-grid: color-mix(in srgb, var(--text) 9%, transparent); --map-grid-major: color-mix(in srgb, var(--text) 15%, transparent); }
-:root[data-appearance="light"] .collaboration-map { --map-ground: color-mix(in srgb, var(--surface-2) 40%, var(--surface-3)); --map-band-0: var(--surface-1); --map-band-1: color-mix(in srgb, var(--surface-0) 45%, var(--surface-1)); --map-band-2: color-mix(in srgb, var(--surface-0) 80%, var(--surface-1)); --map-grid: color-mix(in srgb, var(--text) 10%, transparent); --map-grid-major: color-mix(in srgb, var(--text) 16%, transparent); }
+.collaboration-map { --map-ground: var(--surface-0); --map-band-0: var(--surface-1); --map-band-1: var(--surface-2); --map-band-2: color-mix(in srgb, var(--surface-2) 50%, var(--surface-3)); --map-grid: color-mix(in srgb, var(--text) 9%, transparent); }
+:root[data-appearance="light"] .collaboration-map { --map-ground: color-mix(in srgb, var(--surface-2) 40%, var(--surface-3)); --map-band-0: var(--surface-1); --map-band-1: color-mix(in srgb, var(--surface-0) 45%, var(--surface-1)); --map-band-2: color-mix(in srgb, var(--surface-0) 80%, var(--surface-1)); --map-grid: color-mix(in srgb, var(--text) 10%, transparent); }
 .collaboration-canvas { container-type: inline-size; position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--map-ground); }
-/* Ground grid: two levels of screen-sized dots, the minor fading in as its spacing opens up.
- * It sits under the camera layers (xyflow's renderer is z 4) so land paints over it. */
+/* Ground grid: two adjacent levels drawn with one screen-sized dot. Each level's ink follows its
+ * own screen spacing, so a level looks the same as the finer or the coarser of the pair; where
+ * both draw, the coarser positions read stronger. It sits under the camera layers (xyflow's
+ * renderer is z 4) so land paints over it. */
 .collaboration-map-ground { position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  background-image: radial-gradient(circle, var(--map-grid-major) 1.1px, transparent 1.6px), radial-gradient(circle, color-mix(in srgb, var(--map-grid) calc(var(--map-grid-minor-ink, 1) * 100%), transparent) .8px, transparent 1.3px);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--map-grid) calc(var(--map-grid-major-ink, 1) * 100%), transparent) 1px, transparent 1.5px), radial-gradient(circle, color-mix(in srgb, var(--map-grid) calc(var(--map-grid-minor-ink, 1) * 100%), transparent) 1px, transparent 1.5px);
   background-size: var(--map-grid-major-spacing, 120px) var(--map-grid-major-spacing, 120px), var(--map-grid-minor-spacing, 24px) var(--map-grid-minor-spacing, 24px); }
 /* The canvas itself is the keyboard camera; it shows focus only for keyboard reach. */
 .collaboration-canvas:focus { outline: none; }
