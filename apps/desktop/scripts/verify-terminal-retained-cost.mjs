@@ -65,7 +65,6 @@ const consumers = slice === 'derivation' ? [
   ['components/SessionPane.tsx', 'createConversationSpeakerFactsSelector(speakerIds, activityDemand)']
 ] : [
   ['components/WorkspaceWorkbench.tsx', '<StableWorkbenchView'],
-  ['components/TopicChatsPanel.tsx', "from './LiquidSelectionSurface'"],
   ['components/SurfaceModeSwitch.tsx', '<LiquidSelectionSurface']
 ]
 try {
