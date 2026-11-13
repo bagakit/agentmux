@@ -39,7 +39,8 @@ function slice(source, from, until) {
 }
 const production = {
   dispatch: slice(operations, '    static func capture(_ params: [String: JSONValue]) -> [String: Any] {', '    private static func capturedRectangle(_ rect:'),
-  frames: slice(operations, '    static func captureDisplays(hostPID: pid_t) throws', '    private static func captureRect(_ rect:'),
+  frames: slice(operations, '    static func captureDisplays(hostPID: pid_t, includeHostWindows: Bool = false) throws', '    private static func captureRect(_ rect:'),
+  displayRequest: slice(main, '        case "captureDisplays":', '        case "clipboardRead":'),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
   lease: readFileSync(core[2], 'utf8'),
 }
@@ -59,6 +60,7 @@ function build(name, mutation) {
   swiftc([...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', core[0], core[1], lease,
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core.log'))
   const checks = [['/* PRODUCTION_CAPTURE_DISPATCH */', loaded.dispatch], ['/* PRODUCTION_DISPLAY_FRAMES */', loaded.frames],
+    ['/* PRODUCTION_DISPLAY_REQUEST */', loaded.displayRequest],
     ['/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking]].reduce((source, [marker, code]) => replaceOnce(source, marker, code), fixture)
   const source = join(directory, 'CompiledDisplayFramesChecks.swift')
   writeFileSync(source, checks)
@@ -87,8 +89,12 @@ const mutations = [
   { name: 'ignore-configuration-change', part: 'frames', before: 'guard match.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
   { name: 'enumerate-per-display', part: 'frames', before: 'content: content.get()', after: 'content: BlockingAsync.run(timeout: 10) { try await SCShareableContent.current }', kills: "one window enumeration serves every display's grab" },
   { name: 'timestamp-after-grabs', part: 'frames', before: '"capturedAt": capturedAt', after: '"capturedAt": Date().timeIntervalSince1970 * 1000', kills: 'capturedAt is taken before the first grab' },
-  { name: 'list-host-windows', part: 'frames', before: '[getpid(), hostPID]', after: '[getpid()]', kills: "the host's windows are not capture content" },
-  { name: 'list-helper-windows', part: 'frames', before: '[getpid(), hostPID]', after: '[hostPID]', kills: "the helper's own windows are not capture content" },
+  { name: 'list-host-windows', part: 'frames', before: ': [getpid(), hostPID])', after: ': [getpid()])', kills: "the host's windows are not capture content" },
+  { name: 'list-helper-windows', part: 'frames', before: ': [getpid(), hostPID])', after: ': [hostPID])', kills: "the helper's own windows are not capture content" },
+  { name: 'omit-included-host-windows', part: 'frames', before: 'includeHostWindows ? [getpid()] :', after: 'includeHostWindows ? [getpid(), hostPID] :', kills: "the included background lists the host's visible windows in place" },
+  { name: 'include-helper-windows', part: 'frames', before: 'includeHostWindows ? [getpid()] :', after: 'includeHostWindows ? [] :', kills: "the included background still excludes the helper's windows" },
+  { name: 'drop-include-host-option', part: 'displayRequest', before: 'includeHostWindows: params["includeHostWindows"]?.bool ?? false', after: 'includeHostWindows: false', kills: "the included background lists the host's visible windows in place" },
+  { name: 'accept-nonboolean-host-option', part: 'displayRequest', before: 'value.bool == nil', after: 'false', kills: 'a nonboolean host-window option is refused before a grab' },
   { name: 'list-every-layer', part: 'frames', before: '(info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,', after: '', kills: 'only normal-layer windows are listed' },
   { name: 'list-transparent-windows', part: 'frames', before: '((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,', after: '', kills: 'windows absent from the pixels are not listed' },
   { name: 'list-unshared-windows', part: 'frames', before: '(info[kCGWindowSharingState as String] as? NSNumber)?.intValue != 0,', after: '', kills: 'windows absent from the pixels are not listed' },

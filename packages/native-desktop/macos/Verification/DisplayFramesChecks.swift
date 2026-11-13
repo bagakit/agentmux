@@ -19,13 +19,21 @@ private enum NativeDesktopOperations {
     static func renderRect(_ rect: CGRect) -> [String: Double] { ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height] }
 }
 
+private func displayRequest(_ params: [String: JSONValue]) throws -> [String: Any] {
+    switch "captureDisplays" {
+    /* PRODUCTION_DISPLAY_REQUEST */
+    default: throw ProviderError.coded("fixture_unexpected", "not a display capture request")
+    }
+}
+
 /* PRODUCTION_BLOCKING_ASYNC */
 
 private enum ProviderError: Error { case coded(String, String) }
 private enum JSONValue {
-    case string(String), number(Double), object([String: JSONValue])
+    case string(String), number(Double), bool(Bool), object([String: JSONValue])
     var string: String? { if case let .string(value) = self { return value }; return nil }
     var number: Double? { if case let .number(value) = self { return value }; return nil }
+    var bool: Bool? { if case let .bool(value) = self { return value }; return nil }
 }
 private struct CapturedImage { let image: CGImage; let engine: String }
 private func nativeErrorPayload(_ error: Error) -> [String: String] {
@@ -163,8 +171,8 @@ private struct DisplayFramesChecks {
         var cases: [String] = [], failures: [String] = []
         func check(_ name: String, _ value: @autoclosure () -> Bool) { cases.append(name); if !value() { failures.append(name) } }
         func code(_ error: Error?) -> String? { if case let ProviderError.coded(code, _)? = error { return code }; return nil }
-        func run() -> (result: [String: Any]?, error: Error?) {
-            do { return (try NativeDesktopOperations.captureDisplays(hostPID: hostPID), nil) } catch { return (nil, error) }
+        func run(_ params: [String: JSONValue] = [:]) -> (result: [String: Any]?, error: Error?) {
+            do { return (try displayRequest(params), nil) } catch { return (nil, error) }
         }
         let io = Controlled.shared
         // Display 1 has a camera housing 32 points tall at its top.
@@ -209,6 +217,23 @@ private struct DisplayFramesChecks {
         check("a window on no display is not listed", !listed.contains(16))
         check("windows absent from the pixels are not listed", !listed.contains(17) && !listed.contains(19))
         check("one window list serves every display", io.windowListings == 1)
+
+        io.reset(screens: all)
+        let included = run(["includeHostWindows": .bool(true)])
+        let includedDisplays = included.result?["displays"] as? [[String: Any]] ?? []
+        let includedMain = includedDisplays.first { $0["displayId"] as? CGDirectDisplayID == 1 }
+        let includedIds = (includedMain?["windows"] as? [[String: Any]])?.compactMap { $0["windowId"] as? UInt32 }
+        check("the included background lists the host's visible windows in place", included.error == nil && includedIds == [11, 13, 15, 18])
+        check("the included background still excludes the helper's windows", includedIds.map { !$0.contains(12) } == true)
+        check("including host windows still grabs and lists each display only once", io.observation.grabs == [1, 2] && io.windowListings == 1 && io.observation.enumerations == 1)
+        io.reset(screens: all)
+        let excluded = run(["includeHostWindows": .bool(false)])
+        let excludedDisplays = excluded.result?["displays"] as? [[String: Any]] ?? []
+        let excludedIds = excludedDisplays.flatMap { ($0["windows"] as? [[String: Any]] ?? []).compactMap { $0["windowId"] as? UInt32 } }
+        check("the explicit excluded background keeps the host out", excluded.error == nil && !excludedIds.contains(13))
+        io.reset(screens: all)
+        let invalid = run(["includeHostWindows": .string("true")])
+        check("a nonboolean host-window option is refused before a grab", code(invalid.error) == "invalid_argument" && io.observation.grabs.isEmpty && io.windowListings == 0)
 
         // Each encoded PNG alone fits the frame; together they do not.
         io.reset(screens: [NSScreen(id: 1, backingScaleFactor: 2), NSScreen(id: 2, backingScaleFactor: 1)], pngBytes: 10 * 1024 * 1024)

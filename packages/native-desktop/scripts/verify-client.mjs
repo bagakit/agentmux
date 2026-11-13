@@ -32,7 +32,8 @@ const mutations = [
   { file: 'client.js', before: '|| bounds.height <= 0', after: '', test: 'display frames keep' },
   { file: 'client.js', before: "|| (window.owner !== undefined && typeof window.owner !== 'string')", after: '', test: 'display frames keep' },
   { file: 'client.js', before: 'if (!result.displays.some(display => display.png !== undefined))', after: 'if (false)', test: 'display frames keep' },
-  { file: 'client.js', before: "this.request('captureDisplays', {}, { timeoutMs: 120_000 })", after: "this.request('captureDisplays')", test: 'display capture waits' },
+  { file: 'client.js', before: "this.request('captureDisplays', { includeHostWindows }, { timeoutMs: 120_000 })", after: "this.request('captureDisplays', { includeHostWindows })", test: 'display capture waits' },
+  { file: 'client.js', before: "this.request('captureDisplays', { includeHostWindows },", after: "this.request('captureDisplays', { includeHostWindows: false },", test: 'display frames keep' },
   { file: 'client.js', before: "!['captured', 'failed'].includes(raw.state)", after: "!['captured', 'cancelled', 'failed'].includes(raw.state)", test: 'capture conveniences reject' },
   { file: 'client.js', before: "throw invalid('Failed capture contains pixels')", after: '{}', test: 'capture conveniences reject' },
   { file: 'protocol.js', before: "'scroll', 'drag'\n]", after: "'scroll', 'drag', 'captureDisplays'\n]", test: 'display frames keep' }
