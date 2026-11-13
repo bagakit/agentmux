@@ -21,7 +21,7 @@ const host = await startAgentMuxHost({ store: new AgentMuxFileAgentSessionStore(
 const { owner } = await host.hosted.call('runtime.owner.identity', {})
 // These are this test's freshly generated public offer facts; no user device is consulted.
 const publicKey = JSON.parse(await readFile(join(root, 'agentmux-relay-keypair.json'), 'utf8')).publicKeyB64
-const access = host.mobileAccessState(), origin = access.origin ? new URL(access.origin) : null
+const access = host.mobileAccessState(), port = host.mobilePort(), origin = port ? new URL('http://127.0.0.1:' + port + '/') : null
 const offer = { v: 2, serverId: (await host.deviceAuthority()).hostId, daemonPublicKeyB64: publicKey,
   relay: { endpoint: '127.0.0.1:' + (origin?.port ?? '0'), useTls: false } }
 await writeFile(join(root, 'mobile-test-owner.json'), JSON.stringify({ owner, access, origin: origin ? 'http://127.0.0.1:' + origin.port + '/' : null, offer }), { mode: 0o600 })

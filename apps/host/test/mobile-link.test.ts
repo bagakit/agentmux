@@ -64,6 +64,22 @@ describe('choosing the address a phone connects to', () => {
     // Without a known default route the plain order holds: named adapters first, in OS order.
     expect(mobileLinkCandidates(interfaces, null).map(c => c.interface)).toEqual(['en0', 'en9', 'utun4', 'en5'])
     expect(mobileLinkCandidates({ lo0: [nic('127.0.0.1', true)] }, null)).toEqual([])
+    // A full-tunnel VPN carries the default route, but a phone on Wi-Fi cannot reach it.
+    expect(mobileLinkCandidates({ utun4: [nic('10.8.0.2')], en0: [nic('10.69.58.222')] }, 'utun4').map(c => [c.interface, c.preferred]))
+      .toEqual([['en0', true], ['utun4', false]])
+  })
+  it('keeps candidate addresses unique and the result parser bounded', async () => {
+    const twice = mobileLinkCandidates({ en0: [nic('10.0.0.5')], en1: [nic('10.0.0.5')] }, null)
+    expect(twice.map(c => c.interface)).toEqual(['en0'])
+    const original = await authority(), url = offer(original.hostId, '10.0.0.5:8443')
+    const page = new URL(url); page.hash = ''
+    const result = { hostId: original.hostId, url, pageUrl: page.href, relay: { endpoint: '10.0.0.5:8443', useTls: false },
+      mobileAccess: { state: 'connected', message: 'Ready', origin: page.origin } }
+    const one = { address: '10.0.0.5', interface: 'en0', preferred: true }
+    expect(() => core.parseAgentMuxRpcDeviceResult('device.link', { ...result, candidates: [one, one] }, {})).toThrow()
+    expect(() => core.parseAgentMuxRpcDeviceResult('device.link', { ...result, candidates: Array.from({ length: 33 }, (_, i) => ({ ...one, address: `10.0.1.${i}` })) }, {})).toThrow()
+    expect(() => core.parseAgentMuxRpcDeviceResult('device.link', { ...result, candidates: [{ ...one, interface: 'x'.repeat(65) }] }, {})).toThrow()
+    expect(core.parseAgentMuxRpcDeviceResult('device.link', { ...result, candidates: [one] }, {}).candidates).toEqual([one])
   })
   it.runIf(process.platform === 'darwin')('reads the OS port labels once, keeps the first good read and retries after a failure', async () => {
     const listing = 'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 00:00:00:00:00:01\n\nHardware Port: USB 10/100/1000 LAN\nDevice: en9\nEthernet Address: 00:00:00:00:00:02\n'
@@ -75,6 +91,10 @@ describe('choosing the address a phone connects to', () => {
     expect(first).toBe(second); expect(first.get('en0')).toBe('Wi-Fi')
     expect(await labels()).toBe(first)
     expect(read).toHaveBeenCalledTimes(2)
+    // An adapter plugged in later is not in the last good read, so asking for it reads again.
+    read.mockResolvedValue(listing + '\nHardware Port: Thunderbolt Ethernet\nDevice: en7\nEthernet Address: 00:00:00:00:00:03\n')
+    expect((await labels(['en0'])).get('en7')).toBeUndefined(); expect(read).toHaveBeenCalledTimes(2)
+    expect((await labels(['en7'])).get('en7')).toBe('Thunderbolt Ethernet'); expect(read).toHaveBeenCalledTimes(3)
   })
   it('reads the link for the requested candidate and refuses an address that is not one', async () => {
     const original = await authority(), endpointFor = (address: string) => `${address}:8443`
@@ -182,7 +202,7 @@ describe('original mobile link discovery', () => {
 
     const skill = await runCompiledObjectCli(['device', '--skill'], env)
     expect(help.stdout).toContain('pageUrl'); expect(help.stdout).toContain('does not enroll')
-    expect(help.stdout).toContain('--address IPV4'); expect(help.stdout).toContain('never falling back')
+    expect(help.stdout).toContain('--address IPV4'); expect(help.stdout).toContain('never falling back'); expect(help.stdout).toContain('not a VPN tunnel')
     expect(skill.stdout).toContain('address remains readable while disconnected')
   }, 30000)
 })

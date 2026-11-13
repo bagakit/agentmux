@@ -210,7 +210,8 @@ try {
     nativeRun: await fixture.readNativeRun(original.session.run),
     inputReadiness: fixture.original.terminalPromptReadiness, desktop: desktopBefore, graph: graphBefore, goal })
   browser = await privateMobileBrowser(join(directory, 'browser'))
-  const url = fixture.ready.origin + '#offer=' + Buffer.from(JSON.stringify(fixture.ready.offer)).toString('base64url')
+  const { connectionOfferUrl } = await import(pathToFileURL(resolve(repository, 'packages/relay/dist/connection-offer.js')).href)
+  const url = connectionOfferUrl(fixture.ready.origin, fixture.ready.offer)
   const loaded = await browser.action('open-original-mobile', openMobile, { url })
   const assets = await servedMobile(fixture, loaded, candidate)
   await browser.action('open-original-session', openOriginalSession, { sessionId: sid, name })

@@ -52,8 +52,8 @@ async function ownerWorker() {
     mobileBuildDirectory, mobilePort: Number(port), shutdown })
   const host = await startup
   const { owner } = await host.hosted.call('runtime.owner.identity', {})
-  const access = await until('original local Relay access', () => host.mobileAccessState(), value => value.state === 'connected' && value.origin)
-  const origin = new URL(access.origin)
+  await until('original local Relay access', () => host.mobileAccessState(), value => value.state === 'connected')
+  const origin = new URL('http://127.0.0.1:' + host.mobilePort() + '/')
   const publicKey = JSON.parse(await readFile(join(dirname(process.env.AGENTMUX_AGENT_SESSION_STORE), 'agentmux-relay-keypair.json'), 'utf8')).publicKeyB64
   const offer = { v: 2, serverId: (await host.deviceAuthority()).hostId, daemonPublicKeyB64: publicKey,
     relay: { endpoint: '127.0.0.1:' + origin.port, useTls: false } }
