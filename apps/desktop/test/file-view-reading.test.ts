@@ -225,3 +225,18 @@ it('requires the existing App root namespace directory ACK before publishing a m
   fail = false; const receipt = await store.writeFileViewReading({ owner, position: position() })
   expect(steps).toEqual(['root-directory-sync', 'root-directory-sync', 'member-durable-write']); expect(receipt.diskDurability).toBe('confirmed'); expect(store.observe().lastFailure).toBeNull(); await store.flushFileViewReadings()
 })
+
+
+it('retains the newly registered view capture when the old promoted view flushes its final layout sample', async () => {
+  let alive = true
+  const old: FileViewReadingBinding = { owner, current: () => alive, capture() {} }
+  await useAppStore.getState().loadFileViewReading(old); useAppStore.getState().setFileViewReading(old, position(.4)); await checkpointFileViewReading()
+  const moved = createWorkbenchTab('promoted-tab', useAppStore.getState().tabs['original-tab']!.regions.book!); useAppStore.setState({ tabs: { [moved.id]: moved } })
+  const fresh = binding(() => useAppStore.getState().setFileViewReading(fresh, position(.96)))
+  await useAppStore.getState().loadFileViewReading(fresh)
+  // Cross-root layout cleanup can finish after the new view has registered.
+  useAppStore.getState().setFileViewReading(old, position(.81)); alive = false
+  expect(projection().binding).toBe(fresh)
+  await checkpointFileViewReading(); expect(projection()).toMatchObject({ position: position(.96), acknowledged: 3, binding: fresh })
+  expect(JSON.parse(await readFile(memberPath(), 'utf8')).position.progress).toBe(.96)
+})

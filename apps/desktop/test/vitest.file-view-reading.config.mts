@@ -12,6 +12,7 @@ export const readingMutations = {
   receipt: ['apps/desktop/src/renderer/src/store.ts', 'receipt.contentDigest !== digest || ', ''],
   baseline: ['apps/desktop/src/renderer/src/store.ts', '    if (initial) { if (!value.position)', '    if (false) { if (!value.position)'],
   capture: ['apps/desktop/src/renderer/src/store.ts', 'if (value.binding.current()) value.binding.capture()', 'if (value.binding.current()) void 0'],
+  registration: ['apps/desktop/src/renderer/src/store.ts', '    if (!value) return\n    // Initial layout', '    if (!value) return\n    editFileReading(binding.owner, current => ({ ...current, binding }))\n    // Initial layout'],
   namespace: ['apps/desktop/src/main/workbench-user-state.ts', '        await (this.io.syncDirectory ?? syncDirectory)(dirname(dirname(path)))', ''],
   root: ['apps/desktop/src/main/workbench-user-state.ts', 'const result = (this.readingTails.get(key) ?? Promise.resolve()).then(action)', 'const result = this.queue(action)']
 } as const

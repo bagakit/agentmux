@@ -18,16 +18,16 @@ const receipt = { schema: 'agentmux.file-view-reading-verification.v1', passed: 
 const unitPaths = ['apps/desktop/src/main/workbench-user-state.ts', 'apps/desktop/src/shared/workbench-user-state.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/file-view-reading.ts', 'apps/desktop/test/file-view-reading.test.ts', 'apps/desktop/test/vitest.file-view-reading.config.mts']
 let previous
 try { previous = JSON.parse(await readFile(join(output, 'receipt.json'), 'utf8')) } catch {}
-const reusable = previous?.baseline?.passed === 15 && previous.baseline.exitCode === 0 && previous.restored?.passed === 15 && previous.restored.exitCode === 0 &&
-  previous.mutations?.length === 9 && previous.mutations.every(value => value.failed === 1 && value.assertionFailures && value.exitCode !== 0) &&
+const reusable = previous?.baseline?.passed === 16 && previous.baseline.exitCode === 0 && previous.restored?.passed === 16 && previous.restored.exitCode === 0 &&
+  previous.mutations?.length === 10 && previous.mutations.every(value => value.failed === 1 && value.assertionFailures && value.exitCode !== 0) &&
   unitPaths.every(path => previous.sources?.[path] === receipt.sources[path]) && previous.mutations.every(value => previous.loaded?.some(hit => hit.name === value.name && hit.original === receipt.sources[hit.file] && hit.loaded !== hit.original))
 const hits = join(output, 'mutation-loaded.ndjson'); if (!reusable) await writeFile(hits, '')
 const run = async (name, mutation, pattern) => {
   const report = join(output, name + '-tests.json')
   const child = spawnSync(join(root, 'node_modules/.bin/vitest'), ['run', '--config', 'apps/desktop/test/vitest.file-view-reading.config.mts', '--reporter=json', '--outputFile=' + report, ...(pattern ? ['--testNamePattern', pattern] : [])], { cwd: root, env: { ...process.env, FILE_VIEW_READING_MUTATION: mutation ?? '', FILE_VIEW_READING_HITS: hits, FILE_VIEW_READING_COST: join(output, 'cost.json') }, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   const result = JSON.parse(await readFile(report, 'utf8'))
-  assert.equal(result.numTotalTests, 15, 'Every intended nonempty owner test is collected')
-  assert.equal(result.numPassedTests + result.numFailedTests, pattern ? 1 : 15, 'The intended behavior actually executes')
+  assert.equal(result.numTotalTests, 16, 'Every intended nonempty owner test is collected')
+  assert.equal(result.numPassedTests + result.numFailedTests, pattern ? 1 : 16, 'The intended behavior actually executes')
   assert.equal(result.testResults.length, 1, 'Only the exact owning test file is authoritative')
   const failed = result.testResults.flatMap(value => value.assertionResults).filter(value => value.status === 'failed')
   return { name, exitCode: child.status, passed: result.numPassedTests, failed: result.numFailedTests, assertionFailures: failed.length > 0 && failed.every(value => value.failureMessages.some(message => /AssertionError|__VITEST_REJECTS__/.test(message))), report, stderr: child.stderr }
@@ -38,7 +38,7 @@ try {
     receipt.reusedUnitReceipt = sha(JSON.stringify(previous))
   } else {
   receipt.baseline = await run('baseline'); assert.equal(receipt.baseline.exitCode, 0, receipt.baseline.stderr)
-  for (const [name, pattern] of Object.entries({ graph: 'uses one physical', qualified: 'refuses writes', witness: 'refuses writes', stale: 'preserves the Region key', receipt: 'rejects wrong receipts', baseline: 'keeps initial unread', capture: 'captures the actual final', root: 'keeps ordinary root fences', namespace: 'requires the existing App root' })) {
+  for (const [name, pattern] of Object.entries({ graph: 'uses one physical', qualified: 'refuses writes', witness: 'refuses writes', stale: 'preserves the Region key', receipt: 'rejects wrong receipts', baseline: 'keeps initial unread', capture: 'captures the actual final', root: 'keeps ordinary root fences', namespace: 'requires the existing App root', registration: 'retains the newly registered' })) {
     const red = await run("mutation-" + name, name, pattern); assert.notEqual(red.exitCode, 0, name + ' must turn RED'); assert.ok(red.failed > 0 && red.assertionFailures, name + ' must fail a business assertion, not import/setup'); receipt.mutations.push({ ...red, name })
   }
   receipt.loaded = (await readFile(hits, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
