@@ -1,5 +1,7 @@
 export type AgentMuxBrowserMode = 'normal' | 'private'
 
+export type { BrowserSitePermission, BrowserSitePermissionRequest, BrowserSitePermissionDecision, BrowserSitePermissionState } from './browser-site-permissions.js'
+
 /** Original native TLS request awaiting the person. Discovery grants no approval. */
 export type AgentMuxBrowserCertificateRequest = {
   requestId: string
@@ -59,6 +61,8 @@ export type AgentMuxBrowserTarget = {
   cdpMethods?: readonly string[]
   control?: AgentMuxBrowserControl
   certificateRequest?: AgentMuxBrowserCertificateRequest | null
+  /** Native requests and saved choices are observations, never a public approval channel. */
+  sitePermissions?: import('./browser-site-permissions.js').BrowserSitePermissionState
   resource?: AgentMuxBrowserResource
   warning?: string
 }

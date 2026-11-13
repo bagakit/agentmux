@@ -98,6 +98,11 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (profile && (row.source !== 'embedded' || row.mode === 'private')) throw new AgentMuxError('Only a normal embedded Browser has a Profile.', 'CONTROL_PROTOCOL_ERROR')
   const certificateRequest = row.certificateRequest === undefined ? undefined : row.certificateRequest === null ? null : parseBrowserCertificateRequest(row.certificateRequest)
   if (certificateRequest && (row.source !== 'embedded' || certificateRequest.navigationId !== row.navigationId)) throw new AgentMuxError('Browser certificate request belongs to another document.', 'CONTROL_PROTOCOL_ERROR')
+  const sitePermissions = row.sitePermissions === undefined ? undefined : parseBrowserSitePermissionState(row.sitePermissions)
+  if (sitePermissions && (row.source !== 'embedded' || sitePermissions.requests.some(request => request.browserId !== id ||
+    request.navigationId !== row.navigationId || request.profileId !== (profile?.id ?? null)))) {
+    throw new AgentMuxError('Browser permission request belongs to another native target.', 'CONTROL_PROTOCOL_ERROR')
+  }
   const objectLink = row.objectLink === undefined ? undefined : text(row.objectLink, 8192)
   if (objectLink !== undefined) {
     try { parseAmuxObjectLink(objectLink) }
@@ -113,8 +118,34 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
     ...(row.control === undefined ? {} : { control: parseBrowserControl(row.control) }),
     ...(certificateRequest === undefined ? {} : { certificateRequest }),
+    ...(sitePermissions === undefined ? {} : { sitePermissions }),
     ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),
     ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
+}
+
+function parseBrowserSitePermissionState(value: unknown): import('./browser-site-permissions.js').BrowserSitePermissionState {
+  const state = record(value)
+  if (!Array.isArray(state.requests) || !Array.isArray(state.decisions)) throw new AgentMuxError('Browser site permissions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const permission = (value: unknown): import('./browser-site-permissions.js').BrowserSitePermission => {
+    if (!['camera', 'microphone', 'geolocation', 'notifications'].includes(String(value))) throw new AgentMuxError('Browser site permission is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return value as import('./browser-site-permissions.js').BrowserSitePermission
+  }
+  const origin = (value: unknown): string => {
+    const result = text(value, 8192)
+    try { const url = new URL(result); if (['https:', 'http:'].includes(url.protocol) && url.origin === result) return result } catch { /* Invalid protocol fact. */ }
+    throw new AgentMuxError('Browser site permission origin is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return { requests: state.requests.map(value => {
+    const row = record(value)
+    if (!Array.isArray(row.permissions) || row.permissions.length === 0 || new Set(row.permissions).size !== row.permissions.length) throw new AgentMuxError('Browser requested permissions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { requestId: text(row.requestId, 200), browserId: text(row.browserId, 200), navigationId: text(row.navigationId, 200),
+      profileId: row.profileId === null ? null : text(row.profileId, 200), origin: origin(row.origin), embeddingOrigin: origin(row.embeddingOrigin), permissions: row.permissions.map(permission) }
+  }), decisions: state.decisions.map(value => {
+    const row = record(value)
+    if (typeof row.allow !== 'boolean' || !['document', 'profile'].includes(String(row.scope))) throw new AgentMuxError('Browser site permission decision is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { origin: origin(row.origin), embeddingOrigin: origin(row.embeddingOrigin), permission: permission(row.permission), allow: row.allow,
+      scope: row.scope as 'document' | 'profile' }
+  }), ...(state.warning === undefined ? {} : { warning: text(state.warning, 2000) }) }
 }
 
 const reasons = new Set(['visible', 'presentation', 'operation', 'loading', 'profile-switch', 'selection', 'media', 'download', 'upload', 'debugger', 'document-used', 'document-unconfirmed', 'source-changed', 'close-unconfirmed', 'beforeunload', 'owner-unavailable'])
