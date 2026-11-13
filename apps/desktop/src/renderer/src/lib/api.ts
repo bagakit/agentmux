@@ -507,6 +507,8 @@ const mockApi: AgentMuxDesktopApi = {
   hosts: { home: async () => { throw new Error('Device home requires its original authenticated Host. This preview does not invent home paths.') }, network: async () => { throw new Error('Network observation requires the original desktop Host. No network facts are simulated in this preview.') }, inspect: async () => { throw new Error('Runtime observation requires the original desktop Host. This preview does not simulate live Runtime facts.') }, check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }),
     creationTrust: async () => { throw new Error('Source trust requires the original desktop and target Host. This preview cannot read authorization.') },
+    messageTrust: async () => { throw new Error('Message trust requires the original desktop and target Host. This preview cannot read authorization.') },
+    trustMessageSource: async () => { throw new Error('Message approval requires a verified real user and the original target Core.') },
     trustCreationSource: async () => { throw new Error('Source trust requires explicit approval in the original desktop. This preview cannot grant authorization.') },
     installCheck: async () => { throw new Error('Remote Core installation requires the native desktop service. No install was attempted.') },
     install: async () => { throw new Error('Remote Core installation requires the native desktop service. No install was attempted.') },

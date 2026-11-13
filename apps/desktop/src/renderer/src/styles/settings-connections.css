@@ -135,6 +135,11 @@
 
 .host-creation-trust [role="alert"], .host-creation-trust__conflict { color: var(--red); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .host-creation-trust [role="status"] { display: flex; align-items: center; gap: var(--sp-2); }
+.host-message-trust { margin-top: 16px; }
+.host-message-trust__identities { margin-top: 12px; font-size: var(--fs-meta); }
+.host-message-trust__identities summary { cursor: pointer; color: var(--text-2); }
+.host-message-trust__direction { border-top: 1px solid var(--line-soft); margin-top: 16px; padding-top: 12px; }
+.host-message-trust__direction > strong { font-size: var(--fs-body); overflow-wrap: anywhere; }
 
 /* One application task; group sharing stays with the exact Agent menu. */
 .lark-settings { width: 100%; max-width: 680px; }

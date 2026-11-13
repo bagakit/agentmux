@@ -256,6 +256,7 @@ import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
 import { readHostCreationTrust, approveHostCreationTrust } from './settings-host-creation-trust.js'
+import { readHostMessageTrust, approveHostMessageTrust } from './settings-host-message-trust.js'
 import { SettingsHostsInstallOwner } from './settings-hosts-install.js'
 import { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
 import { RemoteCoreUpgradeManager, RemoteCoreInstallManager, type RemoteCoreInstallExpected, type RemoteCoreUpgradeExpected } from '@agentmux/core'
@@ -863,6 +864,13 @@ export async function registerIpc(args: {
   })
   handleWithEvent('hosts:trustCreationSource', async (event, input: HostConfig, expected: import('../shared/contracts.js').HostCreationTrustSnapshot) => {
     return approveHostCreationTrust(input, expected, creationTrustPorts)
+  })
+  handleWithEvent('hosts:messageTrust', async (event, input: HostConfig) => {
+    return readHostMessageTrust(input, creationTrustPorts)
+  })
+  handleWithEvent('hosts:trustMessageSource', async (event, input: HostConfig, expected: import('../shared/contracts.js').HostMessageTrustSnapshot,
+    direction: import('../shared/contracts.js').HostMessageTrustDirection) => {
+    return approveHostMessageTrust(input, expected, direction, creationTrustPorts)
   })
   handle('hosts:installCheck', async (input: HostConfig) => await hostInstalls.check(input))
   handle('hosts:install', async (input: HostConfig, expected: RemoteCoreInstallExpected, operationId: string) => await hostInstalls.install(input, expected, operationId))

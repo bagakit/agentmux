@@ -1645,6 +1645,12 @@ export type HostCreationTrustSnapshot = {
   target: AgentMuxRpcResult<'settings.hosts.trusted-sources'>
 }
 
+export type HostMessageTrustDirection = 'outbound' | 'inbound'
+export type HostMessageTrustSnapshot = {
+  local: AgentMuxRpcResult<'settings.hosts.message-trusted-sources'>
+  remote: AgentMuxRpcResult<'settings.hosts.message-trusted-sources'>
+}
+
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
 export type AgentMuxDesktopApi = {
@@ -1708,6 +1714,8 @@ export type AgentMuxDesktopApi = {
     check(host: HostConfig): Promise<HostCheckResult>
     creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
     trustCreationSource(host: HostConfig, expected: HostCreationTrustSnapshot): Promise<HostCreationTrustSnapshot>
+    messageTrust(host: HostConfig): Promise<HostMessageTrustSnapshot>
+    trustMessageSource(host: HostConfig, expected: HostMessageTrustSnapshot, direction: HostMessageTrustDirection): Promise<HostMessageTrustSnapshot>
     installCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreInstallCheck>
     install(host: HostConfig, expected: import('@agentmux/core').RemoteCoreInstallExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreInstallReceipt>
     installInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreInstallReceipt | null>

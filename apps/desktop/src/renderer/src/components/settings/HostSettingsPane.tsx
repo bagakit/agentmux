@@ -18,6 +18,7 @@ import { ConfirmationDialog } from '../ConfirmationDialog'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostCorePanel } from './HostCorePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
+import { HostMessageTrustPanel } from './HostMessageTrustPanel'
 import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { HostNetworkPanel } from './HostNetworkPanel'
@@ -335,6 +336,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               </div>
               <div data-host-access={id} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>
                 <HostCreationTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'agents'} />
+                <HostMessageTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'agents'} />
               </div>
             </div> : null
           })}
