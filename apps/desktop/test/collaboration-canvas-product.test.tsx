@@ -26,6 +26,12 @@ import collaborationCSS from '../src/renderer/src/styles/collaboration.css?inlin
 import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-map-preferences'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'], moveEnd: undefined as ReactFlowProps['onMoveEnd'], onCommit: undefined as (() => void) | undefined }))
+/** Counts the real route clipping the edge layer performs, with the real result returned. */
+const clips = vi.hoisted(() => ({ count: 0 }))
+vi.mock('../src/renderer/src/lib/collaboration-map-geometry', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/lib/collaboration-map-geometry')>()
+  return { ...actual, collaborationVisibleRoute: (...args: Parameters<typeof actual.collaborationVisibleRoute>) => { clips.count++; return actual.collaborationVisibleRoute(...args) } }
+})
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
   return { ...actual, FocusContextCardBody: (props: ComponentProps<typeof actual.FocusContextCardBody>) => {
@@ -1701,6 +1707,23 @@ it('starts no preview or reading for faces swept past during a camera gesture, a
   vi.spyOn(held, 'matches').mockImplementation(selector => selector === ':hover' || matches(selector))
   await act(async () => captured.moveEnd!(new WheelEvent('wheel'), { x, y, zoom }))
   await settleCollaborationCanvas(() => { expect(schedule).toHaveBeenCalledTimes(1); expect(peek).toHaveBeenCalledWith(a.id) })
+})
+
+it('re-clips a route only when a painted endpoint body changes, not on every zoom frame', async () => {
+  const scene = scenario(2), [a, b] = [...scene.agents.values()] as [CollaborationAgent, CollaborationAgent]
+  scene.agents = new Map([[a.id, { ...a, tier: 'active' as const }], [b.id, { ...b, tier: 'active' as const }]])
+  scene.areas = [{ id: 'pair', name: 'Pair', kind: 'project', members: [a.id, b.id] }]
+  scene.relations = [{ id: 'pair-link', kind: 'communication', source: a.id, target: b.id, evidence: [] }]
+  await loaded(scene); await revealWorld()
+  const edge = () => dom.container.querySelector<SVGPathElement>('.collaboration-connections .react-flow__edge-path')!.getAttribute('d')
+  // Full card scale: both bodies are the whole slot at every zoom above the card band.
+  await viewport(0, 0, 4000, 4000, 1)
+  const card = edge(); clips.count = 0
+  for (const zoom of [1.05, 1.1, 1.2, 1.3]) await viewport(0, 0, 4000, 4000, zoom)
+  expect(clips.count).toBe(0); expect(edge()).toBe(card)
+  // Entering the LOD band changes the painted body, so the route is clipped again.
+  await viewport(0, 0, 4000, 4000, .7)
+  expect(clips.count).toBeGreaterThan(0); expect(edge()).not.toBe(card)
 })
 
 it('weights routes by saturated message strength and lets regions outside a selection recede', async () => {
