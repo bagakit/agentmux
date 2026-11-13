@@ -176,8 +176,9 @@
 .collaboration-agent--unknown .collaboration-agent__point { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
 /* A confirmed-closed member has no disc: shape, not only tone, says it cannot work now.
  * Its face recedes to monochrome and returns to its own colours while it is read. */
-.collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { background: transparent; box-shadow: none; }
-.collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); transition: filter 150ms ease-out, opacity 150ms ease-out; }
+.collaboration-agent--closed .collaboration-agent__body { background: transparent; }
+.collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { box-shadow: none; }
+.collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
 .collaboration-agent--closed:is(:hover, :focus-within, [data-reading=true]) .agent-avatar { filter: none; opacity: 1; }
 /* A raised disc reads as a shape on any region fill; its absence is the closed signal. */
 .collaboration-canvas { --collaboration-closed-ink: .55; --collaboration-disc: color-mix(in srgb, var(--text) 12%, var(--surface-3)); --collaboration-disc-line: color-mix(in srgb, var(--text) 22%, transparent); }
@@ -230,7 +231,6 @@
 .collaboration-area__overview-label[data-recede=true] .collaboration-area__name > strong { color: var(--text-2); }
 .collaboration-area__overview-label[data-recede=true] :is(.collaboration-area__meta, .collaboration-area__meta em) { color: var(--text-3); }
 .collaboration-area__overview-label[data-recede=true] .collaboration-area__identity { opacity: .6; }
-.collaboration-canvas[data-motion=on] :is(.collaboration-area__envelope path, .collaboration-area__name > strong, .collaboration-area__identity) { transition: opacity 150ms ease-out, color 150ms ease-out; }
 
 /* Stable territory colors identify kinds. Motion and health retain separate signals. */
 .collaboration-area, .collaboration-area__overview-label { --area-color: var(--text-2); }
@@ -294,8 +294,10 @@
 /* The effective preference overrides reduction only within this Map's presentation. */
 .collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
-.collaboration-canvas[data-motion=on] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out; transition-duration: 150ms !important; }
-.collaboration-canvas[data-motion=off] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: none; }
+/* One transition contract for every Map presentation change: on keeps 150ms even under reduced
+ * motion, off removes it. Recede and the closed face's return ride the same switch. */
+.collaboration-canvas[data-motion=on] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-agent--closed .agent-avatar, .collaboration-edge, .collaboration-area__overview-label, .collaboration-area__envelope path, .collaboration-area__identity, .collaboration-area__name > strong, .collaboration-area__meta, .collaboration-area__meta em, .collaboration-canvas__motion-switch::after) { transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out, color 150ms ease-out, filter 150ms ease-out; transition-duration: 150ms !important; }
+.collaboration-canvas[data-motion=off] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-agent--closed .agent-avatar, .collaboration-edge, .collaboration-area__overview-label, .collaboration-area__envelope path, .collaboration-area__identity, .collaboration-area__name > strong, .collaboration-area__meta, .collaboration-area__meta em, .collaboration-canvas__motion-switch::after) { transition: none; }
 .collaboration-canvas[data-motion=off] .react-flow__edge[data-recent=true] .collaboration-edge { opacity: 1; stroke-width: 2.75; }
 .collaboration-canvas__hud { position: absolute; z-index: 6; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
 @container (max-width: 680px) {
