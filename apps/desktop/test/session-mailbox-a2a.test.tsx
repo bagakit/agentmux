@@ -42,8 +42,10 @@ beforeEach(() => {
 })
 const system = () => ({ available: true, notices: [], unread: [], acknowledge: vi.fn() })
 const toggle = async () => {
-  const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
-  await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
+  for (const type of ['beforetoggle', 'toggle']) {
+    const event = new Event(type); Object.defineProperty(event, 'newState', { value: 'open' })
+    await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
+  }
 }
 const folder = async (name: string) => {
   if (['inbox', 'outbox', 'collaboration'].includes(name)) await dom.click('[id$="-agents-tab"]')
