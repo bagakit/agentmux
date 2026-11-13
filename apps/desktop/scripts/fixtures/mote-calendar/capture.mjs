@@ -34,7 +34,7 @@ try {
   const runnerInputs = ['capture.mjs', rendererRunner, 'README.md'].map(file => path.join(fixture, file))
   for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'apps/desktop/scripts/radix-overlay-aliases.ts')]) await readBound(file)
   const loaders = { '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.json': 'json', '.css': 'css',
-    '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }
+    '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }
   const captureInputs = { name: 'capture-actual-input-bytes', setup(plugin) {
     plugin.onLoad({ filter: /.*/, namespace: 'file' }, async args => {
       const contents = await readBound(args.path), loader = loaders[path.extname(args.path)]
@@ -52,6 +52,8 @@ try {
         const [prefix, suffix = ''] = key.split('*')
         if (key.includes('*') ? !subpath.startsWith(prefix) || !subpath.endsWith(suffix) : subpath !== key) continue
         const source = typeof target === 'string' ? target : target.browser
+        // Brand art ships as files, not source; it resolves to the same file the App bundles.
+        if (source?.startsWith('./brand/')) return { path: path.join(clientFolder, source.replace('*', subpath.slice(prefix.length, suffix ? -suffix.length : undefined))) }
         assert.ok(source?.startsWith('./src/'), 'Actual browser source export is required')
         return { path: path.join(clientFolder, source.replace('*', subpath.slice(prefix.length, suffix ? -suffix.length : undefined))) }
       }
@@ -86,7 +88,7 @@ try {
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'silent', metafile: true, alias, plugins: [generatedIdentity, clientSources, workers, captureInputs],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   const inputs = Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !/^original-(worker|url|raw):/.test(file))
   for (const file of inputs) assert.ok(consumed.has(path.resolve(root, file)), 'Metafile input has no actual source-byte binding: ' + file)

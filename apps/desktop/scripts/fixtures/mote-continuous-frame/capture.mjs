@@ -26,6 +26,8 @@ try {
         const [prefix, suffix = ''] = key.split('*')
         if (key.includes('*') ? !subpath.startsWith(prefix) || !subpath.endsWith(suffix) : subpath !== key) continue
         const source = typeof target === 'string' ? target : target.browser
+        // Brand art ships as files, not source; it resolves to the same file the App bundles.
+        if (source?.startsWith('./brand/')) return { path: path.join(clientFolder, source.replace('*', subpath.slice(prefix.length, suffix ? -suffix.length : undefined))) }
         assert.ok(source?.startsWith('./src/'), 'Original browser Source export required')
         return { path: path.join(clientFolder, source.replace('*', subpath.slice(prefix.length, suffix ? -suffix.length : undefined))) }
       }
@@ -61,7 +63,7 @@ try {
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', 'apps/desktop/src/renderer/src/components/MoteSpaceFrame.tsx', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/MoteCooperation.tsx'])
