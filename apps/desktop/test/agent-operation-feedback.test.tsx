@@ -170,3 +170,116 @@ it('partial creation preserves its real result and does not mark or remove the s
   expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.phase).toBe('retired')
   expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.report).toBe(retired)
 })
+
+async function openCompactDetail() {
+  const trigger = container.querySelector<HTMLButtonElement>('.agent-operation-feedback--compact button.agent-operation-feedback__label')!
+  expect(trigger, 'the compact status is a real button').not.toBeNull()
+  await act(async () => { trigger.click() })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  return trigger
+}
+
+it('compact operation details open in the maintained non-modal Portal and Escape returns to the original status', async () => {
+  const original = { ...operation('compact-original'), phase: 'unconfirmed' as const, canContinue: true }
+  beginAgentOperation(original)
+  const inspect = vi.spyOn(api.sessions, 'inspectStop').mockResolvedValue({ agentSessionId: subject.agentSessionId,
+    expectedRun: session.control.run, phase: 'stopping', canRetry: true, operationIdMatched: true, observedAt: 8 })
+  const stop = vi.spyOn(api.sessions, 'stop')
+  await act(async () => root.render(<div><input aria-label="Original draft" defaultValue="Keep reading" /><AgentOperationFeedback subject={subject} compact /></div>))
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  const trigger = await openCompactDetail()
+  const panel = document.querySelector<HTMLElement>('.agent-operation-feedback__popover')!
+  expect(panel).not.toBeNull()
+  expect(container.contains(panel)).toBe(false)
+  expect(panel.getAttribute('role')).toBe('dialog')
+  expect(panel.getAttribute('aria-modal')).not.toBe('true')
+  expect(panel.style.visibility).toBe('visible')
+  expect(document.activeElement).toBe(panel)
+  expect(panel.textContent).toContain(original.operationId)
+  expect(panel.querySelector('button')?.closest('summary')).toBeNull()
+  const check = [...panel.querySelectorAll('button')].find(button => button.textContent?.includes('核对原操作'))!
+  await act(async () => { check.click() })
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(session.control, original.operationId)
+  expect(stop).not.toHaveBeenCalled()
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  expect(useAppStore.getState().agentOperations[agentOperationKey(original)]?.phase).toBe('pending')
+})
+
+it('compact operation details dismiss outside without taking later input focus or losing the original unresolved operation', async () => {
+  const original = { ...operation('compact-outside'), phase: 'unconfirmed' as const }
+  beginAgentOperation(original)
+  await act(async () => root.render(<div><input aria-label="Later draft" defaultValue="Later input stays here" /><AgentOperationFeedback subject={subject} compact /></div>))
+  await openCompactDetail()
+  expect(document.querySelector('.agent-operation-feedback__popover')).not.toBeNull()
+  const input = container.querySelector('input')!
+  await act(async () => {
+    input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+    input.focus()
+    input.setSelectionRange(6, 11)
+    input.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0 }))
+    input.click()
+  })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  expect(document.activeElement).toBe(input)
+  expect(input.value).toBe('Later input stays here')
+  expect([input.selectionStart, input.selectionEnd]).toEqual([6, 11])
+  expect(useAppStore.getState().agentOperations[agentOperationKey(original)]).toBe(original)
+})
+
+it('closing compact details keeps later input focus while Escape return-focus is queued', async () => {
+  const original = { ...operation('compact-later-focus'), phase: 'unconfirmed' as const }
+  beginAgentOperation(original)
+  await act(async () => root.render(<div><input aria-label="Later input" defaultValue="Keep my new selection" /><AgentOperationFeedback subject={subject} compact /></div>))
+  await openCompactDetail()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+    expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    const input = container.querySelector('input')!
+    input.focus(); input.setSelectionRange(8, 11)
+    await act(async () => { await vi.runAllTimersAsync() })
+    expect(document.activeElement).toBe(input)
+    expect([input.selectionStart, input.selectionEnd]).toEqual([8, 11])
+    expect(useAppStore.getState().agentOperations[agentOperationKey(original)]).toBe(original)
+  } finally { vi.useRealTimers() }
+})
+
+it('an open compact result survives sibling decoration completion until its last reader closes it', async () => {
+  const fork: Operation = { kind: 'fork', operationId: 'compact-reading-result', subject, phase: 'pending', startedAt: 1 }
+  beginAgentOperation(fork)
+  await act(async () => root.render(<><div className="focus-context-card"><AgentOperationFeedback subject={subject} /></div><AgentOperationFeedback subject={subject} compact /></>))
+  const inline = container.querySelector<HTMLDetailsElement>('.focus-context-card details')!
+  await act(async () => { inline.querySelector('summary')!.click() })
+  expect(inline.open).toBe(true)
+  expect(inline.querySelector('summary button')).toBeNull()
+  await openCompactDetail()
+  const report = { requestId: fork.operationId, outcome: 'opened', from: null, to: null,
+    agent: { agentSessionId: 'created-while-reading', hostId: 'local', runId: 'created-run' }, resource: null, save: {}, issues: [] } as unknown as NonNullable<Operation['report']>
+  await act(async () => { settleAgentCreation(fork, report) })
+  await act(async () => {
+    container.querySelectorAll('.agent-operation-feedback__label').forEach(label => label.dispatchEvent(Object.assign(new Event('animationend', { bubbles: true }), { animationName: 'agent-operation-settle' })))
+  })
+  const panel = document.querySelector('.agent-operation-feedback__popover')
+  expect(panel, 'the original result stays available to its open reader').not.toBeNull()
+  expect(panel!.textContent).toContain('created-while-reading')
+  expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.report).toBe(report)
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  expect(document.querySelector('.agent-operation-feedback__popover')).not.toBeNull()
+  visibility.mockReturnValue('visible')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="关闭操作详情"]')!.click() })
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  expect(inline.open).toBe(true)
+  expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]?.report).toBe(report)
+  await act(async () => { inline.querySelector('summary')!.click() })
+  expect(useAppStore.getState().agentOperations[agentOperationKey(fork)]).toBeUndefined()
+  expect(useAppStore.getState().sessions).toEqual([session])
+})

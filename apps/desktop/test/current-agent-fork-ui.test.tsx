@@ -274,7 +274,7 @@ it.each(['opened', 'retired'] as const)('the real Region header consumes a card-
   const operationId = forkOperation()!.operationId
   expect(document.querySelector('[role="menu"]')).toBeNull()
   expect(document.body.textContent).toContain('Fork未确认')
-  await act(async () => document.querySelector<HTMLElement>('.agent-operation-feedback summary')!.click())
+  await act(async () => document.querySelector<HTMLButtonElement>('.agent-operation-feedback--compact button.agent-operation-feedback__label')!.click())
   await click('核对原操作')
   expect(execute.mock.calls.at(-1)?.[0]).toMatchObject({ operation:'space.inspect', target:{ requestId:operationId } })
   await openMore()
