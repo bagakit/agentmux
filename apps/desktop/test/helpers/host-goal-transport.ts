@@ -73,7 +73,7 @@ export async function openHostGoalTransport(options: {
     }) })
   const ports = { coreClients: () => options.runtime ? [{ hostId: 'local', client: options.runtime().client }] : [],
     spatialState: spatial, conversationLandmarks: new ConversationLandmarkStore(join(directory, 'landmarks.json')),
-    goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges, goalParticipation: hostGoals.participation,
+    goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges, goalParticipation: hostGoals.participation, goalDelegations: hostGoals.goalDelegations,
     ...(options.runtime ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime: options.runtime,
       agentMuxContext: request => hostGoals.contextForSpatialOpen(request) }) } : {}) }
   server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), ...ports })
