@@ -35,7 +35,7 @@ import { registerHeapSnapshotFileIpc } from './renderer-heap-snapshot-ipc.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
-import { browserAgentAuthority } from './browser-agent-authority.js'
+import { browserAgentAuthority, releaseBrowserAgentsOnRetirement } from './browser-agent-authority.js'
 import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererCacheController } from './renderer-cache.js'
@@ -531,6 +531,7 @@ export async function registerIpc(args: {
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime))
+  const releaseRetiredBrowserAgents = releaseBrowserAgentsOnRetirement(args.runtime, browsers)
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
@@ -2137,7 +2138,7 @@ export async function registerIpc(args: {
     return browsers.takeControl(id)
   })
   handleWithEvent('browser:returnControl', async (event, id: string, input?: import('../shared/contracts.js').BrowserControlHandoff) => {
-    return input === undefined ? browsers.returnControl(id) : await browsers.returnControl(id, input)
+    return await browsers.returnControl(id, input)
   })
   handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
     await browserAutomation(id, caller)
@@ -2457,6 +2458,7 @@ export async function registerIpc(args: {
       { owner: 'workbench-native-window-port', dispose: releaseNativeWindowOwner },
       { owner: 'browsers', dispose: () => browsers.dispose() },
       { owner: 'browser-feedback-preferences', dispose: disposeBrowserFeedbackPreferences },
+      { owner: 'browser-agent-retirement', dispose: releaseRetiredBrowserAgents },
       { owner: 'capsule-appearance', dispose: () => { disposeCapsuleAppearance(); nativeTheme.removeListener('updated', updateCapsuleThemes); browsers.capsuleDocumentReady = undefined } },
       { owner: 'capsule-document-ipc', dispose: disposeCapsuleDocument },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },

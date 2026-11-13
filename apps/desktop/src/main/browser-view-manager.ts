@@ -4,7 +4,7 @@ import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
-import { parseBrowserControlHandoff, type BrowserAgentAuthority } from './browser-agent-authority.js'
+import { parseBrowserControlHandoff, type BrowserAgent, type BrowserAgentAuthority } from './browser-agent-authority.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
@@ -1742,6 +1742,12 @@ export class BrowserViewManager {
       resourceRisk: new Set(native ? ['document-used'] : []), resourceDocumentConfirmed: false, resourceReads: 0, publishedRetention: null, releaseAttempt: null
     }
     this.entries.set(id, entry)
+    // A saved association may name a Session retired while this page was closed. Check it once,
+    // after the page exists; only Core's confirmed retirement releases it, any other answer keeps it.
+    const savedAgent = entry.agent
+    if (savedAgent) void this.inspectAssociatedAgent(savedAgent).then(state => {
+      if (state === 'retired' && this.entries.get(id) === entry && entry.agent === savedAgent) this.releaseRetiredAgent(savedAgent)
+    })
     let childRegistrationAttempted = false
     try {
       const prepareHost = () => {
@@ -3138,16 +3144,61 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  returnControl(id: string): BrowserSnapshot
-  returnControl(id: string, input: BrowserControlHandoff): Promise<BrowserSnapshot>
-  returnControl(id: string, input?: BrowserControlHandoff): BrowserSnapshot | Promise<BrowserSnapshot> {
+  /**
+   * Hand input back to the associated Agent, or establish one new association. Handing back refuses
+   * only when Core confirms the associated Session retired; that also releases the association.
+   */
+  async returnControl(id: string, input?: BrowserControlHandoff): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    if (input !== undefined) return this.transferControl(entry, input)
+    if (input !== undefined) return await this.transferControl(entry, input)
     if (this.agentOwnsInput(entry)) return this.snapshot(entry)
-    if (!entry.agent) throw Object.assign(new Error(entry.agent === null
+    const agent = entry.agent
+    if (!agent) throw Object.assign(new Error(agent === null
       ? 'This Browser has no associated Agent. Create an Agent on its right to hand it over.'
       : 'The original Browser Agent association is unconfirmed. Keep the page and restore its original association before returning control.'), { code: 'CONTROL_UNAVAILABLE' })
+    const revision = entry.controlRevision
+    const original = await this.inspectAssociatedAgent(agent)
+    if (this.entries.get(entry.id) !== entry || entry.controlRevision !== revision || entry.agent !== agent) {
+      throw Object.assign(new Error('This Browser changed while Core confirmed its Agent. You keep control; inspect the current page before handing it over.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    }
+    if (original === 'retired') {
+      this.releaseRetiredAgent(agent)
+      throw Object.assign(new Error('The Agent associated with this Browser has been stopped, so it can no longer take control. You keep control; create a new Agent on its right to hand it over.'), { code: 'STALE_AGENT_SESSION_BINDING' })
+    }
+    // An unconfirmed read is not a stopped Agent: the association still stands and the hand-back proceeds.
     return this.applyAgentControl(entry)
+  }
+
+  /**
+   * Core's answer for one associated Agent: still current, confirmed retired, or not confirmed.
+   * An unavailable owner, a read failure or any other answer is never treated as retirement.
+   */
+  private async inspectAssociatedAgent(agent: BrowserAgent): Promise<'current' | 'retired' | 'unconfirmed'> {
+    if (!this.agents) return 'unconfirmed'
+    try {
+      const original = await this.agents.inspect(agent)
+      if (original.hostId !== agent.hostId || original.agentSessionId !== agent.agentSessionId) return 'unconfirmed'
+      return original.kind === 'agent' ? 'current' : original.kind === 'retired-agent' ? 'retired' : 'unconfirmed'
+    } catch { return 'unconfirmed' }
+  }
+
+  /**
+   * Core confirmed this exact Session retired: every Browser associated with that exact Host and
+   * Session loses the association, so it offers a new Agent instead of a stopped one. Input the Agent
+   * held returns to the person first. Other associations, including the same Session id on another
+   * Host, are kept.
+   */
+  releaseRetiredAgent(agent: BrowserAgent): void {
+    const same = (candidate: AgentMuxBrowserControl['agent']) => Boolean(candidate && candidate.hostId === agent.hostId && candidate.agentSessionId === agent.agentSessionId)
+    for (const entry of this.entries.values()) {
+      if (!same(entry.agent)) continue
+      if (this.agentOwnsInput(entry)) { entry.activeRun?.stop(); this.yieldControl(entry.id) }
+      entry.agent = null
+      entry.agentWarning = undefined
+      ++entry.controlRevision
+      this.emit(entry)
+    }
+    for (const released of this.releasedEntries.values()) if (same(released.agent)) { released.agent = null; released.agentWarning = undefined }
   }
 
   /** A trusted click may establish one new relationship only after Core confirms its exact Run. */

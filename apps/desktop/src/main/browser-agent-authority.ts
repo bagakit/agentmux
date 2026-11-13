@@ -9,6 +9,17 @@ export type BrowserAgentAuthority = {
   inspect(agent: BrowserAgent): Promise<AgentMuxAgentCreationInspection & { hostId: string }>
 }
 
+/**
+ * Core's retirement commit names the retired Session in its run-removed event; a low-level Run stop
+ * does not. Each such fact releases that exact Host and Session's Browser associations.
+ */
+export function releaseBrowserAgentsOnRetirement(runtime: Pick<RuntimeController, 'observeCoreEvents'>,
+  browsers: { releaseRetiredAgent(agent: BrowserAgent): void }): () => void {
+  return runtime.observeCoreEvents(['run-removed'], (hostId, event) => {
+    if (event.type === 'run-removed' && event.agentSessionId) browsers.releaseRetiredAgent({ hostId, agentSessionId: event.agentSessionId })
+  })
+}
+
 export function browserAgentAuthority(runtime: Pick<RuntimeController, 'rpcClients' | 'agentCreation'>): BrowserAgentAuthority {
   return {
     resolve(agentSessionId) {
