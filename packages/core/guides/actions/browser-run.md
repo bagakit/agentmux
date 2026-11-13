@@ -21,7 +21,10 @@ work, and a runaway program cannot take AgentMux down with it. A program has 30 
 (`waitForElement`, `waitForLoad`, `waitForNetworkIdle`) and `js()` never outlast that: when the
 program is almost out of time they throw "… because this program's time is almost up" while the
 program still runs, so you can catch it, return what you have, and continue in a new program.
-Prefer several short programs to one long one. Page functions ([Current browser-capability-examples](../../dist/browser-page-capability.js "amux:generated browser-capability-examples"), …)
+Prefer several short programs to one long one. `waitForElement(name, {exact: true, role})` waits
+for one exact name (by default any name containing the text matches, so "Save" also matches "Save
+draft"). `waitForUrl(url)`, `waitForUrl({contains})` or `waitForUrl({pattern})` waits for this page
+to be at a URL and returns `{url, navigationId}`; take a fresh snapshot of that page. Page functions ([Current browser-capability-examples](../../dist/browser-page-capability.js "amux:generated browser-capability-examples"), …)
 are injected into that subprocess. The current capability registry exposes:
 [Current browser-capability-directory](../../dist/browser-page-capability.js "amux:generated browser-capability-directory")
 Elements are addressed by the refs a snapshot hands you — never coordinates.
