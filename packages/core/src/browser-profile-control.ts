@@ -27,9 +27,17 @@ export type BrowserProfileControlPayload =
  */
 export type BrowserProfileControlSource = { browserLabel: string; profileLabel: string; importedAt: number; importedCookies: number; skippedCookies: number;
   skippedByReason?: Record<string, number> }
+/**
+ * How a Profile's pages reach the network. Absent follows the system settings. Main parses and
+ * applies the route; Core only carries it, and it never holds a password.
+ */
+export type BrowserProfileControlNetwork =
+  | { mode: 'direct' }
+  | { mode: 'proxy'; server: { scheme: string; host: string; port: number }; bypass?: string[] }
 /** One Profile as Main lists it. hue is absent when the person chose none. */
 export type BrowserProfileControlProfile = {
   id: string; label: string; createdAt: number; isDefault: boolean; source: BrowserProfileControlSource | null; hue?: number; notes?: string
+  network?: BrowserProfileControlNetwork
 }
 /** One Browser that holds the Profile: open has a native owner now, saved restores into it later. */
 export type BrowserProfileControlUse = { browserId: string; workspaceId?: string; title: string; url: string; state: 'open' | 'saved' }
@@ -119,8 +127,22 @@ function skipCounts(value: unknown, code: string): Record<string, number> {
   }))
 }
 
+function network(value: unknown, code: string): BrowserProfileControlNetwork {
+  const route = record(value, ['mode', 'server', 'bypass'], code, 'Browser Profile network')
+  if (route.mode === 'direct' && route.server === undefined && route.bypass === undefined) return { mode: 'direct' }
+  if (route.mode !== 'proxy') fail(code, 'Browser Profile network mode is invalid.')
+  const server = record(route.server, ['scheme', 'host', 'port'], code, 'Browser Profile proxy server')
+  const port = count(server.port, code, 'Proxy port')
+  if (port < 1 || port > 65535) fail(code, 'Proxy port is invalid.')
+  const bypass = route.bypass === undefined ? undefined : Array.isArray(route.bypass) && route.bypass.length <= 64
+    ? route.bypass.map(rule => text(rule, code, 'Don’t proxy entry', 253))
+    : fail(code, 'Don’t proxy entries are invalid.')
+  return { mode: 'proxy', server: { scheme: text(server.scheme, code, 'Proxy scheme', 16), host: text(server.host, code, 'Proxy host', 255), port },
+    ...(bypass ? { bypass } : {}) }
+}
+
 function profile(value: unknown, code: string): BrowserProfileControlProfile {
-  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes'], code, 'Browser Profile')
+  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network'], code, 'Browser Profile')
   if (typeof row.isDefault !== 'boolean') fail(code, 'Browser Profile default flag is invalid.')
   const source = row.source === null ? null : (() => {
     const imported = record(row.source, ['browserLabel', 'profileLabel', 'importedAt', 'importedCookies', 'skippedCookies', 'skippedByReason'], code, 'Browser Profile source')
@@ -130,7 +152,8 @@ function profile(value: unknown, code: string): BrowserProfileControlProfile {
   })()
   return { id: identity(row.id, code, 'Browser Profile ID'), label: text(row.label, code, 'Browser Profile label'), createdAt: count(row.createdAt, code, 'Browser Profile creation time'),
     isDefault: row.isDefault, source, ...(row.hue === undefined ? {} : { hue: hue(row.hue, code) }),
-    ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }) }
+    ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }),
+    ...(row.network === undefined ? {} : { network: network(row.network, code) }) }
 }
 function usage(value: unknown, code: string): BrowserProfileControlUsage {
   const row = record(value, ['browsers', 'complete'], code, 'Browser Profile usage')
