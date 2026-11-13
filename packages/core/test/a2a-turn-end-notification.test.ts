@@ -100,6 +100,19 @@ it('abstains without inventing a notice when nothing new is pending', async () =
   expect(await h.notices()).toEqual([])
 })
 
+it('never answers a later turn end with an earlier notice that is still unconfirmed', async () => {
+  const h = await fixture()
+  await h.send('unknown-earlier')
+  // The Input owner holds an earlier idle notice whose outcome is unknown: it stays active for that owner.
+  const queue = Reflect.get(h.client, 'messageQueue') as DurableAgentMuxMessageQueue
+  const session = h.client.agentSession('recipient')
+  const earlier = await queue.prepareNotification({ agentSessionId: 'recipient', notificationId: 'a2a-notice-earlier',
+    condition: { expectedRun: session.run, afterSubmissionId: null }, idle: { completionId: 'completion-earlier', inputByte: 0 } })
+  await queue.recordNotificationResult(earlier!.notificationId, 'unconfirmed', 'Original admission unknown.')
+  expect(await (await h.stop('stop-after-unknown', {})).json()).toEqual({})
+  expect((await h.notices()).map(record => record.notification.notificationId)).toEqual(['a2a-notice-earlier'])
+})
+
 it('records a lost response unconfirmed and never resends its references at a later turn end', async () => {
   const h = await fixture()
   await h.send('lost')
@@ -114,6 +127,14 @@ it('records a lost response unconfirmed and never resends its references at a la
   vi.restoreAllMocks()
   expect(await (await h.stop('stop-later', { promptId: 'prompt-2' })).json()).toEqual({})
   expect(await h.notices()).toHaveLength(1)
+  // An idle opportunity and a later message never hand the lost notice to the Input owner as input.
+  await h.send('after-loss')
+  const messageNotifications = Reflect.get(h.client, 'messageNotifications') as { restore(): Promise<void> }
+  await messageNotifications.restore(); await h.settled()
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(h.rawInput).not.toHaveBeenCalled()
+  expect((await h.read('lost'))?.notification?.state).toBe('unconfirmed')
+  expect(h.events.some(event => event.type === 'agent-error' && /Cannot read properties/u.test(event.message))).toBe(false)
 })
 
 it('tells the sender an idle Grok waits for its next turn end while explicit notification stays available', async () => {
