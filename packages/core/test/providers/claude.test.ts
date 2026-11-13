@@ -9,7 +9,7 @@ import { fixturePath } from '../helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
@@ -20,7 +20,7 @@ import { AgentMuxClient } from '../../src/client.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../../src/agent-session-store.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../../src/agent-session-identity.js'
-import { defaultAgentMuxHookPort } from '../../src/runtime-paths.js'
+import { defaultAgentMuxHookPort, defaultAgentMuxStateDirectory } from '../../src/runtime-paths.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
 import {
@@ -34,7 +34,10 @@ describe('Claude native mod activity', () => {
     const provider = new AgentProviderRegistry().get('claude')
     const workspacePath = fixturePath('tmp/native-mod-work')
     const plan = provider.planManagedHooks!({ workspacePath })!
-    const directory = claudeNativeActivityDirectory(workspacePath)
+    const directory = claudeNativeActivityDirectory()
+    // AgentMux's own state directory holds the module; nothing is written into the workspace.
+    expect(directory).toBe(join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'native-activity'))
+    expect(plan.mutations.filter(item => item.path.includes(`${sep}agentmux${sep}native-activity${sep}`) && !item.path.startsWith(directory + sep))).toEqual([])
     const modules = plan.mutations.find(item => item.path === join(directory, 'hooks', 'hooks.json'))!
     expect(JSON.parse(modules.content)).toEqual({ modules: ['./register.js'] })
     expect(plan.mutations.find(item => item.path === join(directory, 'hooks', 'register.js'))?.content)
