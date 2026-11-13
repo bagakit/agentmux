@@ -21,13 +21,16 @@ type FileLease = LeaseBase & { kind: 'audio' | 'video'; media: WorkspaceMediaHan
 /**
  * A root playlist and everything a playlist it served has referenced. Playlists are re-read per
  * request (encoders replace them by rename); segments open per request (live windows delete them).
+ * A name stays admitted after a live window drops it: the player keeps segments of the list it last
+ * read and may still ask for one, and the set grows only by the segments this one view played.
  * Its fact explains the latest refused resource and never closes the lease: a sibling variant or
  * the next live reload may still play, and a clean serve of that same path clears it.
  */
 type PlaylistLease = LeaseBase & {
   kind: 'playlist'
   referenced: Set<string>
-  served: Map<string, { body: Buffer; at: number }>
+  /** The last admitted body per playlist path, when it was answered, and how long an unchanged reload of it is held. */
+  served: Map<string, { body: Buffer; at: number; hold: number | null }>
 }
 type Lease = FileLease | PlaylistLease
 
@@ -354,35 +357,41 @@ export class WorkspaceMediaStreams {
   private async respondPlaylist(lease: PlaylistLease, path: string, request: IncomingMessage, response: ServerResponse, fail: Fail): Promise<void> {
     let body = await this.readPlaylist(lease, path, fail)
     if (!body) return
-    const previous = lease.served.get(path), hold = livePlaylistHoldMs(body.toString('utf8'))
-    if (previous && hold !== null && previous.body.equals(body)) {
+    const previous = lease.served.get(path)
+    let changed = !previous || !previous.body.equals(body)
+    if (previous && !changed && previous.hold !== null) {
       lease.responses.add(response)
       response.once('close', () => lease.responses.delete(response))
       // While held, compare a cheap stamp; only a changed stamp pays for a full confined read.
       let stamp = await this.files.mediaPlaylistStamp(lease.workspace, path).catch(() => null)
-      for (const deadline = previous.at + hold; Date.now() < deadline;) {
+      for (const deadline = previous.at + previous.hold; Date.now() < deadline;) {
         if (!await this.pause(lease, response, Math.min(LIVE_PLAYLIST_RECHECK_MS, deadline - Date.now()))) { fail(410, 'This media lease was released.'); return }
         const nextStamp = await this.files.mediaPlaylistStamp(lease.workspace, path).catch(() => null)
         if (nextStamp !== null && nextStamp === stamp) continue
         stamp = nextStamp
         const next = await this.readPlaylist(lease, path, fail)
         if (!next) return
-        if (!next.equals(body)) { body = next; break }
+        if (!next.equals(body)) { body = next; changed = true; break }
       }
     }
-    const admitted: string[] = []
-    for (const reference of playlistReferences(body.toString('utf8'))) {
-      const resolved = resolvePlaylistReference(reference, path)
-      if (typeof resolved !== 'string') {
-        lease.fact = resolved
-        fail(resolved.state === 'outside-workspace' ? 403 : 422, resolved.state === 'external-reference'
-          ? 'This playlist names media outside the Workspace by an absolute address.' : 'This playlist names a resource that cannot play here.')
-        return
+    let hold = previous?.hold ?? null
+    // A body this lease already admitted named nothing new; only a changed body is decoded and scanned.
+    if (changed) {
+      const text = body.toString('utf8'), admitted: string[] = []
+      for (const reference of playlistReferences(text)) {
+        const resolved = resolvePlaylistReference(reference, path)
+        if (typeof resolved !== 'string') {
+          lease.fact = resolved
+          fail(resolved.state === 'outside-workspace' ? 403 : 422, resolved.state === 'external-reference'
+            ? 'This playlist names media outside the Workspace by an absolute address.' : 'This playlist names a resource that cannot play here.')
+          return
+        }
+        admitted.push(resolved)
       }
-      admitted.push(resolved)
+      for (const reference of admitted) lease.referenced.add(reference)
+      hold = livePlaylistHoldMs(text)
     }
-    for (const reference of admitted) lease.referenced.add(reference)
-    lease.served.set(path, { body, at: Date.now() })
+    lease.served.set(path, { body, at: Date.now(), hold })
     this.clear(lease, path)
     response.writeHead(200, { 'Content-Type': lease.mimeType, 'Content-Length': String(body.byteLength) })
     response.end(request.method === 'HEAD' ? undefined : body)
