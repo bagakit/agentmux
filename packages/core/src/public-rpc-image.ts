@@ -99,6 +99,8 @@ export function parseImageResult<M extends ImageMethod>(method: M, value: unknow
   }
   if (operation?.method === 'image.pin' && operation.state === 'completed' && creationOperationId !== operation.operationId)
     invalid('The image creation receipt lost its original operation.', code)
-  if (operation?.effect === 'missing' && p.state !== 'missing') invalid('An absent image effect cannot claim a current window.', code)
+  // 'missing' records that this close found no open window. The pin may still be known as closed
+  // (an earlier close or the window itself ended it), so only a current open window contradicts it.
+  if (operation?.effect === 'missing' && p.state === 'open') invalid('An absent image effect cannot claim a current window.', code)
   return { hostId: input.hostId, pinId, state: p.state as ImageResult['state'], creationOperationId, recordedOperation: operation }
 }
