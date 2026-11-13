@@ -2,7 +2,7 @@
  * What Main refused or could not confirm. Only locator-changed and navigation-failed can earn a
  * bounded local retry; every other kind, and every error that is not this one, has none.
  */
-export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'cdp-scope' | 'page-dialog'
+export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'cdp-scope' | 'page-dialog' | 'network-configuration'
 
 /** Only Main creates this error. Script/page error text never grants retry authority. */
 export class BrowserLocalRecoveryFailure extends Error {

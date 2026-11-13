@@ -27,7 +27,8 @@ export function safeBrowserUrl(value: string): string {
  */
 export function isSensitiveBrowserPageCall(method: string): boolean {
   return method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp' ||
-    method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests'
+    method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests' ||
+    method === 'routeRequests' || method === 'unrouteRequests' || method === 'setNetworkConditions' || method === 'clearNetworkConditions'
 }
 
 export function startBrowserOperationStep(operation: BrowserOperation, method: string, args: unknown[]): BrowserOperationStep {
@@ -41,6 +42,7 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
           .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
     ...(method === 'fillInput' || method === 'typeText' ? { inputKey: 'value', blockedReason: 'Sensitive input is requested again at replay time.' } : {}),
     ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {}),
+    ...(['routeRequests','unrouteRequests','setNetworkConditions','clearNetworkConditions'].includes(method) ? { blockedReason: 'Network rules belong to their original program and document; apply a new explicit rule set instead of replaying old filters or mock content.' } : {}),
     ...(method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests'
       ? { blockedReason: 'Network readers belong to their original program and document. Start a new explicit observation; old reader handles and URL filters are not retained.' } : {})
   }

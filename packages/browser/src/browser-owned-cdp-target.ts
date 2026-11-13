@@ -1,10 +1,11 @@
 import type { CDPSession } from 'puppeteer-core'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserProgramSession, BrowserProgramTarget } from './browser-program-port.js'
+import type { BrowserNetworkSession } from './browser-page-transport.js'
 import { BrowserRequestFailure } from './browser-program-port.js'
 
 const EVENTS = ['Page.frameNavigated','Page.navigatedWithinDocument','Page.loadEventFired','Page.javascriptDialogOpening',
-  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Input.dragIntercepted'] as const
+  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Input.dragIntercepted','Fetch.requestPaused'] as const
 /** Puppeteer's original flattened CDP sessions supply page and OOPIF senders. No target is reselected. */
 export class OwnedBrowserTargetSession implements BrowserProgramSession {
   readonly frames = new Map<string, BrowserCdpSender>()
@@ -19,6 +20,26 @@ export class OwnedBrowserTargetSession implements BrowserProgramSession {
   get frameDiscoveryFailure(): string | null { return this.missing }
   readonly sendCommand: BrowserCdpSender = (method, params) => this.command(this.root, method, params)
   observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+  async openNetworkSession(): Promise<BrowserNetworkSession> {
+    const { targetInfo } = await this.root.send('Target.getTargetInfo')
+    if (this.endedReason) throw new Error(this.endedReason)
+    const { sessionId } = await this.root.send('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true })
+    const native = this.root.connection()?.session(sessionId)
+    if (!native) throw new Error('The original network session acknowledgement is unavailable. No replacement target is selected.')
+    const listeners = new Set<(method: string, params: unknown) => void>()
+    const removals = EVENTS.map(method => {
+      const fn = (params: unknown) => { for (const listener of listeners) listener(method, params) }
+      native.on(method, fn); return () => native.off(method, fn)
+    })
+    const close = async () => { try { if (!native.detached) await this.root.send('Target.detachFromTarget', { sessionId }) } finally { if (native.detached) { for (const remove of removals) remove(); listeners.clear() } } }
+    if (this.endedReason) { await close(); throw new Error(this.endedReason) }
+    try { await native.send('Page.enable') } catch (error) { await close(); throw error }
+    return {
+      get endedReason() { return native.detached ? 'The original native network session ended.' : null },
+      sendCommand: (method, params) => (native.send as (method: string, params?: Record<string, unknown>) => Promise<unknown>)(method, params),
+      observe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } }, close
+    }
+  }
   private async command(session: CDPSession, method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (this.endedReason || session.detached || session !== this.root && this.children.get(session.id()) !== session) throw new BrowserRequestFailure('The original Browser/frame is unavailable. Nothing was sent to a substitute.', false)
     const navigationId = this.binding.navigationId

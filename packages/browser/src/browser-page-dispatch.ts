@@ -23,6 +23,7 @@ import {
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { createBrowserNetworkObservations } from './browser-network-observation.js'
+import { createBrowserNetworkRouting } from './browser-network-routing.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -42,6 +43,8 @@ import { createBrowserNetworkObservations } from './browser-network-observation.
 
 /** 一次驱动期间，这一层需要从 Browser 那里知道的东西。传闭包而不是传整个 manager：依赖收到最小。 */
 export type BrowserPageContext = {
+  /** Original program owner awaits protocol cleanup before releasing its native session. */
+  registerCleanup?(cleanup: () => Promise<void>): void
   session: BrowserPageTransport
   /** 当前页面身份。每次调用现取——导航可能发生在两次页面函数之间。 */
   pageInfo(): { url: string; title: string; navigationId: string; faviconDataUrl?: string }
@@ -234,6 +237,8 @@ export function createBrowserPageDispatch(
   const { session } = context
   let network: ReturnType<typeof createBrowserNetworkObservations> | undefined
   const networkObservations = () => network ??= createBrowserNetworkObservations(context)
+  let routes: ReturnType<typeof createBrowserNetworkRouting> | undefined
+  const networkRouting = () => routes ??= createBrowserNetworkRouting(context)
   // 最近一张快照。ref 只在发出它的那张快照里有意义，所以这里只留一张——留多张等于允许
   // Agent 拿两轮之前的 ref 说话，而那些 ref 指向的元素早就不在了。
   let current: BrowserPageSnapshot | null = null
@@ -1080,6 +1085,18 @@ export function createBrowserPageDispatch(
 
   return async (name, args, scope) => {
     switch (name) {
+      case 'routeRequests':
+      case 'unrouteRequests':
+      case 'setNetworkConditions':
+      case 'clearNetworkConditions': {
+        const takesInput = name === 'routeRequests' || name === 'setNetworkConditions'
+        if (args.length !== (takesInput ? 1 : 0)) throw new TypeError('Unexpected network-rule arguments.')
+        const owner = networkRouting()
+        if (name === 'routeRequests') return await owner.route(args[0])
+        if (name === 'unrouteRequests') return await owner.unroute()
+        if (name === 'setNetworkConditions') return await owner.setConditions(args[0])
+        return await owner.clearConditions()
+      }
       case 'watchRequests':
       case 'readRequests':
       case 'waitForResponse':

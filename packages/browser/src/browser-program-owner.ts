@@ -95,6 +95,7 @@ export class BrowserProgramOwner {
     let interrupts: BrowserPageInterrupts | undefined
     let feedback: BrowserProgramFeedback | undefined
     let feedbackEnded = false
+    const pageCleanups: (() => Promise<void>)[] = []
     let release = () => {}
     const notes: string[] = []
     try {
@@ -121,6 +122,7 @@ export class BrowserProgramOwner {
       }
       let runBudget: { remainingMillis(): number } | undefined
       const dispatch = createBrowserPageDispatch({ session: attached, signal: active.controller.signal, interrupts, remainingMillis: () => runBudget?.remainingMillis() ?? 0,
+        registerCleanup: cleanup => pageCleanups.push(cleanup),
         beforeAction: requireCurrent,
         pageInfo: () => { requireCurrent(); return { url: binding.url, title: binding.title, navigationId: binding.navigationId } },
         gotoUrl: async (url: string) => { requireCurrent(); await this.navigate(binding, attached, url, active.controller.signal); requireCurrent() },
@@ -224,6 +226,7 @@ export class BrowserProgramOwner {
       return { result: undefined, logs: [], outcome, runOperation: active.operation }
     } finally {
       active.controller.abort()
+      for (const cleanup of pageCleanups) await cleanup()
       if (!feedbackEnded) await feedback?.end(false)
       release()
       await interrupts?.dispose()
