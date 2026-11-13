@@ -59,7 +59,11 @@ beforeEach(async () => {
     kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: alpha.path,
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    status: { state: state as SessionSnapshot['status']['state'], source: 'run-process', observedAt: 1 },
+    status: { state: state as SessionSnapshot['status']['state'], source: 'native-hook', observedAt: Date.now() },
+    // Native activity supplies the idle fact; a live process alone does not declare it.
+    ...(state === 'running' ? { currentActivity: { state: 'idle' as const, source: 'native-hook' as const, providerId: 'codex',
+      nativeSessionId: `native-${index}`, nativeTurnId: `turn-${index}`, sourceId: 'original-native-source', sequence: 1,
+      run: { runId: `run-${index}` }, hookReceiptId: `native-receipt-${index}`, observedAt: Date.now() } } : {}),
     control: { kind: 'agent', hostId: 'local', agentSessionId: `agent-${index}`, run: { runId: `run-${index}` } }
   }))
   const tab = createWorkbenchTab('retained-tab', { regionId: 'retained-region', kind: 'agent', phase: 'attached', workspaceId: alpha.id, sessionId: sessions[0]!.id })
@@ -139,14 +143,14 @@ it('retains exact opening owners and leaves text editing keys in the find input'
   expect(preserved().layouts).toBe(original.layouts)
 })
 
-it('preserves both attention categories, full exact counts, and the same summary when Folders collapses', async () => {
+it('preserves both attention categories, full exact counts, and the same summary when the device folder section collapses', async () => {
   const metrics = container.querySelector('[data-workspace-id="alpha"]')!.closest('.project-rail-entry')!.querySelectorAll('.project-activity__metric')
   expect([...metrics].map((node) => node.className)).toEqual(['project-activity__metric project-activity__metric--needs-you', 'project-activity__metric project-activity__metric--error'])
   const summary = metrics[0]!.closest('.project-activity')!.getAttribute('aria-label')!
   expect(summary).toContain('1 Needs you · 1 Error · 1 Working · 1 Idle · 1 Completed')
-  await act(async () => button('button[aria-label="Folders"]').click())
+  await act(async () => button('[data-folder-host="local"] [aria-label="Collapse Local"]').click())
   expect(container.querySelectorAll('[data-workspace-id]')).toHaveLength(0)
-  expect(container.querySelector('.space-folders-heading .project-activity')!.getAttribute('aria-label')).toContain('1 Needs you · 1 Error · 1 Working · 1 Idle · 1 Completed')
+  expect(container.querySelector('[data-folder-host="local"] .space-section-heading .project-activity')!.getAttribute('aria-label')).toContain('1 Needs you · 1 Error · 1 Working · 1 Idle · 1 Completed')
   expect(preserved().sessions).toEqual(original.sessions)
   expect(preserved().tabs).toEqual(original.tabs)
 })
