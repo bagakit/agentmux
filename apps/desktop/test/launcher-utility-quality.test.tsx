@@ -9,6 +9,7 @@ import { useLauncherState, type LauncherSection, type LauncherSectionMode } from
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { readNoteDocument } from '../src/shared/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM(), initialLauncher = useLauncherState.getState()
@@ -16,7 +17,7 @@ const sectionModes: Record<LauncherSection, LauncherSectionMode> = { agents: 'ex
 function Utility({ id = 'input', visible = true }: { id?: string; visible?: boolean }) {
   const [sections, setSections] = useState(sectionModes)
   return <div data-owner={id}><LauncherSecondarySurfaces workspace={composerConfig.workspaces[0]} tabGroupId="group" launcherRef={{ tabId: 'launcher', regionId: id }} launcherId={`region:${id}`} sections={sections}
-    onSectionChange={(section, mode) => setSections(value => ({ ...value, [section]: mode }))} warmSession={null} warmPending={false} terminalThemeId="graphite" terminalFontSize={12} visible={visible} busy={null}
+    onSectionChange={(section, mode) => setSections(value => ({ ...value, [section]: mode }))} warmPreview={{ session: null, pending: false, slotHeld: false, state: 'idle' }} terminalThemeId="graphite" terminalFontSize={12} visible={visible} busy={null}
     onRun={async (_kind, action) => { await action() }} /></div>
 }
 beforeEach(() => {
@@ -73,7 +74,7 @@ describe('Launcher utility intent and local focus', () => {
     if (origin === 'header') await activate('input', 'Save and open note draft'); else await saveBody()
     expect(write).toHaveBeenCalledOnce(); const [workspaceId, request] = write.mock.calls[0]!
     expect(workspaceId).toBe('workspace'); expect(request.expectedRevision).toBeNull()
-    expect(JSON.parse(request.content)).toMatchObject({ schema: 'agentmux.note.v1', content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Complete note' }, { type: 'hardBreak' }, { type: 'text', text: 'Second line' }] }] } })
+    expect(readNoteDocument(request.content)).toMatchObject({ status: 'valid', note: { schema: 'agentmux.note.v1', content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Complete note' }, { type: 'hardBreak' }, { type: 'text', text: 'Second line' }] }] } } })
     const open = vi.mocked(useAppStore.getState().openFile)
     expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]!.slice(0, 4)).toEqual([request.path, 'group', undefined, 'workspace'])
     expect(open.mock.calls[0]![5]).toMatchObject({ displayWorkspaceId: 'workspace', resource: { hostId: 'local', path: _hygiene_fixturePath("repo") } })
@@ -93,6 +94,6 @@ describe('Launcher utility intent and local focus', () => {
     await dom.render(<Utility />)
     const actions = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.includes('Create blank note') || button.getAttribute('aria-label') === 'Create blank note')
     expect(actions).toHaveLength(1); await act(async () => actions[0]!.click())
-    expect(write).toHaveBeenCalledOnce(); expect(JSON.parse(write.mock.calls[0]![1].content).content.content).toMatchObject([{ type: 'paragraph' }])
+    expect(write).toHaveBeenCalledOnce(); expect(readNoteDocument(write.mock.calls[0]![1].content)).toMatchObject({ status: 'valid', note: { content: { content: [{ type: 'paragraph' }] } } })
   })
 })
