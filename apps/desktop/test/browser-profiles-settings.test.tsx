@@ -182,6 +182,17 @@ describe('Settings › Browser Profiles', () => {
     expect([...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].every(button => !button.disabled)).toBe(true)
   })
 
+  it('says why cookies were skipped on an imported Profile, by reason and count', async () => {
+    port.set({ revision: 4, profiles: [personal, { ...client, source: { browserLabel: 'Google Chrome', profileLabel: 'Work', importedAt: 1, importedCookies: 40, skippedCookies: 5,
+      skippedByReason: { 'app-bound-encryption': 3, expired: 2 } } }] })
+    await act(async () => { await browserProfiles.refresh() })
+    await select('Northwind client')
+    const imported = container.querySelector('[aria-label="Imported"]')!
+    expect(imported.querySelector('p')?.textContent).toBe('Google Chrome · Work: 40 cookies, 5 skipped')
+    expect([...imported.querySelectorAll('.browser-profile-editor__skips li')].map(li => li.textContent))
+      .toEqual(['Already expired2', 'Locked to the other browser by its app-bound encryption3'])
+  })
+
   it('New Profile opens straight into naming the new Profile', async () => {
     const create = [...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('New Profile'))!
     await act(async () => create.click())

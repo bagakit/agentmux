@@ -215,7 +215,7 @@ beforeEach(() => {
     importedCookies: 1,
     skippedCookies: 2,
     plannedBytes: 100,
-    skippedByReason: {}
+    skippedByReason: { expired: 0, 'invalid-cookie': 0, 'app-bound-encryption': 2, undecryptable: 0, 'non-transplantable': 0, 'partition-unreadable': 0, 'partition-family-unreadable': 0 }
   })
 })
 
@@ -452,6 +452,9 @@ describe('BrowserProfileManager', () => {
       label: 'Imported personal',
       source: { ...importedSource, importedAt: 10 }
     })
+    // Only reasons that happened are kept, as counts; no cookie name or value reaches the record.
+    expect(imported.source?.skippedByReason).toEqual({ 'app-bound-encryption': 2 })
+    expect(JSON.stringify(imported)).not.toContain('secret')
     expect(store.pending).toEqual([])
     expect(electronMocks.windows).toHaveLength(1)
     expect(electronMocks.windows[0]!.partition).toBe(partition(IMPORT_ID))

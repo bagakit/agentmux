@@ -244,6 +244,21 @@ describe('BrowserProfileStore', () => {
     expect(JSON.stringify(persisted)).not.toContain('sourcePath')
   })
 
+  it('keeps skip counts per reason only when they add up to the skipped total', async () => {
+    const { path, store } = await storeFixture()
+    const { pending } = await store.beginPendingImport('Imported with skips')
+    const before = await readFile(path, 'utf8')
+    await expect(store.commitImportedProfile(pending.profileId, { ...importedSource, skippedCookies: 3, skippedByReason: { expired: 1 } }))
+      .rejects.toThrow('add up to the skipped total')
+    await expect(store.commitImportedProfile(pending.profileId, { ...importedSource, skippedCookies: 1, skippedByReason: { 'cookie-name': 1 } as never }))
+      .rejects.toBeInstanceOf(Error)
+    expect(await readFile(path, 'utf8')).toBe(before)
+
+    const { profile } = await store.commitImportedProfile(pending.profileId, { ...importedSource, skippedCookies: 3, skippedByReason: { expired: 1, 'app-bound-encryption': 2 } })
+    expect(profile.source?.skippedByReason).toEqual({ expired: 1, 'app-bound-encryption': 2 })
+    expect((await store.listProfiles()).find((item) => item.id === profile.id)?.source?.skippedByReason).toEqual({ expired: 1, 'app-bound-encryption': 2 })
+  })
+
   it('aborts a pending fresh import without publishing a Profile', async () => {
     const { path, store } = await storeFixture()
     const { pending } = await store.beginPendingImport('Discarded import')
