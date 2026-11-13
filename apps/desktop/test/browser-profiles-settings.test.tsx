@@ -50,6 +50,7 @@ const store = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select: (state: typeof store) => unknown) => select(store), { getState: () => store }) }))
 
 import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
+import { profileHue } from '../src/renderer/src/components/ProfileMark'
 import { BrowserProfilesSettingsPane, PROFILE_HUES } from '../src/renderer/src/components/settings/BrowserProfilesSettingsPane'
 import { clearsSemanticHues } from '../src/renderer/src/lib/conversation-avatar-color'
 
@@ -90,6 +91,20 @@ describe('Settings › Browser Profiles', () => {
     expect(rows[1]!.textContent).toContain('1 open')
     expect(rows.every(row => row.querySelector('.profile-mark'))).toBe(true)
     expect($('.browser-profile-editor__name')?.textContent).toBe('Personal')
+  })
+
+  it('draws every automatic Profile in the list in its own color, the same in the list row and the editor header', async () => {
+    // These four ids all hash to the same palette hue; only the list-wide assignment keeps them apart.
+    const sameHash = ['p-1', 'p-10', 'p-11', 'p-14']
+      .map((id, index) => ({ ...client, id, label: `Profile ${id}`, createdAt: 10 + index, hue: undefined, isDefault: false }))
+    expect(new Set(sameHash.map(profile => profileHue({ id: profile.id }))).size, 'the ids must collide on their own').toBe(1)
+    await act(async () => { port.set({ revision: 5, profiles: [personal, ...sameHash] }); await browserProfiles.refresh() })
+    const rowHue = (label: string) => [...container.querySelectorAll<HTMLElement>('[data-resource-row]')]
+      .find(row => row.textContent?.includes(label))!.querySelector<HTMLElement>('.profile-mark')!.style.getPropertyValue('--profile-hue')
+    const hues = [personal.label, ...sameHash.map(profile => profile.label)].map(rowHue)
+    expect(new Set(hues).size, JSON.stringify(hues)).toBe(hues.length)
+    await select('Profile p-11')
+    expect(container.querySelector<HTMLElement>('.browser-profile-editor__mark .profile-mark')!.style.getPropertyValue('--profile-hue')).toBe(rowHue('Profile p-11'))
   })
 
   it('renames in place with the list revision and shows the saved name everywhere', async () => {
