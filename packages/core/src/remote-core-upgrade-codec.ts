@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import type { RemoteCoreCurrentObservation, RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeExpected, RemoteCoreUpgradeHost, RemoteCoreUpgradeReceipt,
-  RemoteCoreMaintenanceOwner, RemoteCoreMaintenanceObservation, RemoteCoreUpgradeNativeRun } from './remote-core-upgrade.js'
+  RemoteCoreMaintenanceOwner, RemoteCoreMaintenanceObservation, RemoteCoreUpgradeNativeRun, RemoteCoreNativeReplacement } from './remote-core-upgrade.js'
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new AgentMuxError('Upgrade DTO has invalid fields.', 'CONTROL_PROTOCOL_ERROR')
   return value as Record<string, unknown>
@@ -71,11 +71,33 @@ export function parseRemoteCoreMaintenanceObservation(value: unknown): RemoteCor
     nativeRuntime: { daemonInstanceId: text(runtime.daemonInstanceId), runtimeId: text(runtime.runtimeId), buildId: text(runtime.buildId),
       protocolGeneration: count(runtime.protocolGeneration), runtimeIdPersistence: text(runtime.runtimeIdPersistence), platform: text(runtime.platform), arch: text(runtime.arch), capabilities } }
 }
+function runIds(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Upgrade Run list is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const ids = value.map(text)
+  if (new Set(ids).size !== ids.length) throw new AgentMuxError('Upgrade Run list repeats a Run.', 'CONTROL_PROTOCOL_ERROR')
+  return ids
+}
 export function parseRemoteCoreUpgradeExpected(value: unknown): RemoteCoreUpgradeExpected {
-  const p = record(value, ['targetDigest', 'runtimeId', 'ownerInstanceId', 'processId', 'startTicks', 'candidateDigest', 'nativeInstanceId', 'nativeProcessId', 'nativeStartTicks'])
+  const p = record(value, ['targetDigest', 'runtimeId', 'ownerInstanceId', 'processId', 'startTicks', 'candidateDigest', 'nativeInstanceId', 'nativeProcessId', 'nativeStartTicks', 'nativeReplacement'])
   if (!/^\d+$/u.test(text(p.startTicks)) || !/^\d+$/u.test(text(p.nativeStartTicks)) || count(p.processId) < 1 || count(p.nativeProcessId) < 1) throw new AgentMuxError('Upgrade process identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return { targetDigest: digest(p.targetDigest), runtimeId: text(p.runtimeId), ownerInstanceId: text(p.ownerInstanceId), processId: count(p.processId),
-    startTicks: text(p.startTicks), candidateDigest: digest(p.candidateDigest), nativeInstanceId: text(p.nativeInstanceId), nativeProcessId: count(p.nativeProcessId), nativeStartTicks: text(p.nativeStartTicks) }
+    startTicks: text(p.startTicks), candidateDigest: digest(p.candidateDigest), nativeInstanceId: text(p.nativeInstanceId), nativeProcessId: count(p.nativeProcessId), nativeStartTicks: text(p.nativeStartTicks),
+    ...(p.nativeReplacement === undefined ? {} : { nativeReplacement: { endingRunIds: runIds(record(p.nativeReplacement, ['endingRunIds']).endingRunIds) } }) }
+}
+function replacementPlan(value: unknown): RemoteCoreNativeReplacement {
+  const p = record(value, ['ending', 'stateBytes'])
+  if (!Array.isArray(p.ending)) throw new AgentMuxError('Native replacement plan is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const ending = p.ending.map(item => { const run = record(item, ['runId', 'agentSessionId']); return { runId: text(run.runId), agentSessionId: run.agentSessionId === null ? null : text(run.agentSessionId) } })
+  runIds(ending.map(run => run.runId))
+  return { ending, stateBytes: count(p.stateBytes) }
+}
+function replacementReceipt(value: unknown): NonNullable<RemoteCoreUpgradeReceipt['nativeReplacement']> {
+  const p = record(value, ['stateCopy', 'endedRunIds', 'survivingProcessIds'])
+  if (p.survivingProcessIds !== undefined && (!Array.isArray(p.survivingProcessIds) || p.survivingProcessIds.some(pid => !Number.isSafeInteger(pid) || (pid as number) < 1))) {
+    throw new AgentMuxError('Native replacement process list is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return { ...(p.stateCopy === undefined ? {} : { stateCopy: text(p.stateCopy) }), endedRunIds: runIds(p.endedRunIds),
+    ...(p.survivingProcessIds === undefined ? {} : { survivingProcessIds: [...p.survivingProcessIds as number[]] }) }
 }
 function host(value: unknown): RemoteCoreUpgradeHost {
   const p = record(value, ['id', 'kind', 'label', 'hostname', 'user', 'port', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId', 'transport', 'tailcat'])
@@ -119,10 +141,15 @@ function current(value: unknown): RemoteCoreCurrentObservation {
     native: { instanceId: text(native.instanceId), buildId: text(native.buildId), protocolVersion: positive(native.protocolVersion) } }
 }
 export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgradeReceipt {
-  const p = record(value, ['input', 'operationId', 'expected', 'status', 'stage', 'detail', 'remoteCommand', 'updatedAt', 'candidate', 'connectionAdoption'])
-  if (!['running', 'completed', 'failed', 'unknown'].includes(text(p.status)) || !['preparing', 'staged', 'stopping', 'starting', 'verifying', 'completed'].includes(text(p.stage))) throw new AgentMuxError('Upgrade outcome is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const p = record(value, ['input', 'operationId', 'expected', 'status', 'stage', 'detail', 'remoteCommand', 'updatedAt', 'candidate', 'connectionAdoption', 'nativeReplacement'])
+  if (!['running', 'completed', 'failed', 'unknown'].includes(text(p.status)) || !['preparing', 'staged', 'stopping', 'replacing-native', 'starting', 'verifying', 'completed'].includes(text(p.stage))) throw new AgentMuxError('Upgrade outcome is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (p.status === 'completed' && (p.stage !== 'completed' || !p.remoteCommand)) throw new AgentMuxError('Completed upgrade lacks its serving command.', 'CONTROL_PROTOCOL_ERROR')
   const expected = parseRemoteCoreUpgradeExpected(p.expected), target = p.candidate === undefined ? undefined : candidate(p.candidate)
+  const nativeReplacement = p.nativeReplacement === undefined ? undefined : replacementReceipt(p.nativeReplacement)
+  if (nativeReplacement && !expected.nativeReplacement || p.stage === 'replacing-native' && !expected.nativeReplacement ||
+      p.status === 'completed' && expected.nativeReplacement && !nativeReplacement?.stateCopy) {
+    throw new AgentMuxError('Native replacement receipt does not match its admission.', 'CONTROL_PROTOCOL_ERROR')
+  }
   if (target && target.digest !== expected.candidateDigest) throw new AgentMuxError('Original operation candidate belongs to another admission.', 'CONTROL_PROTOCOL_ERROR')
   let connectionAdoption: RemoteCoreUpgradeReceipt['connectionAdoption']
   if (p.connectionAdoption !== undefined) {
@@ -134,12 +161,19 @@ export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgrade
   return { input: host(p.input), operationId: text(p.operationId), expected,
     status: p.status as RemoteCoreUpgradeReceipt['status'], stage: p.stage as RemoteCoreUpgradeReceipt['stage'], detail: text(p.detail),
     ...(p.remoteCommand === undefined ? {} : { remoteCommand: text(p.remoteCommand) }), updatedAt: count(p.updatedAt),
-    ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }) }
+    ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }),
+    ...(nativeReplacement === undefined ? {} : { nativeReplacement }) }
 }
 export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCheck {
-  const p = record(value, ['input', 'current', 'candidate', 'candidateUnavailable', 'eligible', 'reason', 'detail', 'expected', 'latestOperation', 'unreadableOperations'])
+  const p = record(value, ['input', 'current', 'candidate', 'candidateUnavailable', 'eligible', 'reason', 'detail', 'expected', 'latestOperation', 'unreadableOperations', 'nativeReplacement'])
   if (typeof p.eligible !== 'boolean' || p.eligible !== (p.expected !== undefined)) throw new AgentMuxError('Upgrade eligibility does not match its checked admission.', 'CONTROL_PROTOCOL_ERROR')
-  if (!['ready', 'up-to-date', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
+  if (!['ready', 'native-replacement', 'up-to-date', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready' || p.reason === 'native-replacement')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
+  const plan = p.nativeReplacement === undefined ? undefined : replacementPlan(p.nativeReplacement)
+  const pinned = p.expected === undefined ? undefined : parseRemoteCoreUpgradeExpected(p.expected)
+  if ((p.reason === 'native-replacement') !== (plan !== undefined) || (p.reason === 'native-replacement') !== (pinned?.nativeReplacement !== undefined) ||
+      plan && pinned?.nativeReplacement && JSON.stringify(plan.ending.map(run => run.runId)) !== JSON.stringify(pinned.nativeReplacement.endingRunIds)) {
+    throw new AgentMuxError('Native replacement review does not match its admission.', 'CONTROL_PROTOCOL_ERROR')
+  }
   const serving = current(p.current), target = p.candidate === null ? null : candidate(p.candidate), input = host(p.input)
   let candidateUnavailable: RemoteCoreUpgradeCheck['candidateUnavailable']
   if (p.candidateUnavailable !== undefined) {
@@ -162,5 +196,6 @@ export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCh
     ...(candidateUnavailable === undefined ? {} : { candidateUnavailable }),
     ...(p.expected === undefined ? {} : { expected: parseRemoteCoreUpgradeExpected(p.expected) }),
     ...(p.latestOperation === undefined ? {} : { latestOperation: parseRemoteCoreUpgradeReceipt(p.latestOperation) }),
-    ...(p.unreadableOperations === undefined ? {} : { unreadableOperations: operationIds(p.unreadableOperations) }) }
+    ...(p.unreadableOperations === undefined ? {} : { unreadableOperations: operationIds(p.unreadableOperations) }),
+    ...(plan === undefined ? {} : { nativeReplacement: plan }) }
 }

@@ -260,6 +260,58 @@ fs.rmSync(next,{force:true});fs.symlinkSync(p.digest,next);fs.renameSync(next,cu
 const directory=fs.openSync(releases,'r');fs.fsyncSync(directory);fs.closeSync(directory);
 console.log(JSON.stringify({current:fs.readlinkSync(current)}));
 `
+/** Stops one exact original Native after its Core has gone, then keeps a complete copy of
+ * its state directory. Without stop it only checks the process and the free space. A
+ * process that survives its Native is reported, never signalled by a stored PID. */
+export const REPLACE_NATIVE = String.raw`
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const p=JSON.parse(fs.readFileSync(0,'utf8')),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const sleep=ms=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms);
+function birth(pid){try{const stat=fs.readFileSync('/proc/'+pid+'/stat','utf8').split(')').slice(1).join(')').trim().split(/\s+/);return stat[0]==='Z'?null:stat[19];}
+ catch(error){if(error.code==='ENOENT'||error.code==='ESRCH')return null;throw error;}}
+function measure(directory){let bytes=0,files=0;
+ for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const target=path.join(directory,entry.name);
+  if(entry.isDirectory()){const inner=measure(target);bytes+=inner.bytes;files+=inner.files;}
+  else if(entry.isFile()){bytes+=fs.statSync(target).size;files++;}
+  else throw Error('The Native state holds an entry that cannot be copied: '+entry.name+'. Nothing was stopped.');}
+ return {bytes,files};}
+function copy(from,to){const mode=fs.statSync(from).mode&0o777;fs.mkdirSync(to,{mode});fs.chmodSync(to,mode);
+ for(const entry of fs.readdirSync(from,{withFileTypes:true})){const source=path.join(from,entry.name),target=path.join(to,entry.name);
+  if(entry.isDirectory()){copy(source,target);continue;}
+  fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);fs.chmodSync(target,fs.statSync(source).mode&0o777);
+  const fd=fs.openSync(target,'r');fs.fsyncSync(fd);fs.closeSync(fd);
+  if(hash(fs.readFileSync(source))!==hash(fs.readFileSync(target)))throw Error('The Native state copy differs from '+entry.name);}
+ const fd=fs.openSync(to,'r');fs.fsyncSync(fd);fs.closeSync(fd);}
+function prepare(){
+ const base='/proc/'+p.pid;
+ if(birth(p.pid)!==p.startTicks||hash(fs.readFileSync(base+'/exe'))!==p.nativeSha256)throw Error('The original Native process changed.');
+ // The copy needs the state's own size; the WAL ceiling stays free for the Native that starts next.
+ const state=measure(p.nativeStateDirectory),space=fs.statfsSync(p.stateDirectory),available=Number(space.bavail)*Number(space.bsize);
+ if(available<state.bytes+p.reserveBytes)throw Error('Keeping a copy of the Native state needs '+(state.bytes+p.reserveBytes)+' free bytes; '+available+' are available.');
+ return {stateBytes:state.bytes,availableBytes:available};
+}
+// A plan read fails like any read. A stop answers with its own outcome, so the caller can tell
+// a confirmed refusal or copy failure from a lost reply.
+if(!p.stop){console.log(JSON.stringify(prepare()));}
+else{
+ let prepared;
+ try{prepared=prepare();}catch(error){console.log(JSON.stringify({outcome:'refused',detail:error.message}));process.exit(0);}
+ const runs=new Map(p.runProcessIds.map(pid=>[pid,birth(pid)]));
+ process.kill(p.pid,'SIGINT');
+ let gone=false;for(let attempt=0;attempt<600&&!gone;attempt++){gone=birth(p.pid)!==p.startTicks;if(!gone)sleep(100);}
+ if(!gone){console.log(JSON.stringify({outcome:'stop-unconfirmed'}));process.exit(0);}
+ // Run processes receive SIGHUP when their terminals close; a short bounded observation lets them leave.
+ const alive=()=>[...runs].filter(([pid,start])=>start!==null&&birth(pid)===start).map(([pid])=>pid);
+ for(let attempt=0;attempt<30&&alive().length;attempt++)sleep(100);
+ const partial=p.copyDirectory+'.partial';
+ try{
+  fs.mkdirSync(path.dirname(p.copyDirectory),{recursive:true,mode:0o700});fs.rmSync(partial,{recursive:true,force:true});
+  copy(p.nativeStateDirectory,partial);fs.renameSync(partial,p.copyDirectory);
+  const parent=fs.openSync(path.dirname(p.copyDirectory),'r');fs.fsyncSync(parent);fs.closeSync(parent);
+ }catch(error){fs.rmSync(partial,{recursive:true,force:true});console.log(JSON.stringify({outcome:'copy-failed',detail:error.message}));process.exit(0);}
+ console.log(JSON.stringify({outcome:'replaced',stateCopy:p.copyDirectory,stateBytes:prepared.stateBytes,survivingProcessIds:alive()}));
+}
+`
 export const OWNER_GONE = String.raw`
 import os,sys,json
 p=json.loads(sys.stdin.read()); base='/proc/'+str(p['pid'])
