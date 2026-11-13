@@ -579,3 +579,31 @@ it('semantic continuation does not replace an unknown saved native environment w
   expect(await h.inspect(saved)).toMatchObject({ ref: saved.control.ref, control: { state: 'enabled' }, admission: null })
   expect(h.inner.kernel.input).not.toHaveBeenCalled()
 })
+
+it('resubmitting a retained message wakes its input at the current waiting generation, not the first', async () => {
+  const h = await controlled()
+  // Saved the way a Connector saves an external message: with its channel, so the same input can be submitted again.
+  const expectedRun = { runId: 'run-recipient' }, externalAuthor = { kind: 'external' as const, connectionId: 'connection',
+    actor: { application: { domain: 'chat.example', appId: 'app' }, idType: 'open_id', userId: 'external-user' },
+    externalConversationId: 'room', externalMessageId: 'external-original', bindingId: 'binding', bindingRevision: 1, grantId: 'grant', grantRevision: 1 }
+  await h.queue.append({ messageId: 'second-generation', operationId: 'second-generation-operation', createdAt: 1, sender: externalAuthor,
+    recipient: { kind: 'agent-session', agentSessionId: 'recipient' }, senderSessionId: null, senderRunId: null, recipientSessionId: 'recipient',
+    recipientRunId: expectedRun.runId, threadId: 'second-generation', correlationId: 'second-generation', replyTo: null, workspaceId: null,
+    body: 'Original second-generation', admissionIntent: { kind: 'manual-actor', expectedRun }, execution: 'immediate', sourceChannel: 'agent-message' },
+    { inputEnvironment: { providerId: 'claude', executorId: 'claude' } })
+  const saved = (await h.queue.inspectInput({ key: { kind: 'message', agentSessionId: 'recipient', expectedRun, messageId: 'second-generation' } }))!
+  const first = saved.control.ref
+  expect(first.waitGeneration).toBe(1)
+  await h.client.stopAgentInputWaiting({ ref: first, cancelOperationId: 'author-stop' })
+  const current = await h.queue.reenableInputWaiting(first)
+  expect(current.waitGeneration).toBe(2)
+  const rejoin = vi.spyOn(h.client, 'rejoinAgentInputWaiting')
+  const retained = (await h.queue.listAfter(0)).find(record => record.envelope.messageId === 'second-generation')!
+  const receipt = await h.client.submitAgentMessage({ agentSessionId: 'recipient', envelope: retained.envelope, admissionIntent: retained.admissionIntent!,
+    execution: 'immediate', sourceChannel: 'agent-message' }, h.context)
+  expect(receipt).toMatchObject({ key: first.key, ref: current })
+  expect(rejoin).toHaveBeenCalledWith(expect.objectContaining({ ref: current, scope: 'wake-only' }), h.context)
+  // The woken input is the current generation: it is delivered once, and the first generation is not revived.
+  await vi.waitFor(async () => expect(await h.inspect(saved)).toMatchObject({ status: 'terminal-confirmed', ref: current }))
+  expect(h.inner.kernel.input).toHaveBeenCalledOnce()
+})
