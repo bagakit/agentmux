@@ -164,7 +164,7 @@ export function SessionPane({
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
   const storageDiagnostic = !session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined
   const storageWait = storageDiagnostic?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE'
-  const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.findLast(value =>
+  const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.slice().reverse().find(value =>
     value.hostId === pendingLaunch.request?.hostId && value.event.type === 'agent-error' &&
     value.event.agentSessionId === sessionId && value.event.code === 'AGENT_CREATION_WAITING_FOR_STORAGE')?.event : undefined
   const pendingTerminal = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
