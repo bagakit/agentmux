@@ -1,8 +1,9 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
-import { spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxMessageAppendInput } from '../src/agent-global-message-queue.js'
 
@@ -29,19 +30,21 @@ async function fixture() {
 const notice = (notificationId: string) => ({ notificationId, agentSessionId: 'recipient', condition, idle })
 async function processClaim(path: string, notificationId: string) {
   const program = `const {DurableAgentMuxMessageQueue}=await import(process.argv[1]); const queue=new DurableAgentMuxMessageQueue(process.argv[2]); process.stdout.write(JSON.stringify(await queue.prepareNotification(JSON.parse(process.argv[3]))));`
-  return await new Promise<any>((yes, no) => {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', program, entry, path, JSON.stringify(notice(notificationId))], { stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = '', errors = ''
-    child.stdout.on('data', bytes => { output += bytes }); child.stderr.on('data', bytes => { errors += bytes })
-    child.once('error', no); child.once('close', code => { if (code === 0) { try { yes(JSON.parse(output)) } catch (error) { no(error) } } else no(new Error(errors || 'Private journal claim failed')) })
-  })
+  const { stdout } = await promisify(execFile)(process.execPath,
+    ['--input-type=module', '-e', program, entry, path, JSON.stringify(notice(notificationId))],
+    { timeout: 15_000, killSignal: 'SIGKILL', maxBuffer: 256 * 1024 })
+  return JSON.parse(stdout)
 }
 
 describe('original Inbox and independent A2A reference notification', () => {
   it('freezes one coalesced reference input across concurrent Core processes and reopening', async () => {
     const queue = await fixture(), originals = [message('first'), message('second')]
     for (const input of originals) await queue.append(input, { deliveryMode: 'reference' })
-    const claims = await Promise.all(['notice-left', 'notice-right'].map(id => processClaim(queue.path, id)))
+    // Both original children must close before cleanup, including a rejected claim.
+    const outcomes = await Promise.allSettled(['notice-left', 'notice-right'].map(id => processClaim(queue.path, id)))
+    const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+    if (failures.length) throw new AggregateError(failures.map(outcome => outcome.reason), 'Private journal claim failed')
+    const claims = outcomes.map(outcome => (outcome as PromiseFulfilledResult<any>).value)
     expect(claims).toHaveLength(2); expect(claims[0]).toEqual(claims[1])
     const frozen = claims[0]
     expect(frozen).toMatchObject({ mode: 'idle', state: 'pending', messageIds: ['first', 'second'], condition, idle,
@@ -61,7 +64,7 @@ describe('original Inbox and independent A2A reference notification', () => {
       expect(retained).toMatchObject({ envelope: { messageId: original.messageId, body: original.body }, delivery: { state: 'queued' },
         deliveryMode: 'reference', notification: { state: 'pending', notificationId: frozen.notificationId, key: frozen.key } })
     }
-  })
+  }, 30_000)
 
   it('budgets the complete bridge and escaped identities before freezing automatic or explicit references', async () => {
     const queue = await fixture(), maxBytes = 64 * 1024
