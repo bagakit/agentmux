@@ -80,6 +80,10 @@ private enum SCScreenshotManager {
     }
 }
 private func pixels(width: Int, height: Int) throws -> CGImage {
+    // A grab past the host limits would allocate gigabytes; the controlled service refuses it instead.
+    guard width <= NativeImageLimits.maxDimension, height <= NativeImageLimits.maxDimension else {
+        throw ProviderError.coded("fixture_oversized_grab", "the controlled service refused an oversized grab")
+    }
     guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
         space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
         let image = context.makeImage() else { throw ProviderError.coded("fixture_allocation", "could not create controlled pixels") }
@@ -176,6 +180,13 @@ private struct DisplayFramesChecks {
         let envelope: [String: Any] = ["id": Int(Int32.max), "instanceId": UUID().uuidString, "operationId": UUID().uuidString, "ok": true, "result": large.result ?? [:]]
         check("the whole response fits one NDJSON frame", (try? JSONSerialization.data(withJSONObject: envelope, options: [.withoutEscapingSlashes]))
             .map { $0.count <= NativeNDJSONReader.maxFrameBytes } == true)
+
+        io.reset(screens: [NSScreen(id: 1, backingScaleFactor: 64), NSScreen(id: 2, backingScaleFactor: 1)])
+        let oversized = run()
+        let oversizedDisplays = oversized.result?["displays"] as? [[String: Any]] ?? []
+        check("a display past the host image limits carries image_too_large and is never grabbed", oversizedDisplays.count == 2
+            && (oversizedDisplays[0]["issue"] as? String)?.hasPrefix("image_too_large:") == true && oversizedDisplays[0]["png"] == nil
+            && oversizedDisplays[1]["png"] is String && io.observation.grabs == [2])
 
         io.reset(screens: [NSScreen(id: 3, backingScaleFactor: 1)])
         let none = run()
