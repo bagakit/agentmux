@@ -1,12 +1,12 @@
-import XCTest
+import Testing
 @testable import AgentMuxNativeMacOSCore
-final class NativeImageLimitsTests: XCTestCase {
-    func testCommonRetinaCaptureAndPerImageBoundaries() {
-        XCTAssertTrue(NativeImageLimits.permits(width: 3840, height: 2160))
-        XCTAssertTrue(NativeImageLimits.permits(width: 8192, height: 4096))
-        XCTAssertFalse(NativeImageLimits.permits(width: 8192, height: 4097))
-        XCTAssertFalse(NativeImageLimits.permits(width: 16385, height: 1))
-        XCTAssertFalse(NativeImageLimits.permits(width: .infinity, height: 1))
-        XCTAssertFalse(NativeImageLimits.permits(width: 1, height: .nan))
+@Suite struct NativeImageLimitsTests {
+    @Test func commonRetinaCaptureAndPerImageBoundaries() {
+        #expect(NativeImageLimits.permits(width: 3840, height: 2160))
+        #expect(NativeImageLimits.permits(width: 8192, height: 4096))
+        #expect(!NativeImageLimits.permits(width: 8192, height: 4097))
+        #expect(!NativeImageLimits.permits(width: 16385, height: 1))
+        #expect(!NativeImageLimits.permits(width: .infinity, height: 1))
+        #expect(!NativeImageLimits.permits(width: 1, height: .nan))
     }
 }

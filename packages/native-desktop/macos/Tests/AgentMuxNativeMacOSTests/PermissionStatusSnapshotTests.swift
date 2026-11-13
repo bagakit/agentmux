@@ -1,25 +1,23 @@
 import Dispatch
+import Foundation
 @testable import AgentMuxNativeMacOSCore
-import XCTest
+import Testing
 
-final class PermissionStatusSnapshotTests: XCTestCase {
-    func testCapturesBothPermissionResults() {
+@Suite struct PermissionStatusSnapshotTests {
+    @Test func capturesBothPermissionResults() {
         let snapshot = PermissionStatusSnapshotProbe.capture(
             accessibilityProbe: { true },
             screenshotsProbe: { false }
         )
 
-        XCTAssertEqual(
-            snapshot,
-            PermissionStatusSnapshot(accessibilityGranted: true, screenshotsGranted: false)
-        )
+        #expect(snapshot == PermissionStatusSnapshot(accessibilityGranted: true, screenshotsGranted: false))
     }
 
-    func testRunsPermissionProbesConcurrently() {
+    @Test func runsPermissionProbesConcurrently() {
         let accessibilityStarted = DispatchSemaphore(value: 0)
         let screenshotsStarted = DispatchSemaphore(value: 0)
         let releaseProbes = DispatchSemaphore(value: 0)
-        let finished = expectation(description: "permission snapshot")
+        let finished = CallbackRecorder()
 
         DispatchQueue.global().async {
             _ = PermissionStatusSnapshotProbe.capture(
@@ -34,21 +32,21 @@ final class PermissionStatusSnapshotTests: XCTestCase {
                     return true
                 }
             )
-            finished.fulfill()
+            finished.record()
         }
 
-        XCTAssertEqual(accessibilityStarted.wait(timeout: .now() + 1), .success)
-        XCTAssertEqual(screenshotsStarted.wait(timeout: .now() + 1), .success)
+        #expect(accessibilityStarted.wait(timeout: .now() + 1) == .success)
+        #expect(screenshotsStarted.wait(timeout: .now() + 1) == .success)
         releaseProbes.signal()
         releaseProbes.signal()
-        wait(for: [finished], timeout: 1)
+        #expect(finished.wait(seconds: 1))
     }
 
-    func testCoalescesRefreshesWhileProbeIsRunning() {
+    @Test func coalescesRefreshesWhileProbeIsRunning() {
         let callbackQueue = DispatchQueue(label: "permission-status-test-callback")
         let probeStarted = DispatchSemaphore(value: 0)
         let releaseProbe = DispatchSemaphore(value: 0)
-        let handled = expectation(description: "snapshot handled")
+        let handled = CallbackRecorder()
         let probeCount = LockedCounter()
         let coordinator = PermissionStatusRefreshCoordinator(
             callbackQueue: callbackQueue,
@@ -61,23 +59,24 @@ final class PermissionStatusSnapshotTests: XCTestCase {
                     screenshotsGranted: true
                 )
             },
-            handler: { _ in handled.fulfill() }
+            handler: { _ in handled.record() }
         )
 
         coordinator.refresh()
-        XCTAssertEqual(probeStarted.wait(timeout: .now() + 1), .success)
+        #expect(probeStarted.wait(timeout: .now() + 1) == .success)
         coordinator.refresh()
         coordinator.refresh()
         releaseProbe.signal()
 
-        wait(for: [handled], timeout: 1)
-        XCTAssertEqual(probeCount.value, 1)
+        #expect(handled.wait(seconds: 1))
+        #expect(probeCount.value == 1)
+        #expect(handled.count == 1)
     }
 
-    func testAllowsRefreshAfterPreviousSnapshotWasHandled() {
+    @Test func allowsRefreshAfterPreviousSnapshotWasHandled() {
         let callbackQueue = DispatchQueue(label: "permission-status-test-callback")
-        let firstHandled = expectation(description: "first snapshot handled")
-        let secondHandled = expectation(description: "second snapshot handled")
+        let firstHandled = CallbackRecorder()
+        let secondHandled = CallbackRecorder()
         let probeCount = LockedCounter()
         let coordinator = PermissionStatusRefreshCoordinator(
             callbackQueue: callbackQueue,
@@ -90,19 +89,21 @@ final class PermissionStatusSnapshotTests: XCTestCase {
             },
             handler: { snapshot in
                 if snapshot.accessibilityGranted {
-                    secondHandled.fulfill()
+                    secondHandled.record()
                 } else {
-                    firstHandled.fulfill()
+                    firstHandled.record()
                 }
             }
         )
 
         coordinator.refresh()
-        wait(for: [firstHandled], timeout: 1)
+        #expect(firstHandled.wait(seconds: 1))
         coordinator.refresh()
 
-        wait(for: [secondHandled], timeout: 1)
-        XCTAssertEqual(probeCount.value, 2)
+        #expect(secondHandled.wait(seconds: 1))
+        #expect(probeCount.value == 2)
+        #expect(firstHandled.count == 1)
+        #expect(secondHandled.count == 1)
     }
 }
 

@@ -1,16 +1,16 @@
 import ApplicationServices
-import XCTest
+import Testing
 @testable import AgentMuxNativeMacOSCore
 
-final class NativeAXReplyTests: XCTestCase {
-    func testUnconfirmedAXWritesNeverAuthorizeAnotherInputPath() {
-        XCTAssertEqual(NativeAXReply.classify(.cannotComplete), .unknown)
-        XCTAssertEqual(NativeAXReply.classify(.failure), .unknown)
-        XCTAssertEqual(NativeAXReply.classify(.apiDisabled), .unknown)
+@Suite struct NativeAXReplyTests {
+    @Test func unconfirmedAXWritesNeverAuthorizeAnotherInputPath() {
+        #expect(NativeAXReply.classify(.cannotComplete) == .unknown)
+        #expect(NativeAXReply.classify(.failure) == .unknown)
+        #expect(NativeAXReply.classify(.apiDisabled) == .unknown)
     }
-    func testAcceptanceAndExplicitUnsupportedRepliesStayDistinct() {
-        XCTAssertEqual(NativeAXReply.classify(.success), .accepted)
-        XCTAssertEqual(NativeAXReply.classify(.actionUnsupported), .unsupported)
-        XCTAssertEqual(NativeAXReply.classify(.attributeUnsupported), .unsupported)
+    @Test func acceptanceAndExplicitUnsupportedRepliesStayDistinct() {
+        #expect(NativeAXReply.classify(.success) == .accepted)
+        #expect(NativeAXReply.classify(.actionUnsupported) == .unsupported)
+        #expect(NativeAXReply.classify(.attributeUnsupported) == .unsupported)
     }
 }

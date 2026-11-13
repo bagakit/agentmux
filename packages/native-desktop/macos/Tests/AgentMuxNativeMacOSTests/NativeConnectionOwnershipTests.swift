@@ -1,97 +1,97 @@
 import AgentMuxNativeMacOSCore
-import XCTest
+import Testing
 
-final class NativeConnectionOwnershipTests: XCTestCase {
-    func testUnclaimedDisconnectDoesNotTerminateAgent() {
+@Suite struct NativeConnectionOwnershipTests {
+    @Test func unclaimedDisconnectDoesNotTerminateAgent() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertFalse(ownership.disconnect(connection(12)))
+        #expect(ownership.disconnect(connection(12)) == false)
     }
 
-    func testUnauthenticatedConnectionCannotClaimOrRetainAgent() {
+    @Test func unauthenticatedConnectionCannotClaimOrRetainAgent() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: false), .rejected)
-        XCTAssertFalse(ownership.disconnect(connection(12)))
+        #expect(ownership.registerConnection(connection(12), authenticated: false) == .rejected)
+        #expect(ownership.disconnect(connection(12)) == false)
     }
 
-    func testLastAuthenticatedDisconnectTerminatesAgent() {
+    @Test func lastAuthenticatedDisconnectTerminatesAgent() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: true), .claimed)
-        XCTAssertTrue(ownership.disconnect(connection(12)))
+        #expect(ownership.registerConnection(connection(12), authenticated: true) == .claimed)
+        #expect(ownership.disconnect(connection(12)) == true)
     }
 
-    func testAgentWaitsForEveryAuthenticatedConnectionToClose() {
+    @Test func agentWaitsForEveryAuthenticatedConnectionToClose() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: true), .claimed)
-        XCTAssertEqual(ownership.registerConnection(connection(13), authenticated: true), .retained)
-        XCTAssertFalse(ownership.disconnect(connection(12)))
-        XCTAssertTrue(ownership.disconnect(connection(13)))
+        #expect(ownership.registerConnection(connection(12), authenticated: true) == .claimed)
+        #expect(ownership.registerConnection(connection(13), authenticated: true) == .retained)
+        #expect(ownership.disconnect(connection(12)) == false)
+        #expect(ownership.disconnect(connection(13)) == true)
     }
 
-    func testDuplicateRegistrationDoesNotRetainAgent() {
+    @Test func duplicateRegistrationDoesNotRetainAgent() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: true), .claimed)
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: true), .rejected)
-        XCTAssertTrue(ownership.disconnect(connection(12)))
+        #expect(ownership.registerConnection(connection(12), authenticated: true) == .claimed)
+        #expect(ownership.registerConnection(connection(12), authenticated: true) == .rejected)
+        #expect(ownership.disconnect(connection(12)) == true)
     }
 
-    func testClosedSessionRejectsNewConnections() {
+    @Test func closedSessionRejectsNewConnections() {
         var ownership = NativeConnectionOwnership()
 
-        XCTAssertEqual(ownership.registerConnection(connection(12), authenticated: true), .claimed)
-        XCTAssertTrue(ownership.disconnect(connection(12)))
-        XCTAssertEqual(ownership.registerConnection(connection(13), authenticated: true), .rejected)
-        XCTAssertFalse(ownership.disconnect(connection(13)))
+        #expect(ownership.registerConnection(connection(12), authenticated: true) == .claimed)
+        #expect(ownership.disconnect(connection(12)) == true)
+        #expect(ownership.registerConnection(connection(13), authenticated: true) == .rejected)
+        #expect(ownership.disconnect(connection(13)) == false)
     }
 
-    func testStaleDisconnectCannotRemoveReusedFileDescriptorOwner() {
+    @Test func staleDisconnectCannotRemoveReusedFileDescriptorOwner() {
         var ownership = NativeConnectionOwnership()
         let staleConnection = connection(12)
         let otherConnection = connection(13)
         let reusedDescriptorConnection = connection(14)
 
-        XCTAssertEqual(ownership.registerConnection(staleConnection, authenticated: true), .claimed)
-        XCTAssertEqual(ownership.registerConnection(otherConnection, authenticated: true), .retained)
-        XCTAssertFalse(ownership.disconnect(staleConnection))
-        XCTAssertEqual(
-            ownership.registerConnection(reusedDescriptorConnection, authenticated: true),
+        #expect(ownership.registerConnection(staleConnection, authenticated: true) == .claimed)
+        #expect(ownership.registerConnection(otherConnection, authenticated: true) == .retained)
+        #expect(ownership.disconnect(staleConnection) == false)
+        #expect(
+            ownership.registerConnection(reusedDescriptorConnection, authenticated: true) ==
             .retained
         )
 
-        XCTAssertFalse(ownership.disconnect(staleConnection))
-        XCTAssertFalse(ownership.disconnect(otherConnection))
-        XCTAssertTrue(ownership.disconnect(reusedDescriptorConnection))
+        #expect(ownership.disconnect(staleConnection) == false)
+        #expect(ownership.disconnect(otherConnection) == false)
+        #expect(ownership.disconnect(reusedDescriptorConnection) == true)
     }
 
-    func testTokenlessConnectionCannotAuthenticate() {
-        XCTAssertFalse(isAuthenticatedNativeConnection(
+    @Test func tokenlessConnectionCannotAuthenticate() {
+        #expect(!isAuthenticatedNativeConnection(
             expectedToken: nil,
             requestToken: nil,
             authorizedPeer: false
         ))
-        XCTAssertFalse(isAuthenticatedNativeConnection(
+        #expect(!isAuthenticatedNativeConnection(
             expectedToken: nil,
             requestToken: nil,
             authorizedPeer: true
         ))
     }
 
-    func testTokenSessionRequiresAuthorizedPeerAndMatchingToken() {
-        XCTAssertFalse(isAuthenticatedNativeConnection(
+    @Test func tokenSessionRequiresAuthorizedPeerAndMatchingToken() {
+        #expect(!isAuthenticatedNativeConnection(
             expectedToken: "expected",
             requestToken: "expected",
             authorizedPeer: false
         ))
-        XCTAssertFalse(isAuthenticatedNativeConnection(
+        #expect(!isAuthenticatedNativeConnection(
             expectedToken: "expected",
             requestToken: "wrong",
             authorizedPeer: true
         ))
-        XCTAssertTrue(isAuthenticatedNativeConnection(
+        #expect(isAuthenticatedNativeConnection(
             expectedToken: "expected",
             requestToken: "expected",
             authorizedPeer: true

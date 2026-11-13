@@ -1,82 +1,64 @@
 import AgentMuxNativeMacOSCore
-import XCTest
+import Testing
 
-final class ActionArgumentValidationTests: XCTestCase {
-    func testPositiveIntegerAcceptsPositiveValuesAndDefaults() {
-        XCTAssertEqual(
-            try ActionArgumentValidation.positiveInteger(nil, defaultValue: 1, name: "clickCount").get(),
-            1
+@Suite struct ActionArgumentValidationTests {
+    @Test func positiveIntegerAcceptsPositiveValuesAndDefaults() throws {
+        #expect(try ActionArgumentValidation.positiveInteger(nil, defaultValue: 1, name: "clickCount").get() == 1)
+        #expect(try ActionArgumentValidation.positiveInteger(2, defaultValue: 1, name: "clickCount").get() == 2)
+    }
+
+    @Test func positiveIntegerRejectsZeroNegativeAndNonFiniteValues() {
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveInteger(0, defaultValue: 1, name: "clickCount"))
+                == "clickCount must be a positive integer"
         )
-        XCTAssertEqual(
-            try ActionArgumentValidation.positiveInteger(2, defaultValue: 1, name: "clickCount").get(),
-            2
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveInteger(-1, defaultValue: 1, name: "clickCount"))
+                == "clickCount must be a positive integer"
+        )
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveInteger(.infinity, defaultValue: 1, name: "clickCount"))
+                == "clickCount must be a positive integer"
         )
     }
 
-    func testPositiveIntegerRejectsZeroNegativeAndNonFiniteValues() {
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveInteger(0, defaultValue: 1, name: "clickCount")),
-            "clickCount must be a positive integer"
+    @Test func positiveNumberAcceptsPositiveValuesAndDefaults() throws {
+        #expect(try ActionArgumentValidation.positiveNumber(nil, defaultValue: 1, name: "pages").get() == 1)
+        #expect(try ActionArgumentValidation.positiveNumber(0.5, defaultValue: 1, name: "pages").get() == 0.5)
+    }
+
+    @Test func positiveNumberRejectsZeroNegativeAndNonFiniteValues() {
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveNumber(0, defaultValue: 1, name: "pages"))
+                == "pages must be a positive number"
         )
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveInteger(-1, defaultValue: 1, name: "clickCount")),
-            "clickCount must be a positive integer"
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveNumber(-0.5, defaultValue: 1, name: "pages"))
+                == "pages must be a positive number"
         )
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveInteger(.infinity, defaultValue: 1, name: "clickCount")),
-            "clickCount must be a positive integer"
+        #expect(
+            failureMessage(ActionArgumentValidation.positiveNumber(.nan, defaultValue: 1, name: "pages"))
+                == "pages must be a positive number"
         )
     }
 
-    func testPositiveNumberAcceptsPositiveValuesAndDefaults() {
-        XCTAssertEqual(
-            try ActionArgumentValidation.positiveNumber(nil, defaultValue: 1, name: "pages").get(),
-            1
-        )
-        XCTAssertEqual(
-            try ActionArgumentValidation.positiveNumber(0.5, defaultValue: 1, name: "pages").get(),
-            0.5
-        )
+    @Test func mouseButtonDefaultsToLeftAndAcceptsEveryButton() throws {
+        #expect(try ActionArgumentValidation.mouseButton(nil).get() == .left)
+        #expect(try ActionArgumentValidation.mouseButton("left").get() == .left)
+        #expect(try ActionArgumentValidation.mouseButton("right").get() == .right)
+        #expect(try ActionArgumentValidation.mouseButton("middle").get() == .middle)
     }
 
-    func testPositiveNumberRejectsZeroNegativeAndNonFiniteValues() {
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveNumber(0, defaultValue: 1, name: "pages")),
-            "pages must be a positive number"
-        )
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveNumber(-0.5, defaultValue: 1, name: "pages")),
-            "pages must be a positive number"
-        )
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.positiveNumber(.nan, defaultValue: 1, name: "pages")),
-            "pages must be a positive number"
-        )
+    @Test func mouseButtonRejectsUnknownButtons() {
+        #expect(failureMessage(ActionArgumentValidation.mouseButton("primary")) == "unsupported mouse button 'primary'")
+        #expect(failureMessage(ActionArgumentValidation.mouseButton("")) == "unsupported mouse button ''")
     }
 
-    func testMouseButtonDefaultsToLeftAndAcceptsEveryButton() {
-        XCTAssertEqual(try ActionArgumentValidation.mouseButton(nil).get(), .left)
-        XCTAssertEqual(try ActionArgumentValidation.mouseButton("left").get(), .left)
-        XCTAssertEqual(try ActionArgumentValidation.mouseButton("right").get(), .right)
-        XCTAssertEqual(try ActionArgumentValidation.mouseButton("middle").get(), .middle)
-    }
-
-    func testMouseButtonRejectsUnknownButtons() {
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.mouseButton("primary")),
-            "unsupported mouse button 'primary'"
-        )
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.mouseButton("")),
-            "unsupported mouse button ''"
-        )
-    }
-
-    func testScrollDirectionRejectsUnknownDirections() {
-        XCTAssertEqual(try ActionArgumentValidation.scrollDirection("down").get(), "down")
-        XCTAssertEqual(
-            failureMessage(ActionArgumentValidation.scrollDirection("diagonal")),
-            "unsupported scroll direction: diagonal"
+    @Test func scrollDirectionRejectsUnknownDirections() throws {
+        #expect(try ActionArgumentValidation.scrollDirection("down").get() == "down")
+        #expect(
+            failureMessage(ActionArgumentValidation.scrollDirection("diagonal"))
+                == "unsupported scroll direction: diagonal"
         )
     }
 

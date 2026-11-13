@@ -1,23 +1,24 @@
 import AgentMuxNativeMacOSCore
-import XCTest
+import Foundation
+import Testing
 
-final class ComputerSnapshotCachePolicyTests: XCTestCase {
-    func testDoesNotExpireFreshSnapshotsAtTheAgeBoundary() {
+@Suite struct ComputerSnapshotCachePolicyTests {
+    @Test func doesNotExpireFreshSnapshotsAtTheAgeBoundary() {
         let createdAt = Date(timeIntervalSince1970: 100)
         let now = createdAt.addingTimeInterval(ComputerSnapshotCachePolicy.maxAge)
 
-        XCTAssertFalse(ComputerSnapshotCachePolicy.isExpired(createdAt: createdAt, now: now))
+        #expect(!ComputerSnapshotCachePolicy.isExpired(createdAt: createdAt, now: now))
     }
 
-    func testExpiresSnapshotsOlderThanTheAgeLimit() {
+    @Test func expiresSnapshotsOlderThanTheAgeLimit() {
         let createdAt = Date(timeIntervalSince1970: 100)
         let now = createdAt.addingTimeInterval(ComputerSnapshotCachePolicy.maxAge + 0.001)
 
-        XCTAssertTrue(ComputerSnapshotCachePolicy.isExpired(createdAt: createdAt, now: now))
+        #expect(ComputerSnapshotCachePolicy.isExpired(createdAt: createdAt, now: now))
     }
 
-    func testPrunesWhenCacheExceedsEntryLimit() {
-        XCTAssertTrue(
+    @Test func prunesWhenCacheExceedsEntryLimit() {
+        #expect(
             ComputerSnapshotCachePolicy.shouldPrune(
                 entryCount: ComputerSnapshotCachePolicy.maxEntries + 1,
                 createdAt: Date(),

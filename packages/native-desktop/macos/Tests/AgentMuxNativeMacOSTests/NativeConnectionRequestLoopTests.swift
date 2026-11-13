@@ -1,9 +1,9 @@
 import Foundation
 @testable import AgentMuxNativeMacOSCore
-import XCTest
+import Testing
 
-final class NativeConnectionRequestLoopTests: XCTestCase {
-    func testReleasesARequestsAutoreleasedObjectsBeforeTheNextRequest() {
+@Suite struct NativeConnectionRequestLoopTests {
+    @Test func releasesARequestsAutoreleasedObjectsBeforeTheNextRequest() {
         var lines = ["screenshot", "next"]
         weak var screenshotBuffer: NSObject?
         var releasedBeforeNextRequest: Bool?
@@ -20,10 +20,10 @@ final class NativeConnectionRequestLoopTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(releasedBeforeNextRequest, true)
+        #expect(releasedBeforeNextRequest == true)
     }
 
-    func testServesEveryLineUntilInputEnds() {
+    @Test func servesEveryLineUntilInputEnds() {
         var lines = ["a", "b", "c"]
         var handled: [String] = []
 
@@ -32,10 +32,10 @@ final class NativeConnectionRequestLoopTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(handled, ["a", "b", "c"])
+        #expect(handled == ["a", "b", "c"])
     }
 
-    func testStopsReadingWhenTheHandlerClosesTheConnection() {
+    @Test func stopsReadingWhenTheHandlerClosesTheConnection() {
         var lines = ["a", "b", "c"]
         var handled: [String] = []
 
@@ -44,7 +44,7 @@ final class NativeConnectionRequestLoopTests: XCTestCase {
             return line != "b"
         }
 
-        XCTAssertEqual(handled, ["a", "b"])
-        XCTAssertEqual(lines, ["c"])
+        #expect(handled == ["a", "b"])
+        #expect(lines == ["c"])
     }
 }

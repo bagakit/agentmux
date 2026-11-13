@@ -1,8 +1,8 @@
-import XCTest
+import Testing
 @testable import AgentMuxNativeMacOSCore
 
-final class KeyboardInputSafetyTests: XCTestCase {
-    func testSyntheticInputRequiresFocusedTargetWindow() {
+@Suite struct KeyboardInputSafetyTests {
+    @Test func syntheticInputRequiresFocusedTargetWindow() {
         let cases: [(focused: Bool, restoreWindow: Bool, expectedFailure: KeyboardInputSafety.FocusFailure?)] = [
             (focused: true, restoreWindow: false, expectedFailure: nil),
             (focused: true, restoreWindow: true, expectedFailure: nil),
@@ -11,12 +11,11 @@ final class KeyboardInputSafetyTests: XCTestCase {
         ]
 
         for testCase in cases {
-            XCTAssertEqual(
+            #expect(
                 KeyboardInputSafety.syntheticInputFocusFailure(
                     targetWindowFocused: testCase.focused,
                     restoreWindowRequested: testCase.restoreWindow
-                ),
-                testCase.expectedFailure
+                ) == testCase.expectedFailure
             )
         }
     }

@@ -1,22 +1,23 @@
 import Darwin
 import Dispatch
+import Foundation
 @testable import AgentMuxNativeMacOSCore
-import XCTest
+import Testing
 
-final class AuthenticatedConnectionHangupMonitorTests: XCTestCase {
-    func testRejectsInvalidDescriptorDuringSetup() {
-        XCTAssertThrowsError(
+@Suite struct AuthenticatedConnectionHangupMonitorTests {
+    @Test func rejectsInvalidDescriptorDuringSetup() {
+        #expect(throws: (any Error).self) {
             try AuthenticatedConnectionHangupMonitor(
                 fileDescriptor: -1,
                 onHangup: {}
             )
-        )
+        }
     }
 
-    func testRegistrationFailureClosesEventQueueOnce() {
+    @Test func registrationFailureClosesEventQueueOnce() {
         let closes = DescriptorCloseRecorder()
 
-        XCTAssertThrowsError(
+        #expect(throws: (any Error).self) {
             try AuthenticatedConnectionHangupMonitor(
                 fileDescriptor: 42,
                 registerEvents: { _, _, _ in .EBADF },
@@ -25,45 +26,45 @@ final class AuthenticatedConnectionHangupMonitorTests: XCTestCase {
                 },
                 onHangup: {}
             )
-        )
-        XCTAssertEqual(closes.count, 1)
+        }
+        #expect(closes.count == 1)
     }
 
-    func testReportsPeerCloseWhileRequestHandlingIsBlocked() throws {
+    @Test func reportsPeerCloseWhileRequestHandlingIsBlocked() throws {
         let descriptors = try makeSocketPair()
-        let hangup = expectation(description: "peer hangup")
-        let processingStarted = expectation(description: "processing started")
+        let hangups = CallbackRecorder()
+        let processingStarted = CallbackRecorder()
         let releaseProcessing = DispatchSemaphore(value: 0)
         let processingFinished = DispatchSemaphore(value: 0)
         let monitor = try AuthenticatedConnectionHangupMonitor(
             fileDescriptor: descriptors.local,
             onHangup: {
-                hangup.fulfill()
+                hangups.record()
             }
         )
         monitor.start()
 
         DispatchQueue.global().async {
-            processingStarted.fulfill()
+            processingStarted.record()
             releaseProcessing.wait()
             processingFinished.signal()
         }
-        wait(for: [processingStarted], timeout: 1)
+        #expect(processingStarted.wait(seconds: 1))
         close(descriptors.peer)
 
-        wait(for: [hangup], timeout: 1)
-        XCTAssertEqual(processingFinished.wait(timeout: .now() + 0.05), .timedOut)
+        #expect(hangups.wait(seconds: 1))
+        #expect(processingFinished.wait(timeout: .now() + 0.05) == .timedOut)
 
         releaseProcessing.signal()
-        XCTAssertEqual(processingFinished.wait(timeout: .now() + 1), .success)
+        #expect(processingFinished.wait(timeout: .now() + 1) == .success)
+        #expect(hangups.count == 1)
         monitor.cancel()
         close(descriptors.local)
     }
 
-    func testReadableDataDoesNotLookLikeHangup() throws {
+    @Test func readableDataDoesNotLookLikeHangup() throws {
         let descriptors = try makeSocketPair()
-        let hangup = expectation(description: "peer hangup")
-        let callbacks = CallbackRecorder()
+        let hangups = CallbackRecorder()
         let events = CallbackRecorder()
         let monitor = try AuthenticatedConnectionHangupMonitor(
             fileDescriptor: descriptors.local,
@@ -71,33 +72,32 @@ final class AuthenticatedConnectionHangupMonitorTests: XCTestCase {
                 events.record()
             },
             onHangup: {
-                callbacks.record()
-                hangup.fulfill()
+                hangups.record()
             }
         )
         monitor.start()
         var byte: UInt8 = 7
 
-        XCTAssertEqual(write(descriptors.peer, &byte, 1), 1)
+        #expect(write(descriptors.peer, &byte, 1) == 1)
         usleep(50_000)
-        XCTAssertEqual(callbacks.count, 0)
-        XCTAssertEqual(events.count, 0)
+        #expect(hangups.count == 0)
+        #expect(events.count == 0)
         close(descriptors.peer)
-        wait(for: [hangup], timeout: 1)
-        XCTAssertEqual(events.count, 1)
+        #expect(hangups.wait(seconds: 1))
+        #expect(events.count == 1)
+        #expect(hangups.count == 1)
 
         monitor.cancel()
         close(descriptors.local)
     }
 
-    func testCancelPreventsLaterHangupCallback() throws {
+    @Test func cancelPreventsLaterHangupCallback() throws {
         let descriptors = try makeSocketPair()
-        let hangup = expectation(description: "peer hangup")
-        hangup.isInverted = true
+        let hangups = CallbackRecorder()
         let monitor = try AuthenticatedConnectionHangupMonitor(
             fileDescriptor: descriptors.local,
             onHangup: {
-                hangup.fulfill()
+                hangups.record()
             }
         )
         monitor.start()
@@ -105,11 +105,11 @@ final class AuthenticatedConnectionHangupMonitorTests: XCTestCase {
         monitor.cancel()
         close(descriptors.peer)
 
-        wait(for: [hangup], timeout: 0.1)
+        #expect(!hangups.wait(seconds: 0.1))
         close(descriptors.local)
     }
 
-    func testCancelReleasesMonitorWhileSocketStaysOpen() throws {
+    @Test func cancelReleasesMonitorWhileSocketStaysOpen() throws {
         let descriptors = try makeSocketPair()
         var monitor: AuthenticatedConnectionHangupMonitor? = try AuthenticatedConnectionHangupMonitor(
             fileDescriptor: descriptors.local,
@@ -124,44 +124,28 @@ final class AuthenticatedConnectionHangupMonitorTests: XCTestCase {
         while retainedMonitor != nil, Date() < deadline {
             usleep(10_000)
         }
-        XCTAssertNil(retainedMonitor)
+        #expect(retainedMonitor == nil)
         close(descriptors.peer)
         close(descriptors.local)
     }
 
-    func testStartReportsHangupQueuedAfterSuccessfulSetup() throws {
+    @Test func startReportsHangupQueuedAfterSuccessfulSetup() throws {
         let descriptors = try makeSocketPair()
-        let hangup = expectation(description: "queued peer hangup")
+        let hangups = CallbackRecorder()
         let monitor = try AuthenticatedConnectionHangupMonitor(
             fileDescriptor: descriptors.local,
             onHangup: {
-                hangup.fulfill()
+                hangups.record()
             }
         )
 
         close(descriptors.peer)
         monitor.start()
 
-        wait(for: [hangup], timeout: 1)
+        #expect(hangups.wait(seconds: 1))
+        #expect(hangups.count == 1)
         monitor.cancel()
         close(descriptors.local)
-    }
-}
-
-private final class CallbackRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var recordedCount = 0
-
-    var count: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return recordedCount
-    }
-
-    func record() {
-        lock.lock()
-        recordedCount += 1
-        lock.unlock()
     }
 }
 

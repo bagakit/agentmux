@@ -1,27 +1,27 @@
-import XCTest
+import Testing
 @testable import AgentMuxNativeMacOSCore
 
-final class NativePeerPolicyTests: XCTestCase {
-    func testExactOSPeerAndUIDAreBothNecessary() {
-        XCTAssertTrue(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: 501))
-        XCTAssertFalse(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4322, expectedUID: 501, actualUID: 501))
-        XCTAssertFalse(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: 502))
-        XCTAssertFalse(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: nil, expectedUID: 501, actualUID: 501))
-        XCTAssertFalse(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: nil))
+@Suite struct NativePeerPolicyTests {
+    @Test func exactOSPeerAndUIDAreBothNecessary() {
+        #expect(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: 501))
+        #expect(!NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4322, expectedUID: 501, actualUID: 501))
+        #expect(!NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: 502))
+        #expect(!NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: nil, expectedUID: 501, actualUID: 501))
+        #expect(!NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: nil))
     }
 
-    func testExplicitPixelsCannotUseTheReadOnlySnapshotPath() {
-        XCTAssertFalse(NativeOperationPolicy.isMutation("getAppState"))
-        XCTAssertFalse(NativeOperationPolicy.isMutation("getAppState", includesScreenshot: false))
-        XCTAssertTrue(NativeOperationPolicy.isMutation("getAppState", includesScreenshot: true))
+    @Test func explicitPixelsCannotUseTheReadOnlySnapshotPath() {
+        #expect(!NativeOperationPolicy.isMutation("getAppState"))
+        #expect(!NativeOperationPolicy.isMutation("getAppState", includesScreenshot: false))
+        #expect(NativeOperationPolicy.isMutation("getAppState", includesScreenshot: true))
     }
 
-    func testEveryGlobalSideEffectIsInstanceCorrelated() {
+    @Test func everyGlobalSideEffectIsInstanceCorrelated() {
         for method in ["click", "performSecondaryAction", "setValue", "typeText", "pressKey", "hotkey", "pasteText", "scroll", "drag", "clipboardWrite", "captureScreenshot"] {
-            XCTAssertTrue(NativeOperationPolicy.isMutation(method), method)
+            #expect(NativeOperationPolicy.isMutation(method), "\(method)")
         }
         for method in ["handshake", "listApps", "listWindows", "getAppState", "clipboardRead", "permissionStatus"] {
-            XCTAssertFalse(NativeOperationPolicy.isMutation(method), method)
+            #expect(!NativeOperationPolicy.isMutation(method), "\(method)")
         }
     }
 }

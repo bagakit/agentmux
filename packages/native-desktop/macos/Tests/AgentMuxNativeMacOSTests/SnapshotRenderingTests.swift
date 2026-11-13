@@ -1,108 +1,108 @@
-import XCTest
+import Testing
 @testable import AgentMuxNativeMacOSCore
 
-final class SnapshotRenderingTests: XCTestCase {
-    func testSkipsUnsupportedAdvertisedAttributes() {
+@Suite struct SnapshotRenderingTests {
+    @Test func skipsUnsupportedAdvertisedAttributes() {
         let advertised: Set<String> = ["AXRole", "AXChildren"]
 
-        XCTAssertTrue(SnapshotRenderHeuristics.supportsAttribute("AXRole", advertisedAttributes: advertised))
-        XCTAssertFalse(SnapshotRenderHeuristics.supportsAttribute("AXTitle", advertisedAttributes: advertised))
+        #expect(SnapshotRenderHeuristics.supportsAttribute("AXRole", advertisedAttributes: advertised))
+        #expect(!SnapshotRenderHeuristics.supportsAttribute("AXTitle", advertisedAttributes: advertised))
     }
 
-    func testUnknownAttributeAdvertisementsStayPermissive() {
-        XCTAssertTrue(SnapshotRenderHeuristics.supportsAttribute("AXTitle", advertisedAttributes: nil))
+    @Test func unknownAttributeAdvertisementsStayPermissive() {
+        #expect(SnapshotRenderHeuristics.supportsAttribute("AXTitle", advertisedAttributes: nil))
     }
 
-    func testSecureTextMetadataOnlyProbesTextLikeRoles() {
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXTextField"))
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXSearchField"))
-        XCTAssertFalse(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXGroup"))
-        XCTAssertFalse(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXButton"))
+    @Test func secureTextMetadataOnlyProbesTextLikeRoles() {
+        #expect(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXTextField"))
+        #expect(SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXSearchField"))
+        #expect(!SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXGroup"))
+        #expect(!SnapshotRenderHeuristics.shouldProbeSecureTextMetadata(role: "AXButton"))
     }
 
-    func testElidesAnonymousWrappers() {
+    @Test func elidesAnonymousWrappers() {
         let node = SnapshotRenderNode(role: "AXGroup", childCount: 1)
 
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldElide(node))
+        #expect(SnapshotRenderHeuristics.shouldElide(node))
     }
 
-    func testPreservesWebAreaContainersWithMultipleChildren() {
+    @Test func preservesWebAreaContainersWithMultipleChildren() {
         let node = SnapshotRenderNode(role: "AXGroup", childCount: 3, webAreaDepth: 1)
 
-        XCTAssertFalse(SnapshotRenderHeuristics.shouldElide(node))
+        #expect(!SnapshotRenderHeuristics.shouldElide(node))
     }
 
-    func testRendersMarkdownLinksAndSuppressesTheirChildren() {
+    @Test func rendersMarkdownLinksAndSuppressesTheirChildren() {
         let node = SnapshotRenderNode(role: "AXLink", linkText: "Skip [main]", url: "https://example.com/path")
 
-        XCTAssertEqual(SnapshotRenderHeuristics.line(index: 7, node: node), "7 link [Skip \\[main\\]](https://example.com/path)")
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldSuppressChildren(node))
+        #expect(SnapshotRenderHeuristics.line(index: 7, node: node) == "7 link [Skip \\[main\\]](https://example.com/path)")
+        #expect(SnapshotRenderHeuristics.shouldSuppressChildren(node))
     }
 
-    func testSuppressesChildrenForNamedCompactControls() {
+    @Test func suppressesChildrenForNamedCompactControls() {
         let button = SnapshotRenderNode(role: "AXButton", roleDescription: "button", label: "Install GitHub", childCount: 1)
         let heading = SnapshotRenderNode(role: "AXHeading", roleDescription: "heading", label: "Repository navigation", value: "2", childCount: 1)
 
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldSuppressChildren(button))
-        XCTAssertTrue(SnapshotRenderHeuristics.shouldSuppressChildren(heading))
-        XCTAssertEqual(SnapshotRenderHeuristics.line(index: 5, node: heading), "5 heading Repository navigation")
+        #expect(SnapshotRenderHeuristics.shouldSuppressChildren(button))
+        #expect(SnapshotRenderHeuristics.shouldSuppressChildren(heading))
+        #expect(SnapshotRenderHeuristics.line(index: 5, node: heading) == "5 heading Repository navigation")
     }
 
-    func testKeepsChildrenForRowsWithNestedControls() {
+    @Test func keepsChildrenForRowsWithNestedControls() {
         let row = SnapshotRenderNode(role: "AXRow", roleDescription: "row", childCount: 3, rowSummary: "Liked Songs")
 
-        XCTAssertFalse(SnapshotRenderHeuristics.shouldSuppressChildren(row))
+        #expect(!SnapshotRenderHeuristics.shouldSuppressChildren(row))
     }
 
-    func testFiltersNoisyActionsAndFormatsSecondaryActions() {
+    @Test func filtersNoisyActionsAndFormatsSecondaryActions() {
         let node = SnapshotRenderNode(
             role: "AXWindow",
             title: "Document",
             rawActions: ["AXPress", "AXShowMenu", "AXScrollToVisible", "AXZoomWindow"]
         )
 
-        XCTAssertEqual(SnapshotRenderHeuristics.meaningfulActions(node.rawActions, role: node.role), ["AXZoomWindow"])
-        XCTAssertEqual(SnapshotRenderHeuristics.line(index: 1, node: node), "1 window Document, Secondary Actions: zoom the window")
+        #expect(SnapshotRenderHeuristics.meaningfulActions(node.rawActions, role: node.role) == ["AXZoomWindow"])
+        #expect(SnapshotRenderHeuristics.line(index: 1, node: node) == "1 window Document, Secondary Actions: zoom the window")
     }
 
-    func testSuppressesHorizontalScrollWhenVerticalScrollExists() {
+    @Test func suppressesHorizontalScrollWhenVerticalScrollExists() {
         let node = SnapshotRenderNode(
             role: "AXScrollArea",
             rawActions: ["AXScrollUpByPage", "AXScrollDownByPage", "AXScrollLeftByPage", "AXScrollRightByPage"]
         )
 
-        XCTAssertEqual(SnapshotRenderHeuristics.meaningfulActions(node.rawActions, role: node.role), ["AXScrollUpByPage", "AXScrollDownByPage"])
+        #expect(SnapshotRenderHeuristics.meaningfulActions(node.rawActions, role: node.role) == ["AXScrollUpByPage", "AXScrollDownByPage"])
     }
 
-    func testKeepsHorizontalOnlyActionsInTheirOriginalOrder() {
+    @Test func keepsHorizontalOnlyActionsInTheirOriginalOrder() {
         let actions = ["AXScrollRightByPage", "AXPress", "AXScrollLeftByPage", "AXScrollRightByPage"]
         let node = SnapshotRenderNode(role: "AXScrollArea", rawActions: actions)
 
-        XCTAssertEqual(
-            SnapshotRenderHeuristics.meaningfulActions(actions, role: node.role),
+        #expect(
+            SnapshotRenderHeuristics.meaningfulActions(actions, role: node.role) ==
             ["AXScrollRightByPage", "AXScrollLeftByPage", "AXScrollRightByPage"]
         )
-        XCTAssertEqual(
-            SnapshotRenderHeuristics.line(index: 2, node: node),
+        #expect(
+            SnapshotRenderHeuristics.line(index: 2, node: node) ==
             "2 scroll area, Secondary Actions: scroll right, scroll left, scroll right"
         )
     }
 
-    func testKeepsMixedScrollActionsOutsideScrollAreas() {
+    @Test func keepsMixedScrollActionsOutsideScrollAreas() {
         let actions = ["AXScrollLeftByPage", "AXScrollDownByPage", "AXScrollRightByPage", "AXCancel"]
         let node = SnapshotRenderNode(role: "AXMenu", rawActions: actions)
 
-        XCTAssertEqual(
-            SnapshotRenderHeuristics.meaningfulActions(actions, role: node.role),
+        #expect(
+            SnapshotRenderHeuristics.meaningfulActions(actions, role: node.role) ==
             ["AXScrollLeftByPage", "AXScrollDownByPage", "AXScrollRightByPage"]
         )
-        XCTAssertEqual(
-            SnapshotRenderHeuristics.line(index: 3, node: node),
+        #expect(
+            SnapshotRenderHeuristics.line(index: 3, node: node) ==
             "3 menu, Secondary Actions: scroll left, scroll down, scroll right"
         )
     }
 
-    func testTextFieldsKeepDistinctValueAndPlaceholder() {
+    @Test func textFieldsKeepDistinctValueAndPlaceholder() {
         let node = SnapshotRenderNode(
             role: "AXTextField",
             roleDescription: "text field",
@@ -111,25 +111,25 @@ final class SnapshotRenderingTests: XCTestCase {
             placeholder: "Search"
         )
 
-        XCTAssertEqual(
-            SnapshotRenderHeuristics.line(index: 3, node: node),
+        #expect(
+            SnapshotRenderHeuristics.line(index: 3, node: node) ==
             "3 text field Address, Value: https://example.com, Placeholder: Search"
         )
     }
 
-    func testStaticTextUsesCompactValueFormatting() {
+    @Test func staticTextUsesCompactValueFormatting() {
         let node = SnapshotRenderNode(role: "AXStaticText", roleDescription: "text", value: "Home")
 
-        XCTAssertEqual(SnapshotRenderHeuristics.line(index: 4, node: node), "4 text Home")
+        #expect(SnapshotRenderHeuristics.line(index: 4, node: node) == "4 text Home")
     }
 
-    func testRowSummaryBecomesName() {
+    @Test func rowSummaryBecomesName() {
         let node = SnapshotRenderNode(role: "AXRow", roleDescription: "row", rowSummary: "General Settings Enabled")
 
-        XCTAssertEqual(SnapshotRenderHeuristics.line(index: 9, node: node), "9 row General Settings Enabled")
+        #expect(SnapshotRenderHeuristics.line(index: 9, node: node) == "9 row General Settings Enabled")
     }
 
-    func testCompactsLargeBrowserTabStripsToSelectedTab() {
+    @Test func compactsLargeBrowserTabStripsToSelectedTab() {
         let parent = SnapshotRenderNode(role: "AXScrollArea", roleDescription: "tab bar")
         let children = (0..<12).map { index in
             SnapshotRenderNode(
@@ -142,10 +142,10 @@ final class SnapshotRenderingTests: XCTestCase {
 
         let compaction = SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children)
 
-        XCTAssertEqual(compaction, SnapshotTabStripCompaction(retainedIndexes: [7], omittedCount: 11))
+        #expect(compaction == SnapshotTabStripCompaction(retainedIndexes: [7], omittedCount: 11))
     }
 
-    func testInfersLargeBrowserTabStripFromScrollAreaChildren() {
+    @Test func infersLargeBrowserTabStripFromScrollAreaChildren() {
         let parent = SnapshotRenderNode(role: "AXScrollArea", roleDescription: "scroll area")
         let children = (0..<12).map { index in
             SnapshotRenderNode(
@@ -158,10 +158,10 @@ final class SnapshotRenderingTests: XCTestCase {
 
         let compaction = SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children)
 
-        XCTAssertEqual(compaction, SnapshotTabStripCompaction(retainedIndexes: [11], omittedCount: 11))
+        #expect(compaction == SnapshotTabStripCompaction(retainedIndexes: [11], omittedCount: 11))
     }
 
-    func testUsesOneValueAsSelectedBrowserTabFallback() {
+    @Test func usesOneValueAsSelectedBrowserTabFallback() {
         let parent = SnapshotRenderNode(role: "AXScrollArea", roleDescription: "scroll area")
         let children = (0..<12).map { index in
             SnapshotRenderNode(
@@ -174,19 +174,19 @@ final class SnapshotRenderingTests: XCTestCase {
 
         let compaction = SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children)
 
-        XCTAssertEqual(compaction, SnapshotTabStripCompaction(retainedIndexes: [4], omittedCount: 11))
+        #expect(compaction == SnapshotTabStripCompaction(retainedIndexes: [4], omittedCount: 11))
     }
 
-    func testKeepsLargeTabCollectionsWithoutActiveTabExpanded() {
+    @Test func keepsLargeTabCollectionsWithoutActiveTabExpanded() {
         let parent = SnapshotRenderNode(role: "AXGroup")
         let children = (0..<12).map { index in
             SnapshotRenderNode(role: "AXTab", title: "Tab \(index)", value: "0")
         }
 
-        XCTAssertNil(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children))
+        #expect(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children) == nil)
     }
 
-    func testKeepsLargeNonBrowserTabCollectionsExpanded() {
+    @Test func keepsLargeNonBrowserTabCollectionsExpanded() {
         let parent = SnapshotRenderNode(role: "AXGroup")
         let children = (0..<12).map { index in
             SnapshotRenderNode(
@@ -197,10 +197,10 @@ final class SnapshotRenderingTests: XCTestCase {
             )
         }
 
-        XCTAssertNil(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children))
+        #expect(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children) == nil)
     }
 
-    func testKeepsSmallTabGroupsExpanded() {
+    @Test func keepsSmallTabGroupsExpanded() {
         let parent = SnapshotRenderNode(role: "AXTabGroup", roleDescription: "tab group")
         let children = (0..<3).map { index in
             SnapshotRenderNode(
@@ -211,6 +211,6 @@ final class SnapshotRenderingTests: XCTestCase {
             )
         }
 
-        XCTAssertNil(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children))
+        #expect(SnapshotRenderHeuristics.tabStripCompaction(parent: parent, children: children) == nil)
     }
 }
