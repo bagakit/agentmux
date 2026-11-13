@@ -53,6 +53,15 @@
 .mobile-sheet { border-radius: var(--mobile-radius-sheet) var(--mobile-radius-sheet) 0 0; padding-inline: var(--mobile-gutter); background: var(--mobile-page); }
 .mobile-sheet > .mobile-sheet-title { background: var(--mobile-page); }
 .mobile-sheet-handle { width: 36px; height: 4px; margin: 2px auto 10px; border-radius: 2px; background: color-mix(in srgb, var(--text) 22%, transparent); }
+/* The handle is a real grab target: a taller invisible hit area around the visible bar. Dragging
+ * moves the sheet with the finger (translate composes with the centring transform) and fades the
+ * scrim; a release that does not close springs back. Reduced motion keeps the close, not the travel. */
+.mobile-sheet-handle[data-draggable] { position: relative; touch-action: none; cursor: grab; }
+.mobile-sheet-handle[data-draggable]::before { content: ''; position: absolute; inset: -14px -48px; }
+.mobile-sheet { transition: translate var(--dur-enter) var(--ease-spring); }
+.mobile-sheet[data-sheet-drag='tracking'] { translate: 0 var(--mobile-sheet-drag, 0px); transition: none; }
+.mobile-sheet-backdrop:has(+ .mobile-sheet[data-sheet-drag='tracking']) { opacity: .6; transition: opacity var(--dur-fast) ease; }
+@media (prefers-reduced-motion: reduce) { .mobile-sheet[data-sheet-drag='tracking'] { translate: none; } }
 .mobile-sheet .mobile-sheet-title h2 { font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; }
 .mobile-sheet .mobile-menu-row { min-height: var(--mobile-menu-row); }
 

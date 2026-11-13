@@ -73,3 +73,10 @@
 .mobile-main[data-motion='pop'] { animation: mobile-screen-pop var(--dur-screen) var(--ease-enter); }
 @keyframes mobile-screen-push { from { transform: translateX(24px); opacity: .55; } to { transform: none; opacity: 1; } }
 @keyframes mobile-screen-pop { from { transform: translateX(-24px); opacity: .55; } to { transform: none; opacity: 1; } }
+/* Left-edge back follows the finger at a fraction of its travel and dims slightly; a release that
+ * does not commit springs back. Committing runs the same pop as the header back. */
+.mobile-main { transition: transform var(--dur-enter) var(--ease-spring), opacity var(--dur-enter) ease; }
+.mobile-main[data-edge-back='tracking'] { transform: translateX(calc(var(--mobile-edge-offset, 0px) * .6)); opacity: calc(1 - var(--mobile-edge-progress, 0) * .3); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .mobile-main, .mobile-main[data-edge-back='tracking'] { transform: none; transition: opacity var(--dur-fast) ease; }
+}
