@@ -11,7 +11,9 @@ review required by [Agent visual review](../../../../../docs/guides/agent-visual
   the preload to a fixture Main that merges with `applyConfigEdit` and pushes the committed config back.
 - **Operations:** for each README and each App appearance, open the preview and capture the centered hero, the
   NOTE alert, the card tables and the themed architecture diagram; then open the Aa reading layout, choose serif,
-  wide and a larger size; finally narrow the window over the cards.
+  wide and a larger size; finally narrow the window over the cards. The elements page also captures fixed
+  width/height and height-only local images in both themes, asserting the real image element resolves to the
+  authored pixel dimensions through the original workspace resource port.
 - **Boundary:** remote README badges load over the network like the product renderer. No installed App, user
   configuration, Session or Run is touched.
 

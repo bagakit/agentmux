@@ -46,3 +46,7 @@ The summary row keeps its disclosure marker and focus ring.
 <p align="center"><img src="docs/assets/readme/app-icons.webp" alt="Centered 72% image" width="72%"></p>
 
 ![Badge that cannot load](https://unreachable.invalid/badge.svg)
+
+## Authored image dimensions
+
+<p><img src="docs/assets/readme/art-promotion-identity.webp" alt="120 by 30 preview" width="120" height="30"> <img src="docs/assets/readme/art-promotion-identity.webp" alt="Height-only 30 preview" height="30"></p>
