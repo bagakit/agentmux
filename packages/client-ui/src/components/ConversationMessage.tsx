@@ -360,6 +360,9 @@ export function ConversationMessage({
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
   const metadataInDetails = detailsOnlyMetadata || contextInDetails || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
+  const revealSubmission = detailsOnlyMetadata && locatedSourceKey && sources?.submissions?.some(record => record.original.kind === 'captured' &&
+    conversationMessageSourceKey(record.original.item.agentSessionId, { kind: 'captured', recordId: record.original.item.id }) === locatedSourceKey)
+    ? locatedSourceKey : undefined
   const submissionMetadata = sources?.submissions?.length ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={inputSource?.kind === 'native' && hasContent}
           {...(expandedOriginals ? { expandedRecords: expandedOriginals } : {})} {...(onOriginalExpandedChange ? { onOpenChange: onOriginalExpandedChange } : {})}
           {...(locatedSourceKey ? { locatedSourceKey } : {})} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null
@@ -402,6 +405,7 @@ export function ConversationMessage({
     feedback: copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'} · Retry Copy</span> : null,
     details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
+        revealSourceKey={revealSubmission}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
         {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{detailsOnlyMetadata ? submissionMetadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,

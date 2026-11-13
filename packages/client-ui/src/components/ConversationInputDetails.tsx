@@ -1,13 +1,15 @@
 import type { AgentSessionUserMessage, AgentSessionUserMessageSource } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
-import { useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useClientUiPlatform } from '../platform.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 
 /** Opening this disclosure never changes the message's author. */
-export function ConversationInputDetails({ messageId, source, publicContent, executionHostId, speaker, declaredAgentSessionId, sourceDeclaration, describeSpeaker, recordedIdentity = false, children }: {
+export function ConversationInputDetails({ messageId, source, publicContent, executionHostId, speaker, declaredAgentSessionId, sourceDeclaration, describeSpeaker, recordedIdentity = false, revealSourceKey, children }: {
   recordedIdentity?: boolean
+  /** An exact original contribution was located inside this disclosure. */
+  revealSourceKey?: string | undefined
   children?: ReactNode
   messageId: string
   source?: AgentSessionUserMessageSource | undefined
@@ -28,12 +30,18 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
   const [opened, setOpened] = useState<{ identity: string; details?: ConversationSenderDetails } | null>(null)
   const contentId = useId()
   const open = opened?.identity === identity
+  function readDetails() {
+    const details = senderId ? describeSpeaker?.({ role: 'agent', id: senderId }).readDetails?.() : undefined
+    return { identity, ...(details && details.sessionId === senderId ? { details } : {}) }
+  }
+  useEffect(() => {
+    if (revealSourceKey) setOpened(previous => previous?.identity === identity ? previous : readDetails())
+  }, [identity, revealSourceKey])
   if (!source && !senderId && !children && !recordedIdentity) return null
 
   function toggle(): void {
     if (open) { setOpened(null); return }
-    const details = senderId ? describeSpeaker?.({ role: 'agent', id: senderId }).readDetails?.() : undefined
-    setOpened({ identity, ...(details && details.sessionId === senderId ? { details } : {}) })
+    setOpened(readDetails())
   }
   const details = open ? opened.details : undefined
   const channelRead = open && speaker?.external ? describeSpeaker?.(speaker) : undefined
