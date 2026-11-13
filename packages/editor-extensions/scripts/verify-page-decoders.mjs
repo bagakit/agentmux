@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { privatePackageSmokeEnvironment } from '../../../apps/desktop/scripts/package-smoke-context.mjs'
-import { runProbeProcess } from '../../../apps/desktop/scripts/probe-process.mjs'
+import { runProbeProcess, stopProbeProcesses } from '../../../apps/desktop/scripts/probe-process.mjs'
 import { pageDecoderMutation } from './page-decoder-mutations.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
@@ -68,7 +68,14 @@ try {
   result.passed = true
 } catch (error) { result.failure = error.stack ?? String(error) }
 finally {
-  await rm(temporary, { recursive: true, force: true })
+  try {
+    await stopProbeProcesses(-1, temporary)
+    await rm(temporary, { recursive: true, force: true })
+    result.cleanup = 'confirmed'
+  } catch (error) {
+    result.passed = false
+    result.cleanup = { status: 'unconfirmed', retained: temporary, failure: error.stack ?? String(error) }
+  }
   await writeFile(join(output, 'receipt.json'), JSON.stringify(result, null, 2))
   console.log(JSON.stringify({ passed: result.passed, output, tests: result.baseline?.passed, memory: result.browser?.memory, mutations: result.mutations, failure: result.failure }))
   process.exitCode = result.passed ? 0 : 1
