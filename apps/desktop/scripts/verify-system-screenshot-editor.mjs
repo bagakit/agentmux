@@ -12,12 +12,12 @@ const { build } = createRequire(require.resolve('vite'))('esbuild')
 const source = 'apps/desktop/src/main/system-screenshot-editor.ts'
 const original = await readFile(source, 'utf8'), sha = value => createHash('sha256').update(value).digest('hex')
 const mutations = [
-  { id: 'exact-window', from: 'event.sender !== request.window.webContents || ', to: '', expected: 'rejects another window and an embedded frame' },
+  { id: 'exact-window', from: 'const request = this.requests.get(event.sender)', to: 'const request = this.requests.values().next().value', expected: 'rejects another window and an embedded frame' },
   { id: 'original-request', from: 'params?.requestId !== request.input.requestId', to: 'false', expected: 'refuses stale request identities' },
   { id: 'failed-delivery-retains-editor', from: "return { status: 'failed', message: message(error) }", to: "request.window.close(); return { status: 'failed', message: message(error) }", expected: 'keeps the original editor after a failed delivery' },
   { id: 'original-operation-receipt', from: 'if (existing) return await existing', to: 'if (false) return await existing', expected: 'returns the original completion receipt for duplicate operation IDs' },
-  { id: 'late-delivery-isolation', from: 'if (this.current === request && !request.window.isDestroyed()) request.window.close()', to: 'if (this.current && !this.current.window.isDestroyed()) this.current.window.close()', expected: 'an earlier late result never closes the newer editor' },
-  { id: 'validated-output-png', from: 'pngBytes(params.image!)', to: 'void params.image', expected: 'refuses stale request identities' }
+  { id: 'late-delivery-isolation', from: 'request.settle()\n      return', to: 'for (const current of this.requests.values()) current.window.close()\n      request.settle()\n      return', expected: 'an earlier late result never closes the newer editor' },
+  { id: 'validated-output-png', from: '    pngBytes(params.image!)\n    request.pending = true', to: '    void params.image\n    request.pending = true', expected: 'refuses stale request identities' }
 ]
 await mkdir(resolve('.local/system-screenshot-editor'), { recursive: true })
 const out = await mkdtemp(resolve('.local/system-screenshot-editor/run-'))
@@ -32,7 +32,10 @@ const inputs = [source, 'apps/desktop/src/shared/system-screenshot-editor.ts', '
   'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts',
   'apps/desktop/test/system-screenshot-editor.config.mts', 'apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts',
   'apps/desktop/scripts/fixtures/system-screenshot-editor/scenario.md', 'apps/desktop/scripts/verify-system-screenshot-editor.mjs',
-  'packages/client-ui/src/theme/runtime.ts', 'apps/desktop/electron.vite.config.ts']
+  'packages/client-ui/src/theme/runtime.ts', 'apps/desktop/electron.vite.config.ts',
+  'apps/desktop/src/main/screenshot-original-files.ts', 'apps/desktop/src/main/screenshot-files.ts', 'apps/desktop/src/main/screenshot-pins.ts',
+  'apps/desktop/src/renderer/screenshot-editor/use-system-screenshot-original.ts', 'apps/desktop/src/renderer/src/styles/context-menu.css',
+  'apps/desktop/src/renderer/src/styles/chrome.css', 'apps/desktop/src/renderer/src/lib/use-screenshot-pin.ts', 'apps/desktop/src/renderer/src/styles/base.css']
 const hashes = Object.fromEntries(await Promise.all(inputs.map(async file => [file, sha(await readFile(file))])))
 const receipt = { schema: 'agentmux.system-screenshot-editor-proof.v1', passed: false, sharedTreeMutations: 0, inputs: hashes, runs: [], native: null }
 async function command(label, program, args, env = {}) {
@@ -40,11 +43,11 @@ async function command(label, program, args, env = {}) {
     const childEnv = { ...process.env, ...env }
     if (program === require('electron')) delete childEnv.ELECTRON_RUN_AS_NODE
     const child = spawn(program, args, { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
-    let log = '', timeout = false
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes })
-    const timer = setTimeout(() => { timeout = true; child.kill('SIGTERM') }, 45000)
+    let log = '', timeout = false, terminateTimer
+    for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes; if (label === 'native') process.stdout.write(bytes) })
+    const timer = setTimeout(() => { timeout = true; child.kill('SIGTERM'); terminateTimer = setTimeout(() => child.kill('SIGKILL'), 3000) }, 45000)
     child.once('error', reject)
-    child.once('exit', (code, signal) => { clearTimeout(timer); done({ code, signal, log, timeout }) })
+    child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(terminateTimer); done({ code, signal, log, timeout }) })
   })
   await writeFile(join(out, label + '.log'), result.log)
   assert.equal(result.timeout, false, label + ': timed-out infrastructure is not a behavior result')
@@ -88,18 +91,23 @@ try {
   const alias = { react: dirname(require.resolve('react/package.json')), 'react-dom': dirname(require.resolve('react-dom/package.json')),
     '@agentmux/client-ui/theme': resolve('packages/client-ui/src/theme/index.ts'), '@agentmux/native-desktop/image': resolve('packages/native-desktop/src/image.ts') }
   await build({ entryPoints: ['apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts'], outfile: join(mainRoot, 'main.js'), bundle: true, platform: 'node', format: 'esm',
-    external: ['electron', '@agentmux/core/object-id'], alias, logLevel: 'silent' })
+    external: ['electron', '@agentmux/core', '@agentmux/core/*', '@agentmux/host/*'], banner: { js: "import { createRequire as fixtureRequire } from 'node:module';const require=fixtureRequire(import.meta.url);" }, alias, logLevel: 'silent' })
   await build({ entryPoints: ['apps/desktop/src/preload/screenshot-editor.ts'], outfile: join(preloadRoot, 'screenshot-editor.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' })
   await build({ entryPoints: ['apps/desktop/src/renderer/screenshot-editor/entry.tsx'], outfile: join(rendererRoot, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', alias,
     conditions: ['browser'], logLevel: 'silent' })
   const html = await readFile('apps/desktop/src/renderer/screenshot-editor/index.html', 'utf8')
   await writeFile(join(rendererRoot, 'index.html'), html.replace('./entry.tsx', './entry.js').replace('</head>', '<link rel="stylesheet" href="./entry.css" /></head>'))
-  const native = await command('native', require('electron'), [appRoot], { AGENTMUX_SCREENSHOT_EDITOR_OUT: out, ELECTRON_RENDERER_URL: '' })
+  const pinRoot = join(appRoot, 'out/renderer/screenshot-pin')
+  await mkdir(pinRoot, { recursive: true })
+  await build({ entryPoints: ['apps/desktop/src/preload/screenshot-pin.ts'], outfile: join(preloadRoot, 'screenshot-pin.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' })
+  await build({ entryPoints: ['apps/desktop/src/renderer/screenshot-pin/entry.tsx'], outfile: join(pinRoot, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', alias, conditions: ['browser'], logLevel: 'silent' })
+  await writeFile(join(pinRoot, 'index.html'), (await readFile('apps/desktop/src/renderer/screenshot-pin/index.html', 'utf8')).replace('./entry.tsx', './entry.js').replace('</head>', '<link rel="stylesheet" href="./entry.css" /></head>'))
+  const native = await command('native', require('electron'), [appRoot], { AGENTMUX_SCREENSHOT_EDITOR_OUT: out, AGENTMUX_SCREENSHOT_FILE_HELPER: resolve('apps/desktop/resources/bin/agentmux-workspace-move'), ELECTRON_RENDERER_URL: '' })
   receipt.native = JSON.parse(await readFile(join(out, 'native.json'), 'utf8'))
   assert.equal(native.code, 0, JSON.stringify(receipt.native.failure) + native.log)
   assert.equal(receipt.native.passed, true)
-  assert.equal(receipt.native.cases.length, 3)
-  assert.equal(receipt.native.screenshots.length, 4)
+  assert.equal(receipt.native.cases.length, 4)
+  assert.equal(receipt.native.screenshots.length, 10)
   for (const [file, hash] of Object.entries(hashes)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
   receipt.passed = true
 } finally {

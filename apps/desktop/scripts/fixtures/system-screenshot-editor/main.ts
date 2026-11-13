@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { app, BrowserWindow, nativeImage } from 'electron'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pngFromBytes } from '@agentmux/native-desktop/image'
+import { ScreenshotOriginalFiles } from '../../../src/main/screenshot-original-files'
+import { ScreenshotPins } from '../../../src/main/screenshot-pins'
+import { exportScreenshotPng, writeScreenshotFile } from '../../../src/main/screenshot-files'
 import { SystemScreenshotEditor } from '../../../src/main/system-screenshot-editor'
 
 const out = process.env.AGENTMUX_SCREENSHOT_EDITOR_OUT!
@@ -10,6 +13,8 @@ app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
 const receipt: any = { passed: false, boundary: 'Actual independent production BrowserWindow, isolated preload, Renderer, shared ImageAnnotationEditor, trusted CDP input and real PNG composition; capture/TCC, user clipboard, Agent attachment, packaging and installation are outside this fixture.', cases: [], screenshots: [] }
 const deliveries: any[] = []
+const contexts: string[] = []
+let pins: ScreenshotPins, dropPinReceipt = true
 let editor: SystemScreenshotEditor, window: BrowserWindow, appearance: 'light' | 'dark' = 'dark', failDelivery = false
 let closed: Promise<void>
 async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNullable<T>> {
@@ -24,14 +29,17 @@ async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNul
 async function evaluate<T = any>(script: string): Promise<T> { return await window.webContents.executeJavaScript(script) }
 async function settle() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))') }
 async function control(name: string) {
-  return await evaluate<{ x: number; y: number; disabled: boolean }>(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b)throw Error('Missing actual control '+${JSON.stringify(name)});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:b.disabled}})()`)
+  return await evaluate<{ x: number; y: number; disabled: boolean }>(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b)throw Error('Missing actual control '+${JSON.stringify(name)});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:b.disabled||b.getAttribute('aria-disabled')==='true'}})()`)
 }
 async function mouse(type: string, x: number, y: number, buttons = 0) {
   await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 })
 }
 async function click(name: string) {
+  process.stdout.write('native-editor: click '+name+'\n')
   const button = await control(name); assert.equal(button.disabled, false, name + ' remains available')
-  await mouse('mouseMoved', button.x, button.y); await mouse('mousePressed', button.x, button.y, 1); await mouse('mouseReleased', button.x, button.y)
+  await mouse('mouseMoved', button.x, button.y); await mouse('mousePressed', button.x, button.y, 1);
+  if (name === 'Cancel') void mouse('mouseReleased', button.x, button.y).catch(() => {}); else await mouse('mouseReleased', button.x, button.y)
+  process.stdout.write('native-editor: dispatched '+name+'\n')
   if (!['Copy', 'Copy & attach', 'Cancel'].includes(name) && !window.isDestroyed()) await settle()
 }
 async function sourcePoint(x: number, y: number) {
@@ -45,23 +53,32 @@ async function drag(from: { x: number; y: number }, to: { x: number; y: number }
 }
 async function shot(name: string) {
   await settle()
+  await evaluate(`Promise.all([...document.querySelectorAll('[role=menu]')].flatMap(menu=>menu.getAnimations()).map(animation=>animation.finished.catch(()=>{})))`)
+  const header = await evaluate(`(()=>{const h=document.querySelector('.image-annotation-editor__header'),t=h.querySelector('.image-annotation-editor__title'),a=h.querySelector('.image-annotation-toolbar__actions'),s=t.querySelector('[role=status]'),r=t.getBoundingClientRect(),ar=a.getBoundingClientRect(),sr=s.getBoundingClientRect();return {width:innerWidth,titleRight:r.right,actionsLeft:ar.left,titleBottom:r.bottom,actionsTop:ar.top,statusRight:sr.right,fullStatus:s.title,status:s.textContent}})()`)
+  assert.ok(header.titleBottom <= header.actionsTop || header.titleRight <= header.actionsLeft, 'title and output actions never overlap')
+  assert.ok(header.statusRight <= header.titleRight && (!header.status || header.fullStatus === header.status), 'long status stays in its own column and remains fully available')
+  process.stdout.write('native-editor: capturing '+name+'\n')
   const file = name + '.png'
   await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG())
   receipt.screenshots.push({ file, appearance, contentSize: window.getContentSize() })
 }
 async function open(image: ReturnType<typeof pngFromBytes>, attach: boolean) {
+  process.stdout.write('native-editor: allocating next image editor\n')
+  const existingWindows = new Set(BrowserWindow.getAllWindows())
   closed = editor.edit(image, attach, async result => {
     if (failDelivery) throw new Error('The private clipboard sink is unavailable.')
     deliveries.push(result)
   })
   void closed.catch(error => { receipt.editError = String(error) })
-  window = await waitFor('production editor allocated', async () => BrowserWindow.getAllWindows().at(-1))
+  window = await waitFor('production editor allocated', async () => BrowserWindow.getAllWindows().find(candidate => !existingWindows.has(candidate)))
+  process.stdout.write('native-editor: exact new editor allocated\n')
   window.webContents.debugger.attach('1.3')
   await waitFor('shared editor image decoded', async () => {
-    try { return await evaluate(`(()=>{const c=document.querySelector('canvas'),i=document.querySelector('img'),b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(attach ? 'Copy & attach' : 'Copy')});return c?.width>0&&i?.complete&&i.naturalWidth>0&&b&&!b.disabled})()`) } catch { return false }
+    try { return await evaluate(`(()=>{const c=document.querySelector('canvas'),i=document.querySelector('img'),b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.textContent.trim()===${JSON.stringify(attach ? 'Copy & attach' : 'Copy')});return c?.width>0&&i?.complete&&i.naturalWidth>0&&b&&!b.disabled})()`) } catch { return false }
   })
   await settle()
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'finish', 'load'])
+  process.stdout.write('native-editor: decoded editor ready\n')
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'copyContext', 'finish', 'inspectOriginal', 'inspectOriginalOperation', 'inspectPin', 'load', 'openOriginal', 'pin', 'saveOriginal', 'savePng'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full application preload is absent')
   const glyphs = await evaluate(`(()=>{const svg=document.querySelector('[aria-label="Crop"] svg use');return !!svg&&!!document.getElementById(svg.getAttribute('href').slice(1))})()`)
   assert.equal(glyphs, true, 'the shared theme runtime installs actual semantic glyphs')
@@ -82,13 +99,70 @@ x.font='600 15px -apple-system';x.fillStyle='#304a5e';x.fillText('Next milestone
 
 async function run() {
   await app.whenReady()
-  editor = new SystemScreenshotEditor(() => ({ terminalTheme: 'graphite', appAppearance: appearance }))
+  pins = new ScreenshotPins({ hostId: 'local', appearance: () => ({ terminalTheme: 'graphite', appAppearance: appearance }), copy: async () => {} })
+  editor = new SystemScreenshotEditor(() => ({ terminalTheme: 'graphite', appAppearance: appearance }), {
+    inspectPin: operationId => pins.call('image.inspect', { hostId: 'local', operationId }, { actor: { kind: 'user', id: 'private-editor-user' } }),
+    copyText: async text => { contexts.push(text) },
+    savePng: async image => exportScreenshotPng(image, { chooseFile: async () => join(out, 'processed.png'), writeFile: writeScreenshotFile }),
+    pin: async (image, operationId) => {
+      const result = await pins.call('image.pin', { hostId: 'local', operationId, image: { format: 'png', data: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, scale: 1 } }, { actor: { kind: 'user', id: 'private-editor-user' } })
+      if (dropPinReceipt) { dropPinReceipt = false; throw new Error('The private pin reader lost its first response.') }
+      return result
+    },
+    originalFiles: () => new ScreenshotOriginalFiles({ chooseOpen: async () => join(out, 'original.json'), chooseSave: async () => join(out, 'original.json'),
+      worker: { helperPath: process.env.AGENTMUX_SCREENSHOT_FILE_HELPER! } })
+  })
   const image = await sourceImage()
+  const started = performance.now()
+  receipt.metrics = { sourcePixels: image.width * image.height, sourcePngBytes: image.byteLength, outputLatenciesMs: {} }
   await open(image, true); await shot('normal-dark')
   process.stdout.write('native-editor: opened original image\n')
   await click('Cover'); await drag({ x: 50, y: 388 }, { x: 350, y: 424 })
   await click('Crop'); await drag({ x: 28, y: 88 }, { x: 890, y: 516 })
   await shot('crop-cover-dark')
+  const saveStart = performance.now()
+  await click('Save PNG')
+  await waitFor('real processed PNG file', async () => { try { return (await readFile(join(out, 'processed.png'))).length > 100 } catch { return false } })
+  receipt.metrics.outputLatenciesMs.processedPngSave = performance.now() - saveStart
+  const exported = nativeImage.createFromBuffer(await readFile(join(out, 'processed.png')))
+  assert.ok(exported.getSize().width < image.width && exported.getSize().height < image.height)
+  assert.equal(deliveries.length, 0, 'Save PNG does not copy or attach')
+  await waitFor('PNG output settled', async () => !(await control('Copy context')).disabled)
+  const contextStart = performance.now()
+  await click('Copy context'); await waitFor('actual context sink', async () => contexts.length === 1)
+  receipt.metrics.outputLatenciesMs.contextCopy = performance.now() - contextStart
+  const context = JSON.parse(contexts[0].slice(contexts[0].indexOf('{')))
+  assert.equal(context.sourceKind, 'system'); assert.equal(context.source, null); assert.equal(context.browserId, null)
+  assert.deepEqual(context.outputPng, exported.getSize())
+  await waitFor('context output settled', async () => !(await control('Original file actions')).disabled)
+  await click('Original file actions'); await shot('original-menu-dark')
+  await click('Save original…')
+  await waitFor('real editable original saved', async () => { try { return JSON.parse(await readFile(join(out, 'original.json'), 'utf8')) } catch { return false } })
+  const saved = await readFile(join(out, 'original.json'), 'utf8')
+  assert.ok(saved.includes('cover') && saved.includes('data:image/png;base64,'), 'the original retains editable shapes and source pixels')
+  await waitFor('original save finished', async () => await evaluate('document.body.innerText.includes("Original saved")'))
+  await click('Clear all')
+  await click('Original file actions'); await click('Open original…')
+  await waitFor('actual original reopened', async () => await evaluate('document.body.innerText.includes("Opened original")&&document.querySelector("canvas")?.width>0'))
+  await shot('reopened-original-dark')
+  await click('Pin image')
+  await waitFor('actual separate pin presentation', async () => {
+    for (const candidate of BrowserWindow.getAllWindows()) if (candidate !== window) {
+      try { if (await candidate.webContents.executeJavaScript('document.querySelector(".screenshot-pin img")?.naturalWidth>0')) return candidate } catch {}
+    }
+    return null
+  })
+  await waitFor('lost pin receipt offers original operation query', async () => { try { return !(await control('Check pin')).disabled } catch { return false } })
+  await shot('pin-unconfirmed-dark')
+  window.setContentSize(420, 570); await shot('pin-unconfirmed-narrow-dark')
+  window.setContentSize(1040, 728); await settle()
+  await click('Check pin')
+  await waitFor('same original pin reconciled', async () => await evaluate('document.body.innerText.includes("Original reference pinned")'))
+  assert.equal(BrowserWindow.getAllWindows().length, 2, 'querying the original operation never creates a second pin')
+  await shot('pin-reconciled-dark')
+  pins.dispose()
+  receipt.cases.push({ label: 'real-editor-processed-save-system-context-original-roundtrip-and-pin', output: exported.getSize(), contextSource: context.sourceKind })
+  await waitFor('pin output settled', async () => !(await control('Copy & attach')).disabled)
   failDelivery = true
   await click('Copy & attach')
   await waitFor('failure visible in the same editing window', async () => await evaluate('document.querySelector("[role=alert]")?.textContent.includes("private clipboard")'))
@@ -107,11 +181,20 @@ async function run() {
   await writeFile(join(out, 'composed.png'), bitmap.toPNG())
   receipt.cases.push({ label: 'real-crop-cover-failed-delivery-keeps-editor-then-explicit-copy', width: deliveries[0].width, height: deliveries[0].height, blackPixels: black })
 
+  process.stdout.write('native-editor: composed bitmap inspected\n')
+  const retained = window
+  assert.equal(retained.isDestroyed(), false, 'successful Copy retains the original editable window')
   appearance = 'light'; await open(image, false); window.setContentSize(420, 570); await settle()
+  assert.equal(retained.isDestroyed(), false, 'a retained image does not block another capture editor')
   await shot('narrow-light')
-  const layout = await evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Copy'),r=b.getBoundingClientRect(),c=document.querySelector('canvas').getBoundingClientRect();return {body:document.body.scrollWidth,width:innerWidth,copyVisible:r.width>0&&r.x>=0&&r.right<=innerWidth,canvasHeight:c.height}})()`)
+  const layout = await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.textContent.trim()==='Copy'),r=b.getBoundingClientRect(),c=document.querySelector('canvas').getBoundingClientRect();return {body:document.body.scrollWidth,width:innerWidth,copyVisible:r.width>0&&r.x>=0&&r.right<=innerWidth,canvasHeight:c.height}})()`)
   assert.ok(layout.body <= layout.width && layout.copyVisible && layout.canvasHeight > 200, 'the narrow real window keeps Copy and a readable canvas')
+  await click('Original file actions'); await shot('original-menu-narrow-light')
+  await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  assert.equal(window.isDestroyed(), false, 'Escape dismisses only the Original menu and preserves image editing')
+  await settle()
   await click('Cancel'); await closed
+  retained.close()
   process.stdout.write('native-editor: narrow Copy-only window cancelled\n')
   assert.equal(deliveries.length, 1)
   receipt.cases.push({ label: 'narrow-light-copy-only-and-cancel', layout })
@@ -124,13 +207,17 @@ async function run() {
   await click('Cancel'); await closed
   assert.equal(deliveries.length, 1, 'cancelled physical renderer encoding does not deliver a new image')
   receipt.cases.push({ label: 'Cancel remains available during actual PNG composition' })
+  editor.dispose()
+  assert.equal(BrowserWindow.getAllWindows().length, 0, 'closing the original capture and references releases every owned window')
+  receipt.metrics.closedWindows = BrowserWindow.getAllWindows().length
+  receipt.metrics.elapsedMs = performance.now() - started
   receipt.passed = true
 }
 void run().catch(async error => {
-  receipt.failure = { message: error.message, stack: error.stack }
+  receipt.failure = { message: error.message, stack: error.stack }; process.stderr.write(JSON.stringify(receipt.failure)+'\n')
   try { if (window && !window.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); await shot('failure') } } catch {}
 }).finally(async () => {
-  editor?.dispose()
+  editor?.dispose(); pins?.dispose()
   await writeFile(join(out, 'native.json'), JSON.stringify(receipt, null, 2))
   app.exit(receipt.passed ? 0 : 1)
 })
