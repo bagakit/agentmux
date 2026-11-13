@@ -107,6 +107,8 @@
 - 新 Agent 的初始指令携带本次准确 Browser 及其展示位置、当前页面的必要上下文，明确先查 Browser 和空间相关 skill，再复用该 Browser 工作，不重新创建或猜测目标。页面 URL、标题与页面内容仍是来源数据，不能升级为平台指令或新的操作授权。
 - 用户这次点击同时明确授权把该 Browser 交给本次新建的 Agent；创建和准确关联确认后，通过原可信 Browser 控制链自动交接，无需再点一次交还。Agent 从当前页面重新观察，原程序、历史步骤与未知副作用不自动重放，原接管和停止继续可用。创建已发生、位置已保存、初始指令已投递与控制已交接分别按实际回执表达；未确认时保留原身份、页面和仍可用能力，并说明失败步骤及恢复动作，不盲目再创建 Agent。
 - 入口选择消费准确 Browser 的控制和关联事实，不以“当前没有运行中的程序”、历史操作条是否可见或 Session 展示列表缺席推断无人关联；未知明确为未知。已有准确关联时沿原交还入口继续工作，不借本入口替换原 Agent 或恢复身份。
+- **Browser 显示它关联的 Agent。** 已有准确关联时，原 Browser chrome 显示关联 Agent 的身份与 Core 确认的当前状态，并提供打开该 Agent 和停止／关闭它的入口；状态未确认时如实未知。打开沿原导航 owner 到该 Session 已有的 View，没有 View 时按本次位置意图新建展示；停止与关闭，以及关闭这个 Browser Region／Tab 时对关联 Agent 的停止或保留确认，只见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。
+- **Session 退休后只清除准确匹配的那一条关联。** 只有 Core 已确认关联 Session 退休，且 Browser 关联的 hostId 与 agentSessionId 都与该 Session 完全一致时，才把这条关联清为“无关联”，之后按上文的明确无关联条件提供创建入口。观测 unknown／unavailable、空快照、Session 列表缺席或 Run 结束都不清除关联，也不改写指向其他 Session 的关联。交还给 Agent 前先向 Core 核对准确关联 Session 的当前事实，确认它仍登记且未退休才交出网页控制；已确认退休时不交出控制并按本条清除关联，核对未知时保留人工控制与原关联，说明未确认的步骤并可重试。
 
 ### Browser 场景消息与框选沟通
 
