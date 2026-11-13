@@ -6,9 +6,10 @@ import { spawn } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire, isBuiltin } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
-const { build } = require('esbuild')
+const { build, transform } = require('esbuild')
 const config = 'packages/core/test/agent-session-continuity-empty-native.mutation.config.mts'
 const focused = process.argv.includes('--startup-observation')
 assert.ok(process.argv.slice(2).every(arg => arg === '--startup-observation'), 'Unknown proof option')
@@ -81,7 +82,18 @@ const buildOptions = { bundle: true, platform: 'node', format: 'esm',
   } }] }
 await build({ ...buildOptions, entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(cli, 'dist/agentmux.js') })
 const worker = join(cli, 'dist/observation-owner.js')
-await build({ ...buildOptions, entryPoints: [join(root, 'packages/core/test/fixtures/empty-native-observation-worker.ts')], outfile: worker })
+// Preserve each imported module's own URL in the flattened observer. Otherwise an imported
+// executable's is-main guard sees the worker URL and incorrectly runs as a separate CLI.
+await build({ ...buildOptions, entryPoints: [join(root, 'packages/core/test/fixtures/empty-native-observation-worker.ts')], outfile: worker,
+  plugins: [...buildOptions.plugins, { name: 'original-module-identity', setup(plugin) {
+    plugin.onLoad({ filter: /\.ts$/ }, async ({ path }) => {
+      const source = await readFile(path, 'utf8')
+      if (!source.includes('import.meta.url')) return
+      const result = await transform(source, { loader: 'ts', format: 'esm', target: 'node24',
+        define: { 'import.meta.url': JSON.stringify(pathToFileURL(path).href) } })
+      return { contents: result.code, loader: 'js', resolveDir: dirname(path) }
+    })
+  } }] })
 const selected = focused ? variants.filter(variant => ['candidate', 'startup-no-reuse', 'startup-explicit-merged', 'startup-fence-unconfirmed',
   'stale-absence-at-commit', 'stale-absence-fence-retained'].includes(variant.name)) : variants
 for (const variant of selected) {
