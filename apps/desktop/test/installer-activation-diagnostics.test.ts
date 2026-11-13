@@ -10,23 +10,27 @@ const executable = _hygiene_fixturePath("private/fixture/AgentMux.app/Contents/M
 const bundle = { executable, helperRoot: _hygiene_fixturePath("private/fixture/AgentMux.app/Contents/Frameworks/") }
 const row = (pid: number, ppid: number, command = executable) => `${uid} ${pid} ${ppid} ${birth} ${command}`
 const identity = (pid: number, ppid: number) => ({ uid, pid, ppid, birth })
+const guiAdmission = (value: { pid: number; ppid: number; birth: string }) => ({ uid, ...value, classification: 'gui', source: 'private-confirmed-gui', initial: { classification: 'gui', source: 'private-confirmed-gui' } })
 const mode = (pid: number, ppid: number, kind = 'node') => ({ ...identity(pid, ppid), mode: kind, executable })
 const main = { pid: 700, package: { sourceCommit: 'fixture' }, renderer: { kind: 'bundled', id: 'fixture' } }
 const native = { status: 'unchanged', confirmedOwner: 'fixture-owner' }
 const ps = (...rows: string[]) => [row(1, 0, '/sbin/launchd'), row(90, 1, (_hygiene_fixturePath("private/parent") + " --secret=PRIVATE_COMMAND")), ...rows].join('\n')
 const gui = row(700, 1)
 async function observe(snapshots: string[], rounds: object[][], previous: object[] = []) {
+  // A two-frame fixture repeats its last census for the exact PID fence.
+  const frames = snapshots.length === 2 ? [...snapshots, snapshots[1]!] : snapshots
+  const batches = rounds.length === 1 ? [rounds[0]!, rounds[0]!] : rounds
   let reads = 0
   const requests: number[][] = []
   const scope = await observeApplicationProcesses(bundle, previous, {
     processSnapshot: async () => {
-      expect(snapshots[reads], 'every OS read has a bounded fixture').toBeTypeOf('string')
-      return snapshots[reads++]!
+      expect(frames[reads], 'every OS read has a bounded fixture').toBeTypeOf('string')
+      return frames[reads++]!
     },
     modes: async pids => {
       requests.push(pids)
-      expect(rounds[requests.length - 1], 'every mode read has a bounded fixture').toBeDefined()
-      return rounds[requests.length - 1]!
+      expect(batches[requests.length - 1], 'every mode read has a bounded fixture').toBeDefined()
+      return batches[requests.length - 1]!.filter((row: any) => pids.includes(row.pid))
     }
   })
   return { scope, reads, requests }
@@ -49,18 +53,18 @@ function failure(scope: Awaited<ReturnType<typeof observe>>['scope'], previous: 
 }
 
 describe('installer failure preserves point-time ownership and qualified stages', () => {
-  it('records a last-snapshot candidate as not requested, preserving exact bounded reads and privacy', async () => {
+  it('records an unreadable discovery-cut candidate as requested, preserving bounded reads and privacy', async () => {
     const intermediate = ps(gui, row(800, 90)), final = ps(gui, row(800, 90), row(801, 90))
-    const { scope, reads, requests } = await observe([ps(gui), intermediate, final],
+    const { scope, reads, requests } = await observe([ps(gui), final, final],
       [[{ ...mode(700, 1, 'gui'), argv: 'PRIVATE_ARGV', env: 'PRIVATE_ENV' }], [mode(800, 90)]])
-    expect(reads).toBe(3); expect(requests).toEqual([[700], [800]])
+    expect(reads).toBe(3); expect(requests).toEqual([[700], [700, 800, 801]])
     expect(scope.serving).toEqual([700, 801]); expect(scope.externalNode).toEqual([800])
     const error = failure(scope), diagnostic = error.ownershipDiagnostic
     expect(error.message).toContain('Application process 801 is not a confirmed descendant')
     expect(diagnostic.stage).toBe('owner-ancestry')
     expect(diagnostic.loadedMain).toEqual(identity(700, 1))
     expect(diagnostic.affected.identity).toEqual(identity(801, 90))
-    expect(diagnostic.affected.mode).toEqual({ status: 'not-requested', observation: null, mismatch: [], unknown: [] })
+    expect(diagnostic.affected.mode).toEqual({ status: 'not-returned', observation: null, mismatch: [], unknown: [] })
     expect(diagnostic.ancestry).toEqual({ path: [identity(801, 90), identity(90, 1), identity(1, 0)], termination: 'system-root', missingPid: null })
     const receipt = JSON.stringify(error.transaction)
     expect(receipt).not.toContain('PRIVATE_'); expect(receipt).not.toContain('argv'); expect(receipt).not.toContain('"env"')
@@ -71,7 +75,7 @@ describe('installer failure preserves point-time ownership and qualified stages'
     for (const returned of [[], [{ ...identity(800, 90), mode: 'unknown' }]]) {
       const final = ps(gui, row(800, 90))
       const { scope, reads, requests } = await observe([ps(gui), final, final], [[mode(700, 1, 'gui')], returned])
-      expect(reads).toBe(3); expect(requests).toEqual([[700], [800]])
+      expect(reads).toBe(3); expect(requests).toEqual([[700], [700, 800]])
       expect(scope.serving).toEqual([700, 800])
       const diagnostic = failure(scope).ownershipDiagnostic
       expect(diagnostic.affected.identity).toEqual(identity(800, 90))
@@ -89,7 +93,7 @@ describe('installer failure preserves point-time ownership and qualified stages'
     for (const [index, stale] of variants.entries()) {
       const { scope, reads, requests } = await observe([final, final],
         [[mode(700, 1, 'gui'), { ...stale, argv: 'PRIVATE_ARGV', env: 'PRIVATE_ENV' }]])
-      expect(reads).toBe(2); expect(requests).toEqual([[700, 800]])
+      expect(reads).toBe(3); expect(requests).toEqual([[700, 800], [700, 800]])
       expect(scope.serving).toEqual([700, 800]); expect(scope.externalNode).toEqual([])
       const error = failure(scope), diagnostic = error.ownershipDiagnostic
       expect(diagnostic.affected.mode.status).toBe('binding-mismatch')
@@ -119,13 +123,13 @@ describe('installer failure preserves point-time ownership and qualified stages'
     const initial = ps(gui, row(701, 700), row(702, 701), row(800, 90), row(801, 90))
     const final = ps(gui, row(701, 700), row(702, 701), row(800, 90))
     const { scope, requests, reads } = await observe([initial, final], [[mode(700, 1, 'gui'), mode(701, 700), mode(702, 701), mode(800, 90), mode(801, 90)]])
-    expect(reads).toBe(2); expect(requests).toEqual([[700, 701, 702, 800, 801]])
+    expect(reads).toBe(3); expect(requests).toEqual([[700, 701, 702, 800, 801], [700, 701, 702, 800]])
     expect(scope.serving).toEqual([700, 701, 702]); expect(scope.externalNode).toEqual([800])
     expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }, { pid: 701, ppid: 700, birth }, { pid: 702, ppid: 701, birth }])
   })
 
   it('keeps a previous same-birth worker protected and records that exact guard', async () => {
-    const previous = [{ pid: 701, ppid: 700, birth }], final = ps(gui, row(701, 1), row(800, 90))
+    const previous = [guiAdmission({ pid: 701, ppid: 700, birth })], final = ps(gui, row(701, 1), row(800, 90))
     const { scope } = await observe([final, final], [[mode(700, 1, 'gui'), mode(701, 1), mode(800, 90)]], previous)
     expect(scope.serving).toEqual([700, 701]); expect(scope.externalNode).toEqual([800])
     const diagnostic = failure(scope, previous).ownershipDiagnostic
@@ -143,7 +147,7 @@ describe('installer failure preserves point-time ownership and qualified stages'
     expect(existingMain.stage).toBe('main-birth'); expect(existingMain.affected.beforeLaunchSameBirth).toBe(true)
     const existingHelper = failure(scope, [], [{ pid: 701, ppid: 700, birth }]).ownershipDiagnostic
     expect(existingHelper.stage).toBe('owner-launch'); expect(existingHelper.affected.identity).toEqual(identity(701, 700))
-    expect(activate(scope, [{ pid: 701, ppid: 1, birth: _hygiene_fixturePsBirth(23889600000) }])).toEqual([{ pid: 700, ppid: 1, birth }, { pid: 701, ppid: 700, birth }])
+    expect(activate(scope, [guiAdmission({ pid: 701, ppid: 1, birth: _hygiene_fixturePsBirth(23889600000) })])).toEqual([{ pid: 700, ppid: 1, birth }, { pid: 701, ppid: 700, birth }])
   })
 
   it('has a real install caller after UI qualification and before owner receipt', () => {

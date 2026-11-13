@@ -220,10 +220,10 @@ describe('external Node clients and Main-owned Node workers have different autho
 
   it('rechecks authoritative OS existence: gone is removed, a still-existing unreadable mode remains protected', async () => {
     const initial = ps(main, row(800, 90)), final = ps(main)
-    const snapshots = [initial, final], requested: number[][] = []
+    const snapshots = [initial, final, final], requested: number[][] = []
     const gone = await observeApplicationProcesses(bundle, [], { processSnapshot: async () => snapshots.shift()!,
       modes: async pids => { requested.push(pids); return [] } })
-    expect(requested).toEqual([[700, 800]])
+    expect(requested).toEqual([[700, 800], [700]])
     expect(gone.serving).toEqual([700]); expect(gone.externalNode).toEqual([])
     expect(gone.processes.map(row => row.pid)).toEqual([1, 90, 700])
     const present = await observeApplicationProcesses(bundle, [], { processSnapshot: async () => initial, modes: async () => [] })
@@ -270,8 +270,8 @@ describe('a bounded observation reads candidates introduced after its first OS s
   it('reads a newly observed external Node before requiring Main ancestry', async () => {
     const initial = ps(main), final = ps(main, row(800, 90))
     const { scope, requested, reads } = await observe([initial, final, final],
-      [[mode(700, 1, birth, uid, 'gui')], [mode(800, 90)]])
-    expect(requested).toEqual([[700], [800]]); expect(reads).toEqual([initial, final, final])
+      [[mode(700, 1, birth, uid, 'gui')], [mode(700, 1, birth, uid, 'gui'), mode(800, 90)]])
+    expect(requested).toEqual([[700], [700, 800]]); expect(reads).toEqual([initial, final, final])
     expect(scope.serving).toEqual([700]); expect(scope.externalNode).toEqual([800])
     expect(scope.nodeModes).toEqual([mode(700, 1, birth, uid, 'gui'), mode(800, 90)])
     expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }])
@@ -280,8 +280,8 @@ describe('a bounded observation reads candidates introduced after its first OS s
   it('retains newly observed direct and indirect Main-owned Node workers', async () => {
     const final = ps(main, row(701, 700), row(702, 701))
     const { scope, requested } = await observe([ps(main), final, final],
-      [[mode(700, 1, birth, uid, 'gui')], [mode(701, 700), mode(702, 701)]])
-    expect(requested).toEqual([[700], [701, 702]])
+      [[mode(700, 1, birth, uid, 'gui')], [mode(700, 1, birth, uid, 'gui'), mode(701, 700), mode(702, 701)]])
+    expect(requested).toEqual([[700], [700, 701, 702]])
     expect(scope.serving).toEqual([700, 701, 702]); expect(scope.externalNode).toEqual([])
     expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }, { pid: 701, ppid: 700, birth }, { pid: 702, ppid: 701, birth }])
   })
@@ -291,8 +291,8 @@ describe('a bounded observation reads candidates introduced after its first OS s
       const initial = ps(main, row(800, 90, original.born, original.uid))
       const final = ps(main, row(800, 90, laterBirth))
       const { scope, requested } = await observe([initial, final, final],
-        [[mode(700, 1, birth, uid, 'gui'), mode(800, 90, original.born, original.uid)], [mode(800, 90, laterBirth)]])
-      expect(requested).toEqual([[700, 800], [800]])
+        [[mode(700, 1, birth, uid, 'gui'), mode(800, 90, original.born, original.uid)], [mode(700, 1, birth, uid, 'gui'), mode(800, 90, laterBirth)]])
+      expect(requested).toEqual([[700, 800], [700, 800]])
       expect(scope.externalNode).toEqual([800]); expect(scope.serving).toEqual([700])
       expect(scope.nodeModes.find(row => row.pid === 800)).toEqual(mode(800, 90, laterBirth))
       expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }])
@@ -302,8 +302,8 @@ describe('a bounded observation reads candidates introduced after its first OS s
   it('rebinds a changed PPID instead of retaining a stale ancestry mode', async () => {
     const final = ps(main, row(800, 91))
     const { scope, requested } = await observe([ps(main, row(800, 90)), final, final],
-      [[mode(700, 1, birth, uid, 'gui'), mode(800, 90)], [mode(800, 91)]])
-    expect(requested).toEqual([[700, 800], [800]])
+      [[mode(700, 1, birth, uid, 'gui'), mode(800, 90)], [mode(700, 1, birth, uid, 'gui'), mode(800, 91)]])
+    expect(requested).toEqual([[700, 800], [700, 800]])
     expect(scope.externalNode).toEqual([800]); expect(scope.serving).toEqual([700])
     expect(scope.nodeModes.find(row => row.pid === 800)).toEqual(mode(800, 91))
     expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }])
@@ -312,8 +312,8 @@ describe('a bounded observation reads candidates introduced after its first OS s
   it('uses the final authoritative snapshot when the newly read candidate has exited', async () => {
     const initial = ps(main), intermediate = ps(main, row(800, 90))
     const { scope, requested, reads } = await observe([initial, intermediate, initial],
-      [[mode(700, 1, birth, uid, 'gui')], [mode(800, 90)]])
-    expect(requested).toEqual([[700], [800]]); expect(reads).toEqual([initial, intermediate, initial])
+      [[mode(700, 1, birth, uid, 'gui')], [mode(700, 1, birth, uid, 'gui'), mode(800, 90)]])
+    expect(requested).toEqual([[700], [700, 800]]); expect(reads).toEqual([initial, intermediate, initial])
     expect(scope.serving).toEqual([700]); expect(scope.externalNode).toEqual([])
     expect(scope.nodeModes).toEqual([mode(700, 1, birth, uid, 'gui')])
     expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }])
@@ -321,26 +321,27 @@ describe('a bounded observation reads candidates introduced after its first OS s
 
   it('keeps an unreadable newly observed process unconfirmed and makes no further mode attempt', async () => {
     const final = ps(main, row(800, 90))
-    const { scope, requested, reads } = await observe([ps(main), final, final], [[mode(700, 1, birth, uid, 'gui')], []])
-    expect(requested).toEqual([[700], [800]]); expect(reads.length).toBe(3)
+    const { scope, requested, reads } = await observe([ps(main), final, final], [[mode(700, 1, birth, uid, 'gui')], [mode(700, 1, birth, uid, 'gui')]])
+    expect(requested).toEqual([[700], [700, 800]]); expect(reads.length).toBe(3)
     expect(scope.serving).toEqual([700, 800]); expect(scope.externalNode).toEqual([])
     expect(() => activate(scope)).toThrow('not a confirmed descendant')
   })
 
-  it('does not loop or silently exempt another process introduced in the last snapshot', async () => {
+  it('keeps a finite discovery cut rather than importing unsolicited births from its targeted fence', async () => {
     const intermediate = ps(main, row(800, 90)), final = ps(main, row(800, 90), row(801, 90))
     const { scope, requested, reads } = await observe([ps(main), intermediate, final],
-      [[mode(700, 1, birth, uid, 'gui')], [mode(800, 90)]])
-    expect(requested).toEqual([[700], [800]]); expect(reads.length).toBe(3)
-    expect(scope.serving).toEqual([700, 801]); expect(scope.externalNode).toEqual([800])
-    expect(() => activate(scope)).toThrow('Application process 801 is not a confirmed descendant')
+      [[mode(700, 1, birth, uid, 'gui')], [mode(700, 1, birth, uid, 'gui'), mode(800, 90)]])
+    expect(requested).toEqual([[700], [700, 800]]); expect(reads.length).toBe(3)
+    expect(scope.serving).toEqual([700]); expect(scope.externalNode).toEqual([800])
+    expect(scope.processes.some(row => row.pid === 801)).toBe(false)
+    expect(activate(scope)).toEqual([{ pid: 700, ppid: 1, birth }])
   })
 
   it('keeps the original same-birth worker protected while classifying a new external Node', async () => {
     const prior = [guiAdmission({ pid: 701, ppid: 700, birth })], initial = ps(main, row(701, 1)), final = ps(main, row(701, 1), row(800, 90))
     const { scope, requested } = await observe([initial, final, final],
-      [[mode(700, 1, birth, uid, 'gui'), mode(701, 1)], [mode(800, 90)]], prior)
-    expect(requested).toEqual([[700, 701], [800]])
+      [[mode(700, 1, birth, uid, 'gui'), mode(701, 1)], [mode(700, 1, birth, uid, 'gui'), mode(701, 1), mode(800, 90)]], prior)
+    expect(requested).toEqual([[700, 701], [700, 701, 800]])
     expect(scope.serving).toEqual([700, 701]); expect(scope.externalNode).toEqual([800])
     expect(() => activate(scope, prior)).toThrow('previous application owner')
   })
@@ -531,7 +532,7 @@ describe('typed admissions retain original evidence without promoting unknown to
     const diagnostic = applicationQuitOwnershipDiagnostic(current, initial.admissions)!
     expect(diagnostic).toMatchObject({ remainingCount: 1, affected: { identity: { pid: 701, ppid: 1 },
       admission: { classification: 'gui', source: 'retained-gui', confirmedGui: { source: 'gui-ancestry', ppid: 700 } },
-      previousAdmission: { classification: 'gui', source: 'gui-ancestry', ppid: 700 } } })
+      previousAdmission: { classification: 'gui', source: 'retained-gui', ppid: 700, initial: { source: 'gui-ancestry' } } } })
     expect(diagnostic.affected.admission.initial.ancestry.path.map(row => row.pid)).toEqual([701, 700])
     expect(diagnostic.ancestry.path.map(row => row.pid)).toEqual([701, 1])
     expect(diagnostic.ancestry.termination).toBe('system-root')

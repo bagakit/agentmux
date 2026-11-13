@@ -14,7 +14,7 @@ export default defineConfig({
     const mutant = process.env.PROCESS_TITLE_MUTANT
     const anchors = {
       'argv-mode-candidates': [
-        " ||\n    previousOwners.some(owner => identityMatches(owner, row))", ''
+        " || identityMatches(prior.get(row.pid), row)", ''
       ],
       'argv-helper-gui': [
         "return boundModes.get(pid) === 'gui' ?",
