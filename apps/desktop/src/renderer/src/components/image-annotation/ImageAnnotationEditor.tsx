@@ -157,7 +157,7 @@ type WindowPresentation = {
   onCheckPin?(): void
   /** Retake (⇧⌘R): the host captures again for the same consumer; unkept marks are confirmed in place first. */
   onRetake?(): void
-  pixelRatio?: never; origin?: never; windows?: never; safeTop?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
+  pixelRatio?: never; origin?: never; windows?: never; safeTop?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never; backgroundHint?: never
 }
 /**
  * One display's full frozen frame at a fixed one-to-one pixel scale, filling a transparent capture overlay. The
@@ -175,6 +175,8 @@ type CapturePresentation = {
   windows?: readonly NormalizedRect[]
   /** Frame CSS pixels at the top the display covers with its camera housing; the hint, toolbar, size chip and loupe stay below it. */
   safeTop?: number
+  /** Names the frozen background and the key that switches it. */
+  backgroundHint?: string
   /** Plain C while the loupe shows: the host copies this exact sampled color. */
   onCopyColor?(hex: string): void
   onSavePng: AnnotationOutput
@@ -191,7 +193,7 @@ type CapturePresentation = {
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
-  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS, safeTop = 0,
+  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS, safeTop = 0, backgroundHint,
   locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onPresented, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
@@ -484,9 +486,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => { if (active && fitted && size.width && size.height) requestView(fitView()) },
     [active, fitted, size, image.width, image.height, capture, pixelRatio, requestView])
   useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedIds, loaded, size, tool, pendingText, outlined, schedulePaint])
-  // The original pixels belong to this image; a wand selection to the wand tool, so another tool or a lock drops it.
-  useEffect(() => { sourcePixelsRef.current = null }, [image.dataUrl])
-  useEffect(() => { setWand(null); setWandIssue(null) }, [tool, locked, image.dataUrl])
+  // Pixel samples and a lit window belong to this source; the user's region geometry stays in the same document.
+  useEffect(() => { sourcePixelsRef.current = null; litWindowRef.current = null; setHover(null) }, [image.dataUrl])
+  // Capture keeps user region geometry across its backgrounds; a replaced window image, another tool or a locked display drops an uncommitted pick.
+  useEffect(() => { setWand(null); setWandIssue(null) }, [tool, locked, capture ? null : image.dataUrl])
   // Marching ants step only while a selection shows in an active, visible editor; under reduced motion the dashes stay put.
   useEffect(() => {
     if (!active || !wand) return
@@ -1154,7 +1157,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate' || tool === 'wand' || strength !== null
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
     const hint = locked ? 'Selecting on another display · Esc to cancel'
-      : !documentState.crop && gesture === null ? `${windows.length ? 'Click a window or drag' : 'Drag'} to select · Arrows nudge · Enter to finish · Esc to cancel` : null
+      : !documentState.crop && gesture === null ? `${windows.length ? 'Click a window or drag' : 'Drag'} to select · Arrows nudge · Enter to finish${backgroundHint ? ' · ' + backgroundHint : ''} · Esc to cancel` : null
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title}
       style={{ ...(active ? {} : { display: 'none' }), ...(safeTop ? { '--capture-safe-top': safeTop + 'px' } : {}) } as CSSProperties}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>

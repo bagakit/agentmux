@@ -6,7 +6,7 @@ if (process.isMainFrame) {
     load: () => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'load'),
     presented: (requestId, background) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'presented', { requestId, background }),
     select: requestId => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'select', { requestId }),
-    switchBackground: requestId => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'switch-background', { requestId }),
+    switchBackground: (requestId, background) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'switch-background', { requestId, background }),
     onEvent: listener => {
       const receive = (_event: Electron.IpcRendererEvent, event: CaptureSurfaceEvent) => listener(event)
       ipcRenderer.on(CAPTURE_SURFACE_EVENT, receive)

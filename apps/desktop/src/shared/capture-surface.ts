@@ -54,8 +54,8 @@ export type CaptureSurfaceApi = {
   presented(requestId: string, background: CaptureBackground): Promise<void>
   /** A selection starts here. False when another display already owns the selection. */
   select(requestId: string): Promise<boolean>
-  /** Explicitly selects the other already frozen background; never recaptures. */
-  switchBackground(requestId: string): Promise<void>
+  /** Explicitly selects the named already frozen background; never recaptures. */
+  switchBackground(requestId: string, background: CaptureBackground): Promise<void>
   onEvent(listener: (event: CaptureSurfaceEvent) => void): () => void
   /** Primary delivery of the processed selection in this display's frozen-frame pixels; a completed delivery closes every overlay. */
   finish(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect): Promise<SystemScreenshotEditorFinish>

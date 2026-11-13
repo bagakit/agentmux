@@ -54,15 +54,29 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
   }
 
   async function requestSwitch() {
-    if (pending.current || switching) return
+    if (pending.current || switching || locked) return
     const next = requestedBackground.current === 'included' ? 'excluded' : 'included', target = input.backgrounds[next]
-    setSwitching(true)
+    if (!target.image) { setStatus(target.issue); return }
+    pending.current = true; setSwitching(true)
     try {
-      if (target.image) { const image = new Image(); image.src = target.image.dataUrl; await image.decode() }
-      await api.switchBackground(input.requestId)
+      const image = new Image(); image.src = target.image.dataUrl; await image.decode()
+      await api.switchBackground(input.requestId, next)
     } catch (cause) { setStatus(presentError(cause)) }
-    finally { setSwitching(false) }
+    finally { pending.current = false; setSwitching(false) }
   }
+
+  // Plain Tab chooses the other frozen background. Text editing and modified Tab keep their own navigation.
+  useEffect(() => {
+    const tab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
+      event.preventDefault()
+      void requestSwitch()
+    }
+    window.addEventListener('keydown', tab, true)
+    return () => window.removeEventListener('keydown', tab, true)
+  })
 
   async function output(edit: ImageAnnotationInput, kind: 'finish' | 'save' | 'pin'): Promise<boolean> {
     if (pending.current || switching) return false
@@ -105,7 +119,7 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
     <p>Select on another display, or press Esc to cancel.</p>
   </main>
   return <main className="capture-surface">
-    <ImageAnnotationEditor presentation="capture" image={frame.image} busy={busy || switching} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }} windows={frame.windows} safeTop={input.safeTop}
+    <ImageAnnotationEditor presentation="capture" image={frame.image} busy={busy || switching} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }} windows={frame.windows} safeTop={input.safeTop} backgroundHint={background === 'included' ? 'Includes AgentMux · Tab to hide' : 'Excludes AgentMux · Tab to include'}
       {...(input.initialCrop ? { initialState: { shapes: [], crop: input.initialCrop } } : {})} locked={locked} onSelect={() => void claim()}
       completeLabel="Done" busyLabel="Copying…" documentStatus={status ?? input.notice ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       onComplete={edit => output(edit, 'finish')} onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')}

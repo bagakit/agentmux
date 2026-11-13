@@ -222,10 +222,10 @@ export class CaptureSurface {
     }
     if (action === 'cancel') { active.end({ state: 'cancelled' }); return }
     if (action === 'switch-background') {
-      if (active.owner !== null || active.finishing) { send(overlay, { kind: 'notice', message: 'Keep the selection on its current display. Finish or cancel this capture before choosing another background.' }); return }
-      const next = active.background === 'included' ? 'excluded' : 'included'
-      // T-001's issue view offers an explicit choice; a failed hidden background is never silently replaced.
-      if (overlay.input.backgrounds[active.background].image) return
+      const next = params.background
+      if (next !== 'included' && next !== 'excluded') throw new Error('Choose the exact frozen screenshot background.')
+      if (active.finishing) { send(overlay, { kind: 'notice', message: 'The current screenshot output is still in progress. Keep its background until that output finishes.' }); return }
+      if (active.owner !== null && active.owner !== overlay.input.displayId) { send(overlay, { kind: 'notice', message: 'Change the screenshot background on the display that holds the selection.' }); return }
       if (!overlay.input.backgrounds[next].image) { send(overlay, { kind: 'notice', message: overlay.input.backgrounds[next].issue! }); return }
       active.background = next
       for (const other of active.overlays) send(other, { kind: 'background', background: next })
