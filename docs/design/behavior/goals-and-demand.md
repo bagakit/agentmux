@@ -66,7 +66,11 @@ Mote 默认承担协调职责：意图或授权未明确时继续轻量讨论，
 
 Goals 的 Work 导航归属、跨上下文打开和无唯一已知关联时不猜 Goal，只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)；下述专属讨论定义实体关系，不合并 Goals 与左下 Mote 面板的选择。
 
-- **Goal 在主 Mote 中有专属 Tab**。主 Mote 的固定默认身份唯一见[《Mote 头像与主 Mote》](motes-and-coordination.md#mote-头像与主-mote)；New Goal 在这同一个主 Mote 内建立该 Goal 的专属讨论 Tab，各 Goal 保持各自独立的 Agent 上下文，不能把新 Tab、Region 或 AgentSession 说成新 Mote。原主 Mote 名称、目录、SOUL、头像、Wiki 与资料保留，不按 Goal 或 Project 复制 Mote 实体或人格；Goal 所关联 Project 只提供该目标的真实上下文，不决定另一个主 Mote 身份。已有 Goal 继续指向原专属 Tab，重入、重试与重启先保留并恢复同一 Goal/Tab/Region/Session 关系，恢复未知沿原服务窗说明，不借其他 Goal 的讨论冒充恢复。 同一个 Mote 目录不足以证明已经复用主 bot。常用探索、New Goal 与已有 Goal 的讨论都归原主 Mote：探索只在其中建立独立讨论 Tab，不新建 Mote，不提前造空 Goal/Project；New Goal 和已有 Goal 沿各自专属 Tab 与同一 Goal ID。新讨论沿原明确目标及已知 bot 的真实 Executor/Provider 配置，保原名称、SOUL、Wiki 和资料，不因配置顺序、产品名或活动项目静默换一个 bot；既有专属 Tab 映射的 Session 继续原上下文，不以复用 bot 为由暗中合并或更换这些会话。同一个真实提需或 PMO 对话可以创建、参与多个 Goal；默认 Supervisor 直接引用该准确来源 Session，不因此新建专属会话。专属讨论与默认指派是不同关系。明确指令的适用 Provider 限制仍成立，不匹配须可见，不另建每 Mote 偏好或身份名册。
+- **Goal 在主 Mote 中有专属 Tab**。主 Mote 的固定默认身份唯一见[《Mote 头像与主 Mote》](motes-and-coordination.md#mote-头像与主-mote)；New Goal 在这同一个主 Mote 内建立该 Goal 的专属讨论 Tab，各 Goal 保持各自独立的 Agent 上下文，不能把新 Tab、Region 或 AgentSession 说成新 Mote。原主 Mote 名称、目录、SOUL、头像、Wiki 与资料保留，不按 Goal 或 Project 复制 Mote 实体或人格；Goal 所关联 Project 只提供该目标的真实上下文，不决定另一个主 Mote 身份。已有关联的 Goal 继续指向原专属 Tab，重入、重试与重启先保留并恢复同一 Goal/Tab/Region/Session 关系，恢复未知沿原服务窗说明，不借其他 Goal 的讨论冒充恢复。 同一个 Mote 目录不足以证明已经复用主 bot。常用探索、New Goal 与已有 Goal 的讨论都归原主 Mote：探索只在其中建立独立讨论 Tab，不新建 Mote，不提前造空 Goal/Project；New Goal 和已有 Goal 沿各自专属 Tab 与同一 Goal ID。新讨论沿原明确目标及已知 bot 的真实 Executor/Provider 配置，保原名称、SOUL、Wiki 和资料，不因配置顺序、产品名或活动项目静默换一个 bot；既有专属 Tab 映射的 Session 继续原上下文，不以复用 bot 为由暗中合并或更换这些会话。同一个真实提需或 PMO 对话可以创建、参与多个 Goal；默认 Supervisor 直接引用该准确来源 Session，不因此新建专属会话。专属讨论与默认指派是不同关系。明确指令的适用 Provider 限制仍成立，不匹配须可见，不另建每 Mote 偏好或身份名册。
+
+已有 Goal 的首次讨论与原讨论恢复必须区分。用户明确打开该 Goal 的讨论，或对该 Goal 发出真实的澄清、制定计划、结果核查请求时，若原 Goal owner 与 Core 的权威读取均确认没有既有讨论操作、冻结请求或讨论绑定，可以在同一 Goal 上显式建立首次专属讨论；不能因 Goal 早已存在或没有首次讨论记录而永久拒绝这个入口。首次登记由原 Goal owner 核对当前记录版本，保存同一首次操作与完整意图，再沿原主 Mote 和讨论 owner 建立工作面；不重建 Goal，不改写其创建来源、Supervisor、目标提案、执行关系或人的确认，不自动为旧 Goal 生成计划或派工。
+
+任一已知原讨论操作、冻结请求、Tab／Region／Session 引用或绑定存在时，都先保留并核对同一原关联；缺少投影、读取失败、来源不可用或解析不明不能当成从未有过讨论。首次登记的并发或回执未知继续沿同一操作读回，不新建另一次讨论或覆盖已保存的关联。清单读取、详情浏览、启动恢复或后台观察不自行登记首次讨论。
 
 已知主 bot 的事实尚未确认时，原主 Mote 的 launcher 内明确说明原 bot 未确认、请求未发送、完整草稿仍在同一 Region，以及手动选择 Agent 后启动的下一步。不能只把说明留在浮窗后，也不能把另一配置的默认选中态说成已复用原 bot；没有既有 bot 的首次选择和非主 Mote 的普通 launcher 沿各自原用途。已在运行的 Session 继续原上下文，不受新讨论的配置选择阻断。
 
