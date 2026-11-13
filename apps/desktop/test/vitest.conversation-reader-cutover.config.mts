@@ -8,6 +8,7 @@ import { candidateAlias, candidateModule } from '../scripts/candidate-package-re
 const root = resolve(import.meta.dirname, '../../..')
 const candidate = mergeConfig(base, { resolve: { alias: [candidateAlias(root, { browser: true, source: true })] } })
 const changes: Record<string, [string, string, string]> = {
+  'leak-incomplete-view': ['packages/client-ui/src/lib/use-conversation-view.ts', 'responseView = { id: page.window.id, token: page.window.view ?? page.window.replay }', 'if (page.window.complete) responseView = { id: page.window.id, token: page.window.view ?? page.window.replay }'],
   'swallow-latest-intent': ['packages/client-ui/src/lib/use-conversation-view.ts', "if (current.inFlight && (kind === 'changes' || kind === 'resume')) return current.inFlight", 'if (current.inFlight) return current.inFlight'],
   'accept-superseded-read': ['packages/client-ui/src/lib/use-conversation-view.ts', 'const isCurrent = () => alive() && current.request === requestController && !requestSignal.aborted', 'const isCurrent = () => alive()'],
   'accept-other-view': ['packages/client-ui/src/lib/use-conversation-view.ts', "if (prior && kind !== 'latest')", 'if (false && prior)'],

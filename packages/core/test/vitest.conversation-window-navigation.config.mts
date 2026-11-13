@@ -9,7 +9,7 @@ const changes: Record<string, [string, string]> = {
     const first = combined.findIndex(page => page.count), last = combined.length - 1 - [...combined].reverse().findIndex(page => page.count)
     return { older: combined[last]!.earlier ? last : adjacent(last + 1, 1), newer: combined[first]!.newer ? first : adjacent(first - 1, -1) }
   `],
-  'delete-parked-view': ['view.observers--; this.trimParked()', 'view.observers--; this.views.delete(view.id); this.trimParked()'],
+  'delete-parked-view': ['return this.get(cursor.viewId, ref, cursor.scope).scope', 'const view = this.get(cursor.viewId, ref, cursor.scope); this.views.delete(view.id); return view.scope'],
   'lose-newer-position': ["newer: complete ? historyCursor(navigation.newer, 'newer') : null", 'newer: null'],
   'follow-anchored-view': ["if (mode === 'changes' && view.anchor)", "if (false && mode === 'changes' && view.anchor)"],
   'ignore-retained-head-version': ['!sizes.has(row.id) || records.get(row.id)?.revision !== row.revision', '!sizes.has(row.id)']

@@ -141,7 +141,7 @@ it('parks exact accepted views without reads, pins watched views and releases on
   expect((await f.client.releaseConversationView({ ...ref, view: kept.window.view! })).released).toBe(false)
   const parked = await complete(read, { ...ref, limit: 1 })
   for (let index = 0; index < 17; index++) await complete(read, { ...ref, limit: 1 })
-  await expect(read({ ...ref, view: parked.window.view! })).rejects.toThrow(/expired/)
+  expect((await complete(read, { ...ref, view: parked.window.view! })).window.id).toBe(parked.window.id)
   expect(projectConversationWindow(parked).historyPage!.items[0]!.id).toBe('after-park')
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })

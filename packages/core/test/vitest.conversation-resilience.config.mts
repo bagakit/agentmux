@@ -8,9 +8,8 @@ const mutations: Record<string, [string, string, string]> = {
   'restore-unit-record-cap': ['conversation-changes.ts', 'p.records.length > CONVERSATION_MAX_WINDOW_RECORDS', 'p.records.length > 200'],
   'drop-retained-contributions': ['conversation-reader.ts', 'const records = new Map(view.rows.map(record => [record.id, record]))', 'const records = new Map()'],
   'ignore-window-record-cap': ['conversation-changes.ts', 'recordIds.size > CONVERSATION_MAX_WINDOW_RECORDS || ', ''],
-  'park-active-read': ['conversation-reader.ts', 'view.observers === 0 && view.readers === 0', 'view.observers === 0'],
-  'retain-finished-read': ['conversation-reader.ts', 'view.readers--', 'void view.readers'],
-  'forget-completion-recency': ['conversation-reader.ts', 'this.views.delete(view.id); this.views.set(view.id, view)', 'void view.id'],
+  'evict-owned-view': ['conversation-reader.ts', 'this.views.set(view.id, view); return view', 'this.views.set(view.id, view); if (this.views.size > 16) this.views.delete(this.views.keys().next().value!); return view'],
+  'retain-failed-open': ['conversation-reader.ts', 'if (created && !delivered) port.state.release', 'if (false && created && !delivered) port.state.release'],
 }
 export default defineConfig({ ...original, root, cacheDir: '.cache/conversation-resilience', plugins: [{
   name: 'conversation-resilience-actual-loaded', enforce: 'pre', transform(source, id) {

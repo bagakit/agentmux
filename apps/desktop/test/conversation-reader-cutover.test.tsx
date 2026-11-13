@@ -599,3 +599,60 @@ it('actual Activity retains a selected original native body through changes and 
   await flush(() => expect(host.textContent).toContain('Later different selected words body'))
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
+
+it('a hidden shared reader retains its exact anchored frame across more than twenty unrelated parked windows', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([{ type: 'user', uuid: 'parked-original', sessionId: 'native-main',
+    message: { role: 'user', content: 'Keep this original reading position' } }]))
+  closes.push(f.close); await desktopBridge(f)
+  const reference = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  let view: ReturnType<typeof useConversationView>
+  function ParkedConsumer({ active }: { active: boolean }) {
+    view = useConversationView(api.conversation, reference, active)
+    return <output>{view.snapshot?.window.id}</output>
+  }
+  const { root, host } = mount()
+  await act(async () => root.render(<ParkedConsumer active />))
+  await flush(() => expect(view!.inspect()).toMatchObject({ loading: false, inFlight: false, error: null }))
+  const original = view!.snapshot!.units[0]!.records[0]!
+  await act(async () => { await view!.reveal({ record: original.reference!, revision: original.revision, frontier: view!.snapshot!.window.checkpoint }) })
+  const retained = view!.snapshot!
+  await act(async () => root.render(<ParkedConsumer active={false} />))
+  const temporary = []
+  for (let index = 0; index < 24; index++) temporary.push(await f.client.readAgentConversation(reference))
+  for (const page of temporary) await f.client.releaseConversationView({ ...reference, view: page.window.view! })
+  await act(async () => root.render(<ParkedConsumer active />))
+  await flush(() => {
+    expect(view!.inspect()).toMatchObject({ loading: false, inFlight: false, error: null })
+    expect(view!.snapshot!.window.id).toBe(retained.window.id)
+    expect(view!.snapshot!.units).toEqual(retained.units)
+    expect(host.textContent).toBe(retained.window.id)
+  })
+  expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+})
+
+it('a shared reader releases an incomplete replacement when its next wire page fails', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([{ type: 'user', uuid: 'fragmented-original', sessionId: 'native-main',
+    message: { role: 'user', content: 'Original fragment body. '.repeat(2400) } }]))
+  closes.push(f.close); await desktopBridge(f)
+  const reference = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const read = f.client.readAgentConversation.bind(f.client), released = vi.spyOn(f.client, 'releaseConversationView')
+  let first: Awaited<ReturnType<typeof read>> | undefined
+  vi.spyOn(f.client, 'readAgentConversation').mockImplementation(async (input, options) => {
+    if (first) throw new Error('Original next wire page failed')
+    // The original Reader uses its supported smaller wire budget. The actual
+    // public route still owns the outer budget and preserves these fragments.
+    first = await read({ ...input, maxBytes: 16 * 1024 }, options)
+    expect(first.window.complete).toBe(false)
+    return first
+  })
+  let view: ReturnType<typeof useConversationView>
+  function IncompleteConsumer() { view = useConversationView(api.conversation, reference, true); return <output>{view.error?.message}</output> }
+  const { root } = mount(); await act(async () => root.render(<IncompleteConsumer />))
+  await flush(() => {
+    expect(view!.loading).toBe(false); expect(view!.error?.message).toContain('Original next wire page failed')
+    expect(released).toHaveBeenCalledWith({ ...reference, view: first!.window.replay })
+  })
+  await expect(read({ ...reference, processDetails: first!.processDetails, cursor: first!.window.replay })).rejects.toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED' })
+  expect(view!.snapshot).toBeNull()
+  expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+})
