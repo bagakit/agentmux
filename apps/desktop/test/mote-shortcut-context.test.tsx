@@ -97,6 +97,8 @@ async function render(extra?: React.ReactNode) {
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  // Status labels read the Core observation, so the clock stays at the fixture's own status time.
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(current.status.observedAt)
   window.localStorage.clear(); restorePopover = installNativePopover()
   useAppStore.setState({ config, sessions: [current, other], tabs: { [currentTab.id]: currentTab, [otherTab.id]: otherTab },
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [currentTab.id, otherTab.id]) },
@@ -113,7 +115,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); restorePopover(); window.localStorage.clear()
-  vi.restoreAllMocks(); useAppStore.setState(baseline, true)
+  vi.restoreAllMocks(); vi.useRealTimers(); useAppStore.setState(baseline, true)
 })
 
 describe('Mote shortcut current context', () => {
@@ -153,7 +155,7 @@ describe('Mote shortcut current context', () => {
   })
 
   it.each([
-    ['working', 'Working'], ['waiting', 'Needs reply'], ['error', 'Failed'], ['running', 'Status unknown']
+    ['working', 'Working'], ['waiting', 'Needs reply'], ['error', 'Failed'], ['running', 'Activity not confirmed'], ['done', 'Idle']
   ] as const)('shows the current Agent %s fact while another Agent needs a reply', async (state, text) => {
     useAppStore.setState({ sessions: [{ ...current, status: { ...current.status, state } }, other] })
     await render()

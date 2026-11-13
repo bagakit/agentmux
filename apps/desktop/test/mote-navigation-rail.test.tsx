@@ -97,8 +97,8 @@ describe('actual Mote navigation rail and original Workbench', () => {
     })
     await settleMoteApp()
     expect(app.panel().querySelector('.mote-chooser__identity')?.textContent).toBe(button.getAttribute('aria-label'))
-    expect(app.panel().querySelector('.mote-chooser__identity')?.textContent).toBe('Renamed Analyst identity · Status unknown')
-    expect(button.dataset.moteStatus).toBe('Status unknown')
+    expect(app.panel().querySelector('.mote-chooser__identity')?.textContent).toBe('Renamed Analyst identity · Activity not confirmed')
+    expect(button.dataset.moteStatus).toBe('Activity not confirmed')
   })
 
   it.each(['pointer', 'keyboard'] as const)('shows a wide card identity only when its actual name is truncated, using %s', async via => {
