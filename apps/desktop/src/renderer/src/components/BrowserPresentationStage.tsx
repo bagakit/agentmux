@@ -195,11 +195,12 @@ export function useBrowserPresentationCapture(browserId: string) {
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
 /** A presentation owns geometry/lease/gesture only; page and Browser UI state stay in BrowserPane. */
-export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, children }: {
+/** fit: 'contain' shows the whole frame; 'cover' fills the stage from the page's top-left (a bounded embed) and crops the right and bottom. */
+export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, fit = 'contain', children }: {
   browserId: string; navigationId: string; presentation: BrowserStagePresentation; inputSelected: boolean; blocked: boolean
   control?: AgentMuxBrowserControl | undefined; preferences?: BrowserAgentControlPreferences | undefined
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
-  onPresentationRemoved?: (() => void) | undefined
+  onPresentationRemoved?: (() => void) | undefined; fit?: 'contain' | 'cover'
 }) {
   const removed = useRef(onPresentationRemoved)
   removed.current = onPresentationRemoved
@@ -396,10 +397,11 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     const stage = element.current, frame = video.current
     if (!stage || !frame || !frame.videoWidth || !frame.videoHeight) return null
     const rect = stage.getBoundingClientRect()
-    const scale = Math.min(rect.width / frame.videoWidth, rect.height / frame.videoHeight)
+    // Map through the same fit the video uses: contain centers the whole frame; cover keeps the page's top-left origin.
+    const scale = (fit === 'cover' ? Math.max : Math.min)(rect.width / frame.videoWidth, rect.height / frame.videoHeight)
     const width = frame.videoWidth * scale, height = frame.videoHeight * scale
-    const x = (event.clientX - rect.x - (rect.width - width) / 2) / width
-    const y = (event.clientY - rect.y - (rect.height - height) / 2) / height
+    const x = (event.clientX - rect.x - (fit === 'cover' ? 0 : (rect.width - width) / 2)) / width
+    const y = (event.clientY - rect.y - (fit === 'cover' ? 0 : (rect.height - height) / 2)) / height
     return x >= 0 && x < 1 && y >= 0 && y < 1 ? { x, y } : null
   }
   const modifiers = (event: PointerEvent<HTMLDivElement>): BrowserPresentationMouseModifier[] => [
@@ -473,8 +475,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
       ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
       onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
-      {media.stream ? <video ref={video} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
-      {media.stream ? <canvas ref={still} hidden aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+      {media.stream ? <video ref={video} muted playsInline style={{ width: '100%', height: '100%', objectFit: fit, objectPosition: fit === 'cover' ? '0% 0%' : '50% 50%', pointerEvents: 'none' }} /> : null}
+      {media.stream ? <canvas ref={still} hidden aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: fit, objectPosition: fit === 'cover' ? '0% 0%' : '50% 50%', pointerEvents: 'none' }} /> : null}
       {control?.owner === 'agent' && preferences && !nativeCovered && frameSize?.stream === media.stream && frameSize
         ? <BrowserControlBoundary preferences={preferences} viewport={frameSize} /> : null}
       {children}
