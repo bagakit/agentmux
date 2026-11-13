@@ -15,6 +15,7 @@ coverage
 .codex-output
 .playwright-cli
 .tmp
+.artifacts/
 .claude
 .local/
 docs/reviews/
