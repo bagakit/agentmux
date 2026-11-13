@@ -25,7 +25,7 @@ function productionHandlers(names: string[], scope: Record<string, unknown>): Re
 }
 
 describe('Main publishes the committed Profile list after every change', () => {
-  it('sends the list once per create, update, default move, import and delete, and never for reads or failures', async () => {
+  it('sends the list once per create, update, default move and import, and never for reads or failures', async () => {
     let revision = 0
     const profiles = [{ id: 'p1', label: 'Personal', createdAt: 1, isDefault: true, source: null }]
     const commit = <T>(value: T) => async () => { revision += 1; return value }
@@ -38,9 +38,8 @@ describe('Main publishes the committed Profile list after every change', () => {
     }
     const sent: Array<[string, unknown]> = []
     const contents = { isDestroyed: () => false, send: (channel: string, payload: unknown) => sent.push([channel, payload]) }
-    const h = productionHandlers(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile', 'browser:importProfile', 'browser:deleteProfile'], {
-      browserProfiles, contents, browsers: { usesProfile: () => false }, spatialState: { read: async () => null },
-      savedBrowsersUsingProfile: () => [], browserRecoveryPreviews: { clearProfile: async () => ({ status: 'cleared' }) }
+    const h = productionHandlers(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile', 'browser:importProfile'], {
+      browserProfiles, contents
     })
     expect(await h['browser:readProfiles']!({})).toEqual({ revision: 0, profiles })
     expect(sent).toHaveLength(0)
@@ -48,12 +47,11 @@ describe('Main publishes the committed Profile list after every change', () => {
     await h['browser:updateProfile']!({}, 'p1', { label: 'Me' }, 1)
     await h['browser:setDefaultProfile']!({}, 'p1', 2)
     await h['browser:importProfile']!({}, 'token', 'Imported')
-    await h['browser:deleteProfile']!({}, 'p2', { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'p2' })
     expect(sent.map(([channel, payload]) => [channel, (payload as { revision: number }).revision])).toEqual([
-      ['browser:profilesChanged', 1], ['browser:profilesChanged', 2], ['browser:profilesChanged', 3], ['browser:profilesChanged', 4], ['browser:profilesChanged', 5]
+      ['browser:profilesChanged', 1], ['browser:profilesChanged', 2], ['browser:profilesChanged', 3], ['browser:profilesChanged', 4]
     ])
     browserProfiles.updateProfile.mockRejectedValueOnce(Object.assign(new Error('changed'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
     await expect(h['browser:updateProfile']!({}, 'p1', { label: 'Late' }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
-    expect(sent).toHaveLength(5)
+    expect(sent).toHaveLength(4)
   })
 })

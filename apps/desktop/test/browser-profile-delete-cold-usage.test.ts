@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs'
-import { URL as NodeURL } from 'node:url'
-import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
-import { savedBrowsersUsingProfile } from '../src/main/browser-profile-usage.js'
+import { createBrowserProfileUsage, savedBrowsersUsingProfile, type BrowserProfileUsagePorts } from '../src/main/browser-profile-usage.js'
 
-const approval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'profile-work' }
+const approval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'profile-work' } as const
 
 function graphWith(regions: Array<{ regionId: string; browserId: string; data: Record<string, unknown> }>): AgentMuxSpatialGraph {
   return {
@@ -18,29 +15,15 @@ function graphWith(regions: Array<{ regionId: string; browserId: string; data: R
   } as unknown as AgentMuxSpatialGraph
 }
 
-// Runs the registered production callback from ipc.ts with its real collaborators replaced.
-function productionDeleteHandler(dependencies: {
-  usesProfile: (id: string) => boolean
-  read: () => Promise<{ graph: AgentMuxSpatialGraph } | null>
-  deleteProfile: (id: string, approval: unknown) => Promise<void>
-}): (event: unknown, id: string, approval: unknown) => Promise<void> {
-  const source = readFileSync(new NodeURL('../src/main/ipc.ts', import.meta.url), 'utf8')
-  const parsed = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
-  const callbacks: ts.Node[] = []
-  const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' &&
-      node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'browser:deleteProfile') callbacks.push(node.arguments[1]!)
-    ts.forEachChild(node, visit)
+function owner(overrides: Partial<BrowserProfileUsagePorts> = {}) {
+  const ports = {
+    open: vi.fn<BrowserProfileUsagePorts['open']>(() => []),
+    readSaved: vi.fn<BrowserProfileUsagePorts['readSaved']>(async () => null),
+    deleteProfile: vi.fn<BrowserProfileUsagePorts['deleteProfile']>(async () => {}),
+    clearPreviews: vi.fn<BrowserProfileUsagePorts['clearPreviews']>(async () => ({ status: 'removed' as const })),
+    ...overrides
   }
-  visit(parsed)
-  expect(callbacks).toHaveLength(1)
-  const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`,
-    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', 'publishProfiles', compiled)(
-    { usesProfile: dependencies.usesProfile }, { read: dependencies.read }, savedBrowsersUsingProfile,
-    { deleteProfile: dependencies.deleteProfile }, { clearProfile: async () => ({ status: 'cleared' }) },
-    (change: Promise<unknown>) => change
-  ) as ReturnType<typeof productionDeleteHandler>
+  return { ports, usage: createBrowserProfileUsage(ports) }
 }
 
 describe('saved Browsers that still need a Profile', () => {
@@ -61,43 +44,81 @@ describe('saved Browsers that still need a Profile', () => {
       { regionId: 'r1', browserId: 'b-default', data: {} },
       { regionId: 'r2', browserId: 'b-work', data: { profileId: 'profile-work', title: 'Launch' } }
     ])
-    expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual([{ browserId: 'b-work', title: 'Launch', url: 'https://example.test/' }])
+    expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual([{ browserId: 'b-work', workspaceId: 'workspace', title: 'Launch', url: 'https://example.test/' }])
     graph.tabs[0]!.regionIds = ['r1']
     expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual([])
   })
 })
 
-describe('Main deletion refuses a Profile a saved Browser still needs', () => {
+describe('Profile usage owner', () => {
+  it('lists open Browsers first, then saved Browsers once each, and never counts an open one twice', async () => {
+    const graph = graphWith([
+      { regionId: 'r1', browserId: 'b-open', data: { profileId: 'profile-work', title: 'Saved copy' } },
+      { regionId: 'r2', browserId: 'b-saved', data: { profileId: 'profile-work', title: 'Notes' } },
+      { regionId: 'r3', browserId: 'b-saved', data: { profileId: 'profile-work', title: 'Notes' } }
+    ])
+    const { usage } = owner({ open: () => [{ browserId: 'b-open', workspaceId: null, title: 'Live', url: 'https://live.test/' }], readSaved: async () => ({ graph }) })
+    expect(await usage.usage('profile-work')).toEqual({ complete: true, browsers: [
+      { browserId: 'b-open', title: 'Live', url: 'https://live.test/', state: 'open' },
+      { browserId: 'b-saved', workspaceId: 'workspace', title: 'Notes', url: 'https://example.test/', state: 'saved' }
+    ] })
+  })
+
+  it('treats absent saved Tabs as known empty and an unreadable file as incomplete, keeping open Browsers', async () => {
+    const live = () => [{ browserId: 'b-open', workspaceId: 'workspace', title: '', url: 'https://live.test/' }]
+    expect(await owner({ open: live }).usage.usage('profile-work')).toMatchObject({ complete: true, browsers: [{ browserId: 'b-open', state: 'open' }] })
+    expect(await owner({ open: live, readSaved: async () => { throw new Error('EIO') } }).usage.usage('profile-work'))
+      .toEqual({ complete: false, browsers: [{ browserId: 'b-open', workspaceId: 'workspace', title: '', url: 'https://live.test/', state: 'open' }] })
+  })
+})
+
+describe('Profile deletion refuses a Profile a Browser still needs', () => {
   it('refuses while a saved Browser that is not loaded names the Profile, and deletes once none does', async () => {
-    const deleteProfile = vi.fn(async () => {})
     let graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-work' } }])
-    const handler = productionDeleteHandler({ usesProfile: () => false, read: async () => ({ graph }), deleteProfile })
-    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('still used by the saved Browser "https://example.test/". Open it and switch it to another Profile, or close it')
-    expect(deleteProfile).not.toHaveBeenCalled()
+    const { ports, usage } = owner({ readSaved: async () => ({ graph }) })
+    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
+      code: 'BROWSER_PROFILE_IN_USE',
+      message: expect.stringContaining('still used by the saved Browser "https://example.test/". Open it and switch it to another Profile, or close it'),
+      details: { browsers: [{ browserId: 'b-work', workspaceId: 'workspace', title: '', url: 'https://example.test/', state: 'saved' }] }
+    })
+    expect(ports.deleteProfile).not.toHaveBeenCalled()
     graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-other' } }])
-    await handler({}, 'profile-work', approval)
-    expect(deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', approval)
+    await usage.deleteProfile('profile-work', approval)
+    expect(ports.deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', approval)
+    expect(ports.clearPreviews).toHaveBeenCalledExactlyOnceWith('profile-work')
   })
 
   it('sees a Browser that starts using the Profile while saved Tabs are being read', async () => {
-    const deleteProfile = vi.fn(async () => {})
     let live = false
-    const handler = productionDeleteHandler({ usesProfile: () => live, read: async () => { live = true; return null }, deleteProfile })
-    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('still used by an open Browser')
-    expect(deleteProfile).not.toHaveBeenCalled()
+    const { ports, usage } = owner({
+      open: () => live ? [{ browserId: 'b-new', workspaceId: null, title: 'New', url: 'https://new.test/' }] : [],
+      readSaved: async () => { live = true; return null }
+    })
+    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
+      code: 'BROWSER_PROFILE_IN_USE', message: 'Browser Profile is still used by an open Browser',
+      details: { browsers: [{ browserId: 'b-new', title: 'New', url: 'https://new.test/', state: 'open' }] }
+    })
+    expect(ports.deleteProfile).not.toHaveBeenCalled()
   })
 
   it('deletes nothing when saved Tabs cannot be read, and keeps the original cause', async () => {
-    const deleteProfile = vi.fn(async () => {})
-    const handler = productionDeleteHandler({ usesProfile: () => false, read: async () => { throw new Error('EIO') }, deleteProfile })
-    await expect(handler({}, 'profile-work', approval)).rejects.toMatchObject({ message: expect.stringContaining('Nothing was deleted'), cause: expect.objectContaining({ message: 'EIO' }) })
-    expect(deleteProfile).not.toHaveBeenCalled()
+    const { ports, usage } = owner({ readSaved: async () => { throw new Error('EIO') } })
+    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
+      code: 'BROWSER_PROFILE_USAGE_UNKNOWN', message: expect.stringContaining('Nothing was deleted'), cause: expect.objectContaining({ message: 'EIO' })
+    })
+    expect(ports.deleteProfile).not.toHaveBeenCalled()
   })
 
   it('still deletes an unused Profile when no saved Tabs exist yet', async () => {
-    const deleteProfile = vi.fn(async () => {})
-    const handler = productionDeleteHandler({ usesProfile: () => false, read: async () => null, deleteProfile })
-    await handler({}, 'profile-work', approval)
-    expect(deleteProfile).toHaveBeenCalledOnce()
+    const { ports, usage } = owner()
+    await usage.deleteProfile('profile-work', approval)
+    expect(ports.deleteProfile).toHaveBeenCalledOnce()
+  })
+
+  it('does not clear previews when the manager refuses the deletion', async () => {
+    const refusal = Object.assign(new Error('Browser Profile deletion requires explicit user approval'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
+    const { ports, usage } = owner({ deleteProfile: async () => { throw refusal } })
+    await expect(usage.deleteProfile('profile-work', approval)).rejects.toBe(refusal)
+    expect(ports.clearPreviews).not.toHaveBeenCalled()
   })
 })

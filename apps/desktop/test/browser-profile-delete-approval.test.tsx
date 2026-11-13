@@ -1,52 +1,26 @@
-import { readFileSync } from 'node:fs'
-import { URL as NodeURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import ts from 'typescript'
-import type { BrowserProfileSummary } from '../src/shared/contracts.js'
+import { createBrowserProfileUsage } from '../src/main/browser-profile-usage.js'
 
-const profile: BrowserProfileSummary = {
-  id: 'profile-work', label: 'Work', createdAt: 1, isDefault: false, source: null
-}
-// Execute the actual registered handler without constructing unrelated Electron services.
-// The callback comes from the production AST; no hand-written mirror of its checks.
-function productionDeleteHandler(dependencies: {
-  browsers: { usesProfile: (id: string) => boolean }
-  browserProfiles: { deleteProfile: (id: string, approval: unknown) => Promise<void> }
-}): (event: unknown, id: string, approval: unknown) => Promise<void> {
-  const source = readFileSync(new NodeURL('../src/main/ipc.ts', import.meta.url), 'utf8')
-  const parsed = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
-  const callbacks: ts.Node[] = []
-  function visit(node: ts.Node) {
-    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' &&
-      node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'browser:deleteProfile') {
-      callbacks.push(node.arguments[1]!)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(parsed)
-  expect(callbacks).toHaveLength(1)
-  expect(ts.isArrowFunction(callbacks[0]!)).toBe(true)
-  const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022 }
-  }).outputText
-  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', 'publishProfiles', compiled)(
-    dependencies.browsers, { read: async () => null }, () => [], dependencies.browserProfiles, { clearProfile: async () => ({ status: 'cleared' }) },
-    (change: Promise<unknown>) => change
-  ) as ReturnType<typeof productionDeleteHandler>
-}
+const approval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'profile-work' } as const
 
-describe('production Browser deletion IPC callback', () => {
-
-  it('rechecks current usage and forwards the exact target approval only when unused', async () => {
-    const usesProfile = vi.fn(() => true)
+describe('Browser Profile deletion approval', () => {
+  it('rechecks current open usage on every attempt and forwards the exact target approval only when unused', async () => {
+    const open = vi.fn((_profileId: string) => [{ browserId: 'b-open', workspaceId: null, title: 'Board', url: 'https://example.test/' }])
     const deleteProfile = vi.fn(async () => {})
-    const approval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id }
-    const handler = productionDeleteHandler({  browsers: { usesProfile }, browserProfiles: { deleteProfile } })
-    await expect(handler({}, profile.id, approval)).rejects.toThrow('Browser Profile is still used by an open Browser')
-    expect(usesProfile).toHaveBeenCalledWith(profile.id)
+    const usage = createBrowserProfileUsage({ open, readSaved: async () => null, deleteProfile, clearPreviews: async () => ({ status: 'removed' }) })
+    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_IN_USE' })
+    expect(open).toHaveBeenCalledWith('profile-work')
     expect(deleteProfile).not.toHaveBeenCalled()
-    usesProfile.mockReturnValue(false)
-    await handler({}, profile.id, approval)
-    expect(deleteProfile).toHaveBeenCalledExactlyOnceWith(profile.id, approval)
+    open.mockReturnValue([])
+    await usage.deleteProfile('profile-work', approval)
+    expect(deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', approval)
+  })
+
+  it('passes the approval through unchanged so the manager remains the one that validates it', async () => {
+    const forged = { ...approval, profileId: 'profile-other' }
+    const deleteProfile = vi.fn(async () => {})
+    const usage = createBrowserProfileUsage({ open: () => [], readSaved: async () => null, deleteProfile, clearPreviews: async () => ({ status: 'removed' }) })
+    await usage.deleteProfile('profile-work', forged)
+    expect(deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', forged)
   })
 })
