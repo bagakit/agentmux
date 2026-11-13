@@ -11,7 +11,7 @@ import { headlessFixture, until } from '../../../packages/core/test/helpers/head
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { ScratchTopics } from '../src/mote-resources.js'
 import { directoryIdentity, homeZoneId, SCRATCH_WORKSPACE_ID } from '../src/mote-model.js'
-import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager, MAINTENANCE_RETRY_MS } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
 import { createHostMotePresence } from '../src/mote-presence.js'
 import { createHostContent } from '../src/content-owner.js'
@@ -153,13 +153,14 @@ async function managedFixture() {
   let manager=make(),presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients})
   cleanup.push(async()=>{presence.dispose();await manager.stop()})
   await manager.start();await manager.check(clock);await manager.check(clock)
-  return {f,snapshot,sent,target,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
+  return {f,snapshot,files,sent,target,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
 }
 it('an unavailable original source is reobserved without a page open, file rewrite or new automatic operation',async()=>{
   const f=await managedFixture(), id=f.loop().loopId, operation=f.loop().creationOperationId
   f.filesAvailable(false);await f.manager.check(100001)
   expect(f.presence.read(f.target)).toMatchObject({status:'unconfirmed',schedule:{loopId:id}})
-  f.filesAvailable(true,false);await f.manager.check(100002)
+  // No change event: the owner reads the source again after its first retry wait.
+  f.filesAvailable(true,false);await f.manager.check(100001+MAINTENANCE_RETRY_MS)
   expect(f.presence.read(f.target)).toMatchObject({status:'active',schedule:{loopId:id,creationOperationId:operation}})
   expect(f.sent).toHaveLength(0)
 })
@@ -192,6 +193,34 @@ it('the original scheduler defers busy input, preserves claimed unknown across r
   await f.manager.call('schedule.update',{scheduleId:f.loop().loopId,expectedRevision:f.loop().revision!,operationId:'paused-period-edit',everyMs:120000})
   expect(f.loop().pendingCompletion).toEqual(claimed);expect(f.loop().status).toBe('paused');expect(f.loop().everyMs).toBe(120000)
   await f.restart();expect(f.loop().pendingCompletion).toEqual(claimed);expect(f.sent).toHaveLength(1);expect(f.loop().status).toBe('paused')
+})
+it('a source gap at a due occurrence keeps the heartbeat active and the next occurrence runs',async()=>{
+  const f=await managedFixture(), id=f.loop().loopId, due=f.loop().nextCheckAt
+  f.filesAvailable(false,false);await f.manager.check(f.at(due))
+  // The gap is a service note on an active arrangement, not a pause the user has to undo.
+  expect(f.loop()).toMatchObject({loopId:id,status:'active',nextCheckAt:due,lastDecision:expect.stringContaining('unconfirmed')})
+  expect(f.sent).toHaveLength(0)
+  f.filesAvailable(true,false);await f.manager.check(f.at(due+60000))
+  expect(f.loop()).toMatchObject({loopId:id,status:'active'});expect(f.sent).toHaveLength(1)
+})
+it('an unconfirmed source is read again after growing waits, not on every tick',async()=>{
+  const f=await managedFixture(), due=f.loop().nextCheckAt
+  const reads=vi.spyOn(f.files,'read')
+  f.filesAvailable(false,false)
+  for(let at=due;at<due+30000;at+=1000)await f.manager.check(f.at(at))
+  // Thirty one-second ticks: the due occurrence and the presence owner each retry at 1, 2, 4, 8 and 16 seconds.
+  expect(reads.mock.calls.length).toBeLessThanOrEqual(12)
+  expect(f.loop().status).toBe('active');expect(f.sent).toHaveLength(0)
+})
+it('a slow Agent read in background maintenance does not delay a due occurrence',async()=>{
+  const f=await managedFixture(), due=f.loop().nextCheckAt
+  const original=await f.f.client.statusAgent('main'), held:Array<()=>void>=[]
+  const status=vi.spyOn(f.f.client,'statusAgent').mockImplementation(()=>new Promise(resolve=>{held.push(()=>resolve(original))}))
+  const checking=f.manager.check(f.at(due))
+  await vi.waitFor(()=>expect(f.sent).toHaveLength(1))
+  expect(held.length).toBeGreaterThan(0)
+  // Later reads answer at once; release the held ones and let this check finish.
+  status.mockResolvedValue(original);for(const release of held)release();await checking
 })
 it('a changed role generation cannot receive a due occurrence even when its Host and SID are the same',async()=>{
   const f=await managedFixture();f.snapshot.roleRevision='new-generation-same-sid'
