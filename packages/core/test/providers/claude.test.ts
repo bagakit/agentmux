@@ -24,6 +24,7 @@ import { defaultAgentMuxHookPort } from '../../src/runtime-paths.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
 import {
+  CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivityDirectory,
   claudeNativeActivitySource
 } from '../../src/providers/claude-native-activity.js'
@@ -242,6 +243,118 @@ describe('Claude native mod activity', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('reports the exact end of a main call Claude asked about, without touching native results or other tools', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-asked-end-'))
+    const modulePath = join(directory, 'register.mjs')
+    const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
+        calls.push({ argv, init }); return { exitCode: 0, stdout: '{}\n', stderr: '' } } },
+      ui: { log: vi.fn(async () => {}) } }
+    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+    const handlers = new Map<string, Handler>()
+    try {
+      await writeFile(modulePath, claudeNativeActivitySource())
+      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
+      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+      await handlers.get('session.start')!(api, {}, event => event)
+      const check = (event: Record<string, unknown>, decision: string) => handlers.get('tool.check')!(api, event, async () => ({ decision }))
+      const call = (event: Record<string, unknown>, settle: () => Promise<unknown>) => handlers.get('tool.call')!(api, event, settle)
+      // Ordinary allowed tools add no observation.
+      expect(await check({ tool: 'Read', tool_use_id: 'toolu_read' }, 'allow')).toEqual({ decision: 'allow' })
+      expect(await call({ tool: 'Read', tool_use_id: 'toolu_read' }, async () => ({ ref: 1, result: 'contents' }))).toEqual({ ref: 1, result: 'contents' })
+      // A child Agent's ask belongs to its own subject.
+      await check({ tool: 'Bash', tool_use_id: 'toolu_child', agentId: 'child-A' }, 'ask')
+      await call({ tool: 'Bash', tool_use_id: 'toolu_child', agentId: 'child-A' }, async () => ({ ref: 1, result: 'Error: rejected' }))
+      // A declined main ask: the native rejection is returned unchanged, then its exact end is reported once.
+      const rejected = { ref: 1, result: "Error: The user doesn't want to proceed with this tool use." }
+      expect(await check({ tool: 'AskUserQuestion', tool_use_id: 'toolu_question' }, 'ask')).toEqual({ decision: 'ask' })
+      expect(await call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_question' }, async () => rejected)).toBe(rejected)
+      // A throwing native call still ends its request and keeps the original failure. The reported
+      // tool is the asked one, even when the call's own arguments carry a \`tool\` field.
+      await check({ tool: 'Bash', tool_use_id: 'toolu_bash' }, 'ask')
+      await expect(call({ tool: 'shadow', tool_use_id: 'toolu_bash' }, async () => { throw new Error('native failure') })).rejects.toThrow('native failure')
+      await vi.waitFor(() => expect(calls).toHaveLength(2))
+      expect(calls.map(entry => JSON.parse(entry.init.stdin))).toEqual([
+        { hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_question', tool_name: 'AskUserQuestion' },
+        { hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_bash', tool_name: 'Bash' }
+      ])
+      expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
+      expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
+      // Each asked call ends once; a repeated call settle for the same id reports nothing new.
+      await call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_question' }, async () => rejected)
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(calls).toHaveLength(2)
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+  it('gives Claude’s classic ask the identity of the one exact asked main call, and none when ambiguous', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-ask-identity-'))
+    const modulePath = join(directory, 'register.mjs')
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async () => ({ exitCode: 0, stdout: '{}\n', stderr: '' }) }, ui: { log: vi.fn(async () => {}) } }
+    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+    const handlers = new Map<string, Handler>()
+    try {
+      await writeFile(modulePath, claudeNativeActivitySource())
+      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
+      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+      await handlers.get('session.start')!(api, {}, event => event)
+      const check = (event: Record<string, unknown>, decision: string) => handlers.get('tool.check')!(api, event, async () => ({ decision }))
+      const ask = (event: Record<string, unknown>) => handlers.get('classic.PermissionRequest')!(api, event, value => value) as Record<string, unknown>
+      const call = (event: Record<string, unknown>) => handlers.get('tool.call')!(api, event, async () => ({ ref: 1, result: 'ok' }))
+      const input = { command: 'mkdir -p build/probe', description: 'Create probe directory' }
+      const classic = { hook_event_name: 'PermissionRequest', session_id: 'original-native', tool_name: 'Bash', tool_input: input, permission_suggestions: [] }
+      // An ask Claude did not route through a main tool.check stays as Claude sent it.
+      expect(await ask(classic)).toBe(classic)
+      await check({ tool: 'Bash', tool_use_id: 'toolu_one', input }, 'ask')
+      // A child Agent's identical ask never borrows a main call.
+      expect(await ask({ ...classic, agent_id: 'child-A' })).toEqual({ ...classic, agent_id: 'child-A' })
+      // Another input or tool is not this call.
+      expect(await ask({ ...classic, tool_input: { ...input, command: 'rm -rf build' } })).not.toHaveProperty('tool_use_id')
+      expect(await ask({ ...classic, tool_name: 'Edit' })).not.toHaveProperty('tool_use_id')
+      // The one exact asked call: the original fields are kept and its identity is added.
+      expect(await ask(classic)).toEqual({ ...classic, tool_use_id: 'toolu_one' })
+      // Its identity is given once: an identical later ask (still running call A) borrows nothing.
+      expect(await ask(classic)).toBe(classic)
+      // Two identical unidentified asks in flight are ambiguous; no identity is guessed.
+      await check({ tool: 'Bash', tool_use_id: 'toolu_two', input }, 'ask')
+      await check({ tool: 'Bash', tool_use_id: 'toolu_three', input }, 'ask')
+      expect(await ask(classic)).toBe(classic)
+      // Once one ends, the remaining call is exact again.
+      await call({ tool: 'Bash', tool_use_id: 'toolu_two' })
+      expect(await ask(classic)).toEqual({ ...classic, tool_use_id: 'toolu_three' })
+      // Equal arguments in another property order are the same call.
+      await check({ tool: 'Bash', tool_use_id: 'toolu_four', input: { description: input.description, command: 'ls' } }, 'ask')
+      expect(await ask({ ...classic, tool_input: { command: 'ls', description: input.description } })).toMatchObject({ tool_use_id: 'toolu_four' })
+      // A native identity Claude already sent is never replaced.
+      expect(await ask({ ...classic, tool_use_id: 'toolu_native' })).toEqual({ ...classic, tool_use_id: 'toolu_native' })
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+  it('outside an AgentMux-launched session the observer never touches Claude’s ask or reports ends', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-ask-outside-'))
+    const modulePath = join(directory, 'register.mjs')
+    const runs: unknown[] = []
+    const api = { env: { get: async () => undefined }, session: { id: async () => 'someone-else' },
+      process: { run: async (...args: unknown[]) => { runs.push(args); return { exitCode: 0, stdout: '{}\n', stderr: '' } } }, ui: { log: vi.fn(async () => {}) } }
+    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+    const handlers = new Map<string, Handler>()
+    try {
+      await writeFile(modulePath, claudeNativeActivitySource())
+      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
+      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+      await handlers.get('session.start')!(api, {}, event => event)
+      const input = { command: 'ls' }
+      await handlers.get('tool.check')!(api, { tool: 'Bash', tool_use_id: 'toolu_out', input }, async () => ({ decision: 'ask' }))
+      const classic = { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input }
+      expect(await handlers.get('classic.PermissionRequest')!(api, classic, value => value)).toBe(classic)
+      await handlers.get('tool.call')!(api, { tool: 'Bash', tool_use_id: 'toolu_out' }, async () => ({ ref: 1 }))
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(runs).toEqual([])
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
 })
 
 /**
@@ -298,7 +411,7 @@ describe('Claude provider', () => {
         ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
       ]) referenced.add(eventName)
 
-      const installed = new Set<string>([...CLAUDE_HOOK_EVENTS, 'turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'])
+      const installed = new Set<string>([...CLAUDE_HOOK_EVENTS, 'turn.start', 'turn.complete', 'AgentMuxActivityUnavailable', CLAUDE_ASKED_TOOL_END_EVENT])
       const declaredButNotInstalled = [...referenced].filter((eventName) => !installed.has(eventName))
       expect(declaredButNotInstalled).toEqual([])
     })
