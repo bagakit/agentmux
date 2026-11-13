@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxDesktopApi, AgentMuxPreloadApi, BrowserProfileDeleteApproval } from '../src/shared/contracts.js'
+import { BROWSER_FIND_MAX_LENGTH } from '../src/shared/contracts.js'
 import type { BrowserRecoveryPreview, BrowserRecoveryPreviewScope } from '../src/shared/browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -293,6 +294,31 @@ describe('actual preload and registered Main recovery-preview read', () => {
         await expect(f.api.getLastSeenFavicons(ids as string[])).rejects.toThrow('at most')
       }
       expect(scope).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(f.spatialRead).not.toHaveBeenCalled()
+    } finally { await f.dispose() }
+  })
+
+  it('forwards find in page through the actual preload to the exact Browser and refuses malformed input first', async () => {
+    const f = await fixture()
+    try {
+      const answer = { status: 'found', navigationId: 'original-document', activeMatchOrdinal: 1, matches: 2 } as const
+      const find = vi.spyOn(f.manager, 'findInPage').mockResolvedValue(answer)
+      const stop = vi.spyOn(f.manager, 'stopFindInPage').mockReturnValue()
+      const direction = { forward: false, newSession: true }
+      await expect(f.api.findInPage('original-browser', 'needle', direction)).resolves.toEqual(answer)
+      expect(find).toHaveBeenCalledExactlyOnceWith('original-browser', 'needle', direction)
+      for (const [id, text, request] of [['', 'needle', direction], ['original-browser', '', direction],
+        ['original-browser', 'x'.repeat(BROWSER_FIND_MAX_LENGTH + 1), direction], ['original-browser', 'needle', { forward: 'yes', newSession: true }],
+        ['original-browser', 'needle', null]] as const) {
+        await expect(f.api.findInPage(id, text, request as never)).rejects.toThrow('Find in page needs')
+      }
+      expect(find).toHaveBeenCalledOnce()
+      await f.api.stopFindInPage('original-browser', { focusPage: true })
+      expect(stop).toHaveBeenCalledExactlyOnceWith('original-browser', { focusPage: true })
+      await expect(f.api.stopFindInPage('original-browser', {} as never)).rejects.toThrow('focus returns')
+      expect(stop).toHaveBeenCalledOnce()
+      await expect(f.invoke('browser:findInPage', ['original-browser', 'needle', direction], { id: f.sender.id }))
+        .rejects.toThrow('Untrusted application main document sender')
+      expect(find).toHaveBeenCalledOnce()
     } finally { await f.dispose() }
   })
 
