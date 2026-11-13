@@ -40,6 +40,23 @@ describe('continuity failure classes', () => {
     expect(notice?.reason).toBe('Recovery identity is not confirmed. The original Session, output and draft are kept.')
   })
 
+  it('says only what Core knows when it holds no native conversation to continue, and offers a new one', () => {
+    // Core's own final fact: nothing to re-read or retry. The copy must not guess that the
+    // Provider failed to save anything, and its one action must be the one that works.
+    const notice = classifyContinuityFailure('unavailable', 'native-conversation-absent')
+
+    expect(notice?.remedy).toEqual({ kind: 'start-new' })
+    expect(continuityRetryEnabled(notice)).toBe(false)
+    expect(continuityRefreshEnabled(notice)).toBe(false)
+    expect(notice?.actionLabel).toBe('Start a new conversation here')
+    expect(notice?.reason).not.toMatch(/save|saved|lost|deleted|fail/iu)
+    // Core knows what it recorded, not what the Provider did or when the Run ended.
+    expect(notice?.reason).not.toMatch(/provider|before|never|ended/iu)
+    // It must stay distinguishable from the unconfirmed-identity class, which keeps its re-read.
+    expect(notice?.title).not.toBe(classifyContinuityFailure('unavailable', 'native-handle-unavailable')?.title)
+    expect(classifyContinuityFailure('unavailable', 'native-handle-unavailable')?.remedy).toEqual({ kind: 'refresh' })
+  })
+
   it('treats a missing Provider as retryable, because it can come back', () => {
     // The one unavailable case that is NOT permanent: install the Provider, or bring the Host back,
     // and the same Agent Session resumes. Telling the user to start a new Agent would throw away a
@@ -275,6 +292,7 @@ describe('the store actually carries Core’s reason to the surface', () => {
     for (const reason of [
       'provider-resume-unsupported',
       'native-handle-unavailable',
+      'native-conversation-absent',
       'provider-unavailable',
       'unknown-session'
     ] as const) {

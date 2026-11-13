@@ -7,7 +7,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { useMoteMainEntry } from '../src/renderer/src/lib/mote-main-entry'
+import { moteMainUnavailableIssue, useMoteMainEntry } from '../src/renderer/src/lib/mote-main-entry'
 import { MoteDialogueViewProvider } from '../src/renderer/src/lib/mote-dialogue-view'
 import { defaultAgent, defaultTab, moteTopics, scratchWorkspace, seedMoteWorkface, installNativePopover } from './fixtures/mote-workface'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
@@ -113,6 +113,14 @@ it('entry hook stops observing input after the first interaction cancels admissi
  expect(renders).toBe(settled)
  await act(async()=>release(page(target)));await new Promise<void>(resolve=>queueMicrotask(resolve))
  expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
+})
+
+// Core holds no conversation for this Main: the issue states that fact and the way forward, apart
+// from the identity case, and never claims what the Provider did or when the Main ended.
+it('names a Main Core holds no conversation for apart from one without a confirmed identity',()=>{
+ const absent=moteMainUnavailableIssue('native-conversation-absent'),identity=moteMainUnavailableIssue('native-handle-unavailable')
+ expect(absent).toContain('开始新一轮');expect(absent).toContain('原对话和草稿都在');expect(absent).not.toBe(identity)
+ expect(absent).not.toMatch(/Provider|之前|开始对话前|未保存/u)
 })
 
 // Core's unavailable result is a fact about this Main, not an unread operation: the issue names what
