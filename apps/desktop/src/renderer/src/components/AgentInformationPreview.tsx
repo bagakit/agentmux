@@ -1,6 +1,6 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchWindowRevision, workbenchDocuments, workbenchDocumentVisible } from '../lib/workbench-window-registry'
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
@@ -12,6 +12,7 @@ import { AgentInformationReader } from './AgentInformationReader'
 import { useAppStore } from '../store'
 import { resolveFocusPreviewTrigger } from '../../../shared/focus-preferences'
 import { useAgentPreviewIntent } from '../lib/use-agent-preview-intent'
+import { PointerRestGateContext } from '../lib/pointer-rest-gate'
 
 /** Mounted once by App, outside transient, filtered and retained surface trees. */
 export function AgentInformationPreviewHost() {
@@ -50,7 +51,7 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
   const document = useWorkbenchDocument()
   const active = useWorkbenchPresentationActive(), enabled = requested && active && Boolean(context)
   const previewTrigger = useAppStore(state => resolveFocusPreviewTrigger(state.config?.focus?.previewTrigger))
-  const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current
+  const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current, gate = useContext(PointerRestGateContext)
   const invoker = useRef({ hasContext: Boolean(context), pointerInside: false })
   const intent = useAgentPreviewIntent(() => show(), previewTrigger, enabled)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -77,6 +78,9 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
       } })
   }
   function showSoon() { intent.cancel(); keepOpen(); if (enabled && previewTrigger !== 'keyboard' && agentInformationPreview.schedule(token, intent.cancel)) intent.schedule() }
+  // A pointer entry on a moving surface waits for its rest, then reads this render's intent.
+  const latestShowSoon = useRef(showSoon); latestShowSoon.current = showSoon
+  const pointerShowSoon = () => { if (anchor.current) gate.enter(anchor.current, () => latestShowSoon.current()) }
   function hideSoon() {
     intent.cancel(); keepOpen()
     departure.current = setTimeout(() => {
@@ -95,17 +99,17 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
     if (!becameAvailable || !enabled || previewTrigger === 'keyboard') return
     const trigger = anchor.current
     if (trigger === document.activeElement) show()
-    else if (invoker.current.pointerInside) showSoon()
+    else if (invoker.current.pointerInside) pointerShowSoon()
   }, [Boolean(context), enabled, document])
   useLayoutEffect(() => () => { close() }, [close])
   const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
     aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
     onPointerEnter={close} onPointerLeave={event => {
-      if (event.relatedTarget && (event.relatedTarget as Node).nodeType && anchor.current?.contains(event.relatedTarget as Node)) showSoon()
+      if (event.relatedTarget && (event.relatedTarget as Node).nodeType && anchor.current?.contains(event.relatedTarget as Node)) pointerShowSoon()
     }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
   return { anchor, position, describedBy: open ? id : undefined, close, suppressRestoredFocus,
     triggerEvents: { 'aria-keyshortcuts': enabled ? options?.readingKey ?? 'ArrowDown' : undefined,
-      onPointerEnter: () => { invoker.current.pointerInside = true; showSoon() }, onPointerLeave: () => { invoker.current.pointerInside = false; hideSoon() },
+      onPointerEnter: () => { invoker.current.pointerInside = true; pointerShowSoon() }, onPointerLeave: () => { invoker.current.pointerInside = false; if (anchor.current) gate.leave(anchor.current); hideSoon() },
       onFocus: () => { if (previewTrigger !== 'keyboard' && !restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close,
       onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
         if (event.key !== (options?.readingKey ?? 'ArrowDown') || !enabled) return

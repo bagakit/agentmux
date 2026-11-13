@@ -1,4 +1,4 @@
-import { type CSSProperties, type RefObject, useCallback, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type RefObject, useCallback, useContext, memo, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore, useStoreApi } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
@@ -11,6 +11,7 @@ import { collaborationVisibleHitBounds } from '../lib/collaboration-map-lod'
 import { createCollaborationHierarchy } from '../lib/collaboration-hierarchy'
 import { collaborationAreaNode } from '../lib/collaboration-presentation'
 import { COLLABORATION_OVERVIEW_ZOOM } from '../lib/collaboration-map-camera'
+import { PointerRestGateContext } from '../lib/pointer-rest-gate'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { useAppStore } from '../store'
 import { HostBadge } from './HostBadge'
@@ -29,18 +30,17 @@ function compareLabelSearchPoints(a: LabelSearchPoint, b: LabelSearchPoint) { re
 
 /** One screen-space identity layer. Natural text size is observed only when it
  * changes; camera movement projects the same boxes without measuring the world. */
-export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl, readingProxies, gesturing = false }: {
+export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl, readingProxies }: {
   areas: readonly { data: Region }[]; geometry: ReadonlyMap<string, CollaborationLayoutBox>
   selectedAgent?: string | undefined; locatedAreas?: readonly string[] | undefined; active: boolean; hud: RefObject<HTMLDivElement | null>
   contextControl: RefObject<HTMLButtonElement | null> | null
   readingProxies: readonly HTMLElement[]
-  /** A direct user camera gesture is in flight; placement waits for its end. */
-  gesturing?: boolean
 }) {
   const preferences = useContext(CollaborationMapPreferences), focus = useContext(CollaborationFocusRegions)
-  // Placement reads the camera except during a direct user gesture; then names keep their slot
-  // and travel with their territory, and are placed once the gesture ends.
-  const camera = usePlacementCamera(gesturing)
+  // Placement reads the camera except while it moves; then names keep their slot and travel
+  // with their territory, and are placed once it rests or the zoom enters another level.
+  const gate = useContext(PointerRestGateContext), moving = useSyncExternalStore(gate.subscribe, gate.moving)
+  const camera = usePlacementCamera(moving)
   const store = useStoreApi(), root = useRef<HTMLDivElement>(null)
   const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number; summaryHeight: number; inset: number }>>(new Map())
   const [occlusion, setOcclusion] = useState<readonly CollaborationBounds[]>([])
@@ -189,26 +189,36 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current); for (const proxy of readingProxies) observer.observe(proxy) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
   }, [active, hud, contextControl, readingProxies, readingCamera])
-  // Labels were placed for \`camera\`. Until the next placement, each keeps its slot and
-  // travels with its own heading's world point, so a pan or pinch moves names with their
-  // territory through direct style writes, never a React render or a placement pass.
+  // Labels were placed for the held camera. Until the next placement each keeps its slot and
+  // travels with its own heading's world point, through direct style writes, never a React
+  // render or a placement pass. A name pinned to the edge because its heading is off-screen
+  // stays on the screen and off the screen-fixed controls while it travels.
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
     const [placedX = 0, placedY = 0, placedZoom = 1] = camera
-    const anchors = [...element.children as HTMLCollectionOf<HTMLElement>].flatMap(label => {
-      const box = geometry.get(label.dataset.areaId!)
-      return box?.kind === 'area' ? [{ label, x: box.x + box.heading.x, y: box.y + box.heading.y + box.heading.height }] : []
+    const anchors = labels.flatMap(({ data, x, y, width, height, context }, index) => {
+      const label = element.children[index] as HTMLElement | undefined
+      return label ? [{ label, worldX: data.box.x + data.box.heading.x, worldY: data.box.y + data.box.heading.y + data.box.heading.height, x, y, width, height, context }] : []
     })
-    const follow = ({ transform: [x, y, zoom] }: { transform: [number, number, number] }) => {
+    const follow = ({ transform: [x, y, zoom], width, height }: { transform: [number, number, number]; width: number; height: number }) => {
       for (const anchor of anchors) {
-        const dx = anchor.x * (zoom - placedZoom) + x - placedX, dy = anchor.y * (zoom - placedZoom) + y - placedY
+        let dx = anchor.worldX * (zoom - placedZoom) + x - placedX, dy = anchor.worldY * (zoom - placedZoom) + y - placedY
+        if (anchor.context) {
+          const left = Math.max(12, Math.min(anchor.x + dx, width - anchor.width - 12))
+          let top = Math.max(8, Math.min(anchor.y + dy, height - anchor.height - 8))
+          for (const box of occlusion) if (collaborationBoundsOverlap({ x: left, y: top, width: anchor.width, height: anchor.height }, box)) {
+            const above = box.y - anchor.height - 6
+            top = above >= 8 ? above : Math.min(box.y + box.height + 6, height - anchor.height - 8)
+          }
+          dx = left - anchor.x; dy = top - anchor.y
+        }
         anchor.label.style.translate = dx || dy ? `${dx}px ${dy}px` : ''
       }
     }
     follow(store.getState())
     return store.subscribe(follow)
-  }, [store, camera, labels, geometry])
+  }, [store, camera, labels, occlusion])
   // Names live inside the camera surface, so wheel, pinch and drag over them move the map.
   const surface = useStore(state => state.domNode?.querySelector<HTMLElement>('.react-flow__renderer') ?? null)
   const layer = <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-recede={focus !== null && !focus.has(data.area.id) || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
@@ -217,18 +227,19 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   return surface ? createPortal(layer, surface) : layer
 })
 
-/** The camera that label placement reads. While a direct user gesture (drag, wheel, pinch) is
- * in flight it holds the last placed camera, so names are never re-placed per frame; a resize,
- * the gesture's end, and every programmatic camera (locate, fit, keyboard) are taken at once. */
-function usePlacementCamera(gesturing: boolean) {
-  // During a gesture the selector returns the held array, so the layer does not even re-render
-  // per frame; the follow effect moves names by direct style writes instead.
+/** The camera that label placement reads. While the camera moves (a direct gesture or an
+ * animated move) it holds the last placed camera, so names are never re-placed per frame. A
+ * resize, the rest, an instant move, and a zoom into or out of the overview level, where the
+ * set of names changes, are taken at once. */
+function usePlacementCamera(moving: boolean) {
+  // While held the selector returns the held array, so the layer does not even re-render per
+  // frame; the follow effect moves names by direct style writes instead.
   const held = useRef<readonly number[] | null>(null)
   const select = useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
-    const next = [...state.transform, state.width, state.height]
-    if (gesturing && held.current && held.current[3] === next[3] && held.current[4] === next[4]) return held.current
+    const next = [...state.transform, state.width, state.height], old = held.current
+    if (moving && old && old[3] === next[3] && old[4] === next[4] && (old[2]! < COLLABORATION_OVERVIEW_ZOOM) === (next[2]! < COLLABORATION_OVERVIEW_ZOOM)) return old
     return held.current = next
-  }, [gesturing])
+  }, [moving])
   return useStore(select, same)
 }
 
