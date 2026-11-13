@@ -3,6 +3,13 @@ import type { BrowserTaskAssetRun, BrowserTaskStep } from './browser-task-assets
 export const BROWSER_TASK_MAX_BRANCHES = 16
 export const BROWSER_TASK_MAX_OPERATIONS = 128
 export const BROWSER_TASK_MAX_EXECUTED_MILLIS = 120_000
+/**
+ * Main ends each task script call after 30 seconds (BrowserViewManager.runScript), below the
+ * 120-second task budget. A wait must end as its own named step failure before that cut,
+ * so it keeps 5 seconds for its final page identity and snapshot reads.
+ */
+export const BROWSER_TASK_WAIT_MAX_MILLIS = 25_000
+export const BROWSER_TASK_MAX_RETRIES = 3
 
 /** One ordered cursor. Explicit edges may only skip forward or finish; there is no loop owner. */
 export function browserTaskNextIndex(steps: BrowserTaskStep[], index: number, destination?: string | null): number {
@@ -23,6 +30,9 @@ export function validateBrowserTaskPath(steps: BrowserTaskStep[]): void {
       : [step.nextStepId]
     if (step.kind === 'branch' && (!step.branch || edges.some(edge => edge === undefined))) throw new Error('Declare both condition paths before running.')
     if (step.kind === 'checkpoint' && step.nextStepId !== undefined) throw new Error('Human checkpoints retain their ordered continuation.')
+    if (step.retry !== undefined && (!Number.isSafeInteger(step.retry) || step.retry < 0 || step.retry > BROWSER_TASK_MAX_RETRIES)) throw new Error(`Step retry must be 0-${BROWSER_TASK_MAX_RETRIES}.`)
+    // A failure jump is one more forward edge of the same cursor; it never loops back.
+    if (step.onFail && typeof step.onFail === 'object') edges.push(step.onFail.goto)
     for (const edge of edges) {
       const next = browserTaskNextIndex(steps, index, edge)
       if (reachable.has(index) && next < steps.length) reachable.add(next)

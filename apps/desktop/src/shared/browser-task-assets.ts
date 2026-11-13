@@ -16,15 +16,35 @@ export type BrowserTaskBranch = {
   onTrue: string | null
   onFalse: string | null
 }
+export type BrowserTaskSemanticTarget = { role: string; name: string }
+/** Read-only page facts a wait step polls until they hold or its timeout ends. */
+export type BrowserTaskWait = { kind: 'element-present'; target: BrowserTaskSemanticTarget } | { kind: 'url-is'; url: string }
+/** Read-only page facts an assert step observes once; it never changes the page. */
+export type BrowserTaskAssertion =
+  | { kind: 'element-present' | 'element-absent'; target: BrowserTaskSemanticTarget }
+  | { kind: 'url-is'; url: string }
+  | { kind: 'text-present'; text: string }
+/** What a page step does after its script failed and its retries are spent. Absent means stop. */
+export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch'
+  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
   parameterKey?: string
   label?: string
   branch?: BrowserTaskBranch
+  wait?: BrowserTaskWait
+  /** Wait steps only: how long the condition may take to hold. */
+  timeoutMs?: number
+  assert?: BrowserTaskAssertion
+  /** Press steps only: one KeyboardEvent key value sent to the target. */
+  key?: string
+  /** Page steps only; checkpoints and conditions keep their own continuation rules. */
+  onFail?: BrowserTaskStepFailure
+  /** Extra attempts after a script failure (0-3). Unknown or stopped results are never retried. */
+  retry?: number
   /** Absent keeps the original ordered next step. Checkpoints retain that order. */
   nextStepId?: string | null
   reviewed: boolean

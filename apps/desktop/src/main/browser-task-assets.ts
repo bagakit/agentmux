@@ -9,17 +9,19 @@ import type { BrowserScriptRunReport } from '../shared/contracts.js'
 import type {
   BrowserTaskAsset, BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskAssetRunInput,
   BrowserTaskAssetState, BrowserTaskContent, BrowserTaskParameter, BrowserTaskStep, BrowserTaskVersion,
-  BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity, BrowserTaskStepExecution, BrowserTaskBatchInput, BrowserTaskBatchRun
+  BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity, BrowserTaskStepExecution, BrowserTaskBatchInput, BrowserTaskBatchRun,
+  BrowserTaskAssertion, BrowserTaskSemanticTarget, BrowserTaskStepFailure, BrowserTaskWait
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 import { parseBrowserOutcomeCriteriaRequest } from '../shared/browser-outcome-criteria.js'
-import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS } from '../shared/browser-task-path.js'
+import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS, BROWSER_TASK_MAX_RETRIES, BROWSER_TASK_WAIT_MAX_MILLIS } from '../shared/browser-task-path.js'
 import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from './browser-task-branch.js'
 import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROWSER_TASK_BATCH_MAX_MILLIS, BROWSER_TASK_BATCH_MAX_BYTES, type BrowserTaskBatchHost, type BrowserTaskRunBudget } from './browser-task-batch.js'
 
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
+const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll']
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -670,16 +672,28 @@ function content(raw: BrowserTaskContent): BrowserTaskContent {
   const parameters: BrowserTaskParameter[] = raw.parameters.map(parameter => ({ key: parameterKey(parameter.key), label: text(parameter.label), secret: parameter.secret === true }))
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    if (!step || !['click', 'fill', 'navigate', 'checkpoint', 'branch'].includes(step.kind)) throw new Error('Invalid task step')
+    if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
     const url = safeUrl(step.url)
     return { id: identity(step.id), kind: step.kind, url, ...(step.target ? { target: target(step.target) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
       ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
+      ...(step.wait !== undefined ? { wait: waitCondition(step.wait) } : {}),
+      ...(step.timeoutMs !== undefined ? { timeoutMs: waitTimeout(step.timeoutMs) } : {}),
+      ...(step.assert !== undefined ? { assert: assertion(step.assert) } : {}),
+      ...(step.key !== undefined ? { key: keyName(step.key) } : {}),
+      ...(step.onFail !== undefined ? { onFail: stepFailure(step.onFail) } : {}),
+      ...(step.retry !== undefined ? { retry: retryCount(step.retry) } : {}),
       ...(step.nextStepId !== undefined ? { nextStepId: step.nextStepId === null ? null : identity(step.nextStepId) } : {}),
       reviewed: step.reviewed === true, ...(step.warning ? { warning: text(step.warning) } : {}) }
   })
   if (new Set(steps.map(step => step.id)).size !== steps.length) throw new Error('Duplicate task step identity')
   for (const step of steps) if (step.kind === 'branch' ? !step.branch : step.branch !== undefined) throw new Error('Condition declaration belongs only to a condition step.')
+  for (const step of steps) {
+    if ((step.kind === 'wait') !== (step.wait !== undefined) || (step.kind === 'wait') !== (step.timeoutMs !== undefined)) throw new Error('A wait step declares its condition and timeout; other steps cannot.')
+    if ((step.kind === 'assert') !== (step.assert !== undefined)) throw new Error('An assert step declares its expected page fact; other steps cannot.')
+    if ((step.kind === 'press') !== (step.key !== undefined)) throw new Error('A press step declares its key; other steps cannot.')
+    if ((step.kind === 'checkpoint' || step.kind === 'branch') && (step.onFail !== undefined || step.retry !== undefined)) throw new Error('Checkpoints and conditions keep their own continuation; failure handling belongs to page steps.')
+  }
   for (const step of steps) if (step.kind === 'fill' && !parameters.some(parameter => parameter.key === step.parameterKey)) throw new Error('Task fill parameter is not defined')
   let completion = raw.completion
   if (completion !== undefined) {
@@ -766,6 +780,45 @@ function branch(value: NonNullable<BrowserTaskStep['branch']>): NonNullable<Brow
     : { kind: value.condition.kind, target: { role: text(value.condition.target.role), name: text(value.condition.target.name) } }
   if (condition.kind === 'page-url-is' ? !condition.url : !condition.target.role) throw new Error('Condition needs a reviewed page URL or a semantic element role.')
   return { condition, onTrue: value.onTrue === null ? null : identity(value.onTrue), onFalse: value.onFalse === null ? null : identity(value.onFalse) }
+}
+function semanticTarget(value: BrowserTaskSemanticTarget): BrowserTaskSemanticTarget {
+  if (!value || typeof value.role !== 'string' || typeof value.name !== 'string' || !value.role.trim()) throw new Error('A page check needs a semantic element role and name.')
+  return { role: text(value.role), name: text(value.name) }
+}
+function checkUrl(value: string): string {
+  const url = safeUrl(value)
+  if (!url) throw new Error('A page check needs a reviewed http, https or about URL.')
+  return url
+}
+function waitCondition(value: BrowserTaskWait): BrowserTaskWait {
+  if (!value || typeof value !== 'object') throw new Error('Invalid wait condition')
+  if (value.kind === 'element-present') return { kind: value.kind, target: semanticTarget(value.target) }
+  if (value.kind === 'url-is') return { kind: value.kind, url: checkUrl(value.url) }
+  throw new Error('Invalid wait condition')
+}
+function waitTimeout(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > BROWSER_TASK_WAIT_MAX_MILLIS) throw new Error(`Wait timeout must be 1-${BROWSER_TASK_WAIT_MAX_MILLIS} ms.`)
+  return value
+}
+function assertion(value: BrowserTaskAssertion): BrowserTaskAssertion {
+  if (!value || typeof value !== 'object') throw new Error('Invalid assertion')
+  if (value.kind === 'element-present' || value.kind === 'element-absent') return { kind: value.kind, target: semanticTarget(value.target) }
+  if (value.kind === 'url-is') return { kind: value.kind, url: checkUrl(value.url) }
+  if (value.kind === 'text-present' && typeof value.text === 'string' && value.text.trim()) return { kind: value.kind, text: text(value.text) }
+  throw new Error('Invalid assertion')
+}
+function keyName(value: string): string {
+  if (typeof value !== 'string' || !value || value.length > 32 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('A press step needs one key name.')
+  return value
+}
+function stepFailure(value: BrowserTaskStepFailure): BrowserTaskStepFailure {
+  if (value === 'stop' || value === 'continue') return value
+  if (value && typeof value === 'object' && Object.keys(value).length === 1 && typeof value.goto === 'string') return { goto: identity(value.goto) }
+  throw new Error('Step failure handling is stop, continue or goto a later step.')
+}
+function retryCount(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > BROWSER_TASK_MAX_RETRIES) throw new Error(`Step retry must be 0-${BROWSER_TASK_MAX_RETRIES}.`)
+  return value
 }
 function recordStepOperation(run: BrowserTaskAssetRun, stepId: string, operationId: string): void {
   const id = identity(operationId)
