@@ -713,6 +713,9 @@ export async function registerIpc(args: {
     controlBridge.accept(response)
   }
   const controlBrowserTask = (request: unknown) => executeBrowserTaskControl(request, {
+    exportPortableTask: (id, assetId, revision, version) => browsers.exportPortableTask(id, assetId, revision, version),
+    importPortableTask: (id, input) => browsers.importPortableTask(id, input),
+    inspectPortableTaskImport: (id, input) => browsers.inspectPortableTaskImport(id, input),
     getTaskSource: id => browsers.getTaskSource(id),
     getTaskDraft: (id, assetId) => browsers.getTaskDraft(id, assetId),
     importTaskAsset: (id, input) => browsers.importTaskAsset(id, input),
@@ -731,7 +734,7 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
-    if (request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
+    if (request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       if (request.kind === 'quick') return controlBridge.execute(request, signal)
       throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')

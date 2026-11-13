@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { parseBrowserTaskImportInput, parseBrowserTaskPortableBundle, parseBrowserTaskPortableBinding, type BrowserTaskImportInput, type BrowserTaskPortableBinding, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
 import type { NameChangeAudit } from './name-change-audit.js'
@@ -104,11 +106,11 @@ export class BrowserTaskAssets {
   }
 
   /** Exact current definition only; cumulative versions/runs stay in this original document. */
-  async draft(assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }> {
+  async draft(assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'importedFrom' | 'draft'> & { warning?: string }> {
     await this.ready()
     if (this.loadUnavailable) throw new AgentMuxError('The original task draft could not be read. Existing data is retained.', 'BROWSER_TASK_DRAFT_UNAVAILABLE')
     const asset = this.requireAsset(assetId)
-    return copy({ id: asset.id, browserId: asset.browserId, revision: asset.revision, sourceRecordingId: asset.sourceRecordingId, draft: asset.draft, ...(this.warning ? { warning: this.warning } : {}) })
+    return copy({ id: asset.id, browserId: asset.browserId, revision: asset.revision, ...(asset.sourceRecordingId === undefined ? { importedFrom: asset.importedFrom! } : { sourceRecordingId: asset.sourceRecordingId }), draft: asset.draft, ...(this.warning ? { warning: this.warning } : {}) })
   }
 
   /** The actual run chosen by the execution owner, including an explicitly resumed earlier cursor. */
@@ -241,13 +243,60 @@ export class BrowserTaskAssets {
     })
   }
 
+  /** Export only an explicitly selected definition; no runtime/recording document enters the bundle. */
+  async exportPortable(assetId: string, expectedRevision: number, version?: number): Promise<BrowserTaskPortableBundle> {
+    return this.change(async () => {
+      if (this.loadUnavailable || this.warning) throw new AgentMuxError('The task definition is not confirmed saved. Repair storage and read the original draft before exporting.', 'BROWSER_TASK_EXPORT_UNAVAILABLE')
+      const asset = this.requireAsset(assetId)
+      if (asset.revision !== expectedRevision) throw revisionChanged(asset, expectedRevision)
+      const selected = version === undefined ? asset.draft : asset.versions.find(item => item.version === version)
+      if (!selected) throw new AgentMuxError('That immutable task version is unavailable.', 'BROWSER_TASK_VERSION_UNAVAILABLE')
+      const { name, url, steps, parameters, completion } = selected
+      const definition = portableContent({ name, url, steps, parameters, ...(completion ? { completion } : {}) })
+      return parseBrowserTaskPortableBundle({ format: 'agentmux.browser-task', version: 1,
+        source: { assetId, revision: asset.revision, ...(version === undefined ? {} : { publishedVersion: version }) }, definition })
+    })
+  }
+
+  /** One new local definition. Its original frozen intent uses the same document and durable receipt. */
+  async importPortable(input: BrowserTaskImportInput): Promise<BrowserTaskAsset> {
+    const { request, binding, definition } = portableIntent(input)
+    return this.change(async () => {
+      if (this.loadUnavailable) throw new AgentMuxError('Original task import receipts could not be read. Keep the same input and repair storage.', 'BROWSER_TASK_CREATE_UNAVAILABLE')
+      const existing = creationAsset(this.document, binding)
+      if (existing) {
+        const saved = await this.readCreation(binding)
+        if (saved.status !== 'created') await this.persistCreation(binding)
+        return copy(existing)
+      }
+      const ids = new Map(definition.steps.map(step => [step.id, mintObjectId()]))
+      const remap = (id: string | null): string | null => id === null ? null : ids.get(id)!
+      const steps = definition.steps.map(step => ({ ...step, id: ids.get(step.id)!, reviewed: false,
+        ...(step.nextStepId === undefined ? {} : { nextStepId: remap(step.nextStepId) }),
+        ...(typeof step.onFail === 'object' ? { onFail: { goto: remap(step.onFail.goto)! } } : {}),
+        ...(step.branch ? { branch: { ...step.branch, onTrue: remap(step.branch.onTrue), onFalse: remap(step.branch.onFalse) } } : {}) }))
+      const completion = definition.completion && { criteria: definition.completion.criteria.map(item => item.kind === 'download-readable'
+        ? { ...item, stepId: remap(item.stepId)! } : { ...item, checkpointId: remap(item.checkpointId)! }) }
+      const at = this.now(), asset: BrowserTaskAsset = { id: request.assetId, browserId: request.browserId, revision: 1,
+        importedFrom: copy(request.bundle.source), creation: binding, draft: content({ ...definition, steps, ...(completion ? { completion } : {}) }), versions: [], createdAt: at, updatedAt: at }
+      this.document.assets.push(asset)
+      await this.persistCreation(binding)
+      return copy(asset)
+    })
+  }
+
+  async inspectPortableImport(input: BrowserTaskImportInput): Promise<BrowserTaskCreateStatus> {
+    const { binding } = portableIntent(input)
+    return this.change(() => this.readCreation(binding))
+  }
+
   /** Read the original durable binding. This never creates, resumes or replays a write. */
   async inspectCreation(input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus> {
     const request = parseBrowserTaskCreateInput(input)
     return this.change(() => this.readCreation(request))
   }
 
-  private async readCreation(request: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus> {
+  private async readCreation(request: BrowserTaskCreateInput | BrowserTaskPortableBinding): Promise<BrowserTaskCreateStatus> {
     const original = creationAsset(this.document, request)
     const identity = { createOperationId: request.createOperationId, assetId: request.assetId, browserId: request.browserId }
     try {
@@ -268,7 +317,7 @@ export class BrowserTaskAssets {
     }
   }
 
-  private async persistCreation(request: BrowserTaskCreateInput): Promise<void> {
+  private async persistCreation(request: BrowserTaskCreateInput | BrowserTaskPortableBinding): Promise<void> {
     try { await this.persist(request.browserId) }
     catch {
       throw new AgentMuxError('Task creation saving is unconfirmed. Keep this original request and asset identity; check its receipt before continuing. Nothing is automatically created again.',
@@ -795,7 +844,31 @@ function revisionChanged(asset: BrowserTaskAsset, expectedRevision: number): Age
   return new AgentMuxError('Task draft changed; read browser task assets and edit the current revision.', 'BROWSER_TASK_REVISION_CONFLICT',
     JSON.stringify({ browserId: asset.browserId, assetId: asset.id, expectedRevision, currentRevision: asset.revision }))
 }
-function creationAsset(document: BrowserTaskAssetDocument, request: BrowserTaskCreateInput): BrowserTaskAsset | undefined {
+function portableContent(value: unknown, strict = false): BrowserTaskContent {
+  const definition = content(value)
+  validateBrowserTaskPath(definition.steps)
+  for (const step of definition.steps) {
+    step.reviewed = false
+    // A previous recording warning is local observation, never part of a portable definition.
+    delete step.warning
+  }
+  for (const item of definition.completion?.criteria ?? []) if (item.kind === 'download-readable' &&
+      (item.path.startsWith('/') || /^[a-z]:[\\/]/i.test(item.path) || item.path.split(/[\\/]/).some(part => part === '..'))) {
+    throw new AgentMuxError('Portable download paths must stay relative to the target Workspace.', 'BROWSER_TASK_PORTABLE_INVALID')
+  }
+  if (strict && !isDeepStrictEqual(definition, value)) throw new AgentMuxError('Portable task definition must use the canonical exported fields with unreviewed steps.', 'BROWSER_TASK_PORTABLE_INVALID')
+  return definition
+}
+function portableIntent(input: BrowserTaskImportInput): { request: BrowserTaskImportInput; binding: BrowserTaskPortableBinding; definition: BrowserTaskContent } {
+  const request = parseBrowserTaskImportInput(input)
+  const definition = portableContent(request.bundle.definition, true)
+  const normalized = { ...request.bundle, definition }
+  // Hash the complete normalized definition/parameter schema and exact origin, not display text.
+  const bundleSha256 = createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
+  return { request, definition, binding: { kind: 'portable', createOperationId: request.createOperationId, assetId: request.assetId,
+    browserId: request.browserId, bundleSha256, source: copy(request.bundle.source) } }
+}
+function creationAsset(document: BrowserTaskAssetDocument, request: BrowserTaskCreateInput | BrowserTaskPortableBinding): BrowserTaskAsset | undefined {
   const byOperation = document.assets.find(asset => asset.creation?.createOperationId === request.createOperationId)
   const byAsset = document.assets.find(asset => asset.id === request.assetId)
   if ((byOperation && !isDeepStrictEqual(byOperation.creation, request)) || (byAsset && !isDeepStrictEqual(byAsset.creation, request)) ||
@@ -887,9 +960,13 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
       const { version: _version, savedAt: _savedAt, ...definition } = version
       return { ...content(definition), version: version.version, savedAt: version.savedAt }
     })
-    const creation = asset.creation === undefined ? undefined : parseBrowserTaskCreateInput(asset.creation)
-    if (creation && (creation.assetId !== asset.id || creation.browserId !== asset.browserId || creation.sourceRecordingId !== asset.sourceRecordingId)) throw new Error('Task creation binding does not match its original asset')
-    return { id: identity(asset.id), browserId: identity(asset.browserId), sourceRecordingId: identity(asset.sourceRecordingId), revision: asset.revision,
+    const creation = asset.creation === undefined ? undefined : 'kind' in asset.creation ? parseBrowserTaskPortableBinding(asset.creation) : parseBrowserTaskCreateInput(asset.creation)
+    const portable = creation && 'kind' in creation ? creation : undefined
+    if (creation && (creation.assetId !== asset.id || creation.browserId !== asset.browserId ||
+        ('sourceRecordingId' in creation && creation.sourceRecordingId !== asset.sourceRecordingId))) throw new Error('Task creation binding does not match its original asset')
+    if (portable ? asset.sourceRecordingId !== undefined || !isDeepStrictEqual(asset.importedFrom, portable.source) : asset.importedFrom !== undefined) throw new Error('Task provenance does not match its original creation')
+    return { id: identity(asset.id), browserId: identity(asset.browserId),
+      ...(portable ? { importedFrom: copy(portable.source) } : { sourceRecordingId: identity(asset.sourceRecordingId!) }), revision: asset.revision,
       ...(creation ? { creation } : {}),
       draft: content(asset.draft), versions, createdAt: asset.createdAt, updatedAt: asset.updatedAt }
   })

@@ -1,4 +1,5 @@
 import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
+import { parseBrowserTaskImportInput, type BrowserTaskImportInput, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
@@ -3162,11 +3163,30 @@ export class BrowserViewManager {
     return source ? { id: source.id, browserId: source.browserId, revision: source.revision, status: source.status, stepCount: source.steps.length, ...(warning ? { warning } : {}) } : null
   }
 
-  async getTaskDraft(id: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }> {
+  async getTaskDraft(id: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'importedFrom' | 'draft'> & { warning?: string }> {
     if (!this.taskAssets) throw new Error('The original task owner is unavailable. Existing Browser work is retained.')
     const asset = await this.taskAssets.draft(assetId)
     if (asset.browserId !== id) throw new Error('This task draft belongs to another Browser.')
     return asset
+  }
+
+  async exportPortableTask(id: string, assetId: string, expectedRevision: number, version?: number): Promise<BrowserTaskPortableBundle> {
+    await this.requireTaskAsset(id, assetId)
+    return this.taskAssets!.exportPortable(assetId, expectedRevision, version)
+  }
+
+  async importPortableTask(id: string, input: BrowserTaskImportInput): Promise<BrowserTaskAsset> {
+    const request = parseBrowserTaskImportInput(input)
+    if (request.browserId !== id) throw new Error('This task import input belongs to another Browser.')
+    if (!this.taskAssets) throw new Error('Original task asset storage is unavailable. Keep the same import input.')
+    return this.taskAssets.importPortable(request)
+  }
+
+  async inspectPortableTaskImport(id: string, input: BrowserTaskImportInput): Promise<BrowserTaskCreateStatus> {
+    const request = parseBrowserTaskImportInput(input)
+    if (request.browserId !== id) throw new Error('This task import input belongs to another Browser.')
+    if (!this.taskAssets) throw new Error('Original task asset storage is unavailable. Keep the same import input.')
+    return this.taskAssets.inspectPortableImport(request)
   }
 
   async importTaskAsset(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset> {

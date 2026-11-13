@@ -67,10 +67,12 @@ export type BrowserTaskVersion = BrowserTaskContent & { version: number; savedAt
 export type BrowserTaskAsset = {
   id: string
   browserId: string
-  sourceRecordingId: string
+  sourceRecordingId?: string
+  /** Historical package origin, not a local demonstration or approval. */
+  importedFrom?: import('@agentmux/core/control').BrowserTaskPortableSource
   revision: number
   /** Original immutable creation binding; later draft edits do not change this intent. */
-  creation?: BrowserTaskCreateInput
+  creation?: BrowserTaskCreateInput | import('@agentmux/core/control').BrowserTaskPortableBinding
   draft: BrowserTaskContent
   versions: BrowserTaskVersion[]
   createdAt: number

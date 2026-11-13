@@ -1,10 +1,18 @@
+import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from './browser-task-creation.js'
 export * from './browser-task-creation.js'
 
 export type AgentMuxBrowserTaskSource = { id: string; browserId: string; revision: number; status: 'recording' | 'stopped' | 'interrupted'; stepCount: number; warning?: string }
-export type AgentMuxBrowserTaskDraft = { id: string; browserId: string; revision: number; sourceRecordingId: string; draft: Record<string, unknown>; warning?: string }
+export type AgentMuxBrowserTaskDraft = { id: string; browserId: string; revision: number; sourceRecordingId?: string; importedFrom?: BrowserTaskPortableSource; draft: Record<string, unknown>; warning?: string }
+
+/** Provenance describes an exported definition; it never identifies a local recording or approval. */
+export type BrowserTaskPortableSource = { assetId: string; revision: number; publishedVersion?: number }
+export type BrowserTaskPortableBundle = { format: 'agentmux.browser-task'; version: 1; source: BrowserTaskPortableSource; definition: Record<string, unknown> }
+export type BrowserTaskImportInput = { createOperationId: string; assetId: string; browserId: string; bundle: BrowserTaskPortableBundle }
+/** Compact immutable intent stored in the original asset document, alongside its imported definition. */
+export type BrowserTaskPortableBinding = { kind: 'portable'; createOperationId: string; assetId: string; browserId: string; bundleSha256: string; source: BrowserTaskPortableSource }
 
 export type BrowserTaskRunStatus = 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
@@ -50,6 +58,9 @@ export type AgentMuxBrowserTaskReliability = {
 }
 
 export type BrowserTaskControlPayload =
+  | { operation: 'browser.task.export'; browserId: string; assetId: string; expectedRevision: number; version?: number }
+  | { operation: 'browser.task.import'; browserId: string; input: BrowserTaskImportInput }
+  | { operation: 'browser.task.import-inspect'; browserId: string; input: BrowserTaskImportInput }
   | { operation: 'browser.task.source'; browserId: string }
   | { operation: 'browser.task.draft'; browserId: string; assetId: string }
   | { operation: 'browser.task.create'; browserId: string; input: BrowserTaskCreateInput }
@@ -65,6 +76,9 @@ export type BrowserTaskControlPayload =
 /** Confirmed write identity; cumulative definition/version history is read separately. */
 export type AgentMuxBrowserTaskAssetReceipt = { id: string; browserId: string; revision: number }
 export type BrowserTaskControlResult =
+  | { operation: 'browser.task.export'; bundle: BrowserTaskPortableBundle }
+  | { operation: 'browser.task.import'; creation: { createOperationId: string; assetId: string; browserId: string; status: 'created' } }
+  | { operation: 'browser.task.import-inspect'; creation: BrowserTaskCreateStatus }
   | { operation: 'browser.task.source'; browserId: string; source: AgentMuxBrowserTaskSource | null }
   | { operation: 'browser.task.draft'; asset: AgentMuxBrowserTaskDraft }
   | { operation: 'browser.task.create'; creation: { createOperationId: string; assetId: string; browserId: string; status: 'created' } }
@@ -83,7 +97,7 @@ const RESULTS: BrowserTaskReliabilityResult[] = ['passed', 'not-met', 'unavailab
 const MAX_BYTES = 1_048_576
 
 export function isBrowserTaskControlOperation(operation: string): operation is BrowserTaskControlPayload['operation'] {
-  return operation === 'browser.task.source' || operation === 'browser.task.draft' || operation === 'browser.task.create' || operation === 'browser.task.create-inspect' || operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
+  return operation === 'browser.task.export' || operation === 'browser.task.import' || operation === 'browser.task.import-inspect' || operation === 'browser.task.source' || operation === 'browser.task.draft' || operation === 'browser.task.create' || operation === 'browser.task.create-inspect' || operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
 }
 
 function bad(message: string, request = false): never {
@@ -144,9 +158,46 @@ function definition(value: unknown, request = false): Record<string, unknown> {
   return result
 }
 
+export function parseBrowserTaskPortableSource(value: unknown, request = true): BrowserTaskPortableSource {
+  const row = rpcRecord(value, ['assetId', 'revision', 'publishedVersion'], request ? 'INVALID_CONTROL_REQUEST' : 'CONTROL_PROTOCOL_ERROR')
+  return { assetId: identifier(row.assetId, request), revision: integer(row.revision, request, 1),
+    ...(row.publishedVersion === undefined ? {} : { publishedVersion: integer(row.publishedVersion, request, 1) }) }
+}
+export function parseBrowserTaskPortableBundle(value: unknown, request = true): BrowserTaskPortableBundle {
+  const row = rpcRecord(value, ['format', 'version', 'source', 'definition'], request ? 'INVALID_CONTROL_REQUEST' : 'CONTROL_PROTOCOL_ERROR')
+  if (row.format !== 'agentmux.browser-task' || row.version !== 1) bad('Unsupported portable task format or version.', request)
+  const result: BrowserTaskPortableBundle = { format: row.format, version: 1, source: parseBrowserTaskPortableSource(row.source, request), definition: definition(row.definition, request) }
+  // Leave room for the RPC/CLI envelope before any import write can occur.
+  if (Buffer.byteLength(JSON.stringify(result)) > MAX_BYTES - 4096) bad('Portable task bundle byte budget exceeded.', request)
+  return result
+}
+export function parseBrowserTaskImportInput(value: unknown): BrowserTaskImportInput {
+  const row = rpcRecord(value, ['createOperationId', 'assetId', 'browserId', 'bundle'], 'INVALID_CONTROL_REQUEST')
+  return { createOperationId: identifier(row.createOperationId, true), assetId: identifier(row.assetId, true), browserId: identifier(row.browserId, true), bundle: parseBrowserTaskPortableBundle(row.bundle) }
+}
+/** Retain this exact input before dispatch; unknown writes continue the same proposed identities. */
+export function browserTaskImportInput(browserId: string, bundle: BrowserTaskPortableBundle): BrowserTaskImportInput {
+  return parseBrowserTaskImportInput({ createOperationId: mintObjectId(), assetId: mintObjectId(), browserId, bundle })
+}
+export function parseBrowserTaskPortableBinding(value: unknown): BrowserTaskPortableBinding {
+  const row = rpcRecord(value, ['kind', 'createOperationId', 'assetId', 'browserId', 'bundleSha256', 'source'], 'INVALID_CONTROL_REQUEST')
+  if (row.kind !== 'portable' || typeof row.bundleSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(row.bundleSha256)) bad('Invalid portable task creation binding.', true)
+  return { kind: 'portable', createOperationId: identifier(row.createOperationId, true), assetId: identifier(row.assetId, true), browserId: identifier(row.browserId, true), bundleSha256: row.bundleSha256, source: parseBrowserTaskPortableSource(row.source) }
+}
+
 export function parseBrowserTaskControlPayload(value: unknown): BrowserTaskControlPayload {
   const source = record(value, true)
   const browserId = identifier(source.browserId, true)
+  if (source.operation === 'browser.task.export') {
+    rpcRecord(source, ['operation', 'browserId', 'assetId', 'expectedRevision', 'version', 'schemaVersion', 'requestId'], 'INVALID_CONTROL_REQUEST')
+    return { operation: source.operation, browserId, assetId: identifier(source.assetId, true), expectedRevision: integer(source.expectedRevision, true, 1), ...(source.version === undefined ? {} : { version: integer(source.version, true, 1) }) }
+  }
+  if (source.operation === 'browser.task.import' || source.operation === 'browser.task.import-inspect') {
+    rpcRecord(source, ['operation', 'browserId', 'input', 'schemaVersion', 'requestId'], 'INVALID_CONTROL_REQUEST')
+    const input = parseBrowserTaskImportInput(source.input)
+    if (input.browserId !== browserId) bad('Task import input belongs to another Browser.', true)
+    return { operation: source.operation, browserId, input }
+  }
   if (source.operation === 'browser.task.source' || source.operation === 'browser.task.draft' || source.operation === 'browser.task.create' || source.operation === 'browser.task.create-inspect') {
     const fields = source.operation === 'browser.task.draft' ? ['assetId'] : source.operation === 'browser.task.source' ? [] : ['input']
     rpcRecord(source, ['operation', 'browserId', ...fields, 'schemaVersion', 'requestId'], 'INVALID_CONTROL_REQUEST')
@@ -297,6 +348,10 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
   try { serialized = JSON.stringify(source) } catch { bad('Browser task result cannot be serialized.') }
   if (Buffer.byteLength(serialized) > MAX_BYTES) bad('Browser task result byte budget exceeded.')
   switch (operation) {
+    case 'browser.task.export': {
+      rpcRecord(source, ['operation', 'bundle'], 'CONTROL_PROTOCOL_ERROR')
+      return { operation, bundle: parseBrowserTaskPortableBundle(source.bundle, false) }
+    }
     case 'browser.task.source': {
       rpcRecord(source, ['operation', 'browserId', 'source'], 'CONTROL_PROTOCOL_ERROR')
       const browserId = identifier(source.browserId)
@@ -307,15 +362,19 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
     }
     case 'browser.task.draft': {
       rpcRecord(source, ['operation', 'asset'], 'CONTROL_PROTOCOL_ERROR')
-      const row = rpcRecord(source.asset, ['id', 'browserId', 'revision', 'sourceRecordingId', 'draft', 'warning'], 'CONTROL_PROTOCOL_ERROR')
-      return { operation, asset: { id: identifier(row.id), browserId: identifier(row.browserId), revision: integer(row.revision, false, 1), sourceRecordingId: identifier(row.sourceRecordingId), draft: definition(row.draft), ...notices(row) } }
+      const row = rpcRecord(source.asset, ['id', 'browserId', 'revision', 'sourceRecordingId', 'importedFrom', 'draft', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+      if ((row.sourceRecordingId === undefined) === (row.importedFrom === undefined)) bad('Task draft source is ambiguous or missing.')
+      return { operation, asset: { id: identifier(row.id), browserId: identifier(row.browserId), revision: integer(row.revision, false, 1),
+        ...(row.sourceRecordingId === undefined ? { importedFrom: parseBrowserTaskPortableSource(row.importedFrom, false) } : { sourceRecordingId: identifier(row.sourceRecordingId) }), draft: definition(row.draft), ...notices(row) } }
     }
+    case 'browser.task.import':
     case 'browser.task.create': {
       rpcRecord(source, ['operation', 'creation'], 'CONTROL_PROTOCOL_ERROR')
       const row = rpcRecord(source.creation, ['createOperationId', 'assetId', 'browserId', 'status'], 'CONTROL_PROTOCOL_ERROR')
       if (row.status !== 'created') bad('Task creation receipt is not confirmed.')
       return { operation, creation: { createOperationId: identifier(row.createOperationId), assetId: identifier(row.assetId), browserId: identifier(row.browserId), status: 'created' } }
     }
+    case 'browser.task.import-inspect':
     case 'browser.task.create-inspect': {
       rpcRecord(source, ['operation', 'creation'], 'CONTROL_PROTOCOL_ERROR')
       const row = rpcRecord(source.creation, ['createOperationId', 'assetId', 'browserId', 'status', 'warning'], 'CONTROL_PROTOCOL_ERROR')
@@ -339,7 +398,11 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
 
 export function assertBrowserTaskControlTarget(request: BrowserTaskControlPayload, result: BrowserTaskControlResult): void {
   if (request.operation !== result.operation) bad('Browser task result operation does not match its request.')
-  if (request.operation === 'browser.task.source' && result.operation === request.operation) {
+  if (request.operation === 'browser.task.export' && result.operation === request.operation) {
+    if (result.bundle.source.assetId !== request.assetId || result.bundle.source.revision !== request.expectedRevision || result.bundle.source.publishedVersion !== request.version) bad('Task export belongs to another asset revision or version.')
+  } else if ((request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect') && result.operation === request.operation) {
+    if (result.creation.browserId !== request.browserId || result.creation.assetId !== request.input.assetId || result.creation.createOperationId !== request.input.createOperationId) bad('Task import receipt belongs to another original request.')
+  } else if (request.operation === 'browser.task.source' && result.operation === request.operation) {
     if (result.browserId !== request.browserId || result.source && result.source.browserId !== request.browserId) bad('Task source belongs to another Browser.')
   } else if (request.operation === 'browser.task.draft' && result.operation === request.operation) {
     if (result.asset.browserId !== request.browserId || result.asset.id !== request.assetId) bad('Task draft belongs to another asset.')

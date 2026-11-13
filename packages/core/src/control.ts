@@ -1201,6 +1201,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.proxy-sign-in.set': 'long',
   'browser.profile.proxy-sign-in.clear': 'long',
   'browser.profile.network.check': 'long',
+  'browser.task.export': 'short', 'browser.task.import': 'long', 'browser.task.import-inspect': 'short',
   'browser.task.source': 'short',
   'browser.task.draft': 'short',
   'browser.task.create': 'short',

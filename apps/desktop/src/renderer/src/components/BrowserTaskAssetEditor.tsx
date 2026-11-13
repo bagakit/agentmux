@@ -78,7 +78,7 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
   const canRun = Boolean(version && !busy && parameters.every(parameter => Boolean(values[parameter.key])))
   function change(next: BrowserTaskContent): void { setDraft(next); setError(undefined) }
   function useSuggestion(stepId: string): void {
-    if (!draft || asset?.sourceRecordingId !== recording?.id) return
+    if (!draft || !asset?.sourceRecordingId || asset.sourceRecordingId !== recording?.id) return
     const suggestion = suggestions?.find(item => item.stepId === stepId && item.status === 'available')
     if (!suggestion?.title || !draft.steps.some(step => step.id === stepId)) return
     const title = suggestion.title
@@ -147,8 +147,8 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
           {step.label && step.kind !== 'checkpoint' && step.kind !== 'branch' ? <small data-task-step-summary>{browserTaskStepSummary(step)}</small> : null}
           {step.kind !== 'checkpoint' ? <><TextInput aria-label={`Task step ${index + 1} title`} value={step.label ?? ''} maxLength={240}
             placeholder="Step title" onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} />
-            <DemonstrationSuggestion suggestion={asset.sourceRecordingId === recording?.id ? suggestions?.find(item => item.stepId === step.id) : undefined} />
-            {asset.sourceRecordingId === recording?.id && suggestions?.some(item => item.stepId === step.id && item.status === 'available') ?
+            <DemonstrationSuggestion suggestion={Boolean(asset.sourceRecordingId) && asset.sourceRecordingId === recording?.id ? suggestions?.find(item => item.stepId === step.id) : undefined} />
+            {Boolean(asset.sourceRecordingId) && asset.sourceRecordingId === recording?.id && suggestions?.some(item => item.stepId === step.id && item.status === 'available') ?
               <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
                 onClick={() => useSuggestion(step.id)}>Use suggestion</button> : null}</> : null}
           {step.warning && !step.reviewed ? <small>{step.warning}</small> : null}

@@ -5,8 +5,11 @@ import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, B
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 
 type BrowserTaskControlOwner = {
+  exportPortableTask(browserId: string, assetId: string, expectedRevision: number, version?: number): Promise<import('@agentmux/core/control').BrowserTaskPortableBundle>
+  importPortableTask(browserId: string, input: import('@agentmux/core/control').BrowserTaskImportInput): Promise<BrowserTaskAsset>
+  inspectPortableTaskImport(browserId: string, input: import('@agentmux/core/control').BrowserTaskImportInput): Promise<BrowserTaskCreateStatus>
   getTaskSource(browserId: string): Promise<AgentMuxBrowserTaskSource | null>
-  getTaskDraft(browserId: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }>
+  getTaskDraft(browserId: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'importedFrom' | 'draft'> & { warning?: string }>
   importTaskAsset(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
   inspectTaskAssetCreation(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
@@ -36,7 +39,14 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
   const { caller, ...payload } = (value && typeof value === 'object' ? value : {}) as { caller?: { agentSessionId?: string } }
   const request = parseBrowserTaskControlPayload(value && typeof value === 'object' ? payload : value)
   let raw: unknown
-  if (request.operation === 'browser.task.source') {
+  if (request.operation === 'browser.task.export') {
+    raw = { bundle: await owner.exportPortableTask(request.browserId, request.assetId, request.expectedRevision, request.version) }
+  } else if (request.operation === 'browser.task.import') {
+    const asset = await owner.importPortableTask(request.browserId, request.input)
+    raw = { creation: { createOperationId: asset.creation?.createOperationId, assetId: asset.id, browserId: asset.browserId, status: 'created' } }
+  } else if (request.operation === 'browser.task.import-inspect') {
+    raw = { creation: await owner.inspectPortableTaskImport(request.browserId, request.input) }
+  } else if (request.operation === 'browser.task.source') {
     raw = { browserId: request.browserId, source: await owner.getTaskSource(request.browserId) }
   } else if (request.operation === 'browser.task.draft') {
     raw = { asset: await owner.getTaskDraft(request.browserId, request.assetId) }
