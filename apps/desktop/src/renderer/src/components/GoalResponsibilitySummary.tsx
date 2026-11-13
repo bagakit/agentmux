@@ -29,6 +29,11 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
   const attention = rows.filter(row => row.alert !== null)
   const visible = compact ? [...attention, ...rows.filter(row => row.alert === null)].slice(0, 2) : rows
   const hiddenAttention = attention.length - visible.filter(row => row.alert !== null).length
+  const hasExecutionRecords = Boolean(current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite'))
+  // With nothing observed and nothing dispatched, Collaboration already states the absence; a patrol
+  // or a retained issue still needs this block.
+  const patrolPresent = Boolean(current.patrols?.length || current.patrolObservations?.length)
+  if (!observed && !hasExecutionRecords && !patrolPresent && !retained && !issue && !current.delegationObservationIssue) return null
   return <div className={`goal-responsibility${compact ? ' goal-responsibility--compact' : ''}`} aria-label="执行责任" data-goal-responsibility={current.id}>
     {!compact ? <strong className="goal-responsibility__heading">执行责任</strong> : null}
     {observed ? <div className="goal-responsibility__manager"><span>管理</span>{observed.supervisor.agentSessionId ? identity(observed.supervisor.agentSessionId, observed.supervisor.hostId) : <span>待指派</span>}

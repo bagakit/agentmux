@@ -1,4 +1,4 @@
-.goal-finite-start { padding-block: var(--sp-6); border-block-end: 1px solid var(--line-soft); }
+.goal-finite-start { padding-block: var(--sp-6); border-block-start: 1px solid var(--line-soft); }
 .goal-finite-start__recipients { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-block: var(--sp-4); }
 .goal-finite-start__recipients .goal-collaboration__member { max-width: 100%; padding: var(--sp-3) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); }
 .goal-finite-start__recipients .goal-collaboration__member { cursor: pointer; }
