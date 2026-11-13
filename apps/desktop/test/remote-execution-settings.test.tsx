@@ -42,7 +42,7 @@ async function button(text: string) {
   await act(async () => candidates[0]!.click())
 }
 async function chooseProject(id: string) {
-  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Project for remote execution"]')!
+  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Project for remote Agent"]')!
   expect(select).not.toBeNull()
   await act(async () => { select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })) })
 }
@@ -58,6 +58,13 @@ function guideText(content: string) {
 }
 
 describe('Remote execution Settings', () => {
+  it('keeps the authoritative empty list compact without a second empty reader', async () => {
+    useAppStore.setState({ sessions: [] })
+    await pane()
+    expect(dom.container.textContent?.match(/No cross-device Agents yet\./gu)).toHaveLength(1)
+    expect(dom.container.querySelector('.remote-execution-bindings__body')).toBeNull()
+    expect(dom.container.querySelector('[data-remote-prepare]')).not.toBeNull()
+  })
   it('reveals the same guide after retained narrow binding detail without replacing original work', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width: 600 } as DOMRect))
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -134,20 +141,21 @@ describe('Remote execution Settings', () => {
     expect(visibleSettingsSections('Remote execution').map(item => item.id)).toContain('remote-execution')
     await dom.render(<SettingsPanel initialSection="overview" onClose={close} />)
     await dom.click('nav [data-settings-target="remote-execution"]')
-    expect(dom.container.querySelector('[data-settings-pane="remote-execution"] [aria-label="Project for remote execution"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-settings-pane="remote-execution"] [aria-label="Project for remote Agent"]')).not.toBeNull()
   })
 
   it('prepares the exact chosen Project through the real Store and retains drafts without starting an Agent', async () => {
     const open = vi.spyOn(useAppStore.getState(), 'openLauncher'), split = vi.spyOn(useAppStore.getState(), 'setLauncherAgentWorkspace')
     const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
+    vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: 'remote', homeDirectory: '/same/project' })
     const before = useAppStore.getState()
-    await pane(); await chooseProject('project-remote'); await button('Prepare Agent')
-    expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'project-remote', reveal: true, initialExecution: { resourceWorkspaceId: 'project-remote', agentWorkspaceId: 'project-remote' } })
+    await pane(); await chooseProject('project-local'); await act(async () => { const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!; select.value = 'remote'; select.dispatchEvent(new Event('change', { bubbles: true })) }); await button('Open in Launcher')
+    expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'project-local', reveal: true, initialExecution: { resourceWorkspaceId: 'project-local', agentWorkspaceId: 'project-remote' } })
     const tabId = open.mock.results[0]!.value as string
     expect(tabId).toBeTruthy()
     const after = useAppStore.getState(), tab = after.tabs[tabId]!
     expect(split).not.toHaveBeenCalled()
-    expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: 'project-remote', agentWorkspaceId: 'project-remote' })
+    expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: 'project-local', agentWorkspaceId: 'project-remote' })
     expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
     expect(after.sessions).toBe(before.sessions)
     expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledOnce()
@@ -155,11 +163,11 @@ describe('Remote execution Settings', () => {
 
   it('excludes Scratch and preserves the page when original Launcher preparation is unavailable', async () => {
     await pane()
-    const options = [...dom.container.querySelectorAll<HTMLOptionElement>('[aria-label="Project for remote execution"] option')].map(item => item.value)
-    expect(options).toContain('project-local'); expect(options).toContain('project-remote'); expect(options).not.toContain('__scratch__')
+    const options = [...dom.container.querySelectorAll<HTMLOptionElement>('[aria-label="Project for remote Agent"] option')].map(item => item.value)
+    expect(options).toContain('project-local'); expect(options).not.toContain('project-remote'); expect(options).not.toContain('__scratch__')
     vi.spyOn(useAppStore.getState(), 'openLauncher').mockReturnValue(undefined)
     const split = vi.spyOn(useAppStore.getState(), 'setLauncherAgentWorkspace')
-    await button('Prepare Agent')
+    await act(async () => { const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Agent runs on"]')!; select.value = 'local'; select.dispatchEvent(new Event('change', { bubbles: true })) }); await button('Open in Launcher')
     expect(split).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
   })
 
