@@ -24,6 +24,7 @@ import { mountThemeRuntime, updateThemeSelection } from '../src/theme/runtime.js
 import { ReadingFindBodies } from '../src/lib/reading-find-body.js'
 import { ConversationBodyWork } from '../src/lib/conversation-body-work.js'
 import { ConversationBodyWorkContext } from '../src/components/ConversationProgressiveBody.js'
+import { ClientUiProvider } from '../src/platform.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const WORKSPACE = '/workspace/repo'
@@ -54,6 +55,75 @@ async function click(target: HTMLElement) {
 const workspaceImage = (path: string, alt: string) => <img data-workspace-image={path} alt={alt} />
 
 describe('README HTML subset rendering', () => {
+  it('retains both image dimensions and height-only sizing through the original port', async () => {
+    await render(<AgentMarkdown documentMode workspaceRoot={WORKSPACE} sourcePath="docs/README.md" renderWorkspaceImage={workspaceImage}
+      content={'<img src="hero.webp" width="120" height="30"><img src="hero.webp" height="30"><img src="hero.webp" width="72%" height="50%">'} />)
+    const frames = all<HTMLElement>('.md-image-frame')
+    expect(frames).toHaveLength(3)
+    expect(frames.map(frame => [frame.style.width, frame.style.height, frame.style.getPropertyValue('--md-image-height'), frame.style.getPropertyValue('--md-image-width')]))
+      .toEqual([['120px', '30px', '30px', '100%'], ['', '30px', '30px', 'auto'], ['72%', '50%', '50%', '100%']])
+    expect(all('img[data-workspace-image]')).toHaveLength(3)
+    expect(all('img[height], img[width]')).toHaveLength(0)
+  })
+
+  it('keeps rejected link labels inert while ordinary bare file paths remain actionable', async () => {
+    const openWorkspaceFile = vi.fn(), openHttpLink = vi.fn()
+    await render(<AgentMarkdown documentMode workspaceRoot={WORKSPACE} sourcePath="README.md" openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink}
+      content={'<a href="javascript:alert(1)"><b>docs/guide.md</b></a> <a href="data:text/html,x">docs/data.md</a> <a href="../../outside.md">docs/escape.md</a>\n\nBare docs/ordinary.md'} />)
+    expect(all<HTMLButtonElement>('button.md-link').map(button => button.textContent)).toEqual(['docs/ordinary.md'])
+    expect(container.textContent).toContain('docs/guide.md')
+    await click(element('button.md-link'))
+    expect(openWorkspaceFile).toHaveBeenCalledWith('docs/ordinary.md', undefined, expect.anything())
+    expect(openWorkspaceFile).toHaveBeenCalledTimes(1)
+    expect(openHttpLink).not.toHaveBeenCalled()
+  })
+
+  it('keeps object-looking rejected labels inert with the real Host renderer installed', async () => {
+    await render(<ClientUiProvider platform={{ copyText: async () => true, overlayContainer: () => container,
+      bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null,
+      renderIcon: () => null, renderObjectLink: reference => <button data-object-uri={reference.uri}>object</button> }}>
+      <AgentMarkdown content={'**Lead**\n\n<a href="javascript:alert(1)">amux://agent/label</a>\n\namux://agent/bare'} />
+    </ClientUiProvider>)
+    expect(all<HTMLElement>('[data-object-uri]').map(button => button.dataset.objectUri)).toEqual(['amux://agent/bare'])
+    expect(container.textContent).toContain('amux://agent/label')
+  })
+
+  it('keeps rejected link labels in deferred find and out of the image gallery', async () => {
+    const path = '/home/user/.agentmux/pasted/label.png'
+    const content = 'Lead. '.repeat(400) + `\n\n<a href="javascript:alert(1)">${path}</a>`
+    expect(markdownImageReferences(content, parseAgentMarkdown(content), false, () => true)).toEqual([])
+    const readers: (() => readonly string[])[] = []
+    const registry = { register(body: { read(): readonly string[] }) { readers.push(() => body.read()); return () => {} } }
+    vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const work = new ConversationBodyWork(), readPastedImage = vi.fn(async () => { throw new Error('A literal label must not request an image') })
+    try {
+      await render(<ReadingFindBodies.Provider value={registry}><ConversationBodyWorkContext.Provider value={{ work, active: true }}>
+        <AgentMarkdown documentMode content={content} readPastedImage={readPastedImage} /></ConversationBodyWorkContext.Provider></ReadingFindBodies.Provider>)
+      expect(readers).toHaveLength(1)
+      expect(readers[0]!().join('\n')).toContain(path)
+      expect(readPastedImage).not.toHaveBeenCalled()
+    } finally { work.disconnect() }
+  })
+
+  it('keeps table width work linear in the number of authored cells', async () => {
+    const parse = vi.spyOn(Number, 'parseFloat'), samples: number[] = []
+    try {
+      for (const columns of [8, 16]) {
+        parse.mockClear()
+        // Both samples mount a fresh table, including the same visibility effects.
+        await render(<AgentMarkdown key={columns} documentMode content={`<table><tr>${'<td width="3%">cell</td>'.repeat(columns)}</tr></table>`} />)
+        const cells = all<HTMLTableCellElement>('td')
+        expect(cells).toHaveLength(columns)
+        expect(cells.map(cell => Number(cell.style.width.slice(0, -1)))).toEqual(Array(columns).fill(100 / columns))
+        const authoredReads = parse.mock.calls.filter(([value]) => value === '3%').length
+        expect(authoredReads).toBeGreaterThan(0)
+        samples.push(authoredReads)
+      }
+      expect(samples).toHaveLength(2)
+      expect(samples[1]!).toBeLessThanOrEqual(samples[0]! * 2.5)
+    } finally { parse.mockRestore() }
+  })
+
   it('renders alignment, authored size and inline marks without any author attribute reaching the DOM', async () => {
     await render(<AgentMarkdown documentMode workspaceRoot={WORKSPACE} sourcePath="docs/README.md" renderWorkspaceImage={workspaceImage}
       content={'<div align="center">\n\n<img src="hero.webp" alt="Hero" width="72%" onerror="steal()" style="position:fixed">\n\n<b>Bold</b> H<sub>2</sub>O x<sup>2</sup> <kbd>Ctrl</kbd>\n\n</div>'} />)

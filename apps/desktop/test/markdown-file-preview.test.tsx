@@ -41,6 +41,16 @@ it('passes the real remote image port: HTTPS README badges load lazily without a
   expect(host.querySelector('.md-image-attachment--unavailable')?.textContent).toContain('Plain')
 })
 
+it('retains authored width and height at the real remote image port', async () => {
+  useAppStore.setState({ config: config() })
+  await render('<img src="https://example.invalid/image.png" width="120" height="30" alt="Sized image">')
+  const image = host.querySelector<HTMLImageElement>('img.md-remote-image')
+  expect(image).not.toBeNull()
+  const frame = image!.closest<HTMLElement>('.md-image-frame')!
+  expect([frame.style.width, frame.style.height, frame.style.getPropertyValue('--md-image-height')]).toEqual(['120px', '30px', '30px'])
+  expect(image!.getAttribute('src')).toBe('https://example.invalid/image.png')
+})
+
 it('projects the saved reading layout and saves each Aa choice through the ConfigOwner path without reparsing', async () => {
   useAppStore.setState({ config: config({ readingWidth: 'wide', readingTypeface: 'serif', readingFontSize: 15 }) })
   const save = vi.spyOn(api.config, 'save').mockImplementation(async next => next)

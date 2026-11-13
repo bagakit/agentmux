@@ -40,6 +40,11 @@ const mutations = [
   { mode: 'unclosed-raw-block-reflowed', path: parser, from: '  const index = nodes.findIndex(opensRawBlock)', to: '  const index = -1' },
   { mode: 'raw-text-node-rescans-suffix', path: parser, from: 'if ((lastRawTextEnd.get(name) ?? -1) < end)', to: 'if (!new RegExp(`</${name}[\\\\t\\\\n\\\\f\\\\r />]`, \'iu\').test(source.slice(end) + \' \'))' },
   { mode: 'raw-text-siblings-rescan-suffix', path: parser, from: 'const closedLater = (index: number, name: string) => (lastClosingNode.get(name) ?? -1) > index', to: 'const closedLater = (index: number, name: string) => nodes.slice(index + 1).some(node => node.type === \'html\' && new RegExp(`</${name}[\\\\t\\\\n\\\\f\\\\r />]`, \'iu\').test(node.value + \' \'))' },
+  { mode: 'author-height-dropped', path: renderer, from: "...(node.height ? { height: node.height, '--md-image-height': node.height, '--md-image-width': node.width ? '100%' : 'auto' } : {})", to: '' },
+  { mode: 'rejected-link-label-reclassified', path: renderer, from: "if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={labelContext} /></Fragment>", to: "if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>" },
+  { mode: 'rejected-label-missing-from-find', path: renderer, from: "inline(node.children, { ...value, inLink: true })", to: "inline(node.children, value)" },
+  { mode: 'rejected-label-enters-gallery', path: 'packages/client-ui/src/lib/conversation-image-references.ts', from: "inline(node.children, true)", to: "inline(node.children, Boolean(options.readOnlyImages))" },
+  { mode: 'table-row-rescanned', path: renderer, from: "const Cell = cell.header ? 'th' : 'td'", to: "entry.cells.map(entry => entry.width?.endsWith('%') ? Number.parseFloat(entry.width) : NaN).reduce((sum, value) => sum + value, 0); const Cell = cell.header ? 'th' : 'td'" },
   { mode: 'closed-details-searchable', path: renderer, from: 'if (node.kind === \'details\') return node.open ? project(node.children) : []', to: "if (node.kind === 'details') return project(node.children)" },
 ]
 
