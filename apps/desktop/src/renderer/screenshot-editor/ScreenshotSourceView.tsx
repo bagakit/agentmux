@@ -6,8 +6,9 @@ import type { ScreenshotSourceApi, ScreenshotSourceInput, ScreenshotSourceList }
 export function ScreenshotSourceView({ input, api }: { input: ScreenshotSourceInput; api: ScreenshotSourceApi }) {
   const [list, setList] = useState<ScreenshotSourceList>({ choices: [], issues: [] }), [busy, setBusy] = useState(false)
   const [error, setError] = useState(''), [query, setQuery] = useState(''), [app, setApp] = useState<string | null>(null)
-  const epoch = useRef(0)
+  const epoch = useRef(0), requestedApp = useRef<string | null>(null)
   async function load(appKey: string | null = null) {
+    requestedApp.current = appKey
     const token = ++epoch.current; setBusy(true); setError(''); setQuery('')
     try { const next = await (appKey ? api.windows(input.requestId, appKey) : api.list(input.requestId)); if (epoch.current === token) { setList(next); setApp(appKey) } }
     catch (cause) { if (epoch.current === token) setError(presentError(cause)) }
@@ -25,7 +26,7 @@ export function ScreenshotSourceView({ input, api }: { input: ScreenshotSourceIn
     <div className="screenshot-source__search">{app !== null ? <button disabled={busy} onClick={() => void load()}>← Applications</button> : null}<TextInput aria-label="Filter capture sources" placeholder="Filter sources…" value={query} onChange={event => setQuery(event.target.value)} /></div>
     <div className="screenshot-source__choices" aria-busy={busy}>{busy ? <p role="status">Reading available sources…</p> : choices.length ? choices.map(choice => <button key={choice.key} onClick={() => void select(choice.key)}><strong>{choice.label}</strong><span>{choice.detail}</span></button>) : <p role="status">{error ? 'Sources could not be loaded. Retry or cancel.' : 'No matching sources.'}</p>}</div>
     {list.issues.length ? <p className="screenshot-source__issue">Some sources could not be confirmed. Available sources remain usable.</p> : null}
-    {error ? <div className="screenshot-source__issue" role="alert">{error}<button onClick={() => void load(app)}>Retry</button></div> : null}
+    {error ? <div className="screenshot-source__issue" role="alert">{error}<button onClick={() => void load(requestedApp.current)}>Retry</button></div> : null}
     <footer>{input.kind === 'display' ? 'One image from the selected display.' : 'Window identity is checked again when capturing.'}</footer>
   </main>
 }
