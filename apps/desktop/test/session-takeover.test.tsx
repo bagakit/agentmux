@@ -640,6 +640,56 @@ it('requires a new explicit choice after retirement and retains both requests ac
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
 })
 
+/** Core's operation binding, as the real `resolveAgentCreationSessionId` answers it: a creation wins over derivation. */
+function coreOperationBindings() {
+  return vi.spyOn(api.sessions, 'resolveCreationSessionId').mockImplementation(async (_hostId, operationId) => {
+    for (const created of creations.values()) {
+      const creation = created.kind === 'retired-agent' ? created.history?.creation : created.creation
+      if (creation?.createOperationId === operationId) return created.agentSessionId
+    }
+    return `derived:${operationId.slice(-12)}`
+  })
+}
+
+it('converges on the Core creation when this Desktop lost its takeover record, without a second Session or launch', async () => {
+  const bindings = coreOperationBindings(), launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  expect(first.outcome).toBe('opened'); expect(launch).toHaveBeenCalledTimes(1)
+  retireTakeover(first.agent!.agentSessionId)
+  // The deterministic operation survives in Core; the local request record does not.
+  useAppStore.setState({ spatialRequests: {} })
+  const again = await takeOverSession(source, 'fixture', () => true)
+  expect(again).toMatchObject({ requestId: first.requestId, outcome: 'retired', agent: { agentSessionId: first.agent!.agentSessionId } })
+  expect(again.issues).toEqual([])
+  expect(launch).toHaveBeenCalledTimes(1)
+  expect(bindings).toHaveBeenCalledWith('local', first.requestId)
+  expect(useAppStore.getState().spatialRequests[first.requestId]?.agentSessionId).toBe(first.agent!.agentSessionId)
+  // The retirement leads to an explicit new choice, which is a new operation with its own Session.
+  const successor = await takeOverSession(source, 'fixture', () => true, first.requestId)
+  expect(successor.outcome).toBe('opened'); expect(successor.requestId).not.toBe(first.requestId)
+  expect(successor.agent!.agentSessionId).not.toBe(first.agent!.agentSessionId)
+  expect(launch).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('repairs a request stuck on a never-created Session from the Core operation binding on Check again', async () => {
+  coreOperationBindings(); const launch = launchBoundary()
+  const first = await takeOverSession(source, 'fixture', () => true)
+  retireTakeover(first.agent!.agentSessionId)
+  const conflict = 'This creation operation belongs to another original Session. Inspect its existing identity without repeating creation.'
+  // The record an older Desktop left behind: a fresh local Session ID that Core refused and never created.
+  useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [first.requestId]: { ...state.spatialRequests[first.requestId]!,
+    agentSessionId: 'never-created', originalFailure: { step: 'owner', code: 'SPACE_OPERATION_UNCONFIRMED', message: conflict,
+      recovery: 'Inspect this request ID and its existing resources; do not repeat creation or send.' } } } }))
+  const onClose = await mountPicker()
+  await act(async () => { document.querySelector<HTMLButtonElement>('.agent-pick')!.click() })
+  await vi.waitFor(() => expect(document.querySelector('.session-takeover__issue strong')?.textContent).toBe('Takeover Agent was closed'))
+  expect(document.querySelector('.session-takeover__issue')!.textContent).not.toContain('belongs to another original Session')
+  expect(useAppStore.getState().spatialRequests[first.requestId]).toMatchObject({ agentSessionId: first.agent!.agentSessionId, originalFailure: { message: conflict } })
+  expect(launch).toHaveBeenCalledTimes(1); expect(onClose).not.toHaveBeenCalled()
+  await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('.session-takeover__issue button')].find(button => button.textContent === 'Choose another Agent')?.disabled).toBe(false))
+})
+
 it('converges concurrent explicit successor choices on one creation and never bypasses unknown', async () => {
   const launch = launchBoundary(), first = await takeOverSession(source, 'fixture', () => true)
   retireTakeover(first.agent!.agentSessionId)

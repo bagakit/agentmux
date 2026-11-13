@@ -44,6 +44,15 @@ function request(value: Record<string, unknown>): AgentMuxSpaceControlRequest {
   return parseAgentMuxControlRequest({ schemaVersion: 5, requestId: `private:${crypto.randomUUID()}`, ...value }) as AgentMuxSpaceControlRequest
 }
 async function control(value: Record<string, unknown>) { return await useAppStore.getState().executeControl(request(value)) }
+/** Like Core: an operation has a confirmed creation only after its launch actually ran for that Session. */
+function launchedCreation<T>(launched: { mock: { calls: unknown[][] } }, read: (id: string) => T) {
+  return async (_hostId: string, id: string): Promise<T> => {
+    if (!launched.mock.calls.some(([input]) => (input as { agentSessionId?: string }).agentSessionId === id)) {
+      throw new Error('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.')
+    }
+    return read(id)
+  }
+}
 let dispose: (() => void) | undefined
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto)
@@ -553,7 +562,7 @@ describe('public Desktop spatial Control owner', () => {
   it('same request and inspection read original Core owner without respawn/resend, even after a later cross-host display move', async () => {
     const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'once' }, destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') }, focus: false })
-    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("other"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' } }))
+    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(launchedCreation(created, id => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("other"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' as const } })))
     const opened = await useAppStore.getState().executeControl(input)
     if (opened.operation !== 'agent.open') throw new Error('Wrong operation')
     const replay = await useAppStore.getState().executeControl(input)
@@ -569,7 +578,8 @@ describe('public Desktop spatial Control owner', () => {
       destination: { zoneId: workspaceZoneId(directoryIdentity('remote', _hygiene_fixturePath("remote")), 'remote-dir') }, focus: false })
     const inspected = await control({ operation: 'space.inspect', target: { requestId: input.requestId } })
     expect(inspected).toMatchObject({ request: { known: true, report: { outcome: 'unknown', agent: { hostId: 'local', cwd: _hygiene_fixturePath("other") } } } })
-    expect(creation.mock.calls.map(call => call[0])).toEqual(['local', 'local'])
+    // Admission, the replay and the inspection each read the one original Core; a display move never reroutes them.
+    expect(creation.mock.calls.map(call => call[0])).toEqual(['local', 'local', 'local'])
     expect(created).toHaveBeenCalledTimes(1)
   })
 
@@ -674,9 +684,9 @@ describe('public Desktop spatial Control owner', () => {
     const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
       return launch(remoteAgent(input.agentSessionId!), input.createOperationId!)
     })
-    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (_hostId, id) => ({
-      ...agentCreationFixture(remoteAgent(id)), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' }
-    }))
+    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(launchedCreation(created, id => ({
+      ...agentCreationFixture(remoteAgent(id)), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' as const }
+    })))
     const stop = vi.spyOn(api.sessions, 'stop'), write = vi.spyOn(api.sessions, 'write'), submit = vi.spyOn(api.sessions, 'submitPrompt')
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'remote-only', executionWorkspaceId: 'remote-workspace', prompt: 'once' },
       destination: { regionId: 'local-region', split: 'down' }, focus: false })
@@ -809,10 +819,10 @@ describe('public Desktop spatial Control owner', () => {
       return { config: { ...config, workspaces: [...config.workspaces, workspace] }, workspace,
         resource: { projectId: input.resource.projectId, sourceWorkspaceId: 'repo', hostId: 'local', path: workspace.path, workspaceId: workspace.id, kind: 'directory', branch: null } }
     })
-    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
+    const launched = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
       destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), newZone: { kind: 'directory', projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), path: _hygiene_fixturePath("new-dir") } }, focus: false })
-    vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' } }))
+    vi.spyOn(api.sessions, 'creation').mockImplementation(launchedCreation(launched, id => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' as const } })))
     const opened = await useAppStore.getState().executeControl(input)
     expect(opened).toMatchObject({ outcome: 'opened', resource: { workspaceId: 'new-resource' } })
     const queried = request({ operation: 'space.inspect', target: { requestId: input.requestId } })

@@ -27,7 +27,7 @@ it('strict public codecs preserve actual owner Host and remaining duration and r
 it('actual compiled CLI flags reach the Desktop owner and retain nonempty strict results while default reads remain topology-only', async () => {
   const owner = moteAppearanceSource(), reads = vi.fn(owner.read), lifecycle = vi.fn(() => { throw new Error('A presentation read must not start or stop an Agent') })
   const ports = { get: () => owner.state, topics: async () => [owner.topic], appearance: reads,
-    patch: lifecycle, launch: lifecycle, creation: lifecycle, createResource: lifecycle, attach: lifecycle, save: lifecycle, focus: lifecycle, isFocused: () => false, notice: lifecycle, closing: () => false } as unknown as SpatialControlPorts
+    patch: lifecycle, launch: lifecycle, creationSessionId: lifecycle, creation: lifecycle, createResource: lifecycle, attach: lifecycle, save: lifecycle, focus: lifecycle, isFocused: () => false, notice: lifecycle, closing: () => false } as unknown as SpatialControlPorts
   let invalid = false, failed = false
   const probe = new ObjectCliProbe(async request => {
     if (failed) throw Object.assign(new Error('Original presentation unavailable; input retained'), { code: 'CONTROL_UNAVAILABLE' })
@@ -70,7 +70,7 @@ it('actual compiled CLI flags reach the Desktop owner and retain nonempty strict
 }, 30000)
 it('the Desktop spatial owner refuses a derived action that the Core service did not expand, and launches nothing', async () => {
   const owner = moteAppearanceSource(), lifecycle = vi.fn(() => { throw new Error('An unexpanded derived action must not start an Agent') })
-  const ports = { get: () => owner.state, topics: async () => [owner.topic], patch: lifecycle, launch: lifecycle, creation: lifecycle, createResource: lifecycle,
+  const ports = { get: () => owner.state, topics: async () => [owner.topic], patch: lifecycle, launch: lifecycle, creationSessionId: lifecycle, creation: lifecycle, createResource: lifecycle,
     attach: lifecycle, save: lifecycle, focus: lifecycle, isFocused: () => false, notice: lifecycle, closing: () => false } as unknown as SpatialControlPorts
   const request = rpcControlRequest('agent.open', { operationId: 'unexpanded-derived', content: { kind: 'derived-action', actionId: 'review', source: { agentSessionId: owner.state.sessions[0]!.id } },
     destination: { spaceId: owner.target.key, newTab: true }, focus: false })

@@ -22,6 +22,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { DesktopSpatialPersistence, desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { deriveAgentSessionId } from '@agentmux/core/agent-session-id'
 
 const exec = promisify(execFile)
 const roots: string[] = []
@@ -164,7 +165,8 @@ describe('Topic and Mote placement retain the explicit execution resource', () =
       destination: { spaceId: space.spaceId, displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'display-group', newZone: resource }, focus: false })
     if (request.operation !== 'agent.open') throw new Error('The strict parser must return the original Agent open tuple')
     const control: SpatialControlPorts = { get: () => state, patch: patch => Object.assign(state, patch), topics: async () => [topic],
-      createResource, launch: launchAgent, creation: async () => { throw new Error('No second creation reader is needed for the first launch') },
+      createResource, launch: launchAgent, creationSessionId: async (_hostId, operationId) => await deriveAgentSessionId(operationId),
+      creation: async () => { throw new Error('No second creation reader is needed for the first launch') },
       attach: async (_regionId, created) => { state.sessions = [...state.sessions, created.session!] },
       save: async layoutApplied => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
       focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }

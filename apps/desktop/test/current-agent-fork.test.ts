@@ -91,6 +91,7 @@ async function fixture(providerId: 'codex' | 'claude', executionRoute = 'local')
     return { layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null } }
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
     createResource: async () => { throw new Error('Fork may not create execution resources') },
+    creationSessionId: async (host, operationId) => { expect(host).toBe(executionRoute); return await client.resolveAgentCreationSessionId(operationId) },
     creation: async (host, id) => { expect(host).toBe(executionRoute); return client.refreshAgentSession(id, client.agentSession(id).run) },
     launch: async input => { expect(input.hostId).toBe(executionRoute)
       // Admission, including its original fork source, must precede native creation.

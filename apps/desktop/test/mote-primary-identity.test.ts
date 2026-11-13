@@ -28,7 +28,7 @@ function owner() {
   const presentation = vi.fn(async (catalog: AgentMuxSpaceCatalog) => catalog.spaces.filter(space => space.kind === 'mote').map(space => ({
     spaceId: space.spaceId, ...(space.topicId === 'launcher:leader' ? { glyph: 'custom' } : { preset: 'primary-mote' as const }) })))
   const ports: SpatialControlPorts = { get: () => state, topics: async () => topics, appearance: presentation,
-    patch: mutation, launch: mutation, creation: mutation, createResource: mutation, attach: mutation, save: mutation, focus: mutation, isFocused: () => false, notice: mutation, closing: () => false }
+    patch: mutation, launch: mutation, creationSessionId: mutation, creation: mutation, createResource: mutation, attach: mutation, save: mutation, focus: mutation, isFocused: () => false, notice: mutation, closing: () => false }
   const service = new AgentMuxRpcService({ coreClients: () => [], execute: request => {
     if (request.operation !== 'space.ls' && request.operation !== 'space.inspect') throw new Error('Only original spatial reads are in scope.')
     return executeSpatialControl(ports, request)

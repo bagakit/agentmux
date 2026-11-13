@@ -50,6 +50,8 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launched(input))
+  // Core's answer before any launch ran: no creation. Each test starts from it, not from a fake an earlier test left behind.
+  vi.spyOn(api.sessions, 'creation').mockRejectedValue(new Error('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.'))
   dispose = await useAppStore.getState().initialize()
   const original = { ...composerSession('original'), processState: 'exited' as const,
     status: { state: 'error' as const, source: 'run-process' as const, observedAt: 2, continuity: 'unavailable' as const, continuityReason: 'native-handle-unavailable' as const } }
@@ -105,12 +107,14 @@ describe('actual SessionPane explicit recovery actions', () => {
   it('lost create ACK and complete dialog/Pane remount read the original request and never launch another Agent', async () => {
     let receipt!: AgentLaunchResult
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { receipt = launched(input); throw new Error('lost create ACK') })
-    vi.spyOn(api.sessions, 'creation').mockImplementation(async (host, id) => { expect(host).toBe('local'); expect(id).toBe(receipt.created.agentSessionId); return receipt.created })
+    vi.spyOn(api.sessions, 'creation').mockImplementation(async (host, id) => { if (!receipt) throw new Error('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.'); expect(host).toBe('local'); expect(id).toBe(receipt.created.agentSessionId); return receipt.created })
     await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent')
     expect(document.body.textContent).toContain('Creation is unconfirmed'); const originalId = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].createOperationId
     await button('Cancel'); await dom.render(null); await mount(); await button('Analyze…'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(document.querySelector<HTMLSelectElement>('[aria-label="Recovery Executor"]')!.value).toBe('codex'); expect(document.querySelector<HTMLSelectElement>('[aria-label="Recovery Executor"]')!.disabled).toBe(true)
-    await button('Check original request'); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.creation).toHaveBeenCalledTimes(1)
+    // Admission asked Core once before launching; the explicit check is the one further read.
+    const reads = vi.mocked(api.sessions.creation).mock.calls.length
+    await button('Check original request'); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.creation).toHaveBeenCalledTimes(reads + 1)
     expect(useAppStore.getState().spatialRequests[originalId!]!.agentSessionId).toBe(receipt.created.agentSessionId)
     expect(useAppStore.getState().pendingAgentLaunches[receipt.created.agentSessionId]?.created?.agentSessionId ?? useAppStore.getState().sessions.find(item => item.id === receipt.created.agentSessionId)?.id).toBe(receipt.created.agentSessionId)
   })
@@ -132,7 +136,7 @@ describe('actual SessionPane explicit recovery actions', () => {
   it('a late creation read cannot confirm or attach a replaced reserved Region', async () => {
     let receipt!: AgentLaunchResult, release!: () => void
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { receipt = launched(input); throw new Error('lost ACK') })
-    vi.spyOn(api.sessions, 'creation').mockImplementation(async () => { await new Promise<void>(resolve => { release = resolve }); return receipt.created })
+    vi.spyOn(api.sessions, 'creation').mockImplementation(async () => { if (!receipt) throw new Error('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.'); await new Promise<void>(resolve => { release = resolve }); return receipt.created })
     await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent')
     const pending = inspectRecoveryRequest(source, 'analyze')
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))

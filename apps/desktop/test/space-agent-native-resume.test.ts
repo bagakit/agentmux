@@ -7,6 +7,7 @@ import type { AgentMuxSpaceControlRequest } from '@agentmux/core/control'
 import type { AgentLaunchResult, AppConfig } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { executeSpatialControl, type SpatialControlPorts, type SpatialWorkbench } from '../src/renderer/src/lib/space-agent-control'
+import { deriveAgentSessionId } from '@agentmux/core/agent-session-id'
 
 function owner() {
   const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
@@ -19,7 +20,7 @@ function owner() {
     providerId: 'codex', executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath,
     run: { runId: 'resumed-native-run' }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), nativeHandle: input.nativeResumeSource!.nativeHandle }, projectionFailures: [] }))
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
-    launch, creation: async () => { throw new Error('Unexpected creation read') }, createResource: async () => { throw new Error('Unexpected resource creation') },
+    launch, creationSessionId: async (_hostId, operationId) => await deriveAgentSessionId(operationId), creation: async () => { throw new Error('Unexpected creation read') }, createResource: async () => { throw new Error('Unexpected resource creation') },
     attach: async () => {}, save: async applied => ({ layoutApplied: applied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }),
     focus: () => {}, isFocused: () => false, notice: () => {}, closing: () => false }
   return { ports, launch, state: () => state }

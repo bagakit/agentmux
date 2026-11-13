@@ -11,6 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { reviewCurrentFork, currentForkRequest } from '../src/renderer/src/lib/agent-current-fork'
 import { fixturePath, fixtureTime } from '../scripts/lib/fixture-values.mjs'
+import { deriveAgentSessionId } from '@agentmux/core/agent-session-id'
 
 const initial = useAppStore.getState()
 afterEach(() => { useAppStore.setState(initial, true); vi.restoreAllMocks() })
@@ -67,6 +68,7 @@ function creator() {
     return { created, session: child, creation: created.creation, timeline: { agentSessionId: child.id, revision: 0, items: [] }, projectionFailures: [] }
   })
   const ports = { get: () => state, patch: (patch: any) => { state = { ...state, ...patch } }, topics: async () => [], creation, launch,
+    creationSessionId: async (_host: string, operationId: string) => await deriveAgentSessionId(operationId),
     attach: async (_region: string, result: any) => { state = { ...state, sessions: [...state.sessions, result.session] } },
     createResource: async () => { throw new Error('No new resource requested') }, save: async (layoutApplied: boolean) => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }

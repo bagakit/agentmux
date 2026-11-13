@@ -66,6 +66,7 @@ it('continues one exact native conversation through the real CLI, public service
     get: () => state, patch: patch => Object.assign(state, patch), topics: async () => [],
     createResource: async () => { throw new Error('Native resume must preserve the original execution resource') },
     launch, creation: (hostId, sessionId) => runtime.agentCreation(hostId, sessionId),
+    creationSessionId: (hostId, operationId) => runtime.resolveCreationSessionId(hostId, operationId),
     attach: async (regionId, result) => {
       expect(result.session).toBeDefined(); state.sessions.push(result.session!)
       const tab = Object.values(state.tabs).find(tab => regionId in tab.regions)!
