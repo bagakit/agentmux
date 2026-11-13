@@ -33,6 +33,14 @@ it('opens on the Brand view, shows every realm through the product resolver and 
   const tabs = [...document.querySelectorAll<HTMLElement>('[data-brand-realm]')]
   expect(tabs.map(tab => tab.dataset.brandRealm)).toEqual(APP_ICON_IDS)
   expect(document.querySelector('[data-brand-realm][aria-selected="true"]')?.getAttribute('data-brand-realm')).toBe(DEFAULT_APP_ICON)
+  for (const tab of tabs) {
+    const id = tab.dataset.brandRealm as (typeof APP_ICON_IDS)[number]
+    // Each tab leads with its realm name and says in words whether its heroes are borrowed.
+    expect(tab.querySelector('strong')?.textContent).toBe(APP_ICON_CATALOG[id].realm.split(' · ')[0])
+    expect(tab.textContent).toContain(resolveBrandHero('launch', id).artRealm !== id ? '借原境的画' : '有自己的大图')
+  }
+  // Selection is marked by a shape as well as colour, on the selected tab only.
+  expect([...document.querySelectorAll('.brand-realm-tabs__check')].map(node => node.closest<HTMLElement>('[data-brand-realm]')?.dataset.brandRealm)).toEqual([DEFAULT_APP_ICON])
   for (const id of APP_ICON_IDS) {
     document.querySelector<HTMLElement>(`[data-brand-realm="${id}"]`)!.click()
     const panel = document.querySelector<HTMLElement>('.brand-realm')!
