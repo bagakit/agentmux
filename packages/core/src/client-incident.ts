@@ -10,18 +10,22 @@ export const CLIENT_READING_INCIDENT_KINDS = ['conversation-reading-progress', '
   'conversation-reading-held', 'conversation-reading-recovered'] as const
 export const CLIENT_INCIDENT_KINDS = ['terminal-attach-failed', 'terminal-replay-failed', 'terminal-output-gap', 'terminal-continuation-unavailable',
   'terminal-reveal-deadline', 'terminal-context-lost', 'terminal-refresh', 'terminal-recovered',
-  'capability-probe', 'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered', 'mobile-web-observation', ...CLIENT_READING_INCIDENT_KINDS] as const
+  'capability-probe', 'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered', 'mobile-web-observation',
+  'workface-save-failed', 'workface-save-recovered', ...CLIENT_READING_INCIDENT_KINDS] as const
 export const CLIENT_INCIDENT_STAGES = ['attach-requested', 'attach-received', 'replay-started', 'replay-applied', 'replay-failed', 'output-gap',
   'live-ready', 'revealed', 'reveal-deadline', 'attach-failed', 'refresh-requested', 'refresh-completed',
   'refresh-failed', 'context-lost', 'visibility', 'resize', 'connection-state', 'probe-started',
-  'probe-completed', 'probe-failed', 'observation-unavailable', 'observation-restored', 'reading-observed', 'mobile-observed'] as const
+  'probe-completed', 'probe-failed', 'observation-unavailable', 'observation-restored', 'reading-observed', 'mobile-observed',
+  'save-stalled', 'save-confirmed'] as const
 export const CLIENT_INCIDENT_CODES = ['EIO', 'ENOSPC', 'EACCES', 'ENOENT', 'EDQUOT', 'EMFILE', 'ENFILE', 'EPIPE',
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EEXIST', 'ENOTDIR', 'EISDIR', 'EROFS', 'EINVAL', 'ABORT_ERR',
   'CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED', 'CONTROL_TIMEOUT', 'CONTROL_PROTOCOL_ERROR', 'CONTROL_CANCELLED', 'CONTROL_PERMISSION_DENIED',
   'RUNTIME_UNAVAILABLE', 'RUNTIME_OWNER_CHANGED', 'CTXMUX_DISCONNECTED', 'CTXMUX_run_not_found', 'STALE_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
   'UNKNOWN_AGENT_SESSION', 'INVALID_CONTROL_REQUEST', 'CTXMUX_EVENT_INVALID', 'EXECUTOR_HOST_CHANGED', 'EXECUTOR_CHECK_FAILED',
   'SETTING_RESOURCE_NOT_FOUND', 'EXECUTABLE_SEARCH_UNAVAILABLE', 'EXECUTABLE_WORKSPACE_REQUIRED',
-  'EXECUTABLE_NOT_FILE', 'EXECUTABLE_CHECK_FAILED', 'CTXMUX_CONNECTION_OBSERVATION_FAILED'] as const
+  'EXECUTABLE_NOT_FILE', 'EXECUTABLE_CHECK_FAILED', 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
+  'SPATIAL_SAVE_STALLED', 'SPATIAL_STATE_CONFLICT', 'SPATIAL_STATE_BUSY', 'SPATIAL_STATE_INVALID', 'SPATIAL_STATE_ABSENT', 'SPATIAL_STATE_READ_UNCONFIRMED',
+  'SPATIAL_ENTITY_REMOVAL_UNCONFIRMED', 'SPATIAL_RESOURCE_AUTHORITY_CONFLICT', 'SPATIAL_CREATION_AUTHORITY_CONFLICT', 'NAME_AUTHORITY_CONFLICT'] as const
 export type AgentMuxClientIncidentKind = typeof CLIENT_INCIDENT_KINDS[number]
 export type AgentMuxClientReadingIncidentKind = typeof CLIENT_READING_INCIDENT_KINDS[number]
 export type AgentMuxClientIncidentStage = typeof CLIENT_INCIDENT_STAGES[number]
@@ -52,6 +56,8 @@ export type AgentMuxClientIncidentMetadata = {
   probeAvailability?: 'unknown' | 'check-failed' | 'missing' | 'available'
   connectionBoundary?: 'consumer-core' | 'core-ctxmux'
   connectionState?: 'lost' | 'retrying' | 'restored' | 'unrecoverable'
+  /** Workface save facts only: the Core revision this window held, its unsaved age and conflict count. */
+  spatialRevision?: number; unsavedForMs?: number; spatialConflicts?: number
 }
 export type AgentMuxClientIncidentReference =
   | { domain: 'delivery.client' | 'delivery.core'; hostId: string; logId: string; authority?: Pick<DiagnosticEvidenceAuthority, 'kind' | 'id'> }
@@ -195,7 +201,7 @@ function namespace(value: unknown, durable = false) {
 }
 const metadataNumbers = ['latestOutputBytes', 'cursorBytes', 'parserAppliedBytes', 'pendingBytes', 'pendingBatches', 'cols', 'rows',
   'clientWidth', 'clientHeight', 'baseY', 'viewportY', 'bufferLength', 'resizeRevision', 'renderCallbacks', 'writeCompletions', 'liveQueueBytes', 'liveQueueItems', 'historyOverwritten', 'reporterDropped', 'recorderReadFailures',
-  'reporterRejected', 'reporterUnavailable', 'reporterCoalesced', 'reporterQueuedCount', 'reporterQueuedBytes']
+  'reporterRejected', 'reporterUnavailable', 'reporterCoalesced', 'reporterQueuedCount', 'reporterQueuedBytes', 'spatialRevision', 'unsavedForMs', 'spatialConflicts']
 const metadataBooleans = ['visible', 'revealed', 'liveReady', 'replaying', 'readOnly', 'canControl', 'disposed']
 export function parseClientIncidentMetadata(value: unknown): AgentMuxClientIncidentMetadata {
   const p = object(value, [...metadataNumbers, ...metadataBooleans, 'attachmentId', 'attachmentState', 'processState', 'bufferType', 'renderer',
