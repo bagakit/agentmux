@@ -20,7 +20,8 @@ const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const specifications = {
   enhancements: {
-    tests: ['apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    tests: ['apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-editing.test.tsx',
+      'apps/desktop/test/image-annotation-compact-toolbar.test.tsx', 'apps/desktop/test/annotation-toolbar-focus.test.tsx'],
     mutations: [{ label: 'brush-note-filter-omitted', source: component + 'drawing-model.ts',
       find: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'",
       replace: "return shape.kind === 'pixelate' || shape.kind === 'cover'",
@@ -37,7 +38,31 @@ const specifications = {
     { label: 'save-png-callback-omitted', source: component + 'ImageAnnotationEditor.tsx',
       find: "else if (action === 'save-png') onSavePng?.(input)", replace: "else if (action === 'save-png') void input",
       test: 'apps/desktop/test/image-annotation-editing.test.tsx',
-      consumer: 'draws one brush mask in original pixels and undoes the whole gesture while all output actions consume the same edited snapshot', failure: /called at least once/ }]
+      consumer: 'draws one brush mask in original pixels and undoes the whole gesture while all output actions consume the same edited snapshot', failure: /called at least once/ },
+    { label: 'compact-tool-selection-omitted', source: component + 'AnnotationToolbar.tsx',
+      find: 'onSelect={() => onTool(item.id)}', replace: 'onSelect={() => {}}',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'the compact radio menu selects the actual editor tool and exposes its checked state', failure: /actual menu selection reaches/ },
+    { label: 'compact-escape-dismissal-blocked', source: component + 'AnnotationToolbar.tsx',
+      find: 'onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault(); else event.stopPropagation() }}', replace: 'onEscapeKeyDown={event => event.preventDefault()}',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'Escape dismisses the compact markup popup before a later Canvas Escape cancels editing', failure: /first Escape dismisses only/ },
+    { label: 'compact-host-active-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '<AnnotationToolbar active={active}', replace: '<AnnotationToolbar active={true}',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'hiding the actual editor closes its tool portal and preserves another workface focus', failure: /inactive editor must close/ },
+    { label: 'compact-hidden-focus-restoration', source: component + 'AnnotationToolbar.tsx',
+      find: 'onCloseAutoFocus={event => { if (!active) event.preventDefault() }}', replace: 'onCloseAutoFocus={() => {}}',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'hiding the actual editor closes its tool portal and preserves another workface focus', failure: /late menu cleanup cannot steal/ },
+    { label: 'compact-hidden-open-state-retained', source: component + 'AnnotationToolbar.tsx',
+      find: 'useEffect(() => { if (!active) setOpen(false) }, [active])', replace: 'useEffect(() => {}, [active])',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'hiding the actual editor closes its tool portal and preserves another workface focus', failure: /showing the retained image does not reopen/ },
+    { label: 'compact-busy-pan-disabled', source: component + 'AnnotationToolbar.tsx',
+      find: "disabled={busy && item.id !== 'pan'} onSelect", replace: 'disabled={busy} onSelect',
+      test: 'apps/desktop/test/image-annotation-compact-toolbar.test.tsx',
+      consumer: 'the busy compact menu keeps only Pan selectable and pans without adding an edit', failure: /actual busy Pan stays available/ }]
   },
   'text-preservation': {
     tests: ['apps/desktop/test/image-annotation-text-preservation.test.tsx'],

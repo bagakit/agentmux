@@ -8,7 +8,13 @@ let host: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
 const select = vi.fn(), undo = vi.fn(), redo = vi.fn(), remove = vi.fn(), clear = vi.fn()
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.clearAllMocks(); host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
-async function mount(busy = false) { await act(async () => root.render(<AnnotationToolbar tool="pen" busy={busy} undoable redoable={false} selected={false} clearable onTool={select} onUndo={undo} onRedo={redo} onDelete={remove} onClear={clear} />)) }
+async function mount(busy = false) {
+  await act(async () => root.render(<AnnotationToolbar tool="pen" busy={busy} undoable redoable={false} selected={false} clearable onTool={select} onUndo={undo} onRedo={redo} onDelete={remove} onClear={clear} />))
+  // happy-dom does not make display:none controls unfocusable. This wide-mode
+  // platform seam models that native focus rule with inert, retaining the actual
+  // Radix routing. Real Chromium width/breakpoint/focus evidence is separate.
+  host.querySelector<HTMLButtonElement>('[aria-label="Markup tool"]')!.inert = true
+}
 const toolbar = () => host.querySelector<HTMLElement>('[role="toolbar"]')!
 const button = (name: string) => host.querySelector<HTMLButtonElement>(`[aria-label="${name}"]`)!
 async function key(key: string) { await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await new Promise(done => setTimeout(done, 0)) }) }
@@ -33,7 +39,7 @@ it('retains the original selected tool while only Pan is reachable during an act
   expect(document.activeElement).toBe(button('Pan'))
   await key('ArrowRight'); await key('Home'); await key('End')
   expect(document.activeElement).toBe(button('Pan'))
-  const enabled = [...toolbar().querySelectorAll<HTMLButtonElement>('button')].filter(control => !control.disabled)
+  const enabled = [...toolbar().querySelectorAll<HTMLButtonElement>('button')].filter(control => !control.disabled && !control.inert)
   expect(enabled).toEqual([button('Pan')])
   expect(button('Pen').getAttribute('aria-pressed')).toBe('true')
   expect(select).not.toHaveBeenCalled()
