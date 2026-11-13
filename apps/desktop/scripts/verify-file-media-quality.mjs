@@ -8,11 +8,11 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const output = resolve(root, process.argv[2] ?? '.bagakit/reviews/file-media-quality')
-const pdf = 'apps/desktop/src/renderer/src/components/PdfContent.tsx'
-const assets = 'apps/desktop/scripts/pdfjs-viewer-assets.ts'
+const pdf = 'packages/editor-extensions/src/pdf/PdfReader.tsx'
+const assets = 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts'
 const config = 'apps/desktop/test/fixtures/file-media/vitest.config.ts'
 const tests = ['apps/desktop/test/pdf-content.test.tsx', 'apps/desktop/test/pdfjs-viewer-assets.test.ts', 'apps/desktop/test/pdf-engine.test.ts']
-const files = [pdf, assets, config, ...tests, 'apps/desktop/src/renderer/src/components/FilePreviewState.tsx', 'apps/desktop/src/renderer/src/styles/pdf-content.css', 'apps/desktop/test/helpers/pdf-reader-fixture.ts']
+const files = [pdf, 'packages/editor-extensions/src/bytes.ts', assets, config, ...tests, 'packages/editor-extensions/src/ui/FilePreviewState.tsx', 'packages/editor-extensions/src/styles/pdf-content.css', 'packages/editor-extensions/src/styles/preview-common.css', 'apps/desktop/test/helpers/pdf-reader-fixture.ts']
 const digest = text => createHash('sha256').update(text).digest('hex')
 const originals = new Map(files.map(path => [path, readFileSync(resolve(root, path), 'utf8')]))
 const isolated = mkdtempSync(join(tmpdir(), 'agentmux-pdf-quality-'))
@@ -30,13 +30,13 @@ const run = (id, testFiles = tests) => {
   return { id, executedTests, exitCode: result.status, assertionRed: result.status !== 0 && /AssertionError:/u.test(log), log: `${id}.log` }
 }
 const cases = [
-  ['byte-copy-removed', pdf, 'data: data.slice(),', 'data,'],
+  ['range-offset-removed', pdf, 'source.read(begin, end - begin, lifetime.signal)', 'source.read(0, end - begin, lifetime.signal)'],
   ['false-ready-before-render', pdf, "update({ phase: 'rendering', pages: document.numPages })", "update({ phase: 'ready', pages: document.numPages })"],
   ['late-load-fence-removed', pdf, 'if (disposed || !reader) return\n        password.current = null', 'if (!reader) return\n        password.current = null'],
   ['worker-release-removed', pdf, 'void loading?.destroy().catch(() => {})', 'void loading'],
-  ['viewer-abort-removed', pdf, 'lifetime.abort()', 'void lifetime'],
-  ['hidden-read-admission-removed', pdf, 'if (!visible) { setReading(null); return }', 'if (false) { setReading(null); return }'],
-  ['hidden-state-byte-release-removed', pdf, 'if (!visible) { setReading(null); return }', 'if (!visible) { return }'],
+  ['viewer-abort-removed', pdf, '      lifetime.abort()', '      void lifetime'],
+  ['hidden-read-admission-removed', pdf, 'if (!visible) { setReading(null); setOutline(null); setSearch(null); return }', 'if (false) { setReading(null); setOutline(null); setSearch(null); return }'],
+  ['hidden-state-byte-release-removed', pdf, 'if (!visible) { setReading(null); setOutline(null); setSearch(null); return }', 'if (!visible) { return }'],
   ['page-recovery-disabled', pdf, 'if (!viewer.current || !current?.pages || !Number.isFinite(value)) return', 'if (!ready || !viewer.current || !current?.pages || !Number.isFinite(value)) return'],
   ['cached-page-recovery-removed', pdf, 'reader?.getPageView(event.pageNumber - 1)?.renderingState === components.RenderingStates.FINISHED', 'false'],
   ['canvas-budget-removed', pdf, 'maxCanvasPixels: 16 * 1024 * 1024', 'maxCanvasPixels: -1'],
@@ -47,6 +47,7 @@ try {
   for (const path of files) { const target = resolve(isolated, path); mkdirSync(dirname(target), { recursive: true }); cpSync(resolve(root, path), target) }
   symlinkSync(resolve(root, 'node_modules'), resolve(isolated, 'node_modules'), 'dir')
   symlinkSync(resolve(root, 'apps/desktop/node_modules'), resolve(isolated, 'apps/desktop/node_modules'), 'dir')
+  symlinkSync(resolve(root, 'packages/editor-extensions/node_modules'), resolve(isolated, 'packages/editor-extensions/node_modules'), 'dir')
   receipt.green = run('owning-green'); assert.equal(receipt.green.exitCode, 0, 'Owning exact source must be green')
   for (const [id, path, before, after] of cases) {
     const original = originals.get(path)
@@ -65,7 +66,7 @@ try {
     assert(found.length > 0, `${symbol} has no outside-definition production caller; task is blocked`)
     return found
   }
-  receipt.callers = { PdfContent: caller('PdfContent', ['apps/desktop/src/renderer/src/components'], pdf),
+  receipt.callers = { PdfReader: caller('PdfReader', ['apps/desktop/src/renderer/src/components'], pdf),
     pdfjsViewerAssets: caller('pdfjsViewerAssets', ['apps/desktop/electron.vite.config.ts', 'apps/desktop/vite.web.config.ts', 'apps/desktop/vite.gallery.config.ts'], assets) }
 } finally {
   for (const [path, original] of originals) assert.equal(digest(readFileSync(resolve(root, path), 'utf8')), digest(original), `Concurrent product source must stay intact: ${path}`)
