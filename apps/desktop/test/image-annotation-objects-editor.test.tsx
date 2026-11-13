@@ -184,6 +184,15 @@ describe('object editing in the mounted editor', () => {
     expect(Object.hasOwn(by(await output(), 'a'), 'locked'), 'Unlock all clears the lock').toBe(false)
   })
 
+  it('Select All takes the marks it shows: never a note hidden under a mask', async () => {
+    const mask: ScreenshotShape = { id: 'mask', kind: 'cover', color: '#111827', from: { x: 300, y: 200 }, to: { x: 390, y: 290 } }
+    const { key, hint, output, ids } = await mount([box('a', 20, 40), note('hidden', 1, 320, 220), note('shown', 2, 120, 80), mask])
+    await key('a', { metaKey: true })
+    expect(selectedCount(hint()), 'Select All selects a, the shown note and the mask, not the hidden note').toBe(3)
+    await key('Delete')
+    expect(ids(await output()), 'Delete then removes only what Select All showed').toEqual(['hidden'])
+  })
+
   it('duplicate and session paste give fresh ids and next note numbers without touching the system clipboard', async () => {
     const write = vi.fn(), read = vi.fn()
     vi.stubGlobal('navigator', { ...navigator, clipboard: { write, read, writeText: write, readText: read } })
