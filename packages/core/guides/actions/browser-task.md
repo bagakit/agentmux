@@ -55,6 +55,34 @@ Touch steps are `tap`, `longPress`, `swipe` and `pinch`. All use a reviewed sema
 uses 600 ms when absent. `pinch.scale` is positive and uses 2 when absent. The task editor
 can add and review these declarations. Their immutable versions, original operations and
 unknown-effect retry rules use the same task owner as other page steps.
+An `upload` step names the reviewed file-input `target` and 1–4 distinct
+`parameterKeys` from the version's parameter declarations. Supply each Workspace-relative
+path as a fresh stdin string for this invocation. Actual files, selected-file handles,
+paths and prompt values do not enter the saved definition or replay. The existing
+Workspace upload owner snapshots and verifies the current FileList; an unknown assignment
+is inspected, never repeated automatically. The task editor can add uploads and file bindings.
+A `click` may declare `dialog: {type: "confirm", action: "accept"}` or a dismiss decision.
+An accepted prompt may additionally name `promptParameterKey` for a fresh answer.
+The current Desktop/Electron host does not open JavaScript prompt dialogs. Its
+editor preserves portable prompt declarations; this is not a claim that they can
+complete on that host. Its original task owner refuses that step before any trigger.
+Read the exact target's `dialogTypes` in `browser targets`: absence means unknown,
+an empty list means no native dialog answers, and a listed type grants neither
+page input nor a beforeunload approval. Answering requires an actual native prompt event on a compatible host.
+The original click and answer share one operation; only its observed expected type and
+original document can be answered. No dialog, a different type/document, human takeover
+or an unconfirmed answer stops this task without replaying the click. Leaving a page with
+unsaved input still requires the person; a saved decision is not a human checkpoint approval.
+Recordings preserve real triggers; dialog policies are explicitly edited and reviewed,
+never inferred as a recorded human approval. Portable imports keep their declarations but
+reset review and do not carry file selections or answers.
+Downloads keep the existing completion declaration, for example
+`{kind: "download-readable", stepId: "download-click", path: "outputs/result.bin"}`.
+One reviewed click per version owns this producer: its listener is installed before the click,
+and only its actual completed Workspace reference can satisfy readable-file completion.
+A click cannot declare both a download producer and a dialog decision. Compose separate
+steps instead. This does not create file capability on a host without a Workspace owner.
+
 A page step may declare `retry` 0–3 and `onFail` stop, continue or goto a later step.
 Only a known `script-failed` attempt that sent no page action is retried, each with its
 own operation id. After continue or goto the run records `failedSteps` with the failed

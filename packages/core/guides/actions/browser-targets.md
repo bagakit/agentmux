@@ -56,3 +56,10 @@ If the target is absent, its recovery is unconfirmed or driving is refused, repo
 Do not guess another Browser or use GUI input to get around that result.
 Opening a Browser preserves the current Workbench selection and eligible input;
 explicit focus is a separate navigation action. Browser progress does not select another Tab.
+
+The optional `dialogTypes` is the original host's supported native dialog kinds.
+Missing means unknown; `[]` means no program dialog answers. Desktop supports alert,
+confirm and keeping a beforeunload page, not JavaScript prompt. The standalone CDP
+host can answer native prompts. External extension tabs leave this fact unknown;
+an omitted type or high-level method is not proof that their native transport cannot answer.
+These facts do not grant input or let a program approve leaving an unsaved page.
