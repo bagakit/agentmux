@@ -8,6 +8,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { SEND_AFTER_REQUEST_ENDS } from '../src/renderer/src/lib/composer-submit-mode'
 import { SessionResultReviewContent } from '../src/renderer/src/components/SessionResultReviewContent'
 import { AgentStatusPromptActions } from '../src/renderer/src/components/AgentStatusPromptActions'
 import { useAppStore } from '../src/renderer/src/store'
@@ -324,7 +325,7 @@ it.each([
     const compact = expectedHeight < 160
     expect(panel.dataset.compact).toBe(String(compact))
     const summary = panel.querySelector<HTMLElement>('.agent-state-face__summary')!, heading = panel.querySelector<HTMLElement>('.agent-status-prompts h3')!
-    expect(summary.textContent).toContain('Send after the pending request ends.')
+    expect(summary.textContent).toContain(`${SEND_AFTER_REQUEST_ENDS}.`)
     expect(getComputedStyle(summary).flexDirection).toBe(compact ? 'row' : 'column')
     expect(getComputedStyle(summary).alignItems).toBe(compact ? 'baseline' : 'flex-start')
     expect(heading.textContent).toBe('User prompts')

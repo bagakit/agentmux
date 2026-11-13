@@ -157,10 +157,9 @@ describe('composerSubmitMode', () => {
     for (const { session, forceDisabled } of cases) {
       const availability = agentComposerAvailability(session, forceDisabled)
       const mode = composerSubmitMode(session, forceDisabled)
-      // canType is the inverse of availability.disabled, and the placeholder text is identical,
-      // including while a request is pending: that no longer disables the surface.
+      // availability.disabled is !canSubmit, so this pins canType === canSubmit on every listed state,
+      // including while a request is pending. Placeholders are pinned per state above.
       expect(mode.canType).toBe(!availability.disabled)
-      expect(mode.placeholder).toBe(availability.placeholder)
     }
   })
 

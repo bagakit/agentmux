@@ -36,6 +36,7 @@ vi.mock('../src/renderer/src/store', async (importOriginal) => {
 // A shallow server render has no mounted Runtime subscription; Runtime reads are not this test's subject.
 vi.mock('../src/renderer/src/lib/run-service-projection', () => ({ useRunService: () => undefined }))
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { SEND_AFTER_REQUEST_ENDS } from '../src/renderer/src/lib/composer-submit-mode'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { ComposerCompletionEditor } from '@agentmux/client-ui/components/ComposerCompletionEditor'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
@@ -142,7 +143,7 @@ describe('pending interaction queue keyboard path', () => {
     it(`${state}: the Send button stays enabled and hands the draft to the store's explicit send`, () => {
       const { id, props } = surfaces(state, true, 'send-button')
       expect(props.disabled).toBe(false)
-      expect(props.submitLabel).toBe('Send after the Agent request ends')
+      expect(props.submitLabel).toBe(SEND_AFTER_REQUEST_ENDS)
       expect(props.onSubmit).toBeTypeOf('function')
       props.onSubmit!()
       // The store, not this view, keeps it unbound in the queue until Core settles the request.

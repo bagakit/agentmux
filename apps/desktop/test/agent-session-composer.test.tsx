@@ -438,15 +438,10 @@ describe('AgentSessionComposer adapter', () => {
   })
 
   it('一张待答卡片不许夺走中断——daemon 那条路从来没关过', () => {
-    // 原则 11 第 2 类。`canSubmit:false` 是对的（卡片拥有输入），但 Interrupt 此前跟 onSubmit 挤在同
-    // 一个条件展开里，于是 `primaryAction` 仍是 `'stop'`、■ 按钮照常渲染，而 `onInterrupt` 是
-    // undefined——`disabled={disabled || !onInterrupt}` 把它变成死按钮。composer 是中断一个 turn 的
-    // **唯一** UI 入口。
-    //
-    // 判据钉的是「daemon 还认不认」这一侧：store.interrupt → kernel.interrupt(runId) 一路没有
-    // pendingInteraction 门，也没有 processState 门（对照 writeAgentInput 是**故意**抛
-    // AGENT_INTERACTION_PENDING 的）。所以这里不是「我们这段代码降级了」，是「我们拿走了用户还有的
-    // 能力」。两个世界同时钉：卡片在时中断仍在，且它真的打到 store。
+    // 原则 11 第 2 类。Interrupt 跟 `primaryAction` 走，不跟 `canSubmit` 走。卡片待答时 Agent 仍在跑，■ 必须
+    // 接得上 `onInterrupt`，否则 `disabled={disabled || !onInterrupt}` 把它变成死按钮，而 composer 是中断
+    // 一个 turn 的唯一 UI 入口。Core 的 signalAgent → kernel.interrupt 没有 pendingInteraction 门，也没有
+    // processState 门，收走就是拿走用户还有的能力。两个世界同时钉：卡片在时中断仍在，且它真的打到 store。
     const waiting = agentSession({
       status: { state: 'working', source: 'native-hook', observedAt: 2 },
       pendingInteraction: {
@@ -463,10 +458,10 @@ describe('AgentSessionComposer adapter', () => {
       props: { onInterrupt?: () => void; onSubmit?: () => void; primaryAction: string }
     }
 
-    // 三条一起才说明问题：按钮是 Stop 形态、提交确实被挡住、而中断仍然接得上。少了中间那条，
-    // 「把卡片门整个拆掉」也会绿。
+    // 三条一起：按钮是 Stop 形态；卡片待答时 Send 也仍接着（消息由 store 排到请求结束后）；中断仍接得上。
+    // Stop 与 Send 两轴互不吞掉。
     expect(composer.props.primaryAction, '正在跑的 Agent 主操作应当是 Stop').toBe('stop')
-    expect(composer.props.onSubmit, '卡片在时不该能直接提交').toBeUndefined()
+    expect(composer.props.onSubmit, '待答时 Send 被收走了——它只该排到请求结束后').toBeTypeOf('function')
     expect(composer.props.onInterrupt, '卡片待答时中断被拿走了——daemon 那条路还通着').toBeTypeOf(
       'function'
     )
@@ -511,14 +506,11 @@ describe('AgentSessionComposer adapter', () => {
     expect(composer.props.onPasteImage).toBeTypeOf('function')
   })
 
-  it('卡片待答时不给姿态切换——那一下真的会被 daemon 拒掉', () => {
+  it('卡片待答时不给姿态切换——按键会落进开着的原生对话框', () => {
     // 上一条的边界在哪：附件/@文件只改本地草稿，卡片在不在都无所谓；姿态**不是**草稿动作。
-    // client.setAgentPosture 查完 Provider 的按键之后调的就是 writeAgentInput，而 writeAgentInput 在
-    // pendingInteraction 时是**故意**抛 AGENT_INTERACTION_PENDING 的。所以这是原则 11 第 1 类（这条路
-    // 真的不通），不是第 2 类——递出去只会让每一次点击换来一条错误横幅。
-    //
-    // 曾经有一版把它跟附件归在一起，理由写的是「setAgentPosture 不依赖 submit readiness」。那句话是
-    // 错的：它只读到了按键查表，没读到后面那次写入。
+    // client.setAgentPosture 查完 Provider 的按键后调 writeAgentInput，Core 不因待答拒收原始输入：
+    // 这串按键会写进开着的原生对话框，并作为原生输入记在该请求上，卡片从此不能再作答。目标不对，
+    // 所以 composer 不递出姿态；终端本身仍可直接操作。
     // grok 是 fixture 里唯一声明了 postureControl 的 Provider；默认的 codex 没有，用它这条测试会恒真。
     const waiting = agentSession({
       providerId: 'grok',
@@ -540,7 +532,7 @@ describe('AgentSessionComposer adapter', () => {
     // 而姿态被挡住。
     expect(fixture.state.providerCatalog[0]?.postureControl, '这个 Provider 本来就没声明姿态，这条测试什么都没证明').toBeTruthy()
     expect(pending.props.onAttach, '收得过头了——附件只改草稿，不该跟着一起消失').toBeTypeOf('function')
-    expect(posturePicker(pending), '卡片待答时递出了姿态——点下去会被 writeAgentInput 拒掉').toBeUndefined()
+    expect(posturePicker(pending), '卡片待答时递出了姿态——按键会写进开着的原生对话框').toBeUndefined()
 
     // 相反世界：卡片答完（没有 pendingInteraction）姿态必须回来，否则「永远不给」也能通过上一条。
     fixture.state.providerCatalog = [postureCatalogEntry()]
@@ -663,11 +655,8 @@ describe('AgentSessionComposer adapter', () => {
     })
     fixture.state.sessions = [waiting]
 
-    // A pending request no longer makes the Agent ineligible for input; its message waits in the queue.
-    expect(agentComposerAvailability(waiting)).toEqual({
-      disabled: false,
-      placeholder: 'Answer the Agent request in its card; messages here send after it ends…'
-    })
+    // A pending request does not make the Agent ineligible for other input surfaces (Browser annotations read this).
+    expect(agentComposerAvailability(waiting).disabled).toBe(false)
   })
 
   // Every native action on this Composer is fired as `void action()` from a JSX handler, so a rejection
