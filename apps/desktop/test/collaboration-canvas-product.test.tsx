@@ -1100,7 +1100,7 @@ it('keeps the last accepted structure after a cancelled placement and a failed s
   if (failure.type !== 'reconcile' || initial.type !== 'arrange') throw Error('Original request chain required')
   expect(failure.previousStructure).toEqual({ areas: initial.input.areas, nodes: initial.input.nodes })
   expect(new Map(failure.boxes.map(box => [box.id, box]))).toEqual(previous)
-  await dom.click('.collaboration-canvas__issue > button')
+  await dom.click('.collaboration-canvas__issue-actions > button')
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   const retry = requests.at(-1)!
   if (retry.type !== 'reconcile') throw Error('Exact structural retry required')
@@ -2123,8 +2123,18 @@ it('keeps local route diagnostics inspectable and retries only the failed origin
   await dom.render(graph(scene))
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__issue details p')?.textContent).toBe(diagnostic))
   const issue = dom.container.querySelector('.collaboration-canvas__issue')!
+  // A corner service window inside the HUD, not a banner across the map.
+  expect(issue.parentElement?.classList.contains('collaboration-canvas__hud')).toBe(true)
   expect(issue.querySelector(':scope > span')?.textContent).toBe('1 connection could not be drawn. Original records remain readable.')
   expect(issue.querySelector('details')?.hasAttribute('open')).toBe(false)
+  // It collapses to a visible count and expands again; it has no close action while the line is missing.
+  expect([...issue.querySelectorAll('button')].map(button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Retry layout', 'Collapse layout notice'])
+  await act(async () => issue.querySelector<HTMLButtonElement>('[aria-label="Collapse layout notice"]')!.click())
+  const chip = dom.container.querySelector<HTMLButtonElement>('.collaboration-canvas__issue-chip')!
+  expect(chip.textContent).toBe('1 not drawn'); expect(chip.getAttribute('aria-label')).toBe('1 connection could not be drawn. Original records remain readable.')
+  expect(dom.container.querySelector('.collaboration-canvas__issue details')).toBeNull()
+  await act(async () => chip.click())
+  expect(dom.container.querySelector('.collaboration-canvas__issue details p')?.textContent).toBe(diagnostic)
   expect(captured.nodes).toHaveLength(28)
   const originals = captured.nodes
   await focusNode(collaborationAgentNode(scene.areas[0]!.id, subject('canvas-0')))
@@ -2133,7 +2143,7 @@ it('keeps local route diagnostics inspectable and retries only the failed origin
   await act(async () => card.dispatchEvent(new MouseEvent('click', { bubbles: true })))
   expect(select).toHaveBeenCalledWith({ kind: 'agent', id: subject('canvas-0') })
   failing = false
-  await act(async () => issue.querySelector('button')!.click())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.collaboration-canvas__issue button')!.click())
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__issue')).toBeNull())
   const retry = requests.at(-1)!
   expect(retry.type).toBe('route'); if (retry.type !== 'route') throw Error('Original connection retry required')
