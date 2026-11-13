@@ -87,6 +87,8 @@ try {
       }
     } })
   assert.equal(row.passed,true)
+  assert.deepEqual(row.cases.map(item=>item.label),['public-create-original-receipt','compiled-sdk-explicit-target-preserves-other-page','official-mcp-stdio-discovers-original-targets-and-unsupported-task-owner','original-sdk-follow-and-mcp-stop-do-not-repeat-pending-native-click','mcp-disconnect-retains-original-operation-and-healthy-page'])
+  assert.ok(Number.isInteger(row.mcpProcess?.originalPid) && row.mcpProcess.originalPid>0,'The official MCP client must own a real independent process')
   receipt.passed=true
 } catch(error) {receipt.error=String(error?.stack??error);throw error}
 finally {
