@@ -161,3 +161,34 @@ including on failure), and `outcome`, which is one of four:
                  look-alike, or the actions ran but their result could not be retained, or the
                  time ran out while a click, input or navigation was still in flight.
                  Look at the page before retrying — do not blind-retry.
+
+
+To observe HTTP requests from the current main document, arm a reader before the action:
+
+```js
+const reader = await watchRequests({maxEntries: 100});
+try {
+  const page = await snapshot();
+  await click(page.nodes.find(node => node.name === "Load items").ref);
+  const response = await waitForResponse(reader, {url: {contains: "/api/items"}, status: 200}, {timeoutMs: 5000});
+  return {response, traffic: await readRequests(reader, {afterSequence: 0, maxEntries: 20})};
+} finally {
+  await stopWatchingRequests(reader);
+}
+```
+
+An exact string matches the whole observed URL; `{contains: "..."}` matches a URL part.
+`method` is an uppercase HTTP method. A buffered response remains eligible, so a fast response
+can arrive before the wait call. `watchRequests` acknowledges native observation before returning.
+A reader belongs to this program and original main document. Navigation, Stop, a native disconnect
+or program completion ends it; a later program cannot reuse its handle. Stopping one reader leaves
+sibling readers and the Browser usable. Do not repeat an action because its response was not observed.
+
+Readers keep 100 metadata events by default, or a requested 1–1000. `readRequests` returns sequence
+numbers, `dropped` event-retention count, `evictedRequests` correlation-retention count and `unattributed` response count.
+Reads return at most 64 KiB of metadata; use `nextAfterSequence` when `hasMore` is true.
+`scannedEntries` reports the bounded retained entries examined, including entries before your cursor. A request evicted before its
+response cannot be attributed later. URLs are capped at 8192 characters, methods at 64 and MIME types
+at 256; a truncated observation is marked and cannot satisfy an exact URL/method wait. URL credentials,
+headers and request/response bodies are omitted. Child documents, worker requests and WebSocket
+messages are outside this main-document HTTP scope. These are observations, not network mocking.
