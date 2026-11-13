@@ -275,3 +275,38 @@ it('Mobile hides the network picker when this Mac has one local address', async 
   expect(dom.container.querySelector('.connection-link-code')).not.toBeNull()
   expect(dom.container.querySelector('[aria-label="Connection network"]')).toBeNull()
 })
+
+it('Mobile does not pin the default address, and drops a pick that a network change removed', async () => {
+  devices()
+  const wired = { address: '10.69.47.238', interface: 'en9', label: 'USB 10/100/1000 LAN', preferred: true }
+  const wifi = { address: '10.69.58.222', interface: 'en0', label: 'Wi-Fi', preferred: false }
+  const home = { address: '192.168.1.20', interface: 'en0', label: 'Wi-Fi', preferred: true }
+  let current = [wired, wifi]
+  const at = (address: string) => `http://${address}:8443/#AgFake`
+  const link = vi.spyOn(api.deviceManagement, 'link').mockImplementation(async params => {
+    // Electron IPC delivers only the message, so the code is deliberately absent here.
+    if (params.address && !current.some(candidate => candidate.address === params.address)) throw new Error('这个地址不是这台 Mac 当前的局域网地址')
+    return linkResult(at(params.address ?? current[0]!.address), current)
+  })
+  await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
+  await dom.click('[data-device-action="scan"]')
+  // Refreshing without a pick keeps asking for the Host's preferred address.
+  await dom.click('[data-device-action="scan"]')
+  expect(link.mock.calls.map(call => call[0])).toEqual([{}, {}])
+  const picker = node<HTMLSelectElement>('[aria-label="Connection network"]')
+  await act(async () => { picker.value = wifi.address; picker.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
+  // The Mac moves to another network: the picked address is gone, so refresh asks for the default again.
+  current = [home]
+  const before = link.mock.calls.length
+  await dom.click('[data-device-action="scan"]')
+  // One refused pick, then one default read; the dropped pick is not asked for again.
+  expect(link.mock.calls.slice(before).map(call => call[0])).toEqual([{ address: wifi.address }, {}])
+  expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(at(home.address))
+  await dom.click('[data-device-action="scan"]')
+  expect(link.mock.calls.at(-1)![0]).toEqual({})
+  // A failure that is not a vanished pick still reaches the person.
+  link.mockRejectedValueOnce(new Error('Relay unavailable'))
+  await dom.click('[data-device-action="scan"]')
+  expect(node('.device-management__feedback').textContent).toContain('Relay unavailable')
+})
