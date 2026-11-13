@@ -129,13 +129,13 @@ try {
     const zoom = nativePage!.getZoomFactor(), css = await nativePage!.executeJavaScript('({ width: innerWidth, height: innerHeight })')
     const page = { width: css.width * zoom, height: css.height * zoom }
     const frame = { width: value.videoWidth / value.screenPixelRatio, height: value.videoHeight / value.screenPixelRatio }
-    const receipt = { name, stage: { width: value.stage.width, height: value.stage.height }, frame, page, css, zoom, notice: value.noticeOverlay }
+    const receipt = { name, stage: { width: value.stage.width, height: value.stage.height }, frame, page, css, zoom, notice: value.noticeFloats }
     ;(report.pageFill ??= []).push(receipt)
     for (const [label, size] of [['frame', frame], ['page', page]] as const) {
       assert.ok(Math.abs(size.width - value.stage.width) <= 2 && Math.abs(size.height - value.stage.height) <= 2,
         `${name}: the ${label} must match the page area 1:1 (${JSON.stringify(receipt)})`)
     }
-    assert.equal(value.noticeOverlay, 'overlay', `${name}: the preview notice floats on the page area`)
+    assert.equal(value.noticeFloats, true, `${name}: the preview notice floats on the page area`)
     return receipt
   }
   const settledFill = async (name: string, expression = 'true') => {
