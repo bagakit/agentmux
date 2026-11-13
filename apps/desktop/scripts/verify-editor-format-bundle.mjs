@@ -58,7 +58,7 @@ try {
       },
       generateBundle(_options, bundle) {
         for (const item of Object.values(bundle)) if (item.type === 'chunk') chunks.push({
-          file: item.fileName, entry: item.isEntry, facade: item.facadeModuleId ? relative(repository, item.facadeModuleId) : null,
+          file: item.fileName, bytes: Buffer.byteLength(item.code), entry: item.isEntry, facade: item.facadeModuleId ? relative(repository, item.facadeModuleId) : null,
           imports: item.imports, dynamicImports: item.dynamicImports,
           modules: Object.keys(item.modules).map(id => relative(repository, id))
         })
@@ -110,12 +110,15 @@ try {
   }
   assert.ok(artifacts.some(file => file.startsWith('excalidraw-assets/fonts/')), 'Local Excalidraw fonts were packaged.')
   for (const [file, digest] of Object.entries(sources)) assert.equal(sha(await readFile(join(repository, file))), digest, `Final source identity: ${file}`)
-  report.startup = { entry: entry.file, chunks: [...closure], moduleCount: modules.length, eagerFormatEngines: isolated,
+  report.startup = { entry: entry.file, chunks: [...closure], javascriptBytes: [...closure].reduce((sum, file) => sum + (byFile.get(file)?.bytes ?? 0), 0), moduleCount: modules.length, eagerFormatEngines: isolated,
     sharedDependencies: sharedYaml.length ? [{ package: 'yaml', reason: 'Existing startup Mote preference consumers', modules: sharedYaml }] : [] }
   for (const file of ['licenses/editor-extensions/djvu-rs/LICENSE', 'licenses/editor-extensions/djvu-rs/THIRD_PARTY_NOTICES', 'licenses/editor-extensions/pdfjs/LICENSE', 'licenses/editor-extensions/zip.js/LICENSE', 'licenses/editor-extensions/fflate/LICENSE', 'licenses/editor-extensions/foliate-js/LICENSE']) {
     assert.ok(targets.renderer.artifacts[file], `Actual packaged upstream notice: ${file}`)
   }
-  assert.ok(artifacts.some(file => /djvu_rs_bg-.*\.wasm$/.test(file)), 'Actual lazily fetched DjVu decoder WASM was emitted')
+  const djvuWasm = artifacts.filter(file => /djvu_rs_bg-.*\.wasm$/.test(file))
+  assert.equal(djvuWasm.length, 2, 'Both upstream scalar and SIMD DjVu decoder variants were emitted')
+  assert.ok(artifacts.some(file => /djvu\.worker-.*\.js$/.test(file)), 'The actual lazy DjVu Worker was emitted')
+  report.bookReader = { entry: bookEntry.file, chunks: [...bookClosure], djvuWasm }
   report.passed = true
 } catch (error) { report.failure = { message: error.message, stack: error.stack } }
 finally {
