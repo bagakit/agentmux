@@ -416,6 +416,13 @@ const NATIVE_FIELDS = {
   'system.subscription.cancel': ['subscriptionId']
 } as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
+/** Home follows an exact execution route; its display name does not identify that route. */
+function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
+  if (configuration === null) return null
+  const { label: _label, ...route } = configuration
+  return route
+}
+
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
     message: error instanceof Error ? error.message : String(error) }
@@ -1221,13 +1228,15 @@ export class AgentMuxRpcService {
       if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') {
         const query = parseHostSettingsParams(method, params)
         const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)
-        if (query.expected !== undefined && !isDeepStrictEqual(query.expected, configuration)) throw new AgentMuxError(
+        if (query.expected !== undefined && !(method === 'settings.hosts.home'
+          ? isDeepStrictEqual(homeHostRoute(query.expected), homeHostRoute(configuration))
+          : isDeepStrictEqual(query.expected, configuration))) throw new AgentMuxError(
           'The original Host configuration changed or could not be confirmed. Reload this connection before observing it.', 'HOST_CONFIGURATION_CHANGED')
         if (method === 'settings.hosts.home') {
           const result = { routeHostId: input.hostId,
             ...await observeRead(Promise.resolve().then(() => client.hostEnvironment()), context.signal) }
           const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
-          if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
+          if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(homeHostRoute(configuration), homeHostRoute(this.ports.hostConfiguration?.(input.hostId) ?? null))) throw new AgentMuxError(
             'The original Host route changed during its home read. Read the current saved Host again.', 'HOST_CONFIGURATION_CHANGED')
           return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
         }

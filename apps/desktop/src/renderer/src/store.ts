@@ -8750,7 +8750,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async openHostHome(hostId) {
     const host = get().config?.hosts.find(item => item.id === hostId)
     if (!host) throw new DeviceHomeError('read', Object.assign(new Error('Device configuration is unavailable.'), { code: 'DEVICE_HOME_TARGET_CHANGED' }))
-    const target = JSON.stringify(host), navigation = {}, selection = fileNavigationSelection(get())
+    const route = (value: HostConfig | undefined) => { if (!value) return null; const { label: _label, ...target } = value; return target }
+    const target = structuredClone(route(host)), navigation = {}, selection = fileNavigationSelection(get())
+    const sameTarget = () => configValuesEqual(route(get().config?.hosts.find(item => item.id === hostId)), target)
     let navigationChanged = false
     const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== selection) navigationChanged = true })
     const canReveal = () => hostHomeNavigation === navigation && !navigationChanged && fileNavigationSelection(get()) === selection
@@ -8759,7 +8761,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       const result = await api.hosts.home(structuredClone(host))
       if (result.routeHostId !== hostId) throw Object.assign(new Error('The home response belongs to another device.'), { code: 'DEVICE_HOME_TARGET_MISMATCH' })
-      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw Object.assign(new Error('The device configuration changed.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
+      if (!sameTarget()) throw Object.assign(new Error('The device configuration changed.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
       // A later explicit navigation owns the screen. This read never opens another workface.
       if (!canReveal()) return
       let workspace = get().config?.workspaces.find(item => item.hostId === hostId && item.path === result.homeDirectory)
@@ -8773,7 +8775,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (!canReveal()) return
       step = 'open'
-      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw Object.assign(new Error('The device configuration changed before opening home.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
+      if (!sameTarget()) throw Object.assign(new Error('The device configuration changed before opening home.'), { code: 'DEVICE_HOME_TARGET_CHANGED' })
       await get().selectWorkspace(workspace.id)
     } catch (error) {
       throw new DeviceHomeError(step, error)
