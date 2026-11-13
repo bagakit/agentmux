@@ -353,6 +353,17 @@ amux space unbind --zone ZONE_ID --space SPACE_ID
 
 远端运行同一 Core 包的 `agentmux-runtime serve`，持有 Provider、Session Store、Hook、Permission 与 semantic Resume。本地 Client 持有连接和可恢复的观察。远端需要 Node 24+、包内支持的原生产物与目标 Agent CLI。
 
+### 免装 Node 的 Linux x64 发布包
+
+`node scripts/linux-release/build.mjs --out DIR` 在已构建的 Core 上产出 `agentmux-core-<version>-linux-x64.tar.gz` 及其 `.sha256`。包内是校验过的官方 Node 24、与 Desktop 远端升级同一份可移植 Core 产物，以及 `install.sh`；目标机只需 Linux x64 与 glibc 2.34 以上，不需要 Node、npm、编译器或外网。可移植产物只带各依赖声明的发布文件，不含 TypeScript 源码、测试、源映射、类型声明和其他平台的原生产物；发出去的 JavaScript 仍可阅读，不能当作代码保密。
+
+```sh
+tar -xzf agentmux-core-<version>-linux-x64.tar.gz
+./agentmux-core-<version>-linux-x64/install.sh   # 默认装到 ~/.agentmux/server
+```
+
+安装器把 Core 放进与远端升级相同的 `state/core-releases/<digest>/` 发行目录（含 `deployment.json` 与 `launcher/amux`），只用升级可重建的环境启动 `serve`，最后打印要填入 Host「Connection options」的 Service command 与 Service socket path。已有 Core 在服务时不再启动第二个 owner；重复安装不删除状态、Session 或 Run。机器重启后执行打印出的 `start.sh`。之后的版本更新使用 Desktop 的 Core 升级。Agent CLI 须在启动 Core 的用户 `PATH` 上。
+
 `connectHostedAgentMux` 是统一的公共 Runtime SDK；本地服务、SSH 与宿主 HTTP 连接使用同一服务合同。`connectSshAgentMux` 组合系统 SSH 与该 SDK，客户端不会复制 Provider、Session Store 或 Run owner。独立 Core Headless 服务与宿主服务共用同一个语义 owner，宿主额外注入私网、设备及 Desktop 能力。调用的传输授权、durable owner 和当前进程代次分别验证；managed Agent capability 不授予完整 Runtime SDK 权限。
 
 `readAgentSession(完整SID)` 从原耐久 metadata owner 读取一个准确 Session，并保留原 owner 已确认的 started-unconfirmed Run 观察；确知缺席返回 `null`，读取失败保持未知，不 probe、adopt 或启动 Run。Hosted 复用原有限 `runtime.invoke`，只返回这次读取，不更新其会话缓存；连接器已有入站命令继续查询原输入和回执，不另设 metadata CLI。
