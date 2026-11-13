@@ -10,6 +10,10 @@ const dom = composerDOM()
 it('the real Mote settings teaches two origins with member Agents and keeps its unsaved preferences while changing scenes', async () => {
   const save = vi.spyOn(api.config, 'save').mockImplementation(async next => next)
   await dom.render(<SettingsPanel onClose={() => {}} initialSection="mote" />)
+  const explanation = dom.container.querySelector<HTMLDetailsElement>('.settings-mote__origins')!
+  expect(explanation.open).toBe(false)
+  await dom.click('.settings-mote__origins > summary')
+  expect(explanation.open).toBe(true)
   const story = dom.container.querySelector('.mote-origin')!
   expect(story, 'The production settings must consume the story').not.toBeNull()
   expect([...story.querySelectorAll('.mote-origin__path > small')].map(node => node.textContent)).toEqual(['From a profile', 'Grow from the work'])
