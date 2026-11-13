@@ -37,6 +37,13 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <select id="fruit" aria-label="Fruit"><option value="a">Apple</option><option value="b">Banana</option></select>
     <input id="level" type="range" min="0" max="10" value="1" aria-label="Level">
   </div>
+  <div style="position:absolute;left:240px;top:200px">
+    <select id="num" aria-label="Number"><option value="0">1</option><option value="1">2</option><option value="2">3</option></select>
+    <fieldset disabled style="display:inline;border:0;padding:0;margin:0"><input id="off" type="date" aria-label="Off date"></fieldset>
+    <input id="stuck" type="range" min="0" max="10" value="8" readonly aria-label="Stuck">
+    <input id="tint" type="color" aria-label="Tint">
+    <input id="agree" type="checkbox" aria-label="Agree">
+  </div>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
   <div style="position:absolute;left:230px;top:20px;width:150px;height:60px;background:rgba(0,0,0,.4)"></div>
   <script>
@@ -91,12 +98,13 @@ app.whenReady().then(async () => {
     const events = async () => await contents.executeJavaScript('window.events.splice(0)')
     const value = async (id) => await contents.executeJavaScript('document.getElementById(' + JSON.stringify(id) + ').value')
     const act = async (label, method, args, read) => {
-      const before = ownSeen.length
+      const before = ownSeen.length, notesBefore = notes.length
       try { await dispatch(method, args); report.actions[label] = { ok: true } }
       catch (error) { report.actions[label] = { ok: false, error: String(error && error.message || error), effects: error && error.fact && error.fact.effects } }
       await new Promise((resolve) => setTimeout(resolve, 80))
       report.actions[label].events = await events()
       report.actions[label].own = ownSeen.slice(before)
+      report.actions[label].notes = notes.slice(notesBefore)
       if (read) report.actions[label].value = await read()
     }
     await events()
@@ -110,6 +118,13 @@ app.whenReady().then(async () => {
     await act('select', 'fillInput', [ref('Fruit'), 'b'], () => value('fruit'))
     await act('range', 'fillInput', [ref('Level'), '7'], () => value('level'))
     await act('dateRefused', 'fillInput', [ref('When'), '03/04/2026'], () => value('when'))
+    await act('numCrossed', 'fillInput', [ref('Number'), '2'], () => value('num'))
+    await act('numByLabel', 'fillInput', [ref('Number'), '3'], () => value('num'))
+    await act('offDate', 'fillInput', [ref('Off date'), '2026-03-04'], () => value('off'))
+    await act('rangePlus', 'fillInput', [ref('Level'), '+3'], () => value('level'))
+    await act('stuck', 'fillInput', [ref('Stuck'), '3'], () => value('stuck'))
+    await act('tint', 'fillInput', [ref('Tint'), '#FF0000'], () => value('tint'))
+    await act('agree', 'fillInput', [ref('Agree'), 'x'], () => contents.executeJavaScript('document.getElementById("agree").checked'))
     report.notes = notes
     report.throttlingAfter = contents.getBackgroundThrottling()
     report.ok = true
@@ -139,7 +154,7 @@ async function buildBundle(outDirectory: string): Promise<void> {
     rollupOptions: { external: ['electron', '@agentmux/core', /^node:/] } } })
 }
 
-type Action = { ok: boolean; error?: string; effects?: string; events: { type: string; target: string; trusted: boolean }[]; own: boolean[]; value?: unknown }
+type Action = { ok: boolean; error?: string; effects?: string; events: { type: string; target: string; trusted: boolean }[]; own: boolean[]; notes?: string[]; value?: unknown }
 type Report = { ok?: boolean; error?: string; actions: Record<string, Action>; notes?: string[]; throttlingAfter?: boolean; framesBefore?: number }
 
 const roots: string[] = []
@@ -213,6 +228,8 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     for (const [label, action] of [['fill', fill], ['type', type]] as const) {
       expect(action!.own.filter((own) => !own), `a ${label} input-event was outside Main’s receipt`).toEqual([])
     }
+    // An email field has no selection API, so type moves the caret with a native End key Electron does report.
+    expect(type!.own.length, 'Electron reported no input-event for the End key of type').toBeGreaterThan(0)
   }, 240_000)
 
   it('Enter is a trusted keydown/keyup that runs its default action and submits the form', async () => {
@@ -244,6 +261,26 @@ describe('real Electron: Agent page actions are trusted native input', () => {
       expect(kinds, `${label} was typed into`).not.toContain('beforeinput')
     }
     expect(actions.dateRefused).toMatchObject({ ok: false, effects: 'not-dispatched', value: '2026-03-04' })
+  }, 240_000)
+
+  it('a picker refuses what Chromium would reset, names the options it cannot tell apart, and takes what a person could set', async () => {
+    const { actions } = await probe()
+    // Options valued 0, 1, 2 labelled 1, 2, 3: "2" is one option's label and another's value.
+    expect(actions.numCrossed, actions.numCrossed?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: '0' })
+    expect(actions.numCrossed!.error).toMatch(/more than one option matching "2": "2" \(value "1"\), "3" \(value "2"\)/)
+    expect(actions.numByLabel, actions.numByLabel?.error).toMatchObject({ ok: true, value: '2' })
+    // A disabled fieldset disables the date inside it, though its own .disabled stays false.
+    expect(actions.offDate, actions.offDate?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: '' })
+    expect(actions.offDate!.error).toContain('is disabled')
+    expect(actions.offDate!.events).toEqual([])
+    // Chromium resets "+3" on a range to its midpoint; it is refused and the earlier 7 stays.
+    expect(actions.rangePlus, actions.rangePlus?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: '7' })
+    // readonly does not apply to a range, and a person can still drag it.
+    expect(actions.stuck, actions.stuck?.error).toMatchObject({ ok: true, value: '3' })
+    // An upper-case color is the same color; it is taken without a note that would make the run indeterminate.
+    expect(actions.tint, actions.tint?.error).toMatchObject({ ok: true, value: '#ff0000', notes: [] })
+    expect(actions.agree, actions.agree?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: false })
+    expect(actions.agree!.error).toContain('checkbox input, which takes a click')
   }, 240_000)
 
   it('a covered target is refused before input and the page receives nothing; throttling is restored afterwards', async () => {

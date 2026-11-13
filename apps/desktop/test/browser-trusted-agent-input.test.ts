@@ -205,7 +205,7 @@ describe('Agent click is one trusted native press at the proven box', () => {
  */
 function textPeer(options: { value?: string; format?: (value: string) => string; deaf?: boolean; readOnly?: boolean; noRange?: boolean;
   /** The field is a picker; accept() says whether a set value sticks, and how it is normalized. */
-  picker?: { accept: (value: string) => string | null } } = {}) {
+  picker?: { accept: (value: string) => string | null; silent?: boolean } } = {}) {
   const peer = pagePeer()
   const field = { value: options.value ?? 'old', selection: [0, 0] as [number, number], focused: false, restored: 0 }
   const send = peer.session.sendCommand
@@ -223,7 +223,8 @@ function textPeer(options: { value?: string; format?: (value: string) => string;
         else if (!options.noRange) field.selection = [field.value.length, field.value.length]
         return { result: { value: { ok: true, before: field.value, caret: replace || !options.noRange ? 'set' : 'end-key' } } }
       }
-      if (declaration.includes('setter.call(self, next)')) {
+      if (declaration.includes('set.call(self, next)')) {
+        if (options.picker!.silent) return { result: {} }
         const before = field.value, wanted = String(params.arguments?.[0]?.value ?? '')
         const taken = options.picker!.accept(wanted)
         // The page's own check refuses before the setter; a refused value never reaches the field.
@@ -369,6 +370,14 @@ describe('Agent fill and type are trusted native text input, read back after', (
     expect(range.field.value).toBe('10')
     expect(range.notes).toEqual([expect.stringMatching(/holds "10" rather than "42"; the field normalized it/)])
     expect(date.notes, 'a value taken as given needs no note').toEqual([])
+
+    // No answer once the value was sent: the setter may have run, so the effect is unknown, not a safe miss.
+    const silent = textPeer({ value: '1', picker: { accept: value => value, silent: true } })
+    const quiet = textDispatch(silent)
+    const quietPage = await quiet.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    const lost = await quiet.dispatch('fillInput', [quietPage.nodes[0]!.ref, '5']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(lost.fact).toEqual({ kind: 'locator-changed', effects: 'unknown' })
+    expect(lost.message).toMatch(/did not answer after its value was sent/)
   })
 
   it('a page that reformats what was typed keeps the action and says the field holds a different value', async () => {
