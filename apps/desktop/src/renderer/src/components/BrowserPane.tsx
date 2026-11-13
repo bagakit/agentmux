@@ -66,7 +66,7 @@ import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
 import { resolveBrowserAgentControl } from '../../../shared/browser-agent-control'
-import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, workbenchBrowserWindowTarget, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, workbenchBrowserWindowTarget, type WorkbenchViewTarget, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
@@ -334,7 +334,7 @@ function BrowserPaneContent({
   useEffect(() => {
     if (initialInputConfirmed) setAgentCreationNotice(current => current === agentCreationNotice ? null : current)
   }, [agentCreationNotice, initialInputConfirmed])
-  async function startBrowserAgent(target: Pick<WorkbenchViewTarget, 'reference' | 'surface'> & { survey?: boolean | undefined } = primaryPresentation): Promise<void> {
+  async function startBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'> = primaryPresentation): Promise<void> {
     const reference = target.reference && { ...target.reference, regionId: tab.regionId }
     if (!reference) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: 'The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.' }); return }
     setCreatingAgent(true)
