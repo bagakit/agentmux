@@ -98,7 +98,8 @@ class ObservedWorker extends OriginalWorker {
 }
 window.Worker = ObservedWorker
 const instrumentation = () => (globalThis as typeof globalThis & { __collaborationCaptureMetrics?: { contextCalls: number; contextIds: Record<string, number>; contextCounterMS: number } }).__collaborationCaptureMetrics ?? { contextCalls: 0, contextIds: {}, contextCounterMS: 0 }
-let measurement: { label: string; start: number; frames: number[]; longTasks: Array<{ start: number; duration: number }>; observer?: PerformanceObserver; frame: number; previous: number; before: ReturnType<typeof counters>; overheadMS: number } | undefined
+type AnimationFrameSample = { start: number; duration: number; blockingDuration: number; renderStart: number; styleAndLayoutStart: number; scripts: Array<{ invoker: string; duration: number; forcedStyleAndLayoutDuration: number; sourceFunctionName: string }> }
+let measurement: { label: string; start: number; frames: number[]; longTasks: Array<{ start: number; duration: number }>; animationFrames: AnimationFrameSample[]; observer?: PerformanceObserver; frameObserver?: PerformanceObserver; frame: number; previous: number; before: ReturnType<typeof counters>; overheadMS: number } | undefined
 function census() {
   const start = performance.now(), map = document.querySelector('.collaboration-map'), canvas = map?.querySelector('.collaboration-canvas'), bounds = canvas?.getBoundingClientRect()
   const nodes = [...map?.querySelectorAll<HTMLElement>('[data-collaboration-agent]') ?? []]
@@ -109,18 +110,20 @@ function census() {
 function counters() { const counts = instrumentation(); return { contextCounterMS: counts.contextCounterMS, workerObserverMS: nativeWorkers.reduce((total, sample) => total + sample.observerMS, 0), contextCalls: counts.contextCalls, contextIds: { ...counts.contextIds }, events: reads.filter(read => read.kind === 'events').length, bodies: reads.filter(read => read.kind === 'body').length, workers: nativeWorkers.length } }
 function beginMeasurement(label: string) {
   if (measurement) throw Error('One finite measurement at a time')
-  const sample = measurement = { label, start: performance.now(), frames: [], longTasks: [], frame: 0, previous: 0, before: counters(), overheadMS: 0 } as NonNullable<typeof measurement>
+  const sample = measurement = { label, start: performance.now(), frames: [], longTasks: [], animationFrames: [], frame: 0, previous: 0, before: counters(), overheadMS: 0 } as NonNullable<typeof measurement>
   const loop = (at: number) => { if (measurement !== sample) return; const start = performance.now(); if (sample.previous) sample.frames.push(at - sample.previous); sample.previous = at; sample.frame = requestAnimationFrame(loop); sample.overheadMS += performance.now() - start }
   sample.frame = requestAnimationFrame(loop)
   if (PerformanceObserver.supportedEntryTypes.includes('longtask')) { sample.observer = new PerformanceObserver(list => { const start = performance.now(); for (const entry of list.getEntries()) sample.longTasks.push({ start: entry.startTime, duration: entry.duration }); sample.overheadMS += performance.now() - start }); sample.observer.observe({ type: 'longtask', buffered: false }) }
+  // Long animation frames split a slow frame into script, style/layout and render time.
+  if (PerformanceObserver.supportedEntryTypes.includes('long-animation-frame')) { sample.frameObserver = new PerformanceObserver(list => { const start = performance.now(); for (const entry of list.getEntries() as unknown as AnimationFrameSample[]) sample.animationFrames.push({ start: entry.start ?? (entry as unknown as PerformanceEntry).startTime, duration: entry.duration, blockingDuration: entry.blockingDuration, renderStart: entry.renderStart, styleAndLayoutStart: entry.styleAndLayoutStart, scripts: (entry.scripts ?? []).map(script => ({ invoker: script.invoker, duration: script.duration, forcedStyleAndLayoutDuration: script.forcedStyleAndLayoutDuration, sourceFunctionName: script.sourceFunctionName })) }); sample.overheadMS += performance.now() - start }); sample.frameObserver.observe({ type: 'long-animation-frame', buffered: false }) }
 }
 function endMeasurement() {
   if (!measurement) throw Error('No native measurement is active')
   const sample = measurement; measurement = undefined; cancelAnimationFrame(sample.frame)
   for (const entry of sample.observer?.takeRecords() ?? []) sample.longTasks.push({ start: entry.startTime, duration: entry.duration })
-  sample.observer?.disconnect()
+  sample.observer?.disconnect(); sample.frameObserver?.disconnect()
   const after = counters(), gaps = [...sample.frames].sort((a, b) => a - b), dom = census()
-  return { label: sample.label, elapsedMS: performance.now() - sample.start, frameCount: gaps.length, tailFrameGapMS: sample.previous ? performance.now() - sample.previous : null, frameGapMS: { max: Math.max(0, ...gaps), p95: gaps[Math.floor(gaps.length * .95)] ?? null, over50: gaps.filter(gap => gap > 50).length }, longTaskSupported: PerformanceObserver.supportedEntryTypes.includes('longtask'), longTasks: sample.longTasks,
+  return { label: sample.label, elapsedMS: performance.now() - sample.start, frameCount: gaps.length, tailFrameGapMS: sample.previous ? performance.now() - sample.previous : null, frameGapMS: { max: Math.max(0, ...gaps), p95: gaps[Math.floor(gaps.length * .95)] ?? null, over50: gaps.filter(gap => gap > 50).length }, longTaskSupported: PerformanceObserver.supportedEntryTypes.includes('longtask'), animationFrames: sample.animationFrames.filter(frame => frame.duration >= 50), longTasks: sample.longTasks,
     observerOverheadMS: sample.overheadMS, contextCounterOverheadMS: after.contextCounterMS - sample.before.contextCounterMS, workerObserverOverheadMS: after.workerObserverMS - sample.before.workerObserverMS, boundaryCensusMS: dom.samplingMS, before: sample.before, after, contextDelta: after.contextCalls - sample.before.contextCalls,
     builtContextIds: Object.keys(after.contextIds).filter(id => after.contextIds[id]! > (sample.before.contextIds[id] ?? 0)), eventReadsDelta: after.events - sample.before.events, dom }
 }
@@ -148,7 +151,7 @@ const projects: WorkspaceRecord[] = [
   { ...originalConfig.workspaces[0], id: SCRATCH_WORKSPACE_ID, hostId, name: 'Topics', path: fixturePath('private/graph/topics'), kind: 'folder' as const }
 ]
 const scratch = projects[2]!
-const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: perception ? ['FlowLens 数据工作台', 'Pageville', '工作流与工具', 'Cloudflare 域名与邮件', '个人知识库', 'Farm', '设计素材', '研究记录'][index]! : 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
+const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: perception ? ['Sample Project 数据工作台', 'Sample Pages', '工作流与工具', 'Cloudflare 域名与邮件', '个人知识库', 'Farm', '设计素材', '研究记录'][index]! : 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
 const emptyProjects = Array.from({ length: scenario === 'endpoints' ? 0 : scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
 const singletonProjects = Array.from({ length: scenario === 'endpoints' ? 0 : 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
 if (perception) Object.assign(emptyProjects[0]!, { hostId: 'fixture-remote', name: 'Remote · 模型评测服务' })

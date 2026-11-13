@@ -42,6 +42,13 @@ module.exports = async function perception({ win, result, read, click, key, fram
       assert.equal(idle.contextDelta, 0, 'Idle Overview does not rebuild Agent reading contexts')
       const arrangements = await arrangementCount()
       await measure('perception-pan-240', pan)
+      // Unprofiled: the same drag, and a two-finger trackpad pan (unmodified wheel) over the
+      // map, including over region names, which now belong to the same camera surface.
+      await measure('perception-pan-unprofiled-240', pan)
+      const wheelAt = await read(`(()=>{const r=document.querySelector('.collaboration-canvas').getBoundingClientRect();return{x:r.left+r.width*.45,y:r.top+r.height*.45}})()`)
+      const beforeWheel = await matrix()
+      await measure('perception-wheel-pan-240', async () => { for (let at = 0; at < 14; at++) { await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelAt, deltaX: 18, deltaY: 9 }); await pause(16) } await pause(220) })
+      assert.notEqual(await matrix(), beforeWheel, 'A two-finger trackpad scroll pans the actual camera')
       assert.equal(await arrangementCount(), arrangements, 'Viewport movement keeps the same original world geometry')
       for (const measurement of result.performance.filter(sample => sample.label.startsWith('perception-'))) assert.ok(measurement.frameCount >= 8, 'Every finite original native measurement contains multiple actual frames: ' + measurement.label)
       await frame('perception-dense-empty-projects-panned')
