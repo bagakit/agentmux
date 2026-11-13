@@ -3009,3 +3009,74 @@ it('returns the reported favicon through actual Manager pageInfo dispatch and th
     await rm(directory, { recursive: true, force: true })
   }
 }, 30_000)
+
+describe('a run owns the page’s dialogs only while it runs', () => {
+  /** The page opens a dialog when the program clicks; Page.* commands are recorded per run. */
+  async function dialogBrowser() {
+    const f = await managerWithBrowser()
+    const commands: string[] = []
+    const fake = f.contents.debugger
+    fake.sendCommandImpl = async (method: string) => { commands.push(method); return {} }
+    // The mocked dispatcher clicks by sending its own Input under Main's receipt, then the page answers with a dialog.
+    createDispatch.mockImplementation((context: BrowserPageContext) => async (name: string) => {
+      if (name === 'click') {
+        const native = await context.beginNativeInput!()
+        try { await native.input(async () => fake.emit('message', 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete it?', url: 'https://example.invalid/' })) }
+        finally { native.end() }
+        return await new Promise(() => {})
+      }
+      if (name === 'dismissDialog') return await context.interrupts!.answer(false)
+      return `dispatched:${name}`
+    })
+    return { ...f, commands }
+  }
+
+  it('a click that opens a dialog fails at once instead of waiting out the budget, and its effect is unknown', async () => {
+    const f = await dialogBrowser()
+    try {
+      const started = performance.now()
+      const report = await f.manager.runScript('b1', `let seen = ''; try { await click('@e1') } catch (error) { seen = String(error.message) }; await dismissDialog(); return seen`)
+      expect(performance.now() - started, 'the program must not wait for its 30 s budget').toBeLessThan(5_000)
+      // The program answered the dialog itself, so the run completes with what it saw.
+      expect(report.outcome).toEqual({ kind: 'completed' })
+      expect(String(report.result)).toContain('The page opened a confirm dialog: [page-authored text] Delete it?')
+      expect(String(report.result)).toContain('acceptDialog() or dismissDialog()')
+      expect(f.commands).toContain('Page.enable')
+    } finally { f.manager.close('b1'); createDispatch.mockReset() }
+  })
+
+  it('while the dialog is open a document call is refused unsent; after the program answers it, the run completes', async () => {
+    const f = await dialogBrowser()
+    try {
+      const report = await f.manager.runScript('b1', `
+        try { await click('@e1') } catch {}
+        let refused = ''
+        try { await snapshot() } catch (error) { refused = String(error.message) }
+        await dismissDialog()
+        return { refused, after: await pageInfo() }`)
+      expect(report.outcome).toEqual({ kind: 'completed' })
+      const result = report.result as { refused: string; after: string }
+      expect(result.refused).toMatch(/^snapshot\(\) was not sent\./)
+      expect(result.after).toBe('dispatched:pageInfo')
+      expect(f.commands).toContain('Page.handleJavaScriptDialog')
+    } finally { f.manager.close('b1'); createDispatch.mockReset() }
+  })
+
+  it('a dialog the program left open is dismissed at the end and the outcome says to look first', async () => {
+    const f = await dialogBrowser()
+    try {
+      const report = await f.manager.runScript('b1', `try { await click('@e1') } catch {}; return 1`)
+      expect(report.outcome.kind).toBe('indeterminate')
+      expect('message' in report.outcome && report.outcome.message).toContain("ended with the page's confirm dialog still open")
+      expect(f.commands.slice(-2)).toEqual(['Page.handleJavaScriptDialog', 'Page.disable'])
+    } finally { f.manager.close('b1'); createDispatch.mockReset() }
+  })
+
+  it('a person browsing outside a run never turns Page notifications on', async () => {
+    const f = await dialogBrowser()
+    try {
+      await f.manager.navigate('b1', 'https://example.invalid/next')
+      expect(f.commands.filter(command => command.startsWith('Page.'))).toEqual([])
+    } finally { f.manager.close('b1'); createDispatch.mockReset() }
+  })
+})

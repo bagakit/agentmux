@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest'
+import { installBrowserPageInterrupts } from '../src/main/browser-page-interrupts.js'
+import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
+import type { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
+
+/** A transport that records commands and lets the test emit protocol events on the root session. */
+function fakeTransport(options: { pageEnable?: 'ok' | 'fail' } = {}) {
+  const sent: { method: string; params: Record<string, unknown> }[] = []
+  const listeners = new Set<(method: string, params: unknown) => void>()
+  const session: BrowserPageTransport = {
+    sendCommand: async (method, params = {}) => {
+      sent.push({ method, params })
+      if (method === 'Page.enable' && options.pageEnable === 'fail') throw new Error('Page.enable failed')
+      return {}
+    },
+    frames: new Map(),
+    endedReason: null,
+    frameDiscoveryFailure: null,
+    observe: listener => { listeners.add(listener); return () => listeners.delete(listener) }
+  }
+  const emit = (method: string, params: unknown) => { for (const listener of [...listeners]) listener(method, params) }
+  return { session, sent, emit, listeners }
+}
+
+const opening = (type: string, message = 'Are you sure?') => ({ type, message, url: 'https://example.test/' })
+
+describe('one owner for a run’s page dialogs', () => {
+  it('ends a page call the moment a dialog opens, with effects from Main’s own input receipt', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    // The click's input went out and the page answered with a dialog; the call itself never settles.
+    const clicked = interrupts.race(() => new Promise(() => {}), () => true)
+    t.emit('Page.javascriptDialogOpening', opening('confirm', 'Delete\nthis item?'))
+    const failure = await clicked.catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(failure.fact).toEqual({ kind: 'page-dialog', effects: 'unknown' })
+    // The page's message is marked as the page's and kept on one line.
+    expect(failure.message).toContain('confirm dialog: [page-authored text] Delete this item?')
+    expect(failure.message).toContain('acceptDialog() or dismissDialog()')
+
+    // A call that sent no input before the dialog opened did nothing to the page.
+    await interrupts.answer(false)
+    const read = interrupts.race(() => new Promise(() => {}), () => false)
+    t.emit('Page.javascriptDialogOpening', opening('alert'))
+    expect((await read.catch((error: unknown) => error) as BrowserLocalRecoveryFailure).fact).toEqual({ kind: 'page-dialog', effects: 'not-dispatched' })
+  })
+
+  it('refuses a call that would hang while a dialog is open, before sending anything; clears once answered', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    expect(() => interrupts.assertNoDialog('snapshot')).not.toThrow()
+    t.emit('Page.javascriptDialogOpening', opening('alert', 'Saved'))
+    let refused: unknown
+    try { interrupts.assertNoDialog('snapshot') } catch (error) { refused = error }
+    expect((refused as BrowserLocalRecoveryFailure).fact).toEqual({ kind: 'page-dialog', effects: 'not-dispatched' })
+    expect((refused as Error).message).toMatch(/^snapshot\(\) was not sent\. The page opened a alert dialog: \[page-authored text\] Saved\. .*dismissDialog\(\) closes it/)
+    await expect(interrupts.answer(false)).resolves.toEqual({ type: 'alert', accepted: false })
+    expect(t.sent.at(-1)).toEqual({ method: 'Page.handleJavaScriptDialog', params: { accept: false } })
+    // Cleared on the reply, not only on the Closed event.
+    expect(interrupts.current()).toBeNull()
+    expect(() => interrupts.assertNoDialog('snapshot')).not.toThrow()
+  })
+
+  it('answers only an open dialog, decided from its own state, and sends prompt text only to a prompt', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    const none = await interrupts.answer(true).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(none.fact).toEqual({ kind: 'page-dialog', effects: 'not-dispatched' })
+    expect(t.sent.filter(command => command.method === 'Page.handleJavaScriptDialog')).toEqual([])
+
+    t.emit('Page.javascriptDialogOpening', opening('confirm'))
+    const text = await interrupts.answer(true, 'yes').catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(text.message).toContain('confirm, which takes no text')
+    await expect(interrupts.answer(true)).resolves.toEqual({ type: 'confirm', accepted: true })
+
+    t.emit('Page.javascriptDialogOpening', opening('prompt'))
+    await interrupts.answer(true, 'Ada')
+    expect(t.sent.at(-1)).toEqual({ method: 'Page.handleJavaScriptDialog', params: { accept: true, promptText: 'Ada' } })
+  })
+
+  it('never agrees to leave a page that asks to stay open; dismissing keeps the page', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    t.emit('Page.javascriptDialogOpening', opening('beforeunload', ''))
+    const leave = await interrupts.answer(true).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(leave.fact).toEqual({ kind: 'page-dialog', effects: 'not-dispatched' })
+    expect(leave.message).toContain('only the person decides')
+    expect(t.sent.filter(command => command.method === 'Page.handleJavaScriptDialog')).toEqual([])
+    await expect(interrupts.answer(false)).resolves.toEqual({ type: 'beforeunload', accepted: false })
+  })
+
+  it('dismisses a dialog the program left open when the run ends, and reports it', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    t.emit('Page.javascriptDialogOpening', opening('alert', 'Left behind'))
+    await interrupts.dispose()
+    expect(interrupts.leftOpenAtEnd()).toMatchObject({ type: 'alert', message: 'Left behind' })
+    expect(t.sent.map(command => command.method)).toEqual(['Page.enable', 'Page.handleJavaScriptDialog', 'Page.disable'])
+    expect(t.listeners.size, 'the owner stops listening once disposed').toBe(0)
+  })
+
+  it('a dialog the program answered leaves nothing to report at the end', async () => {
+    const t = fakeTransport()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    t.emit('Page.javascriptDialogOpening', opening('alert'))
+    await interrupts.answer(false)
+    t.emit('Page.javascriptDialogClosed', { result: false })
+    await interrupts.dispose()
+    expect(interrupts.leftOpenAtEnd()).toBeNull()
+  })
+
+  it('a person taking control ends Agent answers: no answer, no dismissal at the end', async () => {
+    const t = fakeTransport()
+    const control = new AbortController()
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: control.signal })
+    await interrupts.ready()
+    t.emit('Page.javascriptDialogOpening', opening('confirm'))
+    control.abort()
+    expect(() => interrupts.assertNoDialog('snapshot'), 'refusals are the run’s, not the person’s').not.toThrow()
+    const answered = await interrupts.answer(true).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(answered.fact?.effects).toBe('not-dispatched')
+    await interrupts.dispose()
+    expect(t.sent.filter(command => command.method === 'Page.handleJavaScriptDialog'), 'the person answers their own dialog').toEqual([])
+  })
+
+  it('when Page notifications cannot be turned on, nothing is refused and the run behaves as before', async () => {
+    const t = fakeTransport({ pageEnable: 'fail' })
+    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
+    await interrupts.ready()
+    expect(interrupts.observing()).toBe(false)
+    await expect(interrupts.race(async () => 7, () => false)).resolves.toBe(7)
+    await interrupts.dispose()
+    expect(t.sent.map(command => command.method), 'no Page.disable for a Page.enable that failed').toEqual(['Page.enable'])
+  })
+})
