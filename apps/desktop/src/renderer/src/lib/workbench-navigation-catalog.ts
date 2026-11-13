@@ -1,6 +1,7 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
+import { spatialCategorySeeds } from '../../../shared/space-addresses'
 import type { WorkbenchTab } from './workbench-tabs'
 
 type Tabs = Readonly<Record<string, WorkbenchTab>>
@@ -68,7 +69,9 @@ function sameNavigationLayouts(left: Facts['layouts'], right: Facts['layouts']):
 }
 
 const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
+const NO_CATEGORIES: NonNullable<Facts['topicCategories']> = []
 const catalogs = new WeakMap<readonly ScratchTopicSnapshot[], { inputs: readonly unknown[]; value: AgentMuxSpaceCatalog }>()
+let categorySeeds: { bindings: Facts['spaceZoneBindings']; categories: NonNullable<Facts['topicCategories']>; value: ReadonlyMap<string, string | null> } | null = null
 
 /** One shared structural graph per immutable input set, independent of mounted Pane count. */
 export function workbenchNavigationCatalog(state: Facts, topics?: readonly ScratchTopicSnapshot[] | null): AgentMuxSpaceCatalog {
@@ -81,7 +84,11 @@ export function workbenchNavigationCatalog(state: Facts, topics?: readonly Scrat
     known.inputs = inputs
     return known.value
   }
-  const value = spatialCatalog({ ...state, tabs, sessions: [] }, topicFacts)
+  const categories = state.topicCategories ?? NO_CATEGORIES
+  if (!categorySeeds || categorySeeds.bindings !== state.spaceZoneBindings || categorySeeds.categories !== categories) {
+    categorySeeds = { bindings: state.spaceZoneBindings, categories, value: spatialCategorySeeds(state.spaceZoneBindings, categories) }
+  }
+  const value = spatialCatalog({ ...state, tabs, sessions: [] }, topicFacts, categorySeeds.value)
   catalogs.set(topicFacts, { inputs, value })
   return value
 }

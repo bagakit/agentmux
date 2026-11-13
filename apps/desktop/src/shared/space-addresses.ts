@@ -119,15 +119,27 @@ export type SpaceZoneResourceResult = {
   issue?: { code: string; message: string }
 }
 
+/** Initial display memberships are derived only from these two inputs. */
+export function spatialCategorySeeds(bindings: SpaceZoneBindings, categories: readonly TopicCategory[]): Map<string, string | null> {
+  const result = new Map<string, string | null>()
+  for (const binding of Object.values(bindings)) {
+    if (!binding.topicId || binding.contentKind === 'mote' || !categories.length || binding.relations?.[binding.spaceId] === true) continue
+    const category = categories.find(category => binding.relations?.[category.spaceId] === true)
+    result.set(binding.spaceId, category?.spaceId ?? null)
+  }
+  return result
+}
+
 export function spatialSources(config: AppConfig | null, topics: readonly ScratchTopicSnapshot[], bindings: SpaceZoneBindings = {},
-  retained: readonly { workspaceId: string; space: { zoneId: string; spaceId: string } }[] = [], categories: readonly TopicCategory[] = []): {
+  retained: readonly { workspaceId: string; space: { zoneId: string; spaceId: string } }[] = [], categories: readonly TopicCategory[] = [],
+  categorySeeds?: ReadonlyMap<string, string | null>): {
   spaces: AgentMuxSpaceFact[]; zones: AgentMuxZoneFact[]; bindings: AgentMuxSpaceBindingFact[]
 } {
   const spaces = new Map<string, AgentMuxSpaceFact>()
   const zones = new Map<string, AgentMuxZoneFact>()
   const seeds = new Map<string, Set<string>>()
   const conflictingResources = new Set<string>()
-  const categoryByContent = new Map<string, string | null>()
+  const categoryByContent = new Map(categorySeeds ?? spatialCategorySeeds(bindings, categories))
   const workspaces = new Map(config?.workspaces.map(workspace => [workspace.id, workspace]))
   const scratchWorkspace = workspaces.get(SCRATCH_WORKSPACE_ID)
   const topicHomes = new Map<string, string>(scratchWorkspace ? topics.flatMap(topic => {
@@ -136,11 +148,6 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     const path = bindings[address.zoneId]?.directoryPath ?? (topic.readError && !topic.physicalDirectoryPath ? null : scratchTopicPhysicalPath(scratchWorkspace, topic));
     return path ? [[address.spaceId, path] as [string, string]] : [];
   }) : [])
-  for (const binding of Object.values(bindings)) {
-    if (!binding.topicId || binding.contentKind === 'mote' || !categories.length || binding.relations?.[binding.spaceId] === true) continue
-    const category = categories.find(category => binding.relations?.[category.spaceId] === true)
-    categoryByContent.set(binding.spaceId, category?.spaceId ?? null)
-  }
   const addZone = (zoneId: string, workspaceId: string, spaceId: string, homePath?: string): void => {
     const workspace = workspaces.get(workspaceId)
     // Read the original factory/context pair without minting or rewriting its opaque identity.

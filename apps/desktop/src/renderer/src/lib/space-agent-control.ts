@@ -76,9 +76,9 @@ const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied
   storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'No save has been observed by this read.' })
 
 /** Metadata only; every durable entity is indexed once, independent of display. */
-export function spatialCatalog(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[]): AgentMuxSpaceCatalog {
+export function spatialCatalog(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>): AgentMuxSpaceCatalog {
   const sources = spatialSources(state.config, topics, state.spaceZoneBindings,
-    Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []), state.topicCategories)
+    Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []), state.topicCategories, categorySeeds)
   const catalog: AgentMuxSpaceCatalog = { ...sources, ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}), tabs: [], regions: [], locations: [] }
   const sessions = new Map(state.sessions.map(session => [session.id, session]))
   const originalRegions = new Map(state.originalSpatialGraph?.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
