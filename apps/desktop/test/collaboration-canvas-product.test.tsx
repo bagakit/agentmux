@@ -25,7 +25,7 @@ import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 import collaborationCSS from '../src/renderer/src/styles/collaboration.css?inline'
 import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-map-preferences'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
-const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'], onCommit: undefined as (() => void) | undefined }))
+const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'], moveEnd: undefined as ReactFlowProps['onMoveEnd'], onCommit: undefined as (() => void) | undefined }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
   return { ...actual, FocusContextCardBody: (props: ComponentProps<typeof actual.FocusContextCardBody>) => {
@@ -43,6 +43,7 @@ vi.mock('@xyflow/react', async importOriginal => {
   return { ...actual, ReactFlow: ({ children, ...props }: ReactFlowProps & { children?: ReactNode }) => {
     captured.nodes = props.nodes ?? []
     captured.moveStart = props.onMoveStart
+    captured.moveEnd = props.onMoveEnd
     return <actual.ReactFlow {...props}>{children}<ObserveOriginalStore /></actual.ReactFlow>
   } }
 })
@@ -1646,6 +1647,37 @@ it('anchors an unobstructed overview identity to the original Worker heading bas
   expect(label.element.dataset.context).toBeUndefined()
   expect(label.x).toBeCloseTo(100, 6)
   expect(label.y + label.height).toBeCloseTo(100 + box.heading.height * zoom, 6)
+  expect(requests).toHaveLength(1)
+})
+
+it('keeps region names in their slot and on their territory through a direct gesture, then places them once it ends', async () => {
+  const scene = scenario(0); scene.areas = [scene.areas[0]!]; scene.relations = []
+  await loaded(scene)
+  const box = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const zoom = .25, x = 100 - (box.x + box.heading.x) * zoom, y = 100 - (box.y + box.heading.y) * zoom
+  await viewport(x, y, 600, 400, zoom)
+  const placed = regionLabelBounds('area-0'), element = placed.element
+  const anchorX = box.x + box.heading.x, anchorY = box.y + box.heading.y + box.heading.height
+  // A direct gesture: pan and pinch. The name keeps its placed slot (no re-placement) and its
+  // drawn offset carries it exactly onto the moving heading point.
+  await act(async () => captured.moveStart!(new MouseEvent('mousedown'), { x, y, zoom }))
+  const end = [x + 60 - anchorX * .1, y + 70 - anchorY * .1, .35] as const
+  for (const [nextX, nextY, nextZoom] of [[x - 40, y + 25, zoom], [x - 90, y + 60, .3], end] as const) {
+    await act(async () => captured.store!.setState({ transform: [nextX, nextY, nextZoom] }))
+    const label = regionLabelBounds('area-0')
+    expect(label.element).toBe(element); expect(label.x).toBe(placed.x); expect(label.y).toBe(placed.y)
+    const [dx = 0, dy = 0] = (element.style.translate || '0px 0px').split(' ').map(Number.parseFloat)
+    expect(label.x + dx).toBeCloseTo(anchorX * nextZoom + nextX, 6)
+    expect(label.y + label.height + dy).toBeCloseTo(anchorY * nextZoom + nextY, 6)
+  }
+  // The gesture ends: the name is placed once for the final camera and its carry offset clears.
+  await act(async () => captured.moveEnd!(new MouseEvent('mouseup'), { x: end[0], y: end[1], zoom: end[2] }))
+  await settleCollaborationCanvas(() => {
+    const label = regionLabelBounds('area-0')
+    expect(label.x).toBeCloseTo(anchorX * end[2] + end[0], 6)
+    expect(label.y + label.height).toBeCloseTo(anchorY * end[2] + end[1], 6)
+    expect(element.style.translate).toBe('')
+  })
   expect(requests).toHaveLength(1)
 })
 
