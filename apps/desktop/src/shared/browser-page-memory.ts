@@ -34,3 +34,27 @@ export type BrowserPageMemoryReadResult = (
   | { status: 'missing' }
   | { status: 'unavailable' }
 ) & { warning?: string }
+
+const FORWARD_ENTRIES = 10
+
+/**
+ * Bound one observation to a valid record: at most 50 entries around the current one (keeping up to
+ * 10 forward entries). A favicon or history that does not fit is omitted whole, never truncated.
+ */
+export function browserPageMemory(scope: BrowserPageMemory['scope'], url: string, faviconDataUrl: string | undefined,
+  history: { index: number; entries: readonly { url: string; title: string }[] } | undefined): BrowserPageMemory | null {
+  let bounded: BrowserPageMemory['history']
+  if (history && history.index >= 0 && history.index < history.entries.length) {
+    const start = Math.max(0, Math.min(history.entries.length - BROWSER_PAGE_MEMORY_MAX_ENTRIES,
+      history.index - (BROWSER_PAGE_MEMORY_MAX_ENTRIES - FORWARD_ENTRIES - 1)))
+    bounded = { index: history.index - start, entries: history.entries.slice(start, start + BROWSER_PAGE_MEMORY_MAX_ENTRIES)
+      .map(entry => ({ url: entry.url, title: entry.title.slice(0, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH) })) }
+  }
+  const favicon = faviconDataUrl ? { dataUrl: faviconDataUrl } : undefined
+  for (const candidate of [{ favicon, history: bounded }, { history: bounded }, { favicon }, {}]) {
+    const parsed = browserPageMemorySchema.safeParse({ scope, url,
+      ...(candidate.favicon ? { favicon: candidate.favicon } : {}), ...(candidate.history ? { history: candidate.history } : {}) })
+    if (parsed.success) return parsed.data
+  }
+  return null
+}

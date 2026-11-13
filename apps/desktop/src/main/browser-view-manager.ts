@@ -7,6 +7,7 @@ import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favico
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import { parseBrowserControlHandoff, type BrowserAgent, type BrowserAgentAuthority } from './browser-agent-authority.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
+import { browserPageMemory } from '../shared/browser-page-memory.js'
 import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
@@ -157,6 +158,9 @@ type BrowserEntry = {
   recoveryPreviewJob?: AbortController | undefined
   recoveryPreviewNavigation?: string | undefined
   recoveryPreviewRetired?: true
+  pageMemoryTimer?: ReturnType<typeof setTimeout> | undefined
+  /** The last record this owner confirmed, so repeated identical observations do not rewrite it. */
+  pageMemoryRecorded?: string | undefined
   selectionRevision: number
   selectionOperation: number | symbol | null
   annotationRevision: number
@@ -215,6 +219,7 @@ type BrowserEntry = {
   releaseAttempt: {
     navigationId: string
     view: WebContentsView
+    history: BrowserHistory | undefined
     pending: boolean
     receipt: AgentMuxBrowserReleaseReceipt | null
     promise: Promise<AgentMuxBrowserReleaseReceipt>
@@ -303,6 +308,24 @@ function removeWarning(current: string | undefined, warning: string): string | u
   return current?.split('\n').filter(line => line !== warning).join('\n') || undefined
 }
 
+/** One native back/forward list. Chromium page state is in-process memory only, never written to disk. */
+type BrowserHistory = { index: number; entries: { url: string; title: string; pageState?: string }[] }
+
+function nativeHistory(contents: WebContents): BrowserHistory | undefined {
+  try {
+    const entries = contents.navigationHistory.getAllEntries(), index = contents.navigationHistory.getActiveIndex()
+    if (index < 0 || index >= entries.length) return undefined
+    return { index, entries: entries.map(({ url, title, pageState }) => ({ url, title, ...(pageState ? { pageState } : {}) })) }
+  } catch { return undefined } // Optional continuity cannot take away release or the page.
+}
+
+/** Restore only a list whose current entry is this address and whose every entry is a Browser address. */
+function restorableHistory(history: BrowserHistory | undefined, url: string): BrowserHistory | undefined {
+  if (!history || history.entries[history.index]?.url !== url) return undefined
+  try { return history.entries.every(entry => assertAllowedBrowserUrl(entry.url) === entry.url) ? history : undefined }
+  catch { return undefined }
+}
+
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
   id: string
@@ -312,6 +335,8 @@ type ReleasedBrowser = {
   workspaceId: string | null
   storage: BrowserStorage
   requestedUrl: string
+  /** Captured before the native close; restore rebuilds these entries when it reopens this address. */
+  history?: BrowserHistory
   viewport: BrowserViewport
   agent?: AgentMuxBrowserControl['agent']
   agentWarning?: string | undefined
@@ -321,6 +346,8 @@ type ReleasedBrowser = {
   /** An explicit person-facing Close retires the page; only native cleanup remains. */
   cleanupOnly?: true
 }
+
+type BrowserCreationFacts = Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'> & { history?: BrowserHistory }
 
 type ClosingBrowserView = Pick<ReleasedBrowser, 'id' | 'workspaceId' | 'storage' | 'requestedUrl' | 'viewport'> & { view: WebContentsView }
 const NATIVE_CLOSE_WARNING = 'Native page cleanup is unconfirmed. Its resource ownership is retained.'
@@ -383,6 +410,7 @@ const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 // Standalone observations have no script worker deadline. End only this first-document
 // wait after its request budget; the loading page and its navigation remain available.
 const BROWSER_INITIAL_DOCUMENT_OBSERVATION_MS = 30_000
+export const BROWSER_PAGE_MEMORY_SETTLE_MS = 1_000
 const BROWSER_MARKER_MAX_COUNT = 50
 const BROWSER_MARKER_MAX_COORDINATE = 10_000_000
 
@@ -1375,12 +1403,28 @@ export class BrowserViewManager {
     }
     this.assertWorkspaceBinding(saved.workspaceId, input?.workspaceId ?? null)
     if (input?.mode !== undefined && input.mode !== saved.mode) throw new Error('The saved Browser mode does not match this Region.')
+    const history = await this.rememberedHistory(saved)
+    if (this.entries.get(id) || this.releasedEntries.get(id)) return await this.restore(id, binding)
     // create rechecks the original maps and registers synchronously before loadURL. Concurrent
     // visible and public consumers therefore share one owner without a pending registry.
-    return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport, saved)
+    return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport, history ? { ...saved, history } : saved)
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive', saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>): Promise<BrowserSnapshot> {
+  /** A cold normal page reopens its last-seen entries; startNavigation uses them only at the same address. */
+  private async rememberedHistory(saved: BrowserColdDescriptor): Promise<BrowserHistory | undefined> {
+    if (!this.recoveryPreviews || saved.mode !== 'normal' || saved.capsuleId || saved.capsule) return undefined
+    try {
+      const result = await this.recoveryPreviews.readPage({ browserId: saved.id, workspaceId: saved.workspaceId, mode: 'normal',
+        profileId: saved.profileId ?? this.profiles.defaultProfileId() })
+      if (result.warning) console.warn(result.warning)
+      return result.status === 'available' ? result.memory.history : undefined
+    } catch (error) {
+      console.warn('Browser page memory could not be read. The page opens at its saved address.', error)
+      return undefined
+    }
+  }
+
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive', saved?: BrowserCreationFacts): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (mode !== undefined && mode !== 'normal' && mode !== 'private') throw new Error('Browser mode must be normal or private')
@@ -1481,8 +1525,11 @@ export class BrowserViewManager {
       attempt.settle('unknown', ['close-unconfirmed'])
       if (this.owns(entry, view)) this.emit(entry)
     }, 1_000)
+    // The destroyed contents can no longer report its entries or Chromium page state.
+    const history = nativeHistory(contents)
+    this.recordPageMemory(entry, contents.getURL(), history)
     const attempt: NonNullable<BrowserEntry['releaseAttempt']> = {
-      navigationId, view, pending: true, receipt: null, promise,
+      navigationId, view, history, pending: true, receipt: null, promise,
       settle: (status, reasons) => {
         if (attempt.receipt?.status === 'released' || (status === 'unknown' && attempt.receipt?.status === 'retained')) return
         const receipt = result(status, reasons)
@@ -1590,6 +1637,7 @@ export class BrowserViewManager {
     try {
       const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId, released.inputShield, { agent: released.agent,
         ...(released.source ? { source: released.source } : {}),
+        ...(released.history ? { history: released.history } : {}),
         ...(released.agentWarning === undefined ? {} : { warning: released.agentWarning }) }, released.nativeChild)
       return snapshot
     } catch (error) {
@@ -1605,13 +1653,13 @@ export class BrowserViewManager {
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
-    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>,
+    saved?: BrowserCreationFacts,
     native?: ReleasedBrowser['nativeChild']
   ): Promise<BrowserSnapshot> {
     const view = this.createView(storage.partition, 'capsule' in storage ? storage.capsule.record : undefined)
     const entry = this.registerEntry(id, url, storage, view, viewport, workspaceId, retiredInputShield, saved, native)
     try {
-      void this.startNavigation(entry, url, true).catch(() => {})
+      void this.startNavigation(entry, url, true, saved?.history).catch(() => {})
       return this.snapshot(entry)
     } catch (error) {
       // The ordinary creation transaction has not delivered its resource yet.
@@ -1906,8 +1954,9 @@ export class BrowserViewManager {
   }
 
   /** Keep full navigation completion separate from first-document consumption. */
-  private startNavigation(entry: BrowserEntry, rawUrl: string, initial = false): Promise<void> {
+  private startNavigation(entry: BrowserEntry, rawUrl: string, initial = false, history?: BrowserHistory): Promise<void> {
     const url = normalizeBrowserUrl(rawUrl)
+    const restored = restorableHistory(history, url)
     entry.nativeChild?.closing?.settle(false)
     this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
     const view = entry.view
@@ -1929,7 +1978,10 @@ export class BrowserViewManager {
       }
       entry.initialDocument = attempt
     }
-    const promise = view.webContents.loadURL(url).catch((error) => {
+    const navigation = restored
+      ? view.webContents.navigationHistory.restore({ entries: restored.entries, index: restored.index })
+      : view.webContents.loadURL(url)
+    const promise = navigation.catch((error) => {
       if (this.owns(entry, view) && !document?.superseded.signal.aborted &&
         (!document || document.navigationId === document.loadNavigationId)) {
         entry.error = error instanceof Error ? error.message : String(error)
@@ -3953,6 +4005,36 @@ export class BrowserViewManager {
     entry.recoveryPreviewJob?.abort()
   }
 
+  /** Coalesce commits, titles and artwork of the current document into one last-seen page record. */
+  private schedulePageMemory(entry: BrowserEntry, view: WebContentsView): void {
+    if (!this.recoveryPreviews || this.presentationDisposed || !this.owns(entry, view)) return
+    clearTimeout(entry.pageMemoryTimer)
+    entry.pageMemoryTimer = setTimeout(() => {
+      entry.pageMemoryTimer = undefined
+      if (this.owns(entry, view) && !view.webContents.isDestroyed()) this.recordPageMemory(entry, view.webContents.getURL(), nativeHistory(view.webContents))
+    }, BROWSER_PAGE_MEMORY_SETTLE_MS)
+    entry.pageMemoryTimer.unref?.()
+  }
+
+  private recordPageMemory(entry: BrowserEntry, url: string, history: BrowserHistory | undefined): void {
+    clearTimeout(entry.pageMemoryTimer)
+    entry.pageMemoryTimer = undefined
+    const store = this.recoveryPreviews, scope = this.recoveryPreviewScope(entry.id)
+    if (!store || this.presentationDisposed || !scope || !url || url === 'about:blank') return
+    const memory = browserPageMemory(scope, url, entry.faviconDataUrl, history)
+    if (!memory) return
+    const key = JSON.stringify(memory)
+    if (entry.pageMemoryRecorded === key) return
+    // A later Close, restore or Profile switch owns this Browser's record; this observation is then stale.
+    const storage = entry.storage
+    const current = () => entry.storage === storage && (this.entries.get(entry.id) === entry ||
+      (!this.entries.has(entry.id) && this.releasedEntries.get(entry.id)?.storage === storage && !this.releasedEntries.get(entry.id)?.cleanupOnly))
+    void store.recordPage(scope, memory, current).then(result => {
+      if (result.status === 'recorded' && entry.storage === storage) entry.pageMemoryRecorded = key
+      if (result.warning) console.warn(result.warning)
+    }, error => console.warn('Browser page memory could not be saved. The original page remains available.', error))
+  }
+
   /** A single small historical appearance at load/show edges; never an operation or keepalive. */
   private sampleRecoveryPreview(entry: BrowserEntry, view: WebContentsView): void {
     const store = this.recoveryPreviews
@@ -4416,6 +4498,7 @@ export class BrowserViewManager {
       this.releaseUploadFiles(entry)
       entry.requestedUrl = url
       entry.error = null
+      this.schedulePageMemory(entry, view)
       this.emit(entry)
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
@@ -4426,6 +4509,7 @@ export class BrowserViewManager {
       if (reported) this.faviconUrls.set(view, { ...reported, documentUrl: url })
       entry.requestedUrl = url
       this.sampleRecoveryPreview(entry, view)
+      this.schedulePageMemory(entry, view)
       this.emit(entry)
     })
     contents.on('page-favicon-updated', (_event, urls) => {
@@ -4434,6 +4518,7 @@ export class BrowserViewManager {
     })
     contents.on('page-title-updated', () => {
       if (!this.owns(entry, view)) return
+      this.schedulePageMemory(entry, view)
       this.emit(entry)
     })
     contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -4481,6 +4566,7 @@ export class BrowserViewManager {
       const released: ReleasedBrowser = {
         id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning,
         ...(entry.source ? { source: entry.source } : {}),
+        ...(attempt?.view === view && attempt.history ? { history: attempt.history } : {}),
         ...(entry.nativeChild ? { nativeChild: { window: { ...entry.nativeChild.window } } } : {})
       }
       this.releasedEntries.set(entry.id, released)
@@ -4819,6 +4905,7 @@ export class BrowserViewManager {
       if (request.signal.aborted || entry.faviconRequest !== request || !this.owns(entry, view) || entry.navigationId !== navigationId || entry.storage.profileId !== profileId) return
       entry.faviconRequest = undefined
       entry.faviconDataUrl = dataUrl
+      if (dataUrl) this.schedulePageMemory(entry, view)
       this.emit(entry)
     })
   }
