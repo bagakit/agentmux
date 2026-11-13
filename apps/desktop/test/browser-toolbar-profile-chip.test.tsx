@@ -1,0 +1,95 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BrowserProfileList, BrowserProfileSummary } from '../src/shared/contracts'
+
+const port = vi.hoisted(() => {
+  const listeners = new Set<(list: BrowserProfileList) => void>()
+  let list: BrowserProfileList = { revision: 1, profiles: [] }
+  return {
+    listeners, set(next: BrowserProfileList) { list = next },
+    readProfiles: vi.fn(async () => list),
+    onProfilesChanged: vi.fn((listener: (list: BrowserProfileList) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }),
+    switchProfile: vi.fn(async () => ({}))
+  }
+})
+vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
+
+import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
+import { BrowserProfileChip } from '../src/renderer/src/components/BrowserProfileChip'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
+
+const personal: BrowserProfileSummary = { id: 'p-personal', label: 'Personal', createdAt: 1, isDefault: true, source: null }
+const client: BrowserProfileSummary = { id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }
+
+let root: Root, container: HTMLDivElement
+const open = vi.fn()
+async function mount(props: Partial<Parameters<typeof BrowserProfileChip>[0]> = {}) {
+  await act(async () => root.render(<SettingsNavigation.Provider value={{ open } as never}>
+    <BrowserProfileChip browserId="b1" profileId="p-client" control={undefined} {...props} /></SettingsNavigation.Provider>))
+}
+async function openMenu() {
+  const trigger = document.querySelector<HTMLButtonElement>('.browser-profile-chip')!
+  await act(async () => {
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  })
+}
+const items = () => [...document.querySelectorAll<HTMLElement>('.browser-profile-switcher [role="menuitem"]')]
+
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  browserProfiles.reset(); port.listeners.clear(); port.switchProfile.mockClear(); open.mockClear()
+  port.set({ revision: 1, profiles: [personal, client] })
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+})
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
+
+describe('Browser toolbar Profile chip', () => {
+  it('names the exact Profile of this Browser with its mark', async () => {
+    await mount()
+    const chip = container.querySelector('.browser-profile-chip')!
+    expect(chip.getAttribute('aria-label')).toBe('Profile: Northwind client')
+    expect(chip.querySelector('.profile-mark')?.textContent).toBe('N')
+  })
+
+  it('stays out of the way with a single Profile, a private page or no list yet', async () => {
+    port.set({ revision: 1, profiles: [personal] })
+    await mount({ profileId: 'p-personal' })
+    expect(container.querySelector('.browser-profile-chip')).toBeNull()
+    browserProfiles.reset(); port.set({ revision: 2, profiles: [personal, client] })
+    await mount({ profileId: null })
+    expect(container.querySelector('.browser-profile-chip')).toBeNull()
+  })
+
+  it('switches through the original Browser owner and opens Settings from the menu', async () => {
+    await mount()
+    await openMenu()
+    expect(items().map(item => item.textContent)).toEqual(['PPersonalDefault', 'NNorthwind client', 'Manage Browser Profiles…'])
+    await act(async () => items()[0]!.click())
+    expect(port.switchProfile).toHaveBeenCalledExactlyOnceWith('b1', 'p-personal')
+    await openMenu()
+    await act(async () => items()[2]!.click())
+    expect(open).toHaveBeenCalledWith('browser-profiles')
+  })
+
+  it('an Agent-held Browser lists Profiles but cannot switch', async () => {
+    await mount({ control: { owner: 'agent', activeOperationId: null, revision: 1, inputIsolation: 'isolated' } as never })
+    await openMenu()
+    const other = items().find(item => item.textContent?.includes('Personal'))!
+    expect(other.getAttribute('aria-disabled') ?? other.getAttribute('data-disabled')).not.toBeNull()
+    expect(document.querySelector('.browser-profile-switcher')?.textContent).toContain('Take control to switch Profile')
+    await act(async () => other.click())
+    expect(port.switchProfile).not.toHaveBeenCalled()
+  })
+
+  it('a refused switch returns to the original Profile and says it could not switch', async () => {
+    port.switchProfile.mockRejectedValueOnce(new Error('Take control first'))
+    await mount()
+    await openMenu()
+    await act(async () => items()[0]!.click())
+    expect(container.querySelector('.browser-profile-chip')?.getAttribute('aria-label')).toBe('Profile: Northwind client')
+    expect(container.querySelector('.browser-profile-chip__failure')?.textContent).toContain('Couldn’t switch')
+  })
+})
