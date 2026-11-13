@@ -26,7 +26,7 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿由 Desktop 宿主文件持有，具体链路见下节。
 
-合并按实体与键进行：Tab、Region、Zone、Space、绑定与资源各自独立，展示布局再细到每个 Group 的 Tab 顺序、选择与最近记录，以及分割树。不相交编辑保留双方增量。同一键被双方改成不同值时，该键保留已提交的远端值，本地意图作为该键的保留冲突持续说明；其余键照常提交，基线随提交前进，冲突不阻止后续保存，也不阻止观察其他进程的提交。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
+合并按实体与键进行：Tab、Region、Zone、Space、绑定与资源各自独立；展示布局再细到每个 Group，其 Tab 顺序、选择（含最近记录）与分割树各为一个键。不相交编辑保留双方增量。只有一方改动的 Tab 顺序保持该方的顺序；双方都改时，任一方关闭的 Tab 移除、新开的 Tab 保留，双方以不同方式移动同一批 Tab 才算顺序冲突。分割树取远端值时，仍被某一方展示、且没有被任何一方关闭的 Tab 回到原 Group 或活动 Group，不会掉出布局。Tab 的 Region 成员随其合并后的分割树投影，与名称一样不参与 Tab 实体的冲突判定，因此合并结果始终是 Core 接受的图。同一键被双方改成不同值时，该键保留已提交的远端值并在告示中点名；其余键照常提交，基线随提交前进，冲突不阻止后续保存，也不阻止观察其他进程的提交。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
 
 `DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
@@ -34,9 +34,9 @@ Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/
 
 ### 创建即确认位置与后台保存的停滞
 
-Launcher 内创建的 Agent 由 Main 在 Core 创建回执确认后，经 [`AgentMuxSpatialStateStore.commitOwnedResource`](../../packages/core/src/spatial-state.ts) 的 `agentRegion` 在同一把锁内把原 Launcher Region 改为该 Agent 的 Region，不等 Renderer 后台补存；原 Region 已变化时只报告位置问题，不影响已创建的 Agent 与 Run。Renderer 随后的保存与之取同一值，不构成冲突。
+Launcher 内创建的 Agent 由 Main 在 Core 创建回执确认后，经 [`AgentMuxSpatialStateStore.attachLauncherAgent`](../../packages/core/src/spatial-state.ts) 在同一把锁内把原 Launcher Region 改为该 Agent 的 Region，执行目录取创建出的 Session 实际所在目录，不等 Renderer 后台补存。它自行读取当前 revision，已挂好的相同 Region 不产生新 revision。Goal 讨论 Launcher 的位置由 Host 经 `commitOwnedResource` 的 `agentRegion` 与讨论绑定一起提交；两条路径共用同一条 Region 准入规则：只接受空 Launcher，或同一 Session 且 Run 与执行位置未定或相同的 Region，较新的 Run 不会被较早的创建回执改回。原 Region 已变化时只报告位置问题，不影响已创建的 Agent 与 Run。
 
-`DesktopSpatialPersistence` 记录未确认结构首次出现的时间与最后一次确认保存。未确认持续超过有界时间，或保存连续失败，即在原服务窗持续告示并自动退避重试；`app.inspect` 的 `persistence.spatial` 报告同一事实，安装器与 CLI 读同一来源。保存失败与停滞经 Main 的客户端事件档案留存有界记录（阶段、错误码、持有的 revision、未保存实体数），不含正文或路径，重启后可读。
+`DesktopSpatialPersistence` 记录未确认结构首次出现的时间与最后一次确认保存。同一计时器在未确认满 15 秒时告示一次，之后后台按倍增的间隔重试（上限 2 分钟），直到确认；仍在等待的读取或提交应答超过同一时限即按回执丢失处理，下一次尝试重新读取并合并，Core 的 revision 校验保证迟到的写入不会覆盖更新的内容。停滞恢复只清除停滞自己报出的告示。`app.inspect` 的 `persistence.spatial` 报告同一事实，安装器读同一来源。停滞与其恢复经 Main 的客户端事件档案各留一条有界记录（阶段、错误码、持有的 revision、未保存时长、冲突数），不含正文或路径，重启后可读。
 
 ### Desktop 用户数据与保存回执
 
