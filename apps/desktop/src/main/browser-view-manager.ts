@@ -1790,9 +1790,7 @@ export class BrowserViewManager {
     // A saved association may name a Session retired while this page was closed. Check it once,
     // after the page exists; only Core's confirmed retirement releases it, any other answer keeps it.
     const savedAgent = entry.agent
-    if (savedAgent) void this.inspectAssociatedAgent(savedAgent).then(state => {
-      if (state === 'retired' && this.entries.get(id) === entry && entry.agent === savedAgent) this.releaseRetiredAgent(savedAgent)
-    })
+    if (savedAgent) void this.releaseRetiredAgent(savedAgent).catch(error => console.error('Saved Browser Agent retirement projection failed', error))
     let childRegistrationAttempted = false
     try {
       const prepareHost = () => {
@@ -3220,17 +3218,18 @@ export class BrowserViewManager {
       ? 'This Browser has no associated Agent. Choose an existing Agent or create one on its right to hand it over.'
       : 'The original Browser Agent association is unconfirmed. Keep the page and restore its original association before returning control.'), { code: 'CONTROL_UNAVAILABLE' })
     const revision = entry.controlRevision, navigationId = entry.navigationId, view = entry.view
+    const retiring = this.agentBindingsForRetirement(agent)
     const original = await this.inspectAssociatedAgent(agent)
     if (!this.owns(entry, view) || entry.navigationId !== navigationId || entry.controlRevision !== revision || entry.agent !== agent) {
       throw Object.assign(new Error('This Browser changed while Core confirmed its Agent. You keep control; inspect the current page before handing it over.'), { code: 'CONTROL_REQUEST_CONFLICT' })
     }
-    if (original === 'retired') {
-      this.releaseRetiredAgent(agent)
+    if (original?.kind === 'retired-agent') {
+      this.releaseRetiredAgentBindings(retiring)
       throw Object.assign(new Error('The Agent associated with this Browser has retired, so it can no longer take control. You keep control; choose another Agent or create a new Agent on its right to hand it over.'), { code: 'STALE_AGENT_SESSION_BINDING' })
     }
     // An unconfirmed read is not a stopped Agent: the association still stands and the hand-back proceeds.
     this.clearAgentWarning(entry)
-    entry.agentWarning = original === 'unconfirmed'
+    entry.agentWarning = !original
       ? 'The associated Agent’s current Core status could not be confirmed. Its original association and Browser control remain available; reconnect its Core owner or inspect the original Agent to confirm its status.'
       : undefined
     return this.applyAgentControl(entry)
@@ -3240,13 +3239,14 @@ export class BrowserViewManager {
    * Core's answer for one associated Agent: still current, confirmed retired, or not confirmed.
    * An unavailable owner, a read failure or any other answer is never treated as retirement.
    */
-  private async inspectAssociatedAgent(agent: BrowserAgent): Promise<'current' | 'retired' | 'unconfirmed'> {
-    if (!this.agents) return 'unconfirmed'
+  private async inspectAssociatedAgent(agent: BrowserAgent): Promise<Awaited<ReturnType<BrowserAgentAuthority['inspect']>> | null> {
+    if (!this.agents) return null
     try {
       const original = await this.agents.inspect(agent)
-      if (original.hostId !== agent.hostId || original.agentSessionId !== agent.agentSessionId) return 'unconfirmed'
-      return original.kind === 'agent' ? 'current' : original.kind === 'retired-agent' ? 'retired' : 'unconfirmed'
-    } catch { return 'unconfirmed' }
+      if (original.hostId !== agent.hostId || original.agentSessionId !== agent.agentSessionId ||
+        original.kind !== 'agent' && original.kind !== 'retired-agent') return null
+      return original
+    } catch { return null }
   }
 
   /**
@@ -3255,17 +3255,46 @@ export class BrowserViewManager {
    * held returns to the person first. Other associations, including the same Session id on another
    * Host, are kept.
    */
-  releaseRetiredAgent(agent: BrowserAgent): void {
+  private agentBindingsForRetirement(agent: BrowserAgent) {
     const same = (candidate: AgentMuxBrowserControl['agent']) => Boolean(candidate && candidate.hostId === agent.hostId && candidate.agentSessionId === agent.agentSessionId)
-    for (const entry of this.entries.values()) {
-      if (!same(entry.agent)) continue
+    return {
+      live: [...this.entries.values()].filter(entry => same(entry.agent)).map(entry => ({ entry, view: entry.view,
+        agent: entry.agent, revision: entry.controlRevision })),
+      released: [...this.releasedEntries.values()].filter(entry => same(entry.agent)).map(entry => ({ entry, agent: entry.agent }))
+    }
+  }
+
+  /** A historical retirement cannot remove a reopened Session or a newer Browser handoff. */
+  async releaseRetiredAgent(agent: BrowserAgent, retirement?: { runId: string; observedAt: number }): Promise<void> {
+    const bindings = this.agentBindingsForRetirement(agent)
+    const original = await this.inspectAssociatedAgent(agent)
+    if (!original) {
+      for (const { entry, view, agent, revision } of bindings.live) {
+        if (this.entries.get(entry.id) !== entry || entry.view !== view || entry.agent !== agent ||
+          entry.controlRevision !== revision) continue
+        entry.agentWarning = 'The associated Agent’s retirement could not be confirmed. Its original association and Browser controls are kept. Reconnect its Core owner or check this Agent association again.'
+        this.emit(entry)
+      }
+      return
+    }
+    if (original.kind !== 'retired-agent' || retirement && (original.run.runId !== retirement.runId ||
+      original.observedAt !== retirement.observedAt)) return
+    this.releaseRetiredAgentBindings(bindings)
+  }
+
+  private releaseRetiredAgentBindings(bindings: ReturnType<BrowserViewManager['agentBindingsForRetirement']>): void {
+    for (const { entry, view, agent, revision } of bindings.live) {
+      if (this.entries.get(entry.id) !== entry || entry.view !== view || entry.agent !== agent ||
+        entry.controlRevision !== revision) continue
       if (this.agentOwnsInput(entry)) { entry.activeRun?.stop(); this.yieldControl(entry.id) }
       entry.agent = null
       this.clearAgentWarning(entry)
       ++entry.controlRevision
       this.emit(entry)
     }
-    for (const released of this.releasedEntries.values()) if (same(released.agent)) { released.agent = null; released.agentWarning = undefined }
+    for (const { entry, agent } of bindings.released) if (this.releasedEntries.get(entry.id) === entry && entry.agent === agent) {
+      entry.agent = null; entry.agentWarning = undefined
+    }
   }
 
   /** A trusted click establishes or explicitly replaces one relationship after exact Core verification. */

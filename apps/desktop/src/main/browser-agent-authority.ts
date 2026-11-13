@@ -14,9 +14,11 @@ export type BrowserAgentAuthority = {
  * does not. Each such fact releases that exact Host and Session's Browser associations.
  */
 export function releaseBrowserAgentsOnRetirement(runtime: Pick<RuntimeController, 'observeCoreEvents'>,
-  browsers: { releaseRetiredAgent(agent: BrowserAgent): void }): () => void {
+  browsers: { releaseRetiredAgent(agent: BrowserAgent, retirement?: { runId: string; observedAt: number }): Promise<void> }): () => void {
   return runtime.observeCoreEvents(['run-removed'], (hostId, event) => {
-    if (event.type === 'run-removed' && event.agentSessionId) browsers.releaseRetiredAgent({ hostId, agentSessionId: event.agentSessionId })
+    if (event.type === 'run-removed' && event.agentSessionId) void browsers.releaseRetiredAgent(
+      { hostId, agentSessionId: event.agentSessionId }, { runId: event.run.runId, observedAt: event.evidence.observedAt })
+      .catch(error => console.error('Browser Agent retirement projection failed', error))
   })
 }
 
