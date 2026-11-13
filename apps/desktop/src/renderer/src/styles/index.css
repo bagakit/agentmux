@@ -178,12 +178,6 @@
 
 @import './host-identity.css';
 
-@import './surface-mode-switch.css';
-
-@import './mote-idea-controls.css';
-
-@import './liquid-selection.css';
-
 @import './git-workbench.css';
 
 @import './conversation-landmarks.css';
