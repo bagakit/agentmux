@@ -27,10 +27,17 @@ function nonAgentStatus(region: WorkbenchSurface | undefined): string {
   }
 }
 
-export function moteTargetStatus(tab: WorkbenchTab | undefined, session: SessionSnapshot | undefined, tabId: string | undefined, regionId: string | null = tab?.layout.activeRegionId ?? null): string {
+/** Which fact a Mote target's status comes from; callers decide by kind, never by its words. */
+export type MoteTargetStatusKind = 'session' | 'no-target' | 'restoring-context' | 'region'
+export function moteTargetStatusFact(tab: WorkbenchTab | undefined, session: SessionSnapshot | undefined, tabId: string | undefined,
+  regionId: string | null = tab?.layout.activeRegionId ?? null): { kind: MoteTargetStatusKind; label: string } {
   const region = regionId ? tab?.regions[regionId] : undefined
-  return session ? sessionStatusLabel(session)
-    : !tabId ? 'No Agent yet' : !tab ? 'Restoring context' : nonAgentStatus(region)
+  return session ? { kind: 'session', label: sessionStatusLabel(session) }
+    : !tabId ? { kind: 'no-target', label: 'No Agent yet' } : !tab ? { kind: 'restoring-context', label: 'Restoring context' }
+      : { kind: 'region', label: nonAgentStatus(region) }
+}
+export function moteTargetStatus(tab: WorkbenchTab | undefined, session: SessionSnapshot | undefined, tabId: string | undefined, regionId: string | null = tab?.layout.activeRegionId ?? null): string {
+  return moteTargetStatusFact(tab, session, tabId, regionId).label
 }
 
 /** The shortcut and workface consume one exact target, never PMO-wide status. */

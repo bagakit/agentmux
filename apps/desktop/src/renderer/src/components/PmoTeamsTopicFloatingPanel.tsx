@@ -15,7 +15,7 @@ import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pi
   requestAgentConversationFloatingOpen,
   pmoTeamsTopicFloatingAgentIssue, resolvePmoTeamsTopicFloatingSize, type PmoTeamsTopicFloatingSize,
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
-import { moteTargetStatus, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
+import { moteTargetStatusFact, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 import { pmoFocusSessionId } from '../lib/agent-focus'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
@@ -152,10 +152,12 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const files = useMoteMaterialsActions(scope, { floating: true, reference: fileReference, onReferenceSelect: value => onReferenceSelect(topic.id, value) })
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const retainedPrimaryBot = useAppStore(state => topic.id === PMO_TEAMS_TOPIC_ID && primaryMoteHasBot(state))
-  const targetStatus = identityIssue ? 'Original Agent retained' : moteTargetStatus(tab, session, tabId, regionId ?? null)
-  const status = retainedPrimaryBot && targetStatus === 'No Agent yet' ? 'Status unknown' : targetStatus
+  const target = identityIssue ? null : moteTargetStatusFact(tab, session, tabId, regionId ?? null)
+  // A retained primary bot with no saved target is a target whose Agent is not yet known, not an empty Mote.
+  const pendingPrimary = retainedPrimaryBot && target?.kind === 'no-target'
+  const status = !target ? 'Original Agent retained' : pendingPrimary ? 'Status unknown' : target.label
   const identityStatus = (topic.moteArchive?.state === 'archived' ? 'Archived · ' : '') + (topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' : '') + status
-  const restoring = Boolean(retainedPrimaryBot && targetStatus === 'No Agent yet' || tabId && (!tab || !region || region.kind === 'agent' && !session))
+  const restoring = Boolean(pendingPrimary || tabId && (!tab || !region || region.kind === 'agent' && !session))
   const choice = <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
     aria-label={topic.title + ' · ' + identityStatus} onClick={() => onSelect(topic.id, undefined)}
