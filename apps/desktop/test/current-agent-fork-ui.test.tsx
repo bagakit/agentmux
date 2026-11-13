@@ -164,3 +164,10 @@ it('only inspects the exact retained alias-source fork operation without rewriti
   expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: admitted.requestId } }))
   expect(useAppStore.getState().spatialRequests).toEqual(original)
 })
+it('a fork-based derived action sends its instruction as the forked conversation\'s first message, and the official Fork sends none', () => {
+  const derived = { id: 'retry', label: 'Try another approach', instruction: 'Try a different design.' }
+  const review = reviewCurrentFork(session(), origin, 'derived-operation', false, derived)
+  expect(currentForkRequest(review, session(), catalog(), 'tab', true).content).toEqual({ kind: 'fork-agent', source: review.source, prompt: derived.instruction })
+  const official = reviewCurrentFork(session(), origin, 'official-operation')
+  expect(currentForkRequest(official, session(), catalog(), 'tab', true).content).not.toHaveProperty('prompt')
+})

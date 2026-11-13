@@ -16,7 +16,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, executorDetectionKey, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
-import { inspectTakeover, takeOverSession, takeoverExecution, takeoverPrompt, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
+import { inspectTakeover, takeOverSession, takeoverExecution, takeoverPrompt, takeoverRequestId, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTakeoverSurface'
 import { launcherTakeoverSource } from '../src/renderer/src/lib/launcher-resume-actions'
@@ -177,6 +177,45 @@ it('a Focus card hands Take over and Pass on experience to its exact Region, whi
   expect(document.querySelector('.session-learning')).not.toBeNull()
   expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('a custom new-agent action creates its own Agent from the same source with its own identity, instruction and name', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  const derived = { id: 'review', label: 'Review this work', instruction: 'Review the changes and list concrete bugs.' }
+  expect(await takeoverRequestId(source)).toMatch(/^takeover:/)
+  const derivedId = await takeoverRequestId({ ...source, derived })
+  expect(derivedId).toMatch(/^derived:/); expect(derivedId).not.toBe(await takeoverRequestId(source))
+  expect(await takeoverRequestId({ ...source, derived: { ...derived, instruction: 'Another instruction.' } })).not.toBe(derivedId)
+  const report = await takeOverSession({ ...source, derived }, 'fixture', () => true)
+  expect(report.outcome).toBe('opened'); expect(report.requestId).toBe(derivedId)
+  const prompt = launch.mock.calls[0]![0].prompt!
+  expect(prompt).toContain('Your task (Review this work):\nReview the changes and list concrete bugs.')
+  expect(prompt).toContain("agent context --host 'local' --session 'original'")
+  expect(prompt).not.toContain('Take over the unfinished work')
+  await vi.waitFor(() => expect(useAppStore.getState().agentNames[report.agent!.agentSessionId]).toBe('Original Agent - Review this work'))
+  // Take over on the same source is a separate intent and creates its own Agent.
+  const takeover = await takeOverSession(source, 'fixture', () => true)
+  expect(takeover.requestId).not.toBe(derivedId); expect(launch).toHaveBeenCalledTimes(2)
+  expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('the Region opens a custom action from its menu in place and preselects its default Agent', async () => {
+  const launch = launchBoundary()
+  // Two Agents on the same Host; the action's default must lead, not the configuration order.
+  useAppStore.setState(state => ({ config: { ...state.config!, executors: { first: { ...state.config!.executors.fixture!, label: 'First' }, ...state.config!.executors },
+    agentDerivedActions: { actions: [{ id: 'review', label: 'Review this work', base: 'new-agent', instruction: 'Review the changes.', executorId: 'fixture' }] } } }))
+  await act(async () => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible parked interactiveResize={false} linkOrigin={source.origin} />))
+  const trigger = document.querySelector<HTMLButtonElement>('.agent-region-header__more')!
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('.agent-region-menu [data-derived-action="review"]')).not.toBeNull()) })
+  await act(async () => document.querySelector<HTMLElement>('.agent-region-menu [data-derived-action="review"]')!.click())
+  const surface = document.querySelector<HTMLElement>('.session-takeover[data-derived-action="review"]')!
+  expect(surface).not.toBeNull(); expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(surface.querySelector('h2')!.textContent).toBe('Review this work')
+  expect(surface.querySelector('.session-takeover__instruction')!.textContent).toBe('Review the changes.')
+  expect([...surface.querySelectorAll<HTMLButtonElement>('.agent-pick')].map(pick => pick.dataset.executorId)).toEqual(['fixture', 'first'])
+  expect(launch).not.toHaveBeenCalled()
 })
 
 it('a request that arrives while the Region is still hidden opens once it is shown', async () => {
