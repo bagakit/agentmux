@@ -8,11 +8,12 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 
 
 /** Presentation only. The parent passes published configuration and the original section catalog. */
-export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen, active = true }: {
+export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen, active = true, notice }: {
   config: AppConfig
   groups: SettingsNavGroup<Module>[]
   onOpen: (section: Module['id']) => void
   active?: boolean
+  notice?: string | undefined
 }) {
   // The saved choice, never the Appearance draft: the hero shows what the app is set to.
   const hero = resolveBrandHero('banner', config.appearance.appIcon)
@@ -36,6 +37,7 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
         <span className="settings-overview__sweep" aria-hidden="true" />
         <div className="settings-overview__identity"><strong>AgentMux</strong><p>Configure your agents, tools<br />and workspace.</p></div>
       </div>
+      {notice ? <p className="settings-target-issue" role="status" data-settings-target-issue>{notice}</p> : null}
       <section className="settings-overview__shortcuts" aria-label="Quick access">
         {shortcuts.map(item => {
           const Icon = item.icon

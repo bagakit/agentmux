@@ -372,7 +372,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      <div className="settings-agent-body" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} /></div>
+      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} /></div>
       <div hidden={scope !== 'templates'} className="settings-agent-templates">
         <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
           selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />

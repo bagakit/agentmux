@@ -25,6 +25,13 @@ const OverviewIcon = semanticIconComponent('object.board')
 export { visibleSettingsSections, settingsNavGroups } from './settings/settings-modules'
 export type { SettingsSectionId, SettingsPageId } from './settings/settings-modules'
 
+/** A channel request whose application no settings section claims still lands on Overview, but says so. */
+function unmatchedChannel(request: SettingsNavigationRequest | undefined): string | undefined {
+  if (request?.section !== 'overview' || !request.channelOrigin) return undefined
+  const { application, adapterId } = request.channelOrigin.connection
+  return `No settings section manages ${application.domain} applications (${adapterId}) yet. Choose a section below; the original connection is unchanged.`
+}
+
 function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest }: {
   onClose: () => void
   visible?: boolean
@@ -227,12 +234,13 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
           </div>
         </header>
         {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}
-        {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} /> : null}
+        {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} notice={unmatchedChannel(navigationRequest)} /> : null}
         {visited.map((pane) => {
           const Pane = settingsModules.find((module) => module.id === pane)!.Pane
           const paneVisible = visible && active === pane && !(searching && showResults)
           return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
-            {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div> : null}
+            {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
+              : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
             <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest?.section === pane ? navigationRequest : undefined} />
           </div>
         })}
