@@ -112,6 +112,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
             <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
             {url ? <OpenInSurveyButton url={url} note="Opens your phone page in Survey on this Mac. It connects as another device." /> : null}
           </div>
+          {url && <p className="phone-connect-hero__hint">Opening in Survey connects this Mac as another device.</p>}
           {notice && <p className="device-management__feedback" role="status">{notice}</p>}
           {url && <details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details>}
         </div>

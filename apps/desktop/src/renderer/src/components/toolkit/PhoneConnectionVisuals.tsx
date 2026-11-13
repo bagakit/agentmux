@@ -1,8 +1,8 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { ConnectionLinkCode } from './ConnectionLinkCode'
+import { BrandIcon } from '../BrandIcon'
 
-const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
 const ThemeNetworkWifiIcon = semanticIconComponent('object.network-wifi')
 const ThemeNetworkWiredIcon = semanticIconComponent('object.network-wired')
 const ThemeObjectNetworkIcon = semanticIconComponent('object.network')
@@ -32,7 +32,7 @@ export function PhoneConnectionCard({ url, network, state }: { url: string; netw
   return <figure className="phone-link-card" data-state={state ?? 'current'}>
     <div className="phone-link-card__frame" key={url}>
       <ConnectionLinkCode url={url} />
-      <span className="phone-link-card__mark" aria-hidden="true"><ThemeObjectPhoneIcon size={18} strokeWidth={1.8} /></span>
+      <span className="phone-link-card__mark" aria-hidden="true"><BrandIcon size={22} /></span>
     </div>
     <figcaption className="phone-link-card__network">
       {network ? <><NetworkIcon candidate={network} /><span>{networkName(network)}</span><code>{network.address}</code></> : <code>{new URL(url).host}</code>}

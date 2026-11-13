@@ -79,7 +79,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
     <div className="performance-body phone-connection">
       <section className="phone-connection__connect" aria-label="Connect your phone">
         <p className="phone-connection__intro">Your workspace, on your phone.</p>
-        <p className="phone-connection__hint">Connect both devices to the same Wi-Fi.</p>
+        <p className="phone-connection__hint">Connect both devices to the same local network.</p>
         {connection ? <>
           {!currentCode ? <p className="phone-connection__code-state">{evaluating || refreshing ? 'Updating connection details…' : 'Saved code · current details not confirmed'}</p> : null}
           <PhoneConnectionCard url={connection.url} network={null} state={evaluating || refreshing ? 'updating' : currentCode ? 'current' : 'saved'} />
@@ -87,6 +87,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
           <div className="phone-connection__buttons"><button type="button" className="primary-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy link</button>
             <OpenInSurveyButton url={connection.url} note="Opens your phone page in Survey on this Mac. It connects as another device." />
             <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
+          <p className="phone-connection__hint">Opening in Survey connects this Mac as another device. Choose a different network in Phone settings.</p>
           <p className="phone-connection__updated">{connection.current ? 'Checked' : 'Saved'} <time dateTime={new Date(connection.result.endedAt).toISOString()}>{new Date(connection.result.endedAt).toLocaleString()}</time></p>
           <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /></details>
         </> : <>

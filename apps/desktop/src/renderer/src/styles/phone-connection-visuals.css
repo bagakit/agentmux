@@ -1,7 +1,7 @@
 /* Phone connection visuals, shared by the Settings device page, the Phone connection popover and
  * its tool settings. Colours come from theme roles so light, dark and user themes follow. */
 
-/* The QR card is the hero: a mint-to-blue frame, a soft glow, the phone mark centred on the code. */
+/* The QR card is the hero: a mint-to-blue frame, a soft glow, the App mark centred on the code. */
 .phone-link-card { display: grid; justify-items: center; gap: var(--sp-3); margin: 0; }
 .phone-link-card__frame {
   position: relative; display: grid; place-items: center; padding: 10px; border-radius: 22px;
@@ -18,7 +18,8 @@
   background: linear-gradient(160deg, var(--green), var(--green-2)); color: var(--surface-0);
   box-shadow: 0 0 0 4px #ffffff, var(--elev-1);
 }
-.phone-link-card[data-state='updating'] .phone-link-card__frame { opacity: .55; filter: saturate(.6); transition: opacity var(--dur-fast, 120ms) ease; }
+/* A retained owner-issued code stays scannable while its observation refreshes. */
+.phone-link-card[data-state='updating'] .phone-link-card__network { color: var(--text-3); }
 .phone-link-card__network { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; color: var(--text-2); font-size: var(--fs-meta); }
 .phone-link-card__network > svg { flex: none; color: var(--green); }
 .phone-link-card__network > span { font-weight: 560; color: var(--text); }
@@ -26,9 +27,9 @@
 @keyframes phone-link-reveal { from { opacity: 0; transform: scale(.96) translateY(4px); } }
 
 /* Segmented network choice: equal-weight cards, the chosen one solid with a check. */
-.phone-network-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); }
+.phone-network-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: var(--sp-2); }
 .phone-network-choice > button {
-  position: relative; display: flex; align-items: center; gap: 9px; min-height: 52px; padding: 8px 12px; border-radius: 12px;
+  position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 4px 9px; min-height: 52px; padding: 8px 12px; border-radius: 12px;
   border: 1px solid var(--line-soft); background: var(--surface-1); color: var(--text-2); text-align: left;
   transition: background-color var(--dur-fast, 120ms) ease, border-color var(--dur-fast, 120ms) ease, transform var(--dur-fast, 120ms) ease;
 }
@@ -39,13 +40,13 @@
   border-color: color-mix(in srgb, var(--green) 55%, transparent);
   background: color-mix(in srgb, var(--green) 12%, var(--surface-1)); color: var(--text);
 }
-.phone-network-choice > button > svg:first-child { flex: none; color: var(--text-3); }
+.phone-network-choice > button > svg:first-child { grid-column: 1; grid-row: 1; color: var(--text-3); }
 .phone-network-choice > button[data-selected] > svg:first-child { color: var(--green); }
-.phone-network-choice__text { display: grid; min-width: 0; }
+.phone-network-choice__text { grid-column: 2; grid-row: 1; display: grid; min-width: 0; }
 .phone-network-choice__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
-.phone-network-choice__text small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.phone-network-choice__badge { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); font-size: var(--fs-micro); font-weight: 600; white-space: nowrap; }
-.phone-network-choice__check { flex: none; margin-left: 4px; color: var(--green); }
+.phone-network-choice__text small { overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.phone-network-choice__badge { grid-column: 2; grid-row: 2; justify-self: start; max-width: 100%; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); font-size: var(--fs-micro); font-weight: 600; }
+.phone-network-choice__check { grid-column: 3; grid-row: 1; color: var(--green); }
 
 /* First-time steps as a compact numbered rail. */
 .phone-connection-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; color: var(--text-2); font-size: var(--fs-meta); }
