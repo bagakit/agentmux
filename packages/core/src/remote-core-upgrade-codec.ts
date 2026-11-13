@@ -13,6 +13,10 @@ function tailcatField(value: unknown, required: boolean): string {
   if (typeof value !== 'string' || value.length > 8192 || /[\0\r\n]/u.test(value) || required && !value.trim()) throw new AgentMuxError('Upgrade Tailcat target is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value
 }
+function operationIds(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.length || value.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(id))) throw new AgentMuxError('Upgrade unreadable operation IDs are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return [...value] as string[]
+}
 function count(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AgentMuxError('Upgrade DTO count is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value as number
@@ -137,7 +141,7 @@ export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgrade
     ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }) }
 }
 export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCheck {
-  const p = record(value, ['input', 'current', 'candidate', 'candidateUnavailable', 'eligible', 'reason', 'detail', 'expected', 'latestOperation'])
+  const p = record(value, ['input', 'current', 'candidate', 'candidateUnavailable', 'eligible', 'reason', 'detail', 'expected', 'latestOperation', 'unreadableOperations'])
   if (typeof p.eligible !== 'boolean' || p.eligible !== (p.expected !== undefined)) throw new AgentMuxError('Upgrade eligibility does not match its checked admission.', 'CONTROL_PROTOCOL_ERROR')
   if (!['ready', 'up-to-date', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
   const serving = current(p.current), target = p.candidate === null ? null : candidate(p.candidate), input = host(p.input)
@@ -161,5 +165,6 @@ export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCh
   return { input, current: serving, candidate: target, eligible: p.eligible, reason: p.reason as RemoteCoreUpgradeCheck['reason'], detail: text(p.detail),
     ...(candidateUnavailable === undefined ? {} : { candidateUnavailable }),
     ...(p.expected === undefined ? {} : { expected: parseRemoteCoreUpgradeExpected(p.expected) }),
-    ...(p.latestOperation === undefined ? {} : { latestOperation: parseRemoteCoreUpgradeReceipt(p.latestOperation) }) }
+    ...(p.latestOperation === undefined ? {} : { latestOperation: parseRemoteCoreUpgradeReceipt(p.latestOperation) }),
+    ...(p.unreadableOperations === undefined ? {} : { unreadableOperations: operationIds(p.unreadableOperations) }) }
 }

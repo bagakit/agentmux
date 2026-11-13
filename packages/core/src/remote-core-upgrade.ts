@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, open, readFile, readdir, rm, type FileHandle } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, open, readFile, readdir, rm, unlink, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { ctxmuxOwnerReceiptPath } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
+import { mintObjectId } from './object-id.js'
 import { durableWriteFile } from './durable-write.js'
 import { SshExecutionHost, type ExecutionHost } from './execution-host.js'
 import { assertAgentMuxRuntimeCompatibility } from './ctxmux-run-adapter.js'
@@ -36,6 +37,8 @@ export type RemoteCoreUpgradeCheck = {
   reason: 'ready' | 'up-to-date' | 'runtime-update-required' | 'unverified'
   expected?: RemoteCoreUpgradeExpected
   latestOperation?: RemoteCoreUpgradeReceipt
+  /** Operation IDs whose record cannot be read: original Host and outcome unknown, never replayed. */
+  unreadableOperations?: string[]
 }
 export type RemoteCoreUpgradeReceipt = {
   input: RemoteCoreUpgradeHost; operationId: string; expected: RemoteCoreUpgradeExpected
@@ -63,6 +66,7 @@ export type RemoteCoreMaintenanceObservation = { owner: RemoteCoreMaintenanceOwn
 type OwnerReceiptObservation = { status: 'matching' | 'missing' | 'mismatch' | 'unreadable'; path: string; detail?: string }
 type LaunchInspection = Omit<Launch, 'nativeInstanceId' | 'nativeRuntimeId' | 'nativeBuildId'>
 type Observed = RemoteCoreMaintenanceObservation & { launch: Launch; ownerReceipt: OwnerReceiptObservation }
+type OperationRecords = { values: RetainedOperation[]; unreadable: string[] }
 type RetainedOperation = { receipt: RemoteCoreUpgradeReceipt; observed?: Observed; releaseDirectory?: string; nativeRuns?: RemoteCoreUpgradeNativeRun[] }
 export type RemoteCoreUpgradeOptions = {
   stateDirectory: string; packageRoot?: string
@@ -73,6 +77,7 @@ export type RemoteCoreUpgradeOptions = {
 export function remoteCoreUpgradeTargetDigest(host: RemoteCoreUpgradeHost): string {
   return createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(host).filter(([key]) => key !== 'label').sort(([a], [b]) => a.localeCompare(b))))).digest('hex')
 }
+const UNREADABLE_OPERATION = 'CORE_UPGRADE_OPERATION_UNREADABLE'
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const wait = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 250))
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
@@ -173,6 +178,14 @@ export class RemoteCoreUpgradeManager {
   }
   async check(input: RemoteCoreUpgradeHost): Promise<RemoteCoreUpgradeCheck> {
     const captured = structuredClone(input)
+    let records: OperationRecords | Error
+    try { records = await this.records() } catch (error) { records = error instanceof Error ? error : new Error(String(error)) }
+    const result = await this.evaluate(captured, records)
+    // An unattributable record names its own operation ID only; it neither blocks
+    // this Host nor disappears from the read.
+    return records instanceof Error || !records.unreadable.length ? result : { ...result, unreadableOperations: [...records.unreadable].sort() }
+  }
+  private async evaluate(captured: RemoteCoreUpgradeHost, records: OperationRecords | Error): Promise<RemoteCoreUpgradeCheck> {
     let artifact: PortableCoreArtifact | undefined, candidateUnavailable: RemoteCoreUpgradeCheck['candidateUnavailable']
     try { artifact = await this.artifact() }
     catch (error) { candidateUnavailable = { code: error instanceof AgentMuxError ? error.code : 'CORE_ARTIFACT_UNAVAILABLE', detail: errorText(error) } }
@@ -190,11 +203,19 @@ export class RemoteCoreUpgradeManager {
     } catch (error) {
       current = { state: 'unavailable', observedAt: Date.now(), code: error instanceof AgentMuxError ? error.code : 'CORE_OBSERVATION_UNAVAILABLE', detail: errorText(error) }
     }
-    const latestOperation = await this.latest(captured)
+    let latestOperation: RemoteCoreUpgradeReceipt | undefined, scoped: RemoteCoreUpgradeReceipt | undefined
+    try {
+      if (records instanceof Error) throw records
+      latestOperation = await this.latest(captured, records); scoped = await this.unconfirmedInScope(captured, undefined, records)
+    } catch (error) {
+      // Unreadable history cannot admit an update, but it does not erase the
+      // current owner observation or the local candidate facts already read.
+      return { input: captured, candidate, ...(candidateUnavailable ? { candidateUnavailable } : {}), current, eligible: false, reason: 'unverified',
+        detail: `原维护操作记录无法读取：${errorText(error)} 当前 Core 观测保留；不会受理新的升级。` }
+    }
     const base = { input: captured, candidate, ...(candidateUnavailable ? { candidateUnavailable } : {}), current, ...(latestOperation ? { latestOperation } : {}) }
     if (latestOperation?.status === 'unknown' || latestOperation?.status === 'running') return { ...base, eligible: false, reason: 'unverified',
       detail: '此前的升级结果尚未确认。请复查原操作；不会再次停止或启动 Core。' }
-    const scoped = await this.unconfirmedInScope(captured)
     if (scoped) return { ...base, eligible: false, reason: 'unverified', latestOperation: scoped,
       detail: `同一 Core 的连接 ${scoped.input.id} 有未确认的维护操作 ${scoped.operationId}。请复查该原操作；不会再次停止或启动 Core。` }
     if (!artifact || !candidate) return { ...base, eligible: false, reason: 'unverified', detail: 'The local upgrade candidate is unavailable. Current Core and original operation observations are retained.' }
@@ -212,9 +233,32 @@ export class RemoteCoreUpgradeManager {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(operationId)) throw new AgentMuxError('Upgrade operation ID is invalid.', 'INVALID_CONTROL_REQUEST')
     return join(this.options.stateDirectory, 'operations', operationId + '.json')
   }
+  /** A record without its original Host and admission cannot be attributed to any
+   * Core scope. It is refused by its own operation ID and never blocks other Hosts. */
   private async read(operationId: string): Promise<RetainedOperation | null> {
-    try { return JSON.parse(await readFile(this.path(operationId), 'utf8')) as RetainedOperation }
+    let source: string
+    try { source = await readFile(this.path(operationId), 'utf8') }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+    let value: unknown
+    try { value = JSON.parse(source) } catch { value = undefined }
+    const receipt = (value as Partial<RetainedOperation> | undefined)?.receipt
+    if (!receipt || typeof receipt !== 'object' || receipt.operationId !== operationId || !receipt.input || typeof receipt.input !== 'object' ||
+        (receipt.input.kind !== 'ssh' && receipt.input.kind !== 'local') || !receipt.expected || typeof receipt.expected.targetDigest !== 'string') {
+      throw new AgentMuxError(`Upgrade operation ${operationId} has an unreadable record; its original Host and outcome are unknown. It is not replayed.`, UNREADABLE_OPERATION)
+    }
+    return value as RetainedOperation
+  }
+  private async records(): Promise<OperationRecords> {
+    let names: string[]
+    try { names = await readdir(join(this.options.stateDirectory, 'operations')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { values: [], unreadable: [] }; throw error }
+    const values: RetainedOperation[] = [], unreadable: string[] = []
+    for (const name of names) {
+      if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name)) continue
+      try { const value = await this.read(name.slice(0, -5)); if (value) values.push(value) }
+      catch (error) { if (error instanceof AgentMuxError && error.code === UNREADABLE_OPERATION) unreadable.push(name.slice(0, -5)); else throw error }
+    }
+    return { values, unreadable }
   }
   private async save(value: RetainedOperation): Promise<void> {
     value.receipt.updatedAt = Date.now()
@@ -226,30 +270,14 @@ export class RemoteCoreUpgradeManager {
     return digest === receipt.expected.targetDigest || Boolean(receipt.remoteCommand && receipt.input.kind === 'ssh' &&
       digest === remoteCoreUpgradeTargetDigest({ ...receipt.input, remoteCommand: receipt.remoteCommand }))
   }
-  private async latest(input: RemoteCoreUpgradeHost): Promise<RemoteCoreUpgradeReceipt | undefined> {
-    let names: string[]
-    try { names = await readdir(join(this.options.stateDirectory, 'operations')) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
-    const matches: RemoteCoreUpgradeReceipt[] = []
-    for (const name of names) {
-      if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name)) continue
-      const value = await this.read(name.slice(0, -5))
-      if (value && this.matches(input, value.receipt)) matches.push(value.receipt)
-    }
+  private async latest(input: RemoteCoreUpgradeHost, records?: OperationRecords): Promise<RemoteCoreUpgradeReceipt | undefined> {
+    const matches = (records ?? await this.records()).values.map(value => value.receipt).filter(receipt => this.matches(input, receipt))
     matches.sort((a, b) => Number(b.status === 'running' || b.status === 'unknown') - Number(a.status === 'running' || a.status === 'unknown') || b.updatedAt - a.updatedAt)
     return matches[0] ? (await this.inspect(input, matches[0].operationId)) ?? undefined : undefined
   }
-  private async unconfirmedInScope(input: RemoteCoreUpgradeHost, excluding?: string): Promise<RemoteCoreUpgradeReceipt | undefined> {
-    let names: string[]
-    try { names = await readdir(join(this.options.stateDirectory, 'operations')) }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
-    for (const name of names) {
-      if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name) || name === excluding + '.json') continue
-      const value = await this.read(name.slice(0, -5))
-      if (value && maintenanceScope(value.receipt.input) === maintenanceScope(input) &&
-        (value.receipt.status === 'running' || value.receipt.status === 'unknown')) return value.receipt
-    }
-    return undefined
+  private async unconfirmedInScope(input: RemoteCoreUpgradeHost, excluding?: string, records?: OperationRecords): Promise<RemoteCoreUpgradeReceipt | undefined> {
+    return (records ?? await this.records()).values.find(value => value.receipt.operationId !== excluding &&
+      maintenanceScope(value.receipt.input) === maintenanceScope(input) && (value.receipt.status === 'running' || value.receipt.status === 'unknown'))?.receipt
   }
   async inspect(input: RemoteCoreUpgradeHost, operationId: string): Promise<RemoteCoreUpgradeReceipt | null> {
     let retained = await this.read(operationId)
@@ -326,9 +354,15 @@ export class RemoteCoreUpgradeManager {
       if (original) throw new AgentMuxError(`Core maintenance for Host ${original.input.id} is unconfirmed. Inspect original operation ${original.operationId} before admitting another update.`, 'CONFIG_CONFLICT')
       // Claim the original business ID before writing any phase. Separate manager
       // instances and route aliases cannot overwrite another admitted operation.
-      const reservation = await open(this.path(operationId), 'wx', 0o600)
-      try { await reservation.writeFile(JSON.stringify(value) + '\n'); await reservation.sync() }
-      finally { await reservation.close() }
+      // The complete record is synced under a private name and then linked
+      // exclusively, so a crash never leaves an empty or partial operation.
+      const staging = `${this.path(operationId)}.${process.pid}.${mintObjectId()}.reserve`
+      try {
+        const reservation = await open(staging, 'wx', 0o600)
+        try { await reservation.writeFile(JSON.stringify(value) + '\n'); await reservation.sync() }
+        finally { await reservation.close() }
+        await link(staging, this.path(operationId))
+      } finally { await unlink(staging).catch(() => { /* A private staging name is never read as an operation. */ }) }
       admitted = true
       await this.save(value)
       const artifact = await this.artifact(), observed = await this.observe(input)
