@@ -22,14 +22,15 @@ import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
-  type AgentProvider, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
+  type AgentProvider, type AgentMuxRpcMobileAccessState, type AgentMuxRpcMobileLinkCandidate } from '@agentmux/core'
 import { isConnectionMethod } from '@agentmux/core/connections'
 import { isMoteConnectionMethod } from '@agentmux/core/mote-connections'
 import { DeviceAuthority } from './device-authority.js'
 import { networkInterfaces } from 'node:os'
 import { startLocalRelay } from '@agentmux/relay/local'
 import { startRelayTransport, type RelayTransportController, type RelayLogger } from '@agentmux/relay/server'
-import { connectionOfferUrl, isLocalNetworkHost } from '@agentmux/relay/offer'
+import { connectionOfferUrl } from '@agentmux/relay/offer'
+import { createInterfacePortLabels, defaultRouteInterface, mobileLinkCandidates } from './mobile-link-candidates.js'
 import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
 import { MobileAssetsOwner } from './mobile-assets-owner.js'
@@ -84,7 +85,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   }
   const mobileAssets = new MobileAssetsOwner('local')
   let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
-  let offerUrl: (() => string) | undefined
+  // The link for one chosen local address; candidates are read when a link is requested.
+  const interfacePortLabels = createInterfacePortLabels()
+  let offerUrl: ((address?: string) => Promise<{ url: string; candidates: AgentMuxRpcMobileLinkCandidate[] }>) | undefined
   const getAuthority = (): Promise<DeviceAuthority> => {
     if (disposal) return Promise.reject(new AgentMuxError('This Host device owner is closed. Original Agents are retained.', 'CONTROL_CANCELLED'))
     if (authority) return Promise.resolve(authority)
@@ -123,7 +126,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     desktop: desktopClient
   }) : undefined
   const mobileAccessState = (url?: string): AgentMuxRpcMobileAccessState => {
-    try { return { ...mobileState, ...(url || offerUrl ? { origin: new URL(url ?? offerUrl!()).origin } : {}) } }
+    try { return { ...mobileState, ...(url ? { origin: new URL(url).origin } : {}) } }
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
@@ -187,9 +190,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         catch { authority.noteActivityIssue(source.deviceId) }
       }
     },
-    deviceAdministration: createDeviceAdministration(getAuthority, mobileAccessState, () => {
+    deviceAdministration: createDeviceAdministration(getAuthority, mobileAccessState, address => {
       if (!offerUrl) throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
-      return offerUrl()
+      return offerUrl(address)
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
       if (method.startsWith('goal.') && method !== 'goal.focus' || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) throw new AgentMuxError('The original background automation owner is unavailable. Retain the exact Goal, Session and operation; healthy manual input remains available.', 'CONTROL_UNAVAILABLE')
@@ -234,12 +237,14 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         await mobileAssets.initialize(options.mobileBuildDirectory!)
         local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
         const originalServer = runtime!.server
-        offerUrl = () => {
-          const addresses = Object.entries(networkInterfaces()).sort(([a], [b]) => Number(!/^(en|eth|wlan)/.test(a)) - Number(!/^(en|eth|wlan)/.test(b))).flatMap(([, list]) => list ?? []).filter(a => a.family === 'IPv4' && !a.internal && isLocalNetworkHost(a.address))
-          const address = addresses.find(a => !a.address.startsWith('169.254.')) ?? addresses[0]
-          if (!address) throw new AgentMuxError('当前没有可用的局域网地址；Agent 会话仍可使用。', 'CONTROL_UNAVAILABLE')
-          const endpoint = `${address.address}:${local!.port}`
-          return connectionOfferUrl(`http://${endpoint}/`, { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } })
+        offerUrl = async address => {
+          const [route, labels] = await Promise.all([defaultRouteInterface(), interfacePortLabels()])
+          const candidates = mobileLinkCandidates(networkInterfaces(), route, labels)
+          if (!candidates.length) throw new AgentMuxError('当前没有可用的局域网地址；Agent 会话仍可使用。', 'CONTROL_UNAVAILABLE')
+          const chosen = address === undefined ? candidates[0]! : candidates.find(candidate => candidate.address === address)
+          if (!chosen) throw new AgentMuxError('这个地址不是这台 Mac 当前的局域网地址；请从候选地址中选择。', 'INVALID_CONTROL_REQUEST')
+          const endpoint = `${chosen.address}:${local!.port}`
+          return { url: connectionOfferUrl(`http://${endpoint}/`, { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } }), candidates }
         }
         const logger: RelayLogger = { child: () => logger, info: () => {}, debug: () => {}, warn: () => {} }
         relay = startRelayTransport({ logger, serverId: owner.hostId, daemonKeyPair: keyPair,
