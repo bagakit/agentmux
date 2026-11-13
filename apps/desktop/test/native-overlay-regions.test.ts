@@ -36,8 +36,8 @@ it('measures final-only overlap before the first capture and releases motion wit
     { revision: 1, bounds: [{ x: 0, y: 129, width: 300, height: 300 }] })
   stop = overlays.dispose
   expect(publish.mock.calls.at(-1)).toEqual([[{ id: 'chrome-1', bounds: { x: 20, y: 50, width: 120, height: 80 }, radius: 8 }], undefined])
-  // One cached collection read plus Floating UI's initial position-only movement observation.
-  expect(geometry).toHaveBeenCalledTimes(2)
+  // The collector measures once; a shared document frame checks known geometry later.
+  expect(geometry).toHaveBeenCalledTimes(1)
   expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
   expect(child.hasAttribute('data-native-overlay-motion')).toBe(false)
   expect(distant.getAttribute('data-native-overlay-motion')).toBe('static')
@@ -56,10 +56,12 @@ it('measures final-only overlap before the first capture and releases motion wit
 })
 it('does not schedule feedback for its motion marker and releases closed or removed original surfaces', async () => {
   const popup = node('menu'), publish = vi.fn()
+  const geometry = vi.spyOn(popup, 'getBoundingClientRect')
   stop = observeNativeOverlayRegions(document.body, () => 1, publish, undefined,
     { revision: 1, bounds: [{ x: 0, y: 0, width: 300, height: 300 }] }).dispose
   await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
-  expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+  expect(geometry).toHaveBeenCalledTimes(2)
+  expect(publish).toHaveBeenCalledTimes(1)
   popup.setAttribute('data-state', 'closed')
   await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
   expect(publish.mock.calls.at(-1)).toEqual([[], undefined])
