@@ -21,7 +21,10 @@ function parsed<T>(read: () => T): T {
 }
 function withConfig(config: AppConfig, next: AgentDerivedActionsConfig): AppConfig {
   // Validate the complete result once so list limits apply to every write path.
-  return { ...config, agentDerivedActions: parsed(() => parseAgentDerivedActionsConfig(next)) }
+  const value = parsed(() => parseAgentDerivedActionsConfig(next))
+  // The default (no user list, every official action visible) is not written back.
+  if (!value.actions && !value.hidden) { const { agentDerivedActions: _default, ...rest } = config; return rest }
+  return { ...config, agentDerivedActions: value }
 }
 function checkExpected(existing: Fields, expected: Fields | undefined, keys: readonly string[], id: string): void {
   if (!expected) return

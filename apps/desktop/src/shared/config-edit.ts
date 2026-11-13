@@ -168,6 +168,8 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
         if (value === undefined) delete result[key]
         else Object.defineProperty(result, key, { value, enumerable: true, configurable: true, writable: true })
       }
+      // Visible official actions and no user list is the default; it is not written back as an empty record.
+      if (path === 'agentDerivedActions' && Object.keys(result).length === 0 && !Object.hasOwn(next, 'actions') && !Object.hasOwn(next, 'hidden')) return undefined
       return result
     }
     if (!configValuesEqual(effective(path, actual), effective(path, expected))) throw new ConfigConflict(path)
