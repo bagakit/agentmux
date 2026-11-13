@@ -93,6 +93,11 @@ describe('failure explanation', () => {
     expect(describeMediaFailure('active', 2)?.title).toBe('Playback was interrupted')
     expect(describeMediaFailure('active', 1)).toBeNull()
   })
+  it('a playlist lease reading active never proves an unsupported format: a clean reload can follow a refused segment', () => {
+    const view = describeMediaFailure('active', 4, false, 'playlist')
+    expect(view?.title).toBe('Playback failed'); expect(view?.retry).toBe(true)
+    expect(describeMediaFailure('transient', 4, false, 'playlist')?.title).toBe('Playback was interrupted')
+  })
 })
 
 describe('mounted player', () => {
@@ -202,6 +207,15 @@ describe('mounted player', () => {
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Format not supported')
+  })
+
+  it('a playlist that fails before any frame with an active record offers Retry, never an unsupported-format verdict', async () => {
+    vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
+    await render(<MediaPlayer lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
+    define(media(), { error: { code: 4 } })
+    await act(async () => { media().dispatchEvent(new Event('error')) })
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Playback failed')
+    expect(container.textContent).not.toContain('Format not supported')
   })
 
   it('a live stream that stalls after playing says it stopped, not that the format is unsupported', async () => {
