@@ -47,10 +47,19 @@ const updateDigest = (input: unknown): string => {
   return createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')
 }
 
+/** A maintenance source's answer for one due occurrence. Only a confirmed change pauses; a gap only defers. */
+export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string } | { action: 'defer'; reason: string }
+/** The first wait after an unconfirmed source, doubling to the limit. Shared by the scheduler and its maintenance owner. */
+export const MAINTENANCE_RETRY_MS = 1_000, MAINTENANCE_RETRY_LIMIT_MS = 60_000
+/** Background maintenance runs beside due occurrences, never ahead of them; `now` is the scheduler's own clock. */
+export type MaintenanceSourceOwner = { maintain(now: number): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<MaintenanceSourceDecision> }
+
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
-  private maintenanceOwner: { maintain(): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<void> } | undefined
-  setMaintenanceOwner(owner: { maintain(): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<void> }): () => void {
+  private maintenanceOwner: MaintenanceSourceOwner | undefined
+  /** In memory only: a restarted Host asks every source again. */
+  private readonly deferredMaintenance = new Map<string, { until: number; waitMs: number }>()
+  setMaintenanceOwner(owner: MaintenanceSourceOwner): () => void {
     if (this.maintenanceOwner) throw new Error('The original scheduler already has a maintenance source owner.')
     this.maintenanceOwner = owner; return () => { if (this.maintenanceOwner === owner) this.maintenanceOwner = undefined }
   }
@@ -288,6 +297,28 @@ export class ContinuousProgressLoopManager {
       })
     } catch (error) { return { action: 'pause', reason: 'Reading the original Goal is unconfirmed. Its loop, outbox and manual Agent input are kept. Restore the Goal owner and inspect before resuming. ' + (error instanceof Error ? error.message : String(error)) } }
 
+  }
+  /**
+   * Ask the maintenance source whether this due occurrence may run. A confirmed change pauses the arrangement.
+   * An observation gap keeps the arrangement active and the occurrence due; it is asked again after a growing
+   * wait, so an unreadable source costs a bounded number of reads instead of one per second.
+   */
+  private async admitMaintenance(loop: ContinuousProgressLoop, checkAt: number): Promise<boolean> {
+    let decision: MaintenanceSourceDecision
+    try { decision = this.maintenanceOwner ? await this.maintenanceOwner.qualify(loop) : { action: 'defer', reason: 'The original configuration owner is unavailable.' } }
+    catch (error) { decision = { action: 'defer', reason: error instanceof Error ? error.message : String(error) } }
+    switch (decision.action) {
+      case 'continue': this.deferredMaintenance.delete(loop.loopId); return true
+      case 'pause': this.deferredMaintenance.delete(loop.loopId); await this.pauseForSource(loop, decision); return false
+      case 'defer': {
+        const waitMs = Math.min((this.deferredMaintenance.get(loop.loopId)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
+        this.deferredMaintenance.set(loop.loopId, { until: checkAt + waitMs, waitMs })
+        const reason = 'This occurrence waits because its maintenance source is unconfirmed; the arrangement stays active and is checked again. ' + decision.reason
+        if (this.require(loop.loopId).lastDecision !== reason) { this.patch(loop.loopId, { lastDecision: reason }); await this.persist(loop.loopId) }
+        return false
+      }
+      default: return decision satisfies never
+    }
   }
   private async pauseForSource(loop: ContinuousProgressLoop, source: { action: 'continue' | 'pause' | 'stop'; reason: string }): Promise<void> {
     this.patch(loop.loopId, { status: this.require(loop.loopId).status === 'stopped' || source.action === 'stop' ? 'stopped' : 'paused', lastDecision: source.reason })
@@ -632,16 +663,21 @@ export class ContinuousProgressLoopManager {
   }
   private async checkOnce(now?: number, onlyLoopId?: string): Promise<void> {
     if (!this.running) return
-    await this.maintenanceOwner?.maintain()
     const checkAt = now ?? this.now()
+    // A slow source or Agent read in maintenance must not hold back an occurrence that is already due.
+    // Its failure still reaches this check's caller once the due occurrences are done.
+    const maintenance = this.maintenanceOwner?.maintain(checkAt).then(() => null, (error: unknown) => ({ error }))
+    try { await this.runDue(checkAt, now, onlyLoopId) } finally {
+      const failed = await maintenance
+      if (failed) throw failed.error
+    }
+  }
+  private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
     const due = this.scheduler.due(checkAt, onlyLoopId)
     for (const selected of due) {
       const loop = this.scheduler.get(selected.loopId)
       if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) continue
-      if (loop.managedSource) {
-        try { if (!this.maintenanceOwner) throw new Error('The original configuration owner is unavailable.'); await this.maintenanceOwner.qualify(loop) }
-        catch (error) { await this.pause(loop.loopId, 'Original maintenance source is unconfirmed: ' + String(error)); continue }
-      }
+      if (loop.managedSource && ((this.deferredMaintenance.get(loop.loopId)?.until ?? 0) > checkAt || !await this.admitMaintenance(loop, checkAt))) continue
       if (loop.calendar && !loop.pendingCompletion) {
         const latest = latestCalendarOccurrence(loop.calendar, loop.nextCheckAt, checkAt)
         if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
@@ -699,7 +735,7 @@ export class ContinuousProgressLoopManager {
           if (!isCurrent()) continue
           if (source.action !== 'continue') { await this.pauseForSource(claim.loop, source); continue }
         }
-        if (claim.loop.managedSource) await this.maintenanceOwner!.qualify(claim.loop)
+        if (claim.loop.managedSource && !await this.admitMaintenance(claim.loop, checkAt)) continue
         if (pending && claim.loop.lastOutcome === 'unknown') {
           outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal)
         } else {

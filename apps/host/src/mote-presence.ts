@@ -7,7 +7,7 @@ import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialo
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { GoalExecutionClient } from './goal-runtime.js'
-import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
+import { MAINTENANCE_RETRY_LIMIT_MS, MAINTENANCE_RETRY_MS, type ContinuousProgressLoopManager, type MaintenanceSourceDecision } from './continuous-progress-loop-manager.js'
 import { readMoteQuickModeSource, moteQuickModeDefaults } from './mote-quick-mode-source.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
@@ -29,6 +29,8 @@ export function createHostMotePresence(options: {
   const sourceTargets = new Map<string,string>(), executionTargets = new Map<string,Set<string>>(), targetExecutions = new Map<string,string>()
   const executionKey = (hostId: string, sid: string) => JSON.stringify([hostId,sid])
   const readings = new Map<string, MotePresenceReading>(), watchers = new Map<string, { path: string; watcher: FSWatcher }>()
+  // An unconfirmed Mote is read again after a doubling wait, not on every scheduler tick. Any change event reads it at once.
+  const retries = new Map<string, { at: number; waitMs: number }>()
   let discovery = true, closed = false, watching: FSWatcher | undefined, serviceIssue: string | undefined
   const exact = (hostId: string) => {
     const matches = options.clients().filter(value => value.hostId === hostId)
@@ -43,15 +45,20 @@ export function createHostMotePresence(options: {
     if (homes.length !== 1 || !state) throw new Error('The original Mote configuration or spatial source is unconfirmed.')
     for (const space of spatialCatalog(state.graph).spaces) if (space.kind === 'mote' && space.hostId === homes[0].hostId) invalidate({ spaceId: space.spaceId, zoneId: homeZoneId(space.spaceId), expectedResource: { hostId: homes[0].hostId, workspaceId: homes[0].id, workspacePath: homes[0].path } })
   }
-  async function qualify(loop: ContinuousProgressLoop) {
-    if (!loop.managedSource) return
+  /** Confirmed role or preference changes pause the arrangement; anything not yet readable only skips this occurrence. */
+  async function qualify(loop: ContinuousProgressLoop): Promise<MaintenanceSourceDecision> {
+    if (!loop.managedSource) return { action: 'continue' }
     const targetId = sourceTargets.get(loop.managedSource.sourceId), target = targetId ? targets.get(targetId) : undefined
-    if (!target) throw new Error('The original Mote maintenance source is not registered.')
+    if (!target) return { action: 'defer', reason: 'The original Mote maintenance source is not registered yet.' }
     const main = await options.main.readCurrentMoteMain(target)
-    if (main.status !== 'ready' || !main.identity || !main.current || main.roleRevision !== loop.managedSource.revision || motePresenceSourceId(main.identity) !== loop.managedSource.sourceId || main.current.hostId !== loop.hostId || main.current.sessionId !== loop.agentSessionId) throw new Error('The original main role changed or is unconfirmed.')
+    if (main.status !== 'ready' || !main.identity) return { action: 'defer', reason: main.issue ?? 'The original main role is unconfirmed.' }
+    if (!main.current || main.roleRevision !== loop.managedSource.revision || motePresenceSourceId(main.identity) !== loop.managedSource.sourceId ||
+      main.current.hostId !== loop.hostId || main.current.sessionId !== loop.agentSessionId) return { action: 'pause', reason: 'The original main role changed.' }
     const { mode } = await readMoteQuickModeSource(options.files, target)
-    if (mode.status === 'unconfirmed' || !(moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE).enabled) throw new Error('The original standing maintenance was disabled or is unconfirmed.')
+    if (mode.status === 'unconfirmed') return { action: 'defer', reason: mode.message }
+    if (!(moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE).enabled) return { action: 'pause', reason: 'The original standing maintenance was disabled.' }
     await options.main.assertCurrent(main)
+    return { action: 'continue' }
   }
   async function reconcile(target: MotePreferencesTarget) {
     const id = key(target)
@@ -110,7 +117,7 @@ export function createHostMotePresence(options: {
       if (recovered.kind !== 'resumed' && recovered.kind !== 'reattachable') throw new Error(`Original maintenance recovery is ${recovered.kind}; inspect ${operationId}.`)
     } catch (error) { readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) }
   }
-  const releaseScheduler = options.schedules.setMaintenanceOwner({ qualify, async maintain() {
+  const releaseScheduler = options.schedules.setMaintenanceOwner({ qualify, async maintain(now) {
     if (closed) return
     serviceIssue = undefined
     if (discovery) { discovery = false; try { await discover() } catch (error) { discovery = true; for (const id of targets.keys()) readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) } }
@@ -118,7 +125,7 @@ export function createHostMotePresence(options: {
     // The existing scheduler cadence observes only its active main roles; an
     // ended Run still goes through the original source/role checks in reconcile.
     for (const [id, reading] of readings) {
-      if (reading.status === 'unconfirmed') dirty.add(id)
+      if (reading.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)
       const loop = reading.schedule && options.schedules.inspectLoop(reading.schedule.loopId)
       if (!loop || loop.status !== 'active' || dirty.has(id)) continue
       try {
@@ -129,7 +136,13 @@ export function createHostMotePresence(options: {
         dirty.add(id)
       }
     }
-    for (const id of [...dirty]) { dirty.delete(id); const target = targets.get(id); if (target) await reconcile(target) }
+    for (const id of [...dirty]) {
+      dirty.delete(id); const target = targets.get(id); if (!target) continue
+      await reconcile(target)
+      if (readings.get(id)?.status !== 'unconfirmed') { retries.delete(id); continue }
+      const waitMs = Math.min((retries.get(id)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
+      retries.set(id, { at: now + waitMs, waitMs })
+    }
   } })
   const releaseScheduleEvents = options.schedules.subscribe(loop => {
     const id = loop.managedSource && sourceTargets.get(loop.managedSource.sourceId)
