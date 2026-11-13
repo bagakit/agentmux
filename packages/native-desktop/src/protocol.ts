@@ -52,7 +52,6 @@ export type NativeDisplayFrame = {
   /** Global Quartz points. */
   frame: { x: number; y: number; width: number; height: number }
   scale: number
-  isMain: boolean
 } & (
   | { png: string; width: number; height: number; engine: string; issue?: never }
   | { issue: string; png?: never; width?: never; height?: never; engine?: never }

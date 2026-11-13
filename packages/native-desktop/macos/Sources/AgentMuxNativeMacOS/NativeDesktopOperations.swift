@@ -241,8 +241,7 @@ enum NativeDesktopOperations {
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
                 let displays = screens.map { screen -> [String: Any] in
                     let frame = CGDisplayBounds(screen.id)
-                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale,
-                        "isMain": screen.id == CGMainDisplayID()]
+                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale]
                     do {
                         let capture = try pixels(screen.id, frame, screen.scale)
                         let png = try pngData(capture.image)

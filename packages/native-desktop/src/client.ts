@@ -307,7 +307,7 @@ export class NativeDesktop {
       const frame = display?.frame
       if (!display || typeof display !== 'object' || !Number.isSafeInteger(display.displayId) || display.displayId < 0 || ids.has(display.displayId)
         || !frame || ![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite) || frame.width <= 0 || frame.height <= 0
-        || !Number.isFinite(display.scale) || display.scale <= 0 || typeof display.isMain !== 'boolean') {
+        || !Number.isFinite(display.scale) || display.scale <= 0) {
         throw invalid('Native display frame lost its exact display identity or geometry')
       }
       ids.add(display.displayId)
