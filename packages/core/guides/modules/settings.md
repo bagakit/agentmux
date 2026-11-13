@@ -120,10 +120,12 @@ original retry path. All maintenance keeps the existing Runtime, Native process,
 Session and Run preservation contract.
 
 This path supports an already installed Linux x64 headless Core that meets the
-maintenance owner's exact qualification. It does not install AgentMux on another
-Mac, start an absent service, authorize a new target or upgrade healthy work when
-merely opening settings. Tailcat replaces a carrier; it does not extend that
-maintenance qualification.
+maintenance owner's exact qualification. A saved Linux x64 SSH Host with no Core
+can be installed explicitly with `settings hosts install-check` and
+`settings hosts install`; neither runs when merely opening settings or testing a
+connection, and a Host with a serving Core is only ever upgraded. Nothing here
+installs AgentMux on another Mac or authorizes a new target. Tailcat replaces a
+carrier; it does not extend that maintenance qualification.
 
 ## Local readable protocol reference
 
@@ -133,3 +135,38 @@ same Core definitions; it does not describe the connected Runtime or an older in
 Reading a declaration does not authenticate its author, execute hints or grant permissions.
 
 [Current protocol-catalog](../../dist/amux-protocol-definition.js "amux:generated protocol-catalog")
+
+
+## First install on a saved Linux SSH Host
+
+Run `settings hosts install-check <id>` only when you intend to review a first
+installation. The check reads the platform, glibc, install prefix, socket and the
+user service's actual availability. It never installs, starts a service or changes
+Host settings. An existing Core belongs to the upgrade path.
+
+For an eligible result, retain the exact `expected` fields, add
+`keepRunning: "start-script"` or `"systemd"`, and explicitly authorize
+`settings hosts install <id> --input <file|->` with
+`{expected, operationId}`. The same transport-approved user/device authority as
+upgrade is required; a managed Agent cannot grant it. Systemd is a user service;
+AgentMux does not enable linger or overwrite an existing service unit.
+
+Installation copies the pinned Linux Node and the same offline Core candidate
+used by upgrades, writes the restart entry, starts the Core and reads its exact
+owner. Main then saves this Host's command, socket and Runtime identity and
+checks its connection. A completed installation and a confirmed connection are
+separate facts; newer Host edits are retained.
+
+After a lost reply, use
+`settings hosts install-inspect <id> --operation-id <original-id>`. It reads the
+original operation and may confirm the original serving process without
+repeating installation or reconnecting. An unknown result never means nothing
+happened. `install-check` retains `latestOperation`; unreadable records retain
+their original IDs in `unreadableOperations` and do not hide another Host.
+
+A Core running under a user systemd unit is upgraded through that same unit and
+its exact MainPID. After the new owner is verified, the release is selected as
+current and that original operation's temporary start override is removed.
+An upgrade inspection may finish removing only that override and reload the
+user manager's unit definitions; it does not start or stop a service, reinstall,
+or replay an upgrade.
