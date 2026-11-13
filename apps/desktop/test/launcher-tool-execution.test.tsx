@@ -200,6 +200,14 @@ it('Runs on is absent for a remote project and for a single configured device', 
     tabs: { launch: { ...state.tabs.launch!, workspaceId: 'workspace', regions: { ...state.tabs.launch!.regions, input: { ...state.tabs.launch!.regions.input, workspaceId: 'workspace' } } } } })))
   expect(runsOn()).toBeNull()
 })
+it('the Agent section refreshes the exact Agent device it names', async () => {
+  await mount(); await mode('Remote Agent')
+  const refresh = dom.container.querySelector<HTMLButtonElement>('[aria-label="Refresh agents on this device"]')!
+  expect(refresh).not.toBeNull()
+  vi.mocked(api.executors.discover).mockClear()
+  await act(async () => refresh.click())
+  await vi.waitFor(() => expect(api.executors.discover).toHaveBeenCalledWith(remote.id))
+})
 it('Runs on distinguishes identical device names by their exact IDs', async () => {
   await mount()
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.map(host => ({ ...host, label: 'Studio' })) } })))
