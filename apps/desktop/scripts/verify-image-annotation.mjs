@@ -346,7 +346,7 @@ const specifications = {
       find: '    context.globalAlpha = 1 - (1 - progress) ** 2\n', replace: '', test: capture,
       consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /its first frame begins the fade/ },
     { label: 'window-leave-keeps-highlight', source: component + 'ImageAnnotationEditor.tsx',
-      find: '() => { setHover(null); lightWindow(null) }', replace: '() => setHover(null)', test: capture,
+      find: 'if (capture) { setHover(null); lightWindow(null) }', replace: 'if (capture) setHover(null);', test: capture,
       consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /leaving the frame clears the highlight/ },
     { label: 'overlay-windows-unwired', source: 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx',
       find: ' windows={input.windows}', replace: '', test: capture,
