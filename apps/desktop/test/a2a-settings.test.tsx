@@ -15,7 +15,7 @@ it('the real A2A module saves only its authored preference and retains the dirty
     .mockImplementation(async next => { useAppStore.setState({ config: next }); return next })
   await dom.render(<SettingsPanel initialSection="a2a" onClose={() => {}} />)
   expect(dom.container.querySelectorAll('[data-a2a-settings] input[type=radio]')).toHaveLength(3)
-  expect(dom.container.textContent).toContain('confirmed idle opportunity')
+  expect(dom.container.textContent).toContain('when their Provider offers an automatic opportunity, or when you notify them from the Inbox')
   await act(async () => dom.container.querySelector<HTMLInputElement>('input[value=notify]')!.click())
   await dom.click('[data-a2a-settings] [data-settings-save-bar] button')
   expect(dom.container.textContent).toContain('Private save failure')
