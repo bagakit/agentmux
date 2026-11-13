@@ -292,6 +292,7 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
+    application?: import('./agent-message-envelope.js').AgentMuxMessageApplication;
     admissionIntent?: Extract<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'session-conversation' | 'native-conversation' }>;
     execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
@@ -315,6 +316,9 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'message.read': import('./agent-message-query.js').AgentMuxMessageReadRequest & { hostId?: string }
   'message.events': Omit<import('./agent-message-events.js').AgentMuxMessageEventsQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
+  'message.federation.intake': { packet: import('./agent-message-federation.js').AgentMuxSignedMessage }
+  'message.federation.export': { authority: import('./agent-message-federation.js').AgentMuxMessageReadAuthority }
+  'message.dispatch.sync': { sourceMessageId: string; hostId: string }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
   'message.dispatch.read': { sourceMessageId: string; hostId?: string }
@@ -416,6 +420,9 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
     { hostId: string; message: null; field: import('./agent-message-query.js').AgentMuxMessageFieldPage | null }
   'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
   'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
+  'message.federation.intake': AgentMuxMessageReceipt
+  'message.federation.export': import('./agent-message-federation.js').AgentMuxFederatedThread
+  'message.dispatch.sync': import('./agent-handoff.js').DispatchObservation & { hostId: string }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
@@ -489,7 +496,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
-  'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
+  'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long'

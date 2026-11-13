@@ -4,6 +4,27 @@ import type { AgentMuxMessageTarget } from './control.js'
 import { channelActorKey, parseChannelActorProfileObservation, type ChannelActorProfileObservation } from './channel-profile.js'
 import { parseChannelTranscriptQuote, type ChannelTranscriptQuote } from './channel-quote.js'
 
+export type AgentMuxMessageJson = null | boolean | number | string | AgentMuxMessageJson[] | { [key: string]: AgentMuxMessageJson }
+/** Opaque application protocol. Core authenticates bytes without interpreting its domain. */
+export type AgentMuxMessageApplication = { readonly schema: string; readonly data: AgentMuxMessageJson }
+export function parseMessageApplication(value: unknown): AgentMuxMessageApplication {
+  const walk = (input: unknown, seen: Set<object>): AgentMuxMessageJson => {
+    if (input === null || typeof input === 'boolean' || typeof input === 'string' || typeof input === 'number' && Number.isFinite(input)) return input
+    if (!input || typeof input !== 'object' || seen.has(input) || !Array.isArray(input) && Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null) throw new AgentMuxError('Message application data must be finite JSON.', 'MESSAGE_ENVELOPE_INVALID')
+    seen.add(input)
+    try {
+      if (Array.isArray(input)) {
+        if (Array.from({ length: input.length }, (_, index) => Object.hasOwn(input, index)).includes(false)) throw new AgentMuxError('Message application arrays cannot be sparse.', 'MESSAGE_ENVELOPE_INVALID')
+        return input.map(item => walk(item, seen))
+      }
+      return Object.fromEntries(Object.keys(input).sort().map(key => [key, walk((input as Record<string, unknown>)[key], seen)]))
+    } finally { seen.delete(input) }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 2) throw new AgentMuxError('Message application protocol is invalid.', 'MESSAGE_ENVELOPE_INVALID')
+  const p = value as Record<string, unknown>
+  return { schema: messageEnvelopeString(p.schema as string, 'Message application schema'), data: walk(p.data, new Set()) }
+}
+
 export type AgentMuxMessageIdentity =
   | AgentExternalMessageAuthor
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
@@ -31,6 +52,9 @@ export type AgentMuxMessageEnvelope = {
   readonly senderRunId: string | null
   readonly recipientSessionId: string | null
   readonly recipientRunId: string | null
+  readonly senderRuntimeId?: string
+  readonly recipientRuntimeId?: string
+  readonly application?: AgentMuxMessageApplication
   readonly body: string
   /** Frozen reading metadata, independent of the sender's original authorization. */
   readonly channelProfile?: ChannelActorProfileObservation
@@ -39,7 +63,7 @@ export type AgentMuxMessageEnvelope = {
 }
 
 export function messageEnvelopeString(value: string, label: string): string {
-  if (!value.trim() || /[\0\r\n]/u.test(value)) throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
+  if (typeof value !== 'string' || !value.trim() || /[\0\r\n]/u.test(value)) throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
   return value
 }
 
@@ -99,6 +123,9 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
     senderRunId: source.senderRunId === null ? null : messageEnvelopeString(source.senderRunId, 'Message sender run id'),
     recipientSessionId: source.recipientSessionId === null ? null : messageEnvelopeString(source.recipientSessionId, 'Message recipient session id'),
     recipientRunId: source.recipientRunId === null ? null : messageEnvelopeString(source.recipientRunId, 'Message recipient run id'),
+    ...(source.senderRuntimeId === undefined ? {} : { senderRuntimeId: messageEnvelopeString(source.senderRuntimeId, 'Message sender Runtime') }),
+    ...(source.recipientRuntimeId === undefined ? {} : { recipientRuntimeId: messageEnvelopeString(source.recipientRuntimeId, 'Message recipient Runtime') }),
+    ...(source.application === undefined ? {} : { application: parseMessageApplication(source.application) }),
     body: source.body,
     ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {})
   })

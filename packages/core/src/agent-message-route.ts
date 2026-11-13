@@ -9,6 +9,7 @@ export type AgentMessageRoute = {
   messageId: string
   hostId: string
   runtimeId: string | null
+  targetKeyFingerprint?: string
   agentSessionId: string
   expectedRun: { runId: string }
   target: AgentMuxMessageTarget
@@ -20,6 +21,7 @@ export function validateAgentMessageRoute(route: AgentMessageRoute): AgentMessag
   for (const field of ['operationId', 'messageId', 'hostId', 'agentSessionId', 'intentDigest'] as const) messageEnvelopeString(route[field], `Message route ${field}`)
   messageEnvelopeString(route.expectedRun.runId, 'Message route Run')
   if (route.runtimeId !== null) messageEnvelopeString(route.runtimeId, 'Message route Runtime')
+  if (route.targetKeyFingerprint !== undefined && !/^[a-f0-9]{64}$/u.test(route.targetKeyFingerprint)) throw new AgentMuxError('Original message target key is invalid.', 'MESSAGE_ENVELOPE_INVALID')
   const target = route.target
   if (target.kind === 'agent-session') messageEnvelopeString(target.agentSessionId, 'Message route target Session')
   else if (target.kind === 'region') messageEnvelopeString(target.regionId, 'Message route target Region')
@@ -32,6 +34,6 @@ export function assertAgentMessageRouteIntent(route: AgentMessageRoute, input: P
   if (route.messageId !== input.messageId || route.intentDigest !== input.intentDigest) throw new AgentMuxError(
     'This original message already has different content, author or execution. Its route and receipt are retained.', 'MESSAGE_ID_CONFLICT')
   if (!isDeepStrictEqual(route.target, input.target) &&
-      !(input.target.kind === 'agent-session' && input.target.agentSessionId === route.agentSessionId)) throw new AgentMuxError(
+      !(input.target.kind === 'agent-session' && input.target.agentSessionId === route.agentSessionId && (input.target.hostId === undefined || input.target.hostId === route.hostId))) throw new AgentMuxError(
     'This original message already names another target. Its original route and input are retained.', 'MESSAGE_RECIPIENT_MISMATCH')
 }

@@ -60,10 +60,10 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
     if ((action === 'inspect' || action === 'network' || action === 'home') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3] }
     }
-    if (action === 'trusted-sources' && args.length === 4 && id === '--host' && args[3]?.length) {
+    if ((action === 'trusted-sources' || action === 'message-trusted-sources') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3] }
     }
-    if (action === 'trust-source' && args.length === 6 && id === '--host' && args[3]?.length && args[4] === '--input') {
+    if ((action === 'trust-source' || action === 'trust-message-source') && args.length === 6 && id === '--host' && args[3]?.length && args[4] === '--input') {
       return { hostId: args[3], input: await input(args[5]!) }
     }
     if (action === 'ls' && args.length === 2) return {}

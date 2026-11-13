@@ -1,3 +1,4 @@
+import { parseSignedMessage, parseFederatedThread } from './agent-message-federation.js'
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { parseAgentStopInspection, type AgentMuxAgentStopIdentity } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
@@ -255,6 +256,7 @@ function notificationStatus(value: unknown, envelope: ReturnType<typeof validate
       return
     }
   }
+  if (p.deliveryMode === 'outbox') { if (p.notification !== undefined || !p.provenance) fail(); return }
   if (p.deliveryMode === undefined) { if (p.notification !== undefined) fail(); return }
   if (p.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' || !envelope.recipientRunId) fail()
   const status = record(p.notification, ['state', 'notificationId', 'key', 'reason', 'mode', 'preparedAt', 'resultRecordedAt', 'automatic'])
@@ -275,13 +277,19 @@ function message(value: unknown, notificationId?: string): ReturnType<typeof val
   const p = record(value); count(p.sequence); delivery(p.delivery)
   const envelope = validateAgentMuxMessageEnvelope(p.envelope)
   notificationStatus(p, envelope, notificationId)
+  if (p.provenance !== undefined) {
+    parseSignedMessage({ envelope, execution: 'default', sourceChannel: p.sourceChannel, provenance: p.provenance })
+    const transport = record(p.transport, ['state', 'targetRuntimeId'])
+    member(transport.state, ['outbox', 'received']); if (transport.targetRuntimeId !== envelope.recipientRuntimeId || (p.deliveryMode === 'outbox') !== (transport.state === 'outbox')) fail()
+  }
   if (p.promptCondition !== undefined && p.promptCondition !== null) validateAgentPromptCondition(p.promptCondition)
   return envelope
 }
 function dispatch(value: unknown, params: Record<string, unknown>): void {
-  const p = record(value, ['sourceMessageId', 'ownerAgentSessionId', 'workerAgentSessionId', 'threadId', 'openedAt', 'originAwaits', 'events'])
+  const p = record(value, ['sourceMessageId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRuntimeId', 'workerRuntimeId', 'threadId', 'openedAt', 'originAwaits', 'events'])
   if (p.sourceMessageId !== params.sourceMessageId) fail()
   for (const key of ['sourceMessageId', 'ownerAgentSessionId', 'workerAgentSessionId', 'threadId']) string(p[key])
+  if (p.ownerRuntimeId !== undefined) string(p.ownerRuntimeId); if (p.workerRuntimeId !== undefined) string(p.workerRuntimeId)
   count(p.openedAt); bool(p.originAwaits)
   array(p.events, value => { const event = record(value, ['kind', 'replyMessageId', 'at']); assertDispatchEventKind(event.kind); string(event.replyMessageId); count(event.at) })
   if (params.replyMessageId !== undefined && !(p.events as Array<Record<string, unknown>>).some(event => event.replyMessageId === params.replyMessageId && event.kind === params.kind)) fail()
@@ -292,7 +300,7 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
   dispatch(p.dispatch, params)
   const supervision = p.dispatch as Record<string, unknown>, source = message(p.source)
   if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
-    source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId) fail()
+    source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId || source.senderRuntimeId !== supervision.ownerRuntimeId || source.recipientRuntimeId !== supervision.workerRuntimeId) fail()
   const events = supervision.events as Array<Record<string, unknown>>
   const envelopes = new Map<string, ReturnType<typeof validateAgentMuxMessageEnvelope>>()
   array(p.replies, value => {
@@ -303,6 +311,7 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
     if (envelopes.has(reply.messageId) || reply.messageId === source.messageId || reply.threadId !== source.threadId ||
       !(reply.senderSessionId === supervision.ownerAgentSessionId && reply.recipientSessionId === supervision.workerAgentSessionId ||
         reply.senderSessionId === supervision.workerAgentSessionId && reply.recipientSessionId === supervision.ownerAgentSessionId)) fail()
+    if (supervision.ownerRuntimeId !== undefined && !(reply.senderRuntimeId === supervision.ownerRuntimeId && reply.recipientRuntimeId === supervision.workerRuntimeId || reply.senderRuntimeId === supervision.workerRuntimeId && reply.recipientRuntimeId === supervision.ownerRuntimeId)) fail()
     envelopes.set(reply.messageId, reply)
   })
   // Order is the original journal order, not an event/reply positional join.
@@ -822,8 +831,18 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (!isDeepStrictEqual(receipt.key, original.key) || receipt.ref.waitGeneration < original.waitGeneration) fail()
         break
       }
+      case 'message.federation.intake': {
+        const packet = parseSignedMessage(input.packet), envelope = message(p)
+        if (!isDeepStrictEqual(envelope, packet.envelope) || !isDeepStrictEqual(p.provenance, packet.provenance)) fail()
+        for (const key of ['queueId', 'receiptId', 'messageId']) string(p[key]); break
+      }
+      case 'message.federation.export': {
+        const thread = parseFederatedThread(p)
+        if (thread.source.envelope.messageId !== (input.authority as Record<string, unknown>).sourceMessageId) fail()
+        break
+      }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt', 'provenance', 'transport'])
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
@@ -930,7 +949,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         if (p.field !== undefined) fail()
         if (p.message !== null) {
-          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin'])
+          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin', 'provenance', 'transport'])
           if (original.inputOrigin !== null) parseAgentInputJournalCut(original.inputOrigin)
           const envelope = message(original, input.notificationId as string | undefined)
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
@@ -980,6 +999,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           (p.messages as unknown[]).length !== limit)) fail()
         break
       }
+      case 'message.dispatch.sync': dispatchObservation(p, { ...input, hostId: 'local' }); break
       case 'message.dispatch.read': dispatchObservation(p, input); break
       case 'message.dispatch.ls': dispatchPage(p, input); break
       case 'goal.activity': record(p, ['activity', 'diskDurability']); activity(p.activity); member(p.diskDurability, ['confirmed']); break

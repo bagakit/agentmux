@@ -302,8 +302,9 @@ export type AgentMuxControlOpenBrowserRequest = RequestBase & {
   profileId?: string
 }
 export type AgentMuxMessageTarget =
+  | { kind: 'reply'; sourceMessageId: string }
   | AgentMuxSelfAnchor
-  | { kind: 'agent-session'; agentSessionId: string }
+  | { kind: 'agent-session'; agentSessionId: string; hostId?: string }
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlFocusRequest = RequestBase & {

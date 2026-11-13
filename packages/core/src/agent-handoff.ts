@@ -37,6 +37,8 @@ export type Dispatch = {
   readonly sourceMessageId: string
   readonly ownerAgentSessionId: string
   readonly workerAgentSessionId: string
+  readonly ownerRuntimeId?: string
+  readonly workerRuntimeId?: string
   readonly threadId: string
   readonly openedAt: number
   readonly originAwaits: boolean
@@ -88,6 +90,8 @@ export function openDispatch(source: AgentMuxMessageEnvelope, at: number): Dispa
     sourceMessageId: source.messageId,
     ownerAgentSessionId: source.senderSessionId!,
     workerAgentSessionId: source.recipientSessionId!,
+    ...(source.senderRuntimeId === undefined ? {} : { ownerRuntimeId: source.senderRuntimeId }),
+    ...(source.recipientRuntimeId === undefined ? {} : { workerRuntimeId: source.recipientRuntimeId }),
     threadId: source.threadId,
     openedAt: at,
     originAwaits: true,
@@ -109,6 +113,9 @@ export function recordDispatchEvent(
     reply.senderSessionId !== sender || reply.recipientSessionId !== recipient) {
     throw new AgentMuxError('Dispatch reply does not match its source, thread and participants.', 'DISPATCH_MESSAGE_INVALID')
   }
+  const senderRuntime = kind === 'cleanup' ? dispatch.ownerRuntimeId : dispatch.workerRuntimeId
+  const recipientRuntime = kind === 'cleanup' ? dispatch.workerRuntimeId : dispatch.ownerRuntimeId
+  if (senderRuntime !== undefined && reply.senderRuntimeId !== senderRuntime || recipientRuntime !== undefined && reply.recipientRuntimeId !== recipientRuntime) throw new AgentMuxError('Dispatch reply belongs to different Runtime participants.', 'DISPATCH_MESSAGE_INVALID')
   const existing = dispatch.events.find((event) => event.replyMessageId === reply.messageId)
   if (existing) {
     if (existing.kind !== kind) throw new AgentMuxError('Dispatch reply already names a different event kind.', 'DISPATCH_EVENT_CONFLICT')

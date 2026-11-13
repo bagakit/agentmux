@@ -20,6 +20,8 @@ export type AgentMuxMessageEventsQuery = {
 export type AgentMuxMessageEventReference = {
   messageId: string
   senderSessionId: string
+  senderRuntimeId?: string
+  recipientRuntimeId?: string
   recipientSessionId: string
   threadId: string
   replyTo: string | null
@@ -99,10 +101,11 @@ export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEve
     previous = event.sequence as number
     const seen = new Set<string>()
     for (const value of event.messages) {
-      const ref = object(value, ['messageId', 'senderSessionId', 'recipientSessionId', 'threadId', 'replyTo', 'broadcast'])
+      const ref = object(value, ['messageId', 'senderSessionId', 'recipientSessionId', 'senderRuntimeId', 'recipientRuntimeId', 'threadId', 'replyTo', 'broadcast'])
       if (!id(ref.messageId) || !id(ref.senderSessionId) || !id(ref.recipientSessionId) || !id(ref.threadId) ||
           ref.replyTo !== null && !id(ref.replyTo) || seen.has(ref.messageId) ||
           ref.senderSessionId !== input.participantSessionId && ref.recipientSessionId !== input.participantSessionId) return fail()
+      if (ref.senderRuntimeId !== undefined && !id(ref.senderRuntimeId) || ref.recipientRuntimeId !== undefined && !id(ref.recipientRuntimeId)) return fail()
       if (ref.broadcast !== undefined) {
         const batch = object(ref.broadcast, ['operationId', 'sequence'])
         if (!id(batch.operationId) || !Number.isSafeInteger(batch.sequence) || (batch.sequence as number) < 1 || (batch.sequence as number) >= (event.sequence as number)) return fail()

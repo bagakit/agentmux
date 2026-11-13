@@ -1,3 +1,4 @@
+import { parseSignedMessage, parseMessageProvenance, type AgentMuxMessageProvenance, type AgentMuxMessageTransport } from './agent-message-federation.js'
 import { assertAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseAgentInputHandoff, type AgentInputCarrier } from './agent-input-handoff.js'
 import { parseMoteDialogueInputRoute, moteDialogueInputScope, type MoteDialogueInputRoute } from './mote-dialogue-contract.js'
@@ -61,7 +62,7 @@ export type DurableAgentMuxMessage = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
-  readonly deliveryMode?: 'reference'
+  readonly deliveryMode?: 'reference' | 'outbox'
   readonly notification?: AgentMuxMessageNotificationStatus
   /** null proves this new journal intent has not yet crossed a prompt RPC. Absence is unknown. */
   readonly promptCondition?: AgentPromptCondition | null
@@ -70,6 +71,8 @@ export type DurableAgentMuxMessage = {
   readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
+  readonly provenance?: AgentMuxMessageProvenance
+  readonly transport?: AgentMuxMessageTransport
 }
 
 export type AgentMuxDeliveryReader = {
@@ -99,12 +102,14 @@ export type AgentMuxMessageReceipt = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
-  readonly deliveryMode?: 'reference'
+  readonly deliveryMode?: 'reference' | 'outbox'
   readonly notification?: AgentMuxMessageNotificationStatus
   readonly promptCondition?: AgentPromptCondition | null
   readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
+  readonly provenance?: AgentMuxMessageProvenance
+  readonly transport?: AgentMuxMessageTransport
   readonly input?: AgentInputJournalEntry
 }
 
@@ -114,6 +119,8 @@ export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' 
   readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
   readonly sourceDevice?: AgentOperationDevice
+  readonly provenance?: AgentMuxMessageProvenance
+  readonly transport?: AgentMuxMessageTransport
 }
 
 /** Readable recipient-side wrapper; envelope facts have already been validated by Core.
@@ -142,7 +149,7 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'broadcast-result'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly outcome: 'saved' | 'not-applied' | 'unconfirmed'; readonly issue?: AgentMuxBroadcastIssue; readonly at: number }
   | { readonly kind: 'mote-main-input-route'; readonly sequence: number; readonly route: MoteDialogueInputRoute }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference'; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference' | 'outbox'; readonly provenance?: AgentMuxMessageProvenance; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification; readonly at?: number }
   | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string; readonly at?: number }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
@@ -372,6 +379,8 @@ export class DurableAgentMuxMessageQueue {
       ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
       : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
     return { sequence: Number(row.sequence), envelope, delivery,
+      ...(original.deliveryMode === 'outbox' ? { deliveryMode: 'outbox' as const } : {}),
+      ...(original.provenance ? { provenance: parseMessageProvenance(original.provenance), transport: { state: original.deliveryMode === 'outbox' ? 'outbox' as const : 'received' as const, targetRuntimeId: original.provenance.target.runtimeId } } : {}),
       ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, notificationId) } : {}),
       ...(original.deliveryMode !== 'reference' && notificationId !== undefined
         ? { notification: { state: 'unassociated' as const, notificationId, reason: 'notification-not-associated' } } : {}),
@@ -1130,6 +1139,7 @@ export class DurableAgentMuxMessageQueue {
     } else if (record.kind === 'message') {
       if (record.execution !== undefined && record.execution !== 'default' && record.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
+      if (envelope.senderRuntimeId && envelope.recipientRuntimeId && envelope.senderRuntimeId !== envelope.recipientRuntimeId && !record.provenance) throw new AgentMuxError('Cross-Runtime messages require their original signed provenance.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
       if (record.admissionIntent !== undefined) {
         const intent = validateAgentPromptAdmissionIntent(record.admissionIntent)
         if (intent.kind === 'exact-condition' || record.execution !== 'immediate' || envelope.recipientRunId !== intent.expectedRun.runId) throw new AgentMuxError('Message manual intent changed its original Run or execution.', 'MESSAGE_QUEUE_UNAVAILABLE')
@@ -1137,13 +1147,15 @@ export class DurableAgentMuxMessageQueue {
       if (record.promptCondition !== undefined && record.promptCondition !== null) throw new AgentMuxError('Message initial condition is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       if (record.sourceChannel !== undefined) normalizeMessageChannel(record.sourceChannel)
       if (record.sourceDevice !== undefined) normalizeOperationDevice(record.sourceDevice)
-      const consumerId = envelope.recipient.kind === 'agent-session' && envelope.recipient.agentSessionId === envelope.recipientSessionId
+      if (record.provenance) parseSignedMessage({ envelope, execution: record.execution, sourceChannel: record.sourceChannel, provenance: record.provenance })
+      const consumerId = record.deliveryMode === 'outbox' ? null : envelope.recipient.kind === 'agent-session' && envelope.recipient.agentSessionId === envelope.recipientSessionId
         ? envelope.recipient.agentSessionId : null
       const ordinal = consumerId === null ? null : Number(this.db.prepare(
         'SELECT COALESCE(MAX(recipient_ordinal), 0) + 1 AS next FROM messages WHERE recipient_id = ?').get(consumerId)!.next)
       this.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, NULL, NULL)').run(
         envelope.messageId, envelope.operationId, record.sequence, consumerId, ordinal)
-      if (record.deliveryMode !== undefined) {
+      if (record.deliveryMode === 'outbox' && !record.provenance) throw new AgentMuxError('Remote outbox requires its original signed source.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
+      if (record.deliveryMode !== undefined && record.deliveryMode !== 'outbox') {
         if (record.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || !consumerId || !envelope.recipientRunId ||
             record.execution !== 'default' || record.admissionIntent !== undefined) throw new AgentMuxError('Reference intake must preserve a default peer Inbox message.', 'INVALID_A2A_NOTIFICATION')
         this.db.prepare('INSERT INTO a2a_message_notifications (message_id, recipient_id, run_id, message_sequence) VALUES (?, ?, ?, ?)')
@@ -1250,7 +1262,7 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
-  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
+  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference' | 'outbox'; provenance?: AgentMuxMessageProvenance; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
     conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind'] }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
       await newMessage?.reauthorize?.()
@@ -1261,11 +1273,13 @@ export class DurableAgentMuxMessageQueue {
       const sourceChannel = input.sourceChannel === undefined ? undefined : normalizeMessageChannel(input.sourceChannel)
       const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
       const sameOrigin = (existing: DurableAgentMuxMessage) => existing.sourceChannel === sourceChannel &&
+        (newMessage?.deliveryMode === undefined || existing.deliveryMode === newMessage.deliveryMode) &&
         JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice) &&
+        JSON.stringify(existing.provenance) === JSON.stringify(newMessage?.provenance) &&
         (newMessage !== undefined && input.admissionIntent === undefined || JSON.stringify(existing.admissionIntent) === JSON.stringify(admissionIntent))
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
       const route = this.messageRoute(envelope.operationId, messageId)
-      if (route && (route.hostId !== 'local' || route.agentSessionId !== envelope.recipientSessionId)) throw new AgentMuxError(
+      if (route && newMessage?.deliveryMode !== 'outbox' && (route.hostId !== 'local' || route.agentSessionId !== envelope.recipientSessionId)) throw new AgentMuxError(
         'The original message belongs to another retained route. No local replacement was appended.', 'MESSAGE_RECIPIENT_MISMATCH')
       const existingId = this.operationMessageId(envelope.operationId)
       if (existingId) {
@@ -1283,6 +1297,7 @@ export class DurableAgentMuxMessageQueue {
       const frozenIntent = admissionIntent ?? (newMessage?.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(newMessage.admissionIntent))
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
         ...(newMessage?.deliveryMode === undefined ? {} : { deliveryMode: newMessage.deliveryMode }),
+        ...(newMessage?.provenance === undefined ? {} : { provenance: parseMessageProvenance(newMessage.provenance) }),
         ...(frozenIntent === undefined ? {} : { admissionIntent: frozenIntent }),
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       await this.appendRecord(record)
@@ -1466,7 +1481,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Browse the original journal without constructing bodies, delivery batches or consumer cursors. */
-  async listMessages(input: AgentMuxMessageQuery, reauthorize: () => Promise<void>): Promise<AgentMuxMessagePage> {
+  async listMessages(input: AgentMuxMessageQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string): Promise<AgentMuxMessagePage> {
     const participantSessionId = nonEmpty(input.participantSessionId, 'Message participant Session id')
     if (input.direction !== 'incoming' && input.direction !== 'outgoing') throw new AgentMuxError(
       'Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
@@ -1480,7 +1495,7 @@ export class DurableAgentMuxMessageQueue {
       this.db.exec(dispatchDiscoveryJournalSchema)
       const side = input.direction === 'incoming' ? 'recipient' : 'sender'
       const rows = this.db.prepare(`SELECT original.sequence,
-        json_remove(original.json, '$.envelope.body') AS metadata,
+        json_remove(original.json, '$.envelope.body', '$.envelope.application') AS metadata,
         substr(json_extract(original.json, '$.envelope.body'), 1, 240) AS preview,
         length(CAST(json_extract(original.json, '$.envelope.body') AS BLOB)) AS body_bytes,
         latest.json AS delivery
@@ -1491,7 +1506,7 @@ export class DurableAgentMuxMessageQueue {
           AND json_extract(original.json, '$.envelope.${side}SessionId') = ?
           AND json_extract(original.json, '$.envelope.sender.kind') = 'agent-session'
           AND json_extract(original.json, '$.envelope.recipient.kind') = 'agent-session'
-          AND original.sequence < ? ORDER BY original.sequence DESC LIMIT ?`).all(participantSessionId, before, limit + 1)
+          AND original.sequence < ? ${participantRuntimeId === undefined ? '' : `AND (json_extract(original.json, '$.envelope.${side}RuntimeId') IS NULL OR json_extract(original.json, '$.envelope.${side}RuntimeId')=?)`} ORDER BY original.sequence DESC LIMIT ?`).all(participantSessionId, before, ...(participantRuntimeId === undefined ? [] : [participantRuntimeId]), limit + 1)
       const messages = rows.slice(0, limit).map(row => {
         const original = JSON.parse(String(row.metadata)) as { envelope: Omit<AgentMuxMessageEnvelope, 'body'> }
         const { body: _body, ...envelope } = validateAgentMuxMessageEnvelope({ ...original.envelope, body: '' })
@@ -1622,7 +1637,7 @@ export class DurableAgentMuxMessageQueue {
           resultSequence: position.result_sequence === null ? null : Number(position.result_sequence),
           outcome: confirmed ? 'saved' : result?.outcome ?? (position.claim_sequence === null ? 'pending' : 'unconfirmed'),
           ...(result?.issue ? { issue: result.issue } : {}), ...(confirmed ? { message: { sequence: message.sequence, delivery: message.delivery,
-            ...(message.deliveryMode ? { deliveryMode: message.deliveryMode } : {}) } } : {}) } satisfies AgentMuxBroadcastTargetResult
+            ...(message.deliveryMode === 'reference' ? { deliveryMode: 'reference' as const } : {}) } } : {}) } satisfies AgentMuxBroadcastTargetResult
       })
       return parseBroadcastReceipt({ operationId, sequence: original.sequence, author: original.intent.author,
         bodySHA256: createHash('sha256').update(original.intent.body).digest('hex'), bodyBytes: Buffer.byteLength(original.intent.body), createdAt: original.intent.createdAt, targets }, operationId)
@@ -1630,7 +1645,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Read exact original event metadata from both sides without decoding any message body. */
-  async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>): Promise<AgentMuxMessageEventsPage> {
+  async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>, participantRuntimeId?: string): Promise<AgentMuxMessageEventsPage> {
     input = parseMessageEventsQuery(input)
     const participant = input.participantSessionId, after = input.afterSequence ?? 0, limit = input.limit ?? 50
     const backward = input.latest === true || input.beforeSequence !== undefined
@@ -1647,11 +1662,17 @@ export class DurableAgentMuxMessageQueue {
       const referenceScope = scope.replaceAll('message_id', 'position.message_id')
         .replace('SELECT position.message_id FROM', 'SELECT message_id FROM')
       const scopeArgs = input.messageId !== undefined ? [input.messageId] : input.broadcastOperationId !== undefined ? [input.broadcastOperationId] : []
+      const qualify = (column: string) => participantRuntimeId === undefined ? '' : ` AND EXISTS (
+        SELECT 1 FROM messages auth_m JOIN records auth_r ON auth_r.sequence=auth_m.message_sequence
+        WHERE auth_m.message_id=${column} AND (
+          json_extract(auth_r.json, '$.envelope.senderSessionId')=? AND (json_extract(auth_r.json, '$.envelope.senderRuntimeId') IS NULL OR json_extract(auth_r.json, '$.envelope.senderRuntimeId')=?) OR
+          json_extract(auth_r.json, '$.envelope.recipientSessionId')=? AND (json_extract(auth_r.json, '$.envelope.recipientRuntimeId') IS NULL OR json_extract(auth_r.json, '$.envelope.recipientRuntimeId')=?)))`
+      const authorityArgs = participantRuntimeId === undefined ? [] : [participant, participantRuntimeId, participant, participantRuntimeId]
       const index = scope ? ' INDEXED BY message_event_by_message' : ''
       const before = input.beforeSequence === undefined ? '' : ' AND event_sequence<?'
       const rows = this.db.prepare(`WITH selected AS (
         SELECT DISTINCT event_sequence FROM message_event_positions${index}
-          WHERE participant_id=? AND event_sequence>? AND event_sequence<=?${before}${scope}
+          WHERE participant_id=? AND event_sequence>? AND event_sequence<=?${before}${scope}${qualify('message_event_positions.message_id')}
           ORDER BY event_sequence ${backward ? 'DESC' : 'ASC'} LIMIT ?)
       SELECT event.sequence, json_extract(event.json, '$.kind') AS kind,
         COALESCE(json_extract(event.json, '$.at'), json_extract(event.json, '$.envelope.createdAt')) AS at,
@@ -1661,6 +1682,8 @@ export class DurableAgentMuxMessageQueue {
         json_extract(event.json, '$.eventKind') AS event_kind,
         (SELECT json_group_array(json_object('messageId', m.message_id,
           'senderSessionId', json_extract(original.json, '$.envelope.senderSessionId'),
+          'senderRuntimeId', json_extract(original.json, '$.envelope.senderRuntimeId'),
+          'recipientRuntimeId', json_extract(original.json, '$.envelope.recipientRuntimeId'),
           'recipientSessionId', json_extract(original.json, '$.envelope.recipientSessionId'),
           'threadId', json_extract(original.json, '$.envelope.threadId'), 'replyTo', json_extract(original.json, '$.envelope.replyTo'),
           'broadcast', CASE WHEN batch.original_sequence IS NULL THEN NULL ELSE json_object('operationId', batch.operation_id, 'sequence', batch.original_sequence) END))
@@ -1668,16 +1691,14 @@ export class DurableAgentMuxMessageQueue {
           JOIN records original ON original.sequence=m.message_sequence
           LEFT JOIN message_broadcast_targets target ON target.message_id=m.message_id
           LEFT JOIN message_broadcasts batch ON batch.operation_id=target.operation_id
-          WHERE position.participant_id=? AND position.event_sequence=event.sequence${referenceScope}) AS references_json
+          WHERE position.participant_id=? AND position.event_sequence=event.sequence${referenceScope}${qualify('position.message_id')}) AS references_json
       FROM selected JOIN records event ON event.sequence=selected.event_sequence ORDER BY event.sequence ${backward ? 'DESC' : 'ASC'}`)
-        .all(participant, after, through, ...(input.beforeSequence === undefined ? [] : [input.beforeSequence]), ...scopeArgs, limit + 1, participant, ...scopeArgs)
+        .all(participant, after, through, ...(input.beforeSequence === undefined ? [] : [input.beforeSequence]), ...scopeArgs, ...authorityArgs, limit + 1, participant, ...scopeArgs, ...authorityArgs)
       const selected = rows.slice(0, limit)
       if (backward) selected.reverse()
       const events = selected.map(row => ({ sequence: Number(row.sequence), kind: row.kind, at: row.at === null ? null : Number(row.at),
         messages: (JSON.parse(String(row.references_json)) as Array<import('./agent-message-events.js').AgentMuxMessageEventReference & { broadcast: unknown }>).map(ref => {
-          if (ref.broadcast !== null) return ref
-          const { broadcast: _absent, ...original } = ref
-          return original
+          return Object.fromEntries(Object.entries(ref).filter(([key, value]) => value !== null || !['broadcast', 'senderRuntimeId', 'recipientRuntimeId'].includes(key))) as import('./agent-message-events.js').AgentMuxMessageEventReference
         }),
         ...(row.notification_id === null ? {} : { notificationId: String(row.notification_id) }),
         ...(row.state === null ? {} : { state: String(row.state) }), ...(row.reason === null ? {} : { reason: String(row.reason) }),
@@ -1838,10 +1859,11 @@ export class DurableAgentMuxMessageQueue {
     const pending = [dispatch.sourceMessageId], seen = new Set(pending)
     const replies: DurableAgentMuxMessage[] = []
     for (let index = 0; index < pending.length; index++) {
-      for (const [sender, recipient] of [[dispatch.ownerAgentSessionId, dispatch.workerAgentSessionId],
-        [dispatch.workerAgentSessionId, dispatch.ownerAgentSessionId]]) {
+      for (const [sender, recipient, senderRuntime, recipientRuntime] of [[dispatch.ownerAgentSessionId, dispatch.workerAgentSessionId, dispatch.ownerRuntimeId, dispatch.workerRuntimeId],
+        [dispatch.workerAgentSessionId, dispatch.ownerAgentSessionId, dispatch.workerRuntimeId, dispatch.ownerRuntimeId]]) {
         for (const row of select.all(pending[index]!, dispatch.threadId, sender!, recipient!)) {
           const original = JSON.parse(String(row.json)) as JournalMessage
+          if (senderRuntime !== undefined && original.envelope.senderRuntimeId !== senderRuntime || recipientRuntime !== undefined && original.envelope.recipientRuntimeId !== recipientRuntime) continue
           const id = original.envelope.messageId
           if (seen.has(id)) continue
           // Admission facts can supply an originally unresolved recipient Run;
@@ -1853,6 +1875,15 @@ export class DurableAgentMuxMessageQueue {
       }
     }
     return replies.sort((left, right) => left.sequence - right.sequence)
+  }
+
+  /** Exact signed thread export uses the existing reply index without a second queue. */
+  async readFederatedThread(sourceMessageId: string): Promise<{ source: DurableAgentMuxMessage; replies: readonly DurableAgentMuxMessage[] }> {
+    return this.withLock(async () => {
+      const source = this.message(nonEmpty(sourceMessageId, 'Original source message'))
+      if (!source?.provenance) throw new AgentMuxError('The original signed source is unavailable. Keep its identity.', 'MESSAGE_NOT_FOUND')
+      return structuredClone({ source, replies: this.dispatchReplies(openDispatch(source.envelope, source.envelope.createdAt)) })
+    })
   }
 
   /** No cursor or consumption mutation. Only the original participants may use Agent authority. */
@@ -1876,7 +1907,7 @@ export class DurableAgentMuxMessageQueue {
 
   async listDispatches(
     input: { readonly participantSessionId: string; readonly afterSourceMessageId?: string; readonly limit?: number },
-    reauthorize: () => Promise<void>
+    reauthorize: () => Promise<void>, participantRuntimeId?: string
   ): Promise<DispatchPage> {
     const participantSessionId = nonEmpty(input.participantSessionId, 'Dispatch participant Session id')
     const limit = input.limit ?? 50
@@ -1890,7 +1921,7 @@ export class DurableAgentMuxMessageQueue {
       let after = 0
       if (input.afterSourceMessageId !== undefined) {
         const cursor = this.dispatchProjection(input.afterSourceMessageId).dispatch
-        if (cursor.ownerAgentSessionId !== participantSessionId && cursor.workerAgentSessionId !== participantSessionId) throw new AgentMuxError(
+        if (!(cursor.ownerAgentSessionId === participantSessionId && (participantRuntimeId === undefined || cursor.ownerRuntimeId === undefined || cursor.ownerRuntimeId === participantRuntimeId) || cursor.workerAgentSessionId === participantSessionId && (participantRuntimeId === undefined || cursor.workerRuntimeId === undefined || cursor.workerRuntimeId === participantRuntimeId))) throw new AgentMuxError(
           'The original page cursor belongs to another participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
         after = Number(this.db.prepare('SELECT open_sequence FROM dispatches WHERE source_message_id=?').get(cursor.sourceMessageId)!.open_sequence)
       }
@@ -1898,13 +1929,13 @@ export class DurableAgentMuxMessageQueue {
       // or discovering unrelated Sessions. UNION also removes self-directed duplicates.
       const sources = this.db.prepare(`SELECT d.source_message_id, d.open_sequence FROM (
         SELECT sequence FROM records INDEXED BY message_sender
-          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.senderSessionId') = ?
+          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.senderSessionId') = ? ${participantRuntimeId === undefined ? '' : "AND (json_extract(json, '$.envelope.senderRuntimeId') IS NULL OR json_extract(json, '$.envelope.senderRuntimeId')=?)"}
         UNION
         SELECT sequence FROM records INDEXED BY message_recipient
-          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.recipientSessionId') = ?
+          WHERE json_extract(json, '$.kind') = 'message' AND json_extract(json, '$.envelope.recipientSessionId') = ? ${participantRuntimeId === undefined ? '' : "AND (json_extract(json, '$.envelope.recipientRuntimeId') IS NULL OR json_extract(json, '$.envelope.recipientRuntimeId')=?)"}
       ) original JOIN messages m ON m.message_sequence=original.sequence
         JOIN dispatches d ON d.source_message_id=m.message_id
-        WHERE d.open_sequence > ? ORDER BY d.open_sequence LIMIT ?`).all(participantSessionId, participantSessionId, after, limit + 1)
+        WHERE d.open_sequence > ? ORDER BY d.open_sequence LIMIT ?`).all(participantSessionId, ...(participantRuntimeId === undefined ? [] : [participantRuntimeId]), participantSessionId, ...(participantRuntimeId === undefined ? [] : [participantRuntimeId]), after, limit + 1)
       const page = sources.slice(0, limit).map(row => this.dispatchProjection(String(row.source_message_id)).dispatch)
       return structuredClone({ participantSessionId, dispatches: page,
         nextSourceMessageId: sources.length > limit ? page.at(-1)!.sourceMessageId : null })
@@ -1915,7 +1946,7 @@ export class DurableAgentMuxMessageQueue {
     const key = message.envelope.recipientSessionId && message.envelope.recipientRunId
       ? { kind: 'message' as const, agentSessionId: message.envelope.recipientSessionId,
         expectedRun: { runId: message.envelope.recipientRunId }, messageId: message.envelope.messageId } : undefined
-    const input = key ? this.input(key) : undefined
+    const input = key && message.deliveryMode !== 'outbox' ? this.input(key) : undefined
     return {
       queueId: this.queueId,
       receiptId: `${this.queueId}:${message.sequence}:${message.envelope.messageId}`,
@@ -1923,7 +1954,8 @@ export class DurableAgentMuxMessageQueue {
       sequence: message.sequence,
       envelope: structuredClone(message.envelope),
       delivery: { ...message.delivery },
-      ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode, notification: structuredClone(message.notification!) }),
+      ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode, ...(message.notification ? { notification: structuredClone(message.notification) } : {}) }),
+      ...(message.provenance ? { provenance: structuredClone(message.provenance), transport: message.transport } : {}),
       ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
       ...(message.admissionIntent === undefined ? {} : { admissionIntent: structuredClone(message.admissionIntent) }),
       ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),
@@ -1933,7 +1965,7 @@ export class DurableAgentMuxMessageQueue {
   }
 }
 
-export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath(), newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment'] }): Promise<AgentMuxMessageReceipt> {
+export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath(), newMessage?: { deliveryMode?: 'reference' | 'outbox'; provenance?: AgentMuxMessageProvenance; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment'] }): Promise<AgentMuxMessageReceipt> {
   return await new DurableAgentMuxMessageQueue(path).append(input, newMessage)
 }
 

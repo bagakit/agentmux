@@ -10,7 +10,7 @@ export type AgentMuxMessageReadView = DurableAgentMuxMessage & {
 
 /** Exact input key from immutable original message facts; no current Session or Run lookup. */
 export function originalMessageInputKey(message: DurableAgentMuxMessage): Extract<import('./agent-prompt-condition.js').AgentPromptInputKey, { kind: 'message' }> | null {
-  if (message.deliveryMode === 'reference') return null
+  if (message.deliveryMode === 'reference' || message.deliveryMode === 'outbox') return null
   const envelope = message.envelope
   const runs = [envelope.recipientRunId, message.admissionIntent?.kind === 'exact-condition'
     ? message.admissionIntent.condition.expectedRun.runId : message.admissionIntent?.expectedRun.runId, message.promptCondition?.expectedRun.runId].filter((id): id is string => Boolean(id))
@@ -60,7 +60,7 @@ export type AgentMuxMessageQuery = {
 /** Bounded original-body prefix, never a separate full-body field or reconstructed wire. */
 export type AgentMuxMessageMetadata = {
   sequence: number
-  deliveryMode?: 'reference'
+  deliveryMode?: 'reference' | 'outbox'
   notification?: import('./agent-message-notification.js').AgentMuxMessageNotificationStatus
   envelope: Omit<AgentMuxMessageEnvelope, 'body'>
   delivery: AgentMuxMessageDeliveryState

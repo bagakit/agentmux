@@ -14,6 +14,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
+  'agentMessageAuthority', 'listTrustedMessageSources', 'trustMessageSource', 'prepareFederatedMessage', 'intakeFederatedMessage', 'prepareFederatedRead', 'exportFederatedThread',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
   'recordExternalConversationMessage', 'readAgentMessageQueuePath', 'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'inspectAgentExecutionOperation', 'prepareAgentExecutionHelper', 'prepareTerminal', 'createPreparedTerminal', 'inspectPreparedTerminal', 'terminalCreationRuntimeIdentity', 'retirePreparedTerminalCreation', 'observePreparedTerminalCreationRetirement', 'prepareTerminalStop', 'stopPreparedTerminal', 'createTerminal', 'recoverTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
@@ -65,6 +66,8 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   attestAgentCreation: 'owner',
   listTrustedCreationSources: 'session-observation',
   trustCreationSource: 'owner',
+  agentMessageAuthority: 'owner', listTrustedMessageSources: 'owner', trustMessageSource: 'owner',
+  prepareFederatedMessage: 'owner', intakeFederatedMessage: 'owner', prepareFederatedRead: 'owner', exportFederatedThread: 'owner',
   listRuns: 'runtime',
   runtimeProjection: 'runtime',
   runtimeSubject: 'runtime',
@@ -162,8 +165,8 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   listDispatches: 'owner',
 } as const satisfies Record<AgentMuxHostedMethod, AgentMuxHostedPreparation>
 
-type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
-  ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
+type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource' | 'trustMessageSource'
+  ? [input: Parameters<AgentMuxClient[M]>[0]]
   : M extends 'writeTerminal' | 'writeTerminalBytes' ? [ref: Parameters<AgentMuxClient[M]>[0], input: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
   : M extends 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>

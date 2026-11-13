@@ -234,16 +234,17 @@ export class AgentMuxHostedRuntimeService {
     if (typeof input.method !== 'string' || !(AGENTMUX_HOSTED_METHODS as readonly string[]).includes(input.method) || !Array.isArray(input.args) || input.args.length > 12) {
       throw new AgentMuxError('The method is outside the finite SDK surface.', 'INVALID_CONTROL_REQUEST')
     }
-    if (input.method === 'trustCreationSource') {
+    if (input.method === 'trustCreationSource' || input.method === 'trustMessageSource') {
       if (input.args.length !== 1 || context.caller !== undefined || context.principal?.kind !== 'user') {
         throw new AgentMuxError('Creation-source trust requires one input and a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
       }
       const trust = parseAgentMuxCreationTrustInput(record(input.args[0], ['sourceRuntimeId', 'publicKey', 'targetRuntimeId', 'targetKeyFingerprint']))
       context.signal?.throwIfAborted()
-      return { value: encodeHostedValue(await this.client.trustCreationSource(trust,
+      return { value: encodeHostedValue(await this.client[input.method](trust,
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'prepareFederatedRead' && !invocation.args[0]?.caller && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Host thread reading requires its trusted original Host reader. Managed Agents retain their own participant authority.', 'CONTROL_PERMISSION_DENIED')
     if (invocation.method === 'hostEnvironment' && invocation.args.length !== 0)
       throw new AgentMuxError('Host environment reads take no arguments.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'continueAgentCreation') {

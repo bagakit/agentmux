@@ -4,6 +4,7 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/pro
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
+import { parseMessageProvenance, parseMessageReadAuthority, type AgentMuxMessageParticipant, type AgentMuxMessageProvenance, type AgentMuxMessageReadAuthority, type AgentMuxMessageTrust } from './agent-message-federation.js'
 import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput,
   type AgentMuxCreationAdmission, type AgentMuxCreationAuthorityIdentity, type AgentMuxCreationOrigin,
   type AgentMuxCreationSource, type AgentMuxCreationTarget, type AgentMuxCreationTrust, type AgentMuxCreationTrustInput, type AgentMuxCreationUserPrincipal } from './agent-creation-admission.js'
@@ -69,10 +70,12 @@ async function publishFirst(path: string, value: unknown): Promise<void> {
 export class AgentMuxCreationAuthority {
   private readonly identityPath: string
   private readonly trustDirectory: string
+  private readonly messageTrustDirectory: string
   private readonly runtimeId: string
   constructor(options: { stateDirectory: string; runtimeId: string }) {
     this.identityPath = join(options.stateDirectory, 'agent-creation-identity.json')
     this.trustDirectory = join(options.stateDirectory, 'agent-creation-trusted-sources')
+    this.messageTrustDirectory = join(options.stateDirectory, 'agent-message-trusted-sources')
     this.runtimeId = options.runtimeId
     if (!options.runtimeId || options.runtimeId.length > 256 || options.runtimeId.trim() !== options.runtimeId || /[\u0000-\u001f\u007f]/u.test(options.runtimeId)) {
       failure('Agent creation authority needs its original Runtime identity.', 'AGENT_CREATION_AUTHORITY_INVALID')
@@ -140,6 +143,64 @@ export class AgentMuxCreationAuthority {
     let names: string[]
     try { names = await readdir(this.trustDirectory) } catch (error) { if (absent(error)) return []; throw error }
     return await Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.readTrust(join(this.trustDirectory, name))))
+  }
+  private messageTrustPath(sourceRuntimeId: string): string { return join(this.messageTrustDirectory, hash(sourceRuntimeId) + '.json') }
+  private async readMessageTrust(path: string): Promise<AgentMuxMessageTrust> {
+    try {
+      const raw = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+      if (raw.purpose !== 'agent-message') throw new Error('Wrong authority purpose')
+      const { purpose: _, ...fields } = raw
+      const trust = parseAgentMuxCreationTrust(fields), pub = publicKey(trust.publicKey)
+      if (trust.targetRuntimeId !== this.runtimeId || trust.fingerprint !== pub.fingerprint || path !== this.messageTrustPath(trust.sourceRuntimeId)) throw new Error('Wrong message trust scope')
+      return { ...trust, purpose: 'agent-message' }
+    } catch (error) {
+      if (absent(error)) throw error
+      return failure('The original message source pin cannot be verified. Its file is retained.', 'AGENT_MESSAGE_TRUST_INVALID', error)
+    }
+  }
+  async trustMessageSource(value: AgentMuxCreationTrustInput, principal: AgentMuxCreationUserPrincipal): Promise<AgentMuxMessageTrust> {
+    if (!principal || principal.kind !== 'user') failure('Only the authenticated user can pin a message source.', 'AGENT_MESSAGE_TRUST_PERMISSION_REQUIRED')
+    const input = parseAgentMuxCreationTrustInput(value), pub = publicKey(input.publicKey), target = await this.identity()
+    if (input.targetRuntimeId !== target.runtimeId || input.targetKeyFingerprint !== target.fingerprint) failure('The target message authority changed since approval. Inspect its exact identity.', 'AGENT_MESSAGE_TARGET_MISMATCH')
+    const requested: AgentMuxMessageTrust = { ...parseAgentMuxCreationTrust({ sourceRuntimeId: input.sourceRuntimeId, publicKey: pub.encoded,
+      fingerprint: pub.fingerprint, targetRuntimeId: this.runtimeId, registeredAt: Date.now(), registeredBy: principal }), purpose: 'agent-message' }
+    const path = this.messageTrustPath(requested.sourceRuntimeId)
+    let retained: AgentMuxMessageTrust
+    try { retained = await this.readMessageTrust(path) }
+    catch (error) { if (!absent(error)) throw error; await publishFirst(path, requested); retained = await this.readMessageTrust(path) }
+    if (retained.publicKey !== requested.publicKey) failure('This message source already has another pinned key. The original pin is retained.', 'AGENT_MESSAGE_SOURCE_KEY_CONFLICT')
+    return retained
+  }
+  async listTrustedMessageSources(): Promise<AgentMuxMessageTrust[]> {
+    let names: string[]
+    try { names = await readdir(this.messageTrustDirectory) } catch (error) { if (absent(error)) return []; throw error }
+    return Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.readMessageTrust(join(this.messageTrustDirectory, name))))
+  }
+  async attestMessage(source: Omit<AgentMuxMessageParticipant, 'runtimeId'>, target: AgentMuxMessageParticipant, intentDigest: string, targetKeyFingerprint: string): Promise<AgentMuxMessageProvenance> {
+    const { identity, privateKey } = await this.loadIdentity()
+    const { signature: _, ...payload } = parseMessageProvenance({ schema: 'agentmux.agent-message-admission.v1', purpose: 'agent-message',
+      source: { runtimeId: identity.runtimeId, ...source }, target, sourceKeyFingerprint: identity.fingerprint, targetKeyFingerprint, intentDigest, signature: 'A'.repeat(86) })
+    return { ...payload, signature: sign(null, Buffer.from(JSON.stringify(payload)), privateKey).toString('base64url') }
+  }
+  async attestMessageRead(source: Omit<AgentMuxMessageParticipant, 'runtimeId'>, targetRuntimeId: string, sourceMessageId: string, sourceIntentDigest: string,
+    reader: AgentMuxMessageReadAuthority['reader'], targetKeyFingerprint: string): Promise<AgentMuxMessageReadAuthority> {
+    const { identity, privateKey } = await this.loadIdentity()
+    const { signature: _, ...payload } = parseMessageReadAuthority({ schema: 'agentmux.agent-message-read.v1', purpose: 'agent-message',
+      source: { runtimeId: identity.runtimeId, ...source }, reader, sourceKeyFingerprint: identity.fingerprint, targetKeyFingerprint, targetRuntimeId, sourceMessageId, sourceIntentDigest, signature: 'A'.repeat(86) })
+    return { ...payload, signature: sign(null, Buffer.from(JSON.stringify(payload)), privateKey).toString('base64url') }
+  }
+  async verifyMessageProof(value: AgentMuxMessageProvenance | AgentMuxMessageReadAuthority): Promise<AgentMuxMessageTrust> {
+    const proof = value.schema === 'agentmux.agent-message-admission.v1' ? parseMessageProvenance(value) : parseMessageReadAuthority(value)
+    const targetRuntimeId = proof.schema === 'agentmux.agent-message-admission.v1' ? proof.target.runtimeId : proof.targetRuntimeId
+    const identity = await this.identity()
+    if (targetRuntimeId !== this.runtimeId || proof.targetKeyFingerprint !== identity.fingerprint) failure('This signed message belongs to another target Runtime or key. Original records are retained.', 'AGENT_MESSAGE_TARGET_MISMATCH')
+    let trust: AgentMuxMessageTrust
+    try { trust = await this.readMessageTrust(this.messageTrustPath(proof.source.runtimeId)) }
+    catch (error) { if (absent(error)) failure('This message source has not been explicitly trusted by the target user. Keep the original operation and approve its exact source.', 'AGENT_MESSAGE_SOURCE_UNTRUSTED'); throw error }
+    if (proof.sourceKeyFingerprint !== trust.fingerprint) failure('The signed message source key differs from the original approved pin.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
+    const { signature, ...payload } = proof, bytes = Buffer.from(signature, 'base64url')
+    if (bytes.toString('base64url') !== signature || !verify(null, Buffer.from(JSON.stringify(payload)), publicKey(trust.publicKey).key, bytes)) failure('The original message source signature is invalid.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
+    return trust
   }
   /** The caller's Core must authenticate source Session/Run before invoking this signing primitive. */
   async attest(source: Omit<AgentMuxCreationSource, 'runtimeId'>, target: AgentMuxCreationTarget): Promise<AgentMuxCreationAdmission> {

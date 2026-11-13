@@ -1,3 +1,4 @@
+import type { AgentMuxMessageTrust, AgentMuxMessageTrustInput } from './agent-message-federation.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { parseHostRuntimeObservation, type HostRuntimeObservation } from './host-runtime-observation.js'
@@ -18,6 +19,8 @@ export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.executors.discover': 'long',
   'settings.executors.register': 'long',
   'settings.hosts.trusted-sources': 'long',
+  'settings.hosts.message-trusted-sources': 'long',
+  'settings.hosts.trust-message-source': 'long',
   'settings.hosts.trust-source': 'long'
 } as const
 export type HostSettingsMethod = keyof typeof AGENTMUX_RPC_HOST_SETTINGS_METHODS
@@ -29,6 +32,8 @@ export type HostSettingsParameterMap = {
   'settings.executors.register': { hostId: string; executorId: string; input: Omit<AgentMuxHostExecutorConfigureInput, 'executorId'> }
   'settings.hosts.trusted-sources': { hostId: string }
   'settings.hosts.trust-source': { hostId: string; input: AgentMuxCreationTrustInput }
+  'settings.hosts.message-trusted-sources': { hostId: string }
+  'settings.hosts.trust-message-source': { hostId: string; input: AgentMuxMessageTrustInput }
 }
 export type HostSettingsResultMap = {
   'settings.hosts.home': AgentMuxHostEnvironment & { routeHostId: string }
@@ -38,6 +43,8 @@ export type HostSettingsResultMap = {
   'settings.executors.register': AgentMuxHostExecutorConfiguration & { routeHostId: string }
   'settings.hosts.trusted-sources': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; sources: AgentMuxCreationTrust[] }
   'settings.hosts.trust-source': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; source: AgentMuxCreationTrust }
+  'settings.hosts.message-trusted-sources': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; sources: AgentMuxMessageTrust[] }
+  'settings.hosts.trust-message-source': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; source: AgentMuxMessageTrust }
 }
 export function isHostSettingsMethod(method: unknown): method is HostSettingsMethod {
   return typeof method === 'string' && Object.hasOwn(AGENTMUX_RPC_HOST_SETTINGS_METHODS, method)
@@ -60,9 +67,9 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
       config: input.config, ...(input.expectedRevision === undefined ? {} : { expectedRevision: rpcString(input.expectedRevision, 'Executor revision') })
     } } as HostSettingsParameterMap[M]
   }
-  const p = rpcRecord(value, method === 'settings.hosts.trust-source' ? ['hostId', 'input'] : ['hostId'])
+  const p = rpcRecord(value, (method === 'settings.hosts.trust-source' || method === 'settings.hosts.trust-message-source') ? ['hostId', 'input'] : ['hostId'])
   const hostId = rpcString(p.hostId, 'Route Host ID')
-  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.trusted-sources') return { hostId } as HostSettingsParameterMap[M]
+  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.trusted-sources' || method === 'settings.hosts.message-trusted-sources') return { hostId } as HostSettingsParameterMap[M]
   return { hostId, input: parseAgentMuxCreationTrustInput(p.input) } as HostSettingsParameterMap[M]
 }
 export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M, value: unknown,
@@ -110,7 +117,7 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     if (executor.executorId !== (input as HostSettingsParameterMap['settings.executors.register']).executorId) fail()
     return { routeHostId: input.hostId, runtimeId: p.runtimeId, executor } as HostSettingsResultMap[M]
   }
-  const p = rpcRecord(value, method === 'settings.hosts.trust-source'
+  const p = rpcRecord(value, (method === 'settings.hosts.trust-source' || method === 'settings.hosts.trust-message-source')
     ? ['routeHostId', 'authority', 'source'] : ['routeHostId', 'authority', 'sources'], 'CONTROL_PROTOCOL_ERROR')
   if (p.routeHostId !== input.hostId) fail()
   const authority = rpcRecord(p.authority, ['runtimeId', 'publicKey', 'fingerprint'], 'CONTROL_PROTOCOL_ERROR')
@@ -118,11 +125,15 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     if (typeof authority[key] !== 'string' || !authority[key] || /[\0\r\n]/u.test(authority[key])) fail()
   }
   const source = (value: unknown) => {
-    const parsed = parseAgentMuxCreationTrust(value)
+    const messagePurpose = method === 'settings.hosts.message-trusted-sources' || method === 'settings.hosts.trust-message-source'
+    const raw = value as Record<string, unknown>
+    if (messagePurpose && raw?.purpose !== 'agent-message') fail()
+    const { purpose: _, ...fields } = messagePurpose ? raw : {}
+    const parsed = parseAgentMuxCreationTrust(messagePurpose ? fields : value)
     if (parsed.targetRuntimeId !== authority.runtimeId) fail()
-    return parsed
+    return messagePurpose ? { ...parsed, purpose: 'agent-message' as const } : parsed
   }
-  if (method === 'settings.hosts.trusted-sources') {
+  if (method === 'settings.hosts.trusted-sources' || method === 'settings.hosts.message-trusted-sources') {
     if (!Array.isArray(p.sources)) fail()
     const sources = (p.sources as unknown[]).map(source)
     if (new Set(sources.map(item => item.sourceRuntimeId)).size !== sources.length) fail()
