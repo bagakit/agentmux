@@ -173,7 +173,7 @@ describe('BrowserOperationStatus', () => {
     }))
     expect(markup.includes('aria-label="在右侧创建 Agent"')).toBe(agent === null)
     expect(markup).not.toContain('aria-label="Return to Agent"')
-    if (agent === null) expect(markup).toContain('data-semantic-icon="action.create-agent"')
+    if (agent === null) expect(markup).toContain('data-semantic-icon="object.agent"')
   })
 
   it('disables the original create action while its actual request is pending', () => {

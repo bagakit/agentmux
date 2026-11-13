@@ -59,11 +59,11 @@ describe('creating an Agent for a Browser with an old request', () => {
     return executeControl
   }
 
-  it('starts a new Agent only when Core confirms the old request is gone and Main confirms no association', async () => {
+  it('does not treat a missing local binding as proof that the original Core creation never happened', async () => {
     const executeControl = seed(null, { known: false, report: null })
-    // Past the old request, the new-Agent path needs a Workspace; reaching that check proves the request was left behind.
-    await expect(createBrowserAgent('browser', source)).rejects.toThrow('Workspace')
+    await expect(createBrowserAgent('browser', source)).rejects.toThrow('original Agent request finished-request')
     expect(executeControl.mock.calls.map(call => (call[0] as { operation: string }).operation)).toEqual(['space.inspect'])
+    expect((useAppStore.getState().tabs.tab?.regions.region as BrowserWorkbenchSurface).agentCreationRequestId).toBe('finished-request')
   })
 
   for (const [name, association, request] of [

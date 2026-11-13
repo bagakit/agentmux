@@ -239,7 +239,7 @@ describe('Browser operation status in existing controls', () => {
       [attribute.name.getText(source), attribute.initializer && ts.isJsxExpression(attribute.initializer) ? attribute.initializer.expression?.getText(source) : undefined]))
     expect(props).toMatchObject({ activity: 'browserActivity', control: 'tab.control', browserId: 'tab.browserId',
       onTakeControl: '() => void takeBrowserControl()', onStop: '() => void stopBrowserOperation()',
-      onReturnControl: '() => void run(() => api.browser.returnControl(tab.browserId))' })
+      onReturnControl: '() => void handoffBrowser(presentation?.target ?? primaryPresentation)' })
     let ancestor: ts.Node | undefined = status[0]!.parent
     while (ancestor && !(ts.isJsxElement(ancestor) && ancestor.openingElement.tagName.getText(source) === 'form')) ancestor = ancestor.parent
     expect(ancestor).toBeDefined()
@@ -255,22 +255,29 @@ describe('Browser operation status in existing controls', () => {
   })
 
   it('forwards typed control and distinct trusted handoff/Stop actions through the actual BrowserPane wrapper', async () => {
-    const [{ BrowserPane }, { createClientUiRoot }, { api }, { useAppStore }] = await Promise.all([
+    const [{ BrowserPane }, { createClientUiRoot }, { api }, { useAppStore }, { WorkbenchPresentationContext }, { createWorkbenchTab }] = await Promise.all([
       import('../src/renderer/src/components/BrowserPane'), import('./helpers/client-ui-render'),
-      import('../src/renderer/src/lib/api'), import('../src/renderer/src/store')
+      import('../src/renderer/src/lib/api'), import('../src/renderer/src/store'), import('../src/renderer/src/lib/workbench-presentation'),
+      import('../src/renderer/src/lib/workbench-tabs')
     ])
     const previous = useAppStore.getState(), host = document.createElement('div')
     document.body.append(host)
     const root = createClientUiRoot(host), execute = vi.fn().mockResolvedValue(undefined)
     const page = await api.browser.create('density-browser', 'https://example.test/density', 'density-workspace')
     const take = vi.spyOn(api.browser, 'takeControl').mockResolvedValue(page)
-    const resume = vi.spyOn(api.browser, 'returnControl').mockResolvedValue(page)
+    const resume = vi.spyOn(api.browser, 'returnControl').mockResolvedValue({ ...page, control: { ...currentControl('agent'), revision: 4 } })
     vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
     vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
     useAppStore.setState({ toolsOpen: false, sessions: [], executeControl: execute })
     const active = { ...operation, browserId: page.id }, activity: BrowserActivityState = { operation: active, control: 'human' }
-    const render = async (control: AgentMuxBrowserControl, nextActivity = activity) => await act(async () => root.render(<BrowserPane
-      tab={{ ...page, kind: 'browser', browserId: page.id, regionId: 'density-region', workspaceId: 'density-workspace', control, activity: nextActivity }} visible />))
+    const reference = { displayWorkspaceId: 'density-workspace', groupId: 'density-group', tabId: 'density-tab', regionId: 'density-region' }
+    const render = async (control: AgentMuxBrowserControl, nextActivity = activity) => {
+      const surface = { ...page, kind: 'browser' as const, browserId: page.id, regionId: 'density-region', workspaceId: 'density-workspace', control, activity: nextActivity }
+      useAppStore.setState({ tabs: { 'density-tab': createWorkbenchTab('density-tab', surface) } })
+      await act(async () => root.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference }}>
+        <BrowserPane tab={surface} visible />
+      </WorkbenchPresentationContext.Provider>))
+    }
     try {
       await render(currentControl('agent', active.id))
       const status = host.querySelector('.browser-operation-status')!
@@ -292,7 +299,8 @@ describe('Browser operation status in existing controls', () => {
       const returned = host.querySelector<HTMLButtonElement>('[aria-label="Return to Agent"]')!
       expect(returned).not.toBeNull()
       await act(async () => returned.click())
-      expect(resume).toHaveBeenCalledExactlyOnceWith(page.id)
+      expect(resume).toHaveBeenCalledExactlyOnceWith(page.id, { navigationId: page.navigationId, expectedRevision: 3,
+        expectedAgent: { hostId: 'local', agentSessionId: operation.operator.id } })
       expect(execute).toHaveBeenCalledTimes(1); expect(take).toHaveBeenCalledTimes(1)
     } finally {
       await act(async () => root.unmount()); host.remove()

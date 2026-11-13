@@ -12,6 +12,7 @@ export default defineConfig({ ...currentSources, test: { ...currentSources.test,
     'apps/desktop/test/browser-operation-feedback.test.ts',
     'apps/desktop/test/browser-page-action-feedback.test.ts',
     'apps/desktop/test/browser-contextual-queue.test.ts',
+    'apps/desktop/test/browser-contextual-composer.test.tsx',
     'apps/desktop/test/browser-operation-state-density.test.tsx',
     'apps/desktop/test/browser-operation-surface.test.tsx',
     'apps/desktop/test/browser-agent-release-renderer.test.ts'

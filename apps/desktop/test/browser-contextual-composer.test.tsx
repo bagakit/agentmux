@@ -19,8 +19,8 @@ const scene: BrowserInputScene = { reference: { hostId: 'local', captureId: 'ori
   inputContext: { kind: 'browser', version: 1, capturedAt: _batchFixtureEpoch(0, 0, 1), browser: { hostId: 'local', browserId: 'browser-original', navigationId: 'navigation-original' },
     page: { url: operation.url, title: 'Original page' }, activity: { operationId: operation.id, stepSequence: 2, phase: 'running', observedAt: _batchFixtureEpoch(0, 0, 1) } } }
 const originalAgent = { hostId: 'local', agentSessionId: 'agent-1' }
-function Harness({ current = operation, agent = originalAgent, visible = true, comment }: { current?: BrowserOperation | null; agent?: AgentMuxBrowserControl['agent']; visible?: boolean; comment?: { operationId: string; sequence: number } }) {
-  const opinion = useBrowserContextualComposer('browser-original', agent, current, visible)
+function Harness({ current = operation, agent = originalAgent, visible = true, comment, inspect }: { current?: BrowserOperation | null; agent?: AgentMuxBrowserControl['agent']; visible?: boolean; comment?: { operationId: string; sequence: number }; inspect?: () => void }) {
+  const opinion = useBrowserContextualComposer('browser-original', agent, current, visible, undefined, inspect)
   return <><button ref={opinion.buttonRef} onClick={event => opinion.open(event.currentTarget, comment)}>Discuss</button>{opinion.dialog}</>
 }
 const editor = () => document.querySelector<HTMLTextAreaElement>('[aria-label="Opinion for Browser operator"]')!
@@ -45,6 +45,27 @@ beforeEach(() => {
       prompt: input.prompt, ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }), inputContext: scene.inputContext })
     return { reference: record.reference, record, diskDurability: 'confirmed' }
   })
+})
+
+it('keeps an unaddressed message and provides an explicit control-selection action without choosing or sending', async () => {
+  const inspect = vi.fn()
+  await dom.render(<Harness current={null} agent={null} inspect={inspect} />); await button('Discuss'); await type('Save these words before choosing an Agent')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Choose or create a collaborator before sending')
+  expect(document.querySelector<HTMLButtonElement>('.browser-contextual-composer .primary-button')!.disabled).toBe(true)
+  await button('View Agent controls')
+  expect(inspect).toHaveBeenCalledOnce(); expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(useAppStore.getState().browserOpinionDrafts['browser-original']?.text).toBe('Save these words before choosing an Agent')
+  expect(api.browser.captureInputContext).not.toHaveBeenCalled(); expect(Object.keys(useAppStore.getState().agentSteerQueues)).toEqual([])
+  await button('Discuss'); expect(editor().value).toBe('Save these words before choosing an Agent')
+})
+
+it('keeps the original addressed opinion usable when the current Browser has no association', async () => {
+  await dom.render(<Harness />); await button('Discuss'); await type('Send to my original collaborator')
+  await dom.render(<Harness current={null} agent={null} inspect={vi.fn()} />)
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Choose or create a collaborator before sending')
+  await button('Queue opinion')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']?.[0]?.text).toBe('Send to my original collaborator')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']?.[0]?.browserRecipient?.agentSessionId).toBe('agent-1')
 })
 
 it('keeps authored text, original recipient and captured scene across live operation changes and close', async () => {
