@@ -110,3 +110,22 @@ it('serves an unchanged skill folder from cache without re-walking, but re-disco
   expect(three.map((skill) => skill.name)).toEqual(['first', 'second'])
   expect(trace.readdirTargets.length).toBeGreaterThan(afterFirstWalk)
 })
+
+it('keeps discovering the user skill root after the project root spends its whole directory budget', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'amx-skill-budget-')); roots.push(root)
+  const workspacePath = join(root, 'project'), home = join(root, 'home')
+  // 2048 empty directories under the project root: on their own they exhaust one root's budget.
+  const projectRoot = join(workspacePath, '.agents/skills')
+  for (let index = 0; index < 2048; index++) await mkdir(join(projectRoot, `empty-${index}`), { recursive: true })
+  const userSkill = join(home, '.agents/skills/review')
+  await mkdir(userSkill, { recursive: true })
+  await writeFile(join(userSkill, 'SKILL.md'), '---\nname: review\ndescription: Review the code\n---\n')
+
+  const skills = await discoverAgentSkills({ catalog: catalogWithRoot('.agents/skills'), workspacePath, home })
+
+  // A noisy project root no longer takes discovery away from the root declared after it.
+  expect(skills.map((skill) => skill.name)).toEqual(['review'])
+  expect(skills[0]!.source).toBe('user')
+  // The project walk itself stays bounded: it opens at most its own budget of directories.
+  expect(trace.readdirTargets.filter((dir) => dir.startsWith(projectRoot)).length).toBeLessThanOrEqual(2048)
+})
