@@ -100,9 +100,11 @@ const pendingImportSchema = z
   })
   .strict()
 
-const viewSchema = z.custom<BrowserProfileView>(value => {
-  try { return JSON.stringify(parseBrowserProfileView(value)) === JSON.stringify(value) } catch { return false }
-}, 'Saved Profile view is not canonical')
+// JSON object key order is not a persistence contract. Parse the same view semantics as public input.
+const viewSchema = z.unknown().transform((value, context): BrowserProfileView => {
+  try { return parseBrowserProfileView(value) }
+  catch { context.addIssue({ code: 'custom', message: 'Saved Profile view is invalid' }); return z.NEVER }
+})
 
 const metadataSchema = z
   .object({
