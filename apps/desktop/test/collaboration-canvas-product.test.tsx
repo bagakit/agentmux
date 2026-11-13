@@ -1681,6 +1681,28 @@ it('keeps region names in their slot and on their territory through a direct ges
   expect(requests).toHaveLength(1)
 })
 
+it('starts no preview or reading for faces swept past during a camera gesture, and previews once it rests', async () => {
+  const scene = scenario(3), [a] = [...scene.agents.values()] as [CollaborationAgent]
+  const peek = vi.fn()
+  await loaded(scene); await revealWorld()
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { onPreviewAgent: peek }))
+  const mark = () => nodeElement(collaborationAgentNode('area-0', a.id))!.querySelector<HTMLButtonElement>('.collaboration-agent__dot, .collaboration-agent__mark')!
+  const [x, y, zoom] = captured.store!.getState().transform, schedule = vi.spyOn(agentInformationPreview, 'schedule')
+  await act(async () => captured.moveStart!(new WheelEvent('wheel'), { x, y, zoom }))
+  peek.mockClear(); schedule.mockClear()
+  // A wheel pan slides the face under a still pointer: no Agent preview, no shared Reader.
+  await act(async () => { mark().closest('.collaboration-agent')!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); mark().dispatchEvent(new PointerEvent('pointerover', { bubbles: true })) })
+  await act(async () => new Promise(resolve => setTimeout(resolve, 700)))
+  expect(peek.mock.calls.filter(([id]) => id !== null)).toEqual([])
+  expect(schedule).not.toHaveBeenCalled(); expect(agentInformationPreview.getAll()).toHaveLength(0)
+  // The camera rests with the pointer still over the face and no new pointer event arrives (the
+  // pointer never moved): the ordinary hover reading follows from the rest alone.
+  const held = mark(), matches = held.matches.bind(held)
+  vi.spyOn(held, 'matches').mockImplementation(selector => selector === ':hover' || matches(selector))
+  await act(async () => captured.moveEnd!(new WheelEvent('wheel'), { x, y, zoom }))
+  await settleCollaborationCanvas(() => expect(schedule).toHaveBeenCalledTimes(1))
+})
+
 it('weights routes by saturated message strength and lets regions outside a selection recede', async () => {
   const scene = scenario(3), [a, b, c] = [...scene.agents.values()] as [CollaborationAgent, CollaborationAgent, CollaborationAgent]
   scene.areas = [{ id: 'near', name: 'Near', kind: 'project', members: [a.id, b.id] }, { id: 'far', name: 'Far', kind: 'project', members: [c.id] }]
