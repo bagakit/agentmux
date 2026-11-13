@@ -1,10 +1,11 @@
 import { Textarea } from '@agentmux/client-ui/input'
-import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
-import { ConnectionLinkCode } from '../toolkit/ConnectionLinkCode'
+import { NetworkChoice, PhoneConnectionCard, PhoneConnectionSteps, DevicePresence } from '../toolkit/PhoneConnectionVisuals'
+import { OpenInSurveyButton } from '../toolkit/ToolkitResultLink'
 import './mobile-settings.css'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -90,34 +91,34 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   if (!active) return null
   const devices = list?.devices.filter(device => device.revokedAt === undefined) ?? []
   return <section className="settings-group device-management" data-device-view="settings">
-    <div className="device-management__connection">
-      <div className="device-management__intro">
-        <span className="device-management__phone"><ThemeObjectPhoneIcon size={28} aria-hidden="true" /></span>
-        <div><h3>Connect your phone</h3><p className="settings-group-note">Keep both devices on the same Wi-Fi. Scan the code with your phone camera, or open the connection link on your phone.</p></div>
+    <div className="device-management__connection phone-connect-hero">
+      <header className="phone-connect-hero__head">
+        <span className="phone-connect-hero__badge"><ThemeObjectPhoneIcon size={22} aria-hidden="true" /></span>
+        <div><h3>Connect your phone</h3><p>Your agents, conversations and terminals, in your pocket. Everything stays encrypted between this Mac and your phone.</p></div>
+      </header>
+      <div className="phone-connect-hero__body">
+        <div className="phone-connect-hero__code">
+          {url ? <PhoneConnectionCard url={url} network={candidates.find(candidate => candidate.address === shown) ?? null} state={busy ? 'updating' : 'current'} />
+            : <button type="button" className="phone-connect-hero__reveal" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>
+              {linkAction === 'scan' ? <ThemeStatusLoadingIcon size={28} animation="spin" /> : <ThemeObjectConnectionCodeIcon size={32} strokeWidth={1.4} />}
+              <strong>{linkAction === 'scan' ? 'Getting code…' : 'Show connection code'}</strong></button>}
+        </div>
+        <div className="phone-connect-hero__side">
+          {!devices.length ? <PhoneConnectionSteps /> : <p className="phone-connect-hero__ready">Scan with any phone to add it. {devices.filter(device => device.online === true).length} of {devices.length} online now.</p>}
+          <NetworkChoice candidates={candidates} value={shown} disabled={busy} onChoose={address => { void link('scan', address) }} />
+          {candidates.length > 1 ? <p className="phone-connect-hero__hint">Pick the network your phone is on.</p> : null}
+          <div className="settings-pane-toolbar device-management__actions">
+            {url ? <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : 'Refresh code'}</button> : null}
+            <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
+            {url ? <OpenInSurveyButton url={url} note="Opens your phone page in Survey on this Mac. It connects as another device." /> : null}
+          </div>
+          {notice && <p className="device-management__feedback" role="status">{notice}</p>}
+          {url && <details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details>}
+        </div>
       </div>
-      <figure className="device-management__relationship" aria-label="Desktop and phone relationship">
-        <div><SemanticIcon name="object.display" size={20} aria-hidden="true" /><span><strong>This desktop</strong><small>Your Agent workspace</small></span></div>
-        <span className="device-management__relationship-link"><ThemeObjectConnectionCodeIcon size={15} aria-hidden="true" /><small>Connection link</small></span>
-        <div><ThemeObjectPhoneIcon size={20} aria-hidden="true" /><span><strong>Your phone</strong><small>Opens the remote view</small></span></div>
-        <figcaption>How it works · Connection status appears under Devices.</figcaption>
-      </figure>
-      <div className="settings-pane-toolbar device-management__actions">
-        <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : url ? <ThemeActionRefreshIcon size={16} /> : <ThemeObjectConnectionCodeIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : url ? 'Refresh code' : 'Scan to connect'}</button>
-        <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
-      </div>
-      {candidates.length > 1 && shown && <label className="settings-compact-field device-management__address">
-        <span>Network</span>
-        <select aria-label="Connection network" value={shown} disabled={busy} onChange={event => { void link('scan', event.target.value) }}>
-          {candidates.map(candidate => <option key={candidate.address} value={candidate.address}>
-            {`${candidate.label ?? candidate.interface} · ${candidate.address}${candidate.preferred ? ' · default' : ''}`}</option>)}
-        </select>
-        <small>Pick the network your phone is on.</small>
-      </label>}
-      {notice && <p className="device-management__feedback" role="status">{notice}</p>}
-      {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
-      <div className="settings-pane-toolbar"><div><h3>Devices</h3><p className="device-management__count">{list ? `${readIssue ? 'Last observed: ' : ''}${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p></div><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
+      <div className="settings-pane-toolbar"><div><h3>Devices</h3><p className="device-management__count">{list ? <>{readIssue ? 'Last observed · ' : ''}<strong className="phone-device-count"><DevicePresence online={devices.some(device => device.online === true) || undefined} />{devices.filter(device => device.online === true).length} online</strong><span> · {devices.length} authorized</span></> : 'Device status not yet confirmed'}</p></div><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
       {observedAt && <p className="device-management__updated">Last checked {new Date(observedAt).toLocaleTimeString()}</p>}
       {list && <div className="device-management__service">
         <span>Connection service{readIssue ? ' · last observed' : ''}</span><strong>{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Starting' : 'Unavailable'}</strong>
@@ -130,7 +131,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       <details className="device-management__records" data-device-records>
         <summary>Device records{list ? ` · ${devices.length} authorized` : ''}</summary>
         {devices.map(device => <details className="device-management__record" data-device-record={device.deviceId} key={device.deviceId}>
-          <summary><ThemeObjectPhoneIcon size={16} aria-hidden="true" /><strong>{device.name}</strong><span>{device.online === true ? 'Connected' : device.online === false ? 'Disconnected' : 'Connection unconfirmed'}</span></summary>
+          <summary><span className="phone-device-avatar"><ThemeObjectPhoneIcon size={16} aria-hidden="true" /><DevicePresence online={device.online} /></span><strong>{device.name}</strong><span>{device.online === true ? 'Connected' : device.online === false ? 'Disconnected' : 'Connection unconfirmed'}</span></summary>
           <div className="device-management__record-body">
             <dl className="device-management__identity">
               <div><dt>Key fingerprint</dt><dd><code>{device.keyFingerprint ?? 'Not yet confirmed'}</code>{device.keyFingerprint && <button type="button" className="icon-button" aria-label={`Copy key fingerprint for ${device.name}`} title="Copy key fingerprint" onClick={() => { void copyFingerprint(device.deviceId, device.keyFingerprint!) }}><ThemeActionCopyIcon size={14} /></button>}</dd></div>

@@ -1,23 +1,7 @@
 .device-management[data-device-view='settings'] { border: 0; padding-top: 0; container: mobile-settings / inline-size; }
-.device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-6); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); gap: var(--sp-4); }
-.device-management__intro { display: flex; align-items: flex-start; gap: var(--sp-5); min-width: 0; }
-.device-management__intro > div { min-width: 0; }
-.device-management__phone { display: grid; place-items: center; flex: none; width: 52px; height: 60px; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2); }
 .device-management[data-device-view='settings'] h3 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 550; line-height: 1.4; }
-.device-management__intro .settings-group-note { max-width: 64ch; margin: var(--sp-2) 0 0; line-height: 1.65; }
 .device-management[data-device-view='settings'] .device-management__actions { justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-3); }
 .device-management[data-device-view='settings'] .device-management__actions > button { flex: none; margin-right: 0; }
-.device-management__address { flex-wrap: wrap; row-gap: var(--sp-2); margin-top: var(--sp-3); }
-.device-management__address select { min-width: 0; max-width: 100%; }
-.device-management__address small { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-micro); }
-.device-management__relationship { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--sp-3); margin: 0; padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
-.device-management__relationship > div { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text-2); }
-.device-management__relationship > div > svg { flex: none; color: var(--green); }
-.device-management__relationship > div > span { display: grid; gap: var(--sp-1); min-width: 0; }
-.device-management__relationship strong { font-size: var(--fs-meta); font-weight: 550; }
-.device-management__relationship small, .device-management__relationship figcaption { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.device-management__relationship-link { display: grid; justify-items: center; gap: var(--sp-1); padding-inline: var(--sp-3); color: var(--text-3); }
-.device-management__relationship figcaption { grid-column: 1 / -1; }
 .device-management[data-device-view='settings'] .device-management__devices { margin-top: var(--sp-7); padding-top: 0; border: 0; }
 .device-management__devices > .settings-pane-toolbar { align-items: flex-start; }
 .device-management__devices > .settings-pane-toolbar > div { flex: 1; min-width: 0; }
@@ -36,15 +20,36 @@
 .device-management[data-device-view='settings'] summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
 .device-management[data-device-view='settings'] .device-management__record > summary { flex-wrap: wrap; row-gap: var(--sp-2); padding-block: var(--sp-4); }
 .device-management[data-device-view='settings'] .device-management__record > summary strong { overflow-wrap: anywhere; }
-@container mobile-settings (min-width: 640px) {
-  .device-management[data-device-view='settings'] .device-management__connection:has(.connection-link-code) { grid-template-columns: minmax(0, 1fr) 232px; column-gap: var(--sp-6); align-items: start; }
-  .device-management__connection:has(.connection-link-code) > :not(.connection-link-code) { grid-column: 1; }
-  .device-management__connection > .connection-link-code { grid-column: 2; grid-row: 1 / span 4; align-self: center; margin: 0; }
+
+/* The connection hero: identity on top, then the QR card beside the network choice and actions. */
+.phone-connect-hero { display: grid; gap: var(--sp-6); padding: var(--sp-7) var(--sp-7) var(--sp-6); border-radius: 18px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--green) 14%, transparent), transparent 60%),
+    radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--blue) 12%, transparent), transparent 60%),
+    var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--hl); }
+.phone-connect-hero__head { display: flex; align-items: center; gap: var(--sp-5); }
+.phone-connect-hero__badge { display: grid; place-items: center; flex: none; width: 46px; height: 46px; border-radius: 14px;
+  background: linear-gradient(160deg, var(--green), var(--green-2)); color: var(--surface-0); box-shadow: var(--elev-1), var(--hl-strong); }
+.phone-connect-hero__head h3 { margin: 0; color: var(--text); font-size: var(--fs-display, 22px); font-weight: 650; letter-spacing: -.01em; }
+.phone-connect-hero__head p { margin: var(--sp-2) 0 0; max-width: 60ch; color: var(--text-2); line-height: 1.55; }
+.phone-connect-hero__body { display: grid; gap: var(--sp-6); }
+.phone-connect-hero__code { display: grid; place-items: center; }
+.phone-connect-hero__reveal { display: grid; place-items: center; gap: var(--sp-3); width: 236px; height: 236px; border-radius: 22px;
+  border: 1.5px dashed color-mix(in srgb, var(--green) 45%, var(--line)); background: color-mix(in srgb, var(--green) 6%, var(--surface-0));
+  color: var(--green); transition: background-color var(--dur-fast, 120ms) ease, transform var(--dur-fast, 120ms) ease; }
+.phone-connect-hero__reveal:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 11%, var(--surface-0)); }
+.phone-connect-hero__reveal:active:not(:disabled) { transform: scale(.98); }
+.phone-connect-hero__reveal:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.phone-connect-hero__reveal strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.phone-connect-hero__side { display: grid; align-content: start; gap: var(--sp-4); min-width: 0; }
+.phone-connect-hero__ready { margin: 0; color: var(--text-2); }
+.phone-connect-hero__hint { margin: calc(-1 * var(--sp-2)) 0 0; color: var(--text-3); font-size: var(--fs-micro); }
+@container mobile-settings (min-width: 620px) {
+  .phone-connect-hero__body { grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: var(--sp-8, 40px); }
 }
 @container mobile-settings (width < 420px) {
-  .device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-4); }
-  .device-management__intro { gap: var(--sp-3); }
-  .device-management__phone { width: 40px; height: 48px; }
-  .device-management__relationship { grid-template-columns: minmax(0, 1fr); }
-  .device-management__relationship-link { justify-items: start; padding-inline: 0; display: flex; align-items: center; }
+  .phone-connect-hero { padding: var(--sp-5); }
+  .phone-connect-hero__reveal { width: 100%; }
 }
+@media (prefers-reduced-motion: reduce) { .phone-connect-hero__reveal:active:not(:disabled) { transform: none; } }

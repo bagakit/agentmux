@@ -13,7 +13,8 @@ import { MOBILE_CONNECTION_TOOL_ID } from '../../../../shared/toolkit-preference
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { SettingsNavigation } from '../SettingsNavigation'
-import { ConnectionLinkCode } from './ConnectionLinkCode'
+import { DevicePresence, PhoneConnectionCard } from './PhoneConnectionVisuals'
+import { OpenInSurveyButton } from './ToolkitResultLink'
 import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 
@@ -81,10 +82,10 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
         <p className="phone-connection__hint">Connect both devices to the same Wi-Fi.</p>
         {connection ? <>
           {!currentCode ? <p className="phone-connection__code-state">{evaluating || refreshing ? 'Updating connection details…' : 'Saved code · current details not confirmed'}</p> : null}
-          <ConnectionLinkCode url={connection.url} />
+          <PhoneConnectionCard url={connection.url} network={null} state={evaluating || refreshing ? 'updating' : currentCode ? 'current' : 'saved'} />
           <p className="phone-connection__scan">Scan with your phone’s camera</p>
-          <p className="phone-connection__address">{new URL(connection.url).host}</p>
           <div className="phone-connection__buttons"><button type="button" className="primary-button" onClick={() => void copy()}><ThemeActionCopyIcon size={14} /> Copy link</button>
+            <OpenInSurveyButton url={connection.url} note="Opens your phone page in Survey on this Mac. It connects as another device." />
             <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />} Refresh</button></div>
           <p className="phone-connection__updated">{connection.current ? 'Checked' : 'Saved'} <time dateTime={new Date(connection.result.endedAt).toISOString()}>{new Date(connection.result.endedAt).toLocaleString()}</time></p>
           <details className="phone-connection__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={connection.url} onFocus={event => event.target.select()} /></details>
@@ -104,7 +105,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
       <section className="phone-connection__devices" aria-label="Device status">
         <header><h3>Devices</h3><button type="button" className="performance-icon-button" aria-label="Refresh devices" title="Refresh devices" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></header>
         {devices ? <><p className="phone-connection__device-summary">{devices.document.summary}<time dateTime={new Date(devices.at).toISOString()}>Checked {new Date(devices.at).toLocaleTimeString()}</time></p>
-          {devices.document.items.length ? <ul>{devices.document.items.map((device, index) => <li key={index}><ThemeObjectPhoneIcon size={15} aria-hidden="true" /><span>{device.label}</span><small>{device.value}</small></li>)}</ul> : <p className="phone-connection__hint">Your phone appears here while connected.</p>}
+          {devices.document.items.length ? <ul>{devices.document.items.map((device, index) => <li key={index}><span className="phone-device-avatar"><ThemeObjectPhoneIcon size={15} aria-hidden="true" /><DevicePresence online={true} /></span><span>{device.label}</span><small>{device.value}</small></li>)}</ul> : <p className="phone-connection__hint">Your phone appears here while connected.</p>}
           {devices.document.notice ? <details className="phone-connection__device-details"><summary>Connection information</summary><p>{devices.document.notice}</p></details> : null}
         </> : <p className="phone-connection__hint">{evaluating || reading.pending ? 'Checking connected devices…' : 'Refresh to check your connected devices.'}</p>}
       </section>
@@ -118,6 +119,6 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
         <button type="button" className="small-button" disabled={reading.pending} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /> Check previous request</button>
       </details> : null}
     </div>
-    <footer className="performance-actions phone-connection__footer"><button type="button" onClick={() => { close(); navigation?.open('mobile') }}><ThemeObjectPhoneIcon size={14} /> Manage devices</button><button type="button" aria-label="Phone connection settings" title="Phone connection settings" onClick={() => { close(); navigation?.openToolkit(MOBILE_CONNECTION_TOOL_ID) }}><ThemeObjectSettingsIcon size={14} /></button></footer>
+    <footer className="performance-actions phone-connection__footer"><button type="button" className="phone-connection__settings" data-phone-settings onClick={() => { close(); navigation?.open('mobile') }}><ThemeObjectPhoneIcon size={14} /> Phone settings</button><button type="button" aria-label="Phone connection settings" title="Phone connection settings" onClick={() => { close(); navigation?.openToolkit(MOBILE_CONNECTION_TOOL_ID) }}><ThemeObjectSettingsIcon size={14} /></button></footer>
   </>
 }

@@ -51,6 +51,7 @@
 @import './settings-toolkit.css';
 @import './toolkit-custom.css';
 @import './mobile-connection.css';
+@import './phone-connection-visuals.css';
 @import './toolkit-agent-cards.css';
 @import './settings-keyboard-shortcuts.css';
 @import './settings-workview-layout.css';
