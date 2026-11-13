@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WindowGeometryStore } from '../src/main/window-geometry-store.js'
@@ -62,5 +62,32 @@ describe('WindowGeometryStore', () => {
     const loaded = await store.load()
     expect(loaded).not.toBeNull()
     expect([1000, sample.width]).toContain(loaded!.width)
+  })
+
+  it('closeWith waits for a save started without being awaited and writes the final geometry', async () => {
+    const store = new WindowGeometryStore(storePath())
+    // A resize capture starts its save fire-and-forget; quit must wait for it before exiting.
+    void store.save({ width: 1000, height: 700, maximized: false })
+    await store.closeWith(sample)
+    expect(JSON.parse(await readFile(storePath(), 'utf8'))).toEqual(sample)
+    expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('starts no write after closeWith, so a late close capture cannot be cut off by exit', async () => {
+    const store = new WindowGeometryStore(storePath())
+    await store.closeWith(sample)
+    await store.save({ width: 1000, height: 700, maximized: false })
+    expect(JSON.parse(await readFile(storePath(), 'utf8'))).toEqual(sample)
+    expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('closeWith resolves after a failed save so quitting is never blocked by geometry', async () => {
+    await rm(root, { recursive: true, force: true })
+    await writeFile(root, 'a file where the directory should be')
+    const store = new WindowGeometryStore(join(root, 'window-geometry.json'))
+    const failing = store.save(sample)
+    await expect(failing).rejects.toBeTruthy()
+    await expect(store.closeWith(null)).resolves.toBeUndefined()
+    await rm(root, { force: true })
   })
 })

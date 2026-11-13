@@ -1,9 +1,12 @@
 import { EventEmitter } from 'node:events'
 import type { BrowserWindow } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence } from '../src/main/window-state-persistence.js'
-import type { WindowGeometryStore } from '../src/main/window-geometry-store.js'
+import { persistWindowGeometryForQuit, prepareWindowWorkbenchForQuit, registerWindowStatePersistence } from '../src/main/window-state-persistence.js'
+import { WindowGeometryStore } from '../src/main/window-geometry-store.js'
 import type { WindowGeometry } from '../src/main/window-geometry.js'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * The window-owner registration that (1) captures geometry as the window changes and on close, and
@@ -85,6 +88,43 @@ describe('window state persistence owner', () => {
 
     emitter.emit('close')
     expect(flushStorageData).not.toHaveBeenCalled()
+  })
+})
+
+describe('window geometry at quit', () => {
+  it('writes the final geometry once and leaves no temp file when the later close capture fires', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-quit-geometry-'))
+    try {
+      const store = new WindowGeometryStore(join(root, 'window-geometry.json'))
+      const { emitter, window } = fakeWindow()
+      registerWindowStatePersistence(window, store)
+      await persistWindowGeometryForQuit(window, store)
+      // Electron emits 'close' after quit preparation; the process may already be exiting.
+      emitter.emit('close')
+      await Promise.resolve()
+      expect(JSON.parse(await readFile(join(root, 'window-geometry.json'), 'utf8')))
+        .toEqual({ width: 1300, height: 900, x: 5, y: 7, maximized: false })
+      expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('waits for the close capture of a window closed before quit, then writes nothing later', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-quit-geometry-'))
+    try {
+      const store = new WindowGeometryStore(join(root, 'window-geometry.json'))
+      const { emitter, window } = fakeWindow()
+      registerWindowStatePersistence(window, store)
+      // macOS keeps the app alive after its window closes; quit later finds no window.
+      emitter.emit('close')
+      await persistWindowGeometryForQuit(null, store)
+      expect(JSON.parse(await readFile(join(root, 'window-geometry.json'), 'utf8')))
+        .toEqual({ width: 1300, height: 900, x: 5, y: 7, maximized: false })
+      expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

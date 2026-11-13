@@ -54,6 +54,7 @@ function quitHarness(disposeOwners: () => Promise<void>, overrides: Record<strin
   const exitAfterFailure = vi.fn()
   const dependencies = { singleFlight, disposeOwners, reportQuitDisposalFailure,
     workbenchWindow: {}, prepareWindowWorkbenchForQuit: vi.fn(async () => {}), reportWorkbenchQuitFailure: vi.fn(),
+    persistWindowGeometryForQuit: vi.fn(async () => {}), windowGeometryStore: {}, workbenchWindows: null,
     crashLog: { appendSync: (record: CrashRecord) => records.push(record) }, app,
     process: { pid: 4242, stderr: { write: (line: string) => stderr.push(line) } }, exitAfterFailure, ...overrides }
   const harness = execute(`const { ${Object.keys(dependencies).join(', ')} } = dependencies; let allowingQuit = false;
@@ -98,8 +99,35 @@ it('actual Main quit retains the workbench if its existing save path fails befor
   const f = quitHarness(cleanup, { prepareWindowWorkbenchForQuit: async () => { throw failedSave }, reportWorkbenchQuitFailure: report })
   await f.prepareQuit()
   expect(report).toHaveBeenCalledWith(f.dependencies.workbenchWindow, failedSave)
+  expect(f.dependencies.persistWindowGeometryForQuit).not.toHaveBeenCalled()
   expect(cleanup).not.toHaveBeenCalled()
   expect(f.app.quit).not.toHaveBeenCalled()
+})
+
+it('actual Main quit writes the final window geometry after owner disposal and before quitting', async () => {
+  const order: string[] = []
+  let finishGeometry!: () => void
+  const persistWindowGeometryForQuit = vi.fn(() => new Promise<void>(resolve => {
+    order.push('geometry:start'); finishGeometry = () => { order.push('geometry:done'); resolve() }
+  }))
+  const f = quitHarness(async () => { order.push('dispose') }, { persistWindowGeometryForQuit })
+  const quitting = f.prepareQuit()
+  await vi.waitFor(() => expect(order).toEqual(['dispose', 'geometry:start']))
+  expect(f.app.quit).not.toHaveBeenCalled()
+  expect(f.allowingQuit()).toBe(false)
+  finishGeometry()
+  await quitting
+  expect(persistWindowGeometryForQuit).toHaveBeenCalledWith(f.dependencies.workbenchWindow, f.dependencies.windowGeometryStore)
+  expect(order).toEqual(['dispose', 'geometry:start', 'geometry:done'])
+  expect(f.app.quit).toHaveBeenCalledTimes(1)
+})
+
+it('actual Main quit still settles geometry writes when no window remains', async () => {
+  const persistWindowGeometryForQuit = vi.fn(async () => {})
+  const f = quitHarness(async () => {}, { workbenchWindow: null, persistWindowGeometryForQuit })
+  await f.prepareQuit()
+  expect(persistWindowGeometryForQuit).toHaveBeenCalledWith(null, f.dependencies.windowGeometryStore)
+  expect(f.app.quit).toHaveBeenCalledTimes(1)
 })
 
 it('actual IPC disposal isolates synchronous sibling failures and still removes every channel', async () => {
