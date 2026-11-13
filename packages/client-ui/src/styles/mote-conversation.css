@@ -144,5 +144,7 @@
   .mote-conversation__related-chevron, .mote-conversation__source-chevron, .mote-conversation__source-title { transition: none; }
   .mote-threads__views button, .mote-threads__views button::after { transition: none; }
   .mote-conversation__related[open] > .mote-conversation__related-body:not([hidden]), .mote-conversation__source[open] > summary ~ * { animation: none; }
+  .mote-threads__pane > .mote-work-event__thread,
+  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li[data-selected] .mote-work-event__thread { animation: none; }
 }
 .mote-conversation__source > .mote-conversation__muted { margin-top: 0; }

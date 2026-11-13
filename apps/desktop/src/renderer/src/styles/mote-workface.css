@@ -13,31 +13,30 @@
 .mote-space-frame__header .mote-cooperation__team { min-height: 24px; height: 24px; }
 .mote-workface__navigation { display: flex; align-items: center; gap: 12px; min-height: 40px; height: 40px; box-sizing: border-box; padding: 4px 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; }
 .mote-workface { container-name: mote-workface; }
-.mote-workface__navigation .surface-mode-switch { min-width: 0; flex: 0 1 auto; overflow-x: auto; margin: 0; padding: 0; background: transparent; }
-.mote-workface__navigation .surface-mode-switch button { min-height: 24px; height: 24px; padding: 2px 10px; }
 .mote-workface__original[hidden], .mote-threads-panel[hidden], .pane-tabbar[hidden] { display: none; }
 .pane-group.pane-group--mote-conversation { --pane-tabbar-height: 0px; }
-.mote-workface__thread-navigation { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 12px; min-height: 28px; border-bottom: 1px solid var(--line-soft); }
-.mote-workface__thread-navigation button { appearance: none; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
 .mote-threads-panel { flex: 1; min-height: 0; overflow: auto; padding: 8px 20px 20px; }
 .mote-threads-panel__locations { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .mote-cooperation--threads { border: 0; padding: 0; }
 .mote-cooperation--threads .mote-cooperation__team-body { max-height: none; }
-@container mote-space (max-width: 760px) {
-  .mote-space-frame__header { align-items: center; gap: 8px; }
-  .mote-space-frame__navigation { flex-wrap: nowrap; gap: 8px; }
-  .mote-space-frame__navigation > .mote-conversation-identity { max-width: 120px; }
-  .mote-space-frame__navigation > .surface-mode-switch { flex: 0 1 auto; }
-  .mote-space-frame__navigation > .surface-mode-switch button { padding-inline: 7px; }
-}
 @container mote-workface (max-width: 560px) {
   .mote-workface__navigation { gap: 8px; padding-inline: 10px; }
   .mote-workface__navigation > .mote-conversation-identity { max-width: 120px; }
-  .mote-workface__navigation .surface-mode-switch button { padding-inline: 7px; }
 }
-.mote-space-frame__navigation .surface-mode-switch button, .mote-workface__navigation .surface-mode-switch button { display: inline-flex; align-items: center; gap: 5px; }
+.mote-space-frame__navigation .surface-mode-switch button { display: inline-flex; align-items: center; gap: 5px; }
 .mote-space-frame, .mote-workface { position: relative; }
 .mote-main-slot { display: inline-flex; align-items: center; flex: 0 0 auto; margin-inline-start: auto; }
+.mote-space-frame__header > .mote-main-slot { flex: 0 1 280px; min-width: 0; gap: 4px; }
+@container mote-space (max-width: 760px) {
+  .mote-space-frame__header { height: auto; flex-direction: column; align-items: stretch; gap: 2px; padding-block: 6px; }
+  .mote-space-frame__navigation { flex: none; width: 100%; min-height: 28px; gap: 8px; }
+  .mote-space-frame__navigation > .mote-conversation-identity { max-width: 100px; }
+  .mote-space-frame__navigation > .surface-mode-switch { flex: 1; }
+  .mote-space-frame__navigation > .surface-mode-switch button { padding-inline: 7px; }
+  .mote-space-frame__header > .mote-main-slot { flex: none; width: 100%; min-height: 28px; margin-inline-start: 0; }
+  .mote-space-frame__header .mote-cooperation--navigation { max-width: none; }
+}
+.mote-workface__navigation > .mote-cooperation { margin-inline-start: auto; }
 .mote-main-actions[data-presentation="menu"] { font-size: var(--fs-meta); }
 .mote-main-actions__trigger { appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer; color: var(--text-3); padding: 3px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--radius-sm); -webkit-app-region: no-drag; }
 .mote-main-actions__trigger:hover, .mote-main-actions__trigger[data-state="open"] { color: var(--text); background: var(--surface-2); }

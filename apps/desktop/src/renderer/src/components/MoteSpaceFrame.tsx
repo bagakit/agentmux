@@ -2,14 +2,11 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteDialogueViewProvider } from '../lib/mote-dialogue-view'
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { type MoteWorkfaceScope, useMoteWorkfaceScope } from '../lib/mote-workface'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useSpaceContentPresentation } from '../lib/space-content-presentation'
-import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 import { useAppStore } from '../store'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { showMoteConversation } from '../lib/mote-conversation-mode'
-import { MoteCooperation } from './MoteCooperation'
 import { MoteConversationIdentity } from './MoteConversationIdentity'
 
 const ThreadsIcon = semanticIconComponent('object.conversations')
@@ -23,7 +20,7 @@ const MoteSpaceContext = createContext<{
   entryToken?: string | undefined
   threadReference?: WorkbenchProjectionSelection | undefined
   navigationRevision: number
-  select(section: MoteSpaceSection): void
+  select(section: MoteSpaceSection, reference?: WorkbenchProjectionSelection): void
 } | null>(null)
 export const useMoteSpace = () => useContext(MoteSpaceContext)
 
@@ -49,8 +46,9 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
     presentation?.collapse()
   }, [explicitEntry?.token, owner, active])
   const section: MoteSpaceSection = presentation?.expanded ? content.owner === owner && !['discussion', 'threads'].includes(content.section) ? content.section : 'profile' : content.owner === owner && content.section === 'threads' ? 'threads' : 'discussion'
-  const select = (next: MoteSpaceSection) => {
-    setContent(previous => ({ owner, section: next, revision: previous.revision + 1, ...(next === 'discussion' ? { entryToken: crypto.randomUUID() } : {}) }))
+  const select = (next: MoteSpaceSection, reference?: WorkbenchProjectionSelection) => {
+    setContent(previous => ({ owner, section: next, revision: previous.revision + 1, ...(next === 'discussion' ? { entryToken: crypto.randomUUID() } : {}),
+      ...(next === 'threads' && reference ? { threadReference: reference } : {}) }))
     if (next === 'discussion' || next === 'threads') presentation?.collapse()
     else presentation?.expand()
   }
@@ -62,29 +60,13 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
         <div className="mote-space-frame__navigation">
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
         <MoteConversationIdentity scope={scope} visible={visible} />
-        <SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" onChange={select}
+        <SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" onChange={next => select(next)}
           options={[{ value: 'profile', label: 'Profile' }, { value: 'discussion', label: 'Discussion' }, { value: 'threads', label: <><ThreadsIcon size={13} aria-hidden="true" />Threads</> }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} />
         </div>
         <span className="mote-main-slot" ref={setActionsHost} />
-        <MoteSpaceActions key={owner} scope={scope} active={visible} section={section} onThreads={reference => { setContent(previous => ({ owner, section: 'threads', revision: previous.revision + 1, threadReference: reference })); presentation.collapse() }} />
       </header> : null}
       {children}
     </div>
     </WindowSidebarLayoutContext.Provider>
   </MoteSpaceContext.Provider></MoteDialogueViewProvider>
-}
-
-/** Entry controls navigate original work; the shared Composer remains its only input. */
-function MoteSpaceActions({ scope, active, section, onThreads }: {
-  scope: MoteWorkfaceScope; active: boolean; section: MoteSpaceSection; onThreads(reference: WorkbenchProjectionSelection): void
-}) {
-  const selected = useAppStore(state => active ? state.workbenchSpaceSelection : null)
-  const selectedReference = selected?.groupId && selected.tabId && selected.regionId
-    ? { displayWorkspaceId: selected.workspaceId, groupId: selected.groupId, tabId: selected.tabId, regionId: selected.regionId } : null
-  return <MoteCooperation scope={scope} active={active} presentation="navigation" reference={section === 'discussion' ? selectedReference : null}
-    onSelect={reference => {
-      const state = useAppStore.getState()
-      if (!state.selectMainRegion(reference, state.workbenchSpaceSelection)) return false
-      onThreads(reference); showMoteConversation(scope, { reference }); return true
-    }} actions={<MoteFirstCooperation scope={scope} disclosure />} />
 }

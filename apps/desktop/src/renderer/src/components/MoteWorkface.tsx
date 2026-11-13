@@ -1,5 +1,4 @@
 import { createPortal } from 'react-dom'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMoteMainEntry } from '../lib/mote-main-entry'
 import { MoteDialogueViewProvider, useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
@@ -13,7 +12,8 @@ import { confirmedMoteReference } from '../lib/mote-materials-actions'
 import { sessionPresentationById } from '../lib/session-presentation'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { useMoteSpace } from './MoteSpaceFrame'
-import { SurfaceModeSwitch } from './SurfaceModeSwitch'
+import { MoteCooperation } from './MoteCooperation'
+import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteThreadsPanel } from './MoteThreadsPanel'
 import { MoteMainActions } from './MoteMainActions'
 import { MoteQuickModeDialog } from './MoteQuickMode'
@@ -28,7 +28,6 @@ import { api } from '../lib/api'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { motePresentationContextKey, usePublishMotePresentation } from '../lib/mote-presentation-context'
 
-const ThreadsIcon = semanticIconComponent('object.conversations')
 type ShownSelection = WorkbenchProjectionSelection | { workspaceId: string; groupId?: string | null | undefined; tabId?: string | null | undefined; regionId?: string | null | undefined }
 function sameSelection(selected: ShownSelection, reference: string): boolean {
   const next = JSON.parse(reference) as { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
@@ -99,7 +98,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   function showThread(next: WorkbenchProjectionSelection) {
     if (!scope || !confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) || !selectReference(next, 'member')) return false
     setLocal({ owner, section: 'threads', member: true, original: false })
-    if (sharedFrame?.section !== 'threads') sharedFrame?.select('threads')
+    sharedFrame?.select('threads', next)
     showMoteConversation(scope, { reference: next, floating })
     return true
   }
@@ -181,17 +180,28 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     heldInput?.operationId, settleHeldInput])
   usePublishMotePresentation(floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined, context, dialogue)
   const issue = scope?.issue ?? defaults.issue
+  const selectedReference = selected?.groupId && selected.tabId && selected.regionId ? {
+    displayWorkspaceId: 'displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId,
+    groupId: selected.groupId, tabId: selected.tabId, regionId: selected.regionId
+  } : null
+  const conversations = scope ? <MoteCooperation scope={scope} active={visible} reference={selectedReference} presentation="navigation" onSelect={showThread}
+    conversation={{ mode: section === 'discussion' ? 'main' : memberIntent ? 'member' : 'threads', original: currentLocal.original,
+      onMain: showDiscussion, onThreads: showThreads, onWorkspace: () => setLocal(previous => ({ ...previous, owner, original: !previous.original })) }}
+    actions={<MoteFirstCooperation scope={scope} reference={selectedReference} disclosure />} /> : null
   const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null
   return <MoteWorkfaceContext.Provider value={context}>
     <div className={floating ? 'mote-workface' : 'workbench-context-frame'} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
-      {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} /><SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" options={[{ value: 'discussion', label: 'Discussion' }, { value: 'threads', label: <><ThreadsIcon size={13} aria-hidden="true" />Threads</> }]} onChange={next => next === 'discussion' ? showDiscussion() : showThreads()} /><span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
+      {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} />{conversations}<span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
       {notice}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
       {entryRecovery.issue ? <p role="status" className="mote-conversation__issue">{entryRecovery.issue}{entryRecovery.status === 'unavailable'
         ? <button type="button" className="small-button" onClick={showNewRound}>开始新一轮</button>
         : <button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button>}</p> : null}
-      {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
+      {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<>
+        {!floating && visible ? conversations : null}
+        <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />
+      </>, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
       {scope && entry === 'reading' ? <MoteEntryReading scope={scope} active={visible} held={entryHold.held} onHold={entryHold.hold} onRelease={entryHold.release} /> : null}
       {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。{entryHold.held ? '读取中写下的那条消息会在打开主对话后发出。' : null}<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}
       {scope && entry === 'unconfirmed' && !main?.current ? <p role="status" className="mote-conversation__issue">主对话的来源尚未确认，不会当作没有主对话而新建。原对话和草稿仍保留，读取中写下的消息没有发出。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
@@ -205,10 +215,6 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
         {currentLocal.periodOriginal ? <MoteOriginalConversation source={currentLocal.period} client={api.conversation} visible={visible} name={scope.topic.title} />
           : <MotePeriodConversation source={currentLocal.period} client={api.conversation} visible={visible} name={scope.topic.title} onOpenOriginal={() => setLocal(previous => ({ ...previous, periodOriginal: true }))} />}</div> : null}
       {scope ? <MoteThreadsPanel scope={scope} active={visible && section === 'threads' && !memberIntent && presentation !== 'workface'} onSelect={showThread} /> : null}
-      {scope && (memberIntent || presentation === 'workface') ? <div className="mote-workface__thread-navigation">
-        <button type="button" onClick={showThreads}>← Threads</button>
-        {presentation === 'workface' ? <button type="button" onClick={() => setLocal(previous => ({ ...previous, original: false }))}>返回对话</button> : <button type="button" onClick={() => setLocal(previous => ({ ...previous, owner, original: true }))}>在工作区打开 ↗</button>}
-      </div> : null}
       {scope && section === 'discussion' && !showOriginal && !currentMain && main?.current ? <p role="status" className="mote-conversation__issue">原主对话的角色或位置尚未确认，原身份、工作和输入仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
       <div className="mote-workface__original" hidden={!showOriginal} inert={!showOriginal}>{children}</div>
       {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} returnFocus={() => settingsInvoker.current?.isConnected ? settingsInvoker.current : null} /> : null}

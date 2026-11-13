@@ -8,13 +8,18 @@
 .mote-cooperation__team-body { max-height: min(320px, 42vh); overflow: auto; border-top: 1px solid var(--line-soft); padding: 8px 16px; }
 .mote-cooperation__team-heading { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 8px; font-size: var(--fs-meta); }
 .mote-cooperation__team-heading > span { color: var(--text-3); }
-.mote-cooperation__member { display: flex; align-items: center; gap: 10px; padding: 10px 0; min-width: 0; }
+.mote-cooperation__member { display: flex; align-items: center; gap: 10px; padding: 4px 0; min-width: 0; border-radius: var(--radius-sm); }
+.mote-cooperation__member[data-selected] { background: var(--surface-2); }
 .mote-cooperation__member + .mote-cooperation__member { border-top: 1px solid var(--line-soft); }
 .mote-cooperation__member-info { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mote-cooperation__member-info > svg { flex-shrink: 0; color: var(--text-3); }
 .mote-cooperation__member-info > div { min-width: 0; display: grid; gap: 4px; }
 .mote-cooperation__member-info strong { font-size: var(--fs-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mote-cooperation__member-info span { font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
+.mote-cooperation__open { width: 100%; min-height: 50px; padding: 8px; border: 0; border-radius: inherit; background: transparent; color: var(--text); text-align: start; }
+.mote-cooperation__open > div { flex: 1; }
+.mote-cooperation__open:hover { background: var(--surface-3); }
+.mote-cooperation__selected { display: inline-flex; flex: none; align-items: center; padding-inline: 4px; font-size: var(--fs-micro); }
 .mote-cooperation__member[data-attention="true"] .mote-cooperation__member-info > div > span { color: var(--text-2); }
 .mote-cooperation__locations { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 40%; }
 .mote-cooperation__locations > button { display: inline-flex; align-items: center; gap: 3px; background: transparent; color: var(--text-2); border: 0; border-radius: var(--radius-sm); padding: 6px; font-size: var(--fs-meta); }
@@ -29,9 +34,33 @@
   .mote-cooperation__team-body { padding-inline: 10px; }
 }
 
-.mote-cooperation--navigation { border: 0; background: transparent; flex: 0 0 auto; }
-.mote-cooperation__popover { position: fixed; z-index: var(--layer-popover); width: 400px; box-sizing: border-box; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--elev-3), var(--hl-strong); padding: 12px; }
+.mote-cooperation--navigation { display: flex; align-items: center; gap: 3px; border: 0; background: transparent; flex: 1 1 160px; min-width: 0; max-width: 300px; }
+.mote-cooperation--navigation .mote-cooperation__team { flex: 1; min-width: 0; justify-content: flex-start; border-color: transparent; gap: 6px; font-weight: 550; }
+.mote-cooperation__team > span { overflow: hidden; text-overflow: ellipsis; }
+.mote-cooperation__team > svg, .mote-cooperation__team > small { flex: none; }
+.mote-cooperation__team > svg:last-child { margin-inline-start: auto; transition: transform var(--dur-fast, 120ms) var(--ease-enter, ease-out); }
+.mote-cooperation__team > small { display: grid; place-items: center; min-width: 17px; height: 17px; padding-inline: 3px; box-sizing: border-box; background: var(--surface-3); border-radius: 999px; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.mote-cooperation__home, .mote-cooperation__browse { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); }
+.mote-cooperation__home:hover, .mote-cooperation__browse:hover, .mote-cooperation__browse[aria-current] { color: var(--text); background: var(--surface-2); }
+.mote-cooperation__popover { position: fixed; z-index: var(--layer-popover); width: 370px; box-sizing: border-box; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--elev-3), var(--hl-strong); padding: 12px; transform-origin: top center; }
+.mote-cooperation__popover[data-state="open"] { animation: mote-conversation-picker-enter var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
 .mote-cooperation__popover-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .mote-cooperation__popover-heading h2 { margin: 0; font-size: var(--fs-body); font-weight: 600; }
 .mote-cooperation__popover .mote-cooperation__team-body { padding: 8px 0; max-height: none; }
 .mote-cooperation__popover-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.mote-cooperation__main { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px; margin-block-end: 10px; color: var(--text); background: var(--surface-2); border: 1px solid transparent; border-radius: var(--radius-sm); text-align: start; }
+.mote-cooperation__main > span { display: grid; gap: 4px; min-width: 0; }
+.mote-cooperation__main strong { font-size: var(--fs-body); font-weight: 600; }
+.mote-cooperation__main small { color: var(--text-3); font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-cooperation__main > small, .mote-cooperation__main > svg { flex: none; }
+.mote-cooperation__main:hover { background: var(--surface-3); }
+.mote-cooperation__search { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-block-end: 10px; padding-inline: 8px; color: var(--text-3); background: var(--surface-2); border-radius: var(--radius-sm); }
+.mote-cooperation__search input { width: 100%; min-width: 0; border: 0; padding: 6px 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-meta); outline: 0; }
+.mote-cooperation__search:focus-within { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.mote-cooperation__popover .mote-new-discussion { flex: 1 1 100%; }
+.mote-cooperation__popover .mote-new-discussion > summary { width: 100%; justify-content: space-between; }
+@keyframes mote-conversation-picker-enter { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .mote-cooperation__popover[data-state="open"] { animation: none; }
+  .mote-cooperation__team > svg:last-child { transition: none; }
+}
