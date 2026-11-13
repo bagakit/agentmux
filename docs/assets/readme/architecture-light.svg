@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 990" width="1200" height="990" role="img" aria-label="AgentMux in three layers: every client calls Core through one public service; Core drives ctxmux through a single adapter; ctxmux owns the agent CLI processes and PTYs.">
+<defs><linearGradient id="core" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e9f6ee"/><stop offset="1" stop-color="#dff1e6"/></linearGradient><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0 H0 V30" fill="none" stroke="#17201a" stroke-opacity="0.04"/></pattern></defs>
+<rect width="1200" height="990" rx="24" fill="#f7f9f7"/><rect width="1200" height="990" rx="24" fill="url(#grid)"/>
+<text x="48.0" y="44" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="#6b776f" text-anchor="start" letter-spacing="2.6">CLIENT</text>
+<text x="152.0" y="44" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="400" fill="#6b776f" text-anchor="start" letter-spacing="0">presentation · focus · host I/O</text>
+<rect x="48.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="70.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Desktop</text>
+<text x="70.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">Electron · first-party client</text>
+<line x1="178.5" y1="158" x2="178.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
+<polygon points="172.5,200 184.5,200 178.5,210" fill="#6b776f"/>
+<rect x="329.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="351.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Mobile</text>
+<text x="351.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">end-to-end encrypted Relay</text>
+<line x1="459.5" y1="158" x2="459.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
+<polygon points="453.5,200 465.5,200 459.5,210" fill="#6b776f"/>
+<rect x="610.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="632.0" y="102" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">amux CLI</text>
+<text x="632.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">25 modules · 400+ commands</text>
+<line x1="740.5" y1="158" x2="740.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
+<polygon points="734.5,200 746.5,200 740.5,210" fill="#6b776f"/>
+<rect x="891.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="913.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Your program</text>
+<text x="913.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">@agentmux/core SDK</text>
+<line x1="1021.5" y1="158" x2="1021.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
+<polygon points="1015.5,200 1027.5,200 1021.5,210" fill="#6b776f"/>
+<text x="48.0" y="234" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="#2f9a5c" text-anchor="start" letter-spacing="2.6">CORE</text>
+<text x="126.0" y="234" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="400" fill="#6b776f" text-anchor="start" letter-spacing="0">@agentmux/core · agent semantics</text>
+<rect x="48.0" y="248" width="1104.0" height="372" rx="18" fill="url(#core)" stroke="#2f9a5c" stroke-width="1.8"/>
+<rect x="72.0" y="268" width="1056.0" height="72" rx="14" fill="#f4fbf6" stroke="#9fd3b3" stroke-width="1.5"/>
+<text x="96.0" y="313" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="600" fill="#1f7a46" text-anchor="start" letter-spacing="0">Public service</text>
+<text x="280.0" y="313" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="18" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">400+ typed JSON-RPC methods · Unix / HTTP+SSE / SSH / Tailcat / Relay</text>
+<rect x="72.0" y="356" width="520.0" height="84" rx="14" fill="#ffffff" stroke="#c4e3cf" stroke-width="1.5"/>
+<text x="94.0" y="392" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Provider</text>
+<text x="94.0" y="422" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">each agent’s native protocol, interpreted here only</text>
+<rect x="608.0" y="356" width="520.0" height="84" rx="14" fill="#ffffff" stroke="#c4e3cf" stroke-width="1.5"/>
+<text x="630.0" y="392" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">AgentSession</text>
+<text x="630.0" y="422" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">durable identity; resume never swaps in a blank one</text>
+<rect x="72.0" y="454" width="520.0" height="84" rx="14" fill="#ffffff" stroke="#c4e3cf" stroke-width="1.5"/>
+<text x="94.0" y="490" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Permission · Hook</text>
+<text x="94.0" y="520" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">decided by protocol facts and real receipts</text>
+<rect x="608.0" y="454" width="520.0" height="84" rx="14" fill="#ffffff" stroke="#c4e3cf" stroke-width="1.5"/>
+<text x="630.0" y="490" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Spatial identity</text>
+<text x="630.0" y="520" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">Space › Zone › Tab › Region</text>
+<text x="72.0" y="582" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">No Electron or React dependency. A new agent is one new Provider; clients do not change.</text>
+<line x1="600.0" y1="622" x2="600.0" y2="683" stroke="#1f7a46" stroke-width="2"/>
+<polygon points="594.0,682 606.0,682 600.0,692" fill="#1f7a46"/>
+<text x="616.0" y="662" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="16" font-weight="500" fill="#1f7a46" text-anchor="start" letter-spacing="0">CtxmuxRunAdapter · the only adapter</text>
+<text x="48.0" y="718" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="#6b776f" text-anchor="start" letter-spacing="2.6">RUNTIME</text>
+<text x="165.0" y="718" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="400" fill="#6b776f" text-anchor="start" letter-spacing="0">ctxmux · Rust daemon</text>
+<rect x="48.0" y="732" width="1104.0" height="108" rx="16" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="72.0" y="774" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">ctxmux</text>
+<text x="198.0" y="774" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="18" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">PTY · processes · Run lifecycle · ordered bytes · Replay · Gap · Attachment</text>
+<text x="72.0" y="812" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#6b776f" text-anchor="start" letter-spacing="0">Quitting the app or hot-updating the UI never stops a Run; reattach to the same PID and PTY.</text>
+<line x1="600.0" y1="842" x2="600.0" y2="881" stroke="#6b776f" stroke-width="1.6"/>
+<polygon points="594.0,880 606.0,880 600.0,890" fill="#6b776f"/>
+<rect x="48.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="135.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">codex</text>
+<rect x="234.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="321.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">claude</text>
+<rect x="420.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="507.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">gemini</text>
+<rect x="606.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="693.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">cursor</text>
+<rect x="792.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="879.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">kimi</text>
+<rect x="978.0" y="898" width="174.0" height="56" rx="12" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
+<text x="1065.0" y="933" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" font-weight="500" fill="#46554b" text-anchor="middle" letter-spacing="0">+ 8 more</text>
+<text x="1152.0" y="880" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#6b776f" text-anchor="end" letter-spacing="1.2">AGENT CLIs · installed and signed in locally</text>
+</svg>
