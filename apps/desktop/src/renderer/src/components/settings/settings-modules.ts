@@ -27,6 +27,7 @@ import { moteSettingsModule } from './modules/mote'
 import { surveySettingsModule } from './modules/survey'
 import { notesSettingsModule } from './modules/notes'
 import { continuitySettingsModule } from './modules/continuity'
+import { derivedActionsSettingsModule } from './modules/derived-actions'
 
 /** The only Renderer composition point. Registration preserves order within each group. */
 export const settingsModules = [
@@ -34,6 +35,7 @@ export const settingsModules = [
   appearanceSettingsModule,
   notificationsSettingsModule,
   agentsSettingsModule,
+  derivedActionsSettingsModule,
   continuitySettingsModule,
   browserSettingsModule,
   capsuleSettingsModule,

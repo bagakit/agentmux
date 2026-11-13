@@ -1,0 +1,23 @@
+/* Derived actions reuse the Prompt workbench layout; only the parts unique to actions live here. */
+.settings-content__scroll[data-settings-pane='derived-actions'] { padding-inline: max(var(--sp-7), calc((100% - 960px) / 2)); overflow: hidden; }
+.derived-actions__section { margin: var(--sp-4) 0 var(--sp-1); padding-inline: var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.derived-actions__section:first-of-type { margin-top: 0; }
+.derived-actions__item[data-hidden] .prompt-library__name strong { color: var(--text-3); }
+.derived-actions__badge { flex: none; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--wash-1); color: var(--text-3); font-size: var(--fs-micro); line-height: 18px; }
+.derived-actions__badge[data-status='unsaved'] { color: var(--amber-text); }
+.derived-actions__badge[data-status='invalid'] { color: var(--red-text); }
+.derived-actions__title { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-title); font-weight: 600; }
+.derived-actions__lead { margin: 0 0 var(--sp-6); color: var(--text-2); line-height: 1.55; }
+.derived-actions__toggle, .derived-actions__base label { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-3) 0; cursor: pointer; }
+.derived-actions__toggle input, .derived-actions__base input { flex: none; margin-top: 3px; accent-color: var(--green); }
+.derived-actions__toggle span, .derived-actions__base span { display: grid; gap: var(--sp-1); min-width: 0; }
+.derived-actions__toggle small, .derived-actions__base small, .derived-actions__agent small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.derived-actions__base { margin: 0; padding: 0; border: 0; }
+.derived-actions__base legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.derived-actions__agent { display: grid; gap: var(--sp-2); }
+.derived-actions__actions { margin-top: var(--sp-5); }
+.derived-actions__preview-item { display: inline-flex; align-items: center; gap: var(--sp-3); width: fit-content; padding: var(--sp-1) var(--sp-4); border-radius: var(--radius-sm); background: var(--wash-2); color: var(--text); }
+.derived-actions__preview-item svg { color: var(--green); }
+.derived-actions__starts { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.derived-actions__starts p { margin: 0; }
+.derived-actions__starts > div { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
