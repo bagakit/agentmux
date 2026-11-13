@@ -26,7 +26,9 @@ import type { AgentSemanticState } from '../../src/types.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivityDirectory,
-  claudeNativeActivitySource
+  claudeNativeActivitySource,
+  CLAUDE_NOTICE_ADMISSION_EVENT,
+  CLAUDE_TURN_END_EVENT
 } from '../../src/providers/claude-native-activity.js'
 
 describe('Claude native mod activity', () => {
@@ -174,6 +176,8 @@ describe('Claude native mod activity', () => {
     const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-native-mod-'))
     const modulePath = join(directory, 'register.mjs')
     const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
+    // Inbox notice asks are not activity deliveries: recorded apart, answered with no notice.
+    const asks: Array<Record<string, unknown>> = []
     let currentSessionId = 'original-native'
     let release: (() => void) | undefined
     const firstDelivery = new Promise<void>(resolve => { release = resolve })
@@ -182,6 +186,8 @@ describe('Claude native mod activity', () => {
     const api = {
       env: { get: async () => '1' }, session: { id: async () => currentSessionId },
       process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        if (body.hook_event_name === CLAUDE_TURN_END_EVENT) { asks.push(body); return { exitCode: 0, stdout: '{}\n', stderr: '' } }
         calls.push({ argv, init })
         if (++processCalls === 1) await firstDelivery
         const stderr = failNext ? 'receipt delivery unconfirmed' : ''
@@ -241,6 +247,10 @@ describe('Claude native mod activity', () => {
       handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
       await vi.waitFor(() => expect(calls).toHaveLength(9))
       expect(JSON.parse(calls[8]!.init.stdin).hook_event_name).toBe('AgentMuxActivityUnavailable')
+      // Only answered main turns of the original session asked; child turns and the changed source did not.
+      expect(asks).toEqual([
+        { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-A', reason: 'answer' },
+        { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-B', reason: 'answer' }])
     } finally {
       release?.()
       await rm(directory, { recursive: true, force: true })
@@ -414,7 +424,9 @@ describe('Claude provider', () => {
         ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
       ]) referenced.add(eventName)
 
-      const installed = new Set<string>([...CLAUDE_HOOK_EVENTS, 'turn.start', 'turn.complete', 'AgentMuxActivityUnavailable', CLAUDE_ASKED_TOOL_END_EVENT])
+      // Classic Hooks plus every event the managed module itself sends.
+      const installed = new Set<string>([...CLAUDE_HOOK_EVENTS, 'turn.start', 'turn.complete', 'AgentMuxActivityUnavailable', CLAUDE_ASKED_TOOL_END_EVENT,
+        CLAUDE_TURN_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT])
       const declaredButNotInstalled = [...referenced].filter((eventName) => !installed.has(eventName))
       expect(declaredButNotInstalled).toEqual([])
     })
