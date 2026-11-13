@@ -377,7 +377,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
       ? original.replace('): AgentManagedHookPlan {', '): ManagedPlan {') + '\ntype ManagedPlan = AgentManagedHookPlan\n'
       : original.replace('): AgentManagedHookPlan {', ') {')
     expect(typed).not.toBe(original)
-    const mutated = typed.replace(`...${HELPER_NAME}('claude')`, `timeout: ${CONST_NAME}`)
+    const mutated = typed.replace(`...(eventName === 'PermissionRequest' ? {} : ${HELPER_NAME}('claude'))`, `timeout: ${CONST_NAME}`)
     expect(mutated).not.toBe(typed)
     const { findings: bad, contributions: registered, scopes: covered } = generatedPlanScan(new Map([[path, mutated]]))
     expect(registered.length).toBeGreaterThan(0)
@@ -409,7 +409,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     // 取 claude.ts 真实源码，把 `...hookCommandTimeout('claude')` 注入回手写的 `timeout: 10`，重扫。
     const claudePath = join(providersDir, 'claude.ts')
     const original = readFileSync(claudePath, 'utf8')
-    const mutated = original.replace(`...${HELPER_NAME}('claude')`, 'timeout: 10')
+    const mutated = original.replace(`...(eventName === 'PermissionRequest' ? {} : ${HELPER_NAME}('claude'))`, 'timeout: 10')
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     const offenders = forbiddenKeyValues(parse(claudePath, mutated), claudePath).filter(isNumericLiteral)
     expect(offenders.length, '注入的 timeout: 10 没被判成 offender——判据 A 恒真').toBeGreaterThanOrEqual(1)
@@ -608,6 +608,7 @@ interface CommandBearingObject {
   readonly providerId: string
   readonly file: string
   readonly value: Record<string, unknown>
+  nativeDecision?: boolean
 }
 
 function collectCommandBearing(
@@ -644,7 +645,8 @@ function planCommandObjects(providerId: string): {
   parsed: CommandBearingObject[]
   unparsedFiles: string[]
 } {
-  const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: PROBE_WORKSPACE }) ?? null)
+  const provider = new AgentProviderRegistry().get(providerId)
+  const plan = provider.planManagedHooks?.({ workspacePath: PROBE_WORKSPACE }) ?? null
   const parsed: CommandBearingObject[] = []
   const unparsedFiles: string[] = []
   for (const mutation of plan?.mutations ?? []) {
@@ -656,6 +658,15 @@ function planCommandObjects(providerId: string): {
       continue
     }
     collectCommandBearing(document, providerId, mutation.path, parsed)
+    // The Provider-declared synchronous decision waits for a person. The short
+    // observer timeout cannot close that exact callback while the person is reading.
+    const event = provider.hook.permissionDecision?.eventName
+    if (event && document && typeof document === 'object' && 'hooks' in document) {
+      const hooks = (document as { hooks?: Record<string, unknown> }).hooks
+      const decisions: CommandBearingObject[] = []
+      collectCommandBearing(hooks?.[event], providerId, mutation.path, decisions)
+      for (const definition of parsed) if (decisions.some(candidate => candidate.value === definition.value)) definition.nativeDecision = true
+    }
   }
   return { parsed, unparsedFiles }
 }
@@ -677,7 +688,7 @@ describe('判据 D：生成出的 hook 配置里，超时该在的在、该不�
       }
       for (const definition of definitions) {
         checkedDefinitions += 1
-        if (definition.value[field] !== HOOK_COMMAND_TIMEOUT_SECONDS) {
+        if (definition.nativeDecision ? definition.value[field] !== undefined : definition.value[field] !== HOOK_COMMAND_TIMEOUT_SECONDS) {
           offenders.push(
             `${providerId}（${definition.file}）：hook 定义缺少 ${field}=${HOOK_COMMAND_TIMEOUT_SECONDS}，` +
               `实际键集合 ${JSON.stringify(Object.keys(definition.value))}`

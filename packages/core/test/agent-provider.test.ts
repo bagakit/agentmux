@@ -385,13 +385,11 @@ describe('built-in agent providers', () => {
     'makes %s explicitly own its typed terminal response protocol',
     (providerId) => {
       const provider = providers.get(providerId)
-      // Options mirror what each Provider declares, so normalizeAgentInteractionResponse accepts the
-      // chosen optionId. Claude's stable three-row prompt earns an allow-always keystroke; Codex's
-      // dynamic prompt keeps only the positionally-stable allow-once + deny.
+      // Only one-shot native callback decisions are declared. A persistent permission update
+      // cannot be inferred from a terminal position or a generic tool-wide rule.
       const options = providerId === 'claude'
         ? [
             { id: 'allow-once', label: 'Allow once', kind: 'allow-once' as const },
-            { id: 'allow-always', label: "Allow & don't ask again", kind: 'allow-always' as const },
             { id: 'reject-once', label: 'Deny', kind: 'reject-once' as const }
           ]
         : [
@@ -417,7 +415,6 @@ describe('built-in agent providers', () => {
         decision: { outcome: 'selected' as const, optionId }
       })
       expect(reply('allow-once')).toEqual({ data: '1' })
-      if (providerId === 'claude') expect(reply('allow-always')).toEqual({ data: '2' })
       expect(provider.planInteractionResponse(request, {
         kind: 'permission',
         requestId: request.id,

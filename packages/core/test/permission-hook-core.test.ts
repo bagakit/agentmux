@@ -76,6 +76,21 @@ it('uses the original callback without a pane, terminal bytes or nonexistent too
   } finally { await h.close() }
 })
 
+it('an authenticated managed Agent cannot answer the original permission callback as a person', async () => {
+  const h = await fixture(), { pending } = await h.open('human-only')
+  const server = new AgentMuxControlServer({ socketPath: join(h.root, 'human-only.sock'), coreClients: h.coreClients })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: h.credentials })
+  try {
+    const input = withInteractionOperation(h.client, h.input('human-only'))
+    await expect(rpc.call('agent.interaction.respond', input)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    expect(h.server.hasPermissionCallback('recipient', 'run-recipient', 'human-only')).toBe(true)
+    expect(await h.client.inspectAgentInteractionOperation({ agentSessionId: 'recipient', operationId: input.operationId })).toBeNull()
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+    await h.binding.close(); expect(await (await pending).json()).toEqual({})
+  } finally { await rpc.dispose(); await server.stop(); await h.close() }
+})
+
 it('rechecks the current author after saving and releases the original callback without approval on revocation', async () => {
   const h = await fixture(), { pending } = await h.open('revoked')
   let checks = 0

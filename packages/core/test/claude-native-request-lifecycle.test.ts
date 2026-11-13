@@ -44,8 +44,9 @@ async function harness() {
     workspacePath: fixturePath('claude'), pid: 1, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 })
   owner.kernel.input = async (_runId: string, operation: { data: string }) => { writes.push(operation.data); throw new Error('No input is expected') }
   let receipts = 0
-  const hook = async (eventName: string, payload: Record<string, unknown>) => {
+  const hook = async (eventName: string, payload: Record<string, unknown>, permissionCallback = false) => {
     await owner.acceptHookEvent({ receiptId: `receipt-${++receipts}`, agentSessionId, runId, providerId: 'claude',
+      ...(permissionCallback ? { permissionCallback: true } : {}),
       payload: { session_id: nativeSessionId, transcript_path: transcriptPath, cwd: fixturePath('claude'), permission_mode: 'default',
         prompt_id: promptId, hook_event_name: eventName, ...payload } }, new AbortController().signal)
   }
@@ -62,6 +63,33 @@ async function harness() {
 }
 
 describe('Claude native request lifecycle follows the actual Hook protocol', () => {
+  it('settles an addressable callback only through its own Provider-reported invocation', async () => {
+    const h = await harness()
+    try {
+      await h.hook('PreToolUse', { tool_name: 'Bash', tool_input: command, tool_use_id: 'toolu_original' })
+      await h.hook('PermissionRequest', { tool_name: 'Bash', tool_input: command, tool_use_id: 'toolu_original' }, true)
+      expect(h.pending()?.request).toMatchObject({ kind: 'permission', nativeToolCallId: 'toolu_original', permissionHook: { receiptId: 'receipt-2' } })
+      await h.askedEnd('toolu_foreign', 'Bash')
+      expect(h.pending()?.request.id).toBe('receipt-2')
+      await h.askedEnd('toolu_original', 'Bash')
+      expect(h.pending()).toBeUndefined()
+      expect(h.writes).toEqual([])
+    } finally { await h.close() }
+  })
+
+  it('does not borrow a previous invocation identity for an addressable callback that omits it', async () => {
+    const h = await harness()
+    try {
+      await h.hook('PreToolUse', { tool_name: 'Bash', tool_input: command, tool_use_id: 'toolu_previous' })
+      await h.hook('PermissionRequest', { tool_name: 'Bash', tool_input: command }, true)
+      expect(h.pending()?.request).toHaveProperty('permissionHook')
+      expect(h.pending()?.request).not.toHaveProperty('nativeToolCallId')
+      await h.askedEnd('toolu_previous', 'Bash')
+      expect(h.pending()?.request.id).toBe('receipt-2')
+      expect(h.writes).toEqual([])
+    } finally { await h.close() }
+  })
+
   it.each(['result', 'deny', 'throw'] as const)('settles a permission through the generated observer when its nested native call returns %s', async outcome => {
     const h = await harness()
     const directory = await mkdtemp(join(tmpdir(), 'agentmux-nested-permission-'))
