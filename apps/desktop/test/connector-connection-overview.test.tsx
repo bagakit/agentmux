@@ -127,8 +127,8 @@ it('preserves current policy and original scheduled progress across typed counte
   expect(connectorConnectionPresentation(retained).policyState).toBeNull()
   const rewritten = { ...original, outgoing: { ...original.outgoing, value: { ...original.outgoing.value!, sourceObservation: { state: 'unavailable' as const, code: 'AGENT_SESSION_HISTORY_REWRITTEN', codeRecorded: true, checkpointKey: null } } } }
   expect(connectorConnectionPresentation(rewritten).title).toBe('Receiving online')
-  expect(connectorConnectionPresentation(rewritten).hint).toBe('History rewritten · catching up')
-  expect(connectorConnectionPresentation(rewritten).primary).toBe('check')
+  expect(connectorConnectionPresentation(rewritten).hint).toBe('Reply sync stopped · history rewritten')
+  expect(connectorConnectionPresentation(rewritten).primary).toBe('source')
   const paused = { ...source, binding: { value: { ...source.binding.value!, state: 'paused' as const }, issue: null } }
   expect(connectorConnectionPresentation(paused).actionLabel).toBe('Review group sync')
   expect(connectorConnectionPresentation(paused).policyState).toBe('paused')

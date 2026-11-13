@@ -14,21 +14,23 @@ function report(code: string | null): GroupDiagnosis {
   } as unknown as GroupDiagnosis
 }
 
-it('presents an in-place rewrite as automatic resumption, distinct from a different source', () => {
+it('presents a rewrite the owner could not resume as stopped sync with its recovery action, distinct from a different source', () => {
   const rewritten = connectorSourceExplanation({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_REWRITTEN', codeRecorded: true, checkpointKey: null })
   const changed = connectorSourceExplanation({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', codeRecorded: true, checkpointKey: null })
   expect(rewritten.title).toBe('Conversation rewritten after a resume')
-  expect(rewritten.detail).toContain('nothing already sent is resent')
+  expect(rewritten.detail).toContain('Nothing already sent is resent')
+  expect(rewritten.detail).toContain('review sharing to continue from now')
   expect(changed.title).toBe('Saved conversation source changed')
   expect(rewritten.title).not.toBe(changed.title)
 
   const model = connectorConnectionPresentation(report('AGENT_SESSION_HISTORY_REWRITTEN'))
   expect(model.state).toBe('online')
-  expect(model.hint).toBe('History rewritten · catching up')
-  // Automatic recovery is not a call to action: no primary button and no attention badge.
-  expect(model.primary).toBe('check')
-  expect(model.automatic).toBe(true)
-  expect(model.attention).toBeNull()
+  // The Publication owner already tried the anchored resume in the same read, so an
+  // observed rewrite needs the person: the recovery action and the attention badge stay.
+  expect(model.hint).toBe('Reply sync stopped · history rewritten')
+  expect(model.primary).toBe('source')
+  expect(model.actionLabel).toBe('Try sync now')
+  expect(model.attention).toBe('check')
   // A different source still asks for an explicit check.
   expect(connectorConnectionPresentation(report('AGENT_SESSION_HISTORY_SOURCE_CHANGED')).primary).toBe('source')
   // A receiving connection stays online; only the reply source shows its own progress.

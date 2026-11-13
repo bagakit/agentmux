@@ -191,7 +191,7 @@ it('keeps this group input facts when a bot-wide intake check fails, without inv
   expect(connectorSourceExplanation({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', codeRecorded: true, checkpointKey: null }).title).toBe('Saved conversation source changed')
   const rewritten = connectorSourceExplanation({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_REWRITTEN', codeRecorded: true, checkpointKey: null })
   expect(rewritten.title).toBe('Conversation rewritten after a resume')
-  expect(rewritten.detail).toContain('nothing already sent is resent')
+  expect(rewritten.detail).toContain('Nothing already sent is resent')
   expect(connectorSourceExplanation({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE', codeRecorded: true, checkpointKey: null }).title).toBe('Conversation identity unavailable')
   expect(connectorGapExplanation({ reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_BUDGET', codeRecorded: true }).detail).toContain('current reading window')
   for (const codeRecorded of [true, false]) expect(connectorGapExplanation({ reason: 'public-content-unconfirmed', code: null, codeRecorded }).detail).toContain(codeRecorded ? 'safe detail is not available' : 'No finer reason was recorded')
