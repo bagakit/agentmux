@@ -3,7 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import { captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
+import { captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
 import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
@@ -18,7 +18,7 @@ let layout = FRAME
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 // Every fill the editor paints on its own canvas, with the fill style it used.
-let fills: Array<{ style: string; rect: number[] }>, sampled: number[], reads = 0
+let fills: Array<{ style: string; rect: number[] }>, sampled: number[], reads = 0, measures = 0
 class RecordingContext {
   fillStyle = ''; strokeStyle = ''; lineWidth = 1; font = ''; imageSmoothingEnabled = true
   fillRect(...rect: number[]) { fills.push({ style: String(this.fillStyle), rect }) }
@@ -30,13 +30,13 @@ function box(width: number, height: number): DOMRect { return { x: 0, y: 0, left
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  frames = new Map(); nextFrame = 0; fills = []; sampled = [18, 52, 86]; reads = 0; layout = FRAME
+  frames = new Map(); nextFrame = 0; fills = []; sampled = [18, 52, 86]; reads = 0; measures = 0; layout = FRAME
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { const id = ++nextFrame; frames.set(id, callback); return id })
   vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
   // The overlay fills one display; the toolbar and size chip report their laid-out widths.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    if (this.classList.contains('image-annotation-editor__capture-bar')) return box(BAR_WIDTH, 36)
-    if (this.classList.contains('image-annotation-editor__size-chip')) return box(CHIP_WIDTH, 20)
+    if (this.classList.contains('image-annotation-editor__capture-bar')) { measures++; return box(BAR_WIDTH, 36) }
+    if (this.classList.contains('image-annotation-editor__size-chip')) { measures++; return box(CHIP_WIDTH, 20) }
     return box(layout.width, layout.height)
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => new RecordingContext() as unknown as CanvasRenderingContext2D)
@@ -51,8 +51,11 @@ function button(scope: ParentNode, name: string): HTMLButtonElement {
 }
 async function mount(origin?: { x: number; y: number }) {
   const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}),
-    onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onExpand: vi.fn(), onCopyColor: vi.fn() }
-  await act(async () => root.render(<ImageAnnotationEditor key={Math.random()} {...props} />)); await frame()
+    onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onExpand: vi.fn(), onCopyColor: vi.fn(), onSelect: vi.fn() }
+  const instance = Math.random()
+  // The host's lock for this display arrives later than the editor mounts, as another display's claim does.
+  const lock = async (locked: boolean) => { await act(async () => root.render(<ImageAnnotationEditor key={instance} {...props} locked={locked} />)); await frame() }
+  await act(async () => root.render(<ImageAnnotationEditor key={instance} {...props} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
   canvas.setPointerCapture = vi.fn()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load'))); await frame()
@@ -70,7 +73,9 @@ async function mount(origin?: { x: number; y: number }) {
   }
   const bar = () => editor.querySelector<HTMLElement>('.image-annotation-editor__capture-bar')
   const loupe = () => editor.querySelector<HTMLElement>('[aria-label="Pixel loupe"]')
-  return { editor, canvas, props, press, move, release, drag, key, mouse, bar, loupe }
+  const hint = () => editor.querySelector<HTMLElement>('.image-annotation-editor__capture-hint')
+  const lost = async () => { await act(async () => { canvas.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 1 })) }); await frame() }
+  return { editor, canvas, props, press, move, release, drag, key, mouse, bar, loupe, hint, lock, lost }
 }
 // The selection every case starts from: frame points 300, 100 to 500, 200.
 const SELECTED = { x: 600, y: 200, width: 400, height: 200 }
@@ -164,11 +169,9 @@ describe('capture image annotation', () => {
 
   it('a mark button only changes the current tool, and pressing it again returns to the selection tool', async () => {
     const { bar, drag, key, props } = await selected()
-    const before = [bar()!.style.left, bar()!.style.top]
     await act(async () => button(bar()!, 'Rectangle').click()); await frame()
     expect(props.onExpand, 'actual mark button opens no other editor').not.toHaveBeenCalled()
     expect(button(bar()!, 'Rectangle').getAttribute('aria-pressed'), 'the current mark shows pressed').toBe('true')
-    expect([bar()!.style.left, bar()!.style.top], 'the toolbar keeps its place').toEqual(before)
     expect(bar()!.querySelector('[aria-label="Markup properties"]'), 'a mark tool opens its property popover').not.toBeNull()
     await drag([320, 120], [360, 160])
     await key('Enter')
@@ -243,8 +246,8 @@ describe('capture image annotation', () => {
   it('shows the loupe before a selection and while adjusting it, hides it at rest, and copies the sampled color on C', async () => {
     const { loupe, move, press, release, key, props } = await mount({ x: -1440, y: 25 })
     await move([100, 100], 0)
-    const rows = [...loupe()!.querySelectorAll('span')].map(row => row.textContent)
-    expect(rows, 'the loupe reads the frozen pixel and both coordinate units').toEqual(['#123456  18,52,86', '-1340, 125 pt · 200, 200 px'])
+    const rows = [...loupe()!.querySelectorAll(':scope > span')].map(row => [...row.childNodes].map(part => part.textContent))
+    expect(rows, 'the loupe reads the frozen pixel and names each coordinate unit on its own row').toEqual([['#123456', '18,52,86'], ['-1340, 125', 'pt'], ['200, 200', 'px']])
     expect([loupe()!.style.left, loupe()!.style.top], 'the loupe sits beside the pointer').toEqual(['116px', '116px'])
     await key('c')
     expect(props.onCopyColor, 'actual C copies the sampled HEX').toHaveBeenCalledWith('#123456')
@@ -257,5 +260,104 @@ describe('capture image annotation', () => {
     expect(props.onCopyColor, 'C copies nothing while the loupe is hidden').toHaveBeenCalledOnce()
     await key('r'); await press([320, 120]); await move([360, 160])
     expect(loupe(), 'the loupe is hidden while drawing').toBeNull()
+  })
+
+  it('shows a one-line hint with Cancel before a selection and hides it once one exists', async () => {
+    const { hint, drag, props } = await mount()
+    expect(hint()?.textContent, 'before a selection a hint names the gestures and keys').toBe('Drag to select · Arrows nudge · Enter to finish · Esc to cancel')
+    await act(async () => button(hint()!, 'Cancel').click())
+    expect(props.onCancel, 'the hint carries a visible Cancel').toHaveBeenCalledOnce()
+    await drag([300, 100], [500, 200])
+    expect(hint(), 'the hint goes once a selection exists').toBeNull()
+  })
+
+  it('claims the selection once a drag makes one, and not for a click, move or resize', async () => {
+    const { press, release, drag, mouse, props } = await mount()
+    await press([300, 100]); await release([300, 100])
+    expect(props.onSelect, 'a click makes no selection and claims nothing').not.toHaveBeenCalled()
+    await drag([300, 100], [500, 200])
+    expect(props.onSelect, 'a drag claims the selection').toHaveBeenCalledOnce()
+    await drag([400, 150], [420, 160]); await drag([520, 160], [570, 160])
+    expect(props.onSelect, 'moving or resizing claims nothing more').toHaveBeenCalledOnce()
+    await mouse('contextmenu', [100, 50]); await drag([100, 50], [200, 150])
+    expect(props.onSelect, 'a new selection after clearing claims again').toHaveBeenCalledTimes(2)
+  })
+
+  it('a locked display keeps its dimmed frozen frame and Cancel but makes no selection, loupe or color copy', async () => {
+    const { editor, hint, lock, move, drag, key, bar, loupe, props } = await mount()
+    fills = []; await lock(true)
+    expect(editor.style.display, 'the locked frame stays visible').toBe('')
+    expect(fills.filter(fill => fill.style === DIM).map(fill => fill.rect), 'the locked frame stays dimmed').toContainEqual([0, 0, 1600, 1000])
+    await move([100, 100], 0)
+    expect(loupe(), 'actual locked display shows no loupe').toBeNull()
+    await key('c')
+    expect(props.onCopyColor, 'C copies nothing on a locked display').not.toHaveBeenCalled()
+    await drag([300, 100], [500, 200])
+    expect(bar(), 'actual locked display makes no selection').toBeNull()
+    expect(editor.querySelector('[aria-label="Selection size"]'), 'a locked display shows no size').toBeNull()
+    await key('Enter')
+    expect([props.onComplete.mock.calls.length, props.onSelect.mock.calls.length], 'a locked display delivers and claims nothing').toEqual([0, 0])
+    expect(hint()?.textContent, 'the locked frame says where the selection is').toBe('Selecting on another display · Esc to cancel')
+    await act(async () => button(hint()!, 'Cancel').click())
+    expect(props.onCancel, 'the locked frame keeps a visible Cancel').toHaveBeenCalledOnce()
+  })
+
+  it('a lock that arrives after a selection or during its drag drops it', async () => {
+    const early = await mount()
+    await early.drag([300, 100], [500, 200]); await early.lock(true)
+    expect(early.bar(), 'actual selection made before the lock is dropped').toBeNull()
+    await early.key('Enter')
+    expect(early.props.onComplete, 'a dropped selection delivers nothing').not.toHaveBeenCalled()
+    const racing = await mount()
+    await racing.press([300, 100]); await racing.move([500, 200]); await racing.lock(true); await racing.release([500, 200])
+    await racing.key('Enter')
+    expect([racing.bar(), racing.props.onComplete.mock.calls.length], 'a drag the lock interrupts leaves no selection').toEqual([null, 0])
+  })
+
+  it('a click that barely moves keeps the selection, and shows it while pressed', async () => {
+    const { editor, press, move, release, key, props } = await selected()
+    await press([100, 50])
+    expect(editor.querySelector('[aria-label="Selection size"]')?.textContent, 'a press without travel still shows the kept selection').toBe('400 × 200 px')
+    await move([102, 51]); await release([102, 51])
+    await key('Enter')
+    expect(props.onComplete.mock.lastCall![0].crop, 'actual trackpad jitter keeps the selection').toEqual(SELECTED)
+    const blank = await mount()
+    await blank.press([100, 50]); await blank.move([102, 51]); await blank.release([102, 51])
+    expect([blank.bar(), blank.props.onSelect.mock.calls.length], 'jitter on a blank display makes no selection').toEqual([null, 0])
+  })
+
+  it('Escape or lost pointer capture during a move restores the selection, and Command Z undoes a move', async () => {
+    const { press, move, release, lost, key, drag, bar, props } = await selected()
+    const crop = async () => { await key('Enter'); return props.onComplete.mock.lastCall![0].crop }
+    await press([400, 150]); await move([420, 160]); await key('Escape')
+    expect(bar(), 'the toolbar returns after Escape').not.toBeNull()
+    await release([420, 160])
+    expect(await crop(), 'actual Escape during a move restores the selection').toEqual(SELECTED)
+    await press([400, 150]); await move([420, 160]); await lost(); await release([420, 160])
+    expect([bar() !== null, await crop()], 'lost pointer capture restores the selection and its toolbar').toEqual([true, SELECTED])
+    await drag([400, 150], [420, 160]); await key('z', { metaKey: true })
+    expect(await crop(), 'Command Z restores the selection before the move').toEqual(SELECTED)
+  })
+
+  it('keeps the size chip off the toolbar side and leaves room for the property popover', async () => {
+    expect(captureToolbarPlacement({ x: 300, y: 300, width: 200, height: 140 }, BAR_WIDTH, FRAME), 'the bar flips above when the popover has no room below')
+      .toEqual({ side: 'above', left: 200, top: 256 })
+    const narrow = { x: 300, y: 420, width: 200, height: 60 }
+    expect(captureSizeChipPlacement(narrow, CHIP_WIDTH, 'above', FRAME), 'the chip moves inside when the bar takes the side above').toEqual({ left: 300, top: 424 })
+    expect(captureSizeChipPlacement(narrow, CHIP_WIDTH, 'below', FRAME), 'the chip sits above the selection when the bar is below').toEqual({ left: 300, top: 396 })
+    expect(captureSizeChipPlacement({ x: 790, y: 2, width: 10, height: 100 }, CHIP_WIDTH, 'below', FRAME), 'the chip stays inside the frame').toEqual({ left: 720, top: 6 })
+    const { editor, drag, bar } = await mount()
+    await drag([300, 420], [500, 480])
+    const chip = editor.querySelector<HTMLElement>('[aria-label="Selection size"]')!
+    expect([bar()!.dataset.side, bar()!.style.top, chip.style.top], 'actual chip leaves the side the bar takes').toEqual(['above', '376px', '424px'])
+  })
+
+  it('moving a selection forces no layout of the toolbar or size chip', async () => {
+    const { press, move, release } = await selected()
+    await press([400, 150]); const before = measures
+    await move([410, 155]); await move([420, 160])
+    expect(measures, 'actual pointer moves that keep the size measure nothing').toBe(before)
+    await release([420, 160])
+    expect(measures, 'the returning toolbar is measured').toBeGreaterThan(before)
   })
 })
