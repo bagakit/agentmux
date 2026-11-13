@@ -12838,7 +12838,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const [key, check] of Object.entries(get().executorDetections)) {
         const input = check.input
         if (!input || !executorDetectionMatches(input, input.executorId, config.executors[input.executorId],
-          config.hosts.find(host => host.id === input.host.id))) detectionRequestIds.delete(key)
+          config.hosts.find(host => host.id === input.host.id))) {
+          detectionRequestIds.delete(key)
+          // The original read may settle, but an invalidated read cannot deduplicate a new check.
+          pendingExecutorDetections.delete(key)
+        }
       }
       hostCheckRequestIds.clear()
     }
