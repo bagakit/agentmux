@@ -15,6 +15,10 @@ const variants: Record<string, [string, string, string]> = {
 const mutation = process.env.AGENTMUX_THREAD_DISCOVERY_MUTATION
 if (mutation && !variants[mutation]) throw Error('Unknown thread discovery mutation')
 export default defineConfig({ ...base,
+  // The joined public Host/Core fixture exercises Capsule imports through Core's original index.
+  resolve: { ...base.resolve, alias: [...base.resolve!.alias as [],
+    ...['node', 'runtime'].map(entry => ({ find: '@agentmux/capsule/' + entry, replacement: resolve(root, 'packages/capsule/src/' + entry + '.ts') })),
+    { find: '@agentmux/capsule', replacement: resolve(root, 'packages/capsule/src/index.ts') }] },
   plugins: [...base.plugins ?? [], { name: 'loaded-thread-discovery-counterexample', enforce: 'pre', transform(original, id) {
     if (!mutation) return
     const [file, before, after] = variants[mutation]!

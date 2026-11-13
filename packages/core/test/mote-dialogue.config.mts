@@ -3,6 +3,9 @@ import original from './a2a-resumed-inbox.config.mts'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const variants = {
+  'initial-raw-run-required': ['apps/host/src/mote-dialogue.ts', 'dispatch.ownerAgentSessionId !== main.current.sessionId', 'dispatch.ownerAgentSessionId !== main.current.sessionId || !envelope.recipientRunId'],
+  'dispatch-owner-ignored': ['apps/host/src/mote-dialogue.ts', 'dispatch.ownerAgentSessionId !== main.current.sessionId', 'false'],
+  'work-thread-detached': ['apps/host/src/mote-dialogue.ts', 'threadId: envelope.threadId,', 'threadId: input.operationId,'],
   'wrong-role': ['apps/host/src/mote-dialogue.ts', "main.roleRevision !== input.expectedRoleRevision", 'false'],
   'wrong-host': ['apps/host/src/mote-dialogue.ts', 'input.source.messageHostId !== main.current.hostId', 'false'],
   'drop-before-source': ['apps/host/src/mote-dialogue.ts', 'mainSource(before, Date.now()), mainSource(after, Date.now())', 'mainSource(after, Date.now())'],

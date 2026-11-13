@@ -22,6 +22,10 @@ import { AgentMuxError } from '../src/errors.js'
 import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import { defineRun } from '@ctxmux/sdk'
 import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
+import { createMoteWorkThreadFixture, openMoteWorkThread } from './helpers/mote-work-thread.js'
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { MOTE_COORDINATION_ROLE } from '../../../apps/host/src/mote-topic-model.js'
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -64,6 +68,58 @@ async function switchMain(f: Awaited<ReturnType<typeof fixture>>, sessionId: str
   expect(result.status,result.message??'').toBe('saved')
   return result
 }
+
+it('public agent.open first task joins its original qualified Dispatch to Mote without rewriting or replaying input', async () => {
+  const f = await createMoteWorkThreadFixture(); closes.push(f.close)
+  const work = await openMoteWorkThread(f)
+  expect(work.source?.envelope.recipientRunId).toBeNull()
+  expect(work.source?.promptCondition?.expectedRun).toEqual(work.opened.agent.createdRun)
+  expect(work.source?.envelope.body).toBe('Research the original scoped outcome')
+  expect(f.launches[0].args.join('\n')).toContain('proactively reuse a suitable member')
+  expect(work.linked.links).toHaveLength(1)
+  expect(work.page.links).toEqual(work.linked.links)
+  expect(work.page.links[0]).toMatchObject({ kind: 'work', main: { hostId: 'local', agentSessionId: 'primary' },
+    origin: { messageId: work.messageId, threadId: work.observation.dispatch.threadId, recipientSessionId: work.opened.agent.agentSessionId } })
+  expect(work.observation.source.envelope).toEqual(work.source!.envelope)
+  expect(work.observation.source.promptCondition).toEqual(work.source!.promptCondition)
+  expect(work.observation.dispatch).toMatchObject({ ownerAgentSessionId: 'primary', workerAgentSessionId: work.opened.agent.agentSessionId })
+  expect(work.observation.dispatch.events).toMatchObject([{ kind: 'worker_done', replyMessageId: 'first-work-result' }])
+  expect(work.observation.replies[0]?.envelope.body).toBe('Original scoped research result')
+  const launchCount = f.launches.length, writes = f.writes.length
+  expect(await f.rpc.call('space.mote.dialogue.link', work.linkInput)).toEqual(work.linked)
+  expect(await f.client.readMessage({ messageId: work.messageId })).toEqual(work.source)
+  expect(f.launches).toHaveLength(launchCount); expect(launchCount).toBe(1)
+  expect(f.writes).toHaveLength(writes); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
+
+it('work links require an open Dispatch owned by this Main; rejected associations preserve existing input', async () => {
+  const f = await fixture(), main = await f.main.readCurrentMoteMain(f.target)
+  const input = (messageId: string) => ({ target: f.target, operationId: 'link-' + messageId,
+    expectedRoleRevision: main.roleRevision!, source: { kind: 'work' as const, messageHostId: 'local', messageId } })
+  await f.cli(['agent', 'send', '--to-session', 'member', '--text', 'Original unopened work', '--operation-id', 'unopened-op',
+    '--message-id', 'unopened-work', '--thread', 'unopened-thread', '--execution', 'immediate', '--expect-run', 'run-member'])
+  await expect(f.rpc.call('space.mote.dialogue.link', input('unopened-work'))).rejects.toMatchObject({ code: 'DISPATCH_NOT_FOUND' })
+  await f.cli(['agent', 'send', '--to-session', 'primary', '--text', 'Member-owned work', '--operation-id', 'member-owned-op',
+    '--message-id', 'member-owned-work', '--thread', 'member-owned-thread', '--execution', 'immediate', '--expect-run', 'run-primary'], undefined, 'member')
+  await f.cli(['message', 'dispatch', 'open', '--source-message', 'member-owned-work'], undefined, 'member')
+  await expect(f.rpc.call('space.mote.dialogue.link', input('member-owned-work'))).rejects.toMatchObject({ code: 'MOTE_DIALOGUE_SOURCE_UNCONFIRMED' })
+  expect((await f.rpc.call('space.mote.dialogue.read', { target: f.target, kind: 'work' })).links).toEqual([])
+  expect(await f.client.readMessage({ messageId: 'unopened-work' })).not.toBeNull()
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('actual rendered Mote module and delivered startup/input guidance teach an optional original assignment-to-thread route', () => {
+  const guide = agentMuxModuleSkill('mote')!
+  expect(guide).toContain('Keep short questions')
+  expect(guide).toContain('message dispatch open --source-message MESSAGE_ID')
+  expect(guide).toContain('agent.initialMessageId')
+  expect(guide).toContain('space mote dialogue link --input -')
+  expect(guide).toContain('Provider-native subagent')
+  expect(agentMuxCommandHelp('space.mote.dialogue.link')).toContain('requires its original open Dispatch')
+  expect(MOTE_COORDINATION_ROLE).toContain('proactively reuse a suitable member')
+  expect(MOTE_INPUT_GUIDANCE).toContain('If you are the confirmed main Agent')
+  expect(MOTE_INPUT_GUIDANCE).toContain('answer short questions directly')
+})
 
 it('actual CLI main dispatch links the exact original work thread and reads without reexecuting input', async () => {
   const f = await fixture(), read = await f.rpc.call('space.mote.dialogue.read', { target: f.target })
@@ -143,7 +199,7 @@ it('wrong role, Host and missing original message refuse only the association an
   const f=await fixture(), snapshot=await f.main.readCurrentMoteMain(f.target)
   await expect(f.rpc.call('space.mote.dialogue.link',{target:f.target,operationId:'wrong-role',expectedRoleRevision:'different-generation',source:{kind:'main'}})).rejects.toMatchObject({code:'MOTE_MAIN_CHANGED'})
   await expect(f.rpc.call('space.mote.dialogue.link',{target:f.target,operationId:'wrong-host',expectedRoleRevision:snapshot.roleRevision!,source:{kind:'work',messageHostId:'foreign-host',messageId:'same-id'}})).rejects.toMatchObject({code:'MOTE_DIALOGUE_SOURCE_UNCONFIRMED'})
-  await expect(f.rpc.call('space.mote.dialogue.link',{target:f.target,operationId:'no-message',expectedRoleRevision:snapshot.roleRevision!,source:{kind:'work',messageHostId:'local',messageId:'missing-original'}})).rejects.toMatchObject({code:'MOTE_DIALOGUE_SOURCE_UNCONFIRMED'})
+  await expect(f.rpc.call('space.mote.dialogue.link',{target:f.target,operationId:'no-message',expectedRoleRevision:snapshot.roleRevision!,source:{kind:'work',messageHostId:'local',messageId:'missing-original'}})).rejects.toMatchObject({code:'DISPATCH_NOT_FOUND'})
   expect((await f.rpc.call('space.mote.dialogue.read',{target:f.target})).links).toEqual([])
   const input=await f.submit('healthy-after-bad-association')
   expect(input.moteObservationId).toBe(f.observation('healthy-after-bad-association'))

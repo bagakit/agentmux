@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, resolve as resolvePath } from 'node:path'
 import type { CliResult } from './object-cli-rpc.js'
 
 /** Execute the real CLI parser and transport from source, without a dist artifact.
  * This deliberately does not qualify the compiled or installed launcher. */
 export async function runSourceObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = '', timeoutMs = 15_000, sourceLoader?: URL): Promise<CliResult> {
-  const loader = sourceLoader ?? new URL('../../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs', import.meta.url)
-  const entry = fileURLToPath(new URL('../../src/agentmux.ts', import.meta.url))
+  const directory = dirname(fileURLToPath(import.meta.url))
+  const loader = sourceLoader ?? pathToFileURL(resolvePath(directory, '../../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs'))
+  const entry = resolvePath(directory, '../../src/agentmux.ts')
   const registration = `import { register } from 'node:module'; register(${JSON.stringify(loader.href)}, ${JSON.stringify(import.meta.url)});`
   return await new Promise<CliResult>((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(registration), entry, ...args],

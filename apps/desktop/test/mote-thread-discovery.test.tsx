@@ -14,6 +14,7 @@ import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-te
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { MoteActivityConversation } from '../src/renderer/src/components/MoteActivityConversation'
+import { createMoteWorkThreadFixture, openMoteWorkThread } from '../../../packages/core/test/helpers/mote-work-thread'
 
 type Work = Extract<MoteDialogueLink, { kind: 'work' }>
 const current = { hostId: 'local', sessionId: defaultAgent.id, displayWorkspaceId: scratchWorkspace.id, groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId }
@@ -43,12 +44,42 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); if (app) { await app.dispose(); app = undefined }; container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const click = async (node: HTMLElement) => { await act(async () => node.click()) }
-const button = (parent: ParentNode, text: string) => [...parent.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text)!
+const button = (parent: ParentNode, text: string) => [...parent.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === text || node.textContent?.trim() === text)!
 async function search(parent: ParentNode, value: string) {
   const input = parent.querySelector<HTMLInputElement>('[aria-label="查找工作标题或执行者"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 const shown = (parent: ParentNode) => [...parent.querySelectorAll<HTMLElement>('.mote-threads__list > li:not([hidden]) [data-mote-work-event]')].map(node => node.dataset.moteWorkEvent)
+
+it('public agent.open first-task output reaches the real shared and Mobile Threads consumers through original Dispatch reads', async () => {
+  const f = await createMoteWorkThreadFixture()
+  try {
+    const work = await openMoteWorkThread(f), open = vi.fn()
+    const read = vi.fn(async (source: Work) => f.rpc.call('message.dispatch.read', {
+      hostId: source.origin.hostId, sourceMessageId: source.origin.messageId }))
+    await act(async () => root.render(<MoteWorkThreads page={work.page} issue={null} loading={false} visible
+      readWork={read} memberName={() => '原任务执行者'} onRefresh={() => {}} onOpenWork={open} />))
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    await act(async () => { await read.mock.results[0]!.value })
+    expect(container.textContent).toContain('Research the original scoped outcome')
+    expect(read).toHaveBeenCalledExactlyOnceWith(work.page.links[0])
+    await click(container.querySelector<HTMLElement>('.mote-work-event__summary')!)
+    expect(container.textContent).toContain('Original scoped research result')
+    await click(button(container, '继续原工作'))
+    expect(open).toHaveBeenCalledExactlyOnceWith(work.page.links[0])
+    const rpc = vi.fn((method: string, params: any) => f.rpc.call(method as any, params))
+    await act(async () => root.render(<MobileMoteThreads client={{ forwardRpc: rpc } as any}
+      dialogue={{ page: work.page, issue: null, loading: false, refresh() {}, older: async () => {} } as any}
+      team={null} issue={null} visible currentSessionId="primary" onOpen={() => {}} onWork={open} onMain={() => {}}
+      onConfigure={() => {}} onRefresh={() => {}} />))
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledExactlyOnceWith('message.dispatch.read', {
+      hostId: 'local', sourceMessageId: work.messageId }))
+    await act(async () => { await rpc.mock.results[0]!.value })
+    expect(container.textContent).toContain('Research the original scoped outcome')
+    expect((await f.client.readMessage({ messageId: work.messageId }))?.envelope.recipientRunId).toBeNull()
+    expect(f.launches).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await f.close(); vi.unstubAllEnvs() }
+}, 45_000)
 
 it('shared Threads searches original titles and executors, filters exact report records and retains expanded DOM without rereads', async () => {
   const read = vi.fn(async (source: Work) => dispatch(source)), open = vi.fn()
@@ -121,7 +152,7 @@ it('real Desktop App Threads searches the same original dispatch records and ret
   expect(app!.panel().querySelector('.mote-threads-panel:not([hidden])')).not.toBeNull()
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
   await search(app!.panel(), '缓存'); expect(shown(app!.panel())).toEqual(['cache'])
-  await moteClick(button(app!.panel(), 'Discussion')); await settleMoteApp()
+  await moteClick(button(app!.panel(), '返回主对话')); await settleMoteApp()
   expect(app!.panel().querySelector('[data-activity-session="' + current.sessionId + '"]')).toBe(body)
   expect(app!.send).not.toHaveBeenCalled(); expect(app!.launch).not.toHaveBeenCalled(); expect(app!.stop).not.toHaveBeenCalled()
 })
