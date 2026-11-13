@@ -230,8 +230,13 @@ export class RemoteCoreInstallManager {
         if (owner.availability !== 'connected' || typeof owner.runtimeId !== 'string' || !owner.runtimeId) throw new Error('Unconfirmed owner')
         retained.receipt.installed = { remoteCommand: c.remoteCommand, remoteSocketPath: c.remoteSocketPath, runtimeId: owner.runtimeId, startScript: c.startScript, unit: c.unit }
         retained.receipt.status = 'completed'; retained.receipt.stage = 'completed'; retained.receipt.detail = 'The original installation is now confirmed serving. No installation step was repeated.'
-        await this.save(retained)
-      } catch { /* Observation gaps retain the original unknown result. */ }
+        try { await this.save(retained) }
+        catch (error) { return { ...structuredClone(retained.receipt), detail: retained.receipt.detail +
+          ' This confirmation could not be saved: ' + errorText(error) + '. Keep this original operation for another read.' } }
+      } catch (error) {
+        return { ...structuredClone(retained.receipt), detail: retained.receipt.detail +
+          ' This read-only identity check was not confirmed: ' + errorText(error) + '. No installation step was repeated.' }
+      }
     }
     return structuredClone(retained.receipt)
   }
