@@ -30,13 +30,17 @@ describe('waiting for the page', () => {
     setTimeout(() => { state.url = 'https://example.test/orders/42?tab=items'; state.navigationId = 'nav-2' }, 150)
     await expect(dispatch('waitForUrl', [{ contains: '/orders/' }, 2_000])).resolves.toEqual({ url: 'https://example.test/orders/42?tab=items', navigationId: 'nav-2' })
     await expect(dispatch('waitForUrl', ['https://example.test/orders/42?tab=items', 500])).resolves.toMatchObject({ navigationId: 'nav-2' })
-    await expect(dispatch('waitForUrl', [{ pattern: '/orders/\\d+' }, 500])).resolves.toMatchObject({ navigationId: 'nav-2' })
+    // A pattern is refused: it would run program code on Main.
+    await expect(dispatch('waitForUrl', [{ pattern: '(.*)*x' }, 500])).rejects.toThrow('test pageInfo().url in your program')
   })
 
   it('waitForUrl times out naming what it waited for, and refuses a condition it cannot read', async () => {
     const dispatch = page({ url: 'https://example.test/start', navigationId: 'nav-1', nodes: [] })
     await expect(dispatch('waitForUrl', ['https://example.test/done', 200])).rejects.toThrow('Timed out after 200ms waiting for the page to reach "https://example.test/done"')
     await expect(dispatch('waitForUrl', [42, 200])).rejects.toThrow('waitForUrl takes a URL string')
+    // A whole URL is compared as Chromium normalizes it, so the bare origin matches its trailing slash.
+    const origin = page({ url: 'https://example.test/', navigationId: 'nav-1', nodes: [] })
+    await expect(origin('waitForUrl', ['https://example.test', 200])).resolves.toMatchObject({ url: 'https://example.test/' })
     // A full URL means that page, not every page under it: /start is not /start/deeper.
     const deeper = page({ url: 'https://example.test/start/deeper', navigationId: 'nav-1', nodes: [] })
     await expect(deeper('waitForUrl', ['https://example.test/start', 200])).rejects.toThrow('Timed out')
