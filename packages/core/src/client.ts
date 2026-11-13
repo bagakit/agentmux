@@ -8014,7 +8014,10 @@ export class AgentMuxClient {
         !this.endedRuns.has(session.run.runId) &&
         (activity.fact.state !== 'idle' || activity.invalidated || childrenUnconfirmed || !agentHasActiveSubagents(session.run.runId))) {
       const fact = structuredClone(activity.fact)
-      if (activity.invalidated || childrenUnconfirmed || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
+      // A later input admission consumes this turn's idle, never its ongoing activity: Claude may
+      // merge that input into the running turn. The turn's own end then remains unconfirmed.
+      if (activity.invalidated || childrenUnconfirmed ||
+          fact.state === 'idle' && activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
           nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown') {
         delete fact.interruption
         return { ...fact, state: 'unknown' }
@@ -10145,26 +10148,43 @@ export class AgentMuxClient {
     return result
   }
 
+  /** The ordered native activity this Run last accepted, live or durably retained. */
+  private nativeActivityPredecessor(session: AgentMuxStoredAgentSession) {
+    if (session.nativeHandle?.kind !== 'provider') return undefined
+    const retained = session.recoveryActivity?.run.runId === session.run.runId &&
+      session.recoveryActivity.nativeSessionId === session.nativeHandle.sessionId ? session.recoveryActivity : undefined
+    const live = this.nativeCurrentActivities.get(session.agentSessionId)
+    const current = live?.runId === session.run.runId && live.event.nativeSessionId === session.nativeHandle.sessionId ? live : undefined
+    if (current && retained && current.event.sourceId !== retained.sourceId) return { conflicted: true as const }
+    return current && (!retained || current.conflicted || current.event.sequence >= retained.sequence) ? current : retained ? {
+      runId: retained.run.runId, event: retained, admissionId: retained.promptSubmissionId,
+      conflicted: false, invalidated: retained.state === 'unknown'
+    } : undefined
+  }
+
+  /**
+   * The input admission under which this exact native turn started. Its end inherits that
+   * admission: an input admitted mid-turn may be merged into the turn, but the native end
+   * does not prove that input was consumed, so it can never become that input's idle.
+   */
+  private nativeTurnAdmissionId(session: AgentMuxStoredAgentSession, event: AgentNativeActivityEvent): string | undefined {
+    if (event.state !== 'idle') return session.promptCompletionAdmission?.submissionId
+    const previous = this.nativeActivityPredecessor(session)
+    return previous && 'event' in previous && previous.event.nativeTurnId === event.nativeTurnId ? previous.admissionId : undefined
+  }
+
   private acceptsNativeCurrentActivity(session: AgentMuxStoredAgentSession, event: AgentNativeActivityEvent): boolean {
     if (!event.sourceId?.trim() || !Number.isSafeInteger(event.sequence) || event.sequence < 1 ||
         !['active', 'idle', 'unknown'].includes(event.state) ||
         session.nativeHandle?.kind !== 'provider' || event.nativeSessionId !== session.nativeHandle.sessionId ||
         (event.state !== 'unknown' && !event.nativeTurnId?.trim())) return false
-    const retained = session.recoveryActivity?.run.runId === session.run.runId && session.nativeHandle?.kind === 'provider' &&
-      session.recoveryActivity.nativeSessionId === session.nativeHandle.sessionId ? session.recoveryActivity : undefined
-    const live = this.nativeCurrentActivities.get(session.agentSessionId)
-    if (live?.runId === session.run.runId && live.event.nativeSessionId === session.nativeHandle.sessionId &&
-        retained && live.event.sourceId !== retained.sourceId) return false
-    const previous = live?.runId === session.run.runId && live.event.nativeSessionId === session.nativeHandle.sessionId &&
-      (!retained || live.conflicted || live.event.sequence >= retained.sequence) ? live : (retained ? {
-      runId: retained.run.runId, event: retained, admissionId: retained.promptSubmissionId,
-      conflicted: false, invalidated: retained.state === 'unknown'
-    } : undefined)
-    if (previous?.runId === session.run.runId) {
-      if (previous.conflicted) return false
+    const previous = this.nativeActivityPredecessor(session)
+    if (previous) {
+      if (previous.conflicted || !('event' in previous)) return false
       if (event.sourceId !== previous.event.sourceId || event.sequence <= previous.event.sequence) return false
+      // An input admitted during this turn can be merged into it; its end is still this turn's
+      // end. The projection keeps it unknown until a native start, never an old turn's idle.
       if (event.state === 'idle' && (previous.event.state !== 'active' || previous.invalidated ||
-          previous.admissionId !== session.promptCompletionAdmission?.submissionId ||
           event.nativeTurnId !== previous.event.nativeTurnId)) return false
     } else if (event.state === 'idle') return false
     return true
@@ -10563,8 +10583,9 @@ export class AgentMuxClient {
               : {})
       }
       if (nativeActivity && this.acceptsNativeCurrentActivity(next, nativeActivity)) {
+        const promptSubmissionId = this.nativeTurnAdmissionId(next, nativeActivity)
         next.recoveryActivity = { ...structuredClone(nativeActivity), run: { ...current.run }, hookReceiptId: receipt.id,
-          observedAt: receipt.observedAt, ...(current.promptCompletionAdmission?.submissionId ? { promptSubmissionId: current.promptCompletionAdmission.submissionId } : {}) }
+          observedAt: receipt.observedAt, ...(promptSubmissionId ? { promptSubmissionId } : {}) }
       } else if (!nativeActivity && updatesSemanticStatus && !interactionAlreadyEnded && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity) {
         // In-turn tools refresh the original main activity. A new prompt or an old idle end
         // cannot inherit that turn's interruption; neither fact grants live input eligibility.
@@ -10728,7 +10749,7 @@ export class AgentMuxClient {
       if (next.recoveryActivity?.hookReceiptId === receipt.id && next.recoveryActivity.sourceId === nativeActivity.sourceId &&
           next.recoveryActivity.sequence === nativeActivity.sequence || this.acceptsNativeCurrentActivity(next, nativeActivity)) {
         this.nativeCurrentActivities.set(next.agentSessionId, { event: structuredClone(nativeActivity), runId: next.run.runId,
-          admissionId: next.promptCompletionAdmission?.submissionId,
+          admissionId: next.recoveryActivity?.promptSubmissionId,
           ...(nativeActivity.state !== 'unknown' && nativeActivity.nativeTurnId ? { fact: {
             ...nativeActivity, state: nativeActivity.state, nativeTurnId: nativeActivity.nativeTurnId,
             source: 'native-hook', run: { ...next.run }, hookReceiptId: receipt.id, observedAt: receipt.observedAt
