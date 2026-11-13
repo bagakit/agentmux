@@ -75,11 +75,11 @@ const probe = {
   seekFraction(path: string, fraction: number) { const media = regionOf(path)!.querySelector<HTMLMediaElement>('video, audio')!; media.currentTime = media.duration * fraction },
   showControls(path: string) { regionOf(path)?.querySelector('.media-player')?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })) },
   /** The played-progress colour the timeline actually paints, resolved by the engine for the current theme. */
-  accent(path: string) {
+  timelineFill(path: string) {
     const slider = regionOf(path)?.querySelector<HTMLElement>('.media-player__slider')
     if (!slider) return null
     // An input renders no children, so the probe sits beside it, under the same player variables.
-    const probe = document.createElement('span'); probe.style.color = 'var(--media-accent)'; slider.parentElement!.append(probe)
+    const probe = document.createElement('span'); probe.style.color = 'var(--media-fill-color)'; slider.parentElement!.append(probe)
     const color = getComputedStyle(probe).color; probe.remove()
     return color
   },

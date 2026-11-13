@@ -84,12 +84,12 @@ async function capture() {
   report.checks.seekRanges = ranged.map(entry => entry.range)
   await evaluate(`mediaPlaybackProbe.showControls("promo.mp4")`); await evaluate(`mediaPlaybackProbe.hover("promo.mp4", 0.35)`)
   await frame('video-controls-dark')
-  const darkAccent = await evaluate(`mediaPlaybackProbe.accent("promo.mp4")`)
+  const darkAccent = await evaluate(`mediaPlaybackProbe.timelineFill("promo.mp4")`)
   await evaluate(`mediaPlaybackProbe.theme("light")`); await evaluate(`mediaPlaybackProbe.showControls("promo.mp4")`); await frame('video-controls-light')
   // Over the dark scrim the played part of the timeline must stay brighter than the buffered white wash in both themes.
-  const lightAccent = await evaluate(`mediaPlaybackProbe.accent("promo.mp4")`)
+  const lightAccent = await evaluate(`mediaPlaybackProbe.timelineFill("promo.mp4")`)
   report.checks.timelineAccent = { dark: darkAccent, light: lightAccent }
-  for (const [theme, color] of Object.entries(report.checks.timelineAccent)) assert.ok(relativeLuminance(color) > 0.4, `The ${theme} timeline fill reads on the scrim: ${color}`)
+  for (const [theme, color] of Object.entries(report.checks.timelineAccent)) assert.ok(relativeLuminance(color) > 0.7, `The ${theme} timeline fill reads on the scrim: ${color}`)
   await evaluate(`mediaPlaybackProbe.theme("dark")`)
   report.checks.totalBytes = sentFor('promo.mp4')
   assert.ok(report.checks.totalBytes < size, `Watching and seeking did not read the whole file: ${report.checks.totalBytes} of ${size}`)
