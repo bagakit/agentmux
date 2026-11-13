@@ -48,7 +48,8 @@ describe('Goal plan graph', () => {
       .map(column => [...column.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(item => `${item.dataset.goalPlanNode}:${item.dataset.goalPlanState}`))
     expect(columns).toEqual([['api:review', 'docs:ready'], ['ui:waiting'], ['release:waiting']])
     expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('0 of 4 done · revision 2')
-    expect(graph()!.querySelector('[data-goal-plan-node="ui"]')!.textContent).toContain('Waiting on dependencies · Node api')
+    expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting on dependencies')
+    expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
   })
 
   it('highlights exactly one next step: requested changes first, then the first ready node', async () => {
@@ -112,6 +113,27 @@ describe('plan graph projection helpers', () => {
 })
 
 describe('plan graph navigation and list progress', () => {
+  it('keeps dependencies in each dependent card when completed prerequisites make it ready', async () => {
+    seed(goal({ plan: plan(nodes, [pass('api')]), delegations: [reported('api')] }))
+    await dom.render(<GlobalBoardSurface />)
+    expect(graph()!.querySelector('[data-goal-plan-node="ui"]')!.getAttribute('data-goal-plan-state')).toBe('ready')
+    expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
+    expect(graph()!.querySelector('[data-goal-plan-node="release"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node ui, Node docs')
+  })
+  it('names the exact configured remote Host while retaining its machine route in the title', async () => {
+    const prior = useAppStore.getState(), original = prior.sessions.find(session => session.kind === 'agent')!
+    if (original.kind !== 'agent' || !prior.config) throw new Error('An actual preview configuration and Agent snapshot are required')
+    const { toolExecution: _tools, ...source } = original
+    try {
+      seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'worker-host' }] }))
+      useAppStore.setState({ config: { ...prior.config, hosts: [...prior.config.hosts, { id: 'worker-host', kind: 'ssh', label: 'Recovery worker', hostname: 'worker.invalid' }] },
+        sessions: [{ ...source, id: 'remote-worker', hostId: 'worker-host', control: { ...source.control, hostId: 'worker-host', agentSessionId: 'worker-api' } }] })
+      await dom.render(<GlobalBoardSurface />)
+      const who = graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__who')!
+      expect(who.textContent).toContain('Remote · Recovery worker')
+      expect(who.getAttribute('title')).toContain('worker-host')
+    } finally { await act(async () => useAppStore.setState({ config: prior.config, sessions: prior.sessions })) }
+  })
   it('reads the exact original thread on demand and preserves it when a later read fails', async () => {
     const original = attempt('api')
     const envelope = { messageId: original.sourceMessageId, threadId: original.threadId, senderSessionId: original.ownerAgentSessionId,

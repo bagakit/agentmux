@@ -18,7 +18,12 @@ const mutations = [
     before: 'key(workerHostId, delegation.workerRunId)', after: 'key(delegation.hostId, delegation.workerRunId)', test: 'goal-delegation-work' },
   { id: 'worker-responsibility', file: 'apps/desktop/src/renderer/src/lib/goal-current-work.ts',
     before: 'currentDemandKey(delegationWorkerHostId(delegation), delegation.workerAgentSessionId)',
-    after: 'currentDemandKey(delegation.hostId, delegation.workerAgentSessionId)', test: 'goal-delegation-work' }
+    after: 'currentDemandKey(delegation.hostId, delegation.workerAgentSessionId)', test: 'goal-delegation-work' },
+  { id: 'owner-answer-runtime', file: 'apps/desktop/src/renderer/src/lib/goal-delegation-presentation.ts',
+    before: '(!delegation.runtimeIdentity || reply.envelope.senderRuntimeId === delegation.runtimeIdentity.ownerRuntimeId &&\n        reply.envelope.recipientRuntimeId === delegation.runtimeIdentity.workerRuntimeId)',
+    after: 'true', test: 'goal-delegation-work' },
+  { id: 'owner-answer-inbox', file: 'apps/desktop/src/renderer/src/lib/goal-delegation-presentation.ts',
+    before: "reply.deliveryMode !== 'outbox' || reply.peerInbox !== undefined", after: 'true', test: 'goal-delegation-work' }
 ]
 const results = []
 for (const mutant of mutations) {

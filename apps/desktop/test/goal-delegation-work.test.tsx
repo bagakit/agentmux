@@ -136,6 +136,24 @@ describe('original delegation reading facts', () => {
       expect(goalDelegationRows({ ...goal(), delegationObservations: [changed] })[0]!.next).toBe('Question needs a reply')
     }
   })
+  it('does not mistake a same-SID worker follow-up on another Runtime for the owner answer', () => {
+    const d = { ...delegation(), ownerAgentSessionId: 'same-session', workerAgentSessionId: 'same-session', workerHostId: 'worker-host',
+      runtimeIdentity: { ownerRuntimeId: 'owner-runtime', workerRuntimeId: 'worker-runtime' } }
+    const observed: any = structuredClone(observation())
+    observed.communication.dispatch.originAwaits = true
+    observed.communication.dispatch.events = [{ kind: 'question', replyMessageId: 'question', at: 1 }]
+    observed.communication.replies = [{ envelope: { messageId: 'follow-up', replyTo: 'question', threadId: d.threadId,
+      sender: { kind: 'agent-session', agentSessionId: 'same-session' }, senderSessionId: 'same-session', recipientSessionId: 'same-session',
+      senderRuntimeId: 'worker-runtime', recipientRuntimeId: 'owner-runtime' } }]
+    expect(goalDelegationRows({ ...goal(d), delegationObservations: [observed] })[0]!.next).toBe('Question needs a reply')
+    observed.communication.replies[0].envelope.senderRuntimeId = 'owner-runtime'
+    observed.communication.replies[0].envelope.recipientRuntimeId = 'worker-runtime'
+    expect(goalDelegationRows({ ...goal(d), delegationObservations: [observed] })[0]!.next).toBe('Task owner replied · Awaiting worker')
+    observed.communication.replies[0].deliveryMode = 'outbox'
+    expect(goalDelegationRows({ ...goal(d), delegationObservations: [observed] })[0]!.next).toBe('Reply prepared · Delivery unconfirmed')
+    observed.communication.replies[0].peerInbox = { kind: 'recipient-inbox' }
+    expect(goalDelegationRows({ ...goal(d), delegationObservations: [observed] })[0]!.next).toBe('Task owner replied · Awaiting worker')
+  })
   it('separates reported, collected and exact human-accepted results while keeping observation failures visible', () => {
     const d = { ...delegation(), report: report() }, record = { ...goal(d), delegationObservationIssue: 'Original observation unavailable' }
     expect(goalDelegationRows(record)[0]).toMatchObject({ state: 'report', issue: 'Original observation unavailable', next: 'Report ready to collect' })
