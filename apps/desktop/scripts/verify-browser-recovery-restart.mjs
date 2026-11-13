@@ -62,6 +62,7 @@ const localRecoveryCase = localRecoveryKind !== null
 const browserToolsCase = process.argv.includes('--case-browser-tools')
 const structuredCase = process.argv.includes('--case-structured-output')
 const outcomeCase = process.argv.includes('--case-outcome')
+const continuityCase = process.argv.includes('--case-continuity')
 const observeOverlayMenuReadiness = process.env.AGENTMUX_OBSERVE_OVERLAY_MENU_READINESS === '1'
 assert.ok(!observeOverlayMenuReadiness || overlayCase, 'Menu readiness observation belongs to the private overlay recovery case')
 if(observeOverlayMenuReadiness)receipt.diagnosticMode='explicit-overlay-menu-readiness-observation'
@@ -74,7 +75,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,privateCase,collaborationCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,continuityCase,privateCase,collaborationCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -88,6 +89,7 @@ if(localRecoveryCase){receipt.case='local-recovery';receipt.localRecoveryKind=lo
 if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
 if(outcomeCase)receipt.case='outcome'
+if(continuityCase)receipt.case='continuity'
 if(privateCase){receipt.case='private';receipt.privateExitKind=privateCrash?'crash':'ordinary'}
 if(collaborationCase)receipt.case='collaboration'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
@@ -250,7 +252,12 @@ async function identity() {
       'apps/desktop/src/main/browser-completion-control.ts','apps/desktop/src/main/browser-outcome-criteria.ts',
       'packages/browser/src/browser-outcome-journal.ts','packages/browser/src/model/browser-outcome-criteria.ts',
       'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx','apps/desktop/scripts/browser-outcome-probe-scenario.mjs',
-      'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : [])]
+      'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : []),
+    ...(continuityCase ? ['apps/desktop/scripts/browser-continuity-probe-scenario.mjs','apps/desktop/src/shared/browser-page-memory.ts',
+      'apps/desktop/src/main/browser-recovery-preview.ts','apps/desktop/src/renderer/src/lib/browser-last-seen-favicons.ts',
+      'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx','apps/desktop/src/renderer/src/components/SurveyZoneItem.tsx',
+      'apps/desktop/src/renderer/src/components/BrowserFindBar.tsx','apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx',
+      'apps/desktop/src/shared/browser-page-shortcuts.ts','apps/desktop/src/renderer/src/lib/browser-shortcuts.ts'] : [])]
   const values = await Promise.all(files.map(async name => {
     let source = join(repositoryRoot, name)
     if (packageRoot && name.startsWith('apps/desktop/out/')) source = join(packageRoot, name.slice('apps/desktop/'.length))
@@ -926,7 +933,7 @@ async function consumeNativeProof(indexPath) {
 }
 function lastReceiptPath() {
   if(collaborationCase)return join(repositoryRoot,'.tmp/browser-collaboration-recovery-last.json')
-  return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json')
+  return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':continuityCase?'browser-continuity-last.json':'browser-recovery-restart-last.json')
 }
 if(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) {
   try { await consumeNativeProof(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) }
@@ -943,6 +950,7 @@ try {
   const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
+  const continuity = continuityCase ? await import('./browser-continuity-probe-scenario.mjs') : null
   const privateScenario = privateCase ? await import('./browser-private-probe-scenario.mjs') : null
   const collaboration = collaborationCase ? await import('./browser-collaboration-probe-scenario.mjs') : null
   const cost = outcomeCase ? await import('./lib/browser-capability-cost-collector.mjs') : null
@@ -956,6 +964,7 @@ try {
   server=createServer((request,response)=>{
     if(privateScenario?.handlePrivateRequest(request,response,receipt))return
     if(localRecovery?.handleLocalRecoveryDisconnect(request,response,receipt))return
+    if(continuity?.handleContinuityRequest(request,response,receipt))return
     if(taskDownload && request.url==='/task-completion.bin'){
       receipt.taskDownload??={requests:[]}
       // Observe actual durable owner facts at the real HTTP producer; never seed or edit them.
@@ -997,6 +1006,8 @@ try {
       state, launch, normalQuit,
       retainSecond: probe => {second=probe},
       crash: async probe => {await signalOwnedProbeProcess(probe.child.pid,root,'SIGKILL');await waitFor('exact crashed private process exits',()=>probe.child.signalCode!==null||probe.child.exitCode!==null);return {exitCode:probe.child.exitCode,signal:probe.child.signalCode}} })
+  } else if(continuity) {
+    await continuity.runContinuity({...scenarioContext(first,null,urls[0]),launch,normalQuit,retainSecond:probe=>{second=probe}})
   } else {
   await click(first.cdp,selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
   await click(first.cdp,selectors('[aria-label="Search: search and manage browsers"]'))
