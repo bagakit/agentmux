@@ -1212,8 +1212,12 @@ export class AgentMuxClient {
         finally { if (notice.moteObservation) await this.moteInputs.revisit(notice.moteObservation.id) }
       },
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
-      answerTurnEnd: async (callback, output) => await this.hookServer.respondTurnEnd(callback.session.agentSessionId,
-        callback.session.run.runId, callback.hookReceiptId, structuredClone(output) as Record<string, unknown>),
+      answerTurnEnd: async (callback, wire) => {
+        const contribution = this.providers.get(callback.session.providerId).hook.turnEndDecision
+        if (!contribution) { this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'); return 'closed' }
+        return await this.hookServer.respondTurnEnd(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId,
+          structuredClone(contribution.output(wire)) as Record<string, unknown>)
+      },
       abstainTurnEnd: callback => this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'),
       unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
         ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',
@@ -6270,13 +6274,9 @@ export class AgentMuxClient {
       if (session.pendingInteraction) return { key, state: 'active', source: 'interaction',
         sourceId: null, sourceNow: Date.now(), issue: null }
       const activity = session.currentActivity
-      // A Hook that reports its own activity as unknown confirms neither state; the Provider evidence below may.
-      if (activity && sameRun(activity.run, key.expectedRun)) switch (activity.state) {
-        case 'idle': case 'active': return { key, state: activity.state, source: 'native-hook',
-          sourceId: activity.sourceId, sourceNow: Date.now(), issue: null }
-        case 'unknown': break
-        default: return activity satisfies never
-      }
+      if (activity && sameRun(activity.run, key.expectedRun)) return { key,
+        state: activity.state === 'idle' ? 'idle' : 'active', source: 'native-hook',
+        sourceId: activity.sourceId, sourceNow: Date.now(), issue: null }
       if (nativeTargetSourceUnconfirmed(stored)) return unknown('The original native source is unconfirmed.')
       const provider = this.providers.get(session.providerId)
       const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
@@ -7525,8 +7525,7 @@ export class AgentMuxClient {
       if (!original.input) throw new AgentMuxError('The retained message has no original controlled input contract. Inspect its original claim; it cannot be submitted again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       await this.assertInputWaitingAuthor(original.input.intent, input.caller)
       const receipt = (await this.inspectAgentInput({ key: original.input.intent.key }, input.caller))!
-      // Wake the input at its current waiting generation; an earlier Stop and re-enable has moved it past the first.
-      void this.rejoinAgentInputWaiting({ ref: original.input.control.ref, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
+      void this.rejoinAgentInputWaiting({ ref: { key: original.input.intent.key, waitGeneration: 1 }, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
         this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
           message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
       })
