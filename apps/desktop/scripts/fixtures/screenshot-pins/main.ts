@@ -22,23 +22,39 @@ async function until<T>(read: () => Promise<T>, label: string): Promise<NonNulla
 }
 async function evaluate<T = any>(script: string): Promise<T> { return await window.webContents.executeJavaScript(script) }
 async function settle() { await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))') }
-async function click(label: string) {
-  const point = await until(async () => await evaluate<{ x: number; y: number } | null>(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`), 'enabled production ' + label + ' action')
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 })
+async function mouse(type: 'mouseMoved' | 'mousePressed' | 'mouseReleased', point: { x: number; y: number }) {
+  await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 })
 }
-async function shot(name: string, width: number, height: number) {
-  window.setContentSize(width, height)
-  await until(async () => await evaluate(`(()=>{const i=document.querySelector('img'),a=i.parentElement.getBoundingClientRect();return Math.abs(a.height-a.width*i.naturalHeight/i.naturalWidth)<=2})()`), 'normalized reference window image proportion')
-  await settle()
+async function hover() {
+  const [width, height] = window.getContentSize() as [number, number]
+  await mouse('mouseMoved', { x: width / 2, y: height / 2 })
+  await until(async () => await evaluate(`getComputedStyle(document.querySelector('.screenshot-pin__controls')).opacity==='1'`), 'hover-revealed pin controls')
+}
+async function click(label: string) {
+  await hover()
+  const point = await until(async () => await evaluate<{ x: number; y: number } | null>(`(()=>{const b=document.querySelector('button[aria-label=${JSON.stringify(label)}]');if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`), label)
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'] as const) await mouse(type, point)
+}
+/** Resize through the production zoom action, then capture with or without the hover controls. */
+async function shot(name: string, width: number, controls: boolean) {
+  const [current] = window.getContentSize() as [number, number]
+  await evaluate(`window.screenshotPin.zoom(${JSON.stringify((await window.webContents.executeJavaScript('window.screenshotPin.load()')).pinId)}, ${width / current}, { x: 0, y: 0 })`)
+  await until(async () => Math.abs(window.getContentSize()[0]! - width) <= 1, 'zoomed pin width')
+  if (controls) await hover(); else await mouse('mouseMoved', { x: -20, y: -20 })
+  await settle(); await new Promise(done => setTimeout(done, 200))
   const file = name + '.png', pixels = await window.webContents.capturePage()
   await writeFile(join(out, file), pixels.toPNG())
-  const layout = await evaluate(`(()=>{const image=document.querySelector('img'),r=image.getBoundingClientRect(),area=image.parentElement.getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollWidth:document.body.scrollWidth,imageHeight:r.height,objectFit:getComputedStyle(image).objectFit,image:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},area:{left:area.left,right:area.right,top:area.top,bottom:area.bottom},buttons:[...document.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {name:b.textContent.trim(),left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}})()`)
+  const layout = await evaluate(`(()=>{const image=document.querySelector('img'),r=image.getBoundingClientRect(),nav=document.querySelector('.screenshot-pin__controls');return {width:innerWidth,height:innerHeight,scrollWidth:document.body.scrollWidth,objectFit:getComputedStyle(image).objectFit,image:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},controls:getComputedStyle(nav).opacity,buttons:[...nav.querySelectorAll('button')].map(b=>{const x=b.getBoundingClientRect();return {label:b.getAttribute('aria-label'),left:x.left,right:x.right,top:x.top,bottom:x.bottom}})}})()`)
   screenshots.push({ file, appearance, contentSize: window.getContentSize(), layout })
-  assert.ok(layout.scrollWidth <= layout.width && layout.imageHeight > 100, 'actual narrow pin keeps its image and action area')
+  assert.ok(layout.scrollWidth <= layout.width, 'the pin never scrolls sideways')
   assert.equal(layout.objectFit, 'contain', 'the reference preserves the complete source image proportion')
-  assert.ok(layout.image.left >= layout.area.left && layout.image.right <= layout.area.right && layout.image.top >= layout.area.top && layout.image.bottom <= layout.area.bottom, 'the complete source image fits inside its own visible reference area')
-  assert.ok(Math.abs((layout.area.bottom - layout.area.top) - (layout.area.right - layout.area.left) * 360 / 640) <= 2, 'the resized reference removes empty space while preserving the source proportion')
-  assert.ok(layout.buttons.every((b: any) => b.left >= 0 && b.right <= layout.width && b.top >= 0 && b.bottom <= layout.height), 'every actual pin action remains inside its own window')
+  assert.ok(Math.abs(layout.height - layout.width * 360 / 640) <= 2, 'the pin window keeps the source proportion, so the image fills it')
+  assert.ok(layout.image.left === 0 && layout.image.top === 0 && Math.abs(layout.image.right - layout.width) <= 1, 'the image is the whole window')
+  assert.equal(layout.controls, controls ? '1' : '0', controls ? 'hover reveals the controls' : 'controls stay hidden without the pointer')
+  if (controls) {
+    assert.ok(layout.buttons.every((b: any) => b.left >= 0 && b.right <= layout.width && b.top >= 0 && b.bottom <= layout.height), 'every pin action stays inside its own window')
+    assert.equal(new Set(layout.buttons.map((b: any) => Math.round(b.top))).size, 1, 'the controls stay one compact row over the image')
+  }
 }
 async function command(action: string, input: unknown) {
   return await new Promise<{ code: number | null; stdout: string; stderr: string }>((done, reject) => {
@@ -49,7 +65,9 @@ async function command(action: string, input: unknown) {
   })
 }
 async function open(operationId: string, image: ReturnType<typeof pngFromBytes>) {
-  const input = { hostId: 'local', operationId, image: { format: 'png' as const, data: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, scale: 1 } }
+  // A 640x360 capture of a 320x180 point area, so the pin opens at logical size and offers Save PNG at 1x.
+  const input = { hostId: 'local', operationId, image: { format: 'png' as const, data: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, scale: 1 },
+    origin: { x: 80, y: 80, width: 320, height: 180 } }
   const result = await client.call('image.pin', input)
   window = await until(async () => {
     for (const candidate of BrowserWindow.getAllWindows()) {
@@ -59,7 +77,7 @@ async function open(operationId: string, image: ReturnType<typeof pngFromBytes>)
   }, 'the exact production pin document')
   window.webContents.debugger.attach('1.3')
   await until(async () => await evaluate('document.querySelector("img")?.naturalWidth>0'), 'decoded production PinView')
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotPin).sort()'), ['close', 'copy', 'layout', 'load', 'save'])
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotPin).sort()'), ['clickThrough', 'close', 'copy', 'drag', 'load', 'move', 'opacity', 'save', 'zoom'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full workbench bridge is absent')
   assert.equal(window.isAlwaysOnTop(), true)
   return { input, result, window }
@@ -78,16 +96,27 @@ async function run() {
   server = new AgentMuxControlServer({ socketPath: join(endpointDirectory, 'control.sock'), coreClients: () => [], images: owner })
   await server.start(); client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   const image = await sourceImage(), dark = await open('dark-reference', image)
-  await shot('wide-dark', 720, 430); await shot('narrow-dark', 300, 430)
+  assert.deepEqual(window.getContentSize(), [320, 180], 'the pin opens at the logical size of its origin')
+  await shot('wide-dark', 640, true); await shot('plain-dark', 640, false); await shot('narrow-dark', 200, true)
   await click('Copy'); await until(async () => copies.length === 1, 'private PNG sink')
   assert.equal(copies[0].dataUrl, image.dataUrl)
   dialog.showSaveDialog = (async () => ({ canceled: false, filePath: join(out, 'processed.png') })) as typeof dialog.showSaveDialog
   await click('Save PNG'); await until(async () => { try { return (await readFile(join(out, 'processed.png'))).equals(Buffer.from(image.dataUrl.split(',')[1]!, 'base64')) } catch { return false } }, 'exact fixed PNG file')
   assert.deepEqual(nativeImage.createFromBuffer(await readFile(join(out, 'processed.png'))).getSize(), { width: 640, height: 360 })
-  cases.push({ name: 'actual PinView copy and PNG save preserve fixed source pixels after resize', copies: copies.length })
+  dialog.showSaveDialog = (async () => ({ canceled: false, filePath: join(out, 'logical.png') })) as typeof dialog.showSaveDialog
+  await click('Save PNG at 1×'); await until(async () => { try { return nativeImage.createFromBuffer(await readFile(join(out, 'logical.png'))).getSize().width === 320 } catch { return false } }, '1x PNG file')
+  assert.deepEqual(nativeImage.createFromBuffer(await readFile(join(out, 'logical.png'))).getSize(), { width: 320, height: 180 })
+  await click('Opacity'); await until(async () => Math.abs(window.getOpacity() - 0.8) < 0.01, '80% pin opacity')
+  await click('Click-through'); await until(async () => await evaluate(`!!document.querySelector('button[aria-label="Stop click-through"]')`), 'click-through restore handle')
+  await settle(); await new Promise(done => setTimeout(done, 200))
+  await writeFile(join(out, 'click-through-dark.png'), (await window.webContents.capturePage()).toPNG()); screenshots.push({ file: 'click-through-dark.png', appearance })
+  const restore = await evaluate<{ x: number; y: number }>(`(()=>{const r=document.querySelector('button[aria-label="Stop click-through"]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'] as const) await mouse(type, restore)
+  await until(async () => await evaluate(`!document.querySelector('.screenshot-pin[data-click-through]')`), 'click-through restored from its handle')
+  cases.push({ name: 'actual PinView copy, PNG and 1x save, opacity and click-through restore keep fixed source pixels', copies: copies.length })
 
   appearance = 'light'; const light = await open('light-reference', image)
-  await shot('wide-light', 720, 430); await shot('narrow-light', 300, 430)
+  await shot('wide-light', 640, true)
   const closed = await command('close', { hostId: 'local', pinId: light.result.pinId, operationId: 'close-light-reference' })
   assert.equal(closed.code, 0, closed.stdout + closed.stderr)
   assert.equal(JSON.parse(closed.stdout).result.recordedOperation.effect, 'closed')

@@ -18,7 +18,17 @@ const mutations = [
   { id: 'exact-frame', from: ' && event.senderFrame === item.window.webContents.mainFrame', to: '', expected: 'refuses another frame or pin' },
   { id: 'dispose-await', from: "if (this.disposed) throw new AgentMuxError('The original image presentation owner closed before this action. Retain the original operation.', 'CONTROL_UNAVAILABLE')", to: 'void 0', expected: 'dispose during authority stage 2' },
   { id: 'closed-receipt', from: "await new Promise<void>(resolve => { pin.window.once('closed', resolve); pin.window.close() })", to: 'pin.window.close()', expected: 'close acknowledgement waits' },
-  { id: 'finite-layout', from: "if (typeof params.chromeHeight !== 'number' || !Number.isFinite(params.chromeHeight) || params.chromeHeight < 0)", to: 'if (false)', expected: 'layout accepts only finite geometry' }
+  { id: 'origin-placement', from: 'origin.width / image.width, origin.height / image.height), work), origin, work)', to: 'origin.width / image.width, origin.height / image.height), work), { x: work.x + 24, y: work.y + 24 }, work)', expected: 'opens over its origin' },
+  { id: 'origin-display', from: 'screen.getDisplayMatching({ x: Math.round(origin.x)', to: 'screen.getDisplayMatching({ x: 0 * Math.round(origin.x)', expected: 'opens over its origin' },
+  { id: 'work-area-clamp', from: 'x: clamp(at.x, work.x, work.width - width)', to: 'x: Math.round(at.x)', expected: 'opens over its origin' },
+  { id: 'exact-pin-action', from: "if (params?.pinId !== pin.id) throw new Error('Keep the original pinned image identity.')", to: 'void 0', expected: 'act only on the exact pin sender' },
+  { id: 'opacity-range', from: '!(params.opacity >= 0.2 && params.opacity <= 1)', to: 'false', expected: 'act only on the exact pin sender' },
+  { id: 'click-through-forward', from: 'setIgnoreMouseEvents(true, { forward: true })', to: 'setIgnoreMouseEvents(true)', expected: 'act only on the exact pin sender' },
+  { id: 'zoom-around-pointer', from: 'bounds.x + (point.x as number) * (1 - applied)', to: 'bounds.x', expected: 'act only on the exact pin sender' },
+  { id: 'zoom-minimum', from: 'Math.max(scale, PIN_MIN / image.width, PIN_MIN / image.height)', to: 'scale', expected: 'act only on the exact pin sender' },
+  { id: 'drag-file-once', from: 'pin.drag ??= writeDragFile(pin)', to: 'pin.drag = writeDragFile(pin)', expected: 'drag-out writes this pin PNG once' },
+  { id: 'drag-file-cleanup', from: 'if (pin.drag) void rm(', to: 'if (false) void rm(', expected: 'drag-out writes this pin PNG once' },
+  { id: 'pin-logical-save', from: '...(params.logicalSize ? { logicalScale: pin.logicalScale } : {})', to: '...({})', expected: 'saves at 1x through the pin logical scale' }
 ]
 await mkdir(resolve('.local/screenshot-pins'), { recursive: true })
 const out = await mkdtemp(resolve('.local/screenshot-pins/run-'))
@@ -96,7 +106,7 @@ try {
   receipt.native = JSON.parse(await readFile(join(out, 'native.json'), 'utf8'))
   assert.equal(native.code, 0, JSON.stringify(receipt.native.failure) + native.log)
   assert.equal(receipt.native.passed, true)
-  assert.equal(receipt.native.screenshots.length, 4); assert.equal(receipt.native.cases.length, 3)
+  assert.equal(receipt.native.screenshots.length, 5); assert.equal(receipt.native.cases.length, 3)
   const after = await fingerprints()
   for (const file of inputs) assert.equal(after[file], hashes[file], 'Pin candidate changed during verification: ' + file)
   receipt.passed = true

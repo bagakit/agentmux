@@ -34,6 +34,7 @@ const mutations = slice === 'capture' ? [
   { id: 'pixel-save-keeps-pixels', source, from: 'scale !== undefined && scale > 1', to: 'scale !== undefined', owner: 'a pixel-exact save never resizes' },
   { id: 'overwrite-needs-confirmation', source, from: "properties: ['showOverwriteConfirmation', 'createDirectory']", to: "properties: ['createDirectory']", owner: 'the native save sheet names the capture, belongs to the image window and confirms replacing a file' },
   { id: 'editor-on-capture-display', source: 'apps/desktop/src/main/system-screenshot-editor.ts', from: 'screen.getDisplayMatching(rect).workArea', to: 'screen.getDisplayMatching({ x: 0, y: 0, width: 1, height: 1 }).workArea', owner: 'opens the editor centred on the display that holds the capture' },
+  { id: 'pin-at-capture-origin', source: 'apps/desktop/src/main/system-screenshot-editor.ts', from: 'width: params.image!.width / source.scale', to: 'width: source.rect.width', owner: 'pins the edited image over its capture rectangle at the image logical size' },
   { id: 'logical-size-uses-capture-scale', source: 'apps/desktop/src/main/system-screenshot-editor.ts', from: '{ logicalScale: source!.scale }', to: '{}', owner: 'names the save by the capture time and saves at 1x by the capture scale only when asked' }
 ]
 const originals = Object.fromEntries(await Promise.all([...new Set([source, ...mutations.map(row => row.source)])].map(async path => [path, await readFile(path, 'utf8')])))

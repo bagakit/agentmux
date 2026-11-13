@@ -237,3 +237,15 @@ it('opens the editor centred on the display that holds the capture', async () =>
   await open()
   expect(native.windows.at(-1).options).not.toHaveProperty('x')
 })
+
+it('pins the edited image over its capture rectangle at the image logical size', async () => {
+  editor.dispose()
+  const pin = vi.fn(async () => ({ hostId: 'local', pinId: 'pin', state: 'open' as const, creationOperationId: 'pin-op', recordedOperation: null }))
+  editor = new SystemScreenshotEditor(undefined, { pin })
+  const current = await open(undefined, false, undefined, { ...source, scale: 0.5 })
+  await current.call('pin', { requestId: current.input.requestId, operationId: 'pin-op', image })
+  expect(pin).toHaveBeenCalledExactlyOnceWith(image, 'pin-op', { x: 1600, y: 100, width: 2, height: 2 })
+  const plain = await open()
+  await plain.call('pin', { requestId: plain.input.requestId, operationId: 'plain-pin', image })
+  expect(pin.mock.calls[1], 'a pin without a capture source opens near the pointer').toEqual([image, 'plain-pin', undefined])
+})
