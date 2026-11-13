@@ -11,7 +11,7 @@ if (process.argv.includes('--help')) {
 }
 assert.equal(process.platform, 'darwin', 'The production capture source compiles only on macOS')
 const macos = join(repository, 'packages/native-desktop/macos')
-const core = ['NativeImageLimits.swift', 'NativeDisplayCaptureLease.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))
+const core = ['NativeImageLimits.swift', 'NativeNDJSONReader.swift', 'NativeDisplayCaptureLease.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))
 const operations = readFileSync(join(macos, 'Sources/AgentMuxNativeMacOS/NativeDesktopOperations.swift'), 'utf8')
 const main = readFileSync(join(macos, 'Sources/AgentMuxNativeMacOS/main.swift'), 'utf8')
 const fixture = readFileSync(join(macos, 'Verification/DisplayFramesChecks.swift'), 'utf8')
@@ -40,7 +40,7 @@ function slice(source, from, until) {
 const production = {
   frames: slice(operations, '    static func captureDisplays() throws', '    private static func captureRect(_ rect:'),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
-  lease: readFileSync(core[1], 'utf8'),
+  lease: readFileSync(core[2], 'utf8'),
 }
 function swiftc(parameters, log) {
   const result = spawnSync('swiftc', parameters, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
@@ -55,7 +55,7 @@ function build(name, mutation) {
   if (mutation) loaded[mutation.part] = replaceOnce(loaded[mutation.part], mutation.before, mutation.after)
   const lease = join(directory, 'NativeDisplayCaptureLease.swift')
   writeFileSync(lease, loaded.lease)
-  swiftc([...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', core[0], lease,
+  swiftc([...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', core[0], core[1], lease,
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core.log'))
   const checks = replaceOnce(replaceOnce(fixture, '/* PRODUCTION_DISPLAY_FRAMES */', loaded.frames), '/* PRODUCTION_BLOCKING_ASYNC */', loaded.blocking)
   const source = join(directory, 'CompiledDisplayFramesChecks.swift')
