@@ -13,6 +13,7 @@ import { CAPSULE_RUNTIME_METHODS, type CapsuleRuntimeObservation } from '../src/
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
+import { AMUX_PROTOCOL_DEFINITIONS } from '../src/amux-protocol-definition.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { parseAgentMuxControlRequest } from '../src/control-codec.js'
@@ -175,6 +176,16 @@ describe('Capsule public composition', () => {
     expect(help.stdout).toContain('A pending original operation is still unknown')
     expect(help.stdout).toContain('amux space inspect --region REGION')
     expect(guide.stdout).toContain('normally pass an explicit readable split in the same Tab')
+    // The page HITL loop is discoverable from the module guide alone.
+    expect(guide.stdout).toContain('## Ask the person on a page')
+    expect(guide.stdout).toContain('capsule interaction request')
+    expect(guide.stdout).toContain('<' + AMUX_PROTOCOL_DEFINITIONS['capsule-answer'].tag + ' version="1">')
+    expect(guide.stdout).toContain('The recipient defaults to you, the authenticated calling Agent')
+    const create = await run(['capsule', 'create', '--help'])
+    expect(create.code, create.stderr).toBe(0)
+    expect(create.stdout).toContain('target is the recipient of page questions, fixed at creation; omitted means you, the authenticated calling Agent')
+    const reply = await run(['capsule', 'interaction', 'reply', '--help'])
+    expect(reply.stdout).toContain('Agents and pages are refused')
     expect(await readdir(root)).toEqual([])
     const input = { capsuleId, operationId: 'original-open' }, file = join(root, 'open.json')
     await writeFile(file, JSON.stringify(input))
