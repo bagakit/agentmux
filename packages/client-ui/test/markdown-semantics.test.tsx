@@ -161,11 +161,13 @@ describe('shared Markdown document and conversation semantics', () => {
 
   it('keeps raw HTML and forbidden schemes inert while preserving readable source', async () => {
     const openHttpLink = vi.fn(), openWorkspaceFile = vi.fn()
-    const content = `<script>window.compromised = true</script>\n\n<img src="https://example.com/a.png">\n\n[Unsafe](javascript:alert%281%29) [File](${fixtureFileUrl("a.txt")}) [Unknown][missing]`
+    const content = `<script>window.compromised = true</script>\n\n<img src="https://example.com/a.png" alt="Remote" onerror="window.compromised = true">\n\n[Unsafe](javascript:alert%281%29) [File](${fixtureFileUrl("a.txt")}) [Unknown][missing]`
     await render(<AgentMarkdown content={content} documentMode workspaceRoot={fixturePath("repo")} openHttpLink={openHttpLink} openWorkspaceFile={openWorkspaceFile} />)
     expect(container.querySelector('script, img, a, iframe, button')).toBeNull()
     expect(container.textContent).toContain('<script>window.compromised = true</script>')
-    expect(container.textContent).toContain('<img src="https://example.com/a.png">')
+    // A whitelisted HTML image is an image reference like Markdown's; without a Host image port nothing is fetched.
+    expect(element('.md-image-attachment--unavailable').textContent).toContain('Remote')
+    expect(container.innerHTML).not.toContain('onerror')
     expect(container.textContent).toContain('Unsafe File [Unknown][missing]')
     expect(openHttpLink).not.toHaveBeenCalled()
     expect(openWorkspaceFile).not.toHaveBeenCalled()
