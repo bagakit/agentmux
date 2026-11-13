@@ -1,4 +1,4 @@
 import { defineConfig } from 'vitest/config'
 
 // The measurement oracle and argument parser use no compiled product packages.
-export default defineConfig({ test: { include: ['apps/desktop/test/settings-evaluation.test.ts'], maxWorkers: 1 } })
+export default defineConfig({ test: { include: ['apps/desktop/test/settings-evaluation.test.ts', 'apps/desktop/test/settings-evaluation-visibility.test.ts'], maxWorkers: 1 } })
