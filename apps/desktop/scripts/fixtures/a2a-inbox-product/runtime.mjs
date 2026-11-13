@@ -36,7 +36,7 @@ export function installPrivateA2aNativeClipboard({ native, ui, prototype, record
   if (native !== ui || Object.getPrototypeOf(native) !== prototype) throw new Error('The original macOS NativeDesktop UI owner is required')
   for (const name of ['writeClipboardText', 'readClipboardText', 'request']) if (typeof native[name] !== 'function') throw new Error('Original native clipboard port is unavailable: ' + name)
   const other = ['captureScreenshot', 'readClipboardImage', 'writeClipboardImage', 'inspectOperation', 'dispose'].map(name => [name, native[name]])
-  const request = native.request, guard = { port: 'NativeDesktop.writeClipboardText', destination: 'private-recorder', sequence: 0, reads: [], writes: [], blockedRequests: [], delegatedRequests: [] }
+  const request = native.request, guard = { port: 'NativeDesktop.writeClipboardText', destination: 'private-recorder', sequence: 0, reads: [], writes: [], blockedRequests: [] }
   native.writeClipboardText = async text => {
     if (typeof text !== 'string') throw new Error('The original clipboard text must remain a string')
     const value = { text, sequence: ++guard.sequence, port: guard.port, destination: guard.destination, byteLength: Buffer.byteLength(text) }
@@ -51,7 +51,6 @@ export function installPrivateA2aNativeClipboard({ native, ui, prototype, record
       guard.blockedRequests.push({ method, params: args[0] }); persist(guard)
       return Promise.reject(new Error('Unexpected native clipboard transport request blocked by the private proof'))
     }
-    guard.delegatedRequests.push({ method }); persist(guard)
     return request.apply(this, [method, ...args])
   }
   if (Object.getPrototypeOf(native) !== prototype || other.some(([name, value]) => native[name] !== value)) throw new Error('Unrelated native capabilities must retain their original owner')
