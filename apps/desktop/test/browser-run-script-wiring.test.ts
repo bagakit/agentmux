@@ -836,8 +836,9 @@ describe('explicit Browser control', () => {
     try {
       inputShields.FakeInputShield.failNextConstruction = true
       const report = await manager.runScript('b1', 'return 43')
+      // The operation keeps the history line; the Browser's current notice keeps the recovery advice.
       expect(report).toMatchObject({ result: 43, outcome: { kind: 'completed' }, runOperation: {
-        warning: expect.stringContaining('isolation is unconfirmed'), control: { owner: 'agent', activeOperationId: null, inputIsolation: 'unconfirmed' } } })
+        warning: expect.stringContaining('isolation was unconfirmed during this operation'), control: { owner: 'agent', activeOperationId: null, inputIsolation: 'unconfirmed' } } })
       expect(sentEvents().at(-1)?.browser).toMatchObject({ control: { owner: 'agent', inputIsolation: 'unconfirmed' },
         activity: { warning: expect.stringContaining('isolation is unconfirmed') } })
       expect(contents.isDestroyed()).toBe(false)
@@ -1217,7 +1218,9 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], execute: async request =>
       projectBrowserControlResult(await execute(request, api, (code: string, message: string) => Object.assign(new Error(message), { code }), () => {})) })
     await server.start()
-    const invoke = (args: string[]) => runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', ...args], objectCliEnvironment(dirname(path)))
+    // stderr is parsed as the CLI's one JSON error, so Node's SQLite ExperimentalWarning must not share it.
+    const invoke = (args: string[]) => runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', ...args], objectCliEnvironment(dirname(path),
+      { NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') }))
     const previousDispatch = createDispatch.getMockImplementation()!
     createDispatch.mockImplementation(() => async name => name === 'pageInfo' ? { url: 'https://example.invalid/' } : null)
     try {
@@ -2096,7 +2099,8 @@ describe('versioned task assets via the actual Browser Manager', () => {
       const second = await f.manager.locateTaskAssetStep('b1', first.id, first.revision, first.draft.steps[0]!.id)
       expect(second.draft.steps[0]!.target).toEqual({ role: 'button', name: 'Human chosen button', ordinal: 1, count: 1 })
       expect(worlds.inspectionTokens).toHaveLength(2)
-      expect(worlds.inspectionTokens[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+      // A capability token: 32 random bytes in Base58, never a counter or a reused selection revision.
+      expect(worlds.inspectionTokens[0]).toMatch(/^[1-9A-HJ-NP-Za-km-z]{43,44}$/)
       expect(worlds.inspectionTokens[1]).not.toBe(worlds.inspectionTokens[0])
       expect(f.contents.debugger.isAttached()).toBe(false)
       expect(worlds.listeners.size).toBe(0)
