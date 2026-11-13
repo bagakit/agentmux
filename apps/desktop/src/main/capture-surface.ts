@@ -288,7 +288,7 @@ export class CaptureSurface {
 }
 
 function overlayInput(frame: NativeDisplayFrame, session: CaptureSurfaceSession, theme: CaptureSurfaceInput['theme'], initialCrop: CaptureSurfaceHandoff['crop'] | undefined): CaptureSurfaceInput {
-  const base = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, attachToDraft: session.attachToDraft, expandable: session.expandable, theme }
+  const base = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop, attachToDraft: session.attachToDraft, expandable: session.expandable, theme }
   if (frame.issue !== undefined) return { ...base, issue: frame.issue }
   const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + frame.png, width: frame.width, height: frame.height, byteLength: Buffer.byteLength(frame.png, 'base64') }
   pngBytes(image)

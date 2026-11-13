@@ -19,6 +19,8 @@ export type CaptureSurfaceInput = {
   frame: CaptureSurfaceRect
   /** Device pixels per point of the frozen frame. */
   scale: number
+  /** Points at the top covered by the display's camera housing; capture chrome stays below it. */
+  safeTop: number
   attachToDraft: boolean
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean

@@ -1,7 +1,8 @@
 import { intersectRect, normalizeRect, type NormalizedRect, type ScreenshotPoint } from './drawing-model'
 
-/** The capture frame's CSS pixel size; its origin is the frame's top-left. */
-export type CaptureFrame = { width: number; height: number }
+/** The capture frame's CSS pixel size; its origin is the frame's top-left. `top` is the band the display covers with a camera
+ * housing: chrome stays below it, the selection does not. */
+export type CaptureFrame = { width: number; height: number; top: number }
 export type CropHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 /** One selection gesture in image pixels: a new selection, a move, or a resize from an edge or corner. */
 export type CropGesture = { mode: 'create' | 'move' | CropHandle; start: ScreenshotPoint; at: ScreenshotPoint; original: NormalizedRect | null }
@@ -51,11 +52,11 @@ export function captureToolbarPlacement(selection: NormalizedRect, barWidth: num
   const bottom = selection.y + selection.height, right = selection.x + selection.width
   const below = bottom + CAPTURE_BAR_GAP, above = selection.y - CAPTURE_BAR_GAP - CAPTURE_BAR_HEIGHT
   const side = below + CAPTURE_BAR_HEIGHT + CAPTURE_PROPERTIES_REACH <= frame.height - CAPTURE_BAR_INSET ? 'below'
-    : above - CAPTURE_PROPERTIES_REACH >= CAPTURE_BAR_INSET ? 'above' : 'inside'
+    : above - CAPTURE_PROPERTIES_REACH >= frame.top + CAPTURE_BAR_INSET ? 'above' : 'inside'
   const top = side === 'below' ? below : side === 'above' ? above : bottom - CAPTURE_BAR_INSET - CAPTURE_BAR_HEIGHT
   const end = side === 'inside' ? right - CAPTURE_BAR_INSET : right
   return { side, left: clamp(end - barWidth, CAPTURE_BAR_INSET, frame.width - CAPTURE_BAR_INSET - barWidth),
-    top: clamp(top, CAPTURE_BAR_INSET, frame.height - CAPTURE_BAR_INSET - CAPTURE_BAR_HEIGHT) }
+    top: clamp(top, frame.top + CAPTURE_BAR_INSET, frame.height - CAPTURE_BAR_INSET - CAPTURE_BAR_HEIGHT) }
 }
 
 // The size chip's height and its gap to the selection, in frame CSS pixels.
@@ -63,17 +64,19 @@ const SIZE_CHIP_HEIGHT = 20, SIZE_CHIP_GAP = 4
 /** At the selection's top-left on the side away from the toolbar: above it, or just inside when the toolbar or the frame edge takes that side. */
 export function captureSizeChipPlacement(selection: NormalizedRect, chipWidth: number, barSide: CaptureBarSide, frame: CaptureFrame): { left: number; top: number } {
   const above = selection.y - SIZE_CHIP_GAP - SIZE_CHIP_HEIGHT
-  return { left: clamp(selection.x, 0, frame.width - chipWidth), top: barSide !== 'above' && above >= 0 ? above : selection.y + SIZE_CHIP_GAP }
+  const inside = Math.max(selection.y + SIZE_CHIP_GAP, frame.top)
+  return { left: clamp(selection.x, 0, frame.width - chipWidth), top: barSide !== 'above' && above >= frame.top ? above : inside }
 }
 
 export const LOUPE_WIDTH = 136, LOUPE_HEIGHT = 176
 // The loupe's distance from the pointer, and the clearance it keeps from the selection's border and handles.
 const LOUPE_OFFSET = 16, LOUPE_CLEARANCE = 8
-/** Beside the pointer, on the first diagonal that stays in the frame and off the selection. */
+/** Beside the pointer, on the first diagonal that stays in the frame and off the selection. Below the pointer it starts no higher
+ * than the camera housing band ends; above it, it must clear the band whole, so it never slides down over the pointer. */
 export function captureLoupePlacement(at: ScreenshotPoint, avoid: NormalizedRect | null, frame: CaptureFrame): { left: number; top: number } {
-  const right = at.x + LOUPE_OFFSET, left = at.x - LOUPE_OFFSET - LOUPE_WIDTH, below = at.y + LOUPE_OFFSET, above = at.y - LOUPE_OFFSET - LOUPE_HEIGHT
+  const right = at.x + LOUPE_OFFSET, left = at.x - LOUPE_OFFSET - LOUPE_WIDTH, below = Math.max(at.y + LOUPE_OFFSET, frame.top), above = at.y - LOUPE_OFFSET - LOUPE_HEIGHT
   const candidates = [{ left: right, top: below }, { left, top: below }, { left: right, top: above }, { left, top: above }]
-  const fits = (box: { left: number; top: number }) => box.left >= 0 && box.top >= 0 && box.left + LOUPE_WIDTH <= frame.width && box.top + LOUPE_HEIGHT <= frame.height
+  const fits = (box: { left: number; top: number }) => box.left >= 0 && box.top >= frame.top && box.left + LOUPE_WIDTH <= frame.width && box.top + LOUPE_HEIGHT <= frame.height
   const clear = (box: { left: number; top: number }) => !avoid || box.left >= avoid.x + avoid.width + LOUPE_CLEARANCE || box.left + LOUPE_WIDTH <= avoid.x - LOUPE_CLEARANCE ||
     box.top >= avoid.y + avoid.height + LOUPE_CLEARANCE || box.top + LOUPE_HEIGHT <= avoid.y - LOUPE_CLEARANCE
   const inFrame = candidates.filter(fits), chosen = inFrame.find(clear) ?? inFrame[0] ?? { left: right, top: below }

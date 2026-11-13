@@ -6,7 +6,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { claimSurfaceChords } from '../../lib/surface-chord-owners'
 import type { ShortcutEvent } from '../../lib/shortcut-registry'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { CaptureHint, CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
 import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
@@ -137,7 +137,7 @@ type WindowPresentation = {
   onCheckPin?(): void
   /** Retake (⇧⌘R): the host captures again for the same consumer; unkept marks are confirmed in place first. */
   onRetake?(): void
-  pixelRatio?: never; origin?: never; windows?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
+  pixelRatio?: never; origin?: never; windows?: never; safeTop?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
 }
 /**
  * One display's full frozen frame at a fixed one-to-one pixel scale, filling a transparent capture overlay. The
@@ -153,6 +153,8 @@ type CapturePresentation = {
   origin?: ScreenshotPoint
   /** The application windows on this frame when it froze, front to back, in image pixels: hover lights the one a click selects, and gestures snap to their edges. */
   windows?: readonly NormalizedRect[]
+  /** Frame CSS pixels at the top the display covers with its camera housing; the hint, toolbar, size chip and loupe stay below it. */
+  safeTop?: number
   /** Plain C while the loupe shows: the host copies this exact sampled color. */
   onCopyColor?(hex: string): void
   onSavePng: AnnotationOutput
@@ -169,7 +171,7 @@ type CapturePresentation = {
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
-  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS,
+  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS, safeTop = 0,
   locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
@@ -1015,7 +1017,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   </>
   if (capture) {
     // Frame CSS pixels: the selection, its toolbar, size chip and loupe all sit on the one frozen display frame.
-    const frame = { width: size.width, height: size.height }
+    const frame = { width: size.width, height: size.height, top: safeTop }
     const shown = selection && { x: selection.x * scale, y: selection.y * scale, width: selection.width * scale, height: selection.height * scale }
     // The bar shows only at rest, but its side is known during a gesture too, so the size chip never swaps sides on release.
     const placement = shown ? captureToolbarPlacement(shown, measured.bar, frame) : null
@@ -1026,7 +1028,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
     const hint = locked ? 'Selecting on another display · Esc to cancel'
       : !documentState.crop && gesture === null ? `${windows.length ? 'Click a window or drag' : 'Drag'} to select · Arrows nudge · Enter to finish · Esc to cancel` : null
-    return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
+    return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title}
+      style={{ ...(active ? {} : { display: 'none' }), ...(safeTop ? { '--capture-safe-top': safeTop + 'px' } : {}) } as CSSProperties}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
       {chip ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{sizeText}</span> : null}
       {bar ? <div ref={barRef} className="image-annotation-editor__capture-bar" data-side={bar.side} style={{ left: bar.left, top: bar.top }}>
