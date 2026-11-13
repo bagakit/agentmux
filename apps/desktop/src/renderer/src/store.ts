@@ -5258,7 +5258,7 @@ function gitNavigationTarget(state: AppState) {
 }
 
 async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding', options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
-  const state = useAppStore.getState(), originalNavigation = fileNavigationSelection(state)
+  const state = useAppStore.getState()
   await handoffOriginalGoalDiscussions(demandId)
   const choice = primaryMoteExecutorChoice(state)
   const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: mintObjectId(), demandId, mode, ...(choice.executorId ? { executorId: choice.executorId } : {}) })
@@ -5267,14 +5267,7 @@ async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding
   useAppStore.setState(current => ({ demands: { ...current.demands, [goal.id]: demandRecordFromFilesystem(goal, current.demands[goal.id]) } }))
   const receipt = { tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
   options?.onReceipt?.(receipt)
-  if (fileNavigationSelection(useAppStore.getState()) === originalNavigation) {
-    const current = useAppStore.getState()
-    if (receipt.agentSessionId && result.receipt.hostId) current.revealFocusAgent({ hostId: result.receipt.hostId, agentSessionId: receipt.agentSessionId })
-    else {
-      const tab = current.tabs[receipt.tabId], layout = tab && current.layouts[tab.workspaceId], groupId = layout && tabGroupForTab(layout, receipt.tabId)
-      if (tab && groupId) current.selectMainRegion({ displayWorkspaceId: tab.workspaceId, groupId, tabId: receipt.tabId, regionId: result.receipt.regionId })
-    }
-  }
+  // The Goals caller presents this original discussion Tab without replacing its background workface.
   return receipt.tabId
 }
 
