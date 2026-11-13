@@ -23,7 +23,7 @@ program is almost out of time they throw "… because this program's time is alm
 program still runs, so you can catch it, return what you have, and continue in a new program.
 Prefer several short programs to one long one. `waitForElement(name, {exact: true, role})` waits
 for one exact name (by default any name containing the text matches, so "Save" also matches "Save
-draft"). `waitForUrl(url)` or `waitForUrl({contains})` waits for this page
+draft"). `waitForUrl(url)`, `waitForUrl({contains})` or `waitForUrl({pattern})` waits for this page
 to be at a URL and returns `{url, navigationId}`; take a fresh snapshot of that page. Page functions ([Current browser-capability-examples](../../dist/browser-page-capability.js "amux:generated browser-capability-examples"), …)
 are injected into that subprocess. The current capability registry exposes:
 [Current browser-capability-directory](../../dist/browser-page-capability.js "amux:generated browser-capability-directory")
@@ -47,8 +47,7 @@ counts as this program's own input, like `click()`.
 When the page opens an alert, confirm, prompt or leave-page dialog, the page call in flight fails at
 once with a message that names the dialog, instead of waiting out the budget. Calls that need the
 page are refused unsent until it is answered: `dismissDialog()` closes it, `acceptDialog()` says OK
-(`acceptDialog(text)` only for a prompt); navigation does not get past an open dialog. `pageInfo()` still
-answers while one is open. Agreeing to leave a page
+(`acceptDialog(text)` only for a prompt), and `gotoUrl()` leaves the page. Agreeing to leave a page
 that asks to stay open is the person's decision. A dialog still open when the program ends is
 dismissed, and the outcome is indeterminate, so look at the page first.
 `snapshot(options)` and `snapshotText(options)` accept `scope: "page"|"viewport"`,
