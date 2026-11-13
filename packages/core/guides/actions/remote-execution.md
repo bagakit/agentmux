@@ -26,10 +26,10 @@ draft. Existing Agents keep their original two-end bindings.
 
 ## Other arrangements
 
-In **Settings → Remote → Remote Agents**, choose the project, the device the
-Agent runs on and, under **More options**, the project-side folder or a
-different Agent startup directory. This covers a local Agent working on remote
-project files, two remote devices, and different directories on one device.
+In **Settings → Remote → Remote Agents**, choose the project and the device the
+Agent runs on. Under **More options**, choose a project folder on any device or
+where the Agent starts. This covers a local Agent working on remote project
+files, two remote devices, and different directories on one device.
 **Open in Launcher** continues with these selections filled in; preparing does
 not create an Agent or send a task. A Launcher with such an arrangement shows it
 read-only in the Agent section, with **Use project device** and a link back to
