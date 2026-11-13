@@ -77,7 +77,12 @@ export async function createBrowserMcpServer(options: { endpoint: AgentMuxRpcEnd
     inputSchema: z.object({ method: z.enum(BROWSER_RPC_CALL_METHODS), params: z.record(z.string(), z.unknown()) }).strict() },
     async ({ method, params }, ctx) => {
       // JSON enters the existing typed RPC boundary here; its original service parsers validate business params.
-      try { return content({ result: await sdk.call(method, params as AgentMuxRpcParams<typeof method>, { signal: ctx.mcpReq.signal }) }) }
+      try {
+        if (['caller', 'runtimeFence', 'approval'].some(field => Object.hasOwn(params, field))) {
+          throw new AgentMuxError('MCP tool parameters cannot supply caller credentials, Runtime authority or human approval.', 'MCP_CONTROL_FIELDS_FORBIDDEN')
+        }
+        return content({ result: await sdk.call(method, params as AgentMuxRpcParams<typeof method>, { signal: ctx.mcpReq.signal }) })
+      }
       catch (error) { return failure(error) }
     })
   server.registerTool('browser_follow', { description: 'Observe a bounded window of the original operation stream, preserving initial Gap and event sequences. Window expiry or cancellation ends only this reader; use browser.stop to stop that exact operation.',
