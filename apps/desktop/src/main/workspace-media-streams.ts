@@ -144,9 +144,12 @@ export class WorkspaceMediaStreams {
     let path: string
     try { path = previewRelativePath(requestedPath) }
     catch (error) { return { status: 'unavailable', code: 'WORKSPACE_PATH_ESCAPE', message: error instanceof Error ? error.message : String(error) } }
-    const format = workspaceFilePreviewFormat(path)
-    if (!format || (format.kind !== 'audio' && format.kind !== 'video')) return { status: 'unsupported', message: 'This file format has no built-in media playback.' }
+    // A playlist is an editable text File whose preview plays; other media come from the media format table.
     const playlist = workspaceFileExtension(path) === WORKSPACE_MEDIA_PLAYLIST_EXTENSION
+    const table = playlist ? null : workspaceFilePreviewFormat(path)
+    const fileKind = table?.kind === 'audio' || table?.kind === 'video' ? table.kind : null
+    if (!playlist && !fileKind) return { status: 'unsupported', message: 'This file format has no built-in media playback.' }
+    const mimeType = playlist ? PLAYLIST_RESOURCE_TYPES[WORKSPACE_MEDIA_PLAYLIST_EXTENSION]! : table!.mimeType
     let media: WorkspaceMediaHandle | null = null, byteLength: number
     try {
       // A playlist is confirmed readable here and re-read per request; a single file is pinned once.
@@ -158,8 +161,8 @@ export class WorkspaceMediaStreams {
       if (code === 'EISDIR') return { status: 'directory' }
       return { status: 'unavailable', code, message }
     }
-    const base: LeaseBase = { workspace: { ...workspace }, path, mimeType: format.mimeType, fact: { state: 'active' }, responses: new Set(), released: false }
-    const lease: Lease = media ? { ...base, kind: format.kind, media }
+    const base: LeaseBase = { workspace: { ...workspace }, path, mimeType, fact: { state: 'active' }, responses: new Set(), released: false }
+    const lease: Lease = media && fileKind ? { ...base, kind: fileKind, media }
       : { ...base, kind: 'playlist', referenced: new Set([path]), served: new Map() }
     try {
       const origin = await this.start()

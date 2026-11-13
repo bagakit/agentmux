@@ -19,6 +19,7 @@ const PlantUmlFilePreview = lazy(async () => ({ default: (await import('./PlantU
 const ExcalidrawFilePreview = lazy(async () => ({ default: (await import('./ExcalidrawFilePreview')).ExcalidrawFilePreview }))
 const VegaFilePreview = lazy(async () => ({ default: (await import('./VegaFilePreview')).VegaFilePreview }))
 const BuildFilePreview = lazy(async () => ({ default: (await import('./BuildFilePreview')).BuildFilePreview }))
+const PlaylistFilePreview = lazy(async () => ({ default: (await import('./PlaylistFilePreview')).PlaylistFilePreview }))
 
 function SourceImage({ content, name }: { content: string; name: string }) {
   const [loaded, setLoaded] = useState<{ content: string; url: string } | null>(null)
@@ -66,6 +67,7 @@ export function SourceFilePreview(props: SourceFilePreviewProps) {
     case 'excalidraw': return <ExcalidrawFilePreview content={content} path={path} visible={visible} />
     case 'vega': case 'vega-lite': return <VegaFilePreview content={content} path={path} workspaceId={workspaceId} visible={visible} mode={kind} />
     case 'latex': case 'typst': return <BuildFilePreview regionId={props.regionId} kind={kind} path={path} visible={visible} />
+    case 'playlist': return <PlaylistFilePreview workspaceId={workspaceId} path={path} visible={visible} />
     case 'markdown': return <MarkdownFilePreview {...props} />
     case 'note': return null // Note's editable block owner stays with FileSurfaceView.
     default: { const exhaustive: never = kind; return exhaustive }
