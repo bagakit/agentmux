@@ -1,3 +1,5 @@
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { nativeInputDouble } from './browser-native-input-double.js'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 
@@ -236,4 +238,40 @@ describe('Profile environment and page programs share the original connection', 
     old.detach(); expect(c.debugger.isAttached()).toBe(true)
     current.detach(); expect(c.debugger.isAttached()).toBe(false)
   })
+})
+
+
+it('the actual ref dispatcher consumes one stable child sender and refuses its replaced or released lease', async () => {
+  const native=nativeInputDouble(), c=fakeContents({sendCommand:async(method,params:any,sessionId)=>{
+    const answered=native.answer(method,params)
+    if(answered!==undefined)return answered
+    if(method==='Page.getFrameTree')return sessionId?{frameTree:{frame:{id:'child-document',loaderId:'child-loader'}}}:{frameTree:{frame:{id:'main-document',loaderId:'main-loader'},childFrames:[{frame:{id:'child-document',parentId:'main-document',loaderId:'child-loader'}}]}}
+    if(method==='Accessibility.getFullAXTree')return {nodes:sessionId?[{nodeId:'field',backendDOMNodeId:11,role:{value:'textbox'},name:{value:'Child field'},childIds:[]}]:[{nodeId:'root',role:{value:'RootWebArea'},childIds:[]}]}
+    if(method==='Page.createIsolatedWorld')return {executionContextId:1}
+    if(method==='DOM.resolveNode')return {object:{objectId:'child-field'}}
+    if(method==='Runtime.evaluate')return {result:{value:'[]'}}
+    return {}
+  }})
+  const environment=BrowserCdpSession.attach(c), page=BrowserCdpSession.attach(c)
+  c.debugger.emit('message','Target.attachedToTarget',{sessionId:'child',targetInfo:{type:'iframe'}})
+  const original=page.frames.get('child')!
+  const dispatch=createBrowserPageDispatch({session:page,pageInfo:()=>({url:'https://example.test/',title:'Parent',navigationId:'main-nav'}),gotoUrl:async()=>{},captureScreenshot:async()=>({}),readLedger:async()=>null,writeLedger:async()=>{},note:()=>{}})
+  const snapshot=await dispatch('snapshot',[]) as import('@agentmux/browser/model/page').BrowserPageSnapshot
+  expect(snapshot.missingFrames).toEqual([])
+  const field=snapshot.nodes.find(node=>node.name==='Child field')!
+  expect(field.sessionId).toBe('child')
+  await dispatch('fillInput',[field.ref,'native child value'])
+  expect(native.typed.map(row=>row.text)).toEqual(['native child value'])
+  expect(page.frames.get('child')).toBe(original)
+  c.debugger.emit('message','Target.detachedFromTarget',{sessionId:'child'})
+  c.debugger.emit('message','Target.attachedToTarget',{sessionId:'child',targetInfo:{type:'iframe'}})
+  const before=c.debugger.sendCommand.mock.calls.length
+  expect(()=>original('Runtime.evaluate')).toThrow('original child document sender changed')
+  expect(c.debugger.sendCommand.mock.calls).toHaveLength(before)
+  const current=page.frames.get('child')!
+  expect(current).not.toBe(original)
+  page.detach()
+  expect(()=>current('Runtime.evaluate')).toThrow('lease was released')
+  await expect(environment.sendCommand('Runtime.evaluate')).resolves.toBeDefined()
+  environment.detach()
 })
