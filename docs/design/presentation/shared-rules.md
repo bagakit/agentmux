@@ -446,6 +446,7 @@ styles/
   git-history.css  Git History 的固定引用选择、已读提交与拓扑图
   workbench.css  Pane、Region、分屏、拖放
   file-preview.css  共用文件预览与就地编辑
+  media-player.css  File Region 的音视频与直播播放器
   file-data-preview.css  JSON 等结构化数据文件的树状预览
   pdf-content.css  PDF 预览的页面容器与工具
   note.css  Note 阅读、编辑与恢复
