@@ -1,6 +1,6 @@
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
+import { terminalCheckpointHistoryPolicy, terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite } from '@agentmux/client-ui/terminal/live-output'
 import { hydrateTerminalReplay, restoreTerminalCheckpoint, terminalHistoryBoundary, yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 
@@ -11,7 +11,7 @@ export type MobileTerminalCanvas = {
   resize(cols: number, rows: number): void
   scrollToLine(line: number): void
   readonly rows: number
-  readonly buffer: { active: { type: 'normal' | 'alternate'; length: number; baseY: number; viewportY: number } }
+  readonly buffer: { active: { type: 'normal' | 'alternate'; length: number; baseY: number; viewportY: number }; normal: { length: number } }
 }
 export type MobileTerminalReading = { phase: 'pending' | 'reading' | 'paused' | 'unavailable'; message: string; notice: string | null; historyBoundary: string | null }
 type ReaderClient = Pick<AgentMuxHostedClient, 'agentSession' | 'onEvent' | 'reattachAgent' | 'readRunReplay' | 'releaseRunAttachment'>
@@ -40,7 +40,7 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     const next = { ...reading, ...change }
     if (next.phase !== reading.phase || next.message !== reading.message || next.notice !== reading.notice || next.historyBoundary !== reading.historyBoundary) { reading = next; report(reading) }
   }
-  const boundary = () => publish({ historyBoundary: terminalHistoryBoundary(canvas.buffer.active, canvas.rows, scrollback) })
+  const boundary = () => publish({ historyBoundary: terminalHistoryBoundary(canvas.buffer.active, canvas.rows, canvas.options.scrollback ?? scrollback) })
   const write = (bytes: Uint8Array) => new Promise<void>(resolve => {
     if (closed || bytes.byteLength === 0) return resolve()
     const settled = () => { writes.delete(settled); resolve() }
@@ -56,6 +56,17 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     if (!expected || !sameRun(snapshot.run, expected) || snapshot.run.agentSessionId !== agentSessionId) throw new Error('返回的输出不属于这个终端。')
     // Exhaust validation before touching the canvas. A synthetic seed never acknowledges its encoded length.
     const steps = [...terminalContinuationSteps(snapshot)]
+    const historyPolicy = snapshot.terminal.type === 'basic-vt' ? terminalCheckpointHistoryPolicy(snapshot.terminal.checkpoint) : null
+    const preserve = historyPolicy?.status === 'unavailable' && geometryKnown && snapshot.terminal.type === 'basic-vt' &&
+      snapshot.terminal.checkpoint.throughByte <= cursor && !steps.some(step => step.type === 'resized' &&
+        step.resizeRevision > resizeRevision && step.throughByte < cursor)
+    if (historyPolicy?.status === 'unavailable' && !preserve) {
+      cursor = Math.max(cursor, snapshot.run.latestOutputBytes)
+      resizeRevision = snapshot.resizeRevision
+      ready = true
+      problem('原终端历史策略观察', new Error(historyPolicy.message))
+      return
+    }
     const distance = canvas.buffer.active.baseY - canvas.buffer.active.viewportY
     const known = snapshot.terminal.type === 'basic-vt'
     if (!known) geometryKnown = false
@@ -66,20 +77,24 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     for (const step of steps) {
       if (closed) return
       if (step.type === 'restore') {
+        if (preserve) continue
         const checkpoint = step.checkpoint
-        const scrollback = canvas.options.scrollback!
+        const policy = terminalCheckpointHistoryPolicy(checkpoint)
+        if (policy.status !== 'observed') return
+        const scrollback = policy.scrollbackRows
         canvas.reset()
         canvas.resize(checkpoint.restoreSize.cols, checkpoint.restoreSize.rows)
-        if (checkpoint.restoreScrollbackRows !== null) canvas.options.scrollback = checkpoint.restoreScrollbackRows
+        canvas.options.scrollback = Math.max(checkpoint.restoreScrollbackRows ?? scrollback, canvas.buffer.normal.length - canvas.rows)
         try {
           await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), write)
           if (closed) return
+          canvas.options.scrollback = Math.max(scrollback, canvas.buffer.normal.length - canvas.rows)
           if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
             canvas.resize(checkpoint.size.cols, checkpoint.size.rows)
           }
           await restoreTerminalCheckpoint(step.restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), write)
         } finally {
-          canvas.options.scrollback = scrollback
+          canvas.options.scrollback = Math.max(scrollback, canvas.buffer.normal.length - canvas.rows)
         }
         if (closed) return
         cursor = step.checkpoint.throughByte
@@ -87,6 +102,7 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
         geometryKnown = true
         omitted = false
       } else if (step.type === 'resized') {
+        if (preserve && step.resizeRevision <= resizeRevision) continue
         canvas.resize(step.size.cols, step.size.rows)
         resizeRevision = step.resizeRevision
       } else {
@@ -100,6 +116,11 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     if (closed) return
     if (known && distance > 0) canvas.scrollToLine(Math.max(0, canvas.buffer.active.baseY - distance))
     ready = true
+    if (historyPolicy?.status === 'unavailable') {
+      problem('原终端历史策略观察', new Error(historyPolicy.message))
+      boundary()
+      return
+    }
     const message = omitted ? '部分原始输出未能恢复。当前画面继续阅读；可重新核实输出，Mac 上的输入与运行不受影响。'
       : !geometryKnown ? '正在阅读原始输出；历史终端尺寸尚未核实，画面采用本机阅读网格。Mac 的运行与尺寸保持不变。'
         : '已读取终端输出。'

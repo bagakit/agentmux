@@ -231,6 +231,10 @@ export type AgentMuxTerminalCheckpoint = {
   restoreSize: { cols: number; rows: number }
   restoreScrollbackRows: number | null
   resizeAfterRestoreBytes: number
+  /** Exact Run's normal operating capacity, independently observed from its pinned Runtime.
+   * This transient Core observation is not part of the persisted Native checkpoint.
+   * An owner which does not contribute it leaves the policy unconfirmed. */
+  historyPolicy?: { status: 'observed'; scrollbackRows: number } | { status: 'unavailable'; message: string }
 }
 
 export type AgentMuxTerminalContinuation =

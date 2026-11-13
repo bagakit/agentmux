@@ -15,9 +15,10 @@ export type AgentMuxTerminalContinuationStep =
 const invalidContinuation = (): never => {
   throw new AgentMuxError('Terminal continuation has inconsistent byte or geometry ordering.', 'CTXMUX_EVENT_INVALID')
 }
-function continuationRecord(value: unknown, fields: readonly string[]): Record<string, unknown> {
+function continuationRecord(value: unknown, fields: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
-    Object.keys(value).length !== fields.length || Object.keys(value).some(key => !fields.includes(key))) return invalidContinuation()
+    fields.some(key => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some(key => !fields.includes(key) && !optional.includes(key))) return invalidContinuation()
   return value as Record<string, unknown>
 }
 function continuationCursor(value: unknown): number {
@@ -32,6 +33,21 @@ function continuationSize(value: unknown): void {
   }
 }
 
+/** An absent auxiliary observation does not invalidate the original Run's bytes or geometry. */
+export function terminalCheckpointHistoryPolicy(checkpoint: AgentMuxTerminalCheckpoint): NonNullable<AgentMuxTerminalCheckpoint['historyPolicy']> {
+  if (!Object.hasOwn(checkpoint, 'historyPolicy')) return { status: 'unavailable',
+    message: 'The original Core producer did not provide a terminal history policy observation. Refresh the original Session to confirm it.' }
+  const policy = checkpoint.historyPolicy
+  if (policy?.status === 'observed') {
+    continuationRecord(policy, ['status', 'scrollbackRows'])
+    continuationCursor(policy.scrollbackRows)
+  } else {
+    const unavailable = continuationRecord(policy, ['status', 'message'])
+    if (unavailable.status !== 'unavailable' || typeof unavailable.message !== 'string' || !unavailable.message) invalidContinuation()
+  }
+  return policy!
+}
+
 /** Check the synthetic seed before an emulator mutates its grid or history policy. */
 export function assertTerminalCheckpointRestore(checkpoint: AgentMuxTerminalCheckpoint, restoreBytes: Uint8Array): void {
   continuationSize(checkpoint.size)
@@ -39,6 +55,7 @@ export function assertTerminalCheckpointRestore(checkpoint: AgentMuxTerminalChec
   const prefix = continuationCursor(checkpoint.resizeAfterRestoreBytes)
   if (!(restoreBytes instanceof Uint8Array) || prefix > restoreBytes.byteLength) invalidContinuation()
   if (checkpoint.restoreScrollbackRows !== null) continuationCursor(checkpoint.restoreScrollbackRows)
+  terminalCheckpointHistoryPolicy(checkpoint)
 }
 
 /** Validate the original Attachment DTO at another client boundary. This owner
@@ -56,7 +73,7 @@ export function parseTerminalContinuation(value: unknown, snapshot: {
     if (typeof terminal.reason !== 'string' || !['origin_unknown', 'source_gap', 'tail_evicted', 'checkpoint_too_large', 'invalid_checkpoint'].includes(terminal.reason)) invalidContinuation()
   } else if (kind === 'basic-vt') {
     const terminal = continuationRecord(value, ['type', 'checkpoint', 'restoreBytes', 'resizes'])
-    const checkpoint = continuationRecord(terminal.checkpoint, ['runId', 'throughByte', 'resizeRevision', 'size', 'restoreSize', 'restoreScrollbackRows', 'resizeAfterRestoreBytes'])
+    const checkpoint = continuationRecord(terminal.checkpoint, ['runId', 'throughByte', 'resizeRevision', 'size', 'restoreSize', 'restoreScrollbackRows', 'resizeAfterRestoreBytes'], ['historyPolicy'])
     let throughByte = continuationCursor(checkpoint.throughByte), currentRevision = continuationCursor(checkpoint.resizeRevision)
     continuationSize(checkpoint.size)
     if (checkpoint.runId !== snapshot.run.runId || throughByte > latest ||

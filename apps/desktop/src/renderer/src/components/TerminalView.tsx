@@ -11,7 +11,7 @@ import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalCleanupContext, RendererTerminalWriteContext } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { observeRead } from '@agentmux/core/observation-read'
-import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
+import { terminalCheckpointHistoryPolicy, terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -341,6 +341,7 @@ export function TerminalView({
   const [replayGap, setReplayGap] = useState(false)
   const [runtimeHistoryGap, setRuntimeHistoryGap] = useState(false)
   const [historyReadFailure, setHistoryReadFailure] = useState(false)
+  const [historyPolicyFailure, setHistoryPolicyFailure] = useState<string | null>(null)
   const [historyBoundary, setHistoryBoundary] = useState<string | null>(null)
   const [replaySizeUnknown, setReplaySizeUnknown] = useState(false)
   const [continuationAbsence, setContinuationAbsence] = useState<TerminalContinuationAbsence | null>(null)
@@ -633,6 +634,7 @@ export function TerminalView({
     setReplayGap(false)
     setRuntimeHistoryGap(false)
     setHistoryReadFailure(false)
+    setHistoryPolicyFailure(null)
     setHistoryBoundary(null)
     setReplaySizeUnknown(false)
     setContinuationAbsence(null)
@@ -1047,6 +1049,7 @@ export function TerminalView({
     let historyReadIncidentActive = false
     let continuationObservation: { type: AgentMuxRunAttachment['terminal']['type']; reason?: TerminalContinuationAbsence['reason'] } | null = null
     let recordedContinuationAbsence: TerminalContinuationAbsence | null = null
+    let historyPolicyPending = false
     let outputTail = Promise.resolve()
     const liveOutputQueue = new TerminalLiveOutputQueue()
     let liveDrain: Promise<void> | null = null
@@ -1360,6 +1363,16 @@ export function TerminalView({
       // Exhaust the same ordering iterator before changing the canvas. Steps hold byte views,
       // not copied payload; an invalid tail or revision cannot leave a partially restored seed.
       const steps = [...terminalContinuationSteps(snapshot)]
+      const historyPolicy = snapshot.terminal.type === 'basic-vt' ? terminalCheckpointHistoryPolicy(snapshot.terminal.checkpoint) : null
+      if (historyPolicy?.status === 'unavailable') setHistoryPolicyFailure(historyPolicy.message)
+      if ((!preserve || !continuationKnown) && historyPolicy?.status === 'unavailable') {
+        // This is a consumer observation failure, not a source Gap or loss of the healthy Run.
+        historyPolicyPending = true
+        cursor = Math.max(cursor, snapshot.run.latestOutputBytes)
+        resizeRevision = snapshot.resizeRevision
+        return false
+      }
+      if (historyPolicyPending) preserve = false
       if (preserve && (!continuationKnown || snapshot.terminal.type !== 'basic-vt' ||
         snapshot.terminal.checkpoint.throughByte > cursor || steps.some(step => step.type === 'resized' &&
           step.resizeRevision > resizeRevision && step.throughByte < cursor))) {
@@ -1378,14 +1391,17 @@ export function TerminalView({
           if (step.type === 'restore') {
             if (preserve) continue
             const checkpoint = step.checkpoint
-            const scrollback = terminal.options.scrollback!
+            const policy = terminalCheckpointHistoryPolicy(checkpoint)
+            if (policy.status !== 'observed') return false
+            const scrollback = policy.scrollbackRows
             viewport.acceptOwnerSize(checkpoint.restoreSize)
-            if (checkpoint.restoreScrollbackRows !== null) terminal.options.scrollback = checkpoint.restoreScrollbackRows
+            terminal.options.scrollback = Math.max(checkpoint.restoreScrollbackRows ?? scrollback, terminal.buffer.normal.length - terminal.rows)
             try {
               await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), async (data) => {
                 if (!disposed) await writeTerminal(data, 'checkpoint')
               })
               if (disposed) return false
+              terminal.options.scrollback = Math.max(scrollback, terminal.buffer.normal.length - terminal.rows)
               if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
                 viewport.acceptOwnerSize(checkpoint.size)
               }
@@ -1393,7 +1409,7 @@ export function TerminalView({
                 if (!disposed) await writeTerminal(data, 'checkpoint')
               })
             } finally {
-              terminal.options.scrollback = scrollback
+              terminal.options.scrollback = Math.max(scrollback, terminal.buffer.normal.length - terminal.rows)
             }
             if (disposed) return false
             cursor = step.checkpoint.throughByte
@@ -1431,7 +1447,11 @@ export function TerminalView({
         }
         resizeRevision = snapshot.resizeRevision
         continuationKnown = snapshot.terminal.type === 'basic-vt'
-        if (continuationKnown) setContinuationAbsence(null)
+        if (continuationKnown) {
+          historyPolicyPending = false
+          if (historyPolicy?.status !== 'unavailable') setHistoryPolicyFailure(null)
+          setContinuationAbsence(null)
+        }
       } finally {
         replayingContinuation = !readyForLiveOutput
       }
@@ -2244,7 +2264,13 @@ export function TerminalView({
     restore: 'Continue using this terminal and inspect current write metrics in Performance. Refreshing output does not reconstruct this failed observation.'
   } } : null
   const noticeScope = JSON.stringify(['terminal', session.hostId, session.id, session.control.run])
-  const historyNotice = hydrating ? null : historyReadFailure ? {
+  const historyNotice = hydrating ? null : historyPolicyFailure ? {
+    id: 'history-policy', cause: 'history-policy-observation-unavailable', notice: { kind: 'indeterminate' as const, notice: {
+      step: 'Confirming the original terminal history policy',
+      mode: `${historyPolicyFailure} The existing canvas, Run and input are kept. This observation does not report a Runtime history gap.`,
+      restore: 'Refresh observation to retry the original Run’s history policy and checkpoint.'
+    } }
+  } : historyReadFailure ? {
     id: 'history-read', cause: runtimeHistoryGap ? 'read-failed-after-runtime-gap' : 'retained-history-read-failed',
     notice: { kind: 'indeterminate' as const, notice: {
       step: 'Retained history read unconfirmed',
@@ -2293,7 +2319,7 @@ export function TerminalView({
         onClear={() => terminalRef.current?.clear()}
       >
         <div
-          className="terminal-view"
+          className={`terminal-view${historyNotice?.id === 'history-policy' ? ' terminal-view--history-policy' : ''}`}
           style={{ backgroundColor: themeId === 'workspace' ? 'var(--surface-0)' : terminalTheme(themeId).background }}
         >
           <div

@@ -18,6 +18,13 @@
   margin-left:var(--sp-2);
 }
 .terminal-view__xterm--hydrating { visibility: hidden; }
+/* This unresolved observation remains beside the canvas; its passive hit band must clear row one.
+   Existing header clearance is reused, and disclosure/hover does not change the reading grid. */
+.terminal-view--history-policy > .terminal-view__xterm {
+  --terminal-policy-reading-inset: max(var(--agent-region-reading-inset, 0px), calc(22px + var(--sp-2)));
+  margin-top: var(--terminal-policy-reading-inset);
+  height: calc(100% - var(--terminal-policy-reading-inset));
+}
 .terminal-view > .full-page-loading--region { position: absolute; inset: 0; }
 /* Passive pane-corner status readout; the opposite vertical edge keeps the hovered row clear.
    Absolute positioning stays within this Region without changing xterm's grid or taking input. */

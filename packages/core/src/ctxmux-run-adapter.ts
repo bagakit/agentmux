@@ -1398,7 +1398,10 @@ export class CtxmuxRunAdapter {
         attachment.snapshot.replay.first_available_byte <= afterByte ? previous.decodeSeed : new Uint8Array()
       const decoder = new TextDecoder('utf-8', { ignoreBOM: afterByte - seed.byteLength > 0 })
       decoder.decode(seed, { stream: true })
-      const snapshot = this.projectAttachment(attachment.snapshot, afterByte, decoder)
+      const snapshot = await this.projectAttachment(attachment.snapshot, afterByte, decoder, client)
+      if (this.client !== client || this.attachmentOpenings.get(runId) !== opening) {
+        throw new AgentMuxError('The original Attachment policy observation was superseded; its Run was retained.', 'CONTROL_CANCELLED')
+      }
       // Record the offered snapshot before synchronous publication can lose the connection.
       // No second queue: the SDK attachment owns all bytes until its pump starts.
       const token = Symbol(runId)
@@ -1465,10 +1468,11 @@ export class CtxmuxRunAdapter {
 
   async replay(runId: string, afterByte: number, view: AgentMuxRunAttachmentView = 'raw'): Promise<CtxmuxAdapterAttachment> {
     let attachment: Attachment | null = null
+    const client = this.requireClient()
     try {
       attachment = await this.openAttachment(runId, afterByte, view)
       const decoder = new TextDecoder()
-      return this.projectAttachment(attachment.snapshot, afterByte, decoder)
+      return await this.projectAttachment(attachment.snapshot, afterByte, decoder, client)
     } catch (error) {
       throw translateCtxmuxError(error)
     } finally {
@@ -1502,6 +1506,7 @@ export class CtxmuxRunAdapter {
     view: AgentMuxRunAttachmentView = 'raw'
   ): Promise<CtxmuxAdapterOutputObservation> {
     let attachment: Attachment | null = null
+    const client = this.requireClient()
     try {
       attachment = await this.openAttachment(runId, afterByte, view)
       const decoder = new TextDecoder()
@@ -1519,7 +1524,7 @@ export class CtxmuxRunAdapter {
       // `for await` 一定先在迭代器的 `.next()` promise 上挂起、之后才跑循环体，所以 IIFE 之后的同步语句
       // 照样先执行完。真正的（更弱的）不变量是「replay 的 `.map` 必须是同步的，不许挪到某个 `await` 之后」
       // ——两种摆法都满足它。因此顺序无人守，不是缺口：没有能杀死它的变异。
-      const projected = this.projectAttachment(snapshot, afterByte, decoder)
+      const projected = await this.projectAttachment(snapshot, afterByte, decoder, client)
       void (async () => {
         try {
           for await (const event of active.events()) {
@@ -1581,8 +1586,24 @@ export class CtxmuxRunAdapter {
     return view === 'terminal' ? await client.attachTerminal(runId, afterByte) : await client.attach(runId, afterByte)
   }
 
-  private projectAttachment(snapshot: AttachedSnapshot, afterByte: number, decoder: TextDecoder): CtxmuxAdapterAttachment {
+  private async projectAttachment(snapshot: AttachedSnapshot, afterByte: number, decoder: TextDecoder, client: CtxmuxClient): Promise<CtxmuxAdapterAttachment> {
     const source = snapshot.terminal
+    let historyPolicy: import('./types.js').AgentMuxTerminalCheckpoint['historyPolicy'] = {
+      status: 'unavailable', message: 'The original Runtime history policy has not been observed.'
+    }
+    if (source.type === 'basic_vt') {
+      const controller = new AbortController()
+      this.connectionObservations.add(controller)
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(DAEMON_CONNECT_OBSERVATION_MS)])
+      try {
+        const observation = await client.observeStorage(snapshot.run.id, { signal })
+        if (this.client !== client || observation.observation.run_id !== snapshot.run.id) throw new AgentMuxError(
+          'History policy did not confirm the original Runtime and Run.', 'CONTROL_PROTOCOL_ERROR')
+        historyPolicy = { status: 'observed', scrollbackRows: observation.observation.policy.terminal_history_rows }
+      } catch (error) {
+        historyPolicy = { status: 'unavailable', message: error instanceof Error ? error.message : String(error) }
+      } finally { this.connectionObservations.delete(controller) }
+    }
     const terminal: AgentMuxTerminalContinuation = source.type === 'basic_vt'
       ? {
           type: 'basic-vt',
@@ -1593,7 +1614,8 @@ export class CtxmuxRunAdapter {
             size: source.checkpoint.size,
             restoreSize: source.checkpoint.restore_size,
             restoreScrollbackRows: source.checkpoint.restore_scrollback_rows,
-            resizeAfterRestoreBytes: source.checkpoint.resize_after_restore_bytes
+            resizeAfterRestoreBytes: source.checkpoint.resize_after_restore_bytes,
+            historyPolicy
           },
           restoreBytes: snapshot.terminal_restore,
           resizes: source.resizes.map((resize) => ({
