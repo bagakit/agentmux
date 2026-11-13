@@ -35,7 +35,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 
-const dom = composerDOM()
+const dom = composerDOM({ agentInformation: true })
 const home = _hygiene_fixturePath("Users/metadata-reader")
 const path = ("" + (home) + _hygiene_fixturePath("projects/one"))
 const local: HostConfig = { id: 'local', label: 'Local', kind: 'local' }
@@ -74,7 +74,11 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     const select = vi.fn()
     await dom.render(<><FocusContextRow context={contexts[0]!} selected={false} onSelect={select} />
       <FocusProjectLanes lanes={lanes} selectedProjectKey="one" onSelect={select} renderLane={(_, heading) => heading} /></>)
-    expect(element('.focus-context').title).toContain(expected)
+    const card = element('.focus-context')
+    await act(async () => card.focus()); await key(card, 'ArrowDown')
+    await act(async () => element('.agent-information-reader__status').click())
+    const directory = [...element('.agent-information-reader__source').querySelectorAll('div')].find(row => row.querySelector('dt')?.textContent === 'Directory')!
+    expect(directory.querySelector('dd')?.textContent).toBe(expected)
     expect(element('.focus-project-lanes__axis').title).toContain(expected)
     await dom.click('.focus-context')
     expect(select).toHaveBeenCalledExactlyOnceWith(session.id)
@@ -95,15 +99,18 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     expect(useAppStore.getState().sessions[0]!.workspacePath).toBe(path)
   })
 
-  it.each(modes)('Topic navigation hover and empty-summary directory use the same preference: %j %s', async (host, absolute, expected) => {
+  it.each(modes)('Mote navigation hover and Topic empty-summary directory use the same preference: %j %s', async (host, absolute, expected) => {
     const { workspace } = seed(host, absolute)
     const topic = { id: 'view:one', title: 'Topic One', summary: '', directoryPath: path, topicPath: `${path}/topic.md`, collaborators: [] }
-    useAppStore.setState({ scratchTopicSnapshots: { one: { scope: scratchTopicsScope(workspace), topics: [topic], error: null } },
+    const mote = { ...topic, id: 'view:mote', title: 'Mote One', soul: { path: `${path}/SOUL.md`, content: 'Identity', version: 'one' } }
+    useAppStore.setState({ scratchTopicSnapshots: { one: { scope: scratchTopicsScope(workspace), topics: [mote], error: null } },
       refreshScratchTopics: vi.fn(), collapsedProjectGroups: {}, pinnedItems: {}, spaceObjectIcons: {} })
-    await dom.render(<><SpaceTopicsTree workspace={workspace} icons={{}} onChangeIcon={() => {}} />
-      <WorkspaceTopicsPanel workspace={workspace} onRevealDirectory={() => {}} /></>)
-    expect(element('.space-topic-row').title).toBe(`Topic One\n${expected}`)
+    await dom.render(<SpaceTopicsTree workspace={workspace} icons={{}} onChangeIcon={() => {}} />)
+    expect(element('.space-mote-row[data-space-nav="topic:view:mote"]').title).toBe(`Mote One\n${expected}`)
+    await act(async () => useAppStore.setState({ scratchTopicSnapshots: { one: { scope: scratchTopicsScope(workspace), topics: [topic], error: null } } }))
+    await dom.render(<WorkspaceTopicsPanel workspace={workspace} onRevealDirectory={() => {}} />)
     expect(element('.workspace-topic-entry .selector-row__identity small').textContent).toBe(expected)
+    expect(mote.directoryPath).toBe(path)
     expect(topic.directoryPath).toBe(path)
   })
 
@@ -223,7 +230,8 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     const resume = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Resume')!
     expect(resume).toBeDefined(); await act(async () => resume.click())
     const directory = element('.launcher-resume__path')
-    expect([directory.textContent, directory.title]).toEqual([expected, expected])
+    expect(directory.textContent).toBe(expected)
+    expect(directory.title).toBe(path)
     expect(useAppStore.getState().recoveryCandidates[0]!.workspacePath).toBe(path)
     expect(api.sessions.historyPage).toHaveBeenCalledWith({ hostId: host.id, agentSessionId: 'saved' }, expect.anything())
   })
