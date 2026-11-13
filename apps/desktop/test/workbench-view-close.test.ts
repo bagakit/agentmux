@@ -10,6 +10,7 @@ import {
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import {
   applyWorkbenchViewCloseTopology,
+  closingWorkbenchTabs,
   planWorkbenchViewClose,
   reconcileWorkbenchViewClose
 } from '../src/renderer/src/lib/workbench-view-close.js'
@@ -282,7 +283,7 @@ describe('Workbench View close ownership', () => {
       tabGroupId: 'pane',
       tabId: second.id,
       keepAgentSessions: false,
-      closingViewIds: new Set([first.id])
+      closing: closingWorkbenchTabs([first.id])
     })!
 
     expect(firstPlan.resources).toEqual([])

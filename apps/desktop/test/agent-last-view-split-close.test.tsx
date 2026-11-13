@@ -1,0 +1,142 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkspaceLayout } from '@agentmux/layout'
+vi.hoisted(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
+// Terminal and Browser rendering are outside close ownership; actual Workbench, modal and Store are mounted.
+vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: ({ sessionId }: { sessionId: string }) => <output data-session-id={sessionId}>{sessionId}</output> }))
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
+vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => <output>Changed editor</output> }))
+vi.mock('../src/renderer/src/components/BrowserPane', () => ({ BrowserPane: () => <output>Browser</output> }))
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { api } from '../src/renderer/src/lib/api'
+import { useAppStore } from '../src/renderer/src/store'
+import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/renderer/src/lib/workbench-tabs'
+import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+
+const initial = useAppStore.getState()
+let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
+const lonely = composerSession('lonely')
+const shared = composerSession('shared')
+const file = { kind: 'file' as const, regionId: 'file-region', workspaceId: 'workspace', path: 'changed.txt' }
+const split = addWorkbenchRegion(
+  createWorkbenchTab('split', { kind: 'agent', regionId: 'lonely-region', phase: 'attached', workspaceId: 'workspace', sessionId: lonely.id }),
+  'lonely-region', 'right', file)
+const elsewhere = createWorkbenchTab('elsewhere', { kind: 'agent', regionId: 'shared-region', phase: 'attached', workspaceId: 'workspace', sessionId: shared.id })
+
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  element = document.createElement('div'); overlay = document.createElement('div'); overlay.dataset.overlayHost = ''
+  document.body.append(element, overlay); root = createRoot(element)
+  useAppStore.setState({ config: composerConfig, sessions: [lonely, shared], loading: false, mainSurface: 'workbench', activeWorkspaceId: 'workspace',
+    tabs: { [split.id]: split, [elsewhere.id]: elsewhere }, layouts: { workspace: createWorkspaceLayout('group', [split.id, elsewhere.id]) },
+    agentNames: { [lonely.id]: 'Lonely Reviewer' },
+    closingWorkbenchViews: {}, closeTabRequest: null, closeRegionRequest: null, error: null, dirtyDocuments: {}, prewarmTerminal: vi.fn() })
+  useAppStore.getState().activateTab('workspace', 'group', split.id)
+  vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+})
+afterEach(async () => {
+  await act(async () => root.unmount()); element.remove(); overlay.remove()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
+})
+async function mount() { await act(async () => root.render(<WorkspaceWorkbench workspaceId="workspace" />)) }
+async function closeSplit(regionId: string) {
+  const close = element.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"] .workbench-region__close`)
+  expect(close, `Close split on ${regionId}`).not.toBeNull(); await act(async () => close!.click())
+}
+async function click(label: string) {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
+  expect(button, `Actual close action ${label}`).toBeDefined(); expect(button!.disabled).toBe(false)
+  await act(async () => button!.click())
+}
+const dialog = () => document.querySelector('[role="dialog"]')
+const regions = () => Object.keys(useAppStore.getState().tabs[split.id]!.regions)
+
+it('split X on an Agent’s last View asks first and names it; Stop & Close stops that exact Run, then closes', async () => {
+  await mount(); await closeSplit('lonely-region')
+  expect(dialog()?.textContent).toContain('Stop Agent Session?')
+  expect(dialog()?.textContent).toContain('Lonely Reviewer')
+  expect(regions()).toEqual(['lonely-region', 'file-region'])
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  await click('Stop & Close')
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control)
+  expect(regions()).toEqual(['file-region'])
+  expect(useAppStore.getState().closingWorkbenchViews).toEqual({})
+  expect(dialog()).toBeNull()
+})
+
+it('Keep Session & Close closes only the presentation', async () => {
+  await mount(); await closeSplit('lonely-region')
+  await click('Keep Session & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(regions()).toEqual(['file-region'])
+  expect(useAppStore.getState().sessions).toEqual([lonely, shared])
+})
+
+it('a failed Stop keeps the only View and reports it', async () => {
+  vi.mocked(api.sessions.stop).mockRejectedValue(new Error('Runtime stop step failed'))
+  await mount(); await closeSplit('lonely-region'); await click('Stop & Close')
+  expect(regions()).toEqual(['lonely-region', 'file-region'])
+  expect(String(useAppStore.getState().error?.message ?? useAppStore.getState().error)).toContain('Runtime stop step failed')
+  expect(useAppStore.getState().closingWorkbenchViews).toEqual({})
+})
+
+it('a dirty file split keeps its discard confirmation; the Agent split beside it asks Stop; Cancel keeps both', async () => {
+  useAppStore.setState({ dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
+  const both = addWorkbenchRegion(
+    createWorkbenchTab('split', { kind: 'agent', regionId: 'lonely-region', phase: 'attached', workspaceId: 'workspace', sessionId: lonely.id }),
+    'lonely-region', 'right', file)
+  useAppStore.setState({ tabs: { [both.id]: both, [elsewhere.id]: elsewhere } })
+  await mount(); await closeSplit('file-region')
+  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  await click('Cancel')
+  await closeSplit('lonely-region')
+  expect(dialog()?.textContent).toContain('Stop Agent Session?')
+  await click('Cancel')
+  expect(regions()).toEqual(['lonely-region', 'file-region'])
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+})
+
+it('another View of the same Agent closes the split silently without Stop', async () => {
+  const twin = addWorkbenchRegion(
+    createWorkbenchTab('split', { kind: 'agent', regionId: 'shared-split-region', phase: 'attached', workspaceId: 'workspace', sessionId: shared.id }),
+    'shared-split-region', 'right', file)
+  useAppStore.setState({ tabs: { [twin.id]: twin, [elsewhere.id]: elsewhere } })
+  await mount(); await closeSplit('shared-split-region')
+  expect(dialog()).toBeNull()
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(regions()).toEqual(['file-region'])
+})
+
+it('keyboard close of the Region takes the same confirmation', async () => {
+  await mount()
+  await act(async () => useAppStore.getState().requestCloseRegion('workspace', split.id, 'lonely-region'))
+  expect(dialog()?.textContent).toContain('Stop Agent Session?')
+  expect(regions()).toEqual(['lonely-region', 'file-region'])
+})
+
+it('closing a Browser Region bound to a live Agent with no other View stops that Agent, then releases the Browser', async () => {
+  const browser = { id: 'page', navigationId: 'page:navigation', regionId: 'browser-region', kind: 'browser' as const, workspaceId: 'workspace',
+    browserId: 'page', profileId: null, url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false,
+    viewport: 'responsive' as const, error: null,
+    control: { owner: 'human' as const, activeOperationId: null, revision: 1, inputIsolation: 'inactive' as const,
+      agent: { hostId: lonely.control.hostId, agentSessionId: lonely.control.agentSessionId } } }
+  const withBrowser = addWorkbenchRegion(createWorkbenchTab('split', file), 'file-region', 'right', browser)
+  useAppStore.setState({ tabs: { [withBrowser.id]: withBrowser, [elsewhere.id]: elsewhere } })
+  await useAppStore.getState().closeRegion('workspace', split.id, 'browser-region')
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control)
+  expect(api.browser.close).toHaveBeenCalledExactlyOnceWith('page')
+  expect(regions()).toEqual(['file-region'])
+  vi.mocked(api.sessions.stop).mockClear()
+  useAppStore.setState({ tabs: { [withBrowser.id]: withBrowser, [elsewhere.id]: elsewhere } })
+  await useAppStore.getState().closeRegion('workspace', split.id, 'browser-region', { keepAgentSessions: true })
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(regions()).toEqual(['file-region'])
+})

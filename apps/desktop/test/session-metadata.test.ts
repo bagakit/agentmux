@@ -15,6 +15,10 @@ const workspaceWorkbenchSource = readFileSync(
   new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url),
   'utf8'
 )
+const lastViewCloseSource = readFileSync(
+  new URL('../src/renderer/src/lib/last-view-close-confirmation.ts', import.meta.url),
+  'utf8'
+)
 const workbenchTabMenuSource = readFileSync(
   new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
   'utf8'
@@ -57,9 +61,11 @@ describe('single-line session tab projection', () => {
   })
 
   it('makes stopping the default Agent Tab close action while preserving an explicit background option', () => {
-    expect(workspaceWorkbenchSource).toContain("'Stop & Close'")
-    expect(workspaceWorkbenchSource).toContain("'Keep Session & Close'")
-    expect(workspaceWorkbenchSource).toContain('sessionIdsWithoutViewsAfterClosingTabs')
+    // The labels live in the one confirmation owner both Tab close and split close render.
+    expect(lastViewCloseSource).toContain("'Stop & Close'")
+    expect(lastViewCloseSource).toContain("'Keep Session & Close'")
+    expect(workspaceWorkbenchSource).toContain('lastViewCloseConfirmation')
+    expect(workspaceWorkbenchSource).toContain('lastViewCloseCopy')
   })
 
   it('Terminal tab 画终端图标而不是 Agent 状态点——判据落在算标记那一层', () => {    // 这条断言原先扫的是 `WorkspaceWorkbench.tsx` 里一个内联三元的字面串
