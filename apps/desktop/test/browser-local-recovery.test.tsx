@@ -74,7 +74,7 @@ async function fixture() {
     }), captureScreenshot: async () => ({}), readLedger: async () => null,
     writeLedger: async () => {}, note: () => {}, beforeAction: () => {
       guardCalls++
-      if (signal.signal.aborted || human || !current) throw new BrowserLocalRecoveryFailure('Control changed.', 'human-control', 'not-dispatched')
+      if (signal.signal.aborted || human || !current) throw new Error('Control changed.')
       if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('Recovery authorization ended before action dispatch.')
     }
   })
@@ -139,7 +139,7 @@ describe('Main local recovery of the original immutable task call', () => {
     expect(f.guardCalls()).toBe(2 * GUARDS_PER_CLICK)
   })
 
-  it.each(['user-rejected', 'permission-denied', 'credential-denied', 'human-control'] as const)('%s has no retry authority', async kind => {
+  it.each(['cdp-scope', 'page-dialog'] as const)('%s has no retry authority, even when nothing was dispatched', async kind => {
     const f = await fixture(), result = await recover(f, { failure: new BrowserLocalRecoveryFailure('Explicit refusal.', kind, 'not-dispatched') })
     expect(result.status).toBe('not-eligible')
     expect(f.actions.map(action => action.objectId)).toEqual(['object-11'])
