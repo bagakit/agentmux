@@ -110,7 +110,7 @@ it('an external exact route during a search visit reveals the new destination gr
   expect(node('nav [data-settings-target="hosts"]').getAttribute('aria-current')).toBe('page')
 })
 
-it('every sidebar group starts expanded with Agent CLIs and Session recovery together', async () => {
+it('every sidebar group starts expanded with Agent CLIs, Derived actions and Session recovery together', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const toggles = [...dom.container.querySelectorAll('[data-settings-group-toggle]')]
   expect(toggles.length).toBeGreaterThan(0)
@@ -119,8 +119,8 @@ it('every sidebar group starts expanded with Agent CLIs and Session recovery tog
   expect(entries.map(entry => entry.dataset.settingsTarget)).toEqual(['overview', ...visibleSettingsSections('').map(item => item.id)])
   expect(entries.every(entry => !entry.closest('[hidden]'))).toBe(true)
   expect(group('agents').getAttribute('aria-expanded')).toBe('true')
-  expect([...node('#settings-nav-agents').querySelectorAll<HTMLElement>('[data-settings-target]')].map(item => item.dataset.settingsTarget)).toEqual(['agents', 'continuity'])
-  expect([...node('[data-settings-directory] [data-settings-group="agents"]').querySelectorAll('[data-settings-section]')].map(item => item.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Agent CLIs'), expect.stringContaining('Session recovery')]))
+  expect([...node('#settings-nav-agents').querySelectorAll<HTMLElement>('[data-settings-target]')].map(item => item.dataset.settingsTarget)).toEqual(['agents', 'derived-actions', 'continuity'])
+  expect([...node('[data-settings-directory] [data-settings-group="agents"]').querySelectorAll('[data-settings-section]')].map(item => item.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Agent CLIs'), expect.stringContaining('Derived actions'), expect.stringContaining('Session recovery')]))
   expect([...dom.container.querySelectorAll('[data-settings-group-toggle]')].slice(0,2).map(item => item.textContent)).toEqual(['Preferences','Agents'])
   expect(node('nav [data-settings-target="hosts"]').textContent).toBe('Hosts')
   expect(node('nav [data-settings-target="agents"]').textContent).toBe('Agent CLIs')
