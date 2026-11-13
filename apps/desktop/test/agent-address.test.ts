@@ -251,7 +251,11 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'BROWSER_PROFILE_REVISION_CONFLICT',
       'BROWSER_PROFILE_NOT_FOUND',
       'BROWSER_PROFILE_DELETE_REQUIRES_PERSON',
-      'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+      'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED',
+      // A Profile's Agent switch is the person's decision, and an unread Profile list is fixed by
+      // waiting for it; addressing another Agent or Region helps neither.
+      'BROWSER_PROFILE_AGENT_ACCESS_OFF',
+      'BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN'
     ]
 
     for (const code of AGENTMUX_CONTROL_ERROR_CODES) {

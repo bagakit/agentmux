@@ -9,7 +9,7 @@ vi.hoisted(() => {
 import { visibleSettingsSections } from '../src/renderer/src/components/SettingsPanel.js'
 
 /**
- * 守的缺陷：主进程在 `browser:runScript` 的授权闸上拒绝时说的是
+ * 守的缺陷：主进程在自动化闸（`browser-automation-gate.ts`，所有驱动页面的入口共用）上拒绝时说的是
  * “Agent browser automation is off. Turn it on in Settings › Browser.”——而 Settings 里**根本没有
  * Browser 这一节**，`agentAutomation` 在整个 renderer 里一次都没出现过。那句拒绝点名了一个到不了
  * 的地方：用户照它去 Settings 翻遍六节也找不到开关，只能去改配置文件，或者放弃。
@@ -30,14 +30,14 @@ function read(relative: string): string {
 
 /** 从主进程那句拒绝里取出它点名的 Settings 小节名。取不到就是文案没点名。 */
 function refusalSectionName(): string | null {
-  const ipc = read('../src/main/ipc.ts')
+  const ipc = read('../src/main/browser-automation-gate.ts')
   const match = ipc.match(/Agent browser automation is off\.[^'"]*Settings\s*›\s*([A-Za-z ]+?)\./u)
   return match?.[1]?.trim() ?? null
 }
 
 describe('Agent 浏览器自动化开关：拒绝点名的位置真的到得了', () => {
   it('拒绝文案点名了一个 Settings 小节', () => {
-    const ipc = read('../src/main/ipc.ts')
+    const ipc = read('../src/main/browser-automation-gate.ts')
     // 前提自检：闸门那句话还在。整句被改写/删掉时，下面按它取名字会得到 null，
     // 而 null 在"没点名"与"这条判据坏了"之间不可区分——先把在场判掉。
     expect(ipc, '授权闸上的拒绝文案不见了——这条判据失去靶子').toContain(
@@ -102,7 +102,7 @@ describe('Agent 浏览器自动化开关：拒绝点名的位置真的到得了'
    * 必须落在**抛出点**，不是码表里有没有这个字符串。
    */
   it('拒绝带着 BROWSER_AUTOMATION_DISABLED 这个码离开主进程，而不是折成 CONTROL_FAILED', () => {
-    const ipc = read('../src/main/ipc.ts')
+    const ipc = read('../src/main/browser-automation-gate.ts')
     // 先切到那句拒绝所在的一小段，再在段内判——全文件判的话，文件里别处提一句这个码就能满足，
     // 而抛出点上光秃秃的 `new Error(...)` 照样绿。
     const at = ipc.indexOf('Agent browser automation is off.')
@@ -113,7 +113,7 @@ describe('Agent 浏览器自动化开关：拒绝点名的位置真的到得了'
       .toContain('BROWSER_AUTOMATION_DISABLED')
     // 码要真的挂在被 throw 的那个 error 上。只在附近注释里出现这个词不算。
     expect(throwSite, '码不在 throw 出去的 error 身上').toMatch(
-      /throw Object\.assign\([\s\S]*BROWSER_AUTOMATION_DISABLED/u
+      /throw new AgentMuxError\([\s\S]*BROWSER_AUTOMATION_DISABLED/u
     )
   })
 })

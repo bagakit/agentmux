@@ -277,6 +277,18 @@ describe('BrowserProfileStore', () => {
     expect(JSON.parse(await readFile(path, 'utf8')).profiles[0]).not.toHaveProperty('network')
   })
 
+  it('stores only a turned-off Agent switch, so an untouched Profile keeps the global answer', async () => {
+    const { path, store } = await storeFixture()
+    const [profile] = await store.listProfiles()
+    const { profile: guarded } = await store.updateProfile(profile!.id, { agentAccess: false }, 0)
+    expect(guarded.agentAccess).toBe(false)
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles[0].agentAccess).toBe(false)
+    const { profile: open } = await store.updateProfile(profile!.id, { agentAccess: true }, 1)
+    expect(open).not.toHaveProperty('agentAccess')
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles[0]).not.toHaveProperty('agentAccess')
+    await expect(store.updateProfile(profile!.id, { agentAccess: 'yes' as never }, 2)).rejects.toThrow('on or off')
+  })
+
   it('refuses metadata whose stored route the parser would not produce', async () => {
     const { path, store } = await storeFixture()
     const raw = JSON.parse(await readFile(path, 'utf8').catch(async () => { await store.listProfiles(); return await readFile(path, 'utf8') }))
