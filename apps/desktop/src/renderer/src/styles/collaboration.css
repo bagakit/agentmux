@@ -47,7 +47,7 @@
 .collaboration-endpoints small { flex: 0 0 30px; color: var(--text-2); font-size: var(--fs-micro); }
 .collaboration-endpoints span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .collaboration-endpoints svg { flex: 0 0 auto; color: var(--text-2); }
-.collaboration-map { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; overflow: hidden; color: var(--text); background: var(--map-ground); }
+.collaboration-map { container: collaboration-map / inline-size; position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; overflow: hidden; color: var(--text); background: var(--map-ground); }
 .collaboration-map[hidden], .collaboration-inspector[hidden] { display: none; }
 .collaboration-map__body { position: relative; display: flex; flex: 1; min-height: 0; }
 /* Scene: ground, then up to three land bands by nesting depth, then raised discs. Each layer is
@@ -134,7 +134,8 @@
 .collaboration-evidence li { padding: 4px 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
 .collaboration-evidence li p { margin: 0; flex-basis: 100%; }
 .collaboration-evidence .composer-mailbox__detail { padding: 12px 0 0; }
-@media (max-width: 850px) { .collaboration-inspector { flex-basis: 230px; width: 230px; padding: 12px; } }
+/* Width tiers follow the Map's own width: in a split window its region is narrower than the window. */
+@container collaboration-map (max-width: 850px) { .collaboration-inspector { flex-basis: 230px; width: 230px; padding: 12px; } }
 
 .collaboration-canvas__issue { position: absolute; left: 14px; right: 14px; top: 44px; padding: 8px; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-micro); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 /* The layout notice is a compact corner service window in the HUD, never over the map centre. */
@@ -181,14 +182,14 @@
 :root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; --collaboration-disc: var(--surface-0); --collaboration-disc-line: color-mix(in srgb, var(--text) 30%, transparent); }
 .collaboration-canvas__progress { position: absolute; top: 12px; right: 12px; color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
 
-@media (max-width: 850px) {
+@container collaboration-map (max-width: 850px) {
   .collaboration-map__header { gap: 6px; }
   .collaboration-map__tools { gap: 4px; }
   .collaboration-map__tools .small-button > span:not(.collaboration-map__reading) { display: none; }
   .collaboration-map__tools .small-button { min-width: 28px; justify-content: center; padding-inline: 5px; }
   .collaboration-map__search { flex-basis: 170px; }
 }
-@media (max-width: 620px) {
+@container collaboration-map (max-width: 720px) {
   .collaboration-map__header { flex-wrap: wrap; padding-right: 8px; }
   .collaboration-map__tools { flex-basis: 100%; padding-left: 12px; }
   .collaboration-map__tools .small-button > span:not(.collaboration-map__reading) { display: inline; }
