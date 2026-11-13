@@ -1871,7 +1871,8 @@ export async function registerIpc(args: {
       const saved = await spatialState.read()
       if (saved) {
         graph = saved.graph
-        cold = coldBrowserTargets(graph, live).map(target => ({ ...target, resource: { state: 'cold', locations: [], processes: [] } }))
+        cold = coldBrowserTargets(graph, live, profileId => browsers.profileLabel(profileId))
+          .map(target => ({ ...target, resource: { state: 'cold', locations: [], processes: [] } }))
         coverage = externalBridge.membershipCoverage
       } else warnings.push('Saved Browser ownership is unconfirmed. Existing live targets remain usable; retry discovery.')
     }

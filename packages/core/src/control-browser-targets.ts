@@ -75,6 +75,13 @@ export function parseBrowserTargetsResult(value: unknown): AgentMuxBrowserTarget
   return { targets, coverage, ...(input.warning === undefined ? {} : { warning: text(input.warning, 2000) }) }
 }
 
+/** {id,label} of one Browser Profile; nothing else about its storage crosses the wire. */
+export function parseBrowserProfileRef(raw: unknown): import('./browser-targets.js').AgentMuxBrowserProfileRef {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key => key !== 'id' && key !== 'label')) throw new AgentMuxError('Browser Profile reference is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const row = raw as Record<string, unknown>
+  return { id: text(row.id, 200), label: text(row.label, 512) }
+}
+
 /** A single exact owner result is not a complete discovery catalog. */
 export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new AgentMuxError('Browser target is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -87,6 +94,8 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
   if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
+  const profile = row.profile === undefined ? undefined : parseBrowserProfileRef(row.profile)
+  if (profile && (row.source !== 'embedded' || row.mode === 'private')) throw new AgentMuxError('Only a normal embedded Browser has a Profile.', 'CONTROL_PROTOCOL_ERROR')
   const certificateRequest = row.certificateRequest === undefined ? undefined : row.certificateRequest === null ? null : parseBrowserCertificateRequest(row.certificateRequest)
   if (certificateRequest && (row.source !== 'embedded' || certificateRequest.navigationId !== row.navigationId)) throw new AgentMuxError('Browser certificate request belongs to another document.', 'CONTROL_PROTOCOL_ERROR')
   const objectLink = row.objectLink === undefined ? undefined : text(row.objectLink, 8192)
@@ -96,6 +105,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   }
   return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
     ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
+    ...(profile ? { profile } : {}),
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
     ...(objectLink === undefined ? {} : { objectLink }),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],

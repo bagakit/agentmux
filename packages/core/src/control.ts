@@ -165,7 +165,9 @@ export type AgentMuxAgentRegion = AgentMuxRegionBase & {
   executorId: AgentExecutorId
 }
 export type AgentMuxTerminalRegion = AgentMuxRegionBase & { kind: 'terminal'; runId: string }
-export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string; mode?: AgentMuxBrowserMode }
+export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string; mode?: AgentMuxBrowserMode
+  /** The Profile a normal page opened in; absent for private pages and Capsules. */
+  profile?: import('./browser-targets.js').AgentMuxBrowserProfileRef }
 export type AgentMuxFileRegion = AgentMuxRegionBase & { kind: 'file'; path: string }
 export type AgentMuxLauncherRegion = AgentMuxRegionBase & { kind: 'launcher' }
 /** An addressable read-only surface; its domain data belongs to the host client. */
@@ -289,6 +291,8 @@ export type AgentMuxControlOpenBrowserRequest = RequestBase & {
   mode?: AgentMuxBrowserMode
   /** Original content identity; the client resolves its Host-owned container and document policy. */
   capsuleId?: string
+  /** Exact Browser Profile for a new normal page; absent uses the current default. Not with private or a Capsule. */
+  profileId?: string
 }
 export type AgentMuxMessageTarget =
   | AgentMuxSelfAnchor

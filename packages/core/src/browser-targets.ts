@@ -35,12 +35,17 @@ export type AgentMuxBrowserControl = {
 }
 
 /** One addressable page, with its actual transport capabilities. No host UI or profile object. */
+/** The Browser Profile a normal page uses: its id and the label Main lists for it. */
+export type AgentMuxBrowserProfileRef = { id: string; label: string }
+
 export type AgentMuxBrowserTarget = {
   id: string
   workspaceId: string | null
   source: 'embedded' | 'external'
   /** Only present when the original page owner knows its storage mode. */
   mode?: AgentMuxBrowserMode
+  /** A normal embedded page's Profile; absent for private pages, Capsules, external tabs and unknown ownership. */
+  profile?: AgentMuxBrowserProfileRef
   status: 'ready' | 'disconnected' | 'revoked' | 'closed' | 'unavailable'
   url: string
   /** Stable original resource reference when known; url remains the actual document address. */

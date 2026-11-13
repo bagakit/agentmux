@@ -77,7 +77,7 @@ import { parseAppMemoryEvidence } from './app-memory-evidence.js'
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
-import { parseBrowserControl, parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
+import { parseBrowserControl, parseBrowserProfileRef, parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
@@ -486,6 +486,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (source.operation === 'open.browser' && source.capsuleId !== undefined && (!isObjectId(source.capsuleId) || source.mode === 'private')) {
       throw new AgentMuxError('A Capsule requires its exact object ID and an independent normal Browser container.', 'INVALID_CONTROL_REQUEST')
     }
+    if (source.operation === 'open.browser' && source.profileId !== undefined && (source.mode === 'private' || source.capsuleId !== undefined)) {
+      throw new AgentMuxError('A Browser Profile applies only to a normal page; a private page or a Capsule keeps its own storage.', 'INVALID_CONTROL_REQUEST')
+    }
     const destination = openDestination(source.destination)
     const owner = optionalCaller(source.caller)
     if (destinationUsesSelf(destination) && !owner) throw new AgentMuxError('A self destination requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -505,6 +508,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
           url: text(source.url, 'Browser URL'),
           ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }),
           ...(source.capsuleId === undefined ? {} : { capsuleId: source.capsuleId as string }),
+          ...(source.profileId === undefined ? {} : { profileId: identity(source.profileId, 'Browser Profile ID is invalid.', 'INVALID_CONTROL_REQUEST') }),
           destination,
           ...(owner ? { caller: owner } : {})
         }
@@ -914,7 +918,9 @@ function parseBrowserRegion(value: unknown): AgentMuxBrowserRegion {
   if (region.kind !== 'browser') throw new AgentMuxError('Control Browser Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const source = object(value, 'Control Browser Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') throw new AgentMuxError('Browser mode result is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...region, ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }) }
+  const profile = source.profile === undefined ? undefined : parseBrowserProfileRef(source.profile)
+  if (profile && source.mode === 'private') throw new AgentMuxError('A private Browser has no Profile.', 'CONTROL_PROTOCOL_ERROR')
+  return { ...region, ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }), ...(profile ? { profile } : {}) }
 }
 
 function parseTab(value: unknown) {

@@ -81,7 +81,9 @@ function isCapsuleOrigin(value: string): boolean {
 }
 
 /** Discovery never acquires a native page and never replaces an existing Main fact. */
-export function coldBrowserTargets(graph: AgentMuxSpatialGraph | null, live: readonly AgentMuxBrowserTarget[]): AgentMuxBrowserTarget[] {
+/** labelOf reads Main's committed Profile list; an id it cannot name leaves profile out instead of guessing. */
+export function coldBrowserTargets(graph: AgentMuxSpatialGraph | null, live: readonly AgentMuxBrowserTarget[],
+  labelOf: (profileId: string) => string | undefined = () => undefined): AgentMuxBrowserTarget[] {
   if (!graph) return []
   const known = new Set(live.map(target => target.id))
   return graph.regions.flatMap<AgentMuxBrowserTarget>(region => {
@@ -91,7 +93,9 @@ export function coldBrowserTargets(graph: AgentMuxSpatialGraph | null, live: rea
     try {
       const saved = browserColdDescriptor(graph, id)
       const objectLink = browserObjectLink(saved)
+      const label = saved.mode === 'normal' && !saved.capsuleId && saved.profileId ? labelOf(saved.profileId) : undefined
       return [{ id, workspaceId: saved.workspaceId, source: 'embedded' as const, mode: saved.mode,
+        ...(label === undefined ? {} : { profile: { id: saved.profileId!, label } }),
         ...(saved.source ? { openedFrom: saved.source } : {}),
         status: 'unavailable' as const, url: saved.url, ...(objectLink ? { objectLink } : {}), title: saved.title, capabilities: [],
         control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unconfirmed',

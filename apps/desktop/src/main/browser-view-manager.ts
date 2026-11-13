@@ -341,6 +341,8 @@ type PendingProfileSwitch = {
 export interface BrowserProfileResolver {
   defaultProfileId(): string
   resolvePartition(profileId: string): string
+  /** Main's committed list; absent or failing means the label is unknown, so targets omit profile. */
+  listProfiles?(): readonly { id: string; label: string }[]
 }
 
 /**
@@ -459,7 +461,8 @@ export class BrowserViewManager {
     const workspaceId = entry.workspaceId
     const url = available ? contents.getURL() : ''
     const objectLink = this.objectLink(entry, url)
-    return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
+    const profile = this.profileRef(entry.storage)
+    return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, ...(profile ? { profile } : {}), status: available ? 'ready' : 'unavailable',
       ...(entry.source ? { openedFrom: entry.source } : {}),
       control: this.controlState(entry),
       certificateRequest: entry.certificateDecision?.request ?? null,
@@ -470,6 +473,17 @@ export class BrowserViewManager {
       ...(!available || !workspaceId || entry.agentWarning ? { warning: [entry.agentWarning, !available
         ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
           ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join(' ') } : {}) }
+  }
+  /** {id,label} for a normal page's Profile. Private pages and Capsules have none; an unread label stays unknown. */
+  private profileRef(storage: BrowserStorage): { id: string; label: string } | undefined {
+    if (storage.mode !== 'normal' || !storage.profileId || 'capsule' in storage) return undefined
+    const label = this.profileLabel(storage.profileId)
+    return label === undefined ? undefined : { id: storage.profileId, label }
+  }
+  /** The label Main lists for this Profile id, or undefined when the list is unread or lacks it. */
+  profileLabel(profileId: string): string | undefined {
+    try { return this.profiles.listProfiles?.().find(candidate => candidate.id === profileId)?.label }
+    catch { return undefined }
   }
   /** One read of the existing owners; no page acquisition or persistent resource index. */
   resourceTargets(processes: ReadonlyMap<number, number> | null): AgentMuxBrowserTarget[] {

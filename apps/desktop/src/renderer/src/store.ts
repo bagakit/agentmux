@@ -231,6 +231,7 @@ import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../.
 import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
 import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import { api } from './lib/api'
+import { browserProfiles } from './lib/browser-profiles'
 import { sessionLaunchFailure } from '../../shared/session-launch-result'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserOpinionDraft } from './lib/browser-opinion-draft'
@@ -7092,8 +7093,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     try {
       const browser = request.capsuleId === undefined
-        ? await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode)
+        ? await api.browser.create(browserId, request.url, workspace.id, request.profileId, request.mode)
         : await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode, undefined, request.capsuleId, request.requestId)
+      // The receipt names the Profile Main actually used, with the label from Main's one committed list.
+      const profile = browser.mode === 'normal' && request.capsuleId === undefined && browser.profileId
+        ? browserProfiles.get().profiles?.find(candidate => candidate.id === browser.profileId) ?? (await api.browser.listProfiles()).find(candidate => candidate.id === browser.profileId)
+        : undefined
       createdBrowserId = browser.id
       if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
       if (signal?.aborted) await cleanup(controlCancellation(signal))
@@ -7115,7 +7120,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!attached) await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Browser creation.'))
       return {
         operation: request.operation,
-        region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId, mode: browser.mode }
+        region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId, mode: browser.mode,
+          ...(profile ? { profile: { id: profile.id, label: profile.label } } : {}) }
       }
     } catch (error) {
       rollback(plan.launcher)
