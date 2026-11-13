@@ -4,7 +4,7 @@ import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { NativeConnection, NativeDesktop, type JsonObject } from '../../../packages/native-desktop/src/index.js'
+import { NativeConnection, NativeDesktop, type CaptureResult, type JsonObject } from '../../../packages/native-desktop/src/index.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
@@ -21,7 +21,7 @@ const context = { principal: { kind: 'user' as const, id: 'fixture-person' }, tr
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-async function nativeFixture(captureResults = new Map<string, unknown>()) {
+async function nativeFixture(captureResults = new Map<string, unknown>(), selection = { captureSelection: vi.fn(async (): Promise<CaptureResult> => ({ state: 'cancelled' })) }) {
   const directory = await mkdtemp(join(tmpdir(), 'amn-public-'))
   const socketPath = join(directory, 'native.sock'), calls: JsonObject[] = [], sockets = new Set<Socket>()
   const server = createServer(socket => {
@@ -53,10 +53,10 @@ async function nativeFixture(captureResults = new Map<string, unknown>()) {
     request: (method, params = {}, options) => connection.request(method, params, options),
     inspectOperation: (operationId, instance) => connection.inspectOperation(operationId) ?? { operationId, instanceId: instance, state: 'unknown', reason: 'original_receipt_unavailable' }
   }
-  const owner = createNativeDesktopPublicOwner(port, { hostId: 'local' })
+  const owner = createNativeDesktopPublicOwner(port, { hostId: 'local' }, selection)
   const service = new AgentMuxRpcService({ coreClients: () => [], nativeDesktop: owner })
   cleanups.push(async () => { connection.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }) })
-  return { connection, owner, service, calls, directory }
+  return { connection, owner, service, calls, directory, selection }
 }
 
 async function publicFixture(captureResults = new Map<string, unknown>()) {
@@ -101,7 +101,7 @@ it('revocation during lazy native launch is checked at actual submission', async
   let finish!: (connection: NativeConnection) => void, began!: () => void
   const started = new Promise<void>(resolve => { began = resolve })
   ;(desktop as unknown as { launch(): Promise<NativeConnection> }).launch = () => { began(); return new Promise(resolve => { finish = resolve }) }
-  const service = new AgentMuxRpcService({ coreClients: () => [], nativeDesktop: createNativeDesktopPublicOwner(desktop, { hostId: 'local' }) })
+  const service = new AgentMuxRpcService({ coreClients: () => [], nativeDesktop: createNativeDesktopPublicOwner(desktop, { hostId: 'local' }, { captureSelection: async () => ({ state: 'cancelled' }) }) })
   let revoked = false
   const request = service.call('native.action', { ...scope, target, operationId: 'revoked-action', snapshotId: 'snapshot-original', action: { kind: 'click', elementIndex: 0 } }, { ...context, assertCurrent() { if (revoked) throw new AgentMuxError('Original authority was revoked', 'CONTROL_PERMISSION_DENIED') } })
   const rejected = expect(request).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
@@ -153,8 +153,29 @@ it('a rejected duplicate cannot claim or disclose an earlier GUI receipt', async
 
 it('a captured PNG follows the real native response shape through the public codec', async () => {
   const h = await nativeFixture()
-  const result = await h.service.call('native.capture', { ...scope, operationId: 'capture-png', capture: { mode: 'selection' } }, context)
+  const result = await h.service.call('native.capture', { ...scope, operationId: 'capture-png', capture: { mode: 'display', displayId: 1 } }, context)
   expect(result.result).toEqual(captured)
+})
+
+it('a public region selection is served by the capture surface, never by a native picker, with the same result and receipt', async () => {
+  const selection = { captureSelection: vi.fn(async (): Promise<CaptureResult> => captured as CaptureResult) }
+  const h = await nativeFixture(new Map(), selection)
+  const result = await h.service.call('native.capture', { ...scope, operationId: 'surface-selection', capture: { mode: 'selection' } }, context)
+  expect(result).toEqual({ ...scope, operationId: 'surface-selection', state: 'responded', result: captured })
+  expect(selection.captureSelection).toHaveBeenCalledOnce()
+  expect(h.calls.filter(call => call.method === 'captureScreenshot'), 'no native picker request').toEqual([])
+  expect((await h.service.call('native.operation.inspect', { ...scope, operationId: 'surface-selection' }, context)).result)
+    .toMatchObject({ operationId: 'surface-selection', instanceId, state: 'completed' })
+  const repeated = await h.service.call('native.capture', { ...scope, operationId: 'surface-selection', capture: { mode: 'selection' } }, context)
+  expect(repeated.error, 'a repeated operation opens no second surface').toMatchObject({ code: 'duplicate_operation' })
+  expect(selection.captureSelection).toHaveBeenCalledOnce()
+  await expect(h.service.call('native.operation.inspect', { ...scope, operationId: 'surface-selection' }, { ...context, principal: { kind: 'user', id: 'someone-else' } }))
+    .rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  selection.captureSelection.mockResolvedValueOnce({ state: 'cancelled' })
+  expect((await h.service.call('native.capture', { ...scope, operationId: 'surface-cancelled', capture: { mode: 'selection' } }, context)).result).toEqual({ state: 'cancelled' })
+  selection.captureSelection.mockResolvedValueOnce({ state: 'failed', error: { code: 'display_configuration_changed', message: 'The display layout changed.' } })
+  expect((await h.service.call('native.capture', { ...scope, operationId: 'surface-failed', capture: { mode: 'selection' } }, context)).result)
+    .toEqual({ state: 'failed', error: { code: 'display_configuration_changed', message: 'The display layout changed.' } })
 })
 
 it.each([
@@ -170,7 +191,7 @@ it.each([
     for (const consumer of ['service', 'client'] as const) {
       const operationId = `invalid-${kind}-${index}-${consumer}`
       captureResults.set(operationId, reply)
-      const input = { ...scope, operationId, capture: { mode: 'selection' as const } }
+      const input = { ...scope, operationId, capture: { mode: 'display' as const, displayId: 1 } }
       const request = consumer === 'service' ? h.service.call('native.capture', input, context) : h.client.call('native.capture', input)
       await expect(request).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
       expect(h.connection.inspectOperation(operationId)).toMatchObject({ instanceId, operationId, state: 'completed' })
@@ -181,7 +202,7 @@ it.each([
   }
   const operationId = `invalid-${kind}-cli`
   captureResults.set(operationId, replies[0])
-  const rejected = await h.cli(['capture'], { ...scope, operationId, capture: { mode: 'selection' } })
+  const rejected = await h.cli(['capture'], { ...scope, operationId, capture: { mode: 'display', displayId: 1 } })
   expect(rejected.code).toBe(1)
   expect(JSON.parse(rejected.stderr).error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
   const inspect = await h.cli(['operation', 'inspect'], { ...scope, operationId })
@@ -193,13 +214,13 @@ it.each([
 
 it('actual public client and CLI preserve valid capture pixels, provenance and geometry', async () => {
   const captureResults = new Map([['client-captured', captured], ['cli-captured', captured]]), h = await publicFixture(captureResults)
-  const result = await h.client.call('native.capture', { ...scope, operationId: 'client-captured', capture: { mode: 'selection' } })
+  const result = await h.client.call('native.capture', { ...scope, operationId: 'client-captured', capture: { mode: 'display', displayId: 1 } })
   expect(result).toEqual({ ...scope, operationId: 'client-captured', state: 'responded', result: captured })
-  const cli = await h.cli(['capture'], { ...scope, operationId: 'cli-captured', capture: { mode: 'selection' } })
+  const cli = await h.cli(['capture'], { ...scope, operationId: 'cli-captured', capture: { mode: 'display', displayId: 1 } })
   expect(cli.code, cli.stderr).toBe(0)
   expect(JSON.parse(cli.stdout).result).toEqual({ ...scope, operationId: 'cli-captured', state: 'responded', result: captured })
   for (const operationId of ['client-captured', 'cli-captured']) {
-    expect(h.calls.filter(call => call.operationId === operationId)).toEqual([expect.objectContaining({ method: 'captureScreenshot', expectedInstanceId: instanceId, params: { mode: 'selection' } })])
+    expect(h.calls.filter(call => call.operationId === operationId)).toEqual([expect.objectContaining({ method: 'captureScreenshot', expectedInstanceId: instanceId, params: { mode: 'display', displayId: 1 } })])
   }
 })
 
@@ -231,7 +252,7 @@ it('actual CLI and public Unix server consume the same native owner and discover
   expect(agentMuxCliModuleCatalog().find(module => module.root === 'native')?.readCommand).toBe('amux native --skill')
   const apps = await cli(['apps', 'list'], scope)
   expect(apps.code, apps.stderr).toBe(0); expect(JSON.parse(apps.stdout).result).toMatchObject({ instanceId, result: { apps: [{ pid: target.pid }] } })
-  const capture = await cli(['capture'], { ...scope, operationId: 'cli-capture', capture: { mode: 'selection' } })
+  const capture = await cli(['capture'], { ...scope, operationId: 'cli-capture', capture: { mode: 'display', displayId: 1 } })
   expect(capture.code, capture.stderr).toBe(0); expect(JSON.parse(capture.stdout).result.result.state).toBe('cancelled')
   expect(h.calls.at(-1)).toMatchObject({ method: 'captureScreenshot', operationId: 'cli-capture', expectedInstanceId: instanceId })
   const lost = await cli(['action'], { ...scope, operationId: 'lose-action', target, snapshotId: 'snapshot-original', action: { kind: 'click', elementIndex: 0 } })
