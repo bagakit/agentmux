@@ -7,6 +7,7 @@ const attention = `  if (hasRequest || presentation?.group === 'attention' || pr
     presentation?.state === 'error' || presentation?.state === 'waiting' || presentation?.state === 'blocked') return false`
 const sourceFence = 'if (beforeAction && !beforeAction() || !current.current.visible || !current.current.connected || current.current.client !== client || current.current.agentSessionId !== agentSessionId) return false'
 const mutations: Record<string, { file: string; before: string; after: string }> = {
+  'english-details': { file: 'navigation/MobileAgentStatusDetails.tsx', before: '{mobileAgentStateLabel(presentation)}', after: '{presentation.stateLabel}' },
   'show-unknown': { file: 'navigation/mobile-agent-status.ts', before: 'hasRequest = false): boolean {', after: 'hasRequest = false): boolean { return false;' },
   'attention': { file: 'navigation/mobile-agent-status.ts', before: attention, after: '  if (false) return false' },
   'request': { file: 'navigation/mobile-agent-status.ts', before: 'if (hasRequest ||', after: 'if (false ||' },
