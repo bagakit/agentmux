@@ -1,21 +1,28 @@
-import { BrowserWindow, ipcMain, nativeTheme, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, nativeImage, nativeTheme, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import type { AppearanceConfig } from '../shared/contracts'
-import { SCREENSHOT_SOURCE_CHANNEL, type ScreenshotSourceInput, type ScreenshotSourceList } from '../shared/screenshot-source'
+import { SCREENSHOT_SOURCE_CHANNEL, type ScreenshotSourceInput, type ScreenshotSourceList, type ScreenshotSourceThumbnail, WINDOW_PREVIEW_LIMIT } from '../shared/screenshot-source'
 import { themeBootstrap } from './theme-bootstrap'
 
 type App = { pid: number; processStartedAt: number; name: string }
 type Request = { window: BrowserWindow; input: ScreenshotSourceInput; choices: Map<string, CaptureParams>; apps: Map<string, App>;
-  settled: boolean; resolve(value: CaptureParams | null): void }
+  thumbnails: Map<string, Promise<ScreenshotSourceThumbnail>>; settled: boolean; resolve(value: CaptureParams | null): void }
+/** Thumbnail width in pixels. */
+const THUMBNAIL_WIDTH = 240
+/** Concurrent native captures for thumbnails, so a long window list stays responsive. */
+const THUMBNAIL_CONCURRENCY = 4
+
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0
 
 /** Exact OS identities are held here; labels and Renderer rows never grant capture targets. */
 export class ScreenshotSourcePicker {
   private current: Request | null = null
   private disposed = false
-  constructor(private readonly ports: { native(): Pick<NativeDesktop, 'request'>; appearance(): AppearanceConfig }) {
+  private readonly queue: Array<() => void> = []
+  private running = 0
+  constructor(private readonly ports: { native(): Pick<NativeDesktop, 'request' | 'captureScreenshot'>; appearance(): AppearanceConfig }) {
     ipcMain.handle(SCREENSHOT_SOURCE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
 
@@ -31,7 +38,7 @@ export class ScreenshotSourcePicker {
     let resolve!: Request['resolve']
     const selected = new Promise<CaptureParams | null>(done => { resolve = done })
     const request: Request = { window, input: { requestId: mintObjectId(), kind, theme },
-      choices: new Map(), apps: new Map(), settled: false, resolve }
+      choices: new Map(), apps: new Map(), thumbnails: new Map(), settled: false, resolve }
     this.current = request
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
@@ -54,6 +61,13 @@ export class ScreenshotSourcePicker {
     const input = value as { requestId?: string; key?: string } | undefined
     if (input?.requestId !== request.input.requestId) throw new Error('The original source selection is no longer current.')
     if (action === 'cancel') { request.window.close(); return }
+    if (action === 'thumbnail') {
+      const key = typeof input.key === 'string' ? input.key : '', target = request.choices.get(key)
+      if (!target) throw new Error('Preview only an exact source returned by this original selection.')
+      let thumbnail = request.thumbnails.get(key)
+      if (!thumbnail) { thumbnail = this.limited(() => this.preview(request, target)); request.thumbnails.set(key, thumbnail) }
+      return await thumbnail
+    }
     if (action === 'select') {
       const target = typeof input.key === 'string' ? request.choices.get(input.key) : undefined
       if (!target) throw new Error('Choose an exact source returned by this original selection.')
@@ -71,7 +85,7 @@ export class ScreenshotSourcePicker {
         if (!positive(w.id) || !Number.isSafeInteger(w.id)) { issues.push('One window has no confirmed identity.'); continue }
         const key = mintObjectId()
         request.choices.set(key, { mode: 'window', app: `pid:${app.pid}`, processStartedAt: app.processStartedAt, windowId: w.id })
-        choices.push({ key, label: typeof w.title === 'string' && w.title ? w.title : app.name,
+        choices.push({ key, label: typeof w.title === 'string' && w.title ? w.title : app.name, preview: choices.length < WINDOW_PREVIEW_LIMIT,
           detail: positive(w.width) && positive(w.height) ? `${Math.round(w.width)} × ${Math.round(w.height)} pt` : 'Window dimensions unavailable' })
       }
     } else if (request.input.kind === 'display') {
@@ -82,7 +96,7 @@ export class ScreenshotSourcePicker {
         if (!positive(d.id) || !Number.isSafeInteger(d.id) || !positive(d.width) || !positive(d.height) || !positive(d.scale)) { issues.push('One display has incomplete geometry.'); continue }
         const key = mintObjectId()
         request.choices.set(key, { mode: 'display', displayId: d.id })
-        choices.push({ key, label: d.isMain === true ? 'Main display' : `Display ${choices.length + 1}`,
+        choices.push({ key, label: d.isMain === true ? 'Main display' : `Display ${choices.length + 1}`, preview: true,
           detail: `${Math.round(d.width * d.scale)} × ${Math.round(d.height * d.scale)} px · ${d.scale}×` })
       }
     } else {
@@ -93,12 +107,32 @@ export class ScreenshotSourcePicker {
         if (!positive(app.pid) || !Number.isSafeInteger(app.pid) || !positive(app.processStartedAt)) { issues.push('One application has no confirmed process identity.'); continue }
         const key = mintObjectId(), name = typeof app.name === 'string' && app.name ? app.name : 'Application'
         request.apps.set(key, { pid: app.pid, processStartedAt: app.processStartedAt, name })
-        choices.push({ key, label: name, detail: `Process ${app.pid}` })
+        choices.push({ key, label: name, detail: `Process ${app.pid}`, preview: false })
       }
       choices.sort((a, b) => a.label.localeCompare(b.label))
     }
     // Late reads retain the original request only; they never create or reopen a source window.
     return { choices, issues }
+  }
+
+  /** One native capture of the exact listed target, scaled to the thumbnail width. Any failure is a neutral placeholder. */
+  private async preview(request: Request, target: CaptureParams): Promise<ScreenshotSourceThumbnail> {
+    if (request.settled || request.window.isDestroyed()) return null
+    try {
+      const result = await this.ports.native().captureScreenshot(target)
+      if (result.state !== 'captured' || !result.screenshot) return null
+      const image = nativeImage.createFromBuffer(Buffer.from(result.screenshot.data, 'base64'))
+      if (image.isEmpty()) return null
+      const small = image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }), size = small.getSize()
+      return { dataUrl: small.toDataURL(), width: size.width, height: size.height }
+    } catch { return null }
+  }
+
+  private async limited<T>(work: () => Promise<T>): Promise<T> {
+    if (this.running >= THUMBNAIL_CONCURRENCY) await new Promise<void>(resolve => this.queue.push(resolve))
+    this.running++
+    try { return await work() }
+    finally { this.running--; this.queue.shift()?.() }
   }
 
   dispose(): void { this.disposed = true; ipcMain.removeHandler(SCREENSHOT_SOURCE_CHANNEL); if (this.current && !this.current.window.isDestroyed()) this.current.window.destroy() }

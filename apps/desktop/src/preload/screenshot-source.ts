@@ -5,6 +5,7 @@ if (process.isMainFrame) {
     load: () => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'load'),
     list: requestId => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'list', { requestId }),
     windows: (requestId, key) => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'windows', { requestId, key }),
+    thumbnail: (requestId, key) => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'thumbnail', { requestId, key }),
     select: (requestId, key) => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'select', { requestId, key }),
     cancel: requestId => ipcRenderer.invoke(SCREENSHOT_SOURCE_CHANNEL, 'cancel', { requestId })
   }
