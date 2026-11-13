@@ -2391,7 +2391,7 @@ export function TerminalView({
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
                 session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session, nativeService)]),
               hookIngress: session.kind === 'agent' ? JSON.stringify([session.hookIngressObservation?.phase, session.hookIngressObservation?.code, session.hookIngressObservation?.message]) : '',
-              hookDelivery: session.kind === 'agent' ? JSON.stringify([session.hookDeliveryObservation?.since, session.hookDeliveryObservation?.accepted, session.hookDeliveryObservation?.code]) : '',
+              hookDelivery: session.kind === 'agent' ? JSON.stringify([session.hookDeliveryObservation?.since, session.hookDeliveryObservation?.accepted, session.hookDeliveryObservation?.code, session.hookDeliveryObservation?.reason]) : '',
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}

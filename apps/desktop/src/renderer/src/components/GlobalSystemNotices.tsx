@@ -384,7 +384,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
     }
-    return { current: currentEntries, activity: historyEntries, unavailableSources, activityNotRetained: useAppStore.getState().notificationEventsNotRetained }
+    return { current: currentEntries, activity: historyEntries, unavailableSources, activityNotRetained: notRetained }
   }
   useLayoutEffect(() => registerNotificationReader(buildEntries))
   const visible = open ? buildEntries() : null
@@ -452,7 +452,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
             <p>{category !== 'all' ? 'Choose another category to review its notifications.' : section === 'current' ? 'New service issues will appear here. Past events stay in Activity.' : 'New events will appear here with their original details.'}</p>
           </div> : null}
           {!available ? <p className="global-system-notices__observation">Some sources are still being checked. Existing notices are kept.</p> : null}
-          {section === 'history' && notRetained ? <p className="global-system-notices__observation global-system-notices__retention">{`${notRetained === 1 ? '1 older event was' : `${notRetained} older events were`} not kept. Activity keeps the newest ${ACTIVITY_RETENTION_LIMIT}.`}</p> : null}
+          {section === 'history' && notRetained ? <p className="global-system-notices__observation global-system-notices__retention">{`${notRetained === 1 ? '1 earlier event was' : `${notRetained} earlier events were`} not kept across all categories. Activity keeps up to ${ACTIVITY_RETENTION_LIMIT}, removing read events first.`}</p> : null}
         </div>
         <div className="global-system-notices__footer">
           <span>{shownUnread.length ? `${shownUnread.length} unread in this view` : 'All read in this view'}</span>

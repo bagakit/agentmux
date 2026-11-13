@@ -223,12 +223,12 @@ export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome
 export function hookDeliveryServiceOutcome(session: SessionSnapshot): StepOutcome {
   const loss = session.kind === 'agent' ? session.hookDeliveryObservation : undefined
   if (!loss || loss.run.runId !== session.control.run.runId) return { completed: true }
-  const running = session.processState === 'running' && session.status.state !== 'disconnected'
+  // This owner knows only that observations were lost; the Run state and input keep their own owners.
   return { completed: false, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected'), step: {
     label: `Native Hook observations (${loss.code})`,
-    degradedMode: `${running ? 'The Agent, its terminal and input remain usable.' : `The Run was last observed ${session.processState}.`} ${loss.accepted === false
+    degradedMode: `Losing these observations does not stop the Agent, its terminal or input. ${loss.accepted === false
       ? 'Recent Hook observations were refused before AgentMux processed them, so the status shown here may lag behind the Agent.'
-      : 'Whether AgentMux recorded a recent Hook observation is unconfirmed, so the status shown here may lag behind the Agent.'}`,
+      : 'Whether AgentMux recorded a recent Hook observation is unconfirmed, so the status shown here may lag behind the Agent.'}${loss.reason ? ` Rejected: ${loss.reason}` : ''}`,
     restore: 'This clears when the next Hook observation from this Run is delivered. Nothing is replayed; you do not need to resend input.'
   } }
 }

@@ -72,7 +72,7 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
   const deliveryNotice = serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(session), observationAvailable))
   if (deliveryNotice && session.hookDeliveryObservation) notices.push({ id: 'hook-delivery',
     occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId, session.hookDeliveryObservation.since]),
-    cause: JSON.stringify([session.hookDeliveryObservation.accepted, session.hookDeliveryObservation.code]),
+    cause: JSON.stringify([session.hookDeliveryObservation.accepted, session.hookDeliveryObservation.code, session.hookDeliveryObservation.reason ?? null]),
     observedAt: session.hookDeliveryObservation.since, notice: deliveryNotice })
   if (session.creation?.initialPrompt === 'unconfirmed' || session.creation?.initialPrompt === 'unknown') notices.push({
     id: 'initial-prompt', occurrence: session.creation.createOperationId, notice: { kind: 'indeterminate', notice: {

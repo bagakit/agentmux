@@ -585,7 +585,7 @@ export function notificationEventIdentity(message: string, context: ErrorNoticeC
     context?.startupProviderCatalog ? 'provider-catalog' : undefined, errorIdentity(message)]))
 }
 
-function observeRuntimeOperation(state: Pick<AppState, 'notificationEvents'>, event: RuntimeEvent): Partial<AppState> {
+function observeRuntimeOperation(state: Pick<AppState, 'notificationEvents' | 'notificationEventsNotRetained' | 'noticeReadReceipts'>, event: RuntimeEvent): Partial<AppState> {
   if (event.event.type !== 'agent-lifecycle-observed') return {}
   const core = event.event, resolved = runtimeOperationOwner({ hostId: event.hostId, agentSessionId: core.agentSessionId,
     lifecycle: core.lifecycle, observedAt: core.evidence.observedAt })
@@ -596,7 +596,8 @@ function observeRuntimeOperation(state: Pick<AppState, 'notificationEvents'>, ev
     changed = true
     return { ...record, context: { ...record.context!, runtimeOperation: { ...original, resolvedAt: core.evidence.observedAt } } }
   })
-  return changed ? { notificationEvents } : {}
+  // A settled operation joins Activity here, so the same bound applies as for a new event.
+  return changed ? retainActivity(state, notificationEvents) : {}
 }
 
 // Membership reconciliation replays the same envelope for projection. That is
@@ -665,9 +666,11 @@ function settleNotificationRecords(state: Pick<AppState, 'notificationEvents' | 
 /** Activity keeps this many of the newest events per window; its cost follows this window, not uptime. */
 export const ACTIVITY_RETENTION_LIMIT = 256
 /**
- * Bound the Activity history after an append. Current problems their owner has not settled are
- * outside the bound. Over the limit the oldest read events leave first, then the oldest unread
- * ones; the count of what left is kept separately and is never presented as read or resolved.
+ * Bound the Activity history wherever a record joins it (a new event, or an operation settling).
+ * Current problems their owner has not settled are outside the bound. Over the limit read events
+ * leave before unread ones, each group in order of when it was last seen, so an event that keeps
+ * recurring stays with its count and reading. The count of what left is kept separately and is
+ * never presented as read or resolved.
  */
 function retainActivity(state: Pick<AppState, 'notificationEvents' | 'notificationEventsNotRetained' | 'noticeReadReceipts'>,
   records: NotificationEvent[]): Pick<AppState, 'notificationEvents'> & Partial<Pick<AppState, 'notificationEventsNotRetained' | 'noticeReadReceipts'>> {
@@ -677,9 +680,13 @@ function retainActivity(state: Pick<AppState, 'notificationEvents' | 'notificati
   excess = history.length - ACTIVITY_RETENTION_LIMIT
   if (excess <= 0) return { notificationEvents: records }
   const read = state.noticeReadReceipts['global:events'] ?? {}
+  // Last seen, not first appended: a repeat updates its record in place without moving it.
+  const seen = (record: NotificationEvent) => record.lastObservedAt ?? record.firstObservedAt ?? 0
+  const byLastSeen = history.map((record, index) => ({ record, index }))
+    .sort((a, b) => seen(a.record) - seen(b.record) || a.index - b.index).map(entry => entry.record)
   const leaving = new Set<NotificationEvent>()
-  for (const record of history) { if (leaving.size >= excess) break; if (read[record.id] === 'read') leaving.add(record) }
-  for (const record of history) { if (leaving.size >= excess) break; leaving.add(record) }
+  for (const record of byLastSeen) { if (leaving.size >= excess) break; if (read[record.id] === 'read') leaving.add(record) }
+  for (const record of byLastSeen) { if (leaving.size >= excess) break; leaving.add(record) }
   let receipts = state.noticeReadReceipts
   const released = [...leaving].filter(record => read[record.id] === 'read')
   if (released.length) {
