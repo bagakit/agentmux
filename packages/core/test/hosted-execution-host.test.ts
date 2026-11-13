@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
 import { HostedExecutionHost as SourceHostedExecutionHost } from '../src/hosted-execution-host.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxRunAttachment } from '../src/types.js'
 
 const scopes: Array<Awaited<ReturnType<typeof headlessFixture>>> = []
 const HostedExecutionHost: typeof SourceHostedExecutionHost = process.env.AGENTMUX_TEST_HOSTED_EXECUTION_HOST_ENTRY
@@ -146,5 +148,116 @@ describe('HostedExecutionHost through the real Core and official ctxmux', () => 
     await expect(host.run('test', ['bad\0arg'])).rejects.toMatchObject({ code: 'INVALID_COMMAND' })
     await expect(host.run('test', [], { env: { 'invalid;name': 'value' } })).rejects.toMatchObject({ code: 'INVALID_COMMAND' })
     expect(connect).not.toHaveBeenCalled()
+  })
+})
+
+describe('HostedExecutionHost while a native receipt is pending', () => {
+  function pendingFixture(stage: 'attachment' | 'input', unknown?: 'stop' | 'end') {
+    let token = '', createOperationId = '', releasePending!: () => void, entered!: () => void
+    let receive: ((event: AgentMuxClientEvent) => void) | undefined
+    const pendingEntered = new Promise<void>(resolve => { entered = resolve })
+    const pending = new Promise<void>(resolve => { releasePending = resolve })
+    const run: AgentMuxRun = { runId: 'own-command-run', kind: 'terminal', providerId: null, executorId: null,
+      agentSessionId: null, workspacePath: fixturePath('command/remote'), pid: null, state: 'running',
+      cols: 80, rows: 24, observedAt: 0, latestOutputBytes: 0, acceptedInputBytes: 0, nativeService: null }
+    const snapshot = (data = `${token}:ready\n`): AgentMuxRunAttachment => {
+      const bytes = Buffer.from(data)
+      return { run, gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0,
+        replay: [{ runId: run.runId, type: 'data', startByte: 0, endByte: bytes.length, dataBytes: bytes, data }] }
+    }
+    const client = {
+      prepareTerminal: vi.fn(async (input: { createOperationId: string; args: string[] }) => { token = input.args[3]!; createOperationId = input.createOperationId; return input }),
+      createPreparedTerminal: vi.fn(async () => run),
+      attachTerminal: vi.fn(async () => { if (stage === 'attachment') { entered(); await pending }; return snapshot() }),
+      writeTerminal: vi.fn(async (_run: AgentMuxRun, input: { data: string; expectedByte: number }) => { entered(); await pending; return { acceptedThroughByte: input.expectedByte + Buffer.byteLength(input.data) } }),
+      stopTerminal: vi.fn(async () => { if (unknown === 'stop') throw new AgentMuxError('The original stop receipt is unconfirmed.', 'CONTROL_CONNECTION_FAILED'); if (unknown !== 'end') run.state = 'exited' }),
+      releaseRunAttachment: vi.fn(async () => {}), removeTerminal: vi.fn(async () => {}),
+      listRuns: vi.fn(async () => [run]), runtimeIdentity: () => ({ instanceId: 'original-owner' }),
+      onRunEvent: vi.fn((_runId: string, listener: (event: AgentMuxClientEvent) => void) => { receive = listener; return () => { receive = undefined } }),
+      onStatusEvent: vi.fn(() => () => {}), dispose: vi.fn(async () => {})
+    }
+    const host = new HostedExecutionHost({ id: 'remote', label: 'Remote', connect: async () => client as never })
+    const completeResult = () => {
+      run.state = 'exited'
+      receive?.({ type: 'terminal-snapshot', ...snapshot(`${token}:ready\n${token}:result:0\n${Buffer.from('finished').toString('base64')}\n\n${token}:done\n`) } as AgentMuxClientEvent)
+    }
+    return { client, host, run, pendingEntered, releasePending, completeResult, createOperationId: () => createOperationId }
+  }
+
+  it.each(['attachment', 'input'] as const)('deadline settles while the %s receipt never replies and cleans up its late attachment once', async stage => {
+    vi.useFakeTimers()
+    const f = pendingFixture(stage)
+    let outcome: unknown
+    const result = f.host.run('/bin/echo', ['literal'], { timeoutMs: 100, input: 'x'.repeat(32 * 1024) }).catch(error => error)
+    void result.then(value => { outcome = value })
+    try {
+      await f.pendingEntered
+      await vi.advanceTimersByTimeAsync(100)
+      expect(outcome).toMatchObject({ code: 'COMMAND_TIMEOUT', controlFailure: { disposition: 'unknown' } })
+      expect(JSON.parse((outcome as AgentMuxError).detail!)).toMatchObject({ createOperationId: f.createOperationId(), runId: f.run.runId,
+        ...(stage === 'input' ? { inputOperationId: expect.any(String) } : {}) })
+      expect(f.client.createPreparedTerminal).toHaveBeenCalledOnce()
+      expect(f.client.writeTerminal).toHaveBeenCalledTimes(stage === 'input' ? 1 : 0)
+      expect(f.client.stopTerminal).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      f.releasePending(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.client.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      expect(f.client.removeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      expect(f.client.writeTerminal).toHaveBeenCalledTimes(stage === 'input' ? 1 : 0)
+    } finally { f.releasePending(); await vi.advanceTimersByTimeAsync(1_000); await result; vi.useRealTimers() }
+  })
+
+  it.each(['attachment', 'input'] as const)('abort settles while the %s receipt never replies without input replay or a replacement Run', async stage => {
+    vi.useFakeTimers()
+    const f = pendingFixture(stage), controller = new AbortController()
+    let outcome: unknown
+    const result = f.host.run('/bin/echo', ['literal'], { signal: controller.signal, input: 'x'.repeat(32 * 1024) }).catch(error => error)
+    void result.then(value => { outcome = value })
+    try {
+      await f.pendingEntered
+      controller.abort(); await vi.advanceTimersByTimeAsync(0)
+      expect(outcome).toMatchObject({ code: 'COMMAND_ABORTED', controlFailure: { disposition: 'unknown' } })
+      expect(JSON.parse((outcome as AgentMuxError).detail!)).toMatchObject({ createOperationId: f.createOperationId(), runId: f.run.runId,
+        ...(stage === 'input' ? { inputOperationId: expect.any(String) } : {}) })
+      expect(f.client.stopTerminal).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      f.releasePending(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.client.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      expect(f.client.createPreparedTerminal).toHaveBeenCalledOnce()
+      expect(f.client.writeTerminal).toHaveBeenCalledTimes(stage === 'input' ? 1 : 0)
+    } finally { f.releasePending(); await vi.advanceTimersByTimeAsync(1_000); await result; vi.useRealTimers() }
+  })
+
+  it.each(['stop', 'end'] as const)('a late attachment keeps its exact Run when %s is unconfirmed', async unknown => {
+    vi.useFakeTimers()
+    const f = pendingFixture('attachment', unknown)
+    let outcome: unknown
+    const result = f.host.run('/bin/echo', ['literal'], { timeoutMs: 100 }).catch(error => error)
+    void result.then(value => { outcome = value })
+    try {
+      await f.pendingEntered
+      await vi.advanceTimersByTimeAsync(100)
+      expect(outcome).toMatchObject({ code: 'COMMAND_TIMEOUT', controlFailure: { disposition: 'unknown' } })
+      f.releasePending(); await vi.advanceTimersByTimeAsync(1_000)
+      expect(f.client.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      expect(f.client.removeTerminal).not.toHaveBeenCalled()
+    } finally { f.releasePending(); await vi.advanceTimersByTimeAsync(1_000); await result; vi.useRealTimers() }
+  })
+
+  it.each(['result-first', 'receipt-first'] as const)('returns the complete original result without sending more input when the %s settles first', async order => {
+    vi.useFakeTimers()
+    const f = pendingFixture('input')
+    let outcome: unknown
+    const result = f.host.run('/bin/echo', ['literal'], { input: 'x'.repeat(32 * 1024) }).then(value => { outcome = value; return value })
+    try {
+      await f.pendingEntered
+      if (order === 'receipt-first') f.releasePending()
+      f.completeResult(); await vi.advanceTimersByTimeAsync(0)
+      expect(outcome).toEqual({ stdout: 'finished', stderr: '', exitCode: 0 })
+      expect(f.client.stopTerminal).not.toHaveBeenCalled()
+      expect(f.client.writeTerminal).toHaveBeenCalledOnce()
+      f.releasePending(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.client.writeTerminal).toHaveBeenCalledOnce()
+      expect(f.client.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+      expect(f.client.removeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: f.run.runId })
+    } finally { f.releasePending(); await vi.advanceTimersByTimeAsync(1_000); await result; vi.useRealTimers() }
   })
 })
