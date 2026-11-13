@@ -130,26 +130,31 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
   const [confirm, setConfirm] = useState<'delete' | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   useEffect(() => { if (naming) { nameInput.current?.focus(); nameInput.current?.select() } }, [naming])
-  useEffect(() => { if (!naming) setName(profile.label) }, [profile.label, naming])
-  useEffect(() => { if (!noting) setNotes(profile.notes ?? '') }, [profile.notes, noting])
+  useEffect(() => { if (!naming) setName(profile.label) }, [profile.label])
+  useEffect(() => { if (!noting) setNotes(profile.notes ?? '') }, [profile.notes])
   useEffect(() => { if (!saved) return; const timer = setTimeout(() => setSaved(false), 1200); return () => clearTimeout(timer) }, [saved])
 
-  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1]) => {
-    if (await run('edit', () => api.browser.updateProfile(profile.id, edit, revision))) setSaved(true)
+  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1]): Promise<boolean> => {
+    const ok = await run('edit', () => api.browser.updateProfile(profile.id, edit, revision))
+    if (ok) setSaved(true)
+    return ok
   }
+  // A refused edit reopens the field with the person's own text; nothing they typed is dropped.
   const finishName = async (keep: boolean) => {
-    setNaming(false); onNameEdited()
+    onNameEdited()
     const next = name.trim()
-    if (keep && next && next !== profile.label) await commit({ label: next })
-    else setName(profile.label)
+    if (!keep || !next || next === profile.label) { setNaming(false); setName(profile.label); return }
+    setNaming(false)
+    if (!await commit({ label: next })) { setName(next); setNaming(true) }
   }
   const nameKeys = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); void finishName(true) }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void finishName(false) }
   }
   const finishNotes = async () => {
+    const draft = notes
     setNoting(false)
-    if (notes.trim() !== (profile.notes ?? '')) await commit({ notes: notes.trim() })
+    if (draft.trim() !== (profile.notes ?? '') && !await commit({ notes: draft.trim() })) { setNotes(draft); setNoting(true) }
   }
   const blockedDelete = profile.isDefault ? 'The default Profile can’t be deleted' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
   const open = uses.filter(use => use.state === 'open')
