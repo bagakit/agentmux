@@ -10,12 +10,12 @@ One agent-first, terminal-first desktop where people and agents keep working in 
 
 <br>
 
-![Providers](https://img.shields.io/badge/built--in_providers-13-8de3ae?style=flat-square&labelColor=30363d)
-![amux](https://img.shields.io/badge/amux-25_modules_·_400%2B_commands-8de3ae?style=flat-square&labelColor=30363d)
-![JSON-RPC](https://img.shields.io/badge/typed_JSON--RPC-400%2B_methods-8de3ae?style=flat-square&labelColor=30363d)
-![Tests](https://img.shields.io/badge/test_files-3.5k%2B-8de3ae?style=flat-square&labelColor=30363d)
-![Platform](https://img.shields.io/badge/desktop-macOS_Apple_Silicon-6e7781?style=flat-square&labelColor=30363d)
-![Node](https://img.shields.io/badge/node-%E2%89%A524-6e7781?style=flat-square&labelColor=30363d)
+![Providers](https://img.shields.io/badge/built--in_providers-13-8de3ae?style=flat-square&labelColor=111419)
+![amux](https://img.shields.io/badge/amux-25_modules_·_400%2B_commands-8de3ae?style=flat-square&labelColor=111419)
+![JSON-RPC](https://img.shields.io/badge/typed_JSON--RPC-400%2B_methods-8de3ae?style=flat-square&labelColor=111419)
+![Tests](https://img.shields.io/badge/test_files-3.5k%2B-8de3ae?style=flat-square&labelColor=111419)
+![Platform](https://img.shields.io/badge/desktop-macOS_Apple_Silicon-edf1ee?style=flat-square&labelColor=111419)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-edf1ee?style=flat-square&labelColor=111419)
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -46,7 +46,7 @@ Use the Core alone to drive agents from your own host, or use the desktop app fo
 
 ### 1 · Close the app. The agents keep working.
 
-Agent processes live in the ctxmux daemon, not in a window. Quit or restart the app, or hot-update only the UI, and healthy Runs carry on. When you come back, Core reattaches to the **same PID and PTY** and the terminal resumes from its byte cursor. If a process really has ended and its Provider supports native resume, Core resumes it through the same Session and the Provider's own session handle. **It never quietly swaps in a blank conversation.** On a cold start, agents active in the last 24 hours (the default window) resume automatically; older ones get their tabs, layout, drafts and readable history back first and reconnect the first time you need them to act. After a reboot or power loss the original PTY is gone, so Core starts a new Run for the same Session from its native handle instead of pretending the old process survived.
+Agent processes live in the ctxmux daemon, not in a window. Quit or restart the app, or hot-update only the UI, and healthy Runs carry on. When you come back, Core reattaches to the **same PID and PTY** and the terminal resumes from its byte cursor. If a process really has ended, Core resumes it natively through the same Session and the Provider's own session handle. **It never quietly swaps in a blank conversation.** On a cold start, agents active in the last 24 hours resume automatically; older ones get their tabs, layout, drafts and readable history back first and reconnect the first time you need them to act. After a reboot or power loss the original PTY is gone, so Core starts a new Run for the same Session from its native handle instead of pretending the old process survived.
 
 > See [Durable Runtime health](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [On-demand cold-start recovery](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal runtime](docs/architecture/terminal-runtime.md)
 
@@ -55,7 +55,7 @@ Agent processes live in the ctxmux daemon, not in a window. Quit or restart the 
 Space › Zone › Tab › Region is **where something is shown**. AgentSession / Run is **what is executing**. They never mix. Drag an agent into another tab, pop it into its own window or arrange a tab as `grid-4`: its Session, Run, host and working directory stay the same, and it keeps running. Core owns the spatial graph, so it can be read and edited without a GUI.
 
 ```sh
-amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
+amux space mv --from-region '<region-id>' --expect-session '<session-id>' --new-tab
 amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 · grid-6 · grid-9
 ```
 
@@ -67,7 +67,7 @@ amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 ·
 
 ### 4 · Agents drive the product through a CLI, not through screenshots
 
-`amux` is the product's public control surface: 25 object modules and 400+ commands over a typed JSON-RPC service of the same scale. Every agent AgentMux starts already has `amux` (`$AGENTMUX_CLI`). Opening an agent inside AgentMux to improve AgentMux itself is a supported, deliberate path.
+`amux` is the product's whole control surface: 25 object modules and 400+ commands over a typed JSON-RPC service of the same scale. Every agent AgentMux starts already has `amux` (`$AGENTMUX_CLI`). Opening an agent inside AgentMux to improve AgentMux itself is a supported, deliberate path.
 
 ```sh
 amux whoami                                   # who am I, which Zone / Tab / Region, which capabilities
@@ -157,7 +157,7 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 
 > See [Where partners come from](docs/design/behavior/companions-from-work.md) · [Mote contract](docs/design/behavior/motes-and-coordination.md)
 
-### Tools
+### Toolkit
 
 | Capability | What you can do | Where |
 | --- | --- | --- |
@@ -169,11 +169,11 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 | **Toolkit** | Put your own tools in the status bar: scripts, action buttons and result views. Saving or viewing a tool never runs its script. The built-in Performance panel is itself a Toolkit that reads everything through the public CLI. | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
 | **Connectors** | Bring agent conversations into Feishu and Discord (the two built-in adapters): messages, files, questions and permission prompts. Core doesn't depend on this optional package. | [`@agentmux/connectors`](packages/connectors/README.md) |
 | **Files and Git** | Browse, edit and preview files in the working directory, review diffs, manage workspaces and worktrees. | [Files and Git](docs/design/behavior/files-and-git.md) |
-| **Mobile** | On the same Wi-Fi as the Mac, scan a code on your phone to continue existing agents' conversations or watch their terminals over the Mac's end-to-end encrypted local Relay. Agents and history stay on the Mac. | [AgentMux Mobile](apps/mobile/README.md) |
+| **Mobile** | Scan a code on your phone and continue existing agents' conversations or watch their terminals over an end-to-end encrypted Relay. Agents and history stay on the Mac. | [AgentMux Mobile](apps/mobile/README.md) |
 
 <img src="docs/assets/readme/focus-map.webp" alt="Focus Map: agents as nodes inside nested areas, connected by their messages" width="100%">
 
-<p align="center"><sub>Focus Map: nested areas show where agents belong, edges show real messages and creation links between them, and any node opens its original workface.</sub></p>
+<p align="center"><sub>Focus Map: nested areas show where agents belong, edges show real messages between them, and any node opens its original workface.</sub></p>
 
 ## Architecture: three layers, one owner per fact
 
@@ -190,11 +190,11 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 
 Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **presentation**, Project / Workspace is **resources and working directory**, AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
 
-Core ships a pinned ctxmux daemon, CLI and SDK for macOS arm64 and Linux x64 (exact versions in the [darwin-arm64](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) and [linux-x64](packages/core/vendor/ctxmux/linux-x64/manifest.json) manifests), and checks every SHA-256 before installing or activating them. The ctxmux CLI can manage Runs without AgentMux; AgentMux is one of its clients.
+Core ships a pinned ctxmux 0.1.0 (protocol 25) daemon, CLI and SDK for macOS arm64 and Linux x64, and checks every SHA-256 before installing or activating them. The ctxmux CLI can manage Runs without AgentMux; AgentMux is one of its clients.
 
 ### 13 built-in Providers
 
-Every difference between agents stays inside its Provider and is declared honestly in its catalog. Nothing is declared that hasn't been verified. Clients don't need agent-specific branches for protocol behavior.
+Every difference between agents stays inside its Provider and is declared honestly in its catalog. Nothing is declared that hasn't been verified. Clients never branch on a specific agent.
 
 | Provider | Permission | Native resume | Native fork | Native history |
 | --- | :---: | :---: | :---: | :---: |
@@ -219,7 +219,7 @@ The full text is in [AGENTS.md](AGENTS.md). These are the ones that shape produc
 | Confirmed healthy | Stay out of the way |
 | Can't tell | Say it's unknown. Don't guess healthy, and don't guess dead |
 
-A real P0 incident showed that stating this rule was not enough: an agent whose process was alive and whose PTY was still receiving bytes [could never receive another message](docs/casestudy/prompt-refused-after-readiness-consumed.md), because our own readiness bookkeeping was never renewed. Since then, every new `throw`, early return or disabled control has to answer the four questions in [RED-LINES.md](RED-LINES.md) first. The most important one: **"If this code is bypassed, does the path still work?"**
+This rule comes from a real P0 incident: an agent whose process was alive and whose PTY was still receiving bytes [could never receive another message](docs/casestudy/prompt-refused-after-readiness-consumed.md), because our own readiness bookkeeping was never renewed. Since then, every new `throw`, early return or disabled control has to answer the four questions in [RED-LINES.md](RED-LINES.md) first. The most important one: **"If this code is bypassed, does the path still work?"**
 
 **Durable sessions are the foundation.** Resuming the original Session with its original identity comes before everything else. A new process, a screen that merely looks right or a fresh empty session never counts as a successful recovery.
 
@@ -235,9 +235,9 @@ A real P0 incident showed that stating this rule was not enough: an agent whose 
 
 | Dependency | Requirement | Source |
 | --- | --- | --- |
-| Platform | Desktop: macOS on Apple Silicon. Core's bundled runtime: macOS arm64, Linux x64 | [Packaging script](apps/desktop/scripts/package-macos.mjs) · ctxmux manifests ([darwin-arm64](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) · [linux-x64](packages/core/vendor/ctxmux/linux-x64/manifest.json)) |
-| Node.js | 24 or newer | `engines` in the [Core package](packages/core/package.json) |
-| pnpm | The version declared by `packageManager` | [Root package](package.json) |
+| Platform | Desktop: macOS on Apple Silicon. Core's bundled runtime: macOS arm64, Linux x64 | [Packaging script](apps/desktop/scripts/package-macos.mjs) · [ctxmux manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) |
+| Node.js | 24 or newer (CI uses 24.14.1) | `engines` in the [Core package](packages/core/package.json) |
+| pnpm | 11.5.1 | `packageManager` in the [root package](package.json) |
 | Xcode or Command Line Tools | Needed for desktop development: clang and the Swift 6 toolchain build the native layer and workspace helper | [native-desktop](packages/native-desktop/README.md) |
 | Agent CLIs | Install and sign in to each one locally | Each agent's own docs |
 
@@ -252,7 +252,7 @@ Development mode uses its own user data and never touches the sessions or settin
 
 ### Build and install the macOS app
 
-Packaging needs a clean source tree and a signing identity: set `AGENTMUX_MACOS_SIGN_IDENTITY` (a Developer ID Application certificate), or create a local signing identity once with `node apps/desktop/scripts/macos-local-signing.mjs --setup`, then run it again with `--trust` to approve macOS code-signing trust. See [Signing identity](docs/architecture/desktop-updates.md#signing-identity).
+Packaging needs a clean source tree and a signing identity: set `AGENTMUX_MACOS_SIGN_IDENTITY` (a Developer ID Application certificate), or create a local signing identity once with `node apps/desktop/scripts/macos-local-signing.mjs --setup`. See [Signing identity](docs/architecture/desktop-updates.md#signing-identity).
 
 ```sh
 pnpm package:mac           # build AgentMux.app and a DMG (not notarized)
@@ -293,7 +293,7 @@ try {
     executorId: 'codex',                 // the default Executor id equals the Provider id
     workspacePath: process.cwd(),
     injectAgentMuxGuide: true,
-    createOperationId: mintObjectId(),   // keep it: it identifies this creation if the result is unclear
+    createOperationId: mintObjectId(),   // keep it: retrying with the same id returns the same Session
     prompt: 'Inspect the repository and explain its structure and what needs verifying'
   })
   console.log(session.agentSessionId, creation.initialPrompt)
@@ -303,14 +303,14 @@ try {
 ```
 
 - `creation.initialPrompt` records whether the first prompt was delivered (`confirmed`, `unconfirmed`, `unknown` or `not-requested`). It doesn't mean the task is done.
-- Keep the `createOperationId`. If the result is unclear, use it to check this creation as the [Core guide](packages/core/README.md#agent-调用与输入) describes; the same intent never starts a second agent. Don't create again with a new id.
+- Retrying a creation with the same `createOperationId` returns the existing Session instead of starting a second agent.
 - For terminals only, use `connectLocalAgentMuxRuntime()`: it connects to the physical runtime without waiting for session and Provider observation.
 
 Reattaching, follow-up prompts, structured answers, terminals, attachments and recoverable input are covered in the [Core guide](packages/core/README.md#agent-调用与输入). Custom Providers extend [`defineAgentProvider`](packages/core/src/agent-provider.ts) and [plugins](packages/core/src/agent-plugin.ts); the desktop app currently lists built-in Providers only.
 
 ## `amux`: the product is a CLI
 
-The design target is that every capability goes through one typed JSON-RPC public service. The CLI, mobile and your own programs call that service directly; the desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI always see the same facts.
+Every capability goes through one typed JSON-RPC public service. The CLI, mobile and your own programs call that service directly; the desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI always see the same facts.
 
 - **Agents operate the product without simulated clicks.** `app inspect` reads what the main window actually shows and has selected, `app snapshot` reads a global observation across objects, and object commands do the work. Nothing the product already offers is done through screenshots and coordinates.
 - **The surface describes itself.** `amux --skill` is a module catalog of about 4 KB, and `amux <module> --skill` loads one module's guide on demand. Both are generated from the same source as the [Core guides](packages/core/guides/README.md).
@@ -394,7 +394,7 @@ The [documentation index](docs/README.md) connects design constraints, current m
 - [Interaction topic index](docs/design/agentmux-desktop-interaction.md) and [presentation topic index](docs/design/agentmux-surface-density.md): product behavior and visual rules
 - [System ownership](docs/architecture/system-ownership.md): layers, identities and the single owner of each fact
 - [Public capability sources](docs/specs/public-capabilities.md): the actual public API / CLI contracts
-- [Incident case studies](docs/casestudy/): major failures, each with what happened, the evidence and what changed
+- [Incident case studies](docs/casestudy/): 13 major failures, each with what happened, the evidence and what changed
 
 Feature descriptions in this README are based on confirmed product design and source wiring. A capability existing in source doesn't mean it has been packaged, installed or behavior-verified; each capability's current scope is stated in its own document. The screenshots come from capture scenes that render the real components with demo data.
 
