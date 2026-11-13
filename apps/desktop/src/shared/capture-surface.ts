@@ -23,6 +23,8 @@ export type CaptureSurfaceInput = {
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean
   theme: ThemeBootstrap
+  /** The selection last delivered on this display while its frame and scale stay the same, in frozen-frame pixels; only a starting point. */
+  initialCrop?: NormalizedRect
 } & (
   /** `windows`: the application windows on this display when it froze, front to back, in frozen-frame pixels clipped to the frame. */
   | { image: BrowserPng; windows: CaptureSurfaceRect[]; issue?: undefined }

@@ -119,7 +119,8 @@ type CapturePresentation = {
   onPin: AnnotationOutput
   /** ⌘E or Expand: the host reopens these marks in a separate window editor as initialState and initialTool. */
   onExpand(handoff: CaptureAnnotationHandoff): void
-  /** A drag or a click on a window made a new selection on this display, once per new selection; the host claims the request's one selection for this display. Moving, resizing or a click off every window claims nothing. */
+  /** A drag or a click on a window made a new selection on this display, once per new selection; the host claims the request's one selection for this display. Moving, resizing or a click off every window claims nothing.
+   * An opening `initialState.crop` is claimed by the first change that keeps a selection; the host claims it before any output made on it unchanged. */
   onSelect(): void
   /** Another display owns the request's selection: this frame keeps only its dimmed freeze and Cancel, and anything begun here is dropped. */
   locked?: boolean
@@ -129,7 +130,7 @@ export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | Capt
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS,
-  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onSelect, onEdited, onError }: ImageAnnotationEditorProps) {
+  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
   const ownerWindow = document.defaultView!
@@ -335,6 +336,16 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
   useEffect(() => { if (active && pendingText) { const frame = ownerWindow.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => ownerWindow.cancelAnimationFrame(frame) } }, [active, pendingText, ownerWindow])
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
+  // An opening capture selection is only a starting point: the first change that keeps a selection claims it like a drawn
+  // one, and clearing it claims nothing. Opening on it claims nothing and delivers nothing.
+  const opening = useRef(capture && initialState?.crop ? documentState : null)
+  const onSelect = () => { opening.current = null; claimSelection?.() }
+  useEffect(() => {
+    const start = opening.current
+    if (!start || documentState === start) return
+    opening.current = null
+    if (documentState.crop) claimSelection?.()
+  }, [documentState, claimSelection])
   // The lock reaches this display asynchronously, so a gesture or selection begun here before it arrived is dropped.
   useEffect(() => {
     if (!locked) return

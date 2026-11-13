@@ -55,11 +55,14 @@ type Active = {
   focused: BrowserWindow | null
   end(outcome: CaptureSurfaceOutcome | Error): void
 }
+/** The selection the last primary delivery confirmed, with its display as it was then; this process only, never persisted. */
+type Recall = { displayId: number; frame: CaptureSurfaceRect; scale: number; rect: CaptureSurfaceRect }
 
 /** Desktop's one capture surface: a transparent overlay per display over that display's frozen frame. */
 export class CaptureSurface {
   private active: Active | null = null
   private disposed = false
+  private recall: Recall | null = null
 
   constructor(private readonly ports: Ports) {
     ipcMain.handle(CAPTURE_SURFACE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
@@ -119,7 +122,7 @@ export class CaptureSurface {
       const bounds = displays.find(display => display.id === frame.displayId)?.bounds
       if (!bounds || bounds.x !== frame.frame.x || bounds.y !== frame.frame.y || bounds.width !== frame.frame.width || bounds.height !== frame.frame.height)
         throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
-      return { frame, input: overlayInput(frame, active.session, theme) }
+      return { frame, input: overlayInput(frame, active.session, theme, this.recalled(frame)) }
     })
     for (const { frame, input } of placed) {
       const window = new BrowserWindow({
@@ -152,8 +155,10 @@ export class CaptureSurface {
     for (const { window } of active.overlays) window.showInactive()
     const pointer = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
     const target = active.overlays.find(overlay => overlay.input.displayId === pointer) ?? active.overlays[0]
+    // A remembered selection is the one Enter and the arrows act on, so its display takes the keys.
+    const keys = active.overlays.find(overlay => overlay.input.initialCrop) ?? target
     if (process.platform === 'darwin') app.focus({ steal: true })
-    target?.window.focus()
+    keys?.window.focus()
   }
 
   private async invoke(event: IpcMainInvokeEvent, action: unknown, input: unknown): Promise<unknown> {
@@ -204,8 +209,17 @@ export class CaptureSurface {
     try { await active.session.complete(params.image!, source, overlay.engine!) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
+    this.recall = { displayId: overlay.input.displayId, frame: overlay.input.frame, scale: overlay.input.scale, rect: source.rect }
     active.end({ state: 'completed' })
     return { status: 'completed' } satisfies SystemScreenshotEditorFinish
+  }
+
+  /** The remembered selection in this frame's pixels, only on its own display while that display's frame and scale are unchanged. */
+  private recalled({ displayId, frame, scale }: NativeDisplayFrame): CaptureSurfaceHandoff['crop'] | undefined {
+    const last = this.recall
+    if (!last || last.displayId !== displayId || last.scale !== scale || !sameRect(last.frame, frame)) return undefined
+    return { x: Math.round((last.rect.x - frame.x) * scale), y: Math.round((last.rect.y - frame.y) * scale),
+      width: Math.round(last.rect.width * scale), height: Math.round(last.rect.height * scale) }
   }
 
   /** The selection in global points: this display's origin plus its frozen-frame pixels over the display scale. */
@@ -249,12 +263,12 @@ export class CaptureSurface {
   }
 }
 
-function overlayInput(frame: NativeDisplayFrame, session: CaptureSurfaceSession, theme: CaptureSurfaceInput['theme']): CaptureSurfaceInput {
+function overlayInput(frame: NativeDisplayFrame, session: CaptureSurfaceSession, theme: CaptureSurfaceInput['theme'], initialCrop: CaptureSurfaceHandoff['crop'] | undefined): CaptureSurfaceInput {
   const base = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, attachToDraft: session.attachToDraft, expandable: session.expandable, theme }
   if (frame.issue !== undefined) return { ...base, issue: frame.issue }
   const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + frame.png, width: frame.width, height: frame.height, byteLength: Buffer.byteLength(frame.png, 'base64') }
   pngBytes(image)
-  return { ...base, image, windows: displayWindows(frame, image) }
+  return { ...base, image, windows: displayWindows(frame, image), ...(initialCrop ? { initialCrop } : {}) }
 }
 
 /** Native's global window bounds as this frame's pixels, clipped to the frame; windows off it are dropped and the order is kept. */
@@ -265,6 +279,9 @@ function displayWindows({ frame, scale, windows }: NativeDisplayFrame, image: Br
     const height = Math.min(image.height, (bounds.y + bounds.height - frame.y) * scale) - y
     return width > 0 && height > 0 ? [{ x, y, width, height }] : []
   })
+}
+function sameRect(a: CaptureSurfaceRect, b: CaptureSurfaceRect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 /** Above full-screen apps and the menu bar on every Space; set again after the first paint because mixed-scale displays can misplace the first bounds. */
 function raise(window: BrowserWindow, bounds: CaptureSurfaceRect): void {
