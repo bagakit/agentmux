@@ -445,6 +445,7 @@ styles/
   workspace-zones.css  Workspace Zone 面板：范围、列表、详情与提示
   git-history.css  Git History 的固定引用选择、已读提交与拓扑图
   workbench.css  Pane、Region、分屏、拖放
+    workbench-tabs.css  同一入口先读的 Pane 顶栏、Tab 身份与动作
   file-preview.css  共用文件预览与就地编辑
   media-player.css  File Region 的音视频与直播播放器
   file-data-preview.css  JSON 等结构化数据文件的树状预览
@@ -485,6 +486,7 @@ styles/
   focus-workspace-stage.css  Focus 卡片派生动作的就地层，覆盖 Focus 工作区一侧
   collaboration.css  Focus 协作图：画布、筛选、关系与检视面
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
+    focus-context.css  同一入口先读的查找、上下文卡片与位置选择
   agent-input-recap.css  Focus 卡片里的原输入回看与图片缩略
   agent-bookmarks.css  Agent 信息阅读窗里的书签、更新提示与问题
   focus-timeline-ruler.css  Focus 时间轴与有界标尺
@@ -498,6 +500,7 @@ styles/
   mote-origin-story.css  Mote 来源故事：选择与路径
   settings-mote.css  Settings Mote 目录视图与头像尺寸
   mote-workface.css  Mote 工作面外壳：Space 框架、详情、导航与资料
+    mote-workface-frame.css  同一入口先读的 Space 框架、详情与资料
   mote-directory.css  Mote 目录：列表、归档、当前项与身份动效
   mote-idea-controls.css  Mote 每日想法的动作按钮
   browser-recovery-surface.css  Browser 恢复与证书问题页
@@ -542,6 +545,7 @@ styles/
   agent-connector.css  Agent 连接器对话框：身份、房间、成员、投递详情与绑定恢复
   session-connecting.css  Connecting 与 Session 恢复：身份、Executor、初始 Prompt（舞台本身归 full-page-loading.css）
   composer.css  Composer——Agent 那格底部的输入条（packages/client-ui/src/styles）
+    composer-editor.css  同一入口先读的编辑器、工具与输入模式
   input-history.css  输入历史：搜索、记录与来源（packages/client-ui/src/styles）
   message-delivery-failure.css  消息投递失败提示与投递记录（packages/client-ui/src/styles）
   original-input-waiting.css  原输入等待：回执与重试动作
@@ -555,6 +559,7 @@ styles/
   activity.css  Activity 时间线、机器步骤与标尺
   agent-session-action-surface.css  Agent 会话记录阅读浮层：标题与正文
   conversation-message.css  对话回合、消息动作与状态（packages/client-ui/src/styles）
+    conversation-turn.css  同一入口先读的回合结构、文本与消息动作
   conversation-tool-diff.css  工具编辑的增删行 diff（packages/client-ui/src/styles）
   conversation-message-disclosure.css  对话消息的展开与收起（packages/client-ui/src/styles）
   reading-find.css  阅读区查找与浮动触发（packages/client-ui/src/styles）
@@ -606,9 +611,9 @@ styles/
 - 分文件是**按表面切**而不是按属性切（不设 `typography.css`/`colors.css`）——改一个表面时想看到的是
   它的全部规则，而不是在三个文件间来回跳。
 - 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
-- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。**拆出去的那一半要紧跟原文件 `@import`**——
+- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。**拆出去的表面块在原入口的合法顶层 `@import` 中保持原层叠位置**——
   层叠顺序即文件顺序，排到别处就不是搬家而是在改层叠。守护就是上面那条文件顺序断言。
-- **没有孤儿文件**：每个 `.css` 都要在 `index.css` 里 `@import`。一个没进入口的样式文件是死文件——
+- **没有孤儿文件**：每个 `.css` 都要沿 `index.css` 的导入图可达，子表可由原表面的入口递归 `@import`。一个没进入口导入图的样式文件是死文件——
   规则永不生效，而契约测试会照常扫描它并放行。
 - 契约测试读的是**整张表**（`test/helpers/styles.ts` 按 `@import` 顺序拼接），不硬编码单个文件路径；
   否则下一次再拆一刀，它们会扫到空内容却全绿。这条对**任何**读样式的测试都成立，不只是那几条以
