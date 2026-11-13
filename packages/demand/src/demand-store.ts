@@ -36,6 +36,8 @@ import {
   isDemandStatus,
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
+import { assertGoalPlanKeepsRecordedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
+  type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
@@ -183,13 +185,14 @@ function parseDemand(value: unknown, label: string): Demand {
     'delegations',
     'progressUpdates',
     'patrols',
+    'plan',
     'activities',
     'decisions',
     'alignment',
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'dispatches', 'delegations', 'progressUpdates', 'patrols'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -231,6 +234,7 @@ function parseDemand(value: unknown, label: string): Demand {
     ...(record.delegations === undefined ? {} : { delegations: parseDemandDelegations(record.delegations) }),
     ...(record.progressUpdates === undefined ? {} : { progressUpdates: parseDemandProgressUpdates(record.progressUpdates) }),
     ...(record.patrols === undefined ? {} : { patrols: parseDemandPatrols(record.patrols) }),
+    ...(record.plan === undefined ? {} : { plan: parseGoalPlan(record.plan) }),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
@@ -719,11 +723,76 @@ export class DemandStore {
       const alignment = demand.alignment
       if (!alignment || alignment.revision !== intent.alignmentRevision || intent.criterionIds.some(criterionId => !alignment.criteria.some(criterion => criterion.id === criterionId)))
         this.rejectDelegation('A new delegation must reference the current proposal and its original success criteria.')
+      if (intent.planNodeId !== undefined) {
+        if (!demand.plan) this.rejectDelegation('This Goal has no plan; delegate without a plan node or revise the plan first.')
+        const issue = goalPlanDelegationIssue(demand.plan, demand.delegations ?? [], alignment.criteria, intent.planNodeId, { hostId: intent.hostId, agentSessionId: intent.workerAgentSessionId })
+        if (issue) this.rejectDelegation(issue)
+      }
       demand.delegations = [...(demand.delegations ?? []), { ...intent, preparedAt: Date.now(), capturedCriteria: clone(alignment.criteria.filter(criterion => intent.criterionIds.includes(criterion.id))) }]
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, intent.operationId)
+  }
+
+  /**
+   * Revise the Goal plan as a whole. The caller names the revision it read; a later revision by
+   * someone else is rejected so nobody overwrites a plan they have not seen.
+   */
+  async revisePlan(id: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer): Promise<DemandReceipt> {
+    let revision: GoalPlanRevisionInput
+    try { revision = parseGoalPlanRevisionInput(input) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+    return this.mutate('plan.revise', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
+      if (current?.history.some(record => record.operationId === revision.operationId)) {
+        const original = current.history.find(record => record.operationId === revision.operationId)!
+        if (original.author.kind !== author.kind || original.author.id !== author.id) this.rejectDelegation('This plan revision operation belongs to another author.')
+        return { unchanged: demand }
+      }
+      if ((current?.revision ?? 0) !== revision.expectedRevision)
+        this.rejectDelegation(`The plan changed to revision ${current?.revision ?? 0} after you read revision ${revision.expectedRevision}. Read the current plan before revising it.`)
+      if (!demand.alignment || demand.alignment.revision !== revision.alignmentRevision)
+        this.rejectDelegation('A plan must be written against the current Goal proposal version.')
+      try { assertGoalPlanKeepsRecordedNodes(current, revision.nodes, demand.delegations ?? []) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+      const now = Date.now(), next = (current?.revision ?? 0) + 1
+      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), reviews: current?.reviews ?? [],
+        history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now }] }
+      demand.updatedAt = Math.max(now, demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, revision.operationId)
+  }
+
+  /**
+   * Record one node verdict on its current attempt. The reviewer is admitted by the host and must
+   * not be the attempt's executor; a pass carries the check that was actually run.
+   */
+  async reviewPlanNode(id: string, input: GoalPlanReviewInput, reviewer: GoalPlanReviewer): Promise<DemandReceipt> {
+    let review: GoalPlanReviewInput
+    try { review = parseGoalPlanReviewInput(input) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+    return this.mutate('plan.review', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), plan = demand.plan
+      if (!plan) this.rejectDelegation('This Goal has no plan to review.')
+      const original = plan.reviews.find(item => item.operationId === review.operationId)
+      if (original) {
+        const { reviewer: before, reviewedAt: _time, ...saved } = original
+        if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id)
+          this.rejectDelegation('This review operation was already recorded with a different verdict or reviewer.')
+        return { unchanged: demand }
+      }
+      const projection = projectGoalPlan(plan, demand.delegations ?? [], demand.alignment?.criteria ?? []).nodes.find(item => item.node.id === review.nodeId)
+      if (!projection) this.rejectDelegation(`Plan node ${review.nodeId} is not in the current plan.`)
+      if (!projection.delegation || projection.delegation.operationId !== review.delegationOperationId)
+        this.rejectDelegation('A review must judge the node\'s current attempt.')
+      if (projection.state !== 'review') this.rejectDelegation(`Plan node ${review.nodeId} is ${projection.state}; only a reported attempt can be reviewed.`)
+      if (reviewer.kind === 'agent' && reviewer.id === projection.delegation.workerAgentSessionId)
+        this.rejectDelegation('The executor of a node cannot review its own work.')
+      const now = Date.now()
+      plan.reviews = [...plan.reviews, { ...clone(review), reviewer, reviewedAt: now }]
+      demand.updatedAt = Math.max(now, demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, review.operationId)
   }
 
   async inspectDelegation(id: string, operationId: string): Promise<DemandDelegation | null> {
@@ -1443,6 +1512,7 @@ async function enqueue<T>(root: string, fn: () => Promise<T>): Promise<T> {
 function rejectProvenanceInput(value: object): void {
   if (Object.hasOwn(value, 'progressUpdates') || Object.hasOwn(value, 'patrols')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the original responsibility owner records progress and inspection facts')
   if (Object.hasOwn(value, 'delegations')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the actual delegation owner can prepare, link, report or collect original business work.')
+  if (Object.hasOwn(value, 'plan')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Revise the Goal plan through its plan revision, and record node verdicts through plan review.')
   if (['participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
     throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
   if (Object.hasOwn(value, 'executorId')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Executor is creation configuration, not a Goal assignee. Assign accurate Sessions.')

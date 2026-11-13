@@ -5,6 +5,7 @@ import type { DemandDelegation } from './delegations.js'
 import type { DemandCreationOrigin, DemandParticipation, DemandParticipationSource } from './collaboration.js'
 import type { DemandContentReference } from './content-references.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
+import type { GoalPlan } from './goal-plan.js'
 
 export const DEMAND_STORE_SCHEMA = 'agentmux.demand-store.v1' as const
 export const DEMAND_RECEIPT_SCHEMA = 'agentmux.demand-receipt.v1' as const
@@ -112,6 +113,8 @@ export type Demand = {
   /** Source-qualified business declarations, separate from Runtime and human acceptance. */
   progressUpdates?: DemandProgress[]
   patrols?: DemandPatrol[]
+  /** Dependency plan inside this Goal; only its owner revises it and records node reviews. */
+  plan?: GoalPlan
   activities: DemandActivity[]
   decisions: DemandDecision[]
   alignment?: DemandAlignment

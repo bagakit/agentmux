@@ -25,6 +25,8 @@ export type DemandDelegationIntent = {
   alignmentRevision: number
   criterionIds: string[]
   context?: DemandDelegationContextSource[]
+  /** The Goal plan node this attempt works on; absent for work outside a plan. */
+  planNodeId?: string
 }
 export type DemandDelegationReportInput = {
   operationId: string
@@ -82,9 +84,9 @@ function positive(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer`)
   return value
 }
-const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'requestText', 'alignmentRevision', 'criterionIds', 'context']
+const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'requestText', 'alignmentRevision', 'criterionIds', 'planNodeId', 'context']
 export function parseDemandDelegationIntent(value: unknown): DemandDelegationIntent {
-  const data = record(value, 'delegation', intentKeys, ['context', 'requestText'])
+  const data = record(value, 'delegation', intentKeys, ['context', 'requestText', 'planNodeId'])
   if (typeof data.text !== 'string' || !data.text.trim() || data.text.includes('\0')) throw new Error('delegation.text must be a nonempty frozen body')
   if (data.requestText !== undefined && (typeof data.requestText !== 'string' || !data.requestText.trim() || data.requestText.includes('\0'))) throw new Error('delegation.requestText must be the nonempty original task request')
   if (!Array.isArray(data.criterionIds) || data.criterionIds.length === 0) throw new Error('delegation requires at least one success criterion')
@@ -107,7 +109,8 @@ export function parseDemandDelegationIntent(value: unknown): DemandDelegationInt
     workerAgentSessionId: identity(data.workerAgentSessionId, 'delegation.workerAgentSessionId'), ownerRunId: identity(data.ownerRunId, 'delegation.ownerRunId'),
     workerRunId: identity(data.workerRunId, 'delegation.workerRunId'), threadId: identity(data.threadId, 'delegation.threadId'), text: data.text,
     ...(data.requestText === undefined ? {} : { requestText: data.requestText as string }),
-    alignmentRevision: positive(data.alignmentRevision, 'delegation.alignmentRevision'), criterionIds, ...(context === undefined ? {} : { context }) }
+    alignmentRevision: positive(data.alignmentRevision, 'delegation.alignmentRevision'), criterionIds, ...(context === undefined ? {} : { context }),
+    ...(data.planNodeId === undefined ? {} : { planNodeId: identity(data.planNodeId, 'delegation.planNodeId') }) }
 }
 export function parseDemandDelegationReportInput(value: unknown): DemandDelegationReportInput {
   const data = record(value, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding'])
@@ -138,7 +141,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
   return intentKeys.every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'linkedAt', 'report', 'collection', 'attention'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'linkedAt', 'report', 'collection', 'attention'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {

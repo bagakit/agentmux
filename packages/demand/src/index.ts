@@ -12,6 +12,7 @@ export * from './dispatch.js'
 export * from './delegations.js'
 export * from './responsibility.js'
 export * from './goal-patrol.js'
+export * from './goal-plan.js'
 export * from './relations.js'
 
 export * from './discussion.js'
