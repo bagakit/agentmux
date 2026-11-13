@@ -73,7 +73,10 @@ it.each(['codex', 'claude'] as const)('%s: twenty lost observations publish the 
     expect((await service.bootstrap()).sessions.find(value => value.agentSessionId === record.agentSessionId)?.hookDeliveryObservation).toEqual(delivery)
   } finally { await service.dispose() }
   expect(f.events.filter(event => event.type === 'agent-error'), 'no per-receipt diagnostics').toEqual([])
-  expect((await loadAgentSessions(f.store)).every(value => !('hookDeliveryObservation' in value))).toBe(true)
+  // The Session itself is stored; only the live delivery fact is absent from it.
+  const stored = await loadAgentSessions(f.store)
+  expect(stored).toEqual([expect.objectContaining({ agentSessionId: record.agentSessionId, run: record.run })])
+  expect(Object.hasOwn(stored[0]!, 'hookDeliveryObservation')).toBe(false)
   // The delivery fact is not a restore failure: no retry and nothing that qualifies a connection restore.
   expect(f.inner.hookIngressObservations.size).toBe(0)
   expect(f.inner.sessionObservationRetries.has()).toBe(false)
@@ -98,18 +101,21 @@ it('Refresh does not clear a delivery loss without a delivered observation', asy
 
 it('an authoritative Run end releases the delivery loss and the ended binding takes no more receipts', async () => {
   const record = hookSession('ending-loss'), f = await fixture(record)
-  vi.spyOn(f.inner, 'persistActivityBoundary').mockResolvedValue()
+  const boundary = vi.spyOn(f.inner, 'persistActivityBoundary').mockResolvedValue()
   expect((await post(f.binding, 'lost')).status).toBe(503)
   expect(f.client.agentSession(record.agentSessionId).hookDeliveryObservation).toBeDefined()
   f.inner.acceptKernelEvent({ type: 'exit', runId: record.run.runId, state: { type: 'exited', code: 0, signal: null }, observedAt: 2 })
   await vi.waitFor(() => expect(f.client.agentSession(record.agentSessionId).hookDeliveryObservation).toBeUndefined())
   expect(f.published().at(-1)).toMatchObject({ session: { agentSessionId: record.agentSessionId } })
   expect((f.published().at(-1) as Extract<AgentMuxClientEvent, { type: 'agent-session' }>).session.hookDeliveryObservation).toBeUndefined()
+  // Settle point: the exit handling's own boundary write has run, so its publications are in.
+  await vi.waitFor(() => expect(boundary).toHaveBeenCalled())
   const ended = f.published().length
   expect((await post(f.binding, 'after-end')).status).toBe(403)
-  await new Promise(resolve => setTimeout(resolve, 20))
+  const afterEnd = f.published().slice(ended - 1)
+  expect(afterEnd.length, 'the release itself was published').toBeGreaterThan(0)
   // Exit handling may still publish this Session; none of it may bring the released loss back.
-  expect(f.published().slice(ended - 1).every(event => event.type === 'agent-session' && event.session.hookDeliveryObservation === undefined)).toBe(true)
+  expect(afterEnd.filter(event => event.type === 'agent-session' && event.session.hookDeliveryObservation !== undefined)).toEqual([])
   expect(f.client.agentSession(record.agentSessionId).run).toEqual(record.run)
 })
 

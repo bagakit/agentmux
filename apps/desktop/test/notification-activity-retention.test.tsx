@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { ACTIVITY_RETENTION_LIMIT, useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
@@ -57,6 +57,40 @@ it('never evicts a current problem that its owner has not settled', () => {
   expect(useAppStore.getState().notificationEvents.filter(event => event !== current)).toHaveLength(ACTIVITY_RETENTION_LIMIT)
 })
 
+it('among read events the oldest leave first', () => {
+  for (let index = 0; index < ACTIVITY_RETENTION_LIMIT; index++) report(index)
+  const events = useAppStore.getState().notificationEvents
+  useAppStore.setState({ noticeReadReceipts: { 'global:events': Object.fromEntries([40, 120, 200].map(index => [events[index]!.id, 'read'])) } })
+  report(ACTIVITY_RETENTION_LIMIT); report(ACTIVITY_RETENTION_LIMIT + 1)
+  const kept = ids()
+  expect(kept).not.toContain('Independent failure 40.')
+  expect(kept).not.toContain('Independent failure 120.')
+  expect(kept, 'the newest read event stays while room remains').toContain('Independent failure 200.')
+  expect(kept, 'no unread event left while read ones could').toContain('Independent failure 0.')
+})
+
+it('within each group the event seen longest ago leaves first, so a recurring one keeps its count and reading', () => {
+  let clock = 1000
+  const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+  try {
+    // Two read events: the first one recurs later, the second stays quiet.
+    report(0); report(1)
+    const [recurring, quiet] = useAppStore.getState().notificationEvents
+    useAppStore.setState({ noticeReadReceipts: { 'global:events': { [recurring!.id]: 'read', [quiet!.id]: 'read' } } })
+    for (let index = 2; index < ACTIVITY_RETENTION_LIMIT; index++) { clock += 1; report(index) }
+    clock += 1; report(0)
+    clock += 1; report(ACTIVITY_RETENTION_LIMIT)
+    const kept = useAppStore.getState().notificationEvents
+    const again = kept.find(event => event.message === 'Independent failure 0.')
+    expect(again, 'the recurring read event was seen most recently of the read ones and is kept').toBeDefined()
+    expect(again!.occurrences).toBe(2)
+    expect(useAppStore.getState().noticeReadReceipts['global:events']?.[recurring!.id]).toBe('read')
+    expect(kept.find(event => event.message === 'Independent failure 1.'), 'the quiet read event left instead').toBeUndefined()
+    expect(kept.find(event => event.message === 'Independent failure 2.'), 'no unread event left while a read one could').toBeDefined()
+    expect(useAppStore.getState().notificationEventsNotRetained).toBe(1)
+  } finally { now.mockRestore() }
+})
+
 it('a repeat of a kept event takes no new place', () => {
   for (let index = 0; index < ACTIVITY_RETENTION_LIMIT; index++) report(index)
   for (let index = 0; index < 20; index++) report(5)
@@ -71,7 +105,7 @@ it('the Activity list says how many older events were not kept, without calling 
   await selectNotificationView(dom.container, 'history')
   expect(notificationEventRows(dom.container).length).toBeGreaterThan(0)
   const note = dom.container.querySelector('.global-system-notices__retention')
-  expect(note?.textContent).toBe(`3 older events were not kept. Activity keeps the newest ${ACTIVITY_RETENTION_LIMIT}.`)
+  expect(note?.textContent).toBe(`3 earlier events were not kept across all categories. Activity keeps up to ${ACTIVITY_RETENTION_LIMIT}, removing read events first.`)
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain(`${ACTIVITY_RETENTION_LIMIT} unread`)
   await act(async () => { useAppStore.setState({ notificationEventsNotRetained: 0 }) })
   expect(dom.container.querySelector('.global-system-notices__retention')).toBeNull()
@@ -91,4 +125,18 @@ it('the CLI reader reports the same not-kept count with an Activity read', async
   const current = parseClientNotificationsObservation(observeNotifications({ schemaVersion: 1, requestId: 'current-read', operation: 'inspect.notifications',
     target: { ...target, list: { section: 'current', limit: 4 } }, includeRaw: false, maxBytes: 64 * 1024 } as never), { ...target, list: { section: 'current', limit: 4 } }, false)
   expect(current.data?.activityNotRetained, 'a Current read does not report Activity retention').toBeUndefined()
+})
+
+it('an operation that settles into Activity is bounded the same way as a new event', () => {
+  const lifecycle = { kind: 'resume' as const, lifecycleOperationId: 'resume-op', phase: 'prepared-run' as const }
+  useAppStore.getState().reportError('Resuming the original Session is unconfirmed.', { kind: 'indeterminate', summary: 'Resume is unconfirmed',
+    runtimeOperation: { hostId: 'local', agentSessionId: 'resume-session', lifecycle, observedAt: 1 } })
+  for (let index = 0; index < ACTIVITY_RETENTION_LIMIT; index++) report(index)
+  // While its owner has not settled it, the operation is a current problem outside the bound.
+  expect(useAppStore.getState().notificationEvents).toHaveLength(ACTIVITY_RETENTION_LIMIT + 1)
+  expect(useAppStore.getState().notificationEventsNotRetained).toBe(0)
+  useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-lifecycle-observed', agentSessionId: 'resume-session',
+    lifecycle, evidence: { source: 'agentmux', observedAt: 2 } } })
+  expect(useAppStore.getState().notificationEvents).toHaveLength(ACTIVITY_RETENTION_LIMIT)
+  expect(useAppStore.getState().notificationEventsNotRetained).toBe(1)
 })

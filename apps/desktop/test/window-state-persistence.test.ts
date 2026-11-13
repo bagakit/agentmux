@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { persistWindowGeometryForQuit, prepareWindowWorkbenchForQuit, registerWindowStatePersistence } from '../src/main/window-state-persistence.js'
 import { WindowGeometryStore } from '../src/main/window-geometry-store.js'
 import type { WindowGeometry } from '../src/main/window-geometry.js'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -96,12 +96,16 @@ describe('window geometry at quit', () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-quit-geometry-'))
     try {
       const store = new WindowGeometryStore(join(root, 'window-geometry.json'))
-      const { emitter, window } = fakeWindow()
+      const { emitter, window, bounds } = fakeWindow()
       registerWindowStatePersistence(window, store)
       await persistWindowGeometryForQuit(window, store)
       // Electron emits 'close' after quit preparation; the process may already be exiting.
+      // A different geometry at that moment would show up in the file if the late capture wrote.
+      Object.assign(bounds, { width: 640, height: 480, x: 50, y: 60 })
+      const save = vi.spyOn(store, 'save')
       emitter.emit('close')
-      await Promise.resolve()
+      await vi.waitFor(() => expect(save).toHaveBeenCalled())
+      await save.mock.results[0]!.value
       expect(JSON.parse(await readFile(join(root, 'window-geometry.json'), 'utf8')))
         .toEqual({ width: 1300, height: 900, x: 5, y: 7, maximized: false })
       expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
@@ -122,6 +126,23 @@ describe('window geometry at quit', () => {
       expect(JSON.parse(await readFile(join(root, 'window-geometry.json'), 'utf8')))
         .toEqual({ width: 1300, height: 900, x: 5, y: 7, maximized: false })
       expect((await readdir(root)).filter(name => name.endsWith('.tmp'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('window geometry write failure at quit', () => {
+  it('a failed final write with an open window still lets quit continue', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-quit-geometry-'))
+    try {
+      // The parent of the geometry path is a file, so every write fails.
+      await writeFile(join(root, 'blocked'), 'not a directory')
+      const store = new WindowGeometryStore(join(root, 'blocked', 'window-geometry.json'))
+      const { window } = fakeWindow()
+      await expect(store.closeWith({ width: 1, height: 1, x: 0, y: 0, maximized: false }), 'the store itself reports the failure').rejects.toThrow()
+      const fresh = new WindowGeometryStore(join(root, 'blocked', 'window-geometry.json'))
+      await expect(persistWindowGeometryForQuit(window, fresh)).resolves.toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })
     }

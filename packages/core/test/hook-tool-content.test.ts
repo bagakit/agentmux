@@ -125,7 +125,7 @@ describe('Hook tool content through durable and public consumers', () => {
       expect((await h.post('before-failure', { command: 'echo healthy' })).status).toBe(204)
       const original = normalizeStoredAgentSession((await h.store.load())[0])
       // Fault the real durability owner after normalization, not the Hook callback.
-      const save = vi.spyOn(h.store, 'compareAndSwap').mockRejectedValue(new AgentMuxError(
+      const save = vi.spyOn(h.store, 'compareAndSwapMetadata').mockRejectedValue(new AgentMuxError(
         'hookReceipt.toolInvocation.toolInput is invalid.', 'INVALID_AGENT_SESSION_STORE'))
       const failure = await h.post('owner-failure', { command: 'echo still healthy' })
       expect(failure.status).toBe(503)
@@ -135,10 +135,11 @@ describe('Hook tool content through durable and public consumers', () => {
       const again = await h.post('owner-failure', { command: 'echo still healthy' })
       expect(again.status).toBe(503); expect(await again.json()).toEqual(receipt)
       expect(save).toHaveBeenCalledTimes(1)
-      const errors = () => rpcEvents.filter(e => e.type === 'agent-error' && e.code === 'INVALID_AGENT_SESSION_STORE')
-      await vi.waitFor(() => expect(errors()).toHaveLength(2))
-      expect(errors()).toEqual([expect.objectContaining({ agentSessionId: sessionId, message: expect.stringContaining(receipt.message),
-        evidence: expect.objectContaining({ run: original.run }) }), expect.objectContaining({ message: expect.stringContaining(receipt.message) })])
+      // The safe field rejection travels with the Run's one delivery fact, on SDK and RPC alike.
+      const delivery = { run: original.run, since: expect.any(Number), accepted: 'unknown', code: 'INVALID_AGENT_SESSION_STORE', reason: receipt.message }
+      expect(h.client.agentSession(sessionId).hookDeliveryObservation).toEqual(delivery)
+      await vi.waitFor(() => expect(rpcEvents.some(e => e.type === 'agent-session' && e.session.hookDeliveryObservation?.reason === receipt.message)).toBe(true))
+      expect(rpcEvents.filter(e => e.type === 'agent-error' && e.code === 'INVALID_AGENT_SESSION_STORE'), 'no per-receipt diagnostics').toEqual([])
       expect(await h.store.load()).toEqual([original])
       save.mockRestore()
       h.inner.kernel.input = vi.fn(async () => ({ run: h.run(original.run.runId), appliedByteRange: { startByte: 0, endByte: 1 } }))
@@ -157,16 +158,18 @@ describe('Hook tool content through durable and public consumers', () => {
       const error = kind === 'typed'
         ? new AgentMuxError(`hookReceipt.toolInvocation.toolInput is invalid. ${secret}`, 'INVALID_AGENT_SESSION_STORE')
         : new Error(secret)
-      vi.spyOn(h.store, 'compareAndSwap').mockRejectedValue(error)
+      vi.spyOn(h.store, 'compareAndSwapMetadata').mockRejectedValue(error)
       const response = await h.post(`unsafe-${kind}`, { command: 'echo healthy' })
       expect(response.status).toBe(503)
       const receipt = await response.json()
       expect(receipt).toMatchObject({ receiptId: `unsafe-${kind}`, stage: 'owner', accepted: 'unknown' })
       expect(receipt).not.toHaveProperty('message')
       expect(JSON.stringify(receipt)).not.toContain(secret)
-      const errors = h.events.filter(event => event.type === 'agent-error')
-      expect(errors).toHaveLength(1)
-      expect(JSON.stringify(errors)).not.toContain(secret)
+      // An unsafe owner message is not a field rejection: the fact keeps only its code.
+      const fact = h.client.agentSession(sessionId).hookDeliveryObservation
+      expect(fact).toMatchObject({ accepted: 'unknown' })
+      expect(fact).not.toHaveProperty('reason')
+      expect(JSON.stringify(h.events)).not.toContain(secret)
       expect(h.client.agentSession(sessionId).run).toEqual({ runId: `run-${sessionId}` })
       expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { vi.restoreAllMocks(); await h.close() }

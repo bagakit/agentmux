@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 
 /**
@@ -13,12 +13,13 @@ afterEach(async () => { for (const close of closes.splice(0)) await close() })
 const daemonsUnder = (root: string) => execFileSync('/bin/ps', ['-axo', 'pid=,command=']).toString().split('\n')
   .filter(line => line.includes('ctxmuxd') && line.includes(`--socket ${root}`))
 
-it('connecting through the shared fixture starts no Runtime daemon under its private root', async () => {
+it('connecting through the shared fixture reaches its deterministic port, not a real Runtime daemon', async () => {
   const h = await rpcOwnerFixture(['caller', 'recipient']); closes.push(h.close)
+  const connect = h.inner.kernel.connect as (...args: unknown[]) => Promise<void>
+  // The property itself: the fixture replaced the adapter's activation path before any test runs.
+  expect(vi.isMockFunction(connect), 'the fixture owns kernel.connect').toBe(true)
   await h.client.connect()
-  await new Promise(resolve => setTimeout(resolve, 200))
-  expect(daemonsUnder(h.root), 'a fixture connect must not leave a detached ctxmuxd').toEqual([])
-  // Callers keep their own deterministic connect when they need one.
-  const kernel = (h.inner.kernel as { connect: (...args: unknown[]) => Promise<void> })
-  expect(typeof kernel.connect).toBe('function')
+  expect(connect).toHaveBeenCalled()
+  // Secondary evidence on this machine: nothing is listening as a ctxmuxd under the private root.
+  expect(daemonsUnder(h.root)).toEqual([])
 })

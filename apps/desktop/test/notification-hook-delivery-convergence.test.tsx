@@ -19,7 +19,7 @@ beforeEach(() => useAppStore.setState({ loading: false, sessions, tabs: {}, noti
   error: null, lastError: null, errorNoticeContext: null, errorDismissed: false, environmentWarning: undefined,
   runtimeOwnershipWarnings: [], runtimeEndpointWarnings: [], displacedAgentSessionIds: [], agentSteerQueues: {}, agentSteerInFlight: {} }))
 
-type Loss = { since: number; accepted: false | 'unknown'; code: string } | null
+type Loss = { since: number; accepted: false | 'unknown'; code: string; reason?: string } | null
 function projection(loss: Loss, updatedAt: number): RuntimeEvent {
   const session = sessions[0]!
   return { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
@@ -41,7 +41,7 @@ it.each([1, 20])('%i lost Hook observations of one Run show one current notice a
   await selectNotificationView(dom.container, 'current')
   expect(deliveryRows(), 'exactly one current Hook delivery problem for this Run').toHaveLength(1)
   await toggleNotificationDetails(deliveryRows()[0]!)
-  expect(deliveryRows()[0]!.textContent).toContain('The Agent, its terminal and input remain usable.')
+  expect(deliveryRows()[0]!.textContent).toContain('Losing these observations does not stop the Agent, its terminal or input.')
   expect(deliveryRows()[0]!.textContent).toContain('Whether AgentMux recorded a recent Hook observation is unconfirmed')
   expect(deliveryRows()[0]!.textContent).toContain('This clears when the next Hook observation from this Run is delivered.')
   await selectNotificationView(dom.container, 'history')
@@ -113,14 +113,17 @@ it('Core\'s own republish shape (unchanged Session time) still sets, escalates a
   expect(deliveryRows()).toHaveLength(0)
 })
 
-it('a loss on a Run that is not confirmed running does not claim the Agent is usable', async () => {
+it('the notice states only what the delivery owner knows, and names a safe field rejection when there is one', async () => {
   const session = sessions[0]!
   useAppStore.setState({ sessions: [{ ...session, processState: 'interrupted' } as typeof session] })
   await dom.render(<GlobalSystemNotices />)
-  await apply(projection({ since: 10, accepted: 'unknown', code: 'HOOK_DELIVERY_TIMEOUT' }, 10))
+  await apply(projection({ since: 10, accepted: 'unknown', code: 'INVALID_AGENT_SESSION_STORE',
+    reason: 'hookReceipt.toolInvocation.toolInput is invalid.' }, 10))
   await toggleNotificationCenter(dom.container, 'open')
   await selectNotificationView(dom.container, 'current')
   await toggleNotificationDetails(deliveryRows()[0]!)
+  // Never claims the Agent is usable: the Run state and input keep their own owners.
   expect(deliveryRows()[0]!.textContent).not.toContain('remain usable')
-  expect(deliveryRows()[0]!.textContent).toContain('The Run was last observed interrupted.')
+  expect(deliveryRows()[0]!.textContent).toContain('Losing these observations does not stop the Agent, its terminal or input.')
+  expect(deliveryRows()[0]!.textContent).toContain('Rejected: hookReceipt.toolInvocation.toolInput is invalid.')
 })

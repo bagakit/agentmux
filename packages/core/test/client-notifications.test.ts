@@ -30,9 +30,11 @@ describe('client notifications public diagnostic boundary', () => {
       .toMatchObject({ target: { notificationId }, includeRaw: true })
     for (const extra of [['--recent'], ['--logid', 'original'], ['--notification-id', notificationId, '--unread'], ['--limit', '0'], ['--category', 'invented']])
       await expect(parseAgentMuxCliInvocation([...args, ...extra])).rejects.toThrow()
-    // A caller's out-of-range page size is an argument error, not a broken evidence contract.
-    for (const limit of ['0', '33', '50', '2.5']) await expect(parseAgentMuxCliInvocation([...args, '--limit', limit]))
-      .rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT', message: expect.stringContaining('from 1 to 32') })
+    // A caller's invalid list option is an argument error that names the valid values, not a broken evidence contract.
+    for (const extra of [['--limit', '0'], ['--limit', '33'], ['--limit', '50'], ['--limit', '2.5'], ['--section', 'archive'],
+      ['--category', 'invented'], ['--cursor', 'not a cursor']]) await expect(parseAgentMuxCliInvocation([...args, ...extra]))
+      .rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT', message: expect.stringContaining('--section current|activity') })
+    await expect(parseAgentMuxCliInvocation([...args, '--limit', '33'])).rejects.toMatchObject({ message: expect.stringContaining('--limit 1-32') })
     expect((await parseAgentMuxCliInvocation([...args, '--limit', '32'])).params).toMatchObject({ target: { list: { limit: 32 } } })
     await expect(parseAgentMuxCliInvocation(['system', 'diagnostics', 'inspect', '--domain', 'client.incident', '--host-id', 'local', '--recent', '--unread'])).rejects.toThrow()
   })
@@ -96,5 +98,32 @@ describe('client notifications public diagnostic boundary', () => {
       expect(await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'caller' } }, { caller: original.credentials })).toBeDefined()
       expect(original.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { await service.dispose(); await original.close() }
+  })
+})
+
+describe('client notifications Activity retention count', () => {
+  const activityTarget: AgentMuxClientNotificationsTarget = { domain: 'client.notifications', hostId: 'local', list: { section: 'activity' } }
+  const activityData = () => ({ ...evidence(), items: [{ ...evidence().items[0]!, section: 'activity' as const }] })
+  const activity = (activityNotRetained: unknown, query: AgentMuxClientNotificationsTarget = activityTarget) => ({
+    ...observation(query), data: { ...activityData(), activityNotRetained } })
+
+  it('carries a positive whole count on an Activity read', () => {
+    expect(parseClientNotificationsObservation(activity(1), activityTarget, false).data?.activityNotRetained).toBe(1)
+    expect(parseClientNotificationsObservation(activity(21), activityTarget, false).data?.activityNotRetained).toBe(21)
+    // Absent means nothing left the window.
+    expect(parseClientNotificationsObservation({ ...observation(activityTarget), data: activityData() }, activityTarget, false).data?.activityNotRetained).toBeUndefined()
+  })
+
+  it.each([0, -1, 1.5, '3', null])('rejects a malformed count %j', value => {
+    expect(() => parseClientNotificationsObservation(activity(value), activityTarget, false)).toThrow()
+  })
+
+  it('is only valid where the producer sends it: an Activity or all-section list, never Current or one notification', () => {
+    const allSections: AgentMuxClientNotificationsTarget = { domain: 'client.notifications', hostId: 'local', list: {} }
+    expect(parseClientNotificationsObservation(activity(2, allSections), allSections, false).data?.activityNotRetained).toBe(2)
+    const current: AgentMuxClientNotificationsTarget = { domain: 'client.notifications', hostId: 'local', list: { section: 'current' } }
+    expect(() => parseClientNotificationsObservation({ ...observation(current), data: { ...evidence(), activityNotRetained: 2 } }, current, false)).toThrow()
+    const exact: AgentMuxClientNotificationsTarget = { domain: 'client.notifications', hostId: 'local', notificationId }
+    expect(() => parseClientNotificationsObservation({ ...observation(exact), data: { ...evidence(), activityNotRetained: 2 } }, exact, false)).toThrow()
   })
 })
