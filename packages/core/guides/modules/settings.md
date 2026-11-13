@@ -91,6 +91,9 @@ If the current candidate cannot be assembled, `candidate` is `null` and
 `candidateUnavailable` explains the local failure; current deployment and any
 original operation remain independently observable. Inspect the original
 operation by its existing ID rather than treating its candidate as the current one.
+`unreadableOperations` lists operation IDs whose maintenance record cannot be read.
+Their original Host and outcome are unknown and they are never replayed; they do
+not hide the current deployment or block an upgrade of another Host.
 Only a qualified ready result includes the pinned expected facts for an upgrade.
 In Desktop, review the exact target and maintenance effect, then explicitly confirm
 that same candidate. Cancelling review does not upgrade. A changed candidate or
