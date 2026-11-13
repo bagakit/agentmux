@@ -18,7 +18,7 @@
 /* Members: one table so the count and access columns line up for every row. */
 .connector-group-status__people { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: var(--sp-4); align-items: center; }
 .connector-group-status__people-title, .connector-group-status__person { display: contents; }
-.connector-group-status__people-title > * { padding: 0 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+.connector-group-status__people-title > :is(strong, small) { padding: 0 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
 .connector-group-status__people-title > strong { padding-left: var(--status-inset); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .connector-group-status__people-title > small:nth-child(2) { text-align: right; }
 .connector-group-status__people-title > small:last-child { padding-right: var(--status-inset); }
@@ -27,7 +27,8 @@
 .connector-group-status__who > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-meta); }
 .connector-group-status__person > strong { justify-content: flex-end; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
 .connector-group-status__person > small { padding-right: var(--status-inset); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); }
-.connector-group-status__person:not([data-observed]) > small { color: var(--text-3); }
+/* A checked access label reads as a fact; an unchecked dash stays quiet, like the traffic cells. */
+.connector-group-status__person[data-observed] > small { color: var(--text-2); }
 /* A member without a profile image gets a filled initial the size of a real avatar. */
 .connector-group-status__initial { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
 
@@ -53,4 +54,4 @@
 .connector-header-menu__receiving[data-state=recovering]::before { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 18%, transparent); }
 .connector-header-menu__receiving[data-state=recovering] { color: var(--amber-text); }
 .connector-header-menu__receiving[data-state=stopped]::before { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
-.connector-header-menu__receiving[data-state=stopped] { color: var(--red); }
+.connector-header-menu__receiving[data-state=stopped] { color: var(--red-text); }
