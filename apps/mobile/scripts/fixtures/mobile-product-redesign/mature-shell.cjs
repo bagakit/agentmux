@@ -37,6 +37,31 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await until('!!document.querySelector(".mobile-drawer")')
   await capture('mature-drawer-390-dark')
   await tap('[aria-label="关闭面板"]', 'Close drawer')
+  // A permission that fits one tap answers on the card, through the same original request and Core receipt.
+  await button('Focus', '.mobile-navigation')
+  await until('!!document.querySelector(".mobile-needs-you-card .mobile-ticket-answer__choices button")')
+  const card = await read(`(()=>{const c=document.querySelector('.mobile-needs-you-card'),r=n=>n?n.getBoundingClientRect().toJSON():null
+    const choices=[...c.querySelectorAll('.mobile-ticket-answer__choices button')]
+    return {card:r(c),title:c.querySelector('.mobile-ticket-answer__title')?.textContent,choices:choices.map(b=>({label:b.textContent,primary:b.classList.contains('is-primary'),rect:r(b)}))}})()`)
+  result.matureTicketAnswer = { card }
+  assert.equal(card.title, '请确认本次资料读取')
+  assert.deepEqual(card.choices.map(choice => [choice.label, choice.primary]), [['允许本次读取', true], ['拒绝本次读取', false]])
+  for (const choice of card.choices) assert.ok(choice.rect.height >= 40 && choice.rect.right <= card.card.right, 'Choices are thumb-sized and inside the card')
+  await capture('mature-ticket-answer-390-dark')
+  await tap('.mobile-needs-you-card .mobile-ticket-answer__choices button.is-primary', 'Allow on the ticket')
+  await until('document.querySelector(".mobile-ticket-answer")?.dataset.phase==="confirmed"')
+  const answers = await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.respondAgentInteraction").map(call=>call.params)')
+  assert.equal(answers.length, 1, 'One tap sends exactly one answer')
+  assert.deepEqual(answers[0].response, { kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'allow-original' } })
+  assert.equal(answers[0].agentSessionId, 'session-waiting')
+  await capture('mature-ticket-answered-390-dark')
+  await read('mobileProductScene.settleWaitingAnswer()')
+  // The shell reads the directory after a confirmed answer; the strip leaves once that read lands.
+  await until('!document.querySelector(".mobile-needs-you")')
+  assert.equal(await read('document.querySelector(".mobile-navigation .mobile-tab-badge")'), null, 'The count clears once Core settles the request')
+  await read('mobileProductScene.restoreWaitingRequest()')
+  await button('Space', '.mobile-navigation'); await button('Focus', '.mobile-navigation')
+  await until('!!document.querySelector(".mobile-needs-you-ticket")')
   // One tap from the needs-you strip opens the exact waiting request.
   await button('Focus', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-needs-you-ticket")')

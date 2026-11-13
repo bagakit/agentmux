@@ -32,6 +32,7 @@ waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-origi
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
   permissionHook: { receiptId: 'request-original' },
   options: [{ id: 'allow-original', label: '允许本次读取', kind: 'allow-once' }, { id: 'deny-original', label: '拒绝本次读取', kind: 'reject-once' }] } }
+const waitingRequest = structuredClone(waiting.pendingInteraction)
 const sessions = [main, waiting, result]
 const joinedNotice = new URLSearchParams(location.search).get('mote-notice-join') === '1' ? moteNoticeCaptureFixture({
   recipient: main.agentSessionId, member: waiting.agentSessionId,
@@ -387,6 +388,20 @@ function Scene() {
       tab.regionIds.push('region-result-mote')
       catalog.regions.push({ ...catalog.regions.find(value => value.regionId === 'region-result')!, tabId: tab.tabId, regionId: 'region-result-mote' })
       catalog.locations.push({ ...catalog.locations.find(value => value.regionId === 'region-mote')!, regionId: 'region-result-mote' })
+    },
+    /** Core settles the answered request: the pending interaction closes and the row leaves attention. */
+    settleWaitingAnswer: () => {
+      waiting.pendingInteraction = undefined
+      const row = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
+      Object.assign(row, { group: 'working', state: 'working', stateMark: 'working', stateLabel: '执行中' })
+      for (const listener of listeners) listener({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
+    },
+    /** The capture's later steps open the same waiting request again. */
+    restoreWaitingRequest: () => {
+      waiting.pendingInteraction = structuredClone(waitingRequest)
+      const row = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
+      Object.assign(row, { group: 'attention', state: 'waiting', stateMark: 'attention', stateLabel: '需要你回应' })
+      for (const listener of listeners) listener({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
     },
     prepareFocusState: () => {
       catalog.agentPresentation![1]!.stateMark = 'unknown'
