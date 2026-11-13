@@ -39,7 +39,8 @@ function participantKey(source: AgentSessionHistorySource, occurrences: Map<stri
   return JSON.stringify([reference, occurrence])
 }
 
-function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRecordedTime | undefined {
+/** The one recorded-span reading for a process step, shared by eager and deferred rows. */
+export function recordTime(item: Pick<AgentSessionHistoryItem, 'startedAt' | 'completedAt'>, origin?: number): WorkflowRecordedTime | undefined {
   if (item.startedAt === undefined) return undefined
   return recordSpan(item.startedAt, item.completedAt ?? item.startedAt, origin)
 }

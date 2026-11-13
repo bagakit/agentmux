@@ -6,6 +6,8 @@ import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { RecordedToolRow } from './WorkflowObservation.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
+import { NATIVE_CONVERSATION_SOURCE } from '../lib/conversation-sources.js'
+import { recordTime } from './NativeProcessObservation.js'
 
 /** A disclosure is the only owner of its exact loaded bodies. Closed steps carry
  * typed reading metadata; they never mount a placeholder as original content. */
@@ -38,13 +40,16 @@ export function DeferredConversationProcess({ record, readDetail, renderDetail, 
   const title = header.kind === 'captured' ? header.item.toolName ?? header.item.title
     : tool?.kind === 'tool-call' ? tool.name : header.item.title ?? (header.parts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity')
   const collaboration = header.kind === 'native' ? header.collaboration : undefined
+  // The same row an eager step draws: its recorded time, and status read in the details when unrecorded.
+  const time = header.kind === 'native' ? recordTime(header.item) : recordTime({ startedAt: header.item.createdAt, completedAt: header.item.updatedAt })
   const status = header.kind === 'captured' ? header.item.status : collaboration?.kind === 'operation'
     ? collaboration.status === 'completed' ? 'complete' : collaboration.status
     : header.parts.some(part => part.kind === 'tool-result' && part.failed) ? 'failed' : undefined
   return <div className="wf-native-process" data-conversation-layout-key={key} data-message-source-key={conversationMessageSourceKey(record.agentSessionId, record.source)}
     data-deferred-process-id={record.rawId}>
-    <RecordedToolRow className="log-row" observation={{ id: record.rawId, title, source: header.kind === 'native' ? 'Native record' : 'Captured record', persistentSource: true, ...(status ? { status } : {}) }}
-      icon={<SemanticIcon name="conversation.tool-call" size={12} />} expanded={expanded} controls={bodyId}
+    <RecordedToolRow className="log-row" observation={{ id: record.rawId, title, source: header.kind === 'native' ? NATIVE_CONVERSATION_SOURCE : 'Captured record', persistentSource: true,
+      ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
+      missingStatusInDetails icon={<SemanticIcon name="conversation.tool-call" size={12} />} expanded={expanded} controls={bodyId}
       onToggle={() => { setOpen(!expanded); disclosure?.onStepExpandedChange(key, !expanded) }} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {loading ? <p role="status">Reading original process details…</p> : null}
