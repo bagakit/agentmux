@@ -55,13 +55,15 @@ export function createGoalAutomationPause(options: {
         options.cancel({ kind: 'agent', ...target, run: input.expectedRun })
         options.progress.cancelTarget(target)
         const originalContext = { ...context, assertCurrent: assertTarget }
-        const loops = options.progress.list(target).filter(loop => loop.status !== 'stopped')
+        // A Mote's standing heartbeat already skips each tick while this input is occupied, and
+        // the contract keeps the main role available; pausing it would wait for a manual resume.
+        const loops = options.progress.list(target).filter(loop => loop.status !== 'stopped' && !loop.managedSource)
         const intents: string[] = []
         let afterIntentId: string | undefined
         do {
           await authorize(context)
           const page = await options.client.listAgentFuturePromptIntents(input.agentSessionId, { ...(afterIntentId ? { afterIntentId } : {}), limit: 16 })
-          intents.push(...page.intents.filter(value => value.intent.active).map(value => value.intentId))
+          intents.push(...page.intents.filter(value => value.intent.active && !value.intent.continuitySource).map(value => value.intentId))
           afterIntentId = page.nextIntentId ?? undefined
         } while (afterIntentId)
         const effects = await Promise.allSettled([
