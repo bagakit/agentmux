@@ -42,6 +42,12 @@ app.whenReady().then(async () => {
     await capture('surface-dark', 1250, 860)
     await evaluate('derivedVisual.appearance("light")')
     await capture('surface-light-narrow', 560, 860)
+    await win.loadFile(process.env.DERIVED_VISUAL_HTML, { search: 'scene=menu' })
+    await ready('Boolean(window.derivedVisual && document.querySelector(\'[role="group"][aria-label="Session lifecycle"]\'))')
+    await evaluate('derivedVisual.appearance("dark")'); await wait(300)
+    await capture('menu-custom-dark', 520, 620)
+    await evaluate('derivedVisual.appearance("light")'); await wait(300)
+    await capture('menu-custom-light', 520, 620)
     receipt.complete = true
   } catch (error) { receipt.complete = false; receipt.failure = { message: error instanceof Error ? error.message : String(error) } }
   writeFileSync(join(directory, 'capture.json'), JSON.stringify(receipt, null, 2))

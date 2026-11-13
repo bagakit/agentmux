@@ -3,6 +3,11 @@ import { flushSync } from 'react-dom'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SessionTakeoverSurface } from '../../../src/renderer/src/components/SessionTakeoverSurface'
+import { AgentMenuContent } from '../../../src/renderer/src/components/AgentMenuContent'
+import { WorkbenchMenuScope } from '../../../src/renderer/src/components/WorkbenchMenuScope'
+import * as Menu from '../../../src/renderer/src/components/HoverDropdownMenu'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+const ForkIcon = semanticIconComponent('action.fork-conversation'), DerivedIcon = semanticIconComponent('action.derived-action')
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
@@ -20,7 +25,16 @@ mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 api.config.save = async next => { useAppStore.setState({ config: next }) }
 const params = new URLSearchParams(location.search)
 const root = createRoot(document.getElementById('root')!)
-if (params.get('scene') === 'surface') {
+if (params.get('scene') === 'menu') {
+  // The shared Agent menu body with official and saved custom actions, in a real open dropdown.
+  flushSync(() => root.render(<DesktopClientUiProvider><div style={{ padding: 24 }}><Menu.Root open modal={false}><Menu.Trigger>More</Menu.Trigger>
+    <Menu.Content className="tab-context-menu agent-region-menu" side="bottom" align="start"><WorkbenchMenuScope.Provider value={Menu}>
+      <AgentMenuContent name="Mote dialogue and Threads" executorLabel="Claude" sessionId="preview-session" executionHost={{ id: 'local', label: 'This Mac', kind: 'local', configured: true, cwd: '/preview/repo' }} links={null}
+        onHistory={() => {}} onTakeOver={() => {}} onLearn={() => {}} onRestart={() => {}} onStop={() => {}} onDerived={() => {}} onCustomize={() => {}}
+        extensions={{ controls: <Menu.Item className="tab-context-menu__item" data-preview-fork=""><ForkIcon size={14} /><span>Fork current conversation…</span></Menu.Item>,
+          forkAction: action => <Menu.Item className="tab-context-menu__item" data-derived-action={action.id}><DerivedIcon size={14} /><span>{action.label}…</span></Menu.Item> }} />
+    </WorkbenchMenuScope.Provider></Menu.Content></Menu.Root></div></DesktopClientUiProvider>))
+} else if (params.get('scene') === 'surface') {
   const executorId = actions[0]!.executorId!
   flushSync(() => root.render(<DesktopClientUiProvider><div className="agent-surface" style={{ position: 'relative', flex: 1 }}>
     <SessionTakeoverSurface active onClose={() => {}} source={{ agentSessionId: 'preview-session', hostId: 'local', cwd: '/preview/repo', label: 'Mote dialogue and Threads', executorId,
