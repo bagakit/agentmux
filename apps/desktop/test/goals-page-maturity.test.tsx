@@ -214,6 +214,8 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await fill(search, 'no such outcome')
     expect([...dom.container.querySelectorAll('[data-demand-id]')]).toEqual([])
     expect(dom.container.querySelector('.goals-empty')!.textContent).toContain('no such outcome')
+    // Clearing stays in place, so it carries no navigation glyph, like every other clear-filters action.
+    expect(button('Clear search & filters').querySelector('[data-semantic-icon]')).toBeNull()
     await click('Clear search & filters')
     expect(search.value).toBe('')
     expect(document.activeElement, 'Clearing zero matches returns focus to the live search').toBe(search)
