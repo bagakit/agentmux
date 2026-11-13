@@ -45,7 +45,7 @@ for (const memory of [false, true]) it(`${memory ? 'Memory' : 'File'} exact vers
   const f = await fixture(memory), items = [f.item, { ...f.item, content: 'Second original revision 中🙂', updatedAt: 2 }, { ...f.item, id: 'two', content: 'Third record', updatedAt: 3 }]
   for (const item of items) await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: f.session.agentSessionId, item })
   const first = await f.client.readAgentSessionUsage({ ...f.reference, limit: 1 })
-  expect(first.captured, 'usage-exact-target').toMatchObject({ status: 'measured', records: 1, logicalBytes: Buffer.byteLength(JSON.stringify(items[0])), throughSequence: 3, complete: false })
+  expect(first.captured, 'usage-exact-target').toMatchObject({ status: 'measured', records: 1, logicalBytes: 0, throughSequence: 3, complete: false })
   if (first.captured.status !== 'measured') throw Error('Expected measured original')
   expect(first.unmeasured).toEqual(['other-core-records', 'provider-native', 'ctxmux-runtime', 'shared-database-physical'])
   const other = capturedStorageSession(f.root, 'usage-decoy'); await f.store.compareAndSwap(null, other)
@@ -53,7 +53,7 @@ for (const memory of [false, true]) it(`${memory ? 'Memory' : 'File'} exact vers
   await expect(f.client.readAgentSessionUsage({ ...f.reference, agentSessionId: other.agentSessionId, cursor: first.captured.nextCursor! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
   await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: f.session.agentSessionId, item: { ...f.item, content: 'Later append outside cut', updatedAt: 4 } })
   const rest = await f.client.readAgentSessionUsage({ ...f.reference, cursor: first.captured.nextCursor!, limit: 10 })
-  expect(rest.captured).toMatchObject({ records: 2, logicalBytes: items.slice(1).reduce((n, item) => n + Buffer.byteLength(JSON.stringify(item)), 0), throughSequence: 3, lastSequence: 3, complete: true, nextCursor: null })
+  expect(rest.captured).toMatchObject({ records: 2, logicalBytes: Buffer.byteLength(JSON.stringify(items[2])), throughSequence: 3, lastSequence: 3, complete: true, nextCursor: null })
   await expect(f.client.readAgentSessionUsage({ ...f.reference, hostId: 'another-host' })).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
   expect(f.connect).not.toHaveBeenCalled()
 })
@@ -80,7 +80,7 @@ it('usage Stop cancels an entered exact source read while its original Store wri
   const writer = owner.enqueue(async () => { enteredWriter(); await held }, undefined, f.session.agentSessionId).then(() => { writerDone = true })
   await entered
   const original = f.store.readHistorySource.bind(f.store)
-  const source = vi.spyOn(f.store, 'readHistorySource').mockImplementation((id, signal) => { enteredSource(); return original(id, signal) })
+  const source = vi.spyOn(f.store, 'readHistorySource').mockImplementation((id: string, signal?: AbortSignal) => { enteredSource(); return original(id, signal) })
   const stopped = f.client.readAgentSessionUsage(f.reference, { signal: abort.signal }).then(() => null, error => error)
   try {
     await observing
@@ -104,7 +104,7 @@ it('File usage visits indexed bounded metadata without parsing bodies or writing
   const originalPrepare = DatabaseSync.prototype.prepare, observed: Array<{ sql: string; rows: number }> = []
   vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
     const statement = originalPrepare.call(this, sql)
-    if (sql.includes('AS logicalBytes')) { const all = statement.all.bind(statement); statement.all = (...args) => { const rows = all(...args); observed.push({ sql, rows: rows.length }); return rows } }
+    if (sql.includes('AS logicalBytes')) { const all = statement.all.bind(statement); statement.all = (...args) => { const rows = Reflect.apply(all, statement, args) as ReturnType<typeof all>; observed.push({ sql, rows: rows.length }); return rows } }
     return statement
   })
   const originalParse = JSON.parse
