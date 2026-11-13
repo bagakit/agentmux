@@ -7527,7 +7527,8 @@ export class AgentMuxClient {
       if (!original.input) throw new AgentMuxError('The retained message has no original controlled input contract. Inspect its original claim; it cannot be submitted again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       await this.assertInputWaitingAuthor(original.input.intent, input.caller)
       const receipt = (await this.inspectAgentInput({ key: original.input.intent.key }, input.caller))!
-      void this.rejoinAgentInputWaiting({ ref: { key: original.input.intent.key, waitGeneration: 1 }, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
+      // Wake the input at its current waiting generation; an earlier Stop and re-enable has moved it past the first.
+      void this.rejoinAgentInputWaiting({ ref: original.input.control.ref, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
         this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
           message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
       })
