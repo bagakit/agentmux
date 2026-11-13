@@ -333,6 +333,7 @@ const NATIVE_FIELDS = {
   'goal.patrol': ['goalId', 'operationId'],
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
   'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
+  'goal.plan': ['goalId'], 'goal.plan.revise': ['goalId', 'revision'], 'goal.plan.review': ['goalId', 'review'],
   'goal.participation.confirm': ['goalId','creationOperationId','hostId','agentSessionId','expectedRun','evidence','operationId'],
   'goal.watch': [],
   'settings.appearance.watch': [],

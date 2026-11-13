@@ -446,6 +446,7 @@ export type AgentMuxDemand = {
   dispatches?: import('@agentmux/demand').DemandDispatch[]
   progressUpdates?: import('@agentmux/demand').DemandProgress[]
   patrols?: import('@agentmux/demand').DemandPatrol[]
+  plan?: import('@agentmux/demand/goal-plan').GoalPlan
   activities?: AgentMuxDemandActivity[]
   decisions?: import('@agentmux/demand').DemandDecision[]
   participations: import('@agentmux/demand').DemandParticipation[]
