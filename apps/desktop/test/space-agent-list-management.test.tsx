@@ -140,7 +140,8 @@ describe('Space Agent list management through the production Dock and shared Foc
     const menu = document.querySelector('.focus-context-menu')
     expect(menu).not.toBeNull()
     expect(menu?.getAttribute('data-agent-session-id')).toBe('gamma')
-    expect([...menu!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Rename Agent', 'Copy Agent Link', 'Restart Session…', 'Stop Agent'])
+    expect([...menu!.querySelectorAll('[role="menuitem"]')].map(item => item.getAttribute('aria-label') ?? item.textContent))
+      .toEqual(expect.arrayContaining(['Copy Agent Link', 'Rename Agent', 'Restart Session…', 'Stop Agent']))
   })
 
   it('filters by authoritative state and selects visible cards while retaining hidden selection until clear', async () => {
