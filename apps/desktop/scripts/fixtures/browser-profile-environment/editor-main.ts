@@ -53,7 +53,8 @@ let win: BrowserWindow | undefined,
   server: AgentMuxControlServer | undefined
 let holdAck = false,
   releaseAck: (() => void) | undefined,
-  writeFailure = false
+  writeFailure = false,
+  readFailure = phase === 'read-failure'
 app.on('window-all-closed', () => {})
 await app.whenReady()
 app.setActivationPolicy?.('prohibited')
@@ -61,7 +62,11 @@ try {
   stage('original owners initializing')
   manager = new BrowserProfileManager(new BrowserProfileStore(join(directory, 'profiles.json')))
   await manager.initialize()
-  const userState = new WorkbenchUserStateStore(join(directory, 'workbench-user-state.json'))
+  const userStatePath = join(directory, 'workbench-user-state.json')
+  const userState = new WorkbenchUserStateStore(userStatePath, { read: async (path, encoding) => {
+    if (readFailure && path === userStatePath) throw Object.assign(new Error('Private draft read unconfirmed'), { code: 'EACCES' })
+    return await readFile(path, encoding)
+  } })
   win = new BrowserWindow({
     width: 1180,
     height: 900,
@@ -240,7 +245,23 @@ try {
   await until(
     'Boolean(window.environmentEditorProof?.preloadAvailable && document.querySelector(".profile-environment"))'
   )
-  if (phase === 'restart') {
+  if (phase === 'read-failure') {
+    stage('original Desktop document read unknown preserves healthy Profile Apply')
+    await until('document.querySelector(".profile-environment")?.textContent.includes("Draft storage unconfirmed")')
+    await type('Time zone', 'Europe/Paris')
+    await button('Apply environment')
+    await until('document.querySelector(".profile-environment")?.textContent.includes("Settings saved.")')
+    assert.equal((await cli(['inspect', '--profile', id])).profile.environment.timeZone, 'Europe/Paris')
+    await type('Time zone', 'Asia/Tokyo')
+    assert.equal(await evaluate('[...document.querySelectorAll(".profile-environment button")].find(e=>e.textContent==="Apply environment").disabled'), false)
+    readFailure = false; await button('Retry draft storage')
+    await until('!document.querySelector(".profile-environment")?.textContent.includes("Draft storage unconfirmed")')
+    assert.equal(await evaluate('document.querySelector(\'input[aria-label="Time zone"]\').value'), 'Asia/Tokyo')
+    const stored = JSON.parse((await userState.read())!)
+    assert.equal(JSON.parse(stored.desktopFragments.profileEnvironmentDrafts).profiles[id].active.fields.timeZone, 'Asia/Tokyo')
+    assert.equal(manager.environmentSettings(id)?.timeZone, 'Europe/Paris')
+    report.observations.push({ kind: 'native-read-unknown-healthy-apply-and-recovery', id, savedTimeZone: 'Europe/Paris', rawInput: 'Asia/Tokyo', diskDurability: userState.observe().diskDurability })
+  } else if (phase === 'restart') {
     stage('same Profile draft restoring after real process restart')
     await until('document.querySelector(\'input[aria-label="Time zone"]\')?.value === "Unfinished/"')
     const identities = JSON.parse(await readFile(join(directory, 'identities.json'), 'utf8'))

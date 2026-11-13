@@ -170,7 +170,7 @@ try {
       inputs.has(join(desktop, 'src/renderer/src/components/settings/BrowserProfilesSettingsPane.tsx'))
     )
     assert.ok(inputs.has(join(desktop, 'src/main/browser-profile-editor-ipc.ts')))
-    for (const phase of name === 'mutation' ? ['seed'] : ['seed', 'restart']) {
+    for (const phase of process.argv.includes('--draft-read-proof') ? ['read-failure'] : name === 'mutation' ? ['seed'] : ['seed', 'restart']) {
       const resultFile = join(compiled, phase + '.json'),
         bootstrap = join(home, phase + '-bootstrap.cjs')
       await writeFile(
