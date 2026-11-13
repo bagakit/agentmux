@@ -27,8 +27,8 @@ export type AgentMuxSignedDispatchEvent = { schema: 'agentmux.agent-dispatch-eve
 export type AgentMuxDispatchEventSubmission = { kind: 'dispatch-event-submission'; sourceMessageId: string; replyMessageId: string;
   event: AgentMuxSignedDispatchEvent; diskDurability: 'confirmed' }
 export type AgentMuxRecipientInboxReceipt = { kind: 'recipient-inbox'; runtimeId: string; keyFingerprint: string; messageId: string;
-  operationId: string; intentDigest: string; sequence: number; deliveryMode: 'reference'; diskDurability: 'confirmed' }
-export type AgentMuxFederatedThread = { source: AgentMuxSignedMessage; replies: AgentMuxSignedMessage[]; dispatchEvents?: AgentMuxSignedDispatchEvent[]; sourceReceipt?: AgentMuxRecipientInboxReceipt }
+  operationId: string; intentDigest: string; sequence: number; deliveryMode: 'reference'; diskDurability: 'confirmed'; publicKey: string; signature: string }
+export type AgentMuxFederatedThread = { source: AgentMuxSignedMessage; replies: AgentMuxSignedMessage[]; dispatchEvents?: AgentMuxSignedDispatchEvent[]; sourceReceipt?: AgentMuxRecipientInboxReceipt; inboxReceipts?: AgentMuxRecipientInboxReceipt[] }
 export type AgentMuxMessageTransport = { state: 'outbox' | 'received'; targetRuntimeId: string }
 
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -91,7 +91,7 @@ export function assertSignedDispatchLineage(source: AgentMuxSignedMessage, reply
     event.provenance.sourceKeyFingerprint !== actorKey || event.provenance.targetKeyFingerprint !== peerKey) invalid()
 }
 export function parseFederatedThread(value: unknown): AgentMuxFederatedThread {
-  const p = object(value, ['source', 'replies', 'dispatchEvents', 'sourceReceipt']), source = parseSignedMessage(p.source)
+  const p = object(value, ['source', 'replies', 'dispatchEvents', 'sourceReceipt', 'inboxReceipts']), source = parseSignedMessage(p.source)
   if (!Array.isArray(p.replies)) invalid()
   const replies = p.replies.map(parseSignedMessage), byId = new Map<string, AgentMuxSignedMessage>()
   const same = (left: AgentMuxMessageParticipant, right: AgentMuxMessageParticipant) => left.runtimeId === right.runtimeId && left.agentSessionId === right.agentSessionId && left.runId === right.runId
@@ -118,12 +118,22 @@ export function parseFederatedThread(value: unknown): AgentMuxFederatedThread {
     assertSignedDispatchLineage(source, reply, event)
   }
   const sourceReceipt = p.sourceReceipt === undefined ? undefined : parseRecipientInboxReceipt(p.sourceReceipt, source)
-  return { source, replies, ...(dispatchEvents === undefined ? {} : { dispatchEvents }), ...(sourceReceipt ? { sourceReceipt } : {}) }
+  if (p.inboxReceipts !== undefined && !Array.isArray(p.inboxReceipts)) invalid()
+  const inboxReceipts = (p.inboxReceipts as unknown[] | undefined)?.map(value => {
+    const receipt = parseRecipientInboxReceipt(value), message = byId.get(receipt.messageId)
+    if (!message || receipt.runtimeId !== source.provenance.target.runtimeId) invalid()
+    return parseRecipientInboxReceipt(receipt, message)
+  })
+  return { source, replies, ...(dispatchEvents === undefined ? {} : { dispatchEvents }), ...(sourceReceipt ? { sourceReceipt } : {}), ...(inboxReceipts === undefined ? {} : { inboxReceipts }) }
 }
-export function parseRecipientInboxReceipt(value: unknown, source: AgentMuxSignedMessage): AgentMuxRecipientInboxReceipt {
-  const p = object(value, ['kind', 'runtimeId', 'keyFingerprint', 'messageId', 'operationId', 'intentDigest', 'sequence', 'deliveryMode', 'diskDurability'])
+export function parseRecipientInboxReceipt(value: unknown, source?: AgentMuxSignedMessage): AgentMuxRecipientInboxReceipt {
+  const p = object(value, ['kind', 'runtimeId', 'keyFingerprint', 'messageId', 'operationId', 'intentDigest', 'sequence', 'deliveryMode', 'diskDurability', 'publicKey', 'signature'])
   if (p.kind !== 'recipient-inbox' || p.deliveryMode !== 'reference' || p.diskDurability !== 'confirmed' ||
-    p.runtimeId !== source.provenance.target.runtimeId || p.keyFingerprint !== source.provenance.targetKeyFingerprint || p.messageId !== source.envelope.messageId ||
-    p.operationId !== source.envelope.operationId || p.intentDigest !== source.provenance.intentDigest || !Number.isSafeInteger(p.sequence) || Number(p.sequence) < 1) invalid()
-  return p as AgentMuxRecipientInboxReceipt
+    typeof p.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/u.test(p.signature) || !Number.isSafeInteger(p.sequence) || Number(p.sequence) < 1) invalid()
+  const receipt: AgentMuxRecipientInboxReceipt = { kind: 'recipient-inbox', runtimeId: id(p.runtimeId), keyFingerprint: fingerprint(p.keyFingerprint),
+    messageId: id(p.messageId), operationId: id(p.operationId), intentDigest: fingerprint(p.intentDigest), sequence: Number(p.sequence), deliveryMode: 'reference',
+    diskDurability: 'confirmed', publicKey: id(p.publicKey), signature: p.signature }
+  if (source && (receipt.runtimeId !== source.provenance.target.runtimeId || receipt.keyFingerprint !== source.provenance.targetKeyFingerprint || receipt.messageId !== source.envelope.messageId ||
+    receipt.operationId !== source.envelope.operationId || receipt.intentDigest !== source.provenance.intentDigest)) invalid()
+  return receipt
 }

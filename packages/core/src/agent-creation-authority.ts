@@ -4,7 +4,7 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/pro
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
-import { parseMessageProvenance, parseMessageReadAuthority, type AgentMuxMessageParticipant, type AgentMuxMessageProvenance, type AgentMuxMessageReadAuthority, type AgentMuxMessageTrust } from './agent-message-federation.js'
+import { parseMessageProvenance, parseMessageReadAuthority, parseRecipientInboxReceipt, type AgentMuxMessageParticipant, type AgentMuxMessageProvenance, type AgentMuxMessageReadAuthority, type AgentMuxMessageTrust, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput,
   type AgentMuxCreationAdmission, type AgentMuxCreationAuthorityIdentity, type AgentMuxCreationOrigin,
   type AgentMuxCreationSource, type AgentMuxCreationTarget, type AgentMuxCreationTrust, type AgentMuxCreationTrustInput, type AgentMuxCreationUserPrincipal } from './agent-creation-admission.js'
@@ -51,6 +51,15 @@ function publicKey(value: unknown): { key: KeyObject; encoded: string; fingerpri
     if (key.asymmetricKeyType !== 'ed25519' || encoded !== value) throw new Error('Noncanonical key')
     return { key, encoded, fingerprint: hash(bytes) }
   } catch { return failure('Invalid Agent creation public key.', 'AGENT_CREATION_AUTHORITY_INVALID') }
+}
+
+/** Target-host receipt only; it grants no Agent authorship or source-message trust. */
+export function verifyAgentMessageInboxReceipt(value: AgentMuxRecipientInboxReceipt): AgentMuxRecipientInboxReceipt {
+  const receipt = parseRecipientInboxReceipt(value), key = publicKey(receipt.publicKey)
+  const { signature, ...payload } = receipt, bytes = Buffer.from(signature, 'base64url')
+  if (key.fingerprint !== receipt.keyFingerprint || bytes.toString('base64url') !== signature ||
+    !verify(null, Buffer.from(JSON.stringify(payload)), key.key, bytes)) failure('The exact recipient Core inbox receipt signature is invalid.', 'AGENT_MESSAGE_RECEIPT_INVALID')
+  return receipt
 }
 
 /** Publish a complete immutable identity/pin without replacing a concurrent winner. */
@@ -175,6 +184,11 @@ export class AgentMuxCreationAuthority {
     let names: string[]
     try { names = await readdir(this.messageTrustDirectory) } catch (error) { if (absent(error)) return []; throw error }
     return Promise.all(names.filter(name => name.endsWith('.json')).sort().map(name => this.readMessageTrust(join(this.messageTrustDirectory, name))))
+  }
+  async attestMessageInboxReceipt(input: Omit<AgentMuxRecipientInboxReceipt, 'runtimeId' | 'keyFingerprint' | 'publicKey' | 'signature'>): Promise<AgentMuxRecipientInboxReceipt> {
+    const { identity, privateKey } = await this.loadIdentity()
+    const { signature: _, ...payload } = parseRecipientInboxReceipt({ ...input, runtimeId: identity.runtimeId, keyFingerprint: identity.fingerprint, publicKey: identity.publicKey, signature: 'A'.repeat(86) })
+    return { ...payload, signature: sign(null, Buffer.from(JSON.stringify(payload)), privateKey).toString('base64url') }
   }
   async attestMessage(source: Omit<AgentMuxMessageParticipant, 'runtimeId'>, target: AgentMuxMessageParticipant, intentDigest: string, targetKeyFingerprint: string): Promise<AgentMuxMessageProvenance> {
     const { identity, privateKey } = await this.loadIdentity()

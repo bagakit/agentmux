@@ -214,7 +214,7 @@ import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHi
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
 import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
   type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread,
-  type AgentMuxSignedDispatchEvent, type AgentMuxDispatchEventSubmission } from './agent-message-federation.js'
+  type AgentMuxSignedDispatchEvent, type AgentMuxDispatchEventSubmission, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
@@ -704,8 +704,10 @@ export class AgentMuxClient {
     const original = await this.messageQueue.readByMessageId(packet.envelope.messageId) ?? await this.messageQueue.readByOperationId(packet.envelope.operationId)
     // An exact original inbox receipt remains readable after its Run, pin or
     // connection changes. Reconciliation never notifies or submits it again.
-    if (original?.deliveryMode === 'reference' && original.provenance && original.envelope.recipientRuntimeId === identity.runtimeId) return this.messageQueue.append(
-      { ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance })
+    if (original?.deliveryMode === 'reference' && original.provenance && original.envelope.recipientRuntimeId === identity.runtimeId) {
+      const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance })
+      return { ...receipt, recipientInbox: await this.attestFederatedInboxReceipt(receipt) }
+    }
     await this.requireCreationAuthority().verifyMessageProof(packet.provenance)
     const target = await this.currentStoredAgentSession(packet.provenance.target.agentSessionId)
     if (packet.provenance.target.runtimeId !== identity.runtimeId || target.hostId !== 'local' || target.run.runId !== packet.provenance.target.runId && !target.retiredRuns.some(run => run.runId === packet.provenance.target.runId)) throw new AgentMuxError('The signed message names another retained recipient Run. No input was retargeted.', 'MESSAGE_RECIPIENT_MISMATCH')
@@ -713,8 +715,18 @@ export class AgentMuxClient {
     const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance,
       reauthorize: async () => { await this.requireCreationAuthority().verifyMessageProof(packet.provenance) } })
     if (target.run.runId === packet.provenance.target.runId) this.messageNotifications.saved(target.agentSessionId)
-    return receipt
+    return { ...receipt, recipientInbox: await this.attestFederatedInboxReceipt(receipt) }
   }
+
+  private async attestFederatedInboxReceipt(message: Pick<import('./agent-global-message-queue.js').DurableAgentMuxMessage, 'envelope' | 'sequence' | 'deliveryMode' | 'provenance' | 'sourceChannel'>): Promise<AgentMuxRecipientInboxReceipt> {
+    const identity = await this.agentMessageAuthority(), packet = parseSignedMessage({ envelope: message.envelope, execution: 'default', sourceChannel: message.sourceChannel, provenance: message.provenance })
+    if (message.deliveryMode !== 'reference' || packet.provenance.target.runtimeId !== identity.runtimeId || packet.provenance.targetKeyFingerprint !== identity.fingerprint) throw new AgentMuxError('Only the original target Core key can confirm this received inbox record. The original message remains readable.', 'AGENT_MESSAGE_TARGET_MISMATCH')
+    return this.requireCreationAuthority().attestMessageInboxReceipt({ kind: 'recipient-inbox', messageId: packet.envelope.messageId,
+      operationId: packet.envelope.operationId, intentDigest: packet.provenance.intentDigest, sequence: message.sequence, deliveryMode: 'reference', diskDurability: 'confirmed' })
+  }
+
+  /** Cryptographically confirmed target facts only; this never admits a message or changes Native delivery. */
+  async recordFederatedInboxReceipt(receipt: AgentMuxRecipientInboxReceipt) { return this.messageQueue.recordPeerInbox(receipt) }
 
   async prepareFederatedRead(input: { caller?: { agentSessionId: string; capability: string }; sourceMessageId: string }): Promise<AgentMuxMessageReadAuthority> {
     const caller = input.caller ? await this.authorizeRetainedAgentCaller(input.caller.capability, input.caller.agentSessionId) : undefined, identity = await this.agentMessageAuthority()
@@ -735,8 +747,8 @@ export class AgentMuxClient {
     if (thread.source.deliveryMode !== 'reference' || thread.source.envelope.recipientRuntimeId !== identity.runtimeId) throw new AgentMuxError('Only the actual recipient Core can confirm this original inbox source.', 'MESSAGE_RECIPIENT_MISMATCH')
     const packet = (message: typeof thread.source) => parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
     return { source: packet(thread.source), replies: thread.replies.map(packet), ...(thread.dispatchEvents.length ? { dispatchEvents: thread.dispatchEvents } : {}),
-      sourceReceipt: { kind: 'recipient-inbox', runtimeId: identity.runtimeId, keyFingerprint: identity.fingerprint, messageId: thread.source.envelope.messageId,
-        operationId: thread.source.envelope.operationId, intentDigest: thread.source.provenance.intentDigest, sequence: thread.source.sequence, deliveryMode: 'reference', diskDurability: 'confirmed' } }
+      sourceReceipt: await this.attestFederatedInboxReceipt(thread.source), inboxReceipts: await Promise.all(thread.replies.filter(message =>
+        message.deliveryMode === 'reference' && message.envelope.recipientRuntimeId === identity.runtimeId).map(message => this.attestFederatedInboxReceipt(message))) }
   }
 
   /** A source-authorized exact thread slice, never all pending messages or another journal. */

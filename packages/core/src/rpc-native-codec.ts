@@ -1,4 +1,5 @@
 import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
+import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { parseAgentStopInspection, type AgentMuxAgentStopIdentity } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
@@ -283,9 +284,11 @@ function message(value: unknown, notificationId?: string): ReturnType<typeof val
   const envelope = validateAgentMuxMessageEnvelope(p.envelope)
   notificationStatus(p, envelope, notificationId)
   if (p.provenance !== undefined) {
-    parseSignedMessage({ envelope, execution: 'default', sourceChannel: p.sourceChannel, provenance: p.provenance })
+    const packet = parseSignedMessage({ envelope, execution: 'default', sourceChannel: p.sourceChannel, provenance: p.provenance })
     const transport = record(p.transport, ['state', 'targetRuntimeId'])
     member(transport.state, ['outbox', 'received']); if (transport.targetRuntimeId !== envelope.recipientRuntimeId || (p.deliveryMode === 'outbox') !== (transport.state === 'outbox')) fail()
+    if (p.peerInbox !== undefined) { if (p.deliveryMode !== 'outbox') fail(); verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(p.peerInbox, packet)) }
+    if (p.recipientInbox !== undefined) { if (p.deliveryMode !== 'reference') fail(); verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(p.recipientInbox, packet)) }
   }
   if (p.promptCondition !== undefined && p.promptCondition !== null) validateAgentPromptCondition(p.promptCondition)
   return envelope
@@ -307,7 +310,7 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
   dispatch(p.dispatch, params)
   const supervision = p.dispatch as Record<string, unknown>, source = message(p.source)
   const packet = (value: unknown) => { const original = record(value); return parseSignedMessage({ envelope: original.envelope, execution: original.execution, sourceChannel: original.sourceChannel, provenance: original.provenance }) }
-  if (p.remoteSource !== undefined) parseRecipientInboxReceipt(p.remoteSource, packet(p.source))
+  if (p.remoteSource !== undefined) verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(p.remoteSource, packet(p.source)))
   if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
     source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId || source.senderRuntimeId !== supervision.ownerRuntimeId || source.recipientRuntimeId !== supervision.workerRuntimeId) fail()
   const events = supervision.events as Array<Record<string, unknown>>
@@ -856,7 +859,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt', 'provenance', 'transport'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt', 'provenance', 'transport', 'peerInbox', 'recipientInbox'])
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
@@ -972,7 +975,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         if (p.field !== undefined) fail()
         if (p.message !== null) {
-          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin', 'provenance', 'transport'])
+          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin', 'provenance', 'transport', 'peerInbox'])
           if (original.inputOrigin !== null) parseAgentInputJournalCut(original.inputOrigin)
           const envelope = message(original, input.notificationId as string | undefined)
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&

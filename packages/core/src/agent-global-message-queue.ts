@@ -1,4 +1,6 @@
-import { parseSignedMessage, parseMessageProvenance, parseSignedDispatchEvent, assertSignedDispatchLineage, type AgentMuxSignedDispatchEvent, type AgentMuxMessageProvenance, type AgentMuxMessageTransport } from './agent-message-federation.js'
+import { parseSignedMessage, parseMessageProvenance, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt,
+  type AgentMuxRecipientInboxReceipt, type AgentMuxSignedDispatchEvent, type AgentMuxMessageProvenance, type AgentMuxMessageTransport } from './agent-message-federation.js'
+import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
 import { assertAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseAgentInputHandoff, type AgentInputCarrier } from './agent-input-handoff.js'
 import { parseMoteDialogueInputRoute, moteDialogueInputScope, type MoteDialogueInputRoute } from './mote-dialogue-contract.js'
@@ -63,6 +65,7 @@ export type DurableAgentMuxMessage = {
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
   readonly deliveryMode?: 'reference' | 'outbox'
+  readonly peerInbox?: AgentMuxRecipientInboxReceipt
   readonly notification?: AgentMuxMessageNotificationStatus
   /** null proves this new journal intent has not yet crossed a prompt RPC. Absence is unknown. */
   readonly promptCondition?: AgentPromptCondition | null
@@ -103,6 +106,8 @@ export type AgentMuxMessageReceipt = {
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
   readonly deliveryMode?: 'reference' | 'outbox'
+  readonly peerInbox?: AgentMuxRecipientInboxReceipt
+  readonly recipientInbox?: AgentMuxRecipientInboxReceipt
   readonly notification?: AgentMuxMessageNotificationStatus
   readonly promptCondition?: AgentPromptCondition | null
   readonly admissionIntent?: AgentPromptAdmissionIntent
@@ -149,6 +154,7 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'broadcast-result'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly outcome: 'saved' | 'not-applied' | 'unconfirmed'; readonly issue?: AgentMuxBroadcastIssue; readonly at: number }
   | { readonly kind: 'mote-main-input-route'; readonly sequence: number; readonly route: MoteDialogueInputRoute }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
+  | { readonly kind: 'message-peer-inbox'; readonly sequence: number; readonly messageId: string; readonly receipt: AgentMuxRecipientInboxReceipt; readonly at: number }
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference' | 'outbox'; readonly provenance?: AgentMuxMessageProvenance; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification; readonly at?: number }
   | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string; readonly at?: number }
@@ -373,12 +379,14 @@ export class DurableAgentMuxMessageQueue {
     if (!row) return undefined
     const original = JSON.parse(String(row.original)) as JournalMessage
     const envelope = validateAgentMuxMessageEnvelope(original.envelope)
+    const peerInbox = original.deliveryMode === 'outbox' && original.provenance ? this.peerInboxReceipt(messageId, original) : undefined
     const condition = row.condition === null ? null : JSON.parse(String(row.condition)) as Extract<JournalRecord, {kind: 'prompt-condition'}>
     const last = row.delivery === null ? null : JSON.parse(String(row.delivery)) as Extract<JournalRecord, {kind: 'delivery' | 'delivery-issue'}>
     const delivery: AgentMuxMessageDeliveryState = last?.kind === 'delivery'
       ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
       : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
     return { sequence: Number(row.sequence), envelope, delivery,
+      ...(peerInbox ? { peerInbox } : {}),
       ...(original.deliveryMode === 'outbox' ? { deliveryMode: 'outbox' as const } : {}),
       ...(original.provenance ? { provenance: parseMessageProvenance(original.provenance), transport: { state: original.deliveryMode === 'outbox' ? 'outbox' as const : 'received' as const, targetRuntimeId: original.provenance.target.runtimeId } } : {}),
       ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, notificationId) } : {}),
@@ -389,6 +397,15 @@ export class DurableAgentMuxMessageQueue {
       ...(original.admissionIntent === undefined ? {} : { admissionIntent: validateAgentPromptAdmissionIntent(original.admissionIntent) }),
       ...(original.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(original.sourceChannel) }),
       ...(original.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(original.sourceDevice) }) }
+  }
+
+  private peerInboxReceipt(messageId: string, message: JournalMessage): AgentMuxRecipientInboxReceipt | undefined {
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_peer_inboxes'").get()) return undefined
+    const row = this.db.prepare('SELECT r.json FROM message_peer_inboxes p JOIN records r ON r.sequence=p.sequence WHERE p.message_id=?').get(messageId)
+    if (!row) return undefined
+    const record = JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'message-peer-inbox' }>
+    const packet = parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
+    return verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(record.receipt, packet))
   }
 
   private notification(notificationId: string): AgentMuxMessageNotification | undefined {
@@ -1136,6 +1153,15 @@ export class DurableAgentMuxMessageQueue {
     } else if (record.kind === 'message-route') {
       const route = validateAgentMessageRoute(record.route)
       this.db.prepare('INSERT INTO message_routes VALUES (?, ?, ?)').run(route.messageId, route.operationId, record.sequence)
+    } else if (record.kind === 'message-peer-inbox') {
+      const message = this.message(nonEmpty(record.messageId, 'Original outgoing message'))
+      if (!message?.provenance || message.deliveryMode !== 'outbox') throw new AgentMuxError('A peer inbox receipt requires this original signed outbox.', 'MESSAGE_RECIPIENT_MISMATCH')
+      const packet = parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
+      const receipt = verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(record.receipt, packet))
+      finiteTimestamp(record.at, 'Peer inbox receipt observation')
+      if (message.peerInbox && !isDeepStrictEqual(message.peerInbox, receipt)) throw new AgentMuxError('The original peer inbox receipt is frozen.', 'MESSAGE_ID_CONFLICT')
+      this.db.exec('CREATE TABLE IF NOT EXISTS message_peer_inboxes (message_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL)')
+      this.db.prepare('INSERT OR IGNORE INTO message_peer_inboxes VALUES (?, ?)').run(record.messageId, record.sequence)
     } else if (record.kind === 'message') {
       if (record.execution !== undefined && record.execution !== 'default' && record.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
@@ -1334,6 +1360,22 @@ export class DurableAgentMuxMessageQueue {
       const record: JournalDelivery = { kind: 'delivery', sequence: this.nextSequence, messageId, state, at, ...(reason === undefined ? {} : { reason }) }
       await this.appendRecord(record)
       return this.receipt(this.message(messageId)!)
+    }, true)
+  }
+
+  /** One target-signed journal reference; no input delivery or consumption state changes. */
+  async recordPeerInbox(value: AgentMuxRecipientInboxReceipt): Promise<AgentMuxRecipientInboxReceipt> {
+    const receipt = verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(value))
+    return this.withLock(async () => {
+      const message = this.message(receipt.messageId)
+      if (!message?.provenance || message.deliveryMode !== 'outbox') throw new AgentMuxError('The exact original signed outbox is unavailable. No receipt was remapped.', 'MESSAGE_RECIPIENT_MISMATCH')
+      parseRecipientInboxReceipt(receipt, parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance }))
+      if (message.peerInbox) {
+        if (!isDeepStrictEqual(message.peerInbox, receipt)) throw new AgentMuxError('The original peer inbox receipt has different facts.', 'MESSAGE_ID_CONFLICT')
+        return message.peerInbox
+      }
+      await this.appendRecord({ kind: 'message-peer-inbox', sequence: this.nextSequence, messageId: receipt.messageId, receipt, at: Date.now() })
+      return receipt
     }, true)
   }
 
@@ -1994,6 +2036,7 @@ export class DurableAgentMuxMessageQueue {
       delivery: { ...message.delivery },
       ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode, ...(message.notification ? { notification: structuredClone(message.notification) } : {}) }),
       ...(message.provenance ? { provenance: structuredClone(message.provenance), transport: message.transport } : {}),
+      ...(message.peerInbox ? { peerInbox: structuredClone(message.peerInbox) } : {}),
       ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
       ...(message.admissionIntent === undefined ? {} : { admissionIntent: structuredClone(message.admissionIntent) }),
       ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),

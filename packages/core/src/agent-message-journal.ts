@@ -150,6 +150,9 @@ export const messageObservationJournalSchema = `
         AND json_extract(original.json, '$.envelope.sender.kind') = 'agent-session'
         AND json_extract(original.json, '$.envelope.recipient.kind') = 'agent-session'))
     BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
+  CREATE TRIGGER IF NOT EXISTS message_peer_inbox_observation_record_insert AFTER INSERT ON records
+    WHEN json_extract(NEW.json, '$.kind') = 'message-peer-inbox'
+    BEGIN INSERT OR IGNORE INTO message_observation_records VALUES (NEW.sequence); END;
   CREATE TRIGGER IF NOT EXISTS message_notification_observation_record_insert AFTER INSERT ON records
     WHEN json_extract(NEW.json, '$.kind') IN ('a2a-notification', 'a2a-notification-result')
     BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
@@ -199,7 +202,7 @@ export const messageBroadcastJournalSchema = `
 function messageEventPositions(source: string): string {
   return `WITH event(sequence, payload) AS (${source}), refs AS (
     SELECT sequence, COALESCE(json_extract(payload, '$.messageId'), json_extract(payload, '$.sourceMessageId'), json_extract(payload, '$.envelope.messageId')) AS mid
-      FROM event WHERE json_extract(payload, '$.kind') IN ('message','delivery','delivery-issue','dispatch-open','dispatch-event')
+      FROM event WHERE json_extract(payload, '$.kind') IN ('message','delivery','delivery-issue','message-peer-inbox','dispatch-open','dispatch-event')
     UNION SELECT event.sequence, ref.value FROM event JOIN json_each(CASE json_extract(event.payload, '$.kind')
       WHEN 'a2a-notification' THEN json_extract(event.payload, '$.notification.messageIds')
       WHEN 'a2a-notification-result' THEN (SELECT json_extract(original.json, '$.notification.messageIds')
@@ -219,8 +222,12 @@ const messageEventRows = (source: string) => `WITH positions AS (${messageEventP
 
 /** Initialize a physical index once under the original writer transaction; original records never change. */
 export function initializeMessageEventIndex(db: DatabaseSync): void {
+  const peerReceiptTrigger = `CREATE TRIGGER IF NOT EXISTS message_peer_inbox_event_position_insert AFTER INSERT ON records
+    WHEN json_extract(NEW.json, '$.kind') = 'message-peer-inbox'
+    BEGIN INSERT OR IGNORE INTO message_event_positions SELECT * FROM (${messageEventRows('SELECT NEW.sequence, NEW.json')}); END`
   if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_event_positions'").get()) {
     db.exec('CREATE INDEX IF NOT EXISTS message_event_by_message ON message_event_positions(participant_id, message_id, event_sequence)')
+    db.exec(peerReceiptTrigger)
     return
   }
   db.exec(`CREATE TABLE message_event_positions (
@@ -228,6 +235,7 @@ export function initializeMessageEventIndex(db: DatabaseSync): void {
     PRIMARY KEY(participant_id, event_sequence, message_id)) WITHOUT ROWID`)
   db.exec('CREATE INDEX message_event_by_message ON message_event_positions(participant_id, message_id, event_sequence)')
   db.exec(`INSERT OR IGNORE INTO message_event_positions ${messageEventRows('SELECT sequence, json FROM records')}`)
+  db.exec(peerReceiptTrigger)
   // The trigger consumes exactly the new record and its original message/notification key.
   // Same transaction as append; rollback cannot publish a partial historical index or miss a concurrent append.
   db.exec(`CREATE TRIGGER message_event_position_insert AFTER INSERT ON records

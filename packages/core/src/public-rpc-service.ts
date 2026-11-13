@@ -160,7 +160,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
+  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     remoteTransportObservation?: import('./hosted-client-contract.js').AgentMuxHostedClient['remoteTransportObservation']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
@@ -2878,13 +2878,19 @@ export class AgentMuxRpcService {
         if (exported.source.envelope.messageId !== sourceMessageId || exported.source.provenance.intentDigest !== authority.sourceIntentDigest || !exported.sourceReceipt) throw new AgentMuxError('The remote export does not confirm this exact original recipient inbox source.', 'MESSAGE_RECIPIENT_MISMATCH')
         // The target's successful exact-source read comes first. It never uploads
         // an absent original dispatch or blindly repeats an unknown native input.
+        await owner.client.recordFederatedInboxReceipt(exported.sourceReceipt)
+        for (const receipt of exported.inboxReceipts ?? []) await owner.client.recordFederatedInboxReceipt(receipt)
         const outbox = await owner.client.readFederatedOutbox({ sourceMessageId, ...auth })
         const remoteMessages = new Map(exported.replies.map(message => [message.envelope.messageId, message]))
         for (const packet of outbox.messages) {
           const original = remoteMessages.get(packet.envelope.messageId)
           if (original) {
             if (!isDeepStrictEqual(original, packet)) throw new AgentMuxError('The original remote reply has different frozen signed facts.', 'MESSAGE_ID_CONFLICT')
-          } else await routes[0]!.client.forwardRpc('message.federation.intake', { packet }, { ...(context.signal ? { signal: context.signal } : {}) })
+          } else {
+            const receipt = await routes[0]!.client.forwardRpc('message.federation.intake', { packet }, { ...(context.signal ? { signal: context.signal } : {}) })
+            if (!receipt.recipientInbox) throw new AgentMuxError('The target inbox receipt is unconfirmed. Keep the original reply and inspect it through the same thread.', 'CONTROL_UNAVAILABLE')
+            await owner.client.recordFederatedInboxReceipt(receipt.recipientInbox)
+          }
         }
         const remoteEvents = new Map((exported.dispatchEvents ?? []).map(event => [event.replyMessageId, event]))
         for (const event of outbox.dispatchEvents) {
@@ -3363,7 +3369,9 @@ export class AgentMuxRpcService {
         ...(p.application === undefined ? {} : { application: parseMessageApplication(p.application) }),
         ...(p.threadId === undefined ? {} : { threadId: rpcString(p.threadId, 'Thread ID') }), ...(p.correlationId === undefined ? {} : { correlationId: rpcString(p.correlationId, 'Correlation ID') }),
         ...(p.replyTo === undefined ? {} : { replyTo: rpcString(p.replyTo, 'Reply source') }), sourceChannel: normalizeMessageChannel(p.sourceChannel ?? 'api') })
-      return await owner.client.forwardRpc!('message.federation.intake', { packet }, { ...(context.signal ? { signal: context.signal } : {}) })
+      const receipt = await owner.client.forwardRpc!('message.federation.intake', { packet }, { ...(context.signal ? { signal: context.signal } : {}) })
+      if (receipt.recipientInbox) await caller.client.recordFederatedInboxReceipt(receipt.recipientInbox)
+      return receipt
     }
     return await owner.client.forwardRpc!('agent.send', { ...p, operationId: route.operationId, messageId: route.messageId,
       expectedRun: route.expectedRun, target: { kind: 'agent-session', agentSessionId: route.agentSessionId } } as AgentMuxRpcParams<'agent.send'>,

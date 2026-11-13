@@ -31,7 +31,7 @@ export type AgentMuxMessageEventReference = {
 /** Metadata from one original journal record; never a reconstructed message or body. */
 export type AgentMuxMessageEvent = {
   sequence: number
-  kind: 'message' | 'delivery' | 'delivery-issue' | 'dispatch-open' | 'dispatch-event' |
+  kind: 'message' | 'delivery' | 'delivery-issue' | 'message-peer-inbox' | 'dispatch-open' | 'dispatch-event' |
     'a2a-notification' | 'a2a-notification-result'
   at: number | null
   messages: readonly AgentMuxMessageEventReference[]
@@ -96,7 +96,7 @@ export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEve
     const event = object(entry, ['sequence', 'kind', 'at', 'messages', 'notificationId', 'state', 'reason', 'replyMessageId', 'eventKind'])
     if (!Number.isSafeInteger(event.sequence) || (event.sequence as number) <= previous || (event.sequence as number) > (page.throughSequence as number) ||
         input.beforeSequence !== undefined && (event.sequence as number) >= input.beforeSequence ||
-        !['message', 'delivery', 'delivery-issue', 'dispatch-open', 'dispatch-event', 'a2a-notification', 'a2a-notification-result'].includes(String(event.kind)) ||
+        !['message', 'delivery', 'delivery-issue', 'message-peer-inbox', 'dispatch-open', 'dispatch-event', 'a2a-notification', 'a2a-notification-result'].includes(String(event.kind)) ||
         event.at !== null && (typeof event.at !== 'number' || !Number.isFinite(event.at)) || !Array.isArray(event.messages) || !event.messages.length) return fail()
     previous = event.sequence as number
     const seen = new Set<string>()
