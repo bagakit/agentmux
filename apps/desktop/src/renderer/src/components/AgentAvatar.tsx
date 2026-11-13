@@ -34,15 +34,17 @@ export function executorAvatarAppearance(config: AppConfig | null, executorId: s
 }
 
 /** The same face for an already resolved, read-only identity; no Store reader or disclosure. */
-export function ResolvedAgentAvatar({ label, providerId, state, appearance, executorId, size = 18 }: {
-  label: string; providerId: AgentProviderId; state?: AgentDisplayState | undefined
+export function ResolvedAgentAvatar({ label, providerId, state, appearance, executorId, size = 18, tintMark = true }: {
+  label: string; providerId?: AgentProviderId | undefined; state?: AgentDisplayState | undefined
   appearance?: AgentAvatarAppearance | undefined; executorId?: string | undefined; size?: number
+  /** Monochrome hosts drop the per-face enamel filter they would immediately desaturate. */
+  tintMark?: boolean
 }) {
   const attention = state ? attentionAccentFor(state) : null
   return <span className={`agent-avatar${state ? ` status status--${state}` : ''}`} role="img" aria-label={label}
     data-executor-id={executorId} style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
     {...(attention ? { 'data-attention': attention } : {})}>
-    <AgentAvatarFace provider={providerId} displayState={state} avatar={appearance} size={size} />
+    <AgentAvatarFace provider={providerId} displayState={state} avatar={appearance} size={size} tintMark={tintMark} />
   </span>
 }
 

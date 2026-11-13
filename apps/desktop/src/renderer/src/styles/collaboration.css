@@ -141,10 +141,18 @@
 .collaboration-agent__mark .collaboration-agent__avatar { position: absolute; left: var(--collaboration-avatar-center); top: 50%; transform: translate(-50%, -50%) scale(var(--collaboration-avatar-scale, 1)); }
 .collaboration-agent__mark[data-tier=closed] .collaboration-agent__avatar { left: 50%; }
 .collaboration-agent__avatar { position: relative; display: grid; place-items: center; flex: 0 0 auto; }
-.collaboration-agent__point { display: block; flex: 0 0 auto; border-radius: 50%; background: var(--text-2); }
+/* The tier badge rides the Executor face at a fixed corner; recency is the face size. */
+.collaboration-agent__point { position: absolute; right: -2px; bottom: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--text-2); outline: 1.5px solid var(--surface-1); }
 .collaboration-agent--active .collaboration-agent__point { background: var(--green); }
 .collaboration-agent__mark[data-tier=closed] { justify-content: center; padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.collaboration-agent--unknown .collaboration-agent__point { background: transparent; border: 1px solid var(--text-2); }
+.collaboration-agent--unknown .collaboration-agent__point { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
+/* A confirmed-closed member has no disc: shape, not only tone, says it cannot work now.
+ * Its face recedes to monochrome and returns to its own colours while it is read. */
+.collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { background: transparent; box-shadow: none; }
+.collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); transition: filter 150ms ease-out, opacity 150ms ease-out; }
+.collaboration-agent--closed:is(:hover, :focus-within, [data-reading=true]) .agent-avatar { filter: none; opacity: 1; }
+.collaboration-canvas { --collaboration-closed-ink: .62; }
+:root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; }
 .collaboration-canvas__progress { position: absolute; top: 12px; right: 12px; color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
 
 @media (max-width: 850px) {
@@ -170,7 +178,6 @@
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .collaboration-agent__dot .collaboration-agent__avatar { grid-area: 1 / 1; }
-.collaboration-agent__dot .collaboration-agent__point { width: 12px; height: 12px; }
 .collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2; opacity: .95; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge { opacity: .16; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge__pulse { opacity: .2; }
@@ -223,9 +230,7 @@
 .collaboration-area__overview-label[data-empty=true] .collaboration-area__name > strong { font-weight: 400; color: var(--text-2); }
 .collaboration-agent__dot, .collaboration-agent__mark { position: relative; }
 .collaboration-agent__dot .agent-avatar { grid-area: 1 / 1; }
-.collaboration-agent__point[data-identity=true] { position: absolute; right: 0; bottom: 0; width: 5px !important; height: 5px !important; outline: 2px solid var(--surface-1); opacity: 1 !important; }
 .collaboration-agent--idle .collaboration-agent__point { background: var(--text-2); }
-.collaboration-agent--closed .collaboration-agent__point { background: var(--text-3); }
 .collaboration-canvas__motion { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer; }
 .collaboration-canvas__motion strong { min-width: 17px; font-size: 10px; font-weight: 500; }
 .collaboration-canvas__motion[aria-pressed=true] { color: var(--text); }
@@ -240,10 +245,19 @@
 .collaboration-canvas__legend { position: relative; z-index: 5; order: -1; display: grid; gap: 7px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-1); color: var(--text-2); font-size: 10px; pointer-events: none; }
 .collaboration-canvas__legend > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 13px; }
 .collaboration-canvas__legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.collaboration-node-key { display: block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--text-2); background: var(--text-2); }
-.collaboration-node-key[data-tier=active] { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 16%, transparent); }
-.collaboration-node-key[data-tier=closed] { width: 5px; height: 5px; margin-inline: 1.5px; border: 0; background: var(--text-3); }
-.collaboration-node-key[data-tier=unknown] { background: transparent; }
+/* Legend keys reuse the node's own language: a disc with its tier badge, or a bare grey face. */
+.collaboration-node-key { position: relative; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.collaboration-node-key::after { content: ''; position: absolute; right: -1px; bottom: -1px; width: 5px; height: 5px; border-radius: 50%; background: var(--text-2); outline: 1.5px solid var(--surface-1); }
+.collaboration-node-key[data-tier=active]::after { background: var(--green); }
+.collaboration-node-key[data-tier=unknown]::after { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
+.collaboration-node-key[data-tier=closed] { background: transparent; box-shadow: none; }
+.collaboration-node-key[data-tier=closed]::after { content: none; }
+.collaboration-node-key[data-tier=closed] .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
+.collaboration-recency-key { display: inline-flex; align-items: center; gap: 3px; }
+.collaboration-recency-key > i { display: block; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--text-3); }
+.collaboration-recency-key > [data-recency=recent] { width: 14px; height: 14px; }
+.collaboration-recency-key > [data-recency=today] { width: 11px; height: 11px; }
+.collaboration-recency-key > [data-recency=older] { width: 8px; height: 8px; }
 /* The effective preference overrides reduction only within this Map's presentation. */
 .collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }

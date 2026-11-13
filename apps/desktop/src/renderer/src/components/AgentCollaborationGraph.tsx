@@ -11,7 +11,7 @@ import { useCollaborationLayout } from '../lib/use-collaboration-layout'
 import { collaborationEnvelope, collaborationVisibleRoute } from '../lib/collaboration-map-geometry'
 import { collaborationMapReadsSummary, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationMapTextBudget, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
-import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName, collaborationAgentGlyph } from '../lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecencyLabel, collaborationRecencyStep, collaborationAgentName, collaborationAgentGlyph, useCollaborationRecencyClock, type CollaborationRecencyStep } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
@@ -33,7 +33,7 @@ import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
-type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; activity?: NodeActivity | undefined; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
+type AgentData = { box: CollaborationBox; agent: CollaborationAgent; step: CollaborationRecencyStep; selected: boolean; activity?: NodeActivity | undefined; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
 type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; boundary: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; totalMembers: number; childCount: number; depth: number; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
@@ -55,7 +55,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
     const request = agentInformationPreview.getAll().find(request => root.current?.contains(request.anchor))
     return request?.anchor.closest<HTMLElement>('[data-map-layer]')?.dataset.mapLayer as 'identity' | 'detail' | undefined
   })
-  const recency = collaborationRecency(agent.lastActivityAt), label = collaborationAgentName(agent)
+  const label = collaborationAgentName(agent)
   const tier = agent.tier ?? (agent.context ? 'active' : 'unknown')
   const detail = agent.context && tier === 'active' ? lod.detail : 0
   const contentInk = collaborationMapContentInk(detail)
@@ -63,17 +63,17 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   const identityOpacity = heldLayer ? Number(owner === 'identity') : contentInk.identity
   const detailOpacity = heldLayer ? Number(owner === 'detail') : contentInk.detail
   const focusProxy = Boolean(heldLayer) && owner === 'detail' && detail < .5
-  const glyph = collaborationAgentGlyph(agent)
+  const glyph = collaborationAgentGlyph(agent, data.step)
   const hull = collaborationVisibleHull(data.box, zoom, glyph.overviewRadius, glyph.pointRadius, preferences), markScale = collaborationOverviewScale(data.box, zoom)
-  const identityInk = collaborationIdentityInk(hull.width, zoom, lod.identity, markScale,
-    glyph.identity ? (22 - 2 * lod.identity) / 2 : 6 + (recency.radius - 6) * lod.identity)
-  return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag nopan`} data-collaboration-agent={agent.id} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
+  // Names align on the largest disc so a recency step never shifts the column.
+  const identityInk = collaborationIdentityInk(hull.width, zoom, lod.identity, markScale, COLLABORATION_OVERVIEW_MARK_SIZE / 2)
+  return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag nopan`} data-collaboration-agent={agent.id} data-recency={data.step} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
     style={{ ...collaborationMapTextBudget(zoom), '--collaboration-mark-scale': markScale, '--collaboration-identity': lod.identity, '--collaboration-detail': detail, '--collaboration-avatar-center': `${identityInk.avatarCenter}px` } as CSSProperties}
     onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={event => { data.onPreview(true); setFocusedLayer((event.target as HTMLElement).closest<HTMLElement>('[data-map-layer]')?.dataset.mapLayer as 'identity' | 'detail' ?? null) }}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) { setFocusedLayer(null); data.onPreview(false) } }}>
     <div className="collaboration-agent__body" data-selected={data.selected || undefined} style={{ left: hull.x - data.box.x, top: hull.y - data.box.y, width: hull.width, height: hull.height, borderRadius: hull.radius }}>
       <div className="collaboration-agent__identity-layer" data-map-layer="identity" inert={owner !== 'identity'} aria-hidden={owner !== 'identity'} style={{ opacity: identityOpacity, '--collaboration-mark-scale': markScale } as CSSProperties}>
-        <AgentMark data={data} label={label} tier={tier} recency={recency} overview={overview} identityProgress={lod.identity} markScale={markScale} identityInk={identityInk} status={lod.status} />
+        <AgentMark data={data} label={label} tier={tier} glyph={glyph} overview={overview} identityProgress={lod.identity} markScale={markScale} identityInk={identityInk} status={lod.status} />
       </div>
       {agent.context && (tier === 'active' && detail > 0 || owner === 'detail') ? <div className="collaboration-agent__detail-layer" data-map-layer="detail" data-focus-proxy={focusProxy || undefined} inert={owner !== 'detail'} aria-hidden={owner !== 'detail'} style={{ opacity: detailOpacity }}>
         <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} disclosure={{ status: lod.status, summary: lod.summary }} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
@@ -90,17 +90,19 @@ function ActivityMark({ activity }: { activity: NodeActivity }) {
   return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} aria-label={label} title={label}
     style={{ animationDelay: `${delay}ms` }}><span>{pulse.kind === 'communication' ? direction === 'sent' ? 'Sent ↗' : 'Received ↙' : 'Updated'}</span></span>
 }
-function AgentMark({ data, label, tier, recency, overview = false, identityProgress = 1, markScale = 1, identityInk, status = 0 }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean; identityProgress?: number; markScale?: number; identityInk: ReturnType<typeof collaborationIdentityInk>; status?: number }) {
+/** One identity mark at every non-card scale: the Executor face sized by recency.
+ * Runnable members sit on a disc; confirmed-closed members drop it and recede. */
+function AgentMark({ data, label, tier, glyph, overview = false, identityProgress = 1, markScale = 1, identityInk, status = 0 }: { data: AgentData; label: string; tier: string; glyph: ReturnType<typeof collaborationAgentGlyph>; overview?: boolean; identityProgress?: number; markScale?: number; identityInk: ReturnType<typeof collaborationIdentityInk>; status?: number }) {
   const context = data.agent.context, { config } = useContext(ExecutorIdentityContext), zoom = useStore(state => state.transform[2])
-  const providerId = data.agent.providerId ?? context?.providerId, executorId = data.agent.executorId ?? context?.executorId
+  const providerId = data.agent.providerId ?? context?.providerId ?? undefined, executorId = data.agent.executorId ?? context?.executorId
   const appearance = executorId ? config?.executors[executorId]?.avatar ?? config?.appearance.agentAvatars?.[executorId] : undefined
-  const showIdentity = collaborationAgentGlyph(data.agent).identity
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
-  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: COLLABORATION_OVERVIEW_MARK_SIZE, height: COLLABORATION_OVERVIEW_MARK_SIZE } : undefined}
-    aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${recency.label}`}>
+  const diameter = glyph.overviewRadius * 2
+  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: diameter, height: diameter } : undefined}
+    aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${collaborationRecencyLabel(data.agent)}`}>
     <span className="collaboration-agent__avatar" style={{ '--collaboration-avatar-scale': markScale + (1 - markScale) * identityProgress } as CSSProperties}>
-      {showIdentity ? <ResolvedAgentAvatar label={label} providerId={providerId!} executorId={executorId} appearance={appearance} size={22 - 2 * identityProgress} /> : null}
-      <span className="collaboration-agent__point" data-identity={showIdentity || undefined} style={{ width: (6 + (recency.radius - 6) * identityProgress) * 2, height: (6 + (recency.radius - 6) * identityProgress) * 2, opacity: recency.depth }} />
+      <ResolvedAgentAvatar label={label} providerId={providerId} executorId={executorId} appearance={appearance} size={glyph.icon} tintMark={!glyph.closed} />
+      {glyph.closed ? null : <span className="collaboration-agent__point" />}
       {context ? <CollaborationEssentialState context={context} /> : null}
     </span>{!overview && tier !== 'closed' ? <strong style={{ left: identityInk.nameLeft, opacity: identityInk.opacity, fontSize: identityInk.fontSize, transform: status > 0 ? `translateY(${-7 * status}px)` : undefined }}>{label}</strong> : null}
     {context && !overview ? <CollaborationCompactState context={context} progress={status} left={identityInk.nameLeft} opacity={identityInk.opacity} zoom={zoom} /> : null}
@@ -124,6 +126,8 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
 }) {
   const preferences = useAppStore(state => resolveFocusMapPreferences(state.config?.focus?.map)), settings = useContext(SettingsNavigation)
   const motion = useCollaborationMotion(active), hud = useRef<HTMLDivElement>(null), contextControl = useRef<HTMLButtonElement>(null)
+  const now = useCollaborationRecencyClock(active)
+  const steps = useMemo(() => new Map([...agents].map(([id, agent]) => [id, collaborationRecencyStep(agent, now)])), [agents, now])
   const [readingProxies, setReadingProxies] = useState<readonly HTMLSpanElement[]>([])
   const registerReadingProxy = useCallback((element: HTMLSpanElement | null) => {
     if (!element) return
@@ -240,11 +244,11 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         if (!card) continue
         const old = previous?.type === 'agent' ? previous.data : undefined, context = agent.context
         const presentationKey = context && JSON.stringify([context.hostId, context.id]), identity = presentationKey ? identities?.get(presentationKey) : undefined, links = presentationKey ? goals?.get(presentationKey) : undefined
-        const selected = selection?.kind === 'agent' && selection.id === id, live = activity.get(id)
-        const node: AgentNode = old?.box === card && previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links && old.activity === live ? previous as AgentNode : {
+        const selected = selection?.kind === 'agent' && selection.id === id, live = activity.get(id), step = steps.get(id) ?? 'older'
+        const node: AgentNode = old?.box === card && previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && old.agent === agent && old.step === step && old.selected === selected && old.identity === identity && old.goals === links && old.activity === live ? previous as AgentNode : {
           id: nodeId, type: 'agent', parentId: areaId, position: { x: card.x - box.x, y: card.y - box.y }, width: card.width, height: card.height,
           measured: { width: card.width, height: card.height }, handles: emptyHandles, style: { width: card.width, height: card.height, pointerEvents: 'none' }, draggable: false, selectable: false,
-          data: { box: card, agent, selected, identity, goals: links, activity: live,
+          data: { box: card, agent, step, selected, identity, goals: links, activity: live,
             onPreview: old?.onPreview ?? (enter => { if (enter) { actions.current.settle(); readingAnchor.current = nodeId } actions.current.onPreviewAgent?.(enter ? id : null) }),
             onSelect: old?.onSelect ?? (() => { actions.current.settle(); readingAnchor.current = nodeId; actions.current.onSelect({ kind: 'agent', id }) }),
             onOpen: old?.onOpen ?? (() => { const context = actions.current.agents.get(id)?.context; if (context) actions.current.onOpen(context) }) }
@@ -255,7 +259,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     nodeCache.current = cache
     if (!sameItems(heldNodes.current, next)) heldNodes.current = next
     return heldNodes.current
-  }, [hierarchy, graphAreas, geometry, agents, presentation, selection, identities, goals, activity, preferences.boundary])
+  }, [hierarchy, graphAreas, geometry, agents, steps, presentation, selection, identities, goals, activity, preferences.boundary])
   const areaNames = useMemo(() => new Map(graphAreas.map(area => [collaborationAreaNode(area.id), area.name])), [graphAreas])
   const routeCache = useRef(new Map<string, { path: RelationPath }>())
   const heldPaths = useRef<RelationPath[]>([])
@@ -276,7 +280,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const emphasis = selection || peeked ? selected || related ? 'related' : 'muted' : 'normal'
       const from = areaNames.get(connection.source) ?? (collaborationAgentName(fromAgent) || first.source)
       const to = areaNames.get(connection.target) ?? (collaborationAgentName(toAgent) || first.target)
-      const sourceGlyph = collaborationAgentGlyph(fromAgent), targetGlyph = collaborationAgentGlyph(toAgent)
+      const sourceGlyph = collaborationAgentGlyph(fromAgent, steps.get(first.source) ?? 'older'), targetGlyph = collaborationAgentGlyph(toAgent, steps.get(first.target) ?? 'older')
       const sourceRadius = sourceGlyph.overviewRadius, targetRadius = targetGlyph.overviewRadius
       const sourcePointRadius = sourceGlyph.pointRadius, targetPointRadius = targetGlyph.pointRadius
       const count = connection.relations.reduce((count, relation) => count + relation.evidence.length, 0)
@@ -293,7 +297,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     routeCache.current = next
     if (!sameItems(heldPaths.current, paths)) heldPaths.current = paths
     return heldPaths.current
-  }, [allConnections, layout.paths, geometry, pulses, selection, agents, areaNames, peeked])
+  }, [allConnections, layout.paths, geometry, pulses, selection, agents, steps, areaNames, peeked])
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
   const areaNodes = useMemo(() => nodes.filter((node): node is AreaNode => node.type === 'area'), [nodes])
@@ -314,7 +318,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       <button type="button" className="icon-button" aria-label="Overview" title="Show the whole map" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })) }}><SemanticIcon name="layout.expand" size={14} /></button>
     </div>
     {motion.issue ? <p className="collaboration-canvas__motion-issue" role="status">{motion.issue}</p> : null}
-    <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true" />{{active: 'Active', idle: 'Idle', closed: 'Closed', unknown: 'Unconfirmed'}[tier]}</span>)}</div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><CollaborationRelationKey kind={kind as CollaborationRelation['kind']} />{label}</span>)}</div></div></div>
+    <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true"><ResolvedAgentAvatar label="" size={11} tintMark={false} /></i>{{active: 'Active', idle: 'Idle', closed: 'Closed', unknown: 'Unconfirmed'}[tier]}</span>)}</div><div aria-label="Recency"><span><i className="collaboration-recency-key" aria-hidden="true">{(['recent', 'today', 'older'] as const).map(step => <i key={step} data-recency={step} />)}</i>Recent → older</span></div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><CollaborationRelationKey kind={kind as CollaborationRelation['kind']} />{label}</span>)}</div></div></div>
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}

@@ -4,6 +4,9 @@ import { DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from '../../.
 export const COLLABORATION_DETAIL_START = .62
 export const COLLABORATION_DETAIL_END = .82
 export const COLLABORATION_OVERVIEW_MARK_SIZE = 28
+/** The largest glyph a confirmed-closed point slot draws. */
+export const COLLABORATION_POINT_MARK_SIZE = 17
+const pointSlot = (box: CollaborationLayoutBounds) => box.width <= 28 && box.height <= 28
 
 /** The camera can shrink a shell without shrinking its readable ink below the
  * same screen budget. Longer text is clipped into the original Reader entry. */
@@ -52,9 +55,11 @@ export function collaborationIdentityInk(width: number, zoom: number, progress: 
   return { avatarCenter, nameLeft, opacity: progress * smooth(32, 60, available), fontSize: Math.max(12, 11 / zoom) }
 }
 
-/** Original small point slots cannot become giant overlapping overview marks. */
+/** A slot's largest overview glyph keeps its screen size until it spans twice the slot's
+ * short side, so neighbours separated by the layout gap never overlap. Smaller recency
+ * steps share the scale and keep their ratio. */
 export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number) =>
-  Math.min(1 / zoom, Math.min(box.width, box.height) / (COLLABORATION_OVERVIEW_MARK_SIZE / 2))
+  Math.min(1 / zoom, 2 * Math.min(box.width, box.height) / (pointSlot(box) ? COLLABORATION_POINT_MARK_SIZE : COLLABORATION_OVERVIEW_MARK_SIZE))
 
 export type CollaborationVisibleHull = CollaborationLayoutBounds & { radius: number }
 
@@ -63,7 +68,7 @@ export type CollaborationVisibleHull = CollaborationLayoutBounds & { radius: num
 export function collaborationVisibleHull(box: CollaborationLayoutBounds, zoom: number, overviewRadius = COLLABORATION_OVERVIEW_MARK_SIZE / 2, pointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES): CollaborationVisibleHull {
   const { identity, detail, status } = collaborationMapLod(zoom, preferences)
   const scale = collaborationOverviewScale(box, zoom)
-  if (box.width <= 28 && box.height <= 28) {
+  if (pointSlot(box)) {
     const radius = mix(overviewRadius, pointRadius, identity) * mix(scale, 1, identity)
     return { x: box.x + box.width / 2 - radius, y: box.y + box.height / 2 - radius, width: radius * 2, height: radius * 2, radius }
   }
@@ -75,7 +80,9 @@ export function collaborationVisibleHull(box: CollaborationLayoutBounds, zoom: n
   return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height, radius }
 }
 
-export const collaborationVisibleHitBounds = (box: CollaborationLayoutBounds, zoom: number, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES): CollaborationLayoutBounds => collaborationVisibleHull(box, zoom, 14, Math.min(box.width, box.height) / 2, preferences)
+/** Clearance follows each slot's largest glyph, so a recency step never moves labels. */
+export const collaborationVisibleHitBounds = (box: CollaborationLayoutBounds, zoom: number, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES): CollaborationLayoutBounds =>
+  collaborationVisibleHull(box, zoom, (pointSlot(box) ? COLLABORATION_POINT_MARK_SIZE : COLLABORATION_OVERVIEW_MARK_SIZE) / 2, Math.min(box.width, box.height) / 2, preferences)
 
 /** Only visible summary ink needs retained body facts. The same predicate owns
  * viewport leases and actual body reads, including custom early/late stages. */

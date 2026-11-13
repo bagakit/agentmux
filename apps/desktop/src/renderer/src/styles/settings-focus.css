@@ -37,7 +37,9 @@
 .focus-map-preview__route { fill: none; stroke: var(--green); stroke-width: 2; }
 .focus-map-preview__agent { position: absolute; background: var(--surface-1); border: 1px solid var(--line); overflow: hidden; }
 .focus-map-preview__identity { position: absolute; inset: 0; }
-.focus-map-preview__point { position: absolute; inset: 2px; border-radius: 50%; background: var(--text-3); opacity: .5; }
+.focus-map-preview__agent:has(> .focus-map-preview__closed) { background: transparent; border-color: transparent; }
+.focus-map-preview__closed { position: absolute; left: 50%; top: 50%; line-height: 0; }
+.focus-map-preview__closed .agent-avatar { filter: grayscale(1); opacity: .6; }
 .focus-map-preview__identity > span { position: absolute; top: 50%; }
 .focus-map-preview__identity > strong { position: absolute; top: 50%; transform: translateY(-50%); right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .focus-map-preview__detail { box-sizing: border-box; position: absolute; inset: 0; padding: 10px; }
