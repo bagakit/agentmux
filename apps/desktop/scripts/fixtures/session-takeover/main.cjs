@@ -140,7 +140,11 @@ app.whenReady().then(async () => {
     result.nativeDevicePixelRatio = await evaluate('devicePixelRatio')
     if (qualification === 'agent-operations') {
       const { runAgentOperations } = require('./agent-operations-main.cjs')
-      await runAgentOperations({ win, result, evaluate, wait, click, key, size, frame, painted, originalTerminalReady, spatial, evidence, mode, nativeMutant })
+      // Live ordered output continually renews xterm's scrollbar transitions.
+      // Observe painted frames without requiring the healthy terminal to go idle.
+      const operationPainted = () => evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      const operationFrame = async (name, _settle, extra) => { await operationPainted(); return frame(name, false, extra) }
+      await runAgentOperations({ win, result, evaluate, wait, click, key, size, frame: operationFrame, painted: operationPainted, originalTerminalReady, spatial, evidence, mode, nativeMutant })
       result.consoleErrors = errors; result.passed = true; return
     }
     if (mode === 'first') {
