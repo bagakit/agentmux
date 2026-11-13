@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events'
+import { settingsScratchTopics, settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -9,19 +11,17 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { AppConfig, AppLinkSchemeChoice } from '../src/shared/contracts.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
-import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const ipc = vi.hoisted(() => ({
   root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
   remember: undefined as ((scheme: string, choice: AppLinkSchemeChoice) => Promise<void>) | undefined
 }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => ipc.root || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { getAppPath: () => process.cwd() + '/apps/desktop', on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class {
@@ -30,11 +30,13 @@ vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typ
   }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class {
+  setPresentationWindowOwner() {}
+  async release() {}
   constructor(_window: unknown, _profiles: unknown, _ledger: unknown, options: { rememberScheme: typeof ipc.remember }) { ipc.remember = options.rememberScheme }
   dispose() {}
 } }))
@@ -43,6 +45,7 @@ import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION, AGENT
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { saveRuntimeConfig } from '../src/main/runtime-config-transaction.js'
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from '../src/main/settings-browser-control.js'
@@ -57,11 +60,12 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 
 async function privateConfig(browser = structuredClone(DEFAULT_CONFIG.browser)) {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-browser-settings-')); directories.push(root); ipc.root = root
+  await prepareSettingsIpcDirectory(root)
   const store = new ConfigStore(join(root, 'config.json'))
   const config = await store.save({ ...structuredClone(DEFAULT_CONFIG), browser,
     workspaces: [{ id: '__scratch__', name: 'Private Topics', path: join(root, 'topics'), hostId: 'local', kind: 'folder' }] })
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() }
-  const runtime = { prepare: vi.fn(async () => preparation), commit: vi.fn(), discard: vi.fn(async () => {}),
+  const runtime = { prepare: vi.fn(async () => preparation), validatePreparation: vi.fn(), commit: vi.fn(), discard: vi.fn(async () => {}),
     reserveExecutorConfigEdit: vi.fn(async () => () => {}), setTerminalViewColors: vi.fn(), attach: vi.fn(() => () => {}),
     resourceSampler: { setObservationSources: vi.fn(() => () => {}) } } as unknown as RuntimeController
   return { root, store, config, runtime, bytes: () => readFile(store.filePath, 'utf8') }
@@ -162,7 +166,7 @@ describe('Browser settings share the sole typed Main owner', () => {
   })
 
   it('routes registered native answers, public Control and UI Forget through the same actual Main ConfigOwner', async () => {
-    const f = await privateConfig(), sender = { id: 918, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } }
+    const f = await privateConfig(), sender = Object.assign(new EventEmitter(), { id: 918, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
     const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     vi.spyOn(runtime, 'prepare').mockImplementation(vi.mocked(f.runtime.prepare).getMockImplementation()!)
     vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
@@ -171,9 +175,9 @@ describe('Browser settings share the sole typed Main owner', () => {
     // The durable private file is already initialized; no default global Topics bootstrap is part of this owner oracle.
     vi.spyOn(f.store, 'get').mockResolvedValue(f.config)
     ipc.handlers.clear(); ipc.execute = undefined; ipc.remember = undefined
-    const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-      configStore: f.store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
-      workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    const dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+      configStore: f.store, runtime, progressLoops, scratchTopics: settingsScratchTopics(),
+      workspaceFiles: settingsWorkspaceFiles() })
     try {
       expect(ipc.execute).toBeTypeOf('function'); expect(ipc.remember).toBeTypeOf('function')
       const handler = ipc.handlers.get('browser:forgetAppLinkScheme'); expect(handler).toBeTypeOf('function')

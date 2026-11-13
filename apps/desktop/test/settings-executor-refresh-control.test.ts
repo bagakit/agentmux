@@ -1,3 +1,5 @@
+import { executorEnvironmentRevision } from '../src/shared/executor-probe-context.js'
+import { settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -13,7 +15,6 @@ import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxControlSett
 import type { AppConfig } from '../src/shared/contracts.js'
 import type { RuntimePreparation } from '../src/main/runtime-controller.js'
 import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const ipc = vi.hoisted(() => ({ root: '', failurePath: '',
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
@@ -26,11 +27,11 @@ vi.mock('node:fs/promises', async original => {
     return await actual.stat(...args)
   } }
 })
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => resolve('apps/desktop') || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => ipc.root || tmpdir(), getAppPath: () => resolve('apps/desktop') || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class {
@@ -39,16 +40,17 @@ vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('
   }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager.js', async () => ({ BrowserViewManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserViews }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore, LocalExecutionHost } from '@agentmux/core'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
@@ -59,6 +61,7 @@ const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'e
 
 async function registered() {
   const root = await mkdtemp(join(tmpdir(), 'amux-refresh-main-')); roots.push(root); ipc.root = root
+  await prepareSettingsIpcDirectory(root)
   const executable = join(root, 'executable'), directory = join(root, 'directory')
   await writeFile(executable, '#!/bin/sh\n'); await chmod(executable, 0o755); await mkdir(directory)
   const store = new ConfigStore(join(root, 'config.json'))
@@ -90,9 +93,9 @@ async function registered() {
     async () => { throw new Error('Refresh cannot deliver progress input') }, undefined,
     async () => { throw new Error('Refresh cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn(async () => {}) } as unknown as ScratchTopics,
-    workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    workspaceFiles: settingsWorkspaceFiles() })
   expect(ipc.execute).toBeTypeOf('function'); expect(ipc.handlers.get('executors:detect')).toBeTypeOf('function')
   return {  root, config, executable, directory, clients, runtime, prepare, sender, dispose, execute: ipc.execute!,
     native: (executorId: unknown, hostId: unknown) => ipc.handlers.get('executors:detect')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, executorId, hostId),
@@ -110,12 +113,13 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       f.sender.isDestroyed.mockReturnValue(true)
       const result = await exec(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix:${server.path}`, 'settings', 'executors', 'refresh', 'first', '--host', 'local'],
         { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
-      expect(JSON.parse(result.stdout).result).toEqual({ input: { executorId: 'first', providerId: 'codex', command: f.executable, host: f.config.hosts[0] },
+      expect(JSON.parse(result.stdout).result).toEqual({ input: { executorId: 'first', providerId: 'codex', command: f.executable, environmentRevision: executorEnvironmentRevision(f.config.executors.first!.env), host: f.config.hosts[0] },
         executable: f.executable, availability: 'available' })
-      expect(f.clients[0]!.probeExecutorAvailability).toHaveBeenCalledExactlyOnceWith('codex', f.executable)
+      expect(f.clients[0]!.probeExecutorAvailability).toHaveBeenCalledExactlyOnceWith('codex', f.executable, { env: f.config.executors.first!.env })
       expect(f.clients[0]!.connect).not.toHaveBeenCalled()
+      f.sender.isDestroyed.mockReturnValue(false)
       const directory = await f.native('second', 'local')
-      expect(directory).toEqual({ input: { executorId: 'second', providerId: 'claude', command: f.directory, host: f.config.hosts[0] },
+      expect(directory).toEqual({ input: { executorId: 'second', providerId: 'claude', command: f.directory, environmentRevision: executorEnvironmentRevision(f.config.executors.second!.env), host: f.config.hosts[0] },
         executable: f.directory, availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FILE', message: `${f.directory} is a directory; expected a regular executable file.` } })
       vi.mocked(f.clients[1]!.connect).mockRejectedValueOnce(Object.assign(new Error('Remote Runtime is not supported.'), { code: 'REMOTE_UNSUPPORTED' }))
       const remote = await rpc.call('settings.executors.refresh', { executorId: 'second', hostId: '--help' })
@@ -147,7 +151,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
     expect(original).toBeTypeOf('function')
     let release!: () => void
     const held = new Promise<void>(done => { release = done })
-    probe.mockImplementationOnce(async (providerId, command) => { await held; return await original.call(f.clients[0]!, providerId, command) })
+    probe.mockImplementationOnce(async (providerId, command, env) => { await held; return await original.call(f.clients[0]!, providerId, command, env) })
     const pending = f.execute({ ...envelope, executorId: 'first', hostId: 'local' })
     try {
       const changed: AppConfig = { ...f.config, executors: { ...f.config.executors, first: { ...f.config.executors.first!, command: f.directory } } }
@@ -157,7 +161,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       expect(observed, JSON.stringify(observed)).toMatchObject({ input: { executorId: 'first', command: f.executable }, executable: f.executable, availability: 'available' })
       expect(await f.execute({ ...envelope, executorId: 'first', hostId: 'local' })).toMatchObject({ input: { executorId: 'first', command: f.directory },
         executable: f.directory, availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FILE' } })
-      expect(probe).toHaveBeenNthCalledWith(1, 'codex', f.executable); expect(probe).toHaveBeenNthCalledWith(2, 'codex', f.directory)
+      expect(probe).toHaveBeenNthCalledWith(1, 'codex', f.executable, { env: f.config.executors.first!.env }); expect(probe).toHaveBeenNthCalledWith(2, 'codex', f.directory, { env: f.config.executors.first!.env })
     } finally { release(); await pending; await f.dispose() }
   })
 

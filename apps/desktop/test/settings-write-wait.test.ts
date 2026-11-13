@@ -1,3 +1,4 @@
+import { settingsScratchTopics, settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -12,18 +13,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult, ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
-import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const ipc = vi.hoisted(() => ({ root: '',
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop' },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 // Capture the actual registered Main closure without opening the user's default endpoint.
 // Every test below then hosts that closure on the actual public Core server at an owned path.
@@ -34,11 +33,11 @@ vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('
   }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager.js', async () => ({ BrowserViewManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserViews }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
 import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core'
@@ -47,6 +46,7 @@ import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc.js'
 import { CONFIG_CHANGED_CHANNEL } from '../src/shared/contracts.js'
 
@@ -62,6 +62,7 @@ function deferred() {
 
 async function registered() {
   const root = await mkdtemp(join(tmpdir(), 'amux-write-main-')); roots.push(root); ipc.root = root
+  await prepareSettingsIpcDirectory(root)
   const store = new ConfigStore(join(root, 'config.json'))
   const initial = await store.save({ ...structuredClone(DEFAULT_CONFIG), copyPathsAsAbsolute: false,
     browser: { ...DEFAULT_CONFIG.browser, appLinkSchemes: { literal: 'allow' } }, composerShortcuts: [],
@@ -83,9 +84,9 @@ async function registered() {
       if (channel === CONFIG_CHANGED_CHANNEL) { publications.push(value as AppConfig); trace.push('publish'); published.resolve() }
     }) })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
-    workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+  const dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    configStore: store, runtime, progressLoops, scratchTopics: settingsScratchTopics(),
+    workspaceFiles: settingsWorkspaceFiles() })
   expect(ipc.execute).toBeTypeOf('function')
   prepare.mockClear(); commit.mockClear(); trace.length = 0
   const actualSave = store.save.bind(store)

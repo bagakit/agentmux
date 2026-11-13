@@ -1,15 +1,17 @@
+import { settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock, type MockInstance } from 'vitest'
 import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry,
-  LocalExecutionHost, defineAgentProvider, loadAgentSessions,
+  LocalExecutionHost, DurableAgentMuxMessageQueue, defineAgentProvider, loadAgentSessions,
   type AgentMuxStoredAgentSession, type AgentMuxRunInputData, type AgentProviderSessionHistoryContext,
   type AgentProviderSessionHistoryPage } from '@agentmux/core'
 import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/agent-session-registry.js'
@@ -21,17 +23,16 @@ import { unwrapSessionAgentLaunchResult } from '../src/shared/session-agent-laun
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const ipc = vi.hoisted(() => ({
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => new URL('../', import.meta.url).pathname, isPackaged: false },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => new URL('../', import.meta.url).pathname, isPackaged: false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class {
@@ -40,13 +41,14 @@ vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typ
   }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager.js', async () => ({ BrowserViewManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserViews }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { ConfigStore } from '../src/main/config-store.js'
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
@@ -92,11 +94,13 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     const before = (await loadAgentSessions(store)).find(entry => entry.agentSessionId === retained.agentSessionId)
     expect(before).toEqual(retained)
     const processBefore = { ...runs.get(retained.run.runId)! }
+    expect((core as unknown as CoreHarness).connected).toBe(true)
+    expect(kernel.isConnected()).toBe(true)
     const data = '  explicit healthy input\n'
     await expect(runtime.write(control(), data, 'user')).resolves.toBeUndefined()
     expect(writes.at(-1)).toEqual({ runId: retained.run.runId, data })
     const page = await runtime.sessionHistoryPage(control(), { cursor: 'opaque', limit: 5 }, config)
-    expect(page).toEqual({ agentSessionId: retained.agentSessionId,
+    expect(page).toEqual({ agentSessionId: retained.agentSessionId, sourceHostId: 'local',
       source: { providerId: retained.providerId, nativeSessionId: `native-${retained.agentSessionId}` },
       items: [{ id: 'native-item', kind: 'user-message', contentParts: [{ kind: 'text', text: '  exact history\n' }] }], nextCursor: null })
     expect(nativeHistory.mock.calls.at(-1)?.[0]).toMatchObject({ command: config.executors.kept!.command,
@@ -109,8 +113,8 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'amux-executor-references-'))
-    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
-    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+    await prepareSettingsIpcDirectory(root)
+    isolateCoreFixtureEnvironment(root)
     store = new AgentMuxMemoryAgentSessionStore()
     retained = record('retained')
     await store.compareAndSwap(null, retained)
@@ -119,10 +123,10 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       items: [{ id: 'native-item', kind: 'user-message' as const,
         contentParts: [{ kind: 'text' as const, text: '  exact history\n' }] }], nextCursor: null }))
     const template = new AgentProviderRegistry().get('codex')
-    const { providerFork: _nativeFork, ...capabilities } = template.catalog.capabilities
+    const { providerFork: _nativeFork, nativeConversationInput: _nativeInput, asyncQuestionReply: _nativeQuestion, ...capabilities } = template.catalog.capabilities
     const provider = (id: string) => defineAgentProvider({
       catalog: { ...template.catalog, id, label: id, executable: id, expectedProcess: id,
-        capabilities, hookStrategy: { kind: 'none' }, readySignal: { kind: 'foreground-process', expectedProcess: id } },
+        capabilities: { ...capabilities, providerResume: false, permission: 'observe' }, resumeStrategy: { kind: 'none' }, hookStrategy: { kind: 'none' }, readySignal: { kind: 'foreground-process', expectedProcess: id } },
       hook: { rules: [], eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
       buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])], readSessionHistoryPage: nativeHistory
     })
@@ -135,6 +139,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     runs = new Map([[retained.run.runId, run(retained.run.runId)]])
     writes = []
     connect = vi.spyOn(core, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(core, 'connectRuntime').mockResolvedValue(undefined)
     vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: primary.id, installed: true,
       executable: primary.executable, capabilities: primary.catalog.capabilities })
     vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
@@ -157,11 +162,25 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       value.acceptedInputBytes = input.expectedByte + Buffer.byteLength(input.data)
       return { run: value, appliedByteRange: { startByte: input.expectedByte, endByte: value.acceptedInputBytes } }
     })
+    vi.spyOn(kernel, 'openInput').mockImplementation(async id => {
+      const value = runs.get(id)
+      if (!value) throw new AgentMuxError('Private Run absent.', 'CTXMUX_run_not_found')
+      return {
+        run: Object.freeze(structuredClone(value)),
+        waitWritable: async () => {},
+        input: async data => {
+          const startByte = value.acceptedInputBytes ?? 0
+          writes.push({ runId: id, data })
+          value.acceptedInputBytes = startByte + Buffer.byteLength(data)
+          return { appliedByteRange: { startByte, endByte: value.acceptedInputBytes } }
+        }
+      }
+    })
     vi.spyOn(kernel, 'prepareStop').mockImplementation(async (runId, operationKey) => {
       if (!operationKey) throw new Error('The private Core stop must carry its lifecycle operation identity.')
       return { daemonInstance: 'private-reference', operationKey, runId }
     })
-    vi.spyOn(kernel, 'stop').mockImplementation(async operation => { runs.delete(operation.runId) })
+    vi.spyOn(kernel, 'stop').mockImplementation(async operation => { runs.delete(operation.runId); return { disposition: 'graceful' } })
     runtime = new RuntimeController(store, localRuntimeConnector)
     runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', kind: 'local', label: 'Private host' }, client: core,
       executionHost: new LocalExecutionHost({ runner: async () => { throw new Error('This proof must not execute native commands.') } }) }],
@@ -177,7 +196,11 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   })
 
   afterEach(async () => {
-    try { await runtime?.dispose() } finally {
+    try {
+      await runtime?.dispose()
+      // The disposed client may have queued its final journal observation. Join its original queue before removing private storage.
+      if (root) await new DurableAgentMuxMessageQueue(join(root, 'messages.ndjson')).readJournal()
+    } finally {
       vi.restoreAllMocks(); vi.unstubAllEnvs()
       if (root) await rm(root, { recursive: true })
     }
@@ -238,9 +261,10 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   })
 
   it.each(['transport', 'malformed'])('rejects %s reference unknowns while ordinary fields bypass reference loading entirely', async failure => {
-    const read = vi.spyOn(store, 'load')
+    // Main consumes the Core's typed history-source authority, including its original read failures.
+    const read = vi.spyOn(core, 'sessionHistorySources')
     if (failure === 'transport') read.mockRejectedValueOnce(new Error('Private Store observation unavailable.'))
-    else read.mockResolvedValueOnce([retained, { kind: 'invalid-reference-record' }])
+    else read.mockRejectedValueOnce(new AgentMuxError('Original saved Session descriptor is malformed.', 'AGENT_SESSION_STORE_INVALID'))
     await expect(runtime.reserveExecutorConfigEdit(config, without('spare'))).rejects.toMatchObject({ code: 'SETTING_RESOURCE_REFERENCES_UNKNOWN' })
     expect(read).toHaveBeenCalledOnce()
     read.mockClear()
@@ -258,8 +282,9 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   })
 
   it('holds only new launches for a pending dangerous identity edit; same Executor input and History continue', async () => {
-    const read = deferred<readonly unknown[]>()
-    vi.spyOn(store, 'load').mockImplementationOnce(() => read.promise)
+    const sources = await core.sessionHistorySources()
+    const read = deferred<typeof sources>()
+    vi.spyOn(core, 'sessionHistorySources').mockImplementationOnce(() => read.promise)
     const edit = runtime.reserveExecutorConfigEdit(config, without('kept'))
     const settled = edit.then(value => ({ value }), error => ({ error }))
     try {
@@ -267,7 +292,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
         .rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
       expect(connect).not.toHaveBeenCalled()
       await assertHealthyPaths()
-    } finally { read.resolve([retained]); await settled }
+    } finally { read.resolve(sources); await settled }
     await expect(edit).rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
     await assertHealthyPaths()
     await expect(runtime.launchAgent({ executorId: 'kept', hostId: 'local', workspacePath: root,
@@ -283,7 +308,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     const deletion = runtime.reserveExecutorConfigEdit(config, without('spare'))
     const deletionSettled = deletion.then(release => ({ release }), error => ({ error }))
     try {
-      expect(connect).toHaveBeenCalledOnce()
+      await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce())
       expect(kernel.start).not.toHaveBeenCalled()
       expect(await loadAgentSessions(store)).toEqual([retained])
       await expect(deletion).rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
@@ -331,9 +356,9 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'loops.json')),
       async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Executor reference fixture') })
     ipc.handlers.clear()
-    const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: disk, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics,
-      workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+      workspaceFiles: settingsWorkspaceFiles() })
     const invoke = async (channel: string, ...values: unknown[]) => {
       const handler = ipc.handlers.get(channel)
       expect(handler).toBeTypeOf('function')
@@ -351,11 +376,11 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       const settled = launch.then(value => ({ value }), error => ({ error }))
       try {
         // Registered launch admission precedes even the first Core connect await.
-        expect(connect).toHaveBeenCalledOnce()
+        await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce())
         await expect(ipc.execute!({ operation: 'settings.resource.remove', resource: 'executors', id: 'spare' }))
           .rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
         expect(await readFile(disk.filePath, 'utf8')).toBe(bytes)
-        expect(sender.send).not.toHaveBeenCalled()
+        expect(sender.send.mock.calls.filter(([channel]) => channel === CONFIG_CHANGED_CHANNEL)).toEqual([])
         await assertHealthyPaths()
       } finally { firstAwait.reject(new Error('Private held launch failed.')); await settled }
       await expect(launch).rejects.toThrow('Private held launch failed.')
@@ -380,7 +405,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       expect(releasedWith).toHaveLength(1)
       expect(Object.keys(releasedWith[0]!.executors)).toEqual(['kept'])
       expect(await releaseLaunches[0]).toMatchObject({ error: { code: 'EXECUTOR_UNKNOWN', message: 'Missing Executor on the selected Host: spare' } })
-      expect(sender.send).toHaveBeenCalledExactlyOnceWith(CONFIG_CHANGED_CHANNEL, releasedWith[0])
+      expect(sender.send.mock.calls.filter(([channel]) => channel === CONFIG_CHANGED_CHANNEL)).toEqual([[CONFIG_CHANGED_CHANNEL, releasedWith[0]]])
       const saved = JSON.parse(await readFile(disk.filePath, 'utf8')) as AppConfig
       expect(saved.executors).toEqual(releasedWith[0]!.executors)
       expect(await loadAgentSessions(store)).toEqual([retained])
