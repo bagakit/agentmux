@@ -931,6 +931,70 @@ describe('RuntimeController configuration transaction', () => {
     } finally { await controller.dispose() }
   })
 
+  it('keeps the original Host working while a replacement connection is still being prepared', async () => {
+    const controller = await configuredController()
+    const config: AppConfig = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const original = runtimeFixture.FakeClient.instances[1]!
+    await vi.waitFor(() => expect(original.connected).toBe(true))
+    const control: SessionControl = { kind: 'terminal', hostId: 'remote', runId: 'healthy-run', run: { runId: 'healthy-run' } }
+    Object.assign(original, { writeTerminalBytes: vi.fn(async (_run: unknown, data: string) => ({
+      appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length })) })
+    const candidate = deferred<void>()
+    runtimeFixture.FakeClient.initializeNext = client => { client.connectRuntime.mockImplementation(async () => { await candidate.promise }) }
+    const changed: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'replacement.example.test' }] }
+    const preparing = controller.prepare(changed)
+    try {
+      await vi.waitFor(() => expect(runtimeFixture.FakeClient.instances).toHaveLength(3))
+      // The replacement is still connecting. Every capability of the original connection stays reachable.
+      await controller.write(control, 'still typing', 'user')
+      expect((original as unknown as { writeTerminalBytes: ReturnType<typeof vi.fn> }).writeTerminalBytes)
+        .toHaveBeenCalledExactlyOnceWith(control.run, 'still typing', undefined)
+      const inspected = { key: { kind: 'prompt' as const, agentSessionId: 'agent-1', expectedRun: { runId: 'healthy-run' }, submissionId: 'original-input' } }
+      Object.assign(original, { inspectAgentInput: vi.fn(async () => inspected) })
+      const agent: SessionControl = { kind: 'agent', hostId: 'remote', agentSessionId: 'agent-1', run: { runId: 'healthy-run' } }
+      expect(await controller.inspectInput(agent, inspected.key)).toBe(inspected)
+      await controller.stopSession(control)
+      expect(original.stopTerminal).toHaveBeenCalledExactlyOnceWith(control.run)
+      candidate.resolve()
+      controller.commit(await preparing)
+      expect(controller.executionHost('remote')).toBe(runtimeFixture.createdHosts.at(-1))
+      expect(original.dispose).toHaveBeenCalledOnce()
+    } finally { candidate.resolve(); await preparing.catch(() => {}); await controller.dispose() }
+  })
+
+  it('refuses a Host change at once while the original Host still has work in flight, and keeps that work', async () => {
+    const controller = await configuredController()
+    const config: AppConfig = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const original = runtimeFixture.FakeClient.instances[1]!
+    await vi.waitFor(() => expect(original.connected).toBe(true))
+    const control: SessionControl = { kind: 'terminal', hostId: 'remote', runId: 'healthy-run', run: { runId: 'healthy-run' } }
+    const reply = deferred<void>()
+    Object.assign(original, { writeTerminalBytes: vi.fn(async (_run: unknown, data: string) => {
+      await reply.promise
+      return { appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length }
+    }) })
+    const pending = controller.write(control, 'reply still unknown', 'user')
+    const changed: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'replacement.example.test' }] }
+    try {
+      await vi.waitFor(() => expect((original as unknown as { writeTerminalBytes: ReturnType<typeof vi.fn> }).writeTerminalBytes).toHaveBeenCalledOnce())
+      // The attempt is refused without waiting for the unknown reply, and no candidate connection is opened.
+      const outcome = await Promise.race([controller.prepare(changed).then(() => 'prepared', (error: Error) => error.message),
+        new Promise(resolve => setTimeout(() => resolve('still waiting'), 200))])
+      expect(outcome).toMatch(/remote.*in progress/u)
+      expect(runtimeFixture.FakeClient.instances).toHaveLength(2)
+      // The refused attempt leaves no gate behind: the original input still completes and later work is admitted.
+      reply.resolve()
+      await pending
+      await controller.write(control, 'after the refusal', 'user')
+      expect(original.dispose).not.toHaveBeenCalled(); expect(original.stopTerminal).not.toHaveBeenCalled()
+      // Once the original Host is idle, the same change goes through.
+      controller.commit(await controller.prepare(changed))
+      expect(original.dispose).toHaveBeenCalledOnce()
+    } finally { reply.resolve(); await pending.catch(() => {}); await controller.dispose() }
+  })
+
   it('does not reserve or replace a live owner when only its Tailcat listener changes', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
     client.agentSessions.mockReturnValue([{ ...agentStatusFixture().session, run: { runId: 'healthy-agent' } }])
