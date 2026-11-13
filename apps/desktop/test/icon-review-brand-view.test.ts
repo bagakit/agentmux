@@ -67,6 +67,15 @@ it('opens on the Brand view, shows every realm through the product resolver and 
   const commons = manifest.entries.filter(entry => entry.realm === 'commons').map(entry => entry.id).sort()
   expect([...document.querySelectorAll<HTMLElement>('[data-brand-entry]')].map(node => node.dataset.brandEntry).sort()).toEqual(commons)
   for (const image of document.querySelectorAll<HTMLImageElement>('.brand-art img, .brand-avatar img')) expect(image.getAttribute('src'), image.outerHTML).toMatch(/\S/)
+  // Cards name the art in Chinese and show the distinguishing file name, with the full path on hover.
+  for (const card of document.querySelectorAll<HTMLElement>('[data-brand-entry]')) {
+    const entry = manifest.entries.find(item => item.id === card.dataset.brandEntry)!
+    expect(card.querySelector('strong')?.textContent).toBe(entry.title)
+    expect(card.querySelector('code')?.textContent).toBe(entry.file.split('/').pop())
+    expect(card.title).toContain(entry.file)
+  }
+  // The search row filters only the sections below; the realms stay first on this view.
+  expect(document.querySelector<HTMLElement>('.inventory-tools')?.hidden).toBe(true)
   expect(document.querySelectorAll('.brand-vendor')).toHaveLength(BUILT_IN_AGENT_PROVIDER_IDS.length)
   // Each slot holds the product's own drawing of that vendor's mark.
   for (const slot of document.querySelectorAll<HTMLElement>('[data-provider-mark]')) expect(slot.querySelector('svg, img'), slot.dataset.providerMark).not.toBeNull()
