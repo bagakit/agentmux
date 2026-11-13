@@ -128,3 +128,14 @@ describe('Goal detail reading', () => {
     expect(detail.querySelector('.goal-responsibility__heading')).toBeNull()
   })
 })
+
+describe('One solid primary per surface', () => {
+  it('lets the open Goal own the solid primary, keeping New Goal reachable as a secondary', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'review' }); await dom.render(<GlobalBoardSurface />)
+    const create = dom.container.querySelector<HTMLButtonElement>('[data-new-goal]')!
+    expect(create.getAttribute('aria-label')).toBe('New Goal')
+    expect(create.classList.contains('primary-button')).toBe(false)
+    expect(dom.container.querySelectorAll('.goals-surface .primary-button, .goals-surface .goals-button--primary').length).toBe(1)
+    expect(dom.container.querySelector('.goals-detail .goals-button--primary')).not.toBeNull()
+  })
+})
