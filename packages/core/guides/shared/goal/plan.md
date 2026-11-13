@@ -23,3 +23,18 @@ without completing the current work; unchanged criteria keep their accepted work
 Continuous progress on this Goal reports
 open nodes each check and pauses when every node passed review; a person still accepts
 the Goal results. A node review or plan completion never accepts the Goal.
+
+The plan's executor Host can differ from the Supervisor's Host. A delegation intent.hostId
+selects the original Supervisor route; intent.workerHostId selects the executor route.
+When workerHostId is absent in an original local record, its original hostId names both.
+Each signed original source freezes the actual owner and worker Runtime identities: a route
+alias is not a different executor or reviewer. Independent review compares Runtime and
+Session identity, so the worker cannot approve itself through another Host alias.
+
+The remote worker reports from its received source MID as described in the executor section.
+The Supervisor reads goal delegations and uses goal collect on the original Goal; collection
+retrieves signed replies through the original connection before recording the verified report.
+If retrieval is unavailable, retain the source and report identities and inspect the same
+operation; locally verified replies remain readable. Submission, delivery, collection and
+independent review are separate facts. Only the independent passing review releases a
+node's dependents, and a person still accepts the Goal.

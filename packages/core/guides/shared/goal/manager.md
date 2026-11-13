@@ -22,3 +22,8 @@ manager or retry uncertain input. Recovery/navigation and actual patrol completi
 When the Goal has a plan, read goal plan first and follow the plan section of amux goal --skill:
 delegate only ready nodes to their named executor, and mark a node done only through an
 independent goal plan review that ran its check.
+For cross-Host work, keep the Goal at its original owner and set intent.workerHostId to the
+exact executor route. The worker returns a source-based signed report without a second Goal
+store. Its outbox receipt is not owner receipt. Read goal delegations at the original owner;
+goal collect retrieves original signed replies through the existing worker connection and
+records the verified report. Keep unknown transport and observed local replies distinct.
