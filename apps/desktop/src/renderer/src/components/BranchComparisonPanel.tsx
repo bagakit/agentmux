@@ -3,6 +3,7 @@ import type { WorkspaceBranchRecord } from '../../../shared/contracts'
 import type { GitBranchCompareMode, GitBranchComparisonResult } from '../../../shared/git-contracts'
 import { gitBridge } from '../lib/git-bridge'
 import { useAppStore } from '../store'
+import { ChangedFileList } from '../features/git/ChangedFileList'
 
 export function BranchComparisonPanel({ workspaceId, branches }: {
   workspaceId: string
@@ -15,6 +16,7 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const requestId = useRef(0)
+  const scroller = useRef<HTMLElement>(null)
   const open = useAppStore((state) => state.openBranchDiff)
   useEffect(() => () => { requestId.current += 1 }, [])
   function changeSelection(update: () => void): void {
@@ -43,7 +45,7 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
   const branchesExist = [baseBranch, targetBranch].every((name) => branches.some((branch) => branch.name === name))
   const selectionMatches = result?.kind === 'ready' && result.snapshot.baseBranch === baseBranch && result.snapshot.targetBranch === targetBranch && result.snapshot.mode === mode
   return (
-    <section className="branch-comparison" aria-label="Branch comparison">
+    <section ref={scroller} className="branch-comparison" aria-label="Branch comparison">
       <form onSubmit={(event) => { event.preventDefault(); if (branchesExist) void compare() }}>
         <label>Base branch A
           <select aria-label="Base branch A" value={baseBranch} onChange={(event) => changeSelection(() => setBaseBranch(event.target.value))}>
@@ -78,14 +80,12 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
           {!selectionMatches ? <span>Showing the previous fixed comparison. Compare to update.</span> : null}
         </div>
         {result.warnings.map((warning, index) => <p key={index} role="status">{warning}</p>)}
-        {result.entries.length === 0 ? <p>No changed files between these commits.</p> : <div className="branch-comparison__files">
-          {result.entries.map((file) => <button
-            key={JSON.stringify([file.path, file.origPath])}
+        {result.entries.length === 0 ? <p>No changed files between these commits.</p> : <ChangedFileList files={result.entries} scrollRef={scroller}
+          className="branch-comparison__files" renderFile={file => <button
             className="branch-comparison__file"
             title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
             onClick={() => open(workspaceId, { snapshot: result.snapshot, file: { path: file.path, origPath: file.origPath } })}
-          ><span>{file.origPath ? `${file.origPath} → ${file.path}` : file.path}</span><small>{file.change}</small></button>)}
-        </div>}
+          ><span>{file.origPath ? `${file.origPath} → ${file.path}` : file.path}</span><small>{file.change}</small></button>} />}
       </> : null}
     </section>
   )

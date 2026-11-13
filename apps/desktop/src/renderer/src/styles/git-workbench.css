@@ -55,6 +55,20 @@
 .git-workbench__change--added { color: var(--green-text); }
 .git-workbench__change--deleted { color: var(--red-text); }
 .git-workbench__warning { color: var(--text-3); overflow-wrap: anywhere; }
+.git-workbench__files button { height: 100%; align-items: center; }
+.git-workbench__file-path { flex-wrap: nowrap; overflow: hidden; }
+.git-workbench__file-name, .git-workbench__file-path small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-workbench__files .git-workbench__file-origin { display: none; }
+/* Changed-file lists read every file but mount only rows near the viewport (ChangedFileList). */
+.changed-file-list { position: relative; margin: 0; padding: 0; list-style: none; }
+.changed-file-list__row { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1px; }
+.changed-file-list__filter { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 1; display: flex; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); padding: var(--sp-2) 0; background: var(--surface-0); }
+.changed-file-list__filter input { flex: 1; min-width: 0; height: 26px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
+.changed-file-list__filter input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.changed-file-list__clear { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.changed-file-list__clear:hover { color: var(--text); background: var(--surface-2); }
+.changed-file-list__count { flex: none; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.changed-file-list__empty { margin: 0; color: var(--text-3); }
 .git-history-commit { cursor: pointer; }
 .git-history-commit:hover { background: var(--surface-1); }
 .git-history-commit[aria-current="true"] { background: color-mix(in srgb, var(--blue) 16%, var(--surface-1)); border-radius: var(--radius-sm); }
