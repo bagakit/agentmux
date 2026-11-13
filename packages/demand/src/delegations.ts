@@ -61,12 +61,19 @@ export type DemandDelegationAttentionInput = {
   agentMuxNote: string
 }
 export type DemandDelegationAttention = DemandDelegationAttentionInput & { preparedAt: number; attemptedAt?: number }
+/** Original authenticated Core participants, recorded only when the source is linked. */
+export type DemandDelegationRuntimeIdentity = { ownerRuntimeId: string; workerRuntimeId: string }
+export function parseDemandDelegationRuntimeIdentity(value: unknown): DemandDelegationRuntimeIdentity {
+  const data = record(value, 'delegation.runtimeIdentity', ['ownerRuntimeId', 'workerRuntimeId'])
+  return { ownerRuntimeId: identity(data.ownerRuntimeId, 'runtimeIdentity.ownerRuntimeId'), workerRuntimeId: identity(data.workerRuntimeId, 'runtimeIdentity.workerRuntimeId') }
+}
 export type DemandDelegation = DemandDelegationIntent & {
   preparedAt: number
   /** Owner-captured standards retain the meaning of late, old-version reports. */
   capturedCriteria: DemandCriterion[]
   /** Only the verified association to an original Core dispatch, not delivery. */
   linkedAt?: number
+  runtimeIdentity?: DemandDelegationRuntimeIdentity
   report?: DemandDelegationReport
   collection?: DemandDelegationCollection
   attention?: DemandDelegationAttention
@@ -150,7 +157,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
     .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'report', 'collection', 'attention'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -160,6 +167,8 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
   })
   if (capturedCriteria.length !== intent.criterionIds.length || new Set(capturedCriteria.map(item => item.id)).size !== capturedCriteria.length ||
     capturedCriteria.some(item => !intent.criterionIds.includes(item.id))) throw new Error('delegation captured standards differ from its original criteria')
+  const runtimeIdentity = data.runtimeIdentity === undefined ? undefined : parseDemandDelegationRuntimeIdentity(data.runtimeIdentity)
+  if (runtimeIdentity && data.linkedAt === undefined) throw new Error('delegation Runtime identities lack their verified source association')
   let report: DemandDelegationReport | undefined
   if (data.report !== undefined) {
     const item = record(data.report, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding', 'submittedAt', 'recovery'], ['recovery'])
@@ -187,6 +196,7 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
   }
   return { ...intent, capturedCriteria, preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
     ...(data.linkedAt === undefined ? {} : { linkedAt: positive(data.linkedAt, 'delegation.linkedAt') }),
+    ...(runtimeIdentity ? { runtimeIdentity } : {}),
     ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }), ...(attention === undefined ? {} : { attention }) }
 }
 export function validateDemandDelegationReport(intent: DemandDelegationIntent, report: DemandDelegationReportInput): void {

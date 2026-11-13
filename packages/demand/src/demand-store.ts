@@ -1,7 +1,7 @@
 import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
 import { assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
-import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
+import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
@@ -748,7 +748,7 @@ export class DemandStore {
       const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
-        if (original.author.kind !== author.kind || original.author.id !== author.id) this.rejectDelegation('This plan revision operation belongs to another author.')
+        if (original.author.kind !== author.kind || original.author.id !== author.id || original.author.runtimeId !== author.runtimeId || original.author.hostId !== author.hostId) this.rejectDelegation('This plan revision operation belongs to another author.')
         return { unchanged: demand }
       }
       if ((current?.revision ?? 0) !== revision.expectedRevision)
@@ -780,7 +780,7 @@ export class DemandStore {
         const { reviewer: before, reviewedAt: _time, ...saved } = original
         const ownerHost = demand.delegations?.find(entry => entry.operationId === review.delegationOperationId)?.hostId
         if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id ||
-            (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost))
+            (before.runtimeId !== reviewer.runtimeId || (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost)))
           this.rejectDelegation('This review operation was already recorded with a different verdict or reviewer.')
         return { unchanged: demand }
       }
@@ -789,8 +789,11 @@ export class DemandStore {
       if (!projection.delegation || projection.delegation.operationId !== review.delegationOperationId)
         this.rejectDelegation('A review must judge the node\'s current attempt.')
       if (projection.state !== 'review') this.rejectDelegation(`Plan node ${review.nodeId} is ${projection.state}; only a reported attempt can be reviewed.`)
+      if (reviewer.kind === 'agent' && projection.delegation.runtimeIdentity && !reviewer.runtimeId)
+        this.rejectDelegation('The reviewer Runtime is not yet confirmed for this signed delegation. Keep the original work and review evidence.')
       if (reviewer.kind === 'agent' && reviewer.id === projection.delegation.workerAgentSessionId &&
-          (reviewer.hostId ?? projection.delegation.hostId) === delegationWorkerHostId(projection.delegation))
+          (projection.delegation.runtimeIdentity ? reviewer.runtimeId === projection.delegation.runtimeIdentity.workerRuntimeId
+            : (reviewer.hostId ?? projection.delegation.hostId) === delegationWorkerHostId(projection.delegation)))
         this.rejectDelegation('The executor of a node cannot review its own work.')
       const now = Date.now()
       plan.reviews = [...plan.reviews, { ...clone(review), reviewer, reviewedAt: now }]
@@ -812,13 +815,19 @@ export class DemandStore {
   }
 
   /** Call only after Main has verified this exact source envelope through Core. */
-  async linkDelegation(id: string, operationId: string, sourceMessageId: string, actorSessionId: string): Promise<DemandReceipt> {
+  async linkDelegation(id: string, operationId: string, sourceMessageId: string, actorSessionId: string, verifiedRuntimeIdentity?: DemandDelegationRuntimeIdentity): Promise<DemandReceipt> {
+    const runtimeIdentity = verifiedRuntimeIdentity === undefined ? undefined : parseDemandDelegationRuntimeIdentity(verifiedRuntimeIdentity)
     return this.mutate('delegation.link', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, operationId)
       if (entry.sourceMessageId !== sourceMessageId || actorSessionId !== entry.ownerAgentSessionId && actorSessionId !== demand.supervisorSessionId)
         this.rejectDelegation('The original source message and authenticated owner must match this delegation.')
-      if (entry.linkedAt !== undefined) return { unchanged: demand }
+      if (entry.linkedAt !== undefined) {
+        if (runtimeIdentity && JSON.stringify(entry.runtimeIdentity) !== JSON.stringify(runtimeIdentity))
+          this.rejectDelegation('The original linked Core Runtime identities differ. Keep the original signed source.')
+        return { unchanged: demand }
+      }
       entry.linkedAt = Date.now()
+      if (runtimeIdentity) entry.runtimeIdentity = runtimeIdentity
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, operationId)

@@ -34,7 +34,7 @@ export type GoalPlanReviewInput = {
   check: { command: string; result: string; evidence: string[] }
   note: string
 }
-export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string }
+export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string; runtimeId?: string }
 export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number }
 export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number }
 export type GoalPlan = {
@@ -74,9 +74,10 @@ function identities(value: unknown, label: string): string[] {
   return result
 }
 function actor(value: unknown, label: string): GoalPlanReviewer {
-  const data = object(value, label, ['kind', 'id', 'hostId'], ['hostId'])
+  const data = object(value, label, ['kind', 'id', 'hostId', 'runtimeId'], ['hostId', 'runtimeId'])
   if (data.kind !== 'agent' && data.kind !== 'user' && data.kind !== 'device') throw new Error(`${label}.kind is invalid`)
-  return { kind: data.kind, id: identity(data.id, `${label}.id`), ...(data.hostId === undefined ? {} : { hostId: identity(data.hostId, `${label}.hostId`) }) }
+  return { kind: data.kind, id: identity(data.id, `${label}.id`), ...(data.hostId === undefined ? {} : { hostId: identity(data.hostId, `${label}.hostId`) }),
+    ...(data.runtimeId === undefined ? {} : { runtimeId: identity(data.runtimeId, `${label}.runtimeId`) }) }
 }
 
 export function parseGoalPlanNode(value: unknown): GoalPlanNodeInput {
