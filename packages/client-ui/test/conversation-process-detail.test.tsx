@@ -149,3 +149,29 @@ it('deferred step rows read like eager steps: recorded time, shared source label
   // The captured record has a recorded span, so its row carries the time an eager step shows.
   expect(host.querySelector('[data-deferred-process-id="captured-tool"] .log-row__time')).not.toBeNull()
 })
+
+it('a new deferred version keeps its focused control until blur, then reads the updated original', async () => {
+  const f = await fixture(), { host, render } = surface()
+  const read = vi.fn((anchor: ConversationVersionedAnchor, signal: AbortSignal) => readConversationProcessDetail(f.client, anchor, signal))
+  await render(view(f.snapshot, read))
+  const original = host.querySelector<HTMLButtonElement>('[data-deferred-process-id="captured-tool"] > button')!
+  expect(original).not.toBeNull()
+  await act(async () => original.focus())
+  expect(document.activeElement).toBe(original)
+  await f.store.applyTimelineMutation({ type: 'update', agentSessionId: f.session.agentSessionId, itemId: 'captured-tool',
+    updatedAt: 1002, toolOutput: 'Original tool completed with the final retained output' })
+  const next = consumeConversationWindowPage(await f.client.readConversationChanges({ ...f.ref, processDetails: 'deferred',
+    checkpoint: f.snapshot.window.checkpoint, view: f.snapshot.window.view! }))
+  if (next.kind !== 'complete') throw Error('Updated original deferred frame must complete')
+  await render(view(next.snapshot, read))
+  expect(original.isConnected, 'A focused deferred control must survive its pending remount').toBe(true)
+  expect(document.activeElement).toBe(original)
+  expect(read).not.toHaveBeenCalled()
+  await act(async () => original.blur())
+  await eventually(() => expect(host.querySelector('[data-deferred-process-id="captured-tool"] > button')).not.toBe(original))
+  await click(host, '[data-deferred-process-id="captured-tool"] > button')
+  await eventually(() => expect(host.textContent).toContain('final retained output'))
+  const record = next.snapshot.units.flatMap(unit => unit.records).find(record => record.reference?.source.recordId === 'captured-tool')!
+  expect(read.mock.calls[0]![0].revision).toBe(record.revision)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
