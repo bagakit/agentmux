@@ -27,13 +27,18 @@ async function click(label: string) {
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 })
 }
 async function shot(name: string, width: number, height: number) {
-  window.setContentSize(width, height); await settle()
+  window.setContentSize(width, height)
+  await until(async () => await evaluate(`(()=>{const i=document.querySelector('img'),a=i.parentElement.getBoundingClientRect();return Math.abs(a.height-a.width*i.naturalHeight/i.naturalWidth)<=2})()`), 'normalized reference window image proportion')
+  await settle()
   const file = name + '.png', pixels = await window.webContents.capturePage()
   await writeFile(join(out, file), pixels.toPNG())
-  const layout = await evaluate(`(()=>{const r=document.querySelector('img').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollWidth:document.body.scrollWidth,imageHeight:r.height,buttons:[...document.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {name:b.textContent.trim(),left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}})()`)
-  assert.ok(layout.scrollWidth <= layout.width && layout.imageHeight > 100, 'actual narrow pin keeps its image and action area')
-  assert.ok(layout.buttons.every((b: any) => b.left >= 0 && b.right <= layout.width && b.top >= 0 && b.bottom <= layout.height), 'every actual pin action remains inside its own window')
+  const layout = await evaluate(`(()=>{const image=document.querySelector('img'),r=image.getBoundingClientRect(),area=image.parentElement.getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollWidth:document.body.scrollWidth,imageHeight:r.height,objectFit:getComputedStyle(image).objectFit,image:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},area:{left:area.left,right:area.right,top:area.top,bottom:area.bottom},buttons:[...document.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {name:b.textContent.trim(),left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}})()`)
   screenshots.push({ file, appearance, contentSize: window.getContentSize(), layout })
+  assert.ok(layout.scrollWidth <= layout.width && layout.imageHeight > 100, 'actual narrow pin keeps its image and action area')
+  assert.equal(layout.objectFit, 'contain', 'the reference preserves the complete source image proportion')
+  assert.ok(layout.image.left >= layout.area.left && layout.image.right <= layout.area.right && layout.image.top >= layout.area.top && layout.image.bottom <= layout.area.bottom, 'the complete source image fits inside its own visible reference area')
+  assert.ok(Math.abs((layout.area.bottom - layout.area.top) - (layout.area.right - layout.area.left) * 360 / 640) <= 2, 'the resized reference removes empty space while preserving the source proportion')
+  assert.ok(layout.buttons.every((b: any) => b.left >= 0 && b.right <= layout.width && b.top >= 0 && b.bottom <= layout.height), 'every actual pin action remains inside its own window')
 }
 async function command(action: string, input: unknown) {
   return await new Promise<{ code: number | null; stdout: string; stderr: string }>((done, reject) => {
@@ -54,7 +59,7 @@ async function open(operationId: string, image: ReturnType<typeof pngFromBytes>)
   }, 'the exact production pin document')
   window.webContents.debugger.attach('1.3')
   await until(async () => await evaluate('document.querySelector("img")?.naturalWidth>0'), 'decoded production PinView')
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotPin).sort()'), ['close', 'copy', 'load', 'save'])
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotPin).sort()'), ['close', 'copy', 'layout', 'load', 'save'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full workbench bridge is absent')
   assert.equal(window.isAlwaysOnTop(), true)
   return { input, result, window }

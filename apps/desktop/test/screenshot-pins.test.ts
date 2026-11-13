@@ -17,7 +17,7 @@ vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   return {
     nativeTheme: { shouldUseDarkColors: true },
-    screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: -100, y: 0, width: 1200, height: 900 } }) },
+    screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: -100, y: 0, width: 1200, height: 900 } }), getDisplayMatching: () => ({ workArea: { x: -100, y: 0, width: 1200, height: 900 } }) },
     nativeImage: { createFromBuffer: (bytes: Buffer) => ({ isEmpty: () => false, getSize: () => ({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }) }) },
     dialog: { showSaveDialog: async () => { native.saveCalls++; return { canceled: native.savePath === null, filePath: native.savePath } } },
     ipcMain: { handle: (channel: string, handler: (...args: any[]) => Promise<any>) => native.handlers.set(channel, handler), removeHandler: (channel: string) => native.handlers.delete(channel) },
@@ -26,9 +26,14 @@ vi.mock('electron', async () => {
       finishLoad?: () => void
       webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn() })
       showInactive = vi.fn(); closeCalls = 0
+      size: [number, number]
+      getBounds() { return { ...this.options, width: this.size[0], height: this.size[1] } }
+      getContentSize() { return this.size }
+      setContentSize = vi.fn((width: number, height: number) => { this.size = [width, height] })
+      setAspectRatio = vi.fn()
       loadFile = vi.fn(async () => { if (native.deferLoad) await new Promise<void>(done => { this.finishLoad = done }); this.emit('ready-to-show') })
       loadURL = this.loadFile
-      constructor(readonly options: any) { super(); native.windows.push(this) }
+      constructor(readonly options: any) { super(); this.size = [options.width, options.height]; native.windows.push(this) }
       isDestroyed() { return this.dead }
       close() { this.closeCalls++; if (!native.deferClose) this.destroy() }
       destroy() { if (this.dead) return; this.dead = true; this.emit('closed') }
@@ -120,6 +125,21 @@ it('refuses another frame or pin before disclosing pixels or copying them', asyn
   await expect(first.invoke('load', undefined, { ...first.event, senderFrame: {} })).rejects.toThrow('original window')
   await expect(first.invoke('copy', { pinId: second.result.pinId, operationId: 'wrong-target' })).rejects.toThrow('original pinned image')
   await expect(first.invoke('load', undefined, { sender: {}, senderFrame: {} })).rejects.toThrow('original window')
+  expect(copies).not.toHaveBeenCalled()
+})
+
+it('layout accepts only finite geometry from this exact pin and leaves its original effect intact', async () => {
+  const first = await open()
+  await first.invoke('layout', { pinId: first.result.pinId, chromeHeight: 62 })
+  expect(first.window.setAspectRatio).toHaveBeenCalledWith(1, { width: 0, height: 62 })
+  expect(first.window.setContentSize).toHaveBeenCalledWith(260, 322)
+  for (const chromeHeight of [NaN, Infinity, -1, '62']) {
+    await expect(first.invoke('layout', { pinId: first.result.pinId, chromeHeight })).rejects.toThrow('finite control height')
+  }
+  await expect(first.invoke('layout', { pinId: 'another-pin', chromeHeight: 62 })).rejects.toThrow('original pinned image')
+  await expect(first.invoke('layout', { pinId: first.result.pinId, chromeHeight: 62 }, { ...first.event, senderFrame: {} })).rejects.toThrow('original window')
+  expect(first.window.setContentSize).toHaveBeenCalledTimes(1)
+  expect(await owner.call('image.inspect', { hostId: 'local', operationId: 'original-pin' }, context)).toEqual(first.result)
   expect(copies).not.toHaveBeenCalled()
 })
 

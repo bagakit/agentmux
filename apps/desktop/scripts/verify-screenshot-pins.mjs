@@ -17,7 +17,8 @@ const mutations = [
   { id: 'original-effect', from: 'recordedOperation: operation ? structuredClone(operation) : null', to: 'recordedOperation: operation ? { ...structuredClone(operation), effect: pin?.window.isDestroyed() ? "closed" : operation.effect } : null', expected: 'closes only the exact target' },
   { id: 'exact-frame', from: ' && event.senderFrame === item.window.webContents.mainFrame', to: '', expected: 'refuses another frame or pin' },
   { id: 'dispose-await', from: "if (this.disposed) throw new AgentMuxError('The original image presentation owner closed before this action. Retain the original operation.', 'CONTROL_UNAVAILABLE')", to: 'void 0', expected: 'dispose during authority stage 2' },
-  { id: 'closed-receipt', from: "await new Promise<void>(resolve => { pin.window.once('closed', resolve); pin.window.close() })", to: 'pin.window.close()', expected: 'close acknowledgement waits' }
+  { id: 'closed-receipt', from: "await new Promise<void>(resolve => { pin.window.once('closed', resolve); pin.window.close() })", to: 'pin.window.close()', expected: 'close acknowledgement waits' },
+  { id: 'finite-layout', from: "if (typeof params.chromeHeight !== 'number' || !Number.isFinite(params.chromeHeight) || params.chromeHeight < 0)", to: 'if (false)', expected: 'layout accepts only finite geometry' }
 ]
 await mkdir(resolve('.local/screenshot-pins'), { recursive: true })
 const out = await mkdtemp(resolve('.local/screenshot-pins/run-'))
@@ -53,7 +54,7 @@ async function test(label, mutation) {
   const result = await command(label, process.execPath, [resolve('node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/screenshot-pins.config.mts', '--reporter=json', '--outputFile=' + json],
     { SCREENSHOT_PINS_LOADED: loaded, SCREENSHOT_PINS_MUTATION: mutation ? JSON.stringify(mutation) : '' })
   const report = JSON.parse(await readFile(json, 'utf8')), assertions = report.testResults.flatMap(file => file.assertionResults)
-  assert.ok(assertions.length >= 10 && assertions.every(test => ['passed', 'failed'].includes(test.status)), label + ': nonempty executed consumer assertions required')
+  assert.ok(assertions.length >= 11 && assertions.every(test => ['passed', 'failed'].includes(test.status)), label + ': nonempty executed consumer assertions required')
   for (const file of report.testResults) assert.equal(file.message, '', label + ': collection failure cannot kill a behavior mutation')
   assert.doesNotMatch(result.log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/)
   const rows = (await readFile(loaded, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
