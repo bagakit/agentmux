@@ -1,6 +1,6 @@
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
 import { describe, expect, it } from 'vitest'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxError } from '@agentmux/core'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { APP_APPEARANCE_DEFAULT, APP_APPEARANCE_IDS } from '../src/shared/contracts.js'
 
@@ -98,4 +98,32 @@ describe('Main Settings owner', () => {
     expect(f.runtime.prepare).not.toHaveBeenCalled()
     expect(f.publish).not.toHaveBeenCalled()
   })
+})
+
+// One unreadable owner fact must not take away every other setting from a broad read. The key that
+// could not be read is named as an issue; asked by name, its own failure is still the answer.
+const unreadable = { inspect: async () => { throw new AgentMuxError('The Notes location record could not be read.', 'NOTES_LOCATION_UNREADABLE') }, change: async () => { throw new Error('not used') } }
+const readable = { inspect: async () => ({ directory: '/notes/home' }), change: async () => { throw new Error('not used') } } as never
+
+it('returns every scalar setting and names notes.directory as an issue when the Notes location cannot be read', async () => {
+  const { owner } = await configOwnerFixture()
+  const healthy = await executeSettingsControl({ ...envelope, operation: 'settings.get' }, owner, readable)
+  const result = await executeSettingsControl({ ...envelope, operation: 'settings.get' }, owner, unreadable as never)
+  if (result.operation !== 'settings.get' || healthy.operation !== 'settings.get') throw new Error('Expected settings.get')
+  expect(result.entries).toEqual(healthy.entries.filter(entry => entry.key !== 'notes.directory'))
+  expect(result.entries.length).toBeGreaterThan(10)
+  expect(result.issues).toEqual([{ key: 'notes.directory', code: 'NOTES_LOCATION_UNREADABLE', message: expect.stringContaining('The Notes location record could not be read.') }])
+  const notes = await executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'notes' }, owner, unreadable as never)
+  if (notes.operation !== 'settings.get') throw new Error('Expected settings.get')
+  expect(notes.entries.map(entry => entry.key)).toEqual(['notes.fontSize', 'notes.contentWidth'])
+  expect(notes.issues?.map(issue => issue.key)).toEqual(['notes.directory'])
+  // An unrelated target never touches the Notes owner.
+  const appearance = await executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'appearance' }, owner, unreadable as never)
+  expect(appearance).not.toHaveProperty('issues')
+})
+
+it('still fails a read that names notes.directory, with the original error', async () => {
+  const { owner } = await configOwnerFixture()
+  await expect(executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'notes.directory' }, owner, unreadable as never))
+    .rejects.toMatchObject({ code: 'NOTES_LOCATION_UNREADABLE' })
 })

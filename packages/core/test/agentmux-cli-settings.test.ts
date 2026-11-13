@@ -38,6 +38,8 @@ describe('settings CLI over the public Control socket', () => {
         const selected = request.target === undefined || request.target === '' || request.target === 'client'
           ? entries : entries.filter(({ key }) => key === request.target)
         if (selected.length === 0) throw new AgentMuxError('Unsupported setting target.', 'UNSUPPORTED_SETTING')
+        if (request.target === 'client') return { operation: request.operation, entries: selected, partial: true,
+          issues: [{ key: 'client.directory', code: 'NOTES_LOCATION_UNREADABLE', message: 'The directory could not be read.' }] }
         return { operation: request.operation, entries: selected, partial: true }
       }
       if (request.operation === 'settings.set') {
@@ -82,6 +84,13 @@ describe('settings CLI over the public Control socket', () => {
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'settings.get' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'settings.get', target: 'client.copy' }
     ])
+  })
+
+  it('carries a key the owner could not read as a named issue beside the readable entries', async () => {
+    const read = await run(['settings', 'inspect', 'client'])
+    expect(read.code).toBe(0)
+    expect(JSON.parse(read.stdout).result).toEqual({ entries: initial, partial: true,
+      issues: [{ key: 'client.directory', code: 'NOTES_LOCATION_UNREADABLE', message: 'The directory could not be read.' }] })
   })
 
   it('sets through the owner and reports the subsequent committed facts', async () => {
