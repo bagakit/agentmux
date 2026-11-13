@@ -26,13 +26,15 @@ export function assertA2aReferenceUserReading(reading, recipient, nativeSource, 
   assert.equal(original.record.admission.intent.prompt, notification.wire)
   assert.equal(original.record.admission.intent.message.a2aNotificationId, notification.key.submissionId)
   assert.equal(original.record.admission.intent.message.systemContext, notification.wire)
-  assert.deepEqual(reading.history.map(page => page.source), ['captured', 'native'])
-  for (const page of reading.history) {
+  for (const receipt of reading.history) assert.equal(receipt.ok, true, 'Original history IPC read must succeed: ' + JSON.stringify(receipt))
+  const history = reading.history.map(receipt => receipt.value)
+  assert.deepEqual(history.map(page => page.source), ['captured', 'native'])
+  for (const page of history) {
     assert.equal(page.hostId, 'local'); assert.equal(page.agentSessionId, recipient.agentSessionId)
     assert.equal(page.kind, 'user-message'); assert.ok(Array.isArray(page.userMessages))
     assert.ok(['available', 'empty'].includes(page.availability)); assert.equal(page.scan.complete, true)
   }
-  assert.deepEqual(reading.history[1].nativeSource, nativeSource)
+  assert.deepEqual(history[1].nativeSource, nativeSource)
   assert.equal(reading.view.busy, 'false'); assert.ok(reading.view.busyTransitions.includes('true'))
   assert.equal(reading.view.inputScope, JSON.stringify(['local', recipient.agentSessionId]))
   assert.equal(reading.view.sourceCount, 2)

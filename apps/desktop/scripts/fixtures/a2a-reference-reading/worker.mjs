@@ -161,6 +161,7 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
       inputScope:p.querySelector('[data-input-mailbox-scope]')?.dataset.inputMailboxScope,sourceCount:p.querySelectorAll('.input-history__sources > div').length,
       coverage:[...p.querySelectorAll('.input-history__coverage')].map(n=>n.textContent),errors:[...p.querySelectorAll('.input-mailbox > .input-history__notice,.input-history__sources [role="status"],.composer-mailbox__source-notice')].map(n=>n.textContent)}}})()`)
   const nativeSource = contributions.find(record => record.original.kind === 'native').reference.source
+  facts.reading.userReading = userReading
   assertA2aReferenceUserReading(userReading, recipient, { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId }, { key, wire })
   const userPage = userReading.view.text
   assert.ok(!userPage.includes(messageId)); assert.ok(!userPage.includes(body)); assert.ok(!userPage.includes(key.submissionId))
