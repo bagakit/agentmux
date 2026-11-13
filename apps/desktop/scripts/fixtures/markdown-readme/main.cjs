@@ -124,6 +124,15 @@ app.whenReady().then(async () => { try {
     await evaluate(`filePreviewProbe.theme(${JSON.stringify(theme)})`); await paint()
     await scrollTo('h1', 24); await frame(`elements-alerts-${theme}`, { theme, document: 'elements.md' })
     await scrollTo('details.md-details', 24); await frame(`elements-details-cards-${theme}`, { theme, document: 'elements.md' })
+    await scrollTo('h2', 24)
+    await wait(`['120 by 30 preview','Height-only 30 preview'].every(alt=>{const image=${preview}.querySelector('img[alt="'+alt+'"]');return image?.complete && image.naturalWidth>0})`)
+    await paint()
+    const sizes = await evaluate(`['120 by 30 preview','Height-only 30 preview'].map(alt=>{const image=${preview}.querySelector('img[alt="'+alt+'"]');const r=image.getBoundingClientRect();return {alt,width:r.width,height:r.height}})`)
+    assert.equal(sizes.length, 2)
+    assert.ok(Math.abs(sizes[0].width - 120) < 0.1, 'The real local image port honors authored width')
+    for (const image of sizes) assert.ok(Math.abs(image.height - 30) < 0.1, 'The real local image port honors authored height')
+    report.facts['elements.md'].sizedImages = sizes
+    await frame(`elements-sized-images-${theme}`, { theme, document: 'elements.md' })
   }
   // Conversation density: the same README HTML in an Agent reply and a user message, normal and narrow.
   for (const [width, theme] of [[760, 'dark'], [420, 'light']]) {

@@ -23,6 +23,9 @@ try {
   for (const file of ['README.md', 'README.zh-CN.md']) await copyFile(join(root, file), join(workspace, file))
   // README constructs the root files do not use yet: other alert types, details, inline marks, a failing badge.
   await copyFile(join(fixture, 'elements.md'), join(workspace, 'elements.md'))
+  for (const file of ['README.md', 'README.zh-CN.md', 'apps/desktop/scripts/fixtures/markdown-readme/elements.md', 'apps/desktop/scripts/fixtures/markdown-readme/main.cjs']) {
+    receipt.sourceHashes[file] = sha(await readFile(join(root, file)))
+  }
   await cp(join(root, 'docs/assets/readme'), join(workspace, 'docs/assets/readme'), { recursive: true })
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     plugins: [{ name: 'candidate-source-binding', enforce: 'pre', async generateBundle() {
