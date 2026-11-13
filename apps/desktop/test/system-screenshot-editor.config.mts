@@ -24,6 +24,6 @@ export default defineConfig({
       JSON.stringify({ file, original: createHash('sha256').update(source).digest('hex'), consumed: createHash('sha256').update(changed).digest('hex'), mutation: mutated ? mutation.id : null }) + '\n')
     return changed
   } }],
-  test: { include: ['apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
+  test: { include: ['apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/global-screenshot-integration.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
     passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 10000 }
 })

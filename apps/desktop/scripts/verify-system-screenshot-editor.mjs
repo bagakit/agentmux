@@ -9,13 +9,25 @@ import { tmpdir } from 'node:os'
 assert.equal(process.argv.length, 2, 'This bounded verification has no optional skipped slices')
 const root = process.cwd(), require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const source = 'apps/desktop/src/main/system-screenshot-editor.ts', surface = 'apps/desktop/src/main/capture-surface.ts'
+const source = 'apps/desktop/src/main/system-screenshot-editor.ts', surface = 'apps/desktop/src/main/capture-surface.ts', producer = 'apps/desktop/src/main/screen-capture.ts'
 const sha = value => createHash('sha256').update(value).digest('hex')
-const sources = { [source]: await readFile(source, 'utf8'), [surface]: await readFile(surface, 'utf8') }
+const sources = { [source]: await readFile(source, 'utf8'), [surface]: await readFile(surface, 'utf8'), [producer]: await readFile(producer, 'utf8') }
 const mutations = [
   { id: 'exact-window', from: 'const request = this.requests.get(event.sender)', to: 'const request = this.requests.values().next().value', expected: 'rejects another window and an embedded frame' },
   { id: 'original-request', from: 'params?.requestId !== request.input.requestId', to: 'false', expected: 'refuses stale request identities' },
-  { id: 'failed-delivery-retains-editor', from: "return { status: 'failed', message: message(error) }", to: "request.window.close(); return { status: 'failed', message: message(error) }", expected: 'keeps the original editor after a failed delivery' },
+  { id: 'failed-delivery-retains-editor', from: "    } catch (error) {\n      return { status: 'failed', message: message(error) }", to: "    } catch (error) {\n      request.window.close(); return { status: 'failed', message: message(error) }", expected: 'keeps the original editor after a failed delivery' },
+  // Retake: only for a region capture, the same editor back on cancel, closed once the new capture takes over, kept on failure.
+  { id: 'retake-without-region', from: "      if (!request.retake) throw new Error('This image did not come from a region capture", to: "      if (false) throw new Error('This image did not come from a region capture", expected: 'a failed retake keeps it' },
+  { id: 'retake-cancel-closes', from: "      if (state === 'cancelled') return { status: 'cancelled' } satisfies SystemScreenshotEditorRetake", to: "      if (state === 'cancelled') { request.window.close(); return { status: 'cancelled' } satisfies SystemScreenshotEditorRetake }", expected: 'Retake keeps the same editor on a cancelled capture' },
+  { id: 'retake-completion-keeps', from: '      if (!request.window.isDestroyed()) request.window.close()\n      return { status: \'completed\' } satisfies SystemScreenshotEditorRetake', to: "      return { status: 'completed' } satisfies SystemScreenshotEditorRetake", expected: 'closes it once the new capture takes over' },
+  { id: 'retake-expanded-keeps', from: "      if (state === 'cancelled') return", to: "      if (state !== 'completed') return", expected: 'a retake that moves into a new window editor closes this one' },
+  { id: 'retake-failure-closes', from: "      catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorRetake }", to: "      catch (error) { request.window.close(); return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorRetake }", expected: 'a failed retake keeps it' },
+  { id: 'retake-not-offered', from: "...(retake ? { retakable: true } : {})", to: '...{}', expected: 'Retake keeps the same editor on a cancelled capture' },
+  // The retake's consumer: the same delivery and draft, the next editor, and focus back to the editor that asked.
+  { id: 'retake-same-draft', source: producer, from: 'const outcome = await this.ports.present({ attachToDraft, expandable: true, returnFocus: returnFocus && !retaking, complete })', to: 'const outcome = await this.ports.present({ attachToDraft: attachToDraft && !retaking, expandable: true, returnFocus: returnFocus && !retaking, complete })', expected: 'Retake from the window editor captures again for the same draft' },
+  { id: 'retake-focus-leaves-editor', source: producer, from: 'returnFocus: returnFocus && !retaking, complete })', to: 'returnFocus, complete })', expected: 'gives focus back to that editor' },
+  { id: 'retake-editor-not-retakable', source: producer, from: '...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })', to: '...(returnFocus ? { returnFocus } : {}), ...(retaking ? {} : { retake: () => surface(true) }) })', expected: 'a retake that expands again replaces the old editor' },
+  { id: 'retake-capture-ends-early', source: producer, from: '        for (let current = held.editor; current; current = held.editor === current ? null : held.editor) await current', to: '        if (held.editor) await held.editor', expected: 'a retake that expands again replaces the old editor' },
   { id: 'original-operation-receipt', from: 'if (existing) return await existing', to: 'if (false) return await existing', expected: 'returns the original completion receipt for duplicate operation IDs' },
   { id: 'late-delivery-isolation', from: 'request.settle()\n      return', to: 'for (const current of this.requests.values()) current.window.close()\n      request.settle()\n      return', expected: 'an earlier late result never closes the newer editor' },
   { id: 'validated-output-png', from: '    pngBytes(params.image!)\n    request.pending = true', to: '    void params.image\n    request.pending = true', expected: 'refuses stale request identities' },
@@ -62,6 +74,7 @@ const inputs = [source, surface, 'apps/desktop/src/shared/capture-surface.ts', '
   'apps/desktop/src/renderer/src/components/image-annotation/AnnotationToolbar.tsx', 'apps/desktop/test/system-screenshot-editor.test.ts',
   ...['drawing-model.ts', 'drawing-renderer.ts', 'geometry.ts', 'selection-geometry.ts', 'view.ts', 'canvas-render.ts', 'AnnotationNotes.tsx', 'AnnotationOriginalMenu.tsx', 'types.ts']
     .map(name => 'apps/desktop/src/renderer/src/components/image-annotation/' + name),
+  'apps/desktop/test/global-screenshot-integration.test.ts', 'apps/desktop/src/main/global-screenshot.ts',
   'apps/desktop/src/renderer/src/components/RovingToolbar.tsx', 'apps/desktop/src/main/theme-bootstrap.ts', 'packages/native-desktop/src/image.ts',
   'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts',
   'apps/desktop/test/system-screenshot-editor.config.mts', 'apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts',
@@ -145,9 +158,9 @@ try {
   assert.equal(receipt.native.passed, true)
   assert.equal(receipt.native.cases.length, 5)
   assert.equal(receipt.native.screenshots.length, 10)
-  const producerSource = 'apps/desktop/src/main/screen-capture.ts', producer = await readFile(producerSource, 'utf8')
-  assert.equal(producer.split('originalDelivered = true').length, 2, 'Mutate the exact original delivery completion once')
-  const replayed = producer.replace('originalDelivered = true', 'originalDelivered = false'), mutantOut = join(out, 'draft-redelivery')
+  const producerSource = producer, producerText = sources[producer]
+  assert.equal(producerText.split('originalDelivered = true').length, 2, 'Mutate the exact original delivery completion once')
+  const replayed = producerText.replace('originalDelivered = true', 'originalDelivered = false'), mutantOut = join(out, 'draft-redelivery')
   await mkdir(mutantOut)
   let producerConsumed = false
   await build({ ...mainOptions, plugins: [{ name: 'exact-original-draft-redelivery-counterexample', setup(builder) {
@@ -162,7 +175,7 @@ try {
   const counterexample = JSON.parse(await readFile(join(mutantOut, 'native.json'), 'utf8'))
   assert.equal(negative.code, 1); assert.equal(counterexample.passed, false); assert.ok(counterexample.cases.length > 0)
   assert.match(counterexample.failure?.message ?? '', /later clipboard image creates no second draft file/)
-  receipt.nativeCaptureMutation = { source: producerSource, original: sha(producer), consumed: sha(replayed),
+  receipt.nativeCaptureMutation = { source: producerSource, original: sha(producerText), consumed: sha(replayed),
     result: 'owning-AssertionRED', failure: counterexample.failure.message, receipt: join(mutantOut, 'native.json') }
   for (const [file, hash] of Object.entries(hashes)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
   receipt.passed = true
