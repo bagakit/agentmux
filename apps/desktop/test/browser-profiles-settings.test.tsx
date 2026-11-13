@@ -155,3 +155,54 @@ describe('Settings › Browser Profiles', () => {
     expect(document.activeElement).toBe($('input[aria-label="Profile name"]'))
   })
 })
+
+describe('Settings › Browser Profiles deletion', () => {
+  const deleteItem = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.startsWith('Delete Profile'))!
+  async function openMore() {
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label^="More for "]')!
+    await act(async () => {
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+  }
+
+  it('names why a default or in-use Profile cannot be deleted before anyone clicks', async () => {
+    await openMore()
+    expect(deleteItem().textContent).toContain('The default Profile can’t be deleted')
+    expect(deleteItem().hasAttribute('data-disabled')).toBe(true)
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    await select('Northwind client')
+    await openMore()
+    expect(deleteItem().textContent).toContain('Used by 2 Browsers')
+    expect(deleteItem().hasAttribute('data-disabled')).toBe(true)
+  })
+
+  it('an unused Profile confirms in place, sends only its own approval, and Cancel sends nothing', async () => {
+    store.tabs = {}
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await select('Northwind client')
+    await openMore()
+    await act(async () => deleteItem().click())
+    const confirm = container.querySelector('[role="alertdialog"]')!
+    expect(confirm.textContent).toContain('Delete Northwind client? Its sign-ins, cookies, site data and address history are removed for good.')
+    await act(async () => confirm.querySelector<HTMLButtonElement>('.small-button')!.click())
+    expect(port.deleteProfile).not.toHaveBeenCalled()
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull()
+    await openMore()
+    await act(async () => deleteItem().click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
+    expect(port.deleteProfile).toHaveBeenCalledExactlyOnceWith('p-client', { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'p-client' })
+  })
+
+  it('keeps the Profile and Main’s reason when Main refuses the delete', async () => {
+    store.tabs = {}
+    port.deleteProfile.mockRejectedValueOnce(new Error('Browser Profile is still used by the saved Browser "Release notes". Open it and switch it to another Profile, or close it, then delete again.'))
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await select('Northwind client')
+    await openMore()
+    await act(async () => deleteItem().click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
+    expect(container.querySelector('.browser-profile-editor__name')?.textContent).toBe('Northwind client')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('saved Browser "Release notes"')
+  })
+})

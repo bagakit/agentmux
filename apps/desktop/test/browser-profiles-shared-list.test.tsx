@@ -20,6 +20,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: {
 
 import { createBrowserProfilesStore } from '../src/renderer/src/lib/browser-profiles'
 import { BrowserProfilesPanel } from '../src/renderer/src/components/BrowserProfilesPanel'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 
 const personal: BrowserProfileSummary = { id: 'p-personal', label: 'Personal', createdAt: 1, isDefault: true, source: null }
 const client: BrowserProfileSummary = { id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }
@@ -105,12 +106,15 @@ describe('Browser tools panel renders the shared list', () => {
   })
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 
-  it('two panels show a Profile created elsewhere without reading again', async () => {
+  it('two panels show a Profile created elsewhere without reading again, and link to Settings', async () => {
+    const open = vi.fn()
     port.readProfiles.mockResolvedValue({ revision: 1, profiles: [personal] })
-    await act(async () => root.render(<><BrowserProfilesPanel browsers={[]} allBrowsers={[]} /><BrowserProfilesPanel browsers={[]} allBrowsers={[]} /></>))
-    expect(container.querySelectorAll('[aria-label="Delete Northwind client"]')).toHaveLength(0)
+    await act(async () => root.render(<SettingsNavigation.Provider value={{ open } as never}><BrowserProfilesPanel /><BrowserProfilesPanel /></SettingsNavigation.Provider>))
+    expect(container.querySelectorAll('.browser-profiles__marks li')).toHaveLength(2)
     await act(async () => port.push({ revision: 2, profiles: [personal, client] }))
-    expect(container.querySelectorAll('[aria-label="Delete Northwind client"]')).toHaveLength(2)
+    expect(container.querySelectorAll('.browser-profiles__marks li')).toHaveLength(4)
     expect(port.readProfiles).toHaveBeenCalledTimes(1)
+    await act(async () => container.querySelector<HTMLButtonElement>('.browser-profiles__manage')!.click())
+    expect(open).toHaveBeenCalledWith('browser-profiles')
   })
 })
