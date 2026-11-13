@@ -7,6 +7,7 @@
   "types": "./src/index.ts",
   "exports": {
     "./agent-icons/*": "./src/assets/agent-icons/*",
+    "./brand/*": "./brand/*",
     "./input": {
       "types": "./src/input/index.ts",
       "browser": "./src/input/index.ts",
@@ -62,6 +63,7 @@
     }
   },
   "files": [
+    "brand",
     "dist",
     "src"
   ],
