@@ -280,12 +280,14 @@ enum NativeDesktopOperations {
         guard NativeImageLimits.permits(width: width, height: height) else {
             throw ProviderError.coded("image_too_large", "display pixels exceed the host image allocation limit")
         }
-        guard let display = content.displays.first(where: { $0.displayID == id }) else {
+        guard let match = content.displays.first(where: { $0.displayID == id }) else {
             throw ProviderError.coded("display_not_found", "the exact display disappeared before its pixels were captured")
         }
-        guard display.frame == frame else {
+        guard match.frame == frame else {
             throw ProviderError.coded("display_configuration_changed", "the display bounds changed before its pixels were captured")
         }
+        // SCDisplay is an immutable description the producer only reads; the SDK does not mark it Sendable.
+        nonisolated(unsafe) let display = match
         let image = try BlockingAsync.run(timeout: 10) {
             defer { withExtendedLifetime(ownership) {} }
             let configuration = SCStreamConfiguration()
