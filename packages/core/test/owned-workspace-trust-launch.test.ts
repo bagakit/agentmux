@@ -26,7 +26,7 @@ type Internals = {
 let root: string, home: string, project: string, store: AgentMuxFileAgentSessionStore
 let client: AgentMuxClient, events: AgentMuxClientEvent[], start: ReturnType<typeof vi.fn>, startPrepared: ReturnType<typeof vi.fn>
 let trust: ReturnType<typeof vi.fn<(context: AgentWorkspaceTrustContext) => Promise<AgentWorkspaceTrustReceipt>>>
-let owned: ReturnType<typeof vi.fn<(workspacePath: string) => Promise<boolean>>>
+let owned: ReturnType<typeof vi.fn<() => Promise<readonly string[]>>>
 let status: (runId: string) => CtxmuxAdapterRun
 
 function run(workspacePath: string, runId = 'private-run', state: CtxmuxAdapterRun['state'] = { type: 'running' }): CtxmuxAdapterRun {
@@ -45,11 +45,11 @@ beforeEach(async () => {
   trust = vi.fn(async (context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt> =>
     ({ status: 'trusted', trustKey: context.workspacePath, configPath: join(root, '.claude.json'), code: 'CLAUDE_TRUST_RECORDED' }))
   // The Host's directory-identity owner answers for exactly one home.
-  owned = vi.fn(async (workspacePath: string) => workspacePath === home)
+  owned = vi.fn(async (): Promise<readonly string[]> => [home])
   const claude = new AgentProviderRegistry().get('claude')
   const provider: AgentProvider = { ...claude, prepareOwnedWorkspaceTrust: context => trust(context) }
   store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
-  client = new AgentMuxClient({ store, providers: [provider], ownedWorkspaceHome: workspacePath => owned(workspacePath) })
+  client = new AgentMuxClient({ store, providers: [provider], ownedWorkspaceRoots: () => owned() })
   const inner = client as unknown as Internals
   await inner.registry.load('local')
   inner.connected = true
@@ -86,7 +86,7 @@ const create = (workspacePath: string, id = 'private-session') => client.createA
 describe('Core pre-trusts a Host-confirmed home before creating a Provider there', () => {
   it('prepares trust for the confirmed Mote home before the Run starts', async () => {
     await create(home)
-    expect(owned).toHaveBeenCalledWith(home)
+    expect(owned).toHaveBeenCalled()
     expect(trust).toHaveBeenCalledTimes(1)
     expect(trust.mock.calls[0]![0]).toMatchObject({ workspacePath: home })
     expect(trust.mock.invocationCallOrder[0]!).toBeLessThan(start.mock.invocationCallOrder[0]!)
@@ -95,7 +95,7 @@ describe('Core pre-trusts a Host-confirmed home before creating a Provider there
 
   it('leaves a folder the Host does not confirm to the Provider\'s own prompt', async () => {
     await create(project)
-    expect(owned).toHaveBeenCalledWith(project)
+    expect(owned).toHaveBeenCalled()
     expect(trust).not.toHaveBeenCalled()
     expect(start).toHaveBeenCalledTimes(1)
   })
@@ -142,7 +142,7 @@ describe('Core pre-trusts a Host-confirmed home before resuming a Provider there
   it('prepares trust for the confirmed home before the prepared Start is dispatched', async () => {
     const resumed = await resume(home)
     expect(resumed).toMatchObject({ agentSessionId: 'resumed-session', run: { runId: 'resumed-run' }, nativeHandle: { sessionId: 'native-original' } })
-    expect(owned).toHaveBeenCalledWith(home)
+    expect(owned).toHaveBeenCalled()
     expect(trust).toHaveBeenCalledTimes(1)
     expect(trust.mock.calls[0]![0]).toMatchObject({ workspacePath: home })
     expect(startPrepared).toHaveBeenCalledTimes(1)

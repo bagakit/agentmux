@@ -6,7 +6,7 @@ import * as core from '@agentmux/core'
 import type { AgentProvider, AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '@agentmux/core'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { startAgentMuxHost } from '../src/host.js'
-import { moteOwnedWorkspaceHome, ScratchTopics } from '../src/mote-resources.js'
+import { moteOwnedWorkspaceHome, moteOwnedWorkspaceRoots, ScratchTopics } from '../src/mote-resources.js'
 import { scratchTopicDirectoryName } from '../src/mote-topic-model.js'
 
 /**
@@ -73,6 +73,45 @@ describe('Host-owned workspace homes', () => {
     expect(await owns(mote)).toBe(false)
     await write({ workspaces: [] })
     expect(await owns(mote)).toBe(false)
+  })
+})
+
+describe('moteOwnedWorkspaceRoots returns the resolved paths of all Host-owned homes', () => {
+  let cleanupRoot: string, config: string, scratch: string, workspace: { id: string; hostId: string; path: string }
+  let mote: string, topic: string
+  const write = (value: unknown) => writeFile(config, JSON.stringify(value))
+  const roots = () => moteOwnedWorkspaceRoots(config)
+  beforeEach(async () => {
+    const physical = await realpath(await mkdtemp(join(tmpdir(), 'amx-owned-roots-')))
+    await mkdir(join(physical, 'volume', 'scratch'), { recursive: true })
+    const root = join(physical, 'home'); await mkdir(root)
+    await symlink(join(physical, 'volume'), join(root, '.agentmux'))
+    cleanupRoot = physical; config = join(root, 'config.json')
+    scratch = join(root, '.agentmux', 'scratch')
+    workspace = { id: '__scratch__', hostId: 'local', path: scratch }
+    const topics = new ScratchTopics()
+    mote = (await topics.ensureMote(workspace, 'launcher:leader')).physicalDirectoryPath!
+    topic = (await topics.ensure(workspace, 'view:owned-topic', undefined, false)).physicalDirectoryPath!
+    await write({ workspaces: [workspace] })
+  })
+  afterEach(async () => { await rm(cleanupRoot, { recursive: true, force: true }) })
+
+  it('includes both a Mote home and a Topic home', async () => {
+    const result = await roots()
+    expect(result).toContain(mote)
+    expect(result).toContain(topic)
+  })
+
+  it('returns an empty array when the Scratch workspace is remote or absent', async () => {
+    await write({ workspaces: [{ ...workspace, hostId: 'remote' }] })
+    expect(await roots()).toEqual([])
+    await write({ workspaces: [] })
+    expect(await roots()).toEqual([])
+  })
+
+  it('returns an empty array when the configuration is missing', async () => {
+    const missing = config + '.missing'
+    expect(await moteOwnedWorkspaceRoots(missing)).toEqual([])
   })
 })
 
