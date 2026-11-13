@@ -1,8 +1,15 @@
 # AgentMux connectors
 
-`@agentmux/connectors` is an optional executing-Host package. Core consumes its
+`@agentmux/connectors` is an optional package for the connector hosting Host, which
+is distinct from a bound Agent's execution Host ([Host residency](../../docs/design/behavior/conversation-mode.md#host-常驻托管)).
+Core consumes its
 `ConnectionPort` through `AgentMuxRpcServiceOptions.connections`; Core has no
 reverse dependency on this package, an adapter SDK, Electron or React.
+
+How to operate connections is owned by the [connection guide](../core/guides/modules/connection.md)
+(`amux connection --skill`); exact commands, inputs and options come from the running
+version's `amux connection --help`. The commands and JSON below illustrate this
+package's owners and consumers; they are not a separate command reference.
 
 ## Conversation capability ownership
 
