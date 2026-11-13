@@ -84,7 +84,10 @@ const specifications = {
   },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
-    mutations: [{ label: 'capture-no-crop-delivery-allowed', source: component + 'ImageAnnotationEditor.tsx',
+    mutations: [{ label: 'capture-expand-external-link', source: component + 'CaptureToolbar.tsx',
+      find: "ExpandIcon = icon('layout.expand')", replace: "ExpandIcon = icon('action.open-external')", test: capture,
+      consumer: 'draws every capture control with its own glyph, and Expand editor with the expand glyph rather than an external link', failure: /expanding stays in the editor/ },
+    { label: 'capture-no-crop-delivery-allowed', source: component + 'ImageAnnotationEditor.tsx',
       find: '    if (capture && !documentState.crop) return\n', replace: '', test: capture,
       consumer: 'delivers only a selection: Enter and Command C do nothing before one exists', failure: /no selection means no delivery/ },
     { label: 'capture-toolbar-visible-while-dragging', source: component + 'ImageAnnotationEditor.tsx',

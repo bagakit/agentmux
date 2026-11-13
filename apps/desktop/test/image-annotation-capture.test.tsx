@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SEMANTIC_ICON_CATALOG, type SemanticIconName } from '@agentmux/client-ui/icons'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
 import { captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
@@ -181,6 +182,16 @@ describe('capture image annotation', () => {
     expect(button(bar()!, 'Rectangle').getAttribute('aria-pressed'), 'pressing the current mark again leaves it').toBe('false')
     await key('e')
     expect(button(bar()!, 'Ellipse').getAttribute('aria-pressed'), 'a plain letter selects its mark').toBe('true')
+  })
+
+  it('draws every capture control with its own glyph, and Expand editor with the expand glyph rather than an external link', async () => {
+    const { bar } = await selected()
+    const meaning = (name: string) => button(bar()!, name).querySelector('[data-semantic-icon]')!.getAttribute('data-semantic-icon') as SemanticIconName
+    expect(meaning('Expand editor'), 'expanding stays in the editor; it opens nothing outside').toBe('layout.expand')
+    const glyphs = [...bar()!.querySelectorAll('button [data-semantic-icon]')].map(icon => SEMANTIC_ICON_CATALOG[icon.getAttribute('data-semantic-icon') as SemanticIconName].glyph)
+    expect(glyphs.length, 'the toolbar draws its icons').toBeGreaterThan(5)
+    expect(glyphs.filter((glyph, index) => glyphs.indexOf(glyph) !== index), 'no two capture controls share one glyph').toEqual([])
+    expect(SEMANTIC_ICON_CATALOG[meaning('Magnifier')].glyph, 'the magnifier is not the window editor zoom').not.toBe(SEMANTIC_ICON_CATALOG['action.zoom-in'].glyph)
   })
 
   it('double-click inside the selection with the selection tool is the primary delivery', async () => {
