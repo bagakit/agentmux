@@ -17,6 +17,7 @@ import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-docu
 import { installScreenshotAttachmentReceiver } from '../src/renderer/src/lib/screenshot-attachment'
 import { GlobalScreenshot } from '../src/main/global-screenshot'
 import { ScreenCapture } from '../src/main/screen-capture'
+import { presentSelection } from './capture-surface.fixture'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
 import { readPastedImage } from '../src/main/pasted-image-read'
@@ -42,7 +43,8 @@ function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
   const handlers = new Map<string, (...args: any[]) => any>()
   const clipboard = vi.fn(async () => {}), reportIssue = vi.fn()
   const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: clipboard }
-  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), reportIssue })
+  // captureScreenshot is the person's choice on the capture surface: Done on a selection, or Esc.
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), present: presentSelection(() => captureScreenshot()), reportIssue })
   registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   const saved = vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))
@@ -95,7 +97,7 @@ it.each([false, true])('the real %s focused message input pins its bookmark and 
   const { clipboard, reportIssue } = connect(native)
   const { editor, id } = await mount(launcher)
   const { pending } = await begin()
-  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
+  expect(native).toHaveBeenCalledExactlyOnceWith()
   await act(async () => { editor.commands.insertContentAt(1, 'new '); editor.commands.setTextSelection(editor.state.doc.content.size - 1) })
   const outside = document.createElement('button'); document.body.append(outside); externalControls.push(outside)
   await act(async () => outside.focus())
