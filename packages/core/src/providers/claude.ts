@@ -21,6 +21,7 @@ import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
+import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CLAUDE_LAUNCH_OPTIONS } from './launch-options.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
@@ -84,6 +85,14 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
   nativeTurnIdKeys: ['turnId'],
   nativeSessionTransition: (eventName, payload) => eventName === 'SessionStart' &&
     ['startup', 'resume', 'clear', 'compact', 'fork'].includes(String(payload.source)),
+  // `claude --resume <id>` reports SessionStart with source "resume" and the resumed session_id
+  // (observed on a real run; a fresh start reports "startup"). Core only accepts it from the exact
+  // main subject of the current authenticated recovery Run, so a late or foreign event cannot count.
+  continuity(eventName, payload) {
+    const nativeSessionId = normalizeNativeSessionId(payload.session_id)
+    return eventName === 'SessionStart' && payload.hook_event_name === 'SessionStart' && payload.source === 'resume' && nativeSessionId
+      ? { kind: 'context-restored', nativeSessionId } : undefined
+  },
   // 事件名随负载到达：Claude 一族的 stdin 负载带 `hook_event_name`（这也是 claude/codex 的配置都不带
   // `--event` 却照样能用的原因——事件名不在配置侧、在投递侧）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
