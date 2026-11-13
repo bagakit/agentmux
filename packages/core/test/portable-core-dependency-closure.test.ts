@@ -1,11 +1,15 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createPortableCoreArtifact } from '../src/portable-core-artifact.js'
+vi.mock('node:fs/promises', async original => {
+  const fs = await original<typeof import('node:fs/promises')>()
+  return { ...fs, cp: vi.fn(fs.cp) }
+})
 
 const exec = promisify(execFile)
 const sha = (text: string) => createHash('sha256').update(text).digest('hex')
@@ -18,7 +22,8 @@ async function put(path: string, text: string) {
 async function coreFixture(root: string, dependencies?: Record<string, string>) {
   const packageRoot = join(root, 'package')
   await mkdir(join(packageRoot, 'bin'), { recursive: true })
-  await put(join(packageRoot, 'package.json'), JSON.stringify({ name: '@agentmux/core', version: '0.0.0', dependencies }))
+  await put(join(packageRoot, 'package.json'), JSON.stringify({ name: '@agentmux/core', type: 'module', version: '0.0.0', dependencies }))
+  await put(join(packageRoot, 'dist', 'runtime-owner-protocol.js'), 'export const AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION = 7\n')
   await put(join(packageRoot, 'release.json'), JSON.stringify({ sourceCommit: 'private-source-fixture' }))
   await put(join(packageRoot, 'dist', 'agentmux.js'), 'export const privateFixture = true\n')
   const native = 'private Native artifact bytes; not executable\n'
@@ -35,6 +40,25 @@ async function coreFixture(root: string, dependencies?: Record<string, string>) 
   return packageRoot
 }
 
+it('candidate source metadata stays bound to materialized bytes when the source package changes after copying', async () => {
+  const root = await mkdtemp(fixturePath('tmp/amux-portable-source-'))
+  try {
+    const packageRoot = await coreFixture(root, {})
+    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises'), originalCopy = fs.cp
+    const copy = vi.mocked(cp).mockImplementation(async (...args) => {
+      await originalCopy(...args)
+      if (args[0] === join(packageRoot, 'release.json')) await writeFile(join(packageRoot, 'release.json'), JSON.stringify({ sourceCommit: 'changed-after-copy' }))
+    })
+    try {
+      const artifact = await createPortableCoreArtifact(join(root, 'artifact'), packageRoot)
+      expect(artifact.sourceCommit).toBe('private-source-fixture')
+      const release = artifact.files.find(file => file.path === 'release.json')!
+      expect(release.sha256).toBe(sha(await readFile(join(root, 'artifact/core/release.json'), 'utf8')))
+      expect(JSON.parse(await readFile(join(packageRoot, 'release.json'), 'utf8')).sourceCommit).toBe('changed-after-copy')
+    } finally { copy.mockImplementation(originalCopy) }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 it.each([undefined, {}])('omits non-Core development node_modules when runtime dependencies are %j', async dependencies => {
   const root = await mkdtemp(fixturePath("tmp/amux-portable-leaf-"))
   try {
@@ -46,6 +70,8 @@ it.each([undefined, {}])('omits non-Core development node_modules when runtime d
     await put(join(packageRoot, developmentPath), 'development dependency must not ship\n')
 
     const artifact = await createPortableCoreArtifact(join(root, 'artifact'), packageRoot)
+    expect(artifact).toMatchObject({ version: '0.0.0', ownerProtocolVersion: 7, requiredNativeProtocolVersion: 1, sourceCommit: 'private-source-fixture' })
+    expect(artifact.files).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'dist/runtime-owner-protocol.js' })]))
     const files = artifact.files.map(file => file.path)
     expect(files).toContain('node_modules/portable-leaf/runtime.js')
     expect(files.filter(file => file.startsWith('src/'))).toEqual(['src/ctxmux-artifact-contract.json'])

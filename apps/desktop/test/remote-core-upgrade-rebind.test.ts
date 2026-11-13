@@ -58,7 +58,7 @@ async function fixture() {
 
 it('reconciles the completed upgrade through the actual configuration transaction without replacing its live consumer', async () => {
   const f = await fixture()
-  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'completed', operationId: 'original-upgrade' })
+  expect(await f.upgrades.reconnect(host, 'original-upgrade')).toMatchObject({ status: 'completed', operationId: 'original-upgrade' })
   expect(f.config().hosts[0]).toEqual(next)
   expect(f.runtime.rpcClients()[0]!.client).toBe(f.original)
   expect(f.original.setRemoteCommand).toHaveBeenCalledExactlyOnceWith(next.remoteCommand)
@@ -105,7 +105,7 @@ it.each(['unverified', 'different-runtime', 'failed'] as const)('keeps the origi
     if (failure === 'different-runtime') client.identity.runtimeId = 'other-runtime'
     if (failure === 'failed') client.connectRuntime.mockRejectedValueOnce(new Error('Transport unavailable'))
   })
-  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'unknown', stage: 'verifying' })
+  expect(await f.upgrades.reconnect(host, 'original-upgrade')).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'unconfirmed' } })
   expect(f.save).not.toHaveBeenCalled(); expect(f.config().hosts[0]).toEqual(host)
   expect(f.original.setRemoteCommand).not.toHaveBeenCalled(); expect(f.original.dispose).not.toHaveBeenCalled()
   expect(f.clients[1]!.dispose).toHaveBeenCalledOnce()
@@ -116,11 +116,12 @@ it.each(['unverified', 'different-runtime', 'failed'] as const)('keeps the origi
 it('does not update the active launcher when durable save fails and retries only original operation reconciliation', async () => {
   const f = await fixture()
   f.save.mockRejectedValueOnce(new Error('Disk unavailable'))
-  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'unknown' })
+  expect(await f.upgrades.reconnect(host, 'original-upgrade')).toMatchObject({ status: 'completed', connectionAdoption: { state: 'unconfirmed' } })
+  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'completed', connectionAdoption: { state: 'unconfirmed', code: 'CORE_CONNECTION_UNCONFIRMED' } })
   expect(f.config().hosts[0]).toEqual(host); expect(f.original.setRemoteCommand).not.toHaveBeenCalled()
   expect(f.original.dispose).not.toHaveBeenCalled()
-  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'completed' })
-  expect(f.manager.inspect).toHaveBeenCalledTimes(2); expect(f.manager.upgrade).not.toHaveBeenCalled()
+  expect(await f.upgrades.reconnect(host, 'original-upgrade')).toMatchObject({ status: 'completed' })
+  expect(f.manager.inspect).toHaveBeenCalledTimes(3); expect(f.manager.upgrade).not.toHaveBeenCalled()
 })
 
 it.each(['hostname', 'user', 'port', 'identityFile', 'remoteSocketPath'] as const)('repairs a bound %s route alongside the launcher change while retaining its consumer', async field => {
@@ -177,4 +178,15 @@ it.each(['signature', 'consumer'] as const)('rejects a stale prepared launcher %
   expect(() => f.runtime.validatePreparation(prepared)).toThrow()
   expect(f.original.setRemoteCommand).not.toHaveBeenCalled()
   expect(replacement.setRemoteCommand).not.toHaveBeenCalled()
+})
+
+it('pure inspect preserves the completed deployment without adopting config or probing a new client', async () => {
+  const f = await fixture()
+  expect(await f.upgrades.inspect(host, 'original-upgrade')).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'pending-confirmation' } })
+  expect(f.config().hosts[0]).toEqual(host)
+  expect(f.save).not.toHaveBeenCalled(); expect(f.connector).toHaveBeenCalledTimes(1)
+  expect(f.original.setRemoteCommand).not.toHaveBeenCalled(); expect(f.original.dispose).not.toHaveBeenCalled()
+  expect(f.manager.upgrade).not.toHaveBeenCalled()
+  await f.runtime.write(control, 'original healthy input after pure inspect', 'user')
+  expect(f.original.writeAgent).toHaveBeenCalledOnce()
 })

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeExpected, type AgentMuxControlRequest } from '@agentmux/core'
 import { rpcControlRequest, parseRpcControlResult } from '../src/rpc-business-codec.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { ConfigOwner } from '../../../apps/desktop/src/main/config-owner.js'
 import { DEFAULT_CONFIG } from '../../../apps/desktop/src/main/config-store.js'
 import { SettingsHostsUpgradeOwner } from '../../../apps/desktop/src/main/settings-hosts-upgrade.js'
@@ -27,7 +29,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'core-upgrade-public-')); seen.splice(0)
   let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [saved] }
   const owner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value } })
-  const manager = new RemoteCoreUpgradeManager({ stateDirectory: join(root, 'upgrade'), artifact: async () => ({ digest, sourceCommit: 'source', protocolVersion: 22,
+  const manager = new RemoteCoreUpgradeManager({ stateDirectory: join(root, 'upgrade'), artifact: async () => ({ digest, sourceCommit: 'source', version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22,
     nativeBuild: 'native-source', nativeDigest: 'b'.repeat(64), archivePath: join(root, 'unused'), archiveDigest: 'c'.repeat(64), files: [] }) })
   const runtime = { checkHost: vi.fn(async () => ({ detail: 'ordinary check' })) }
   const upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime)
@@ -64,7 +66,7 @@ it('refuses malformed admissions and wrong-object replies before accepting any u
   expect(() => rpcControlRequest('settings.hosts.upgrade', { id: 'local', operationId: 'one', expected: { ...expected, processId: '111' } })).toThrow()
   expect(() => rpcControlRequest('settings.hosts.upgrade', { id: 'local', operationId: 'one', expected: { ...expected, nativeStartTicks: 'unknown' } })).toThrow()
   expect(() => rpcControlRequest('settings.hosts.upgrade-inspect', { id: 'local', operationId: 'one', expected })).toThrow()
-  const check = { input: saved, candidate: { digest, sourceCommit: 'source', protocolVersion: 22 }, eligible: false, reason: 'unverified', detail: 'Original Runtime observation is unavailable.' }
+  const check = { input: saved, current: { state: 'unavailable', observedAt: 1, code: 'UNAVAILABLE', detail: 'Original facts unknown' }, candidate: { digest, sourceCommit: 'source', version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22 }, eligible: false, reason: 'unverified', detail: 'Original Runtime observation is unavailable.' }
   expect(() => parseRpcControlResult('settings.hosts.upgrade-check', { check: { ...check, input: { ...saved, id: 'other' } } }, { id: 'local' })).toThrow('another target')
   expect(() => parseRpcControlResult('settings.hosts.upgrade-check', { check: { ...check, eligible: true } }, { id: 'local' })).toThrow()
   const receipt = { input: saved, operationId: 'other-operation', expected, status: 'failed', stage: 'preparing', detail: 'Refused before mutation.', updatedAt: reshapeFixtureEpoch(0, 0, 1) }
@@ -102,15 +104,15 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
   const receipt = { input: host, expected: pinned, operationId: 'original-update', status: 'completed' as const,
     stage: 'completed' as const, detail: 'Core is updated.', remoteCommand: fixturePath("candidate/core"), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   const deploy = vi.fn(async () => receipt), inspect = vi.fn(async () => receipt)
-  const manager = { upgrade: deploy, inspect, check: vi.fn(async (input: unknown) => ({ input, candidate: { digest, sourceCommit: null, protocolVersion: 22 },
-    eligible: true, reason: 'ready', expected: pinned, detail: 'Core is qualified.', latestOperation: receipt })) } as unknown as RemoteCoreUpgradeManager
+  const manager = { upgrade: deploy, inspect, check: vi.fn(async (input: unknown) => ({ input, candidate: { digest, sourceCommit: null, version: null, ownerProtocolVersion: 2, requiredNativeProtocolVersion: 22 },
+    current: { state: 'available', observedAt: 1, version: '0.1.0', sourceCommit: 'original', deploymentDigest: 'd'.repeat(64), ownerProtocolVersion: 1, runtimeId: pinned.runtimeId, ownerInstanceId: pinned.ownerInstanceId, processId: pinned.processId, native: { instanceId: pinned.nativeInstanceId, buildId: 'native', protocolVersion: 22 } }, eligible: true, reason: 'ready', expected: pinned, detail: 'Core is qualified.', latestOperation: receipt })) } as unknown as RemoteCoreUpgradeManager
   let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [host] }
   const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value as typeof config } })
   const connection = vi.fn(async (): Promise<{ detail: string }> => { throw new Error('fresh handshake could not be confirmed') })
   const upgrades = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection })
-  expect(await upgrades.check(host)).toMatchObject({ eligible: false, reason: 'unverified', latestOperation: { status: 'unknown' } })
+  expect(await upgrades.check(host)).toMatchObject({ eligible: true, reason: 'ready', latestOperation: { status: 'completed', connectionAdoption: { state: 'pending-confirmation' } } })
   expect(connection).not.toHaveBeenCalled()
-  expect(await upgrades.upgrade(host, pinned, receipt.operationId)).toMatchObject({ status: 'unknown', stage: 'verifying' })
+  expect(await upgrades.upgrade(host, pinned, receipt.operationId)).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'unconfirmed' } })
   expect(config.hosts[0].remoteCommand).toBe(receipt.remoteCommand)
   // Maintenance qualifies the old owner even when the new ordinary SDK cannot
   // handshake with it. Only upgrade/inspect claims a fresh client connection.
@@ -123,12 +125,60 @@ it('keeps maintenance eligibility independent of ordinary handshake while reconc
     { ...check, eligible: false, expected: undefined, reason: 'unverified', latestOperation: { ...receipt, status: 'unknown' } }
   ]) {
     vi.mocked(manager.check).mockResolvedValueOnce(rejected as Awaited<ReturnType<RemoteCoreUpgradeManager['check']>>)
-    expect(await restarted.check(config.hosts[0])).toEqual(rejected)
+    expect(await restarted.check(config.hosts[0])).toMatchObject(rejected)
   }
   expect(connection).toHaveBeenCalledTimes(1)
-  expect(await restarted.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'unknown', stage: 'verifying' })
+  expect(await restarted.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'completed', stage: 'completed', connectionAdoption: { state: 'pending-confirmation' } })
   expect(receipt.status).toBe('completed')
   connection.mockImplementation(async () => ({ detail: 'fresh connection confirmed' }))
-  expect((await restarted.inspect(config.hosts[0], receipt.operationId))?.status).toBe('completed')
+  expect((await restarted.reconnect(config.hosts[0], receipt.operationId))?.connectionAdoption?.state).toBe('connected')
   expect(inspect).toHaveBeenCalledTimes(2); expect(deploy).toHaveBeenCalledTimes(1)
+})
+
+it('actual compiled CLI keeps inspect pure and explicitly reconnects the original completed deployment without redeploying', async () => {
+  await server.stop()
+  const host = { id: 'remote', kind: 'ssh' as const, label: 'Remote', hostname: 'private.fixture', runtimeId: 'original', remoteCommand: fixturePath('original/core'), remoteSocketPath: fixturePath('original/control.sock') }
+  const original = { input: host, operationId: 'retained-deployment', expected: { ...expected, targetDigest: remoteCoreUpgradeTargetDigest(host) }, status: 'completed' as const,
+    stage: 'completed' as const, remoteCommand: fixturePath('candidate/core'), detail: 'Original deployment completed.', updatedAt: 1 }
+  const inspect = vi.fn(async () => original), deploy = vi.fn()
+  const manager = { inspect, upgrade: deploy } as unknown as RemoteCoreUpgradeManager
+  let config = { ...structuredClone(DEFAULT_CONFIG), hosts: [host] }
+  const save = vi.fn(async (value: typeof config) => value)
+  const owner = new ConfigOwner({ read: () => config, save: save as never, publish: value => { config = value as typeof config } })
+  const check = vi.fn(async () => ({ detail: 'Connection verified' }))
+  const runtime = { checkHost: check }, upgrades = new SettingsHostsUpgradeOwner(manager, owner, runtime)
+  server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: async request => executeSettingsHostsControl(request as never, owner, runtime, upgrades) })
+  await server.start()
+  const env = objectCliEnvironment(root)
+  const reading = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-inspect', 'remote', '--operation-id', original.operationId], env)
+  expect(reading.code, reading.stderr).toBe(0)
+  expect(JSON.parse(reading.stdout).result.receipt).toMatchObject({ status: 'completed', connectionAdoption: { state: 'pending-confirmation' } })
+  expect(save).not.toHaveBeenCalled(); expect(check).not.toHaveBeenCalled()
+  const applied = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-reconnect', 'remote', '--operation-id', original.operationId], env)
+  expect(applied.code, applied.stderr).toBe(0)
+  expect(JSON.parse(applied.stdout).result.receipt).toMatchObject({ operationId: original.operationId, status: 'completed', connectionAdoption: { state: 'connected' } })
+  expect(config.hosts[0].remoteCommand).toBe(original.remoteCommand)
+  expect(save).toHaveBeenCalledOnce(); expect(check).toHaveBeenCalledOnce(); expect(inspect).toHaveBeenCalledTimes(2); expect(deploy).not.toHaveBeenCalled()
+})
+
+it('maintenance write authority is preserved before the original forward owner and cannot be forged by managed Agents', async () => {
+  const f = await rpcOwnerFixture()
+  const forward = vi.fn(async () => ({ receipt: null }))
+  const service = new AgentMuxRpcService({ coreClients: f.coreClients, forwardControl: forward as never })
+  try {
+    const input = { id: 'remote', operationId: 'original-operation' }
+    for (const method of ['settings.hosts.upgrade', 'settings.hosts.upgrade-reconnect'] as const) {
+      const params = method === 'settings.hosts.upgrade' ? { ...input, expected } : input
+      await expect(service.call(method, params, { caller: f.credentials, principal: { kind: 'user', id: 'local-user' }, transport: 'unix' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+      await expect(service.call(method, params, {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    }
+    expect(forward).not.toHaveBeenCalled()
+    for (const kind of ['user', 'device'] as const) {
+      await service.call('settings.hosts.upgrade-reconnect', input, { principal: { kind, id: 'approved-' + kind }, transport: kind === 'user' ? 'unix' : 'relay' })
+    }
+    expect(forward).toHaveBeenCalledTimes(2)
+    await service.call('settings.hosts.upgrade-inspect', input, { caller: f.credentials, transport: 'unix' })
+    expect(forward).toHaveBeenCalledTimes(3)
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await service.dispose(); await f.close() }
 })

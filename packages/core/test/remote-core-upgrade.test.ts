@@ -8,6 +8,9 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
 import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY } from '../src/remote-core-upgrade-programs.js'
+import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import type { AgentMuxAgentSession } from '../src/types.js'
 
 const directories: string[] = []
@@ -24,7 +27,7 @@ async function fixture() {
     env: { HOME: fixturePath("scope/home"), PATH: fixturePath("original/bin:/usr/bin"), AGENTMUX_STATE_DIRECTORY: fixturePath("scope/state"), AGENTMUX_RUNTIME_DIRECTORY: fixturePath("scope/runtime"), AGENTMUX_AGENT_SESSION_STORE: fixturePath("scope/state/sessions.json") },
     stateDirectory: fixturePath("scope/state"), runtimeDirectory: fixturePath("scope/runtime"), storePath: fixturePath("scope/state/sessions.json"), nativeSha256: nativeDigest, nativeProcessId: 202, nativeStartTicks: '4321',
     nativeArtifactDirectory: fixturePath('original/core/vendor/ctxmux/linux-x64'), nativeManifestSha256: 'e'.repeat(64), nativeInstanceId: native.instanceId,
-    nativeRuntimeId: 'native-runtime', nativeBuildId: native.buildIdentity, platform: 'linux-x64', deploymentDigest: 'd'.repeat(64) }
+    nativeRuntimeId: 'native-runtime', nativeBuildId: native.buildIdentity, platform: 'linux-x64', deploymentDigest: 'd'.repeat(64), version: '0.1.0', sourceCommit: 'old-source' }
   const sessions = [{ agentSessionId: 'original-session', run: { runId: 'original-run' } }] as AgentMuxAgentSession[]
   let receiptStatus = 'matching', physicalDrift = false
   const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
@@ -36,7 +39,7 @@ async function fixture() {
     capabilities: { 'native.start': 1, 'native.recoverable_input': 1, 'native.recoverable_stop': 1, 'services.persistent_state': 1, 'services.planned_exec_upgrade_continuity': 1 } }
   const maintenance = vi.fn(async params => {
     expect(params.runtimeId).toBe('runtime'); expect(params.socket).toBe(host.remoteSocketPath)
-    const projectedOwner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId, processId: owner.processId, ctxmux: native }
+    const projectedOwner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId, processId: owner.processId, protocolVersion: owner.protocolVersion, ctxmux: native }
     if (params.shutdown) {
       expect(params.shutdown).toMatchObject({ ownerInstanceId: owner.ownerInstanceId, processId: owner.processId, sourceDigest: launch.deploymentDigest })
       effects.push('stop-original-core'); if (shutdownUnknown) throw new Error('shutdown response lost')
@@ -79,12 +82,14 @@ async function fixture() {
     } else throw new Error('Unexpected program')
     return { stdout: JSON.stringify(output), stderr: '', exitCode: 0 }
   })
-  const options = { stateDirectory: root, artifact: async () => ({ digest, sourceCommit: 'source', protocolVersion: PROTOCOL_VERSION, nativeBuild: 'native-source', nativeDigest, archivePath,
+  const options = { stateDirectory: root, artifact: async () => ({ digest, sourceCommit: 'source', version: '0.1.0', ownerProtocolVersion: 2, requiredNativeProtocolVersion: PROTOCOL_VERSION, nativeBuild: 'native-source', nativeDigest, archivePath,
     archiveDigest: createHash('sha256').update(await readFile(archivePath)).digest('hex'), files: [] }),
     executionHost: () => ({ id: 'original', kind: 'ssh' as const, label: 'Original', run, dispose: async () => {} }) }
   const manager = new RemoteCoreUpgradeManager(options)
   return { root, manager, options, effects, native, run, maintenance, sessions, compatibility,
     setReceiptStatus: (status: string) => { receiptStatus = status }, setPhysicalDrift: () => { physicalDrift = true },
+    setOwnerProtocol: (version: number) => { owner = { ...owner, protocolVersion: version as 2 } },
+    setCurrentDigest: (value: string) => { launch = { ...launch, deploymentDigest: value } },
     setStageCommand: (command: string) => { stageCommand = command },
     setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setChangedWhileStaging: () => { changedWhileStaging = true },
     setChangedTerminal: () => { changedTerminal = true }, setNaturalExit: () => { naturalExit = true },
@@ -280,7 +285,7 @@ it('a route alias cannot bypass an unconfirmed operation on the same physical Co
   const alias = { ...host, id: 'second-route', hostname: 'dns-alias.invalid', user: 'another-ssh-account', port: 2222, identityFile: fixturePath("other/identity") }
   const other = new RemoteCoreUpgradeManager(f.options)
   expect((await other.check(alias)).eligible).toBe(false)
-  expect((await other.check(alias)).latestOperation).toBeUndefined()
+  expect((await other.check(alias)).latestOperation).toMatchObject({ operationId: 'original-route', input: { id: host.id } })
   expect((await other.check(alias)).detail).toContain('original-route')
   await expect(other.upgrade(alias, { ...check.expected!, targetDigest: remoteCoreUpgradeTargetDigest(alias) }, 'alias-admission')).rejects.toThrow('original-route')
   expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core'])
@@ -298,4 +303,53 @@ it('refuses the exact remote maintenance when current process changes after publ
   const f = await fixture(); f.setPhysicalDrift()
   const check = await f.manager.check(host)
   expect(check.eligible).toBe(false); expect(check.detail).toContain('process or software changed'); expect(f.effects).toEqual([])
+})
+
+it('observes current version and separate owner/Native protocols despite incompatibility and an uncertain old operation', async () => {
+  const f = await fixture(); f.setOwnerProtocol(1); f.native.protocolVersion = 21
+  const incompatible = await f.manager.check(host)
+  expect(incompatible).toMatchObject({ eligible: false, reason: 'runtime-update-required',
+    current: { state: 'available', version: '0.1.0', sourceCommit: 'old-source', deploymentDigest: 'd'.repeat(64), ownerProtocolVersion: 1, native: { protocolVersion: 21 } },
+    candidate: { version: '0.1.0', sourceCommit: 'source', digest, ownerProtocolVersion: 2, requiredNativeProtocolVersion: PROTOCOL_VERSION } })
+  expect(f.effects).toEqual([])
+  f.native.protocolVersion = PROTOCOL_VERSION
+  const ready = await f.manager.check(host); f.setShutdownUnknown()
+  const original = await f.manager.upgrade(host, ready.expected!, 'old-uncertain')
+  const reading = await f.manager.check(host)
+  expect(reading.current).toMatchObject({ state: 'available', version: '0.1.0', ownerProtocolVersion: 1 })
+  expect(reading.latestOperation).toMatchObject({ operationId: original.operationId, status: 'unknown', candidate: { digest, ownerProtocolVersion: 2 } })
+  expect(reading.eligible).toBe(false)
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core'])
+})
+
+it('reports an identical content deployment as up-to-date and refuses mixed-owner check admissions', async () => {
+  const f = await fixture(), ready = await f.manager.check(host)
+  expect(parseRemoteCoreUpgradeCheck(ready)).toMatchObject({ eligible: true })
+  for (const expected of [{ ...ready.expected!, ownerInstanceId: 'another-core' }, { ...ready.expected!, nativeInstanceId: 'another-native' }, { ...ready.expected!, runtimeId: 'another-runtime' }]) {
+    expect(() => parseRemoteCoreUpgradeCheck({ ...ready, expected })).toThrow()
+  }
+  expect(() => parseRemoteCoreUpgradeCheck({ ...ready, current: { state: 'unavailable', observedAt: 1, code: 'UNAVAILABLE', detail: 'Unknown' } })).toThrow()
+  f.setCurrentDigest(digest)
+  expect(await f.manager.check(host)).toMatchObject({ eligible: false, reason: 'up-to-date', current: { state: 'available', deploymentDigest: digest } })
+  expect(f.effects).toEqual([])
+})
+
+it('public SDK apply and original inspect retain a valid failed receipt when the reviewed candidate changed before admission', async () => {
+  const f = await fixture(), checked = await f.manager.check(host)
+  const replacement = new RemoteCoreUpgradeManager({ ...f.options, artifact: async () => ({ ...await f.options.artifact(), digest: 'f'.repeat(64) }) })
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'candidate-drift.sock'), coreClients: () => [], execute: async request => {
+    if (request.operation === 'settings.hosts.upgrade') return { operation: request.operation, receipt: await replacement.upgrade(host, request.expected, request.requestId) }
+    if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await replacement.inspect(host, request.requestId) }
+    throw new Error('Unexpected private operation')
+  } })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try {
+    const result = await rpc.call('settings.hosts.upgrade', { id: host.id, expected: checked.expected!, operationId: 'reviewed-candidate' })
+    expect(result.receipt).toMatchObject({ status: 'failed', operationId: 'reviewed-candidate', expected: { candidateDigest: digest } })
+    expect(result.receipt?.candidate).toBeUndefined()
+    const original = await rpc.call('settings.hosts.upgrade-inspect', { id: host.id, operationId: 'reviewed-candidate' })
+    expect(original.receipt).toEqual(result.receipt)
+    expect(f.effects).toEqual([])
+  } finally { await rpc.dispose(); await server.stop() }
 })
