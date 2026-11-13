@@ -13,6 +13,7 @@ type SourceFile = { path: string; file: FileHandle; identity: BigIntStats }
 export type NativeSqliteHistoryIdentity = { path: string; dev: string; ino: string }
 const snapshotPath = '/history/store.db'
 // Immutable library code only. Native records and SQLite instances are page-local.
+// Only a successful read is kept; a failed read is retried by the next page.
 let wasmBytes: Promise<Buffer> | undefined
 // The 1.0.0 Base declaration has a stale {size,value} xRead signature. Its
 // shipped JS and the package's SQLiteVFS interface both pass Uint8Array.
@@ -27,6 +28,15 @@ function failure(code: string, message: string, detail?: string): never {
 function unchanged(before: BigIntStats, after: BigIntStats): boolean {
   return before.dev === after.dev && before.ino === after.ino && before.size === after.size &&
     before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs
+}
+
+async function sqliteLibrary(): Promise<Buffer> {
+  const attempt = wasmBytes ??= readFile(createRequire(import.meta.url).resolve('wa-sqlite/dist/wa-sqlite-async.wasm'))
+  try { return await attempt } catch (error) {
+    if (wasmBytes === attempt) wasmBytes = undefined
+    throw new AgentMuxError('The SQLite library for native history could not be loaded. The native source is unchanged; read this page again.',
+      'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', error instanceof Error ? error.message : String(error))
+  }
 }
 
 async function optionalStat(path: string): Promise<BigIntStats | undefined> {
@@ -107,8 +117,7 @@ export class NativeSqliteHistoryReader {
       await reader.addSource(`${path}-wal`, `${snapshotPath}-wal`, true)
       await reader.verifyUnchanged()
       reader.check()
-      wasmBytes ??= readFile(createRequire(import.meta.url).resolve('wa-sqlite/dist/wa-sqlite-async.wasm'))
-      const wasmBinary = await wasmBytes
+      const wasmBinary = await sqliteLibrary()
       reader.check()
       reader.sqlite = SQLite.Factory(await initializeSqlite({ wasmBinary }))
       reader.check()
