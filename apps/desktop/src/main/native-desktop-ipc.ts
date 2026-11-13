@@ -4,12 +4,12 @@ import type { BrowserPng } from '../shared/contracts.js'
 
 /** Existing preload operations use their fixed platform owner; Browser pixels remain independent. */
 export function registerNativeDesktopIpc(ports: {
-  capture(mode?: import('../shared/screenshot-source').ScreenshotCaptureMode): Promise<string | null>
+  capture(mode?: import('../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../shared/screenshot-source').ScreenshotCaptureOptions): Promise<string | null>
   native(): Pick<NativeDesktop, 'captureScreenshot' | 'readClipboardText' | 'writeClipboardText' | 'writeClipboardImage'>
   handle<Args extends unknown[], Result>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>): void
 }): void {
-  ports.handle('ui:captureScreenshot', (event, mode?: import('../shared/screenshot-source').ScreenshotCaptureMode) => {
-    return ports.capture(mode)
+  ports.handle('ui:captureScreenshot', (event, mode?: import('../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../shared/screenshot-source').ScreenshotCaptureOptions) => {
+    return ports.capture(mode, options)
   })
   ports.handle('ui:readClipboardText', event => {
     return ports.native().readClipboardText()

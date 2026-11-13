@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { SCREENSHOT_DELAYS } from '../../../shared/screenshot-countdown'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -88,7 +89,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   loadSkills(): Promise<AgentSkill[]>
   onChooseSkill(skill: AgentSkill): void
   onCommand(text: string, item: ComposerSuggestion): void
-  onCapture?: (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode) => Promise<void>
+  onCapture?: (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../../../shared/screenshot-source').ScreenshotCaptureOptions) => Promise<void>
   runAction(action: () => void | Promise<void>): Promise<void>
 }) {
   const [skills, setSkills] = useState<AgentSkill[]>([])
@@ -110,9 +111,9 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     } finally { if (request === discovery.current) setLoading(false) }
   }
 
-  async function capture(mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode) {
+  async function capture(mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../../../shared/screenshot-source').ScreenshotCaptureOptions) {
     setCapturing(true)
-    try { await onCapture?.(mode) }
+    try { await onCapture?.(mode, options) }
     finally { setCapturing(false) }
   }
 
@@ -160,6 +161,8 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
       <DropdownMenu.Root><DropdownMenu.Trigger className="composer-tool" disabled={disabled || capturing} aria-label="Choose screenshot source" title="Choose screenshot source"><SemanticIcon name="control.select-open" size={11} /></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture()) }}>Screen region</DropdownMenu.Item>
+          {SCREENSHOT_DELAYS.map(delaySeconds => <DropdownMenu.Item key={delaySeconds} onSelect={() => { void runAction(() => capture('selection', { delaySeconds })) }}>Region in {delaySeconds} s</DropdownMenu.Item>)}
+          <DropdownMenu.Separator className="tab-context-menu__separator" />
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture('display')) }}>Entire display…</DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture('window')) }}>Application window…</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal>

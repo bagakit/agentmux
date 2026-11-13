@@ -127,6 +127,7 @@ import { ScreenCapture } from './screen-capture.js'
 import { saveScreenshotPng } from './screenshot-files.js'
 import { ScreenshotPins } from './screenshot-pins.js'
 import { ScreenshotSourcePicker } from './screenshot-source-picker.js'
+import { ScreenshotCountdown } from './screenshot-countdown.js'
 import { ScreenshotOriginalFiles } from './screenshot-original-files.js'
 import { GlobalScreenshot } from './global-screenshot.js'
 import { SystemScreenshotEditor } from './system-screenshot-editor.js'
@@ -1377,6 +1378,7 @@ export async function registerIpc(args: {
       chooseSave: async defaultName => { const choice = await dialog.showSaveDialog(window, { title: 'Save editable original · contains the source image', defaultPath: defaultName, filters: [{ name: 'Editable annotation', extensions: ['json'] }] }); return choice.canceled ? null : choice.filePath ?? null },
       worker: { helperPath: join(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'), workerSource: LOCAL_WORKER_SOURCE }
     }) })
+  const screenshotCountdown = new ScreenshotCountdown(() => config.appearance)
   const screenshotSources = new ScreenshotSourcePicker({ native: getNativeDesktopOwner, appearance: () => config.appearance })
   handleWithEvent('ui:pinScreenshot', async (event, input: import('../shared/screenshot-output').ScreenshotPngExport) => {
     return await pinScreenshot(input.image, input.operationId)
@@ -1397,12 +1399,12 @@ export async function registerIpc(args: {
   }
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,
     edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), reportIssue: reportScreenshotIssue,
-    chooseSource: mode => screenshotSources.choose(mode) })
+    chooseSource: mode => screenshotSources.choose(mode), countdown: seconds => screenshotCountdown.wait(seconds) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
     capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue,
     remindPending: () => { screenshotEditor.notice('Finish or cancel this screenshot first') } })
-  registerNativeDesktopIpc({ capture: mode => screenCapture.capture(true, mode), native: getDesktopNativeUiOwner,
+  registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
@@ -2314,6 +2316,7 @@ export async function registerIpc(args: {
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'screenshot-pins', dispose: () => screenshotPins.dispose() },
       { owner: 'screenshot-sources', dispose: () => screenshotSources.dispose() },
+      { owner: 'screenshot-countdown', dispose: () => screenshotCountdown.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'app-brand-icon', dispose: appBrandIcon.dispose },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },

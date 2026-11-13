@@ -124,7 +124,8 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
       throw cause
     }
   }
-  const capture = (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode) => attachCapture(() => api.ui.captureScreenshot(mode), shortcutKey)
+  const capture = (mode?: import('../../../shared/screenshot-source').ScreenshotCaptureMode, options?: import('../../../shared/screenshot-source').ScreenshotCaptureOptions) =>
+    attachCapture(() => api.ui.captureScreenshot(mode, options), shortcutKey)
   const shortcut = useRef({ key: shortcutKey, enabled: false, document, attachCapture })
   shortcut.current = { key: shortcutKey, enabled: shortcutActive && !disabled && hostId === 'local' && Boolean(document), document, attachCapture }
   const shortcutTarget = useMemo(() => ({ prepare() {

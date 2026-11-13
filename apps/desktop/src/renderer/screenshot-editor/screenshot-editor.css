@@ -33,3 +33,16 @@ body { font-family: var(--font-sans); font-size: var(--fs-body); background: var
 .screenshot-source__issue { font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .screenshot-source__issue button { margin-left: 8px; }
 .screenshot-source footer { color: var(--text-3); font-size: var(--fs-meta); }
+
+/* Delayed capture: a floating digit and Cancel on a transparent, unfocusable window. */
+html:has(.screenshot-countdown), html:has(.screenshot-countdown) body { background: transparent; }
+.screenshot-countdown { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px;
+  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--surface-1) 88%, transparent); backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: var(--hl-strong); color: var(--text); user-select: none; }
+.screenshot-countdown__digit { min-height: 64px; font: 600 60px/1 var(--font-sans); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.screenshot-countdown button { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: var(--wash-2); color: var(--text); font: 500 var(--fs-meta)/1 var(--font-sans); cursor: pointer; }
+.screenshot-countdown button:hover { background: var(--wash-3); }
+.screenshot-countdown button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.screenshot-countdown kbd { color: var(--text-3); font: inherit; font-size: var(--fs-micro); }
+.screenshot-countdown p { margin: 0; color: var(--red); font-size: var(--fs-micro); text-align: center; }

@@ -2,6 +2,8 @@ import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { BrowserPng } from '../shared/contracts.js'
 import type { ScreenshotEditContext } from '../shared/system-screenshot-editor.js'
+import { SCREENSHOT_DELAYS, type ScreenshotDelaySeconds } from '../shared/screenshot-countdown.js'
+import type { ScreenshotCaptureMode, ScreenshotCaptureOptions } from '../shared/screenshot-source.js'
 import { savePastedImage, type PastedImageWriteReceipt } from './pasted-image-write.js'
 
 type Ports = {
@@ -12,6 +14,8 @@ type Ports = {
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, context: ScreenshotEditContext): Promise<void>
   reportIssue(error: unknown): void
   chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
+  /** Shows the countdown; resolves false when the user cancelled it. */
+  countdown?(seconds: ScreenshotDelaySeconds): Promise<boolean>
 }
 
 /** One Desktop capture and delivery owner. Native retains the physical selector's lifetime. */
@@ -19,14 +23,20 @@ export class ScreenCapture {
   private busy = false
   constructor(private readonly ports: Ports) {}
 
-  async capture(attachToDraft: boolean, mode: import('../shared/screenshot-source').ScreenshotCaptureMode = 'selection'): Promise<string | null> {
+  async capture(attachToDraft: boolean, mode: ScreenshotCaptureMode = 'selection', { delaySeconds }: ScreenshotCaptureOptions = {}): Promise<string | null> {
     if (this.busy) throw new Error('A screen capture is already in progress. Finish or cancel that selection or editor, then try again.')
     this.busy = true
     try {
-      // Read before the source picker or selection takes focus.
+      if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
+      if (delaySeconds !== undefined) {
+        if (mode !== 'selection' || !SCREENSHOT_DELAYS.includes(delaySeconds)) throw new Error('A delayed capture is a region capture in 3, 5 or 10 seconds. Your draft is kept.')
+        if (!this.ports.countdown) throw new Error('Delayed capture is unavailable in this host. Region capture and your draft remain available.')
+        if (!await this.ports.countdown(delaySeconds)) return null
+      }
+      // Read after any countdown and before the source picker or selection takes focus: the app in
+      // front at that moment is the one the user is capturing and returns to.
       const returnFocus = !this.ports.appActive()
       const native = this.ports.native()
-      if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
       if (mode !== 'selection' && !this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
       const target = mode === 'selection' ? { mode: 'selection' as const, allowEditing: true } : await this.ports.chooseSource?.(mode)
       if (!target) return null

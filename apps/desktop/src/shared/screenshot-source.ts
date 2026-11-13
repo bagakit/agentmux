@@ -1,6 +1,8 @@
 import type { ThemeBootstrap } from './theme-bootstrap'
 
 export type ScreenshotCaptureMode = 'selection' | 'display' | 'window'
+/** Region capture may wait 3, 5 or 10 seconds so the user can set up the screen first. */
+export type ScreenshotCaptureOptions = { delaySeconds?: import('./screenshot-countdown').ScreenshotDelaySeconds }
 export const SCREENSHOT_SOURCE_CHANNEL = 'screenshot:source'
 export type ScreenshotSourceChoice = { key: string; label: string; detail: string }
 export type ScreenshotSourceInput = { requestId: string; kind: 'display' | 'window'; theme: ThemeBootstrap }
