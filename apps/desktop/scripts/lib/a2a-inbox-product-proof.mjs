@@ -458,7 +458,7 @@ export async function verifyA2aReferenceReadingProductProof(product, { root, tes
   assert.equal(r.rendered.role, 'system'); assert.equal(r.rendered.eventRole, 'notice')
   assert.equal(r.rendered.eventAuthor.kind, 'system'); assert.equal(r.rendered.notificationId, r.key.submissionId)
   assert.equal(r.rendered.originals, 1); assert.equal(r.rendered.primarySystemCards, 0); assert.equal(r.rendered.detailsInitiallyOpen, false)
-  assert.deepEqual(r.rendered.original, { messageId: r.messageId, role: 'agent', relation: 'other-agent', direction: 'outgoing',
+  assert.deepEqual(r.rendered.original, { messageId: r.messageId, role: 'agent', relation: 'other-agent', direction: 'incoming',
     senderId: r.author.agentSessionId, body: envelope.body, decodedReferences: 0 })
   assert.deepEqual(r.originalRecords, noticeUnits[0].item.records.map(record => ({ id: record.id, kind: record.original.kind, original: record.original.item })))
   for (const [copy, text] of [[r.copiedWire, r.wire], [r.copiedBody, envelope.body], [r.copiedConversationBody, envelope.body]]) {
@@ -497,6 +497,7 @@ export async function verifyA2aReferenceReadingProductProof(product, { root, tes
       assert.ok(frame.observed.text.includes('authored-example-message'))
       const g = frame.referenceGeometry
       assert.equal(g.viewport, width); assert.ok(g.width > 150 && g.height > 50 && g.left >= 0 && g.right <= width)
+      assert.ok(g.avatar.left >= g.body.right - 1 && g.avatar.right <= g.right + 1)
       assert.ok(g.scrollWidth <= g.clientWidth + 1)
     }
   }

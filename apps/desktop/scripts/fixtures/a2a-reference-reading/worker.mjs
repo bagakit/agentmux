@@ -75,7 +75,7 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
     detailsInitiallyOpen:n.querySelector('.conversation-a2a-notice__details').open}})()`)
   assert.equal(rendered.role, 'system'); assert.equal(rendered.eventRole, 'notice'); assert.equal(rendered.eventAuthor.kind, 'system')
   assert.equal(rendered.notificationId, key.submissionId); assert.equal(rendered.originals, 1); assert.equal(rendered.primarySystemCards, 0)
-  assert.deepEqual(rendered.original, { messageId, role: 'agent', relation: 'other-agent', direction: 'outgoing', senderId: author.agentSessionId, body, decodedReferences: 0 })
+  assert.deepEqual(rendered.original, { messageId, role: 'agent', relation: 'other-agent', direction: 'incoming', senderId: author.agentSessionId, body, decodedReferences: 0 })
   assert.equal(rendered.detailsInitiallyOpen, false)
   await activate(first.cdp, `${originalCard}.querySelector('[aria-label="Copy message"]')`)
   const copiedConversationBody = await waitFor('exact original message Copy in Conversation', async () => {
@@ -121,8 +121,9 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
         await first.cdp.call('Emulation.setDeviceMetricsOverride', { width, height: 980, deviceScaleFactor: 1, mobile: false })
         await first.cdp.evaluate(`${notification}.scrollIntoView({block:'center'})`)
         await screenshot(first, `reference-conversation-${value}-${size}`, width, 980)
-        const geometry = await first.cdp.evaluate(`(()=>{const n=${originalCard},r=n.getBoundingClientRect();return{left:r.left,right:r.right,width:r.width,height:r.height,scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,viewport:innerWidth}})()`)
+        const geometry = await first.cdp.evaluate(`(()=>{const n=${originalCard},r=n.getBoundingClientRect();const a=n.querySelector('.log-turn__node').getBoundingClientRect(),b=n.querySelector('.log-turn__body').getBoundingClientRect();return{left:r.left,right:r.right,width:r.width,height:r.height,avatar:{left:a.left,right:a.right},body:{left:b.left,right:b.right},scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,viewport:innerWidth}})()`)
         assert.ok(geometry.width > 150 && geometry.height > 50 && geometry.left >= 0 && geometry.right <= geometry.viewport)
+        assert.ok(geometry.avatar.left >= geometry.body.right - 1 && geometry.avatar.right <= geometry.right + 1, 'Other-Agent input keeps its avatar to the right of the body')
         assert.ok(geometry.scrollWidth <= geometry.clientWidth + 1, 'The original Agent message stays inside its reading face')
         facts.frames.at(-1).referenceGeometry = geometry
       }
