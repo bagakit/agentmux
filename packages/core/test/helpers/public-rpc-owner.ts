@@ -38,6 +38,9 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
   const client = new Client({ store })
   const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
+  // The Runtime here is a deterministic port. A real connect would activate a detached ctxmuxd that,
+  // by product contract, outlives its client and so outlives this fixture's private root.
+  inner.kernel.connect = vi.fn(async () => {})
   const cursors = new Map<string, number>()
   const writes = new Map<string, { data: string; startByte: number; endByte: number }>()
   const run = (runId: string): CtxmuxAdapterRun => ({ runId, lifecycleOperationId: null, program: facts.executorId ?? 'codex', args: [], workspacePath: root,
