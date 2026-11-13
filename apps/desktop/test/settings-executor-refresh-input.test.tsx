@@ -159,9 +159,11 @@ it('real Store lets a new input replace a held check while unrelated tuple check
   useAppStore.getState().setConfig(changed)
   const next = detectExecutors('local')
   expect(pending.map(item => [item.input.executorId, item.input.command])).toEqual([['codex', 'codex'], ['review', 'claude'], ['codex', 'later']])
-  pending[2]!.resolve({ input: pending[2]!.input, executable: 'later', availability: 'missing' }); await next
+  pending[2]!.resolve({ input: pending[2]!.input, executable: 'later', availability: 'missing' })
+  // The refreshed batch also awaits its shared, unrelated request; let that read settle first.
+  pending[1]!.resolve({ input: pending[1]!.input, executable: 'claude', availability: 'available' }); await next
   pending[0]!.resolve({ input: pending[0]!.input, executable: 'codex', availability: 'available' })
-  pending[1]!.resolve({ input: pending[1]!.input, executable: 'claude', availability: 'available' }); await original
+  await original
   expect(useAppStore.getState().executorDetections[executorDetectionKey('local', 'codex')]).toMatchObject({ state: 'missing', input: { command: 'later' } })
   expect(await list()).toEqual([['codex', 'missing'], ['review', 'available']])
 })
@@ -175,9 +177,10 @@ it('same-ID input A→B→A does not resurrect an older request token or hide th
   useAppStore.getState().setConfig(changed); useAppStore.getState().setConfig(config)
   const latest = detectExecutors('local')
   expect(replies).toHaveLength(3)
-  replies[2]!({ input: savedInput(), availability: 'check-failed', cause: { code: 'EIO', message: 'latest cause' } }); await latest
+  replies[2]!({ input: savedInput(), availability: 'check-failed', cause: { code: 'EIO', message: 'latest cause' } })
+  replies[1]!({ input: savedInput('review'), executable: 'claude', availability: 'available' }); await latest
   replies[0]!({ input: savedInput(), executable: 'codex', availability: 'available' })
-  replies[1]!({ input: savedInput('review'), executable: 'claude', availability: 'available' }); await old
+  await old
   expect(useAppStore.getState().executorDetections[executorDetectionKey('local', 'codex')]).toMatchObject({ state: 'error', detail: 'EIO: latest cause' })
 })
 
