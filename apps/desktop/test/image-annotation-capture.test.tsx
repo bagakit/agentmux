@@ -428,6 +428,11 @@ describe('capture image annotation', () => {
     expect([bar(), props.onSelect.mock.calls.length], 'a press that became a drag selects nothing on its way back').toEqual([null, 0])
   })
 
+  it('the hint names the window click only when the frame has windows to click', async () => {
+    const { hint } = await mount(undefined, [FRONT, BACK])
+    expect(hint()?.textContent, 'with windows the hint names the click that selects one').toBe('Click a window or drag to select · Arrows nudge · Enter to finish · Esc to cancel')
+  })
+
   it('the capture overlay hands its frozen windows to the editor, so a click there selects one', async () => {
     const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
       pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
