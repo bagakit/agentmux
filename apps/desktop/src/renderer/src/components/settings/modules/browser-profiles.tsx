@@ -10,9 +10,9 @@ export const browserProfilesSettingsModule = {
   title: 'Browser Profiles',
   description: 'Each Profile keeps its own sign-ins, site data and saved settings.',
   icon: ThemeObjectProfilesIcon,
-  keywords: 'browser profile profiles sign-in signin login cookies site data identity account import chrome default proxy network route',
+  keywords: 'browser profile profiles sign-in signin login cookies site data identity account import chrome default proxy network route environment fingerprint language locale timezone location screen hardware client hints',
   searchTargets: [
-    { id: 'browser-profiles', title: 'Browser Profiles', keywords: 'profile sign-in cookies import default rename color proxy network route' },
+    { id: 'browser-profiles', title: 'Browser Profiles', keywords: 'profile sign-in cookies import default rename color proxy network route environment fingerprint language locale timezone location screen hardware client hints' },
   ],
   savedSummary: () => '',
   Pane({ active, onClose }) {

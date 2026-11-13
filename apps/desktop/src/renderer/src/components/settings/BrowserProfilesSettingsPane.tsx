@@ -14,6 +14,7 @@ import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from 
 import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../ProfileMark'
 import { BrowserProfileLibrary } from './BrowserProfileLibrary'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
+import { ProfileEnvironmentEditor } from './ProfileEnvironmentEditor'
 import { BrowserProfileOrganization } from './BrowserProfileOrganization'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
@@ -350,6 +351,8 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
         </label>
       </section>
 
+      <ProfileEnvironmentEditor profile={profile} />
+
       {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
       <ProfileNetworkRoute profile={profile} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />
       {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
@@ -365,7 +368,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
             <ThemeObjectBrowserIcon size={13} /><span>{use.title || use.url || 'New Browser'}</span>
             <small data-state={use.state}>{use.state === 'open' ? 'Running' : 'Not loaded yet'}</small>
             <ThemeNavigationNextIcon className="browser-profile-editor__go" size={12} aria-hidden="true" /></button></li>)}
-        </ul> : <p className="browser-profile-editor__quiet">No Browser uses this Profile.</p>}
+        </ul> : <p className="browser-profile-editor__quiet">No Browser in this workface uses this Profile.</p>}
       </section>
 
       <ProfileSites profile={profile} />

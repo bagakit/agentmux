@@ -4,7 +4,8 @@ export const DESKTOP_FRAGMENT_KEYS = {
   agentBookmarks: 'agentmux.agent-bookmarks.v1',
   moteFloating: 'agentmux.leader-topic-floating.v1',
   moteAvatarSaveDrafts: 'agentmux.mote-avatar-save-draft.v1:',
-  globalGoalPatrolOperation: 'agentmux.global-goal-patrol.operation.v1'
+  globalGoalPatrolOperation: 'agentmux.global-goal-patrol.operation.v1',
+  profileEnvironmentDrafts: 'agentmux.browser-profile-environment-drafts.v1'
 } as const
 export type DesktopFragmentValues = {
   launcher: string | null
@@ -12,5 +13,6 @@ export type DesktopFragmentValues = {
   moteFloating: string | null
   moteAvatarSaveDrafts: Record<string, string>
   globalGoalPatrolOperation: string | null
+  profileEnvironmentDrafts: string | null
 }
 export type DesktopFragmentName = keyof DesktopFragmentValues
