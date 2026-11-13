@@ -119,9 +119,9 @@ function stopDialogCopy(phase: Phase, ended: boolean): { title: string; descript
     case 'failed': return { title: 'Stop not confirmed', intent: 'neutral', confirm: 'Continue Stop',
       description: 'Continue Stop sends this same operation again so Core checks and finishes it. Conversation history and drafts are kept. Cancel only closes this notice.' }
     case 'run-changed': return { title: 'Run changed', intent: 'danger', confirm: 'Stop current Run',
-      description: 'The Run changed; stop the current Run. Nothing was stopped yet. Conversation history and drafts are kept.' }
+      description: 'The Run changed; stop the current Run. The current Run was not stopped. Conversation history and drafts are kept.' }
     case 'run-unread': return { title: 'Run changed', intent: 'neutral', confirm: 'Read current Run',
-      description: 'The Run changed and its current Run is not confirmed yet. Read it again before stopping. Nothing was stopped.' }
+      description: 'The Run changed and its current Run is not confirmed yet. Read it again before stopping. The current Run was not stopped.' }
     case 'confirm': return ended
       ? { title: 'Close Agent?', intent: 'neutral', confirm: 'Close Agent',
         description: 'This Run has already ended. Close this retained Agent; its conversation history stays available for viewing and recovery.' }

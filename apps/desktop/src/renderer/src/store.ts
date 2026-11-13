@@ -12608,7 +12608,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Re-read the Session so the next Stop names its current Run with a fresh intent.
         await get().refreshSession(sessionId).catch(() => undefined)
         return { status: 'run-changed', operationId: intent.operationId,
-          message: 'The Run changed; stop the current Run. Nothing was stopped.', action: 'Stop again to stop the current Run.' }
+          message: 'The Run changed; stop the current Run. The current Run was not stopped.', action: 'Stop again to stop the current Run.' }
       }
       const failure = sessionStopFailure(error, intent)
       get().reportError(failure)

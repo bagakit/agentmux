@@ -48,12 +48,12 @@ export function useWorkspaceAgentClose() {
       if (session.kind !== 'agent' || session.control.hostId !== control.hostId || session.control.agentSessionId !== control.agentSessionId) {
         throw new Error('The refreshed Session belongs to another Agent.')
       }
-      const note = `The Run changed; stop the current Run ${session.control.run.runId}. Nothing was stopped yet.`
+      const note = `The Run changed; stop the current Run ${session.control.run.runId}. The current Run was not stopped.`
       return { result: { target, completed: false, message: note },
         retry: { ...target, ...mintSessionStopIntent(session.control), retry: 'run-changed', note } }
     } catch (error) {
       return { result: { target, completed: false,
-        message: `The Run changed and its current Run could not be read: ${presentError(error)} Nothing was stopped; select it again to review its current Run.` } }
+        message: `The Run changed and its current Run could not be read: ${presentError(error)} The current Run was not stopped; select it again to review its current Run.` } }
     }
   }
 
