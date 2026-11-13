@@ -104,7 +104,9 @@ try {
   assert.ok(bookEntry, 'The actual isolated book HTML entry was compiled.')
   const bookClosure = new Set(), visitBook = file => { if (bookClosure.has(file)) return; bookClosure.add(file); for (const dependency of byFile.get(file)?.imports ?? []) visitBook(dependency) }
   visitBook(bookEntry.file)
-  assert.ok([...bookClosure].flatMap(file => byFile.get(file)?.modules ?? []).includes('packages/editor-extensions/src/book-reader/runtime.ts'), 'The private runtime registration was not tree-shaken.')
+  const bookModules = [...bookClosure].flatMap(file => byFile.get(file)?.modules ?? [])
+  assert.ok(bookModules.includes('packages/editor-extensions/src/book-reader/runtime.ts'), 'The private runtime registration was not tree-shaken.')
+  assert.deepEqual(bookModules.filter(id => /packages\/editor-extensions\/src\/books\/(?:adapters|page-decoders)\//.test(id)), [], 'The private reader loads the selected book parser dynamically.')
   assert.ok(targets.preload.chunks.some(chunk => chunk.entry && chunk.facade === 'apps/desktop/src/preload/book-reader.ts'), 'The real sandboxed book preload was compiled.')
   const artifacts = Object.keys(targets.renderer.artifacts)
   for (const pattern of [/markdown-render\.worker-.*\.js$/, /data-structured\.worker-.*\.js$/, /data-notebook\.worker-.*\.js$/, /dot-worker-.*\.js$/, /format-worker-.*\.js$/, /vega-chart\.worker-.*\.js$/]) {
