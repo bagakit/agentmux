@@ -5738,12 +5738,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             event:{source:'workface-save-conflict',key:error.conflicts.map(conflict=>conflict.key).join('\n')}})
           if (error instanceof SpatialSaveStalledError) saveDiagnostics.stalled(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
           get().reportWorkbenchSaveFailure(error)
+          if (error instanceof SpatialSaveStalledError) stallWarning = workbenchSaveFailureRevision
         })
-        // A stall uses the existing unconfirmed-save warning and Retry; recovery clears only that warning.
+        // A stall uses the existing unconfirmed-save warning and Retry. Its recovery clears that warning only
+        // while it is still the stall's own: any failure reported since keeps its notice until its own retry.
+        let stallWarning: number | null = null
         spatialOwner.onRecovered = () => {
           saveDiagnostics.recovered(spatialOwner.saveObservation, spatialOwner.current?.revision ?? null)
-          if (coreSpatialPersistence === spatialOwner && get().workbenchSaveWarningOwner === 'workbench')
+          if (coreSpatialPersistence === spatialOwner && stallWarning === workbenchSaveFailureRevision)
             useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
+          stallWarning = null
         }
         ownedSpatial = spatialOwner
         coreSpatialPersistence = spatialOwner
