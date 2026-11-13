@@ -86,11 +86,9 @@ export type AgentProviderHookActivationContext = {
 
 export type AgentProviderHookActivation = { active: boolean; code: string; action: string | null }
 
-/**
- * One launch cwd that the Host confirmed is exactly one of its own homes (a Mote or Topic home),
- * never a user Project. It may be spelled through an alias of that home.
- */
+/** A directory AgentMux itself creates and owns (a Mote or Topic home), never a user Project. */
 export type AgentWorkspaceTrustContext = {
+  ownedRoot: string
   workspacePath: string
   env: Readonly<Record<string, string>>
   signal?: AbortSignal
@@ -98,8 +96,7 @@ export type AgentWorkspaceTrustContext = {
 
 /** What the Provider's own trust record says after preparation; `unconfirmed` never blocks a launch. */
 export type AgentWorkspaceTrustReceipt = {
-  status: 'trusted' | 'already-trusted' | 'unconfirmed'
-  /** The exact key the Provider reads trust from; null when it could not be determined. */
+  status: 'trusted' | 'already-trusted' | 'not-applicable' | 'unconfirmed'
   trustKey: string | null
   configPath: string | null
   code: string

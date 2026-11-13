@@ -63,7 +63,7 @@ import type { AgentMuxRunStorageObservation } from './run-storage-observation.js
 
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding
@@ -91,7 +91,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
+import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject, recordStopBackgroundTasks, clearStopBackgroundTasks, agentHasPendingBackgroundTasks } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -511,12 +511,10 @@ export type AgentMuxClientOptions = {
    */
   hookInstaller?: AgentManagedHookInstaller
   /**
-   * Whether this exact launch cwd is a home the Host itself creates and owns (a Mote or Topic
-   * home, or an alias of one). A Provider that asks for folder trust is pre-trusted only there;
-   * user Projects and every other folder keep their native prompt. A throw means the Host could
-   * not confirm it: Core publishes a notice and the launch continues.
+   * Directories this Host itself creates and owns (Mote and Topic homes). A Provider that asks for
+   * folder trust is pre-trusted only inside them; user Projects keep their native prompt.
    */
-  ownedWorkspaceHome?: (workspacePath: string) => Promise<boolean>
+  ownedWorkspaceRoots?: () => Promise<readonly string[]>
 }
 
 export type AgentMuxAgentRuntimeStatus = {
@@ -833,7 +831,7 @@ export class AgentMuxClient {
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
   private readonly hookInstaller: AgentManagedHookInstaller
-  private readonly ownedWorkspaceHome: (workspacePath: string) => Promise<boolean>
+  private readonly ownedWorkspaceRoots: () => Promise<readonly string[]>
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
   private unsubscribeConnectionLost: (() => void) | null = null
@@ -1090,7 +1088,7 @@ export class AgentMuxClient {
     )
     this.hookInstaller = options.hookInstaller
       ?? new AgentManagedHookInstaller(join(defaultCtxmuxStateDirectory(), 'hooks'))
-    this.ownedWorkspaceHome = options.ownedWorkspaceHome ?? (async () => false)
+    this.ownedWorkspaceRoots = options.ownedWorkspaceRoots ?? (async () => [])
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: async (agentSessionId, event, evidence) => {
@@ -5740,18 +5738,18 @@ export class AgentMuxClient {
     if (!provider.prepareOwnedWorkspaceTrust) return
     const target = resolve(workspacePath)
     try {
-      // The Host's directory-identity owner decides; Core never infers a home from a path prefix.
-      if (!await this.ownedWorkspaceHome(target)) return
-      const receipt = await provider.prepareOwnedWorkspaceTrust({ workspacePath: target, env })
+      const ownedRoot = (await this.ownedWorkspaceRoots()).map(root => resolve(root))
+        .find(root => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep))
+      if (!ownedRoot) return
+      const receipt = await provider.prepareOwnedWorkspaceTrust({ ownedRoot, workspacePath: target, env })
       if (receipt.status !== 'unconfirmed') return
       this.publisher.publish({ type: 'agent-error', agentSessionId, code: receipt.code,
         message: `${provider.label} folder trust for this AgentMux home is unconfirmed, so it may ask whether to trust the folder. ` +
           `Answer that prompt in the terminal; the Agent launch continues. ${receipt.issue ?? ''}`.trim(),
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     } catch (error) {
-      // Whether this cwd is a home may itself be what failed, so the notice does not claim it is one.
       this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED',
-        message: `${provider.label} folder trust for this workspace is unconfirmed, so it may ask whether to trust the folder; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
+        message: `${provider.label} folder trust for this AgentMux home is unconfirmed; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     }
   }
@@ -8330,6 +8328,9 @@ export class AgentMuxClient {
     'promptCompletionAdmission' | 'nativeSourceObservation' | 'nativeBinding'>): AgentCurrentActivity | undefined {
     const activity = this.nativeCurrentActivities.get(session.agentSessionId)
     const childrenUnconfirmed = agentSubagentActivityUnconfirmed(session.run.runId, activity?.event.sourceId)
+    // A classic Stop that reported pending background tasks (shells, workflows, monitors) means the
+    // Agent is still working even after its main turn ends. Suppress idle until the next turn-start.
+    const backgroundTasksPending = agentHasPendingBackgroundTasks(session.run.runId)
     if (activity?.fact && activity.runId === session.run.runId &&
         session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
         !this.endedRuns.has(session.run.runId) &&
@@ -10752,6 +10753,30 @@ export class AgentMuxClient {
       }
     }
     if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
+    // When a new main turn starts, the previous Stop's background task count is no longer relevant.
+    if (normalized.mainSubject && normalized.lifecycleEvent === 'turn-start') {
+      clearStopBackgroundTasks(envelope.runId)
+    }
+    // Stop hook payload carries background_tasks: running/pending backgrounded tasks (shells,
+    // workflows, monitors, subagents) that outlive the main turn. Record their count so that
+    // projectCurrentActivity() can suppress the idle projection until the next turn-start.
+    // Count rule mirrors Claude binary IDn(): running|(pending && !notified), isBackgrounded !== false,
+    // type !== 'post_turn_memory'. Only main-subject classic Stop from the authenticated run.
+    if (normalized.mainSubject && normalized.eventName === 'Stop' && !witnessTargetMismatch) {
+      const tasks = envelope.payload?.background_tasks
+      let pendingCount = 0
+      if (Array.isArray(tasks)) {
+        for (const task of tasks) {
+          if (!task || typeof task !== 'object') continue
+          const t = task as Record<string, unknown>
+          if (t.type === 'post_turn_memory') continue
+          if (t.isBackgrounded === false) continue
+          const status = t.status
+          if (status === 'running' || (status === 'pending' && t.notified !== true)) pendingCount++
+        }
+      }
+      recordStopBackgroundTasks(envelope.runId, pendingCount)
+    }
     // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
     //
     // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线

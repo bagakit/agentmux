@@ -6,7 +6,7 @@ import { directoryIdentity, homeZoneId } from './mote-model.js'
 import { constants, lstat, mkdir, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, sep } from 'node:path'
-import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './mote-directories.js'
+import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths, type ScratchStorageIds } from './mote-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './mote-directory-identity.mjs'
 import { AgentMuxError, durableWriteFile, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
 export type ScratchWorkspace = { id: string; hostId: string; path: string }
@@ -736,6 +736,31 @@ export async function moteOwnedWorkspaceHome(path: string, workspacePath: string
   const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is ScratchWorkspace =>
     !!value && typeof value === 'object' && value.id === SCRATCH_WORKSPACE_ID && value.hostId === 'local' && typeof value.path === 'string') : []
   return scratch.length === 1 && await new ScratchTopics().readForDirectory(scratch[0]!, workspacePath) !== null
+}
+/**
+ * All Mote and Topic home directories this Host creates and owns inside the local Scratch workspace.
+ * Core uses these as the roots for folder-trust pre-approval; any path inside one of these roots is
+ * an AgentMux home, and a Provider that asks for folder trust is pre-trusted there without a prompt.
+ * User Projects and every other folder keep their native folder-trust prompt.
+ */
+export async function moteOwnedWorkspaceRoots(path: string): Promise<readonly string[]> {
+  let raw: { workspaces?: unknown }
+  try { raw = await readOriginalMoteConfiguration(path) as { workspaces?: unknown } } catch { return [] }
+  const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is ScratchWorkspace =>
+    !!value && typeof value === 'object' && (value as { id?: unknown }).id === SCRATCH_WORKSPACE_ID &&
+    (value as { hostId?: unknown }).hostId === 'local' && typeof (value as { path?: unknown }).path === 'string') : []
+  if (scratch.length !== 1) return []
+  const workspace = scratch[0]!
+  let ids: ScratchStorageIds
+  try { ids = await scratchStorageTopicIds(workspace.path) } catch { return [] }
+  const roots: string[] = []
+  await Promise.all(ids.map(async topicId => {
+    try {
+      const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+      if (resolved) roots.push(resolved)
+    } catch { /* skip unreadable topic */ }
+  }))
+  return roots
 }
 /** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */
 export async function readConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {
