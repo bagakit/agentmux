@@ -50,9 +50,13 @@ function png(width: number, height: number): Buffer {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(Buffer.alloc((width + 1) * height))), chunk('IEND', Buffer.alloc(0))])
 }
 const main = { x: 0, y: 0, width: 4, height: 3 }, side = { x: -2, y: -1, width: 2, height: 2 }
+// Global Quartz points, front to back: one inside the main display, one across both displays, one past the main display's right edge.
+const front = { windowId: 3, frame: { x: 1, y: 0.5, width: 2, height: 1 }, owner: 'Editor' }
+const across = { windowId: 5, frame: { x: -1, y: -1, width: 3, height: 2 } }
+const beyond = { windowId: 9, frame: { x: 4, y: 0, width: 2, height: 2 } }
 const frames = () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [
-  { displayId: 1, frame: main, scale: 2, png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
-  { displayId: 7, frame: side, scale: 1, png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
+  { displayId: 1, frame: main, scale: 2, windows: [front, across, beyond], png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
+  { displayId: 7, frame: side, scale: 1, windows: [across], png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
 const result = pngFromBytes(png(4, 2))
 
 let surface: CaptureSurface, ports: ReturnType<typeof makePorts>
@@ -101,6 +105,13 @@ it('captures every display once and opens one transparent overlay per display at
     expect(window.setBounds).toHaveBeenCalledTimes(2)
   }
   expect(overlays[0]!.input).toMatchObject({ frame: main, scale: 2, attachToDraft: true, expandable: true, image: { width: 8, height: 6 } })
+})
+
+it('gives each overlay its windows in frozen-frame pixels, clipped to that display, front to back', async () => {
+  const { overlays } = await opened()
+  expect(overlays[0]!.input.windows, 'scale 2 from the main origin; the across window is clipped and the one past the edge is dropped')
+    .toEqual([{ x: 2, y: 1, width: 4, height: 2 }, { x: 0, y: 0, width: 4, height: 2 }])
+  expect(overlays[1]!.input.windows, 'scale 1 from the side origin, clipped at its right and bottom').toEqual([{ x: 1, y: 0, width: 1, height: 2 }])
 })
 
 it('shows every overlay together only after each one presented, then focuses the display under the pointer', async () => {
