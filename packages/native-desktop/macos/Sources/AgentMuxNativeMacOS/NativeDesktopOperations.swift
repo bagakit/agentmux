@@ -219,9 +219,9 @@ enum NativeDesktopOperations {
     /// show and crop exactly what was on screen. A display that cannot be
     /// captured carries its `issue`; the other displays remain usable. Each
     /// display also lists the normal windows over it, front to back, read once
-    /// beside the grabs; windows of AgentMux itself (this helper and `hostPID`)
-    /// are not content the user is capturing.
-    static func captureDisplays(hostPID: pid_t) throws -> [String: Any] {
+    /// beside the grabs. The helper is always excluded; the host chooses whether
+    /// its windows belong to this frozen background before it steps out.
+    static func captureDisplays(hostPID: pid_t, includeHostWindows: Bool = false) throws -> [String: Any] {
         do {
             return try NativeDisplayCaptureLease.shared.withCapture { ownership in
                 let capturedAt = Date().timeIntervalSince1970 * 1000
@@ -240,7 +240,7 @@ enum NativeDesktopOperations {
                 } else {
                     pixels = { _, frame, scale in try coreGraphicsDisplayPixels(frame, scale: scale) }
                 }
-                let windows = visibleWindows(excludingOwners: [getpid(), hostPID])
+                let windows = visibleWindows(excludingOwners: includeHostWindows ? [getpid()] : [getpid(), hostPID])
                 // Every display's pixels share one response frame. The identity envelope and
                 // all displays' metadata stay far below the reserve.
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024

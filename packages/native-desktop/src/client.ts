@@ -295,9 +295,10 @@ export class NativeDesktop {
     return result
   }
 
-  /** Every active display's frozen pixels, one grab each, for a host capture surface. */
-  async captureDisplays(): Promise<NativeDisplayFrames> {
-    const raw = await this.request('captureDisplays', {}, { timeoutMs: 120_000 })
+  /** Every active display's frozen pixels, one grab each, for a host capture surface.
+   * `includeHostWindows` makes the window list match a grab taken before the host steps out. */
+  async captureDisplays({ includeHostWindows = false }: { includeHostWindows?: boolean } = {}): Promise<NativeDisplayFrames> {
+    const raw = await this.request('captureDisplays', { includeHostWindows }, { timeoutMs: 120_000 })
     const invalid = (message: string) => new NativeRequestError('invalid_display_frames', message)
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.state !== 'captured' || !Number.isFinite(raw.capturedAt)
       || !Array.isArray(raw.displays) || raw.displays.length === 0) throw invalid('Native display capture did not return its frames')
@@ -332,7 +333,7 @@ export class NativeDesktop {
       if (typeof display.engine !== 'string' || !display.engine) throw invalid('Native display pixels lost their capture engine')
       try {
         pngBytes({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + display.png,
-          width: display.width, height: display.height, byteLength: Buffer.from(display.png, 'base64').byteLength })
+          width: display.width, height: display.height, byteLength: Buffer.byteLength(display.png, 'base64') })
       } catch (error) { throw invalid(error instanceof Error ? error.message : 'Native display PNG is invalid') }
     }
     if (!result.displays.some(display => display.png !== undefined)) throw invalid('Native display capture returned no pixels')

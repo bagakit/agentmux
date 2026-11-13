@@ -195,7 +195,10 @@ final class Provider: @unchecked Sendable {
         case "captureScreenshot":
             return NativeDesktopOperations.capture(params)
         case "captureDisplays":
-            return try NativeDesktopOperations.captureDisplays(hostPID: hostPID)
+            if let value = params["includeHostWindows"], value.bool == nil {
+                throw ProviderError.coded("invalid_argument", "includeHostWindows must be a protocol boolean")
+            }
+            return try NativeDesktopOperations.captureDisplays(hostPID: hostPID, includeHostWindows: params["includeHostWindows"]?.bool ?? false)
         case "clipboardRead":
             return try NativeDesktopOperations.clipboardRead(params)
         case "clipboardWrite":

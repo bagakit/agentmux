@@ -62,7 +62,7 @@ export type NativeDisplayFrame = {
   scale: number
   /** Points at the display's top covered by a camera housing; 0 without one. */
   safeTop: number
-  /** Windows intersecting this display, front to back, excluding AgentMux's own. */
+  /** Windows intersecting this display, front to back; the helper is excluded, the host follows includeHostWindows. */
   windows: NativeDisplayWindow[]
 } & (
   | { png: string; width: number; height: number; engine: string; issue?: never }
