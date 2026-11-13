@@ -70,6 +70,48 @@ describe('one conflicting entity never stalls unrelated workface saves', () => {
     expect(warnings.at(-1)).toMatchObject({ code: 'SPATIAL_ENTITY_CONFLICT' })
   })
 
+  it('names a later local edit to an item another writer changed while this save was in flight', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const warnings: unknown[] = []
+    let raced = false
+    const persistence: DesktopSpatialPersistence = new DesktopSpatialPersistence({ read: () => store.read(), onChange: listener => store.subscribe(listener),
+      commit: async input => {
+        if (!raced) {
+          raced = true
+          // Another writer retitles a, and the user retitles it here from the value still on screen.
+          await writeElsewhere(store, graph => { graph.resources['tab:a'] = { ...graph.resources['tab:a'] as object, title: 'Elsewhere' } })
+          persistence.stage(derive(['a', 'b'], { a: 'Local' }))
+        }
+        return store.commit(input)
+      } }, error => warnings.push(error))
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await persistence.flush().catch(() => undefined)
+    const saved = (await store.read())!.graph
+    expect(saved.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
+    expect(saved.resources['tab:a']).toMatchObject({ title: 'Elsewhere' })
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_ENTITY_CONFLICT', conflicts: [expect.objectContaining({ key: 'resources:tab:a' })] }))
+  })
+
+  it('names a later local edit to an item a failed attempt had already taken from another writer', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const warnings: unknown[] = []
+    let offline = true
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(), onChange: listener => store.subscribe(listener),
+      commit: input => offline ? Promise.reject(Object.assign(new Error('Disk unavailable'), { code: 'EIO' })) : store.commit(input) }, error => warnings.push(error))
+    await persistence.read()
+    await writeElsewhere(store, graph => { graph.resources['tab:a'] = { ...graph.resources['tab:a'] as object, title: 'Elsewhere' } })
+    persistence.stage(derive(['a', 'b']))
+    await persistence.flush().catch(() => undefined)
+    offline = false
+    persistence.stage(derive(['a', 'b'], { a: 'Local' }))
+    await persistence.flush()
+    expect((await store.read())!.graph.resources['tab:a']).toMatchObject({ title: 'Elsewhere' })
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_ENTITY_CONFLICT', conflicts: [expect.objectContaining({ key: 'resources:tab:a' })] }))
+  })
+
   it('keeps saving later unrelated work after a conflict, without any user resolution', async () => {
     const store = await owner()
     await store.commit({ expectedRevision: 0, graph: derive(['a']) })
