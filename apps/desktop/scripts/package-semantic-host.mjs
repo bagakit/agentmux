@@ -4,7 +4,7 @@ import { lstat, readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { observeApplicationProcesses } from './package-process-scope.mjs'
+import { observeApplicationProcesses, applicationQuitOwnershipDiagnostic } from './package-process-scope.mjs'
 import { defaultAgentMuxControlSocketPath } from '@agentmux/core'
 import { macosHostService, macosHostServiceAddress, macosHostServiceRegistration, macosHostServicePid,
   inspectMacosHostService, stopMacosHostService } from '../../host/dist/macos-service.js'
@@ -158,8 +158,20 @@ export async function stopSemanticHostForInstall(plan, ops = operations) {
   const { processes, row } = await inspectSemanticHostForInstall(plan, ops)
   const namespace = semanticHostProcessIds(plan.currentApp, row, processes)
   const original = processes.processes.filter(process => namespace.has(process.pid))
-  fail(processes.serving.filter(pid => !namespace.has(pid)).length === 0,
-    'The original GUI has not exited normally; its Semantic Host and Runs are retained.')
+  const blockers = processes.serving.filter(pid => !namespace.has(pid))
+  if (blockers.length) throw Object.assign(new Error(
+    'GUI or unconfirmed application processes remain outside the original Semantic Host namespace; its Host and Runs are retained.'),
+  { ownershipDiagnostic: {
+    schema: 'agentmux.semantic-host-stop-ownership-diagnostic.v1', stage: 'semantic-host-stop',
+    preparedOwner: { runtimeId: plan.identity.owner.runtimeId, ownerInstanceId: plan.identity.owner.ownerInstanceId,
+      process: { uid: plan.owner.uid, pid: plan.owner.pid, ppid: plan.owner.ppid, birth: plan.owner.birth } },
+    freshOwner: { uid: row.uid, pid: row.pid, ppid: row.ppid, birth: row.birth },
+    serving: processes.serving, namespace: [...namespace], blockerPids: blockers,
+    blockers: blockers.map(pid => {
+      const { affected, ancestry } = applicationQuitOwnershipDiagnostic({ ...processes, serving: [pid] }, [])
+      return { affected, ancestry }
+    })
+  } })
   // Removing the exact platform job precedes replacement, so KeepAlive cannot reload the outgoing image.
   if (plan.service) await ops.stopService(plan.service)
   else {
