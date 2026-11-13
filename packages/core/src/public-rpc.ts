@@ -67,6 +67,10 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   // Other targets and the original tab remain. Cancelling a reader does neither.
   'browser.stop': 'browser.stop',
   'browser.replay': 'browser.replay', 'browser.follow': 'browser.subscribe',
+  'browser.task.source': 'browser.task.source',
+  'browser.task.draft': 'browser.task.draft',
+  'browser.task.create': 'browser.task.create',
+  'browser.task.create-inspect': 'browser.task.create-inspect',
   'browser.task.assets': 'browser.task.assets', 'browser.task.reliability': 'browser.task.reliability',
   'browser.task.edit': 'browser.task.edit', 'browser.task.publish': 'browser.task.publish',
   'browser.task.run': 'browser.task.run', 'browser.task.stop': 'browser.task.stop',

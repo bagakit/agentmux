@@ -103,6 +103,14 @@ export class BrowserTaskAssets {
     await this.ready(); return copy(this.document.assets.find(asset => asset.id === assetId) ?? null)
   }
 
+  /** Exact current definition only; cumulative versions/runs stay in this original document. */
+  async draft(assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }> {
+    await this.ready()
+    if (this.loadUnavailable) throw new AgentMuxError('The original task draft could not be read. Existing data is retained.', 'BROWSER_TASK_DRAFT_UNAVAILABLE')
+    const asset = this.requireAsset(assetId)
+    return copy({ id: asset.id, browserId: asset.browserId, revision: asset.revision, sourceRecordingId: asset.sourceRecordingId, draft: asset.draft, ...(this.warning ? { warning: this.warning } : {}) })
+  }
+
   /** The actual run chosen by the execution owner, including an explicitly resumed earlier cursor. */
   async currentRun(browserId: string): Promise<BrowserTaskAssetRun | null> {
     await this.ready()

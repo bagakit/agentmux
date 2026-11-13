@@ -1,5 +1,10 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from './browser-task-creation.js'
+export * from './browser-task-creation.js'
+
+export type AgentMuxBrowserTaskSource = { id: string; browserId: string; revision: number; status: 'recording' | 'stopped' | 'interrupted'; stepCount: number; warning?: string }
+export type AgentMuxBrowserTaskDraft = { id: string; browserId: string; revision: number; sourceRecordingId: string; draft: Record<string, unknown>; warning?: string }
 
 export type BrowserTaskRunStatus = 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
@@ -45,6 +50,10 @@ export type AgentMuxBrowserTaskReliability = {
 }
 
 export type BrowserTaskControlPayload =
+  | { operation: 'browser.task.source'; browserId: string }
+  | { operation: 'browser.task.draft'; browserId: string; assetId: string }
+  | { operation: 'browser.task.create'; browserId: string; input: BrowserTaskCreateInput }
+  | { operation: 'browser.task.create-inspect'; browserId: string; input: BrowserTaskCreateInput }
   | { operation: 'browser.task.assets'; browserId: string }
   | { operation: 'browser.task.edit'; browserId: string; assetId: string; expectedRevision: number; content: Record<string, unknown> }
   | { operation: 'browser.task.publish'; browserId: string; assetId: string; expectedRevision: number }
@@ -56,6 +65,10 @@ export type BrowserTaskControlPayload =
 /** Confirmed write identity; cumulative definition/version history is read separately. */
 export type AgentMuxBrowserTaskAssetReceipt = { id: string; browserId: string; revision: number }
 export type BrowserTaskControlResult =
+  | { operation: 'browser.task.source'; browserId: string; source: AgentMuxBrowserTaskSource | null }
+  | { operation: 'browser.task.draft'; asset: AgentMuxBrowserTaskDraft }
+  | { operation: 'browser.task.create'; creation: { createOperationId: string; assetId: string; browserId: string; status: 'created' } }
+  | { operation: 'browser.task.create-inspect'; creation: BrowserTaskCreateStatus }
   | { operation: 'browser.task.assets'; state: AgentMuxBrowserTaskState }
   | { operation: 'browser.task.edit'; asset: AgentMuxBrowserTaskAssetReceipt }
   | { operation: 'browser.task.publish'; asset: AgentMuxBrowserTaskAssetReceipt; publishedVersion: number }
@@ -70,7 +83,7 @@ const RESULTS: BrowserTaskReliabilityResult[] = ['passed', 'not-met', 'unavailab
 const MAX_BYTES = 1_048_576
 
 export function isBrowserTaskControlOperation(operation: string): operation is BrowserTaskControlPayload['operation'] {
-  return operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
+  return operation === 'browser.task.source' || operation === 'browser.task.draft' || operation === 'browser.task.create' || operation === 'browser.task.create-inspect' || operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
 }
 
 function bad(message: string, request = false): never {
@@ -134,6 +147,15 @@ function definition(value: unknown, request = false): Record<string, unknown> {
 export function parseBrowserTaskControlPayload(value: unknown): BrowserTaskControlPayload {
   const source = record(value, true)
   const browserId = identifier(source.browserId, true)
+  if (source.operation === 'browser.task.source' || source.operation === 'browser.task.draft' || source.operation === 'browser.task.create' || source.operation === 'browser.task.create-inspect') {
+    const fields = source.operation === 'browser.task.draft' ? ['assetId'] : source.operation === 'browser.task.source' ? [] : ['input']
+    rpcRecord(source, ['operation', 'browserId', ...fields, 'schemaVersion', 'requestId'], 'INVALID_CONTROL_REQUEST')
+    if (source.operation === 'browser.task.source') return { operation: source.operation, browserId }
+    if (source.operation === 'browser.task.draft') return { operation: source.operation, browserId, assetId: identifier(source.assetId, true) }
+    const input = parseBrowserTaskCreateInput(source.input)
+    if (input.browserId !== browserId) bad('Task creation input belongs to another Browser.', true)
+    return { operation: source.operation, browserId, input }
+  }
   if (source.operation === 'browser.task.edit' || source.operation === 'browser.task.publish') {
     rpcRecord(source, ['operation', 'browserId', 'assetId', 'expectedRevision', ...(source.operation === 'browser.task.edit' ? ['content'] : []), 'schemaVersion', 'requestId'])
     const common = { browserId, assetId: identifier(source.assetId, true), expectedRevision: integer(source.expectedRevision, true, 1) }
@@ -275,6 +297,31 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
   try { serialized = JSON.stringify(source) } catch { bad('Browser task result cannot be serialized.') }
   if (Buffer.byteLength(serialized) > MAX_BYTES) bad('Browser task result byte budget exceeded.')
   switch (operation) {
+    case 'browser.task.source': {
+      rpcRecord(source, ['operation', 'browserId', 'source'], 'CONTROL_PROTOCOL_ERROR')
+      const browserId = identifier(source.browserId)
+      if (source.source === null) return { operation, browserId, source: null }
+      const row = rpcRecord(source.source, ['id', 'browserId', 'revision', 'status', 'stepCount', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+      if (!['recording', 'stopped', 'interrupted'].includes(row.status as string)) bad('Task source status is invalid.')
+      return { operation, browserId, source: { id: identifier(row.id), browserId: identifier(row.browserId), revision: integer(row.revision, false, 1), status: row.status as AgentMuxBrowserTaskSource['status'], stepCount: integer(row.stepCount), ...notices(row) } }
+    }
+    case 'browser.task.draft': {
+      rpcRecord(source, ['operation', 'asset'], 'CONTROL_PROTOCOL_ERROR')
+      const row = rpcRecord(source.asset, ['id', 'browserId', 'revision', 'sourceRecordingId', 'draft', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+      return { operation, asset: { id: identifier(row.id), browserId: identifier(row.browserId), revision: integer(row.revision, false, 1), sourceRecordingId: identifier(row.sourceRecordingId), draft: definition(row.draft), ...notices(row) } }
+    }
+    case 'browser.task.create': {
+      rpcRecord(source, ['operation', 'creation'], 'CONTROL_PROTOCOL_ERROR')
+      const row = rpcRecord(source.creation, ['createOperationId', 'assetId', 'browserId', 'status'], 'CONTROL_PROTOCOL_ERROR')
+      if (row.status !== 'created') bad('Task creation receipt is not confirmed.')
+      return { operation, creation: { createOperationId: identifier(row.createOperationId), assetId: identifier(row.assetId), browserId: identifier(row.browserId), status: 'created' } }
+    }
+    case 'browser.task.create-inspect': {
+      rpcRecord(source, ['operation', 'creation'], 'CONTROL_PROTOCOL_ERROR')
+      const row = rpcRecord(source.creation, ['createOperationId', 'assetId', 'browserId', 'status', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+      if (!['created', 'not-found', 'unknown'].includes(row.status as string)) bad('Task creation status is invalid.')
+      return { operation, creation: { createOperationId: identifier(row.createOperationId), assetId: identifier(row.assetId), browserId: identifier(row.browserId), status: row.status as BrowserTaskCreateStatus['status'], ...notices(row) } }
+    }
     case 'browser.task.assets': return { operation, state: state(source.state) }
     case 'browser.task.edit':
     case 'browser.task.publish': {
@@ -292,7 +339,15 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
 
 export function assertBrowserTaskControlTarget(request: BrowserTaskControlPayload, result: BrowserTaskControlResult): void {
   if (request.operation !== result.operation) bad('Browser task result operation does not match its request.')
-  if (request.operation === 'browser.task.assets' && result.operation === request.operation) {
+  if (request.operation === 'browser.task.source' && result.operation === request.operation) {
+    if (result.browserId !== request.browserId || result.source && result.source.browserId !== request.browserId) bad('Task source belongs to another Browser.')
+  } else if (request.operation === 'browser.task.draft' && result.operation === request.operation) {
+    if (result.asset.browserId !== request.browserId || result.asset.id !== request.assetId) bad('Task draft belongs to another asset.')
+  } else if (request.operation === 'browser.task.create' && result.operation === request.operation) {
+    if (result.creation.browserId !== request.browserId || result.creation.assetId !== request.input.assetId || result.creation.createOperationId !== request.input.createOperationId) bad('Task creation receipt belongs to another original request.')
+  } else if (request.operation === 'browser.task.create-inspect' && result.operation === request.operation) {
+    if (result.creation.browserId !== request.browserId || result.creation.assetId !== request.input.assetId || result.creation.createOperationId !== request.input.createOperationId) bad('Task creation inspection belongs to another original request.')
+  } else if (request.operation === 'browser.task.assets' && result.operation === request.operation) {
     if (result.state.assets.some(asset => asset.browserId !== request.browserId) || result.state.runs.some(run => run.browserId !== request.browserId) || result.state.batches?.some(batch => batch.browserId !== request.browserId)) bad('Browser task state belongs to another Browser.')
   } else if ((request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish') && result.operation === request.operation) {
     if (result.asset.id !== request.assetId || result.asset.browserId !== request.browserId || result.asset.revision !== request.expectedRevision + 1) bad('Browser task authoring receipt belongs to another asset or revision.')

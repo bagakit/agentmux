@@ -3154,6 +3154,20 @@ export class BrowserViewManager {
     return asset
   }
 
+  async getTaskSource(id: string): Promise<import('@agentmux/core/control').AgentMuxBrowserTaskSource | null> {
+    if (!this.demonstrations) throw new Error('The original demonstration owner is unavailable. Existing Browser work is retained.')
+    const source = await this.demonstrations.get(id), warning = this.demonstrations.getPersistenceWarning()
+    if (!source && warning) throw new Error('The original demonstration could not be observed. Existing data and Browser work are retained.')
+    return source ? { id: source.id, browserId: source.browserId, revision: source.revision, status: source.status, stepCount: source.steps.length, ...(warning ? { warning } : {}) } : null
+  }
+
+  async getTaskDraft(id: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }> {
+    if (!this.taskAssets) throw new Error('The original task owner is unavailable. Existing Browser work is retained.')
+    const asset = await this.taskAssets.draft(assetId)
+    if (asset.browserId !== id) throw new Error('This task draft belongs to another Browser.')
+    return asset
+  }
+
   async importTaskAsset(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset> {
     const request = parseBrowserTaskCreateInput(input)
     if (request.browserId !== id) throw new Error('This task creation input belongs to another Browser.')

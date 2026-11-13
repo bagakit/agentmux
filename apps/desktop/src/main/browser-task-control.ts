@@ -1,9 +1,14 @@
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
+import type { AgentMuxBrowserTaskSource, BrowserTaskCreateInput, BrowserTaskCreateStatus } from '@agentmux/core/control'
 import type { BrowserOperation } from '../shared/browser-operation.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 
 type BrowserTaskControlOwner = {
+  getTaskSource(browserId: string): Promise<AgentMuxBrowserTaskSource | null>
+  getTaskDraft(browserId: string, assetId: string): Promise<Pick<BrowserTaskAsset, 'id' | 'browserId' | 'revision' | 'sourceRecordingId' | 'draft'> & { warning?: string }>
+  importTaskAsset(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
+  inspectTaskAssetCreation(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
   saveTaskAssetDraft(browserId: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset>
   publishTaskAsset(browserId: string, assetId: string, expectedRevision: number): Promise<BrowserTaskAsset>
@@ -31,7 +36,17 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
   const { caller, ...payload } = (value && typeof value === 'object' ? value : {}) as { caller?: { agentSessionId?: string } }
   const request = parseBrowserTaskControlPayload(value && typeof value === 'object' ? payload : value)
   let raw: unknown
-  if (request.operation === 'browser.task.assets') {
+  if (request.operation === 'browser.task.source') {
+    raw = { browserId: request.browserId, source: await owner.getTaskSource(request.browserId) }
+  } else if (request.operation === 'browser.task.draft') {
+    raw = { asset: await owner.getTaskDraft(request.browserId, request.assetId) }
+  } else if (request.operation === 'browser.task.create') {
+    const asset = await owner.importTaskAsset(request.browserId, request.input)
+    // Creation confirmation does not confirm a later live draft's save/revision.
+    raw = { creation: { createOperationId: asset.creation?.createOperationId, assetId: asset.id, browserId: asset.browserId, status: 'created' } }
+  } else if (request.operation === 'browser.task.create-inspect') {
+    raw = { creation: await owner.inspectTaskAssetCreation(request.browserId, request.input) }
+  } else if (request.operation === 'browser.task.assets') {
     raw = { state: await owner.getTaskAssets(request.browserId) }
   } else if (request.operation === 'browser.task.edit') {
     const asset = await owner.saveTaskAssetDraft(request.browserId, request.assetId, request.expectedRevision, request.content)
