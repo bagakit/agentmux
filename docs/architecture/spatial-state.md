@@ -24,11 +24,11 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 ### 如何提交与合并
 
-仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿由 Desktop 宿主文件持有，具体链路见下节。
+仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 之后，偏好文件不保存第二份实体或布局快照。UI 偏好与草稿由 Desktop 宿主文件持有，具体链路见下节。
 
 合并按实体与键进行：Tab、Region、Zone、Space、绑定与资源各自独立；展示布局再细到每个 Group，其 Tab 顺序、选择（含最近记录）与分割树各为一个键。不相交编辑保留双方增量。只有一方改动的 Tab 顺序保持该方的顺序；双方都改时，任一方关闭的 Tab 移除、新开的 Tab 保留，双方以不同方式移动同一批 Tab 才算顺序冲突。分割树取远端值时，仍被某一方展示、且没有被任何一方关闭的 Tab 回到原 Group 或活动 Group，不会掉出布局。Tab 的 Region 成员随其合并后的分割树投影，与名称一样不参与 Tab 实体的冲突判定，因此合并结果始终是 Core 接受的图。同一键被双方改成不同值时，该键保留已提交的远端值并在告示中点名；其余键照常提交，基线随提交前进，冲突不阻止后续保存，也不阻止观察其他进程的提交。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
 
-`DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
+`DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 没有另外的私有选择修补。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
 Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/src/shared/space-addresses.ts) 写入原内容身份，Category 地址只用于导航。还原时，同一 Core Zone 资源中已确认的内容身份优先于客户端 Tab 描述，分类移动不改写它。带首句的创建先提交原 Launcher 工作面，再由 Host 注册该 Topic，避免客户端自己的待保存布局与注册争用同一图的 revision；失败仍保留原 Launcher 和草稿。
 
@@ -54,12 +54,23 @@ Desktop 的 `workbench-user-state.json` 位于同一应用 `userData` 根，由�
 
 缺少 Host 资源元数据时如实报告，保 Core 身份与当前内容。资源来源和屏幕展示位置分别保留，不能用当前焦点补猜目录。空间管理复用既有 JSON-RPC 与远程传输；可移植 API 不以 OS 安装门禁判断可用性，随包 Native Runtime 的可用性是另一项 Host 能力。本页不为未验证 Host 的 Native surface 宣布完成。
 
+## Topic／Mote 物理目录与目录身份
+
+必须成立的结果归[Topic 与 Mote 的物理目录](../design/behavior/motes-and-coordination.md#topic-与-mote-的物理目录)；本节只说明当前机制。
+
+- **目录根**。[`scratchTopicStorageRoots`](../../apps/host/src/mote-topic-model.ts) 从 Scratch 根派生并列的 `topics/` 与 `motes/` 根；Desktop 的 Scratch 根是 `SCRATCH_BACKING_PATH`，即 `~/.agentmux/scratch`（[config-store.ts](../../apps/desktop/src/main/config-store.ts)）。
+- **Mote 短名**。[`moteDirectoryName`](../../apps/host/src/mote-directory-identity.mjs) 取完整内容 ID 的 SHA-256 前 16 位十六进制，只作目录索引，不代替完整对象 ID。
+- **身份记录**。记录位于对象内的 `.agentmux/directory-identity.json`（`SCRATCH_DIRECTORY_IDENTITY_PATH`）。当前格式由 `directoryIdentityRecord` 生成：`{version: 3, topicId, identityRoot, identityDirectoryName, identityPathHash}`，其中 `identityRoot` 为 `scratch`、`topics` 或 `motes`，`identityPathHash` 是原逻辑地址的 SHA-256，记录中不写绝对路径。`verifiedRecord` 只在恰好一个候选地址与记录的根、目录名和哈希一致时确认身份；旧格式 v1（绝对路径）与 v2（目录名与路径哈希）仍可读取，但标为 `needsUpgrade`。记录无效或地址无法唯一确认时报告 `DIRECTORY_IDENTITY_INVALID`，保留原记录与内容。
+- **写入与升级**。`retainDirectoryIdentity` 为新对象排他创建并同步记录。`normalizeDirectoryIdentity` 把已确认的旧记录无损重编码为 v3，经待确认见证 `.agentmux/directory-identity.pending.json` 发布并核对；发布或持久确认未知时报告 `DIRECTORY_IDENTITY_WRITE_UNKNOWN`。别名交换的待确认见证 `.agentmux/directory-identity.pending.alias` 存在时，先要求确认那次交换，不改写记录。
+- **原子交换**。[`migrateTopicDirectories`](../../apps/host/src/mote-directory-maintenance.mjs) 的 `exchange` 调用原生 helper `agentmux-workspace-move --alias-swap <root> <dev> <ino> …`（`AGENTMUX_WORKSPACE_MOVE_HELPER` 可覆盖其路径），在同一卷上以不覆盖目标的一次交换保留原 inode 与完整内容，并把旧地址变为指向同一对象的别名。非 darwin 平台返回 `DIRECTORY_MIGRATION_UNSUPPORTED`，不做非原子迁移；结果无法确认、目标已存在或别名不指向原对象时，分别返回 `DIRECTORY_MIGRATION_RESULT_UNKNOWN`、`DIRECTORY_MIGRATION_TARGET_EXISTS` 与 `DIRECTORY_MIGRATION_ALIAS_INVALID`，保留原内容与交换见证。Host 的 [mote-resources.ts](../../apps/host/src/mote-resources.ts) 与 Desktop 的 [scratch-topics.ts](../../apps/desktop/src/main/scratch-topics.ts) 以 `motesOnly` 调用它。
+- **解析**。[`resolveScratchTopicDirectory`](../../apps/host/src/mote-directories.ts) 在三个根中按完整目录名与 Mote 短名查找候选：短名目录必须有确认的完整内容 ID，别名必须解析到同一物理对象，出现多个物理位置时拒绝并保留全部字节，待确认的交换中间地址只在同一操作的见证一致时接受。
+
 ## 准确选择与跨视图导航
 
 Desktop 的 [`workbenchSpaceSelection` / `selectMainRegion` / `activateTab`](../../apps/desktop/src/renderer/src/store.ts) 持有并更新 Work 当前选择。原空间目录经 [`workbenchSelectionCatalog` / `resolveDesktopSpaceSelection` / `resolveWorkbenchOccurrenceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts) 确认对象、成员与准确 occurrence；局部选择与显式导航以原 intent 区分，不按最近 Session 或第一处展示推导目标。
 
 Focus 的 [`mainFocusPresentation`](../../apps/desktop/src/renderer/src/lib/focus-tab-projection.ts) 消费同一选择，按原 Tab 或 Region 投影；[`mainRegionReference`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts) 从该选择派生准确引用，不成为第二个选择 owner。实体的展示通过 [`WorkbenchProjection`](../../apps/desktop/src/renderer/src/lib/workbench-projection.ts) 及原工作面组件消费；导航选择与 DOM 输入交接是不同事实。
 
-文件打开由 Store 的 `defaultFileOpenTarget` 捕获 UI 导航上下文，显式公共请求及工作面 projection 保原目标；两条路径消费 [`resolveFileOpenTarget`](../../apps/desktop/src/renderer/src/lib/workface-file-open.ts) 的资源／空间解析。既有准确 File reference 与新建 destination 分别沿原公共机制确认，`FileOpenPlacement` 传递本次目标，`FileOpenResult` 返回实际落点；重开与 Diff 不再重新全局查找文档或读取后来选择来推定结果。文档数据共享仍由 [`FileWorkbenchState`](../../apps/desktop/src/renderer/src/lib/file-workbench-state.ts) 持有。局部导航只从 App owner 读取必要的遮挡状态，不以前端完整 DOM 呈现探测作为选择资格。
+文件打开由 Store 的 `defaultFileOpenTarget` 捕获 UI 导航上下文，显式公共请求及工作面 projection 保原目标；两条路径消费 [`resolveFileOpenTarget`](../../apps/desktop/src/renderer/src/lib/workface-file-open.ts) 的资源／空间解析。既有准确 File reference 与新建 destination 分别沿原公共机制确认，`FileOpenPlacement` 传递本次目标，`FileOpenResult` 返回实际落点；重开与 Diff 沿本次目标与结果，不全局查找文档，也不读取之后的选择来推定结果。文档数据共享仍由 [`FileWorkbenchState`](../../apps/desktop/src/renderer/src/lib/file-workbench-state.ts) 持有。局部导航只从 App owner 读取必要的遮挡状态，不以前端完整 DOM 呈现探测作为选择资格。
 
 这里核对空间底座和既有 Work 导航接缝；Mote／Work／Know 的产品分组及 Survey／Recall 的独立导航要求归[导航上下文合同](../design/behavior/spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)，分组本身不新增 Core 实体或自动同步器。公共服务、JSON-RPC 与 CLI 的原接线见[系统职责地图](system-ownership.md#当前执行与展示链路)，精确参数沿[公共能力源码入口](../specs/public-capabilities.md)。

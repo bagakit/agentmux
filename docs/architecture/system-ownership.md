@@ -11,11 +11,11 @@ AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它�
 | 层或模块 | 持有的事实与职责 | 当前来源 |
 | --- | --- | --- |
 | ctxmux | 通用 Run、PTY、进程生命周期、ordered bytes、Replay、Gap 与 Attachment | [随包 artifact manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Core 的唯一适配器](../../packages/core/src/ctxmux-run-adapter.ts) |
-| AgentMux Core | AgentSession semantics and frontend-independent durable spatial identities, topology and bindings | [Client](../../packages/core/src/client.ts), [Session Store](../../packages/core/src/agent-session-store.ts), [Spatial owner](../../packages/core/src/spatial-state.ts) |
+| AgentMux Core | AgentSession 语义，以及与前端无关的持久空间身份、拓扑与绑定 | [Client](../../packages/core/src/client.ts)、[Session Store](../../packages/core/src/agent-session-store.ts)、[空间 owner](../../packages/core/src/spatial-state.ts) |
 | Provider | 解释原生 Agent 协议，贡献启动／恢复计划、输入协议、Hook 归一化与原生历史能力 | [`AgentProvider` / `defineAgentProvider`](../../packages/core/src/agent-provider.ts)、[内置 Provider](../../packages/core/src/providers/) |
 | 独立 Host | 组合唯一 Core 语义 owner，提供 Relay／设备、原文件／Note／Topic、Goal 领域组合与后台安排、资源配置读取与观察；不持有真实屏幕焦点 | [Host](../../apps/host/src/host.ts)、[内容 owner](../../apps/host/src/content-owner.ts)、[平台服务](../../apps/host/src/macos-service.ts) |
 | Desktop Main | 宿主配置写入、原生文件适配／Git、Browser 与 Toolkit；连接原 Host 并通过 Core 公共 API 管理 Agent | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
-| Desktop Renderer | Consumes Core topology and bindings; owns screen projection, focus, drafts and client resource metadata | [Store](../../apps/desktop/src/renderer/src/store.ts), [Spatial ownership](spatial-state.md) |
+| Desktop Renderer | 消费 Core 的拓扑与绑定；持有屏幕投影、焦点、草稿与客户端资源元数据 | [Store](../../apps/desktop/src/renderer/src/store.ts)、[空间状态机制](spatial-state.md) |
 | `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享 React 呈现和编辑；宿主能力经平台适配器与 typed props 注入 | [包说明](../../packages/client-ui/README.md)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
 | Core `spatial-layout` / `@agentmux/layout` | Core 持有分屏树结构、比例、几何寻址与布局 reducer 的纯代数；`@agentmux/layout` 仅重导出该公共能力，不另持有空间状态或 Session 生命周期 | [Core 代数](../../packages/core/src/spatial-layout.ts)、[重导出入口](../../packages/layout/src/index.ts) |
 | `@agentmux/demand` | Demand／Goal 的 durable 文件事实、关联、决策、目标确认和结果接受的状态 | [包说明](../../packages/demand/README.md)、[Store](../../packages/demand/src/demand-store.ts)、[Goal 类型与规则](../../packages/demand/src/goals.ts) |
@@ -77,7 +77,12 @@ flowchart LR
   Adapter --> Runtime["ctxmux Run Runtime"]
 ```
 
-[`agentmux.ts`](../../packages/core/src/agentmux.ts) 解析 CLI 后通过 `connectAgentMuxRpc` 调用共享 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)。[`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts) 由独立 [Host](../../apps/host/src/host.ts) 接入 Core clients、可移植领域 owner 和事实观察入口；Main 的 [IPC 入口](../../apps/desktop/src/main/ipc.ts) 提供原生宿主能力，并借同一 Host 读取领域事实；业务服务向准确 owner 委托操作，不复制其事实。工作面操作经 [DesktopControlIpcBridge](../../apps/desktop/src/main/control-ipc-bridge.ts) 和 Renderer 的 [Control 接收入口](../../apps/desktop/src/renderer/src/lib/control-api.ts) 进入 [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)，空间判定复用 [Control helpers](../../apps/desktop/src/renderer/src/lib/control.ts)。
+[`agentmux.ts`](../../packages/core/src/agentmux.ts) 解析 CLI 后通过 `connectAgentMuxRpc` 调用共享 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)。图中的「共享 JSON-RPC 业务服务」由两个 [`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts) 实例承载：
+
+- 独立 [Host](../../apps/host/src/host.ts) 的实例监听 `control.sock`（`defaultAgentMuxControlSocketPath`，[runtime-paths.ts](../../packages/core/src/runtime-paths.ts)），接入 Core clients、可移植领域 owner 和事实观察入口。CLI 默认连接这个 socket，Core 也把它作为 `AGENTMUX_RPC_ENDPOINT` 注入托管 Agent。
+- Desktop Main 在 [IPC 入口](../../apps/desktop/src/main/ipc.ts) 另起一个实例，监听 `control.sock.desktop`（`desktopBusinessSocketPath`，[desktop-host.ts](../../apps/desktop/src/main/desktop-host.ts)），提供原生宿主能力。Host 本身未注入的 Desktop 原生方法（工作面控制等）由 Host 服务的 `forwardControl`／`forwardSubscription` 转到这个 socket，携带原调用者凭据；设备主体另带一份只能认领一次的 forwarding 授权。两侧的 `forwardingPeer` 分别指向对端 socket（Host 指向 `control.sock.desktop`，Main 指向 `control.sock`），只用于接收方回到对端认领这份授权（[rpc-forwarding.ts](../../packages/core/src/rpc-forwarding.ts) 的 `receiveForwardedCall`），不是请求的转发通道。
+
+业务服务向各 owner 委托操作，不复制其事实。工作面操作经 [DesktopControlIpcBridge](../../apps/desktop/src/main/control-ipc-bridge.ts) 和 Renderer 的 [Control 接收入口](../../apps/desktop/src/renderer/src/lib/control-api.ts) 进入 [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)，空间判定复用 [Control helpers](../../apps/desktop/src/renderer/src/lib/control.ts)。
 
 Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 沿原 Hosted client 调用公共 API。Browser 操作事实和订阅由准确 Browser 宿主消费共享的 [operation journal](../../packages/browser/src/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。Session lookup、角色绑定和消息编排归共享业务服务；CLI 不直接读写这些本地业务事实。独立 Host 不依赖 Main 提供内容与配置读取；真实焦点、窗口、Browser 等原生 owner 离线时明确局部不可用，服务存在不证明这些宿主能力已经就绪。
 
@@ -103,6 +108,26 @@ Core Session Store 在原 Session 路径使用 SQLite 保存身份与生命周�
 
 Session 元数据与每条未来消息正文分行持久化。Registry 只保留元数据，目录读取不带累计未来正文；准确 Session 读取、元数据 CAS 与单条未来消息读写只访问目标事实。未来消息正文、原 Session／Run 与 occurrence 领取在同一事务内核对，元数据更新不会因未携带正文而删除它。显式 `Store.load()`／完整 CAS 保持完整业务事实合同；普通控制使用名称明确的 metadata／单条／有界分页接口。SQLite 提交及文件、目录同步分别确认；提交结果未知或同步未确认不冒充未发生，也不停止健康 Run，原绑定可重新读取并在同一 owner 确认保存。
 
+Session 元数据与历史贡献可以在一次提交中合并：
+
+- 普通 Tool Hook 由 [`AgentMuxClient`](../../packages/core/src/client.ts) 在 Registry 更新队列中先计算 current→next，再判断这一条历史贡献能否与回执合并。只有不带 outcome、活动边界、待 flush、交互或 continuity 变更的稳态贡献，才调用 Store 接口 `AgentMuxAgentSessionStore`（[agent-session-store.ts](../../packages/core/src/agent-session-store.ts)）的 `compareAndSwapMetadataWithTimeline`；首次 handover 与复杂贡献仍走各自的路径。Registry 复用同一 CAS、身份与 durability owner，Session 与历史的提交结果分别返回。
+- File Store（代码名 `AgentMuxFileAgentSessionStore`）在 timeline 顺序、writer 与 SQLite 事务中保存 metadata，用内部 SAVEPOINT 隔离可选的历史。只有 writer 确认 COMMIT 从未尝试、整个事务已回滚、handle 与 lease 已释放时，才允许按同一 expected／next 只做 metadata CAS；COMMIT 结果未知或提交后 sync 失败时不重写。
+- Memory Store（代码名 `AgentMuxMemoryAgentSessionStore`）先同步 stage 受影响的 metadata、输入记录与一条历史版本，再修改内存中的 map。
+- 必需 metadata 的错误保留真实类型与原因，历史错误只作为辅助明细；仅在准备阶段出现的错误不会把本次回执标为保存未确认。保存承诺见[本地持久化合同](../design/behavior/persistence.md#保存合同)。
+
+Desktop 的 `RuntimeController.snapshot` 分别读取 Runtime membership 与 Session Timeline：
+
+- 单个 Session 的 Timeline 读不到时，已确认的同 Host 成员与 Run 事实照常发布；失败只附在该 Session 的 `SessionSnapshot.timelineObservation` 上，带着它的 Run 与具体原因。
+- Renderer 对齐成员时保留该 Session 最后一次可读的页，[`sessionServiceNotices`](../../apps/desktop/src/renderer/src/lib/session-service-notices.ts) 在该 Session 的本地与全局服务窗里说明重读动作。整个 Host 不因此被标为不可用，缺页也不被补成成功的空记录。
+- 只有该 Host／Session／Run 的 Timeline 在完整快照中读成功，或被显式重读成功，才收起这次观察失败；别的 Session、Run 或连接的恢复不能代替。
+- 状态读取已明确切换到新 Run 时，旧 Run 的观察诊断不再投影；旧页仍由持久 Session 保留，旧 Run 迟到的读取不能清除新 Run 的失败。Timeline 返回另一个 Session 的身份时明确拒绝。
+
+## Markdown 渲染与主题运行时
+
+共享 Markdown 预览的安全与预算由 [`packages/client-ui/src/lib/markdown-render.ts`](../../packages/client-ui/src/lib/markdown-render.ts) 持有：数学源上限 `MARKDOWN_MATH_SOURCE_LIMIT`（4 KiB）、代码源上限 `MARKDOWN_CODE_SOURCE_LIMIT`（64 KiB）、生成 HTML 上限 `MARKDOWN_HTML_LIMIT`（256 KiB）与元素数上限 `MARKDOWN_ELEMENT_LIMIT`（3000）。KaTeX 以 `trust: false`、`strict: 'error'` 渲染；超预算时回退为原文并给出说明。`markdownRenderLimit` 在启动 worker 前准入有界源，原文始终保留为 fallback；`renderMarkdown` 只在可终止的 worker 内生成 DOM，并把生成结果再按同一 HTML／元素预算裁切后传回。
+
+主题不写在静态 CSS `:root` 里。Desktop preload 的 [`projectInitialTheme`](../../apps/desktop/src/preload/theme-bootstrap.ts) 先把同步快照涂到文档根；随后 [`mountThemeRuntime`](../../packages/client-ui/src/theme/runtime.ts) 成为该窗口唯一的 media／选择订阅，经 [`themeCssVariables`](../../packages/client-ui/src/theme/css-variables.ts) 把解析后的颜色、字体与 elevation 写成 `documentElement` 的 CSS 变量并派发 `agentmux-theme-change`。消费者只观察这份投影，不再各自 resolve 主题。
+
 ## 当前接入边界
 
 对象优先 CLI 与共享类型化 JSON-RPC 2.0 服务已经接入当前源码。[Server](../../packages/core/src/public-rpc-server.ts) 默认使用 Unix socket 的有界 JSON-lines framing；显式配置 `AGENTMUX_RPC_HTTP_BIND` 和 `AGENTMUX_RPC_HTTP_TOKEN` 后提供 HTTP POST 与 SSE 订阅，HTTP 默认关闭且不内建 TLS。[Client](../../packages/core/src/public-rpc-client.ts) 的 SSH 与 Tailcat 传输调用远端 CLI 的 [stdio 转发](../../packages/core/src/agentmux-rpc-stdio.ts)，连接远端已运行 owner 的 Unix socket，要求已有远端 CLI 与 SSH 授权或已保存的 Tailcat client key；端到端加密 [Relay](../../packages/core/src/public-rpc-relay.ts) 承载已认证设备的连接。公共方法与参数归 [公共 RPC 类型](../../packages/core/src/public-rpc.ts)；[Control 定义](../../packages/core/src/control.ts) 中的信封保留为内部 owner DTO。行为合同归 [对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。
@@ -112,7 +137,3 @@ Runtime 语义服务由 Core 的 [Headless owner](../../packages/core/src/headle
 [`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 是公共 RPC 的唯一类型化 Runtime client；[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 只负责组合系统 SSH 传输与同一 Hosted client。Desktop 的 [Host connector](../../apps/desktop/src/main/desktop-host.ts) 连接语义 owner；原生工作面、文件格式工具与 Git 继续归 Desktop，可移植内容消费同一 Host owner。客户端的最后观察、durable Runtime 身份、当前 owner 进程代次与 ctxmux 身份分别保留；缓存不成为授权或当前运行事实。
 
 SSH 公共服务连接与远端 shell／文件能力是不同能力。[`SshExecutionHost`](../../packages/core/src/execution-host.ts) 不持有 Agent 生命周期；Core 远程管理连接的是远端 AgentMux owner，由它消费当地 ctxmux。此实现不声称 ctxmux 具有独立 Remote Runtime 协议。源码、编译、安装包和当前连接能力仍分别核对；来源不可用保持未知，恢复行为唯一见[联邦 Runtime 与远端恢复边界](../design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。
-
-## Frontend-independent spatial owner
-
-The Core filesystem owner and public API for stable entities, position topology and bindings are defined in [Durable spatial state](spatial-state.md). Desktop screen layout and focus consume these facts through the same Core owner; client preferences and drafts remain separate. Do not confuse lookup caches with durable spatial relationships.

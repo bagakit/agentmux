@@ -20,6 +20,8 @@ Provider 解释原生初始化、会话创建／恢复及前台连接协议，�
 | [continuity-attempt.ts](../../packages/core/src/agent-session-recovery/continuity-attempt.ts) | `performAgentContinuity` 执行一次原 operation 的事务：读取原事实、冻结请求和 receipt、应用策略、调用执行或对账能力并记录结果；函数本身不另持跨请求状态。 |
 | [lifecycle.ts](../../packages/core/src/agent-session-recovery/lifecycle.ts) | `AgentSessionRunLifecycle` 执行原 Store reservation 对应的启动计划、Run Start／显式 Stop、提交及未收口生命周期的 settlement。 |
 | [reconciliation.ts](../../packages/core/src/agent-session-recovery/reconciliation.ts) | `AgentSessionRecoveryReconciler` 核对原初始化、native identity、frontend 与输入交付，守准确 actor／Run／操作栅栏；Runtime 端口仅允许状态读取与身份核对，没有 Run Start、Stop 或 retire 能力。 |
+| [interruption.ts](../../packages/core/src/agent-session-recovery/interruption.ts)、[resumed-interruption.ts](../../packages/core/src/agent-session-recovery/resumed-interruption.ts) | 在启动下一个 writer 前检查原生目标的中断状态；只有原生 resume 能细化其冻结的旧 turn。两者都不读取终端文字，不调度、不写输入。 |
+| [resume-resolution.ts](../../packages/core/src/agent-session-recovery/resume-resolution.ts)、[executor.ts](../../packages/core/src/agent-session-recovery/executor.ts)、[continuity-activity.ts](../../packages/core/src/agent-session-recovery/continuity-activity.ts) | 分别持有 resume 的安全关联记录（原生退休不声称历史 Start 没有副作用）、恢复所用的 Executor 逻辑选项（不含 RunSpec、生成的凭据或输入载体），以及读取最近活动事实（观察已保留的结束不刷新其年龄）。 |
 
 执行依赖从 `client` 进入 `service`，由单次 attempt 调用 `lifecycle` 和 `reconciliation`；`lifecycle` 也复用同一 reconciler。下层不反向依赖 service 或 client，合同与纯策略不依赖执行 owner。[supervisor.ts](../../packages/core/src/agent-session-recovery/supervisor.ts) 继续持有每个 Session 的串行边界与调度，生命周期共用该串行边界；Run 创建的互斥仍由原 Store reservation 保证。[input.ts](../../packages/core/src/agent-session-recovery/input.ts) 组合和观察恢复输入，通过原 submission owner 投递。
 
@@ -30,6 +32,12 @@ Provider 解释原生初始化、会话创建／恢复及前台连接协议，�
 初始化协议可以先确认准确原生 ID，原 Provider 随后再确认同一会话的记录来源。恢复模块在绑定原 ID 后唤醒既有 native discovery；对本次声明初始化能力的 actor，发现流程只补充同一 Provider／ID 尚缺失、且由原进程证明的 locator，已有 ID 和已知 locator 均不能被替换。补充观察仍核原 Run／PID、Provider witness 与 Store CAS；失败保留已确认身份和健康输入，不把缺少记录来源说成原生对象尚未创建。
 
 GUI 与 CLI 仅消费 Core 的原阶段和结果。原 Run 存活只证明物理运行，不能代签前台恢复、原生上下文或输入接受。故障诊断正文可供阅读，但不参与权限、身份、恢复资格或成功判定。
+
+## Provider 差异（恢复判定内）
+
+部分 Provider 在第一轮对话前不保存可续接的原生会话：原生 resume 会找不到记录。这是 Provider 的持久化合同；AgentMux 不改写、补造或伪装它的保存。Core 的 [`agentSessionHasNoNativeConversation`](../../packages/core/src/agent-session-recovery/continuity-policy.ts)／[`agentSessionHoldsNativeEvidence`](../../packages/core/src/agent-session-recovery/continuity-policy.ts) 只根据已确认的 Session 保存事实、托管身份通道与 ctxmux 输入计数判定，不推断 Provider 磁盘上保存过什么。[`performAgentContinuity`](../../packages/core/src/agent-session-recovery/continuity-attempt.ts) 在该情形下给出 `native-conversation-absent`，替代自动准入，不代替 supervised／resident 授权检查。用户可见表述见 [Session 恢复](../design/behavior/session-recovery.md)。
+
+终端权限选项由各 Provider 在 detection 配置中声明 `permissionOptions`；[`createNumberedTerminalInteractionProtocol`](../../packages/core/src/agent-interaction.ts) 闭包解析所选 option 的按键，投影到 Renderer 时去掉 `input` 键位。当前声明 `respond` 权限并提供编号权限选项的内置 Provider，只暴露 `allow-once`／`reject-once` 一类选项（见各 Provider 的 `permissionOptions`），不把未声明的 always／其他档位投影到公共权限卡。
 
 ## 初始输入与公共消费
 

@@ -1,400 +1,296 @@
-<!--
-meta: AgentMux Terminal / CtxMux 运行时架构。
-目的：解释终端从字节到像素的端到端链路、各层所有权矩阵，以及 Terminal
-palette 与 TUI 自身表现层的边界。
-只记录有证据支撑的事实；所有引用为 repo-relative。
-入口：docs/README.md。
--->
+# Terminal 运行时：字节通路、附着与输入
 
-# Terminal 运行时：CtxMux 内核与外观所有权
+本文说明终端从 PTY 字节到 xterm 像素、从按键回到 PTY 的当前源码链路，以及每一段由谁持有事实。终端外观（palette、OSC 10/11 颜色回复与主题边界）见 [Terminal 外观](terminal-appearance.md)，宿主、xterm 与 Agent 的交互分层见[终端交互分层](terminal-interaction-layers.md)。本文描述源码机制，不声明某个安装或运行实例已通过验证。
 
-本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 Core 持有的持久空间实体，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留见[对象操作指南](../guides/agentmux-cli-object-control.md)。
-
-ctxmux 独立 Runtime 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。当前随包身份唯一取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)；不能从该身份推断正在服务的 daemon 已被更新。
+产品对象沿用[《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space、Zone、Tab、Region 是 Core 持有的持久空间实体，Project／Workspace 是来源与目录事实；空间移动不改变 Session、Run 或执行 cwd。ctxmux 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。随包 ctxmux 的身份只取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)，不能据此推断正在服务的 daemon 已经更新。
 
 ## 1. 端到端链路
 
-一次终端从字节到像素、从按键到 PTY，跨过四层。每层的权威源码入口如下。
+Agent 与 Run 由独立 Host 进程里的 Core 持有，Desktop Main 是这个 Host 的 Hosted 客户端。一次终端输出跨过以下边界：
 
-```
-Agent CLI / shell (PTY 子进程)
-        │  raw bytes
+```text
+Agent CLI / shell（PTY 子进程）
+        │ raw bytes
         ▼
-CtxMux daemon (ctxmuxd)                 ← 唯一的 Run 生命周期 owner
-        │  Unix socket / @ctxmux/sdk
+ctxmuxd                                    ← Run 生命周期唯一 owner
+        │ Unix socket（ctxmux.sock）/ @ctxmux/sdk
         ▼
-CtxmuxRunAdapter                        packages/core/src/ctxmux-run-adapter.ts
-        │  CtxmuxAdapter* 事件（data/exit/gap）
+独立 Host 进程                              apps/host/src/host.ts
+  CtxmuxRunAdapter                         packages/core/src/ctxmux-run-adapter.ts
+        │ CtxmuxAdapter* 事件（data / exit / gap）
+  AgentMuxClient                           packages/core/src/client.ts
+        │ AgentMuxClientEvent（terminal-output / process-state / agent-session …）
+  Hosted Runtime service + AgentMuxControlServer（监听 control.sock）
+        │ Hosted RPC（调用与订阅）
         ▼
-AgentMuxClient                          packages/core/src/client.ts
-        │  AgentMuxClientEvent（terminal-output / process-state / agent-session…）
+Desktop Main
+  Desktop Host connector → connectHostedAgentMux   apps/desktop/src/main/desktop-host.ts
+  RuntimeController                        apps/desktop/src/main/runtime-controller.ts
+        │ IPC SESSION_EVENT_CHANNEL（'agentmux:session-event'）→ RuntimeEvent
         ▼
-RuntimeController (Desktop Main)         apps/desktop/src/main/runtime-controller.ts
-        │  IPC 'agentmux:session-event' → RuntimeEvent
-        ▼
-TerminalView (Renderer, xterm)          apps/desktop/src/renderer/src/components/TerminalView.tsx
-        │  terminal.write(bytes) → WebGL/DOM 渲染
+Renderer
+  TerminalView（xterm）                    apps/desktop/src/renderer/src/components/TerminalView.tsx
+        │ terminal.write(bytes) → WebGL / DOM 渲染
         ▼
 像素
 ```
 
-反向的输入路径：[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 的 xterm `onData` → `api.sessions.write`
-→ [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts) 的 `write`
-→ [AgentMuxClient](../../packages/core/src/client.ts) 的 `writeTerminalBytes` /
-`writeAgent` → [CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 的 input-only 通道 →
-ctxmux 原 writer 的有序字节与本条回执 → PTY。
+输入方向：[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 的 xterm `onData` → preload 的 `api.sessions.write` → [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts) 的 `write` → Hosted 调用 Host 上 [AgentMuxClient](../../packages/core/src/client.ts) 的 `writeTerminalBytes`（普通 Terminal）或 `writeAgent`（Agent）→ [CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 的 input-only 通道 → ctxmux writer 的有序字节与本条回执 → PTY。
 
-关键性质：**Desktop 持有主题；物理终端通路只传输字节、尺寸与生命周期，不承载 Desktop theme**。
-Core 另持有 Provider、AgentSession 等 Agent 语义。此处的公共物理终端类型没有主题字段（`client.ts` 的
-`AgentMuxTerminalCreateInput`、`ctxmux-run-adapter.ts` 的 `CtxmuxAdapterRun` 均无颜色/主题
-字段）。
+物理终端通路只传输字节、尺寸与生命周期，不承载 Desktop 主题：`client.ts` 的 `AgentMuxTerminalCreateInput` 与 `ctxmux-run-adapter.ts` 的 `CtxmuxAdapterRun` 都没有颜色或主题字段。主题归 Desktop，见 [Terminal 外观](terminal-appearance.md)；Core 在字节之上另持有 Provider、AgentSession 等 Agent 语义。
 
-空间操作走另一条正交路径：
+空间操作走另一条路径。Core 在启动托管 Agent 时注入 `AGENTMUX_RPC_ENDPOINT=unix:<control.sock>`，因此托管 Agent 的 CLI 先到达 Host：
 
 ```text
-managed Agent → amux CLI     → control.sock → Desktop Main Control Host
-                                                │ typed IPC request/receipt
-                                                ▼
-                                  Renderer Layout Store / reducer
-                                                │ Agent / Terminal creation
-                                                ▼
-                                  RuntimeController → Core → ctxmuxd
+托管 Agent → amux CLI
+        │ JSON-RPC over unix:control.sock
+        ▼
+独立 Host 的 AgentMuxControlServer（control.sock）
+        │ Desktop 原生方法经 forwardControl／forwardSubscription 转发（携带原调用者凭据）
+        ▼
+Desktop Main 的 AgentMuxControlServer（control.sock.desktop）
+        │ DesktopControlIpcBridge：typed IPC request / receipt
+        ▼
+Renderer control-api → Store.executeControl → Layout Store / reducer
+        │ Agent / Terminal 创建
+        ▼
+RuntimeController → Hosted RPC → Host 的 Core → ctxmuxd
 ```
 
-Core 的 [Control 合同](../../packages/core/src/control.ts) 表达类型化请求与回执，DTO 本身不持有空间图。持久实体、绑定和 split tree 由[Core Spatial owner](spatial-state.md#唯一事实-owner)持有；Renderer Workbench/layout reducer 消费同一图，维护屏幕投影与本地操作意图。
+`control.sock` 的路径来自 `defaultAgentMuxControlSocketPath`（[runtime-paths.ts](../../packages/core/src/runtime-paths.ts)），`control.sock.desktop` 来自 `desktopBusinessSocketPath`（[desktop-host.ts](../../apps/desktop/src/main/desktop-host.ts)）；两者的接入与转发关系见[系统接入边界](system-ownership.md#当前接入边界)。[Control 合同](../../packages/core/src/control.ts)只表达类型化请求与回执，DTO 不持有空间图。持久实体、绑定和 split tree 由 [Core 空间 owner](spatial-state.md#唯一事实-owner) 持有；Renderer 的 Workbench／layout reducer 消费同一张图，维护屏幕投影与本地操作意图。
 
-Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycle。Agent／Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间创建先保存意图，再调用已有 Main Git/config 与公开 Core 创建能力；Core 记录同一次 Agent 创建的首次投递事实。展示归属不改变执行 cwd，Session 续接沿[冷启动恢复合同](../design/behavior/session-recovery.md#冷启动按需恢复p0-末位)。
+Desktop Main 通过公开 Core API 执行 Agent lifecycle：Agent 与 Terminal 的创建经常驻的 RuntimeController，Browser 创建经 Main 的 Browser owner。空间创建先保存意图，再调用 Main 的 Git／config 能力与公开 Core 创建能力，Core 记录同一次 Agent 创建的首次投递事实。展示归属不改变执行 cwd；Session 续接沿[冷启动恢复合同](../design/behavior/session-recovery.md#冷启动按需恢复p0-末位)。
 
-创建后投影或保存失败返回 partial／unknown，健康 Session 仍可发现。查询同一 request 不重启、不重发、不重新执行 Git。当前命令以公共源码与行为合同为准，理解机制不依赖本机历史设计。
+创建之后的投影或保存失败时，回执为 partial 或 unknown，健康 Session 仍可被发现。以同一 request 查询不会重启、重发或重新执行 Git。
 
-布局变更由既有 viewport synchronizer 将稳定后的 cols/rows 提交给 ctxmux。ctxmux 不接收 Tab、Region 或 split direction；PTY 的实际尺寸与客户端测量值分别表达。
+布局变化后，viewport synchronizer 把稳定后的 cols／rows 提交给 ctxmux（见第 5 节）。ctxmux 不接收 Tab、Region 或 split direction；PTY 的实际尺寸与客户端测量值分别表达。
 
 ### 1.1 原终端附着与 Hosted 准入
 
-原 Run 的物理通路与全局语义恢复使用不同前提，行为要求归 [Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。当前 Hosted 调用由 [shared contract](../../packages/core/src/hosted-client-contract.ts) 和 [Host service](../../packages/core/src/hosted-runtime-service.ts) 的既有分类执行：
+接回已有 Run 的物理终端通路与全局语义恢复使用不同前提，行为要求见 [Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。每个 Hosted 方法的前提由 [hosted-client-contract.ts](../../packages/core/src/hosted-client-contract.ts) 中 `AGENTMUX_HOSTED_PREPARATION` 声明的分类决定，[Hosted Runtime service](../../packages/core/src/hosted-runtime-service.ts) 按分类分派：
 
-| 分类／分派 | 源码 owner | 当前机制 |
+| 分类 | 适用场景 | 分派机制 |
 | --- | --- | --- |
-| 需要原 Native 的准确操作 | `AGENTMUX_HOSTED_PREPARATION` 的 `runtime` | 调用 `connectRuntime()`；包括原终端附着、物理事实投影、准确 Agent 创建与 Stop。每个方法仍守自己的业务前提 |
-| 不以 Native 或全局恢复完成为通用前置 | 同一声明的 `owner` | 分派层不预先连接，例如 `sessionTimeline` 从原持久来源读取；每个业务 owner 仍守自身目标、权限、连接与存储合同，不表示缓存成功或事实已知 |
-| 明确需要 Session 观察准备 | 同一声明的 `session-observation` | 保留原 `connect()`；声明只描述传输层准备，不代签业务授权或成功 |
-| 由本次输入意图决定准备 | 同一声明的 `input-admission` | Host service 沿原人工／原生对话准入和引用消息 intake 合同处理，不让传输分类改变原输入资格 |
+| `runtime` | 需要 Native 的操作：终端附着、物理事实投影、Agent 创建与 Stop | 先调用 `connectRuntime()`；每个方法仍检查自己的业务前提 |
+| `owner` | 不以 Native 或全局恢复完成为前提，例如 `sessionTimeline` 从持久来源读取 | 分派层不预先连接；业务 owner 仍检查自身的目标、权限、连接与存储合同。该分类不表示缓存成功或事实已知 |
+| `session-observation` | 明确需要 Session 观察准备 | 调用 `connect()`；只描述传输层准备，不代表业务授权或成功 |
+| `input-admission` | 准备方式由本次输入意图决定 | Host service 按人工输入、原生对话准入或引用消息 intake 的合同处理；传输分类不改变输入资格 |
 
-这张表解释前提，完整方法与例外以源码为准；它不建立第二份方法白名单。有限 SDK 的每个方法均须在唯一准备声明中分类，新增方法不能隐式落入全局恢复；分派穷尽各类，原目标、权限、fence、持久事务与回执仍归业务 owner。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，不在 Desktop 内另建语义 Core。Main Stop 选择已有 Runtime scope，冷 Stop 仅沿 Core 原 metadata owner 采用准确持久 Session，不加载无关 Session。
+这张表解释前提，完整方法与例外以源码为准，不构成第二份方法白名单。`AGENTMUX_HOSTED_PREPARATION` 以 `satisfies Record<AgentMuxHostedMethod, AgentMuxHostedPreparation>` 声明，有限 SDK 的方法缺少分类时无法通过类型检查，新增方法不会默认落入全局恢复；Hosted Runtime service 的分派 `switch` 以 `satisfies never` 穷尽所有分类，目标、权限、fence、持久事务与回执仍由各业务 owner 核对。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，Desktop 内不另建语义 Core。Main 的 Stop 使用已有的 Runtime scope；冷 Stop 只经 Core 的 metadata owner 采用目标 Session 的持久记录，不加载无关 Session。
 
-同一 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的原准备，包括前后 owner discovery 和 Host 准备。成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用收尾不能清掉新的准备。此处不缓存 readiness，不合并输入，不让独立 metadata reader 等待 Native 准备；每次输入仍保留自己的顺序、目标、byte cursor 与回执。
+同一个 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的那一次准备（包括前后两次 owner discovery 与 Host 准备）。准备成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用的收尾不能清掉新的准备。这里不缓存 readiness、不合并输入，独立的 metadata reader 也不等待 Native 准备；每次输入保留自己的顺序、目标、byte cursor 与回执。
 
-Hosted 原始输入由 `writeAgent`／`pasteAgent`／`writeTerminalBytes` 自身先发现原 semantic Host，再交给同一次 Host invocation 准备 Native。Main 不额外调用显式 `connectRuntime()`；每个串行输入只有一次 Host discovery 和一次业务 invocation，重叠 discovery 复用原在途请求。Host 保留准备前后的 owner fence，Core 保留准确 Session／Run、授权、FIFO 和真实回执；发现失败后的新输入重新观察，不重发未知输入。普通 Terminal 不再由 Main 持有输入游标；直接 Core client 仍保留原连接前提。Main 从输入入口、任何异步准备之前沿既有 Host 操作集合保留在途事实，配置切换等待原操作结算；它不再维护第二份 raw 完成队列。
+Hosted 的 raw 输入（`writeAgent`、`pasteAgent`、`writeTerminalBytes`）由方法自身先发现 semantic Host，再在同一次 Host invocation 中准备 Native：
 
-这条路径的发现等待计入原 Main `host-call` 与总输入耗时，原 parent 关联不变。Main 不用旧 Native 投影标记 Hosted 输入的执行 owner，实际 owner 由 Host 诊断提供；观察缺项保持未知。原输入错误保留在 Renderer 的通知与历史中。SDK 的原 Host 发现失败使其观察变为未确认时，Main 将该原错误保留在已有连接服务窗；下一次成功输入只清除此步骤的提醒。已确认 Host 上的业务拒绝不推断为连接失败，也不为分类错误增加探测。
+- Main 不额外调用显式 `connectRuntime()`。每条串行输入只有一次 Host discovery 和一次业务 invocation，重叠的 discovery 复用在途请求。
+- Host 保留准备前后的 owner fence；Core 保留 Session／Run、授权、FIFO 与回执。discovery 失败后，新输入重新观察，未知结果的输入不会重发。
+- 普通 Terminal 的输入游标不由 Main 持有；直接使用 Core client 时保留其连接前提。
+- Main 在输入入口、任何异步准备之前，把在途事实登记进已有的 Host 操作集合；配置切换等待这些操作结算。Main 不维护第二份 raw 完成队列。
 
-本机 Host 的启动探测属于物理连接建立。[Desktop connector](../../apps/desktop/src/main/desktop-host.ts) 将原服务准备注入 [RPC client](../../packages/core/src/public-rpc-client.ts) 的 `prepareUnixConnection`；同一 Unix 通道的原 `ready` 覆盖准备与连接，后续请求、订阅和显式 owner discovery 复用该通道，不重复探测 socket。通道关闭后，新通道重新准备；没有健康状态缓存或定时探测。这个本地 SDK 注入点不进入 wire，也不替代上表的 Native 准入和每次操作的身份检查。
+discovery 的等待计入 Main 的 `host-call` 与总输入耗时，parent 关联不变。Main 不用旧的 Native 投影标记 Hosted 输入的执行 owner，实际 owner 由 Host 诊断提供，观察缺项保持未知。输入错误保留在 Renderer 的通知与历史中。SDK 的 Host 发现失败使观察变为未确认时，Main 把这个错误保留在已有的连接服务窗里；下一次成功输入只清除这一步的提醒。已确认 Host 上的业务拒绝不被推断为连接失败，也不因此追加探测。
 
-单个 reader 取消只结束其等待；共享通道的准备由通道生命周期持有，RPC client 释放后迟到的准备不能再打开 socket。需要原设备授权的 forwarding 仍使用独立认证连接，每条物理连接单独准备，不混入普通共享通道。准备或连接失败不自动重发请求，已派发的未知结果保持原身份；平台服务启动仍由 Desktop 的原服务 owner 管理，reader 释放不停止健康 Host。
+本机 Host 的启动探测属于物理连接建立。[Desktop connector](../../apps/desktop/src/main/desktop-host.ts) 把服务准备注入 [RPC client](../../packages/core/src/public-rpc-client.ts) 的 `prepareUnixConnection`；同一 Unix 通道的 `ready` 同时覆盖准备与连接，后续请求、订阅和显式 owner discovery 复用该通道，不重复探测 socket。通道关闭后，新通道重新准备；没有健康状态缓存或定时探测。这个本地 SDK 注入点不进入 wire，也不替代上表的 Native 准入和每次操作的身份检查。
 
-一次 GUI 原终端附着的实际链路是：
+取消单个 reader 只结束它自己的等待；共享通道的准备由通道生命周期持有，RPC client 释放后，迟到的准备不能再打开 socket。需要设备授权的 forwarding 使用独立认证连接，每条物理连接单独准备，不混入普通共享通道。准备或连接失败不自动重发请求，已派发而结果未知的请求保持原身份。平台服务的启动由 Desktop 的服务 owner 管理，释放 reader 不停止健康 Host。
+
+一次 GUI 终端附着的实际链路：
 
 1. `TerminalView` 经 [preload](../../apps/desktop/src/preload/index.ts) 的 `api.sessions.attach` 或 `refreshAttachment`，进入 [Main IPC](../../apps/desktop/src/main/ipc.ts) 与 `RuntimeController.attachSession`。
-2. Main 通过默认 [Desktop Host connector](../../apps/desktop/src/main/desktop-host.ts) 确认原 Host 与 Runtime；首次附着由 Hosted `runtime.attachment-watch` 取得准确 Agent／raw Terminal 的初始切面和输出 reader，Core 消费 ctxmux 的原 Run、terminal continuation、Replay 与 Gap。已有共享 Attachment 时，Main 读取原 Run Replay；刷新沿原 Attachment 续接，不为每个 View 重建 Run。
-3. Main 核对请求与实际 Attachment 的 Run，再由 `sessionByTarget` 调用 `runtimeSubject(target, attached.run)` 生成同一次回执的 Session 投影。已知 Run 来自该 Attachment，不为这个单目标投影枚举全部 Run；`runtimeSubject` 使用 shared Runtime 准入，不再次等待全局语义恢复。
-4. Main 返回原 `attachmentId`、Session、terminal continuation 与 Replay；Renderer 应用初始切面，再接续原 reader 的有序输出。显示、解析完成和输入资格各沿原事实确认。
+2. Main 通过默认 [Desktop Host connector](../../apps/desktop/src/main/desktop-host.ts) 确认 Host 与 Runtime。首次附着由 Hosted `runtime.attachment-watch` 取得目标 Agent 或 raw Terminal 的初始切面与输出 reader，Core 消费 ctxmux 的 Run、terminal continuation、Replay 与 Gap。已有共享 Attachment 时，Main 读取该 Run 的 Replay；刷新沿已有 Attachment 续接，不为每个 View 重建 Run。
+3. Main 核对请求与实际 Attachment 是同一个 Run，再由 `sessionByTarget` 调用 `runtimeSubject(target, attached.run)` 生成本次回执的 Session 投影。已知 Run 来自该 Attachment，不为这一个目标枚举全部 Run；`runtimeSubject` 使用 shared Runtime 准入，不等待全局语义恢复。
+4. Main 返回 `attachmentId`、Session、terminal continuation 与 Replay；Renderer 先应用初始切面，再接续 reader 的有序输出。显示、解析完成和输入资格分别由各自的事实确认。
 
-冷 Host 的准确 Agent 附着先沿 Core `resolveRawAgentSession`／原 metadata owner 解析该 Session，再取得原 Run。独立调用 `runtimeSubject` 时，若活动 registry 尚无该 Agent 的绑定，仍可能得到 `UNKNOWN_AGENT_SESSION`；Runtime 准入不自动加载所有元数据，也不猜造 Session。owner fence、Session／Run 匹配与 reader lease 继续由各原 owner 核对；释放 reader 不停止原 Run。
+冷 Host 上附着某个 Agent 时，先经 Core 的 `resolveRawAgentSession`（metadata owner）解析该 Session，再取得它的 Run。单独调用 `runtimeSubject` 时，如果活动 registry 还没有该 Agent 的绑定，仍可能得到 `UNKNOWN_AGENT_SESSION`：Runtime 准入不自动加载全部元数据，也不猜造 Session。owner fence、Session／Run 匹配与 reader lease 由各自 owner 核对；释放 reader 不停止 Run。
 
-Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`，远端目标使用 `createHostAgentWithDelivery`；SDK 的 `createAgent` 复用同一 Core 创建 owner。三者沿 shared Runtime 准入，Core 保留原 SID／operation、意图摘要、prepared seed、Provider／Executor、授权、原生启动与首次投递回执合同。新的 fork 在核对准确 source 时仅通过 `resolveRawAgentSession` 采用其原绑定，后续 Store、Run、native witness 和最终来源检查仍成立；已有回执与 prepared 操作先于新的来源采用处理。
+Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`，远端目标使用 `createHostAgentWithDelivery`；SDK 的 `createAgent` 复用同一个 Core 创建 owner。三者都走 shared Runtime 准入，Core 保留 SID 与 operation、意图摘要、prepared seed、Provider／Executor、授权、原生启动与首次投递回执的合同。新的 fork 核对来源 Session 时只通过 `resolveRawAgentSession` 采用其绑定，后续的 Store、Run、native witness 与最终来源检查照常执行；已有回执与 prepared 操作先于新的来源采用处理。
 
-`inspectAgentCreation` 和 `attestAgentCreation` 使用 `owner` 准备分类，分别消费原创建记录和来源授权事实。inspect 读到原 durable 回执可直接返回；原已确认／待确认结果如实保留，没有原结果与 prepared 关联时明确未知。只有需要 reconcile 原 prepared 创建时才 `connectRuntime()` 并核对原 Native 列表，不执行新启动或输入。attest 沿原 Store、来源能力和签名 owner，不由 Runtime 连通性授予权限。`owner` 不免除原业务的必要条件，也不表示成功结果。
+`inspectAgentCreation` 与 `attestAgentCreation` 使用 `owner` 分类，分别消费创建记录与来源授权事实：
 
-准确恢复消费者 `ensureAgentContinuity`、`resumeAgent` 和 `statusAgent` 也使用原 Runtime 准入，各自在 Core 采用准确 Session 元数据与退休事实；`readRetiredAgentSession(id)` 由原 Memory/File Store 按原严格 codec 读取，避免为一个目标扫描所有退休记录。活动／退休冲突、错误 Host 与读取失败不能冒充不存在，退休记录也不授予恢复执行。原 Run 存活时可先返回 reattachable；新 Run 的 Level B 恢复仍沿原 Provider-native 目标、权限与 lifecycle prepare/commit。
+- inspect 读到持久回执即可返回；已确认和待确认的结果如实保留，既没有结果也没有 prepared 关联时明确报告未知。只有需要对账 prepared 创建时，inspect 才调用 `connectRuntime()` 并核对 Native 列表，不执行新的启动或输入。
+- attest 由 Store、来源能力与签名 owner 判定，Runtime 连通性不授予权限。
+- `owner` 分类不免除业务的必要条件，也不表示成功。
 
-Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实际链路上选择 Runtime 连接。Main 的事件缓存缺项时，准确 Core continuity 回执可经既有 `sessionByTarget` 交付真实 Session 投影，并核对 Core 确认的 Run；缓存缺口不重新要求完整 `connect()`。全组 open 的辅助观察逐 Session 保留失败，物理状态读取不等待该 Session 的语义观察完成；当前上下文未知仍如实呈现。managed Hook 配置 helper 的既有无 Session 事件诊断仍有范围限制，不能把 listener／binding 的 `hookIngressObservation` 当成配置修复回执。
+恢复消费者 `ensureAgentContinuity`、`resumeAgent` 与 `statusAgent` 同样使用 Runtime 准入，各自在 Core 中采用目标 Session 的元数据与退休事实。`readRetiredAgentSession(id)` 由 Memory／File Store 按严格 codec 读取单个目标，不为一个目标扫描全部退休记录。活动与退休冲突、Host 不符或读取失败都不能冒充不存在，退休记录也不授予恢复执行。Run 仍存活时可先返回 reattachable；需要新 Run 的 Level B 恢复仍按 Provider-native 目标、权限与 lifecycle prepare/commit 执行。
+
+Desktop 的 `RuntimeController.resumeSession` 与 `performRecovery` 在上述两条链路上选择 Runtime 连接。Main 的事件缓存缺项时，Core 的 continuity 回执可经 `sessionByTarget` 交付真实的 Session 投影，并核对 Core 确认的 Run；缓存缺口不会重新要求完整的 `connect()`。批量打开时的辅助观察按 Session 分别保留失败，物理状态读取不等待该 Session 的语义观察完成，当前上下文未知时如实呈现。managed Hook 配置 helper 的无 Session 事件诊断有范围限制：listener／binding 的 `hookIngressObservation` 不能当成配置修复的回执。
 
 ### 1.2 输入顺序与等待成本
 
-行为要求归 [连续阅读与输入响应](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。需要保证的是原字节、原目标、授权和写入顺序；Core 队列本身不是产品要求。不能用新增优先级、固定攒批延时或自动重试代替降低输入成本。
+输入顺序与等待成本的行为要求（包括哪些手段不能用来降低输入成本）见[连续阅读与输入响应](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)；本节说明当前实现怎样保证字节、目标、授权与写入顺序。
 
-**输入通道**：Agent 的 `writeAgent`／`pasteAgent` 与普通 Terminal 的 `writeTerminalBytes` 消费 `CtxmuxRunAdapter.openInput`，沿 ctxmux 公开的 input-only connection 顺序发送。每个实际使用的 Run 懒开一个物理连接；同一 opening 的 RunInfo 与 daemon 身份供 Core 在首次副作用前核对 Session／Run／cwd，每次派发仍重核当前绑定与原授权。原 writer 决定可写状态和准确 applied range；Core 不维护第二份 cursor，也不逐笔查询状态。 同一 Core 的两个 raw 入口共享准确 Run 的短接纳边界：容量等待、最终授权／目标核对、同步入 wire 是一个连续责任，入线后立即释放，各原调用独立等待 ACK。SDK 的可写通知不预留容量，不能在两个方法中分别排队、再争用同一物理窗口。
+Agent 的 `writeAgent`／`pasteAgent` 与普通 Terminal 的 `writeTerminalBytes` 都消费 `CtxmuxRunAdapter.openInput`，经 ctxmux 公开的 input-only connection 顺序发送：
 
-| 等待或约束 | 归属与处理原则 |
+- 每个实际使用的 Run 懒开一个物理连接。同一次 opening 得到的 RunInfo 与 daemon 身份，供 Core 在首次副作用前核对 Session／Run／cwd；每次派发仍重新核对当前绑定与授权。
+- ctxmux writer 决定可写状态与本条 applied range；Core 不维护第二份 cursor，也不逐笔查询状态。
+- 同一个 Core 的两个 raw 入口共享目标 Run 的短接纳边界：容量等待、最终授权与目标核对、同步写入 wire 是一个连续责任，写入 wire 后立即释放，各调用分别等待自己的 ACK。SDK 的可写通知不预留容量，因此不能在两个方法里各自排队后再争用同一个物理窗口。
+
+| 等待或约束 | 当前处理 |
 | --- | --- |
-| 原调用的授权准备、Session／Run／daemon 身份 | Core 保留；异步准备完成顺序不能打乱已接纳的同源输入 |
-| PTY 字节顺序、真实写入背压、本条 applied range | ctxmux 原 writer 唯一持有；接纳与完成回执分离，真实背压不能伪装成功 |
-| 语义输入的原操作身份、cursor 条件与未知恢复 | Core 与 ctxmux 原 recoverable 合同保留；不能因优化 raw 输入而取消防重复写入 |
-| 每条 raw 为获取 cursor 先查询一次 Run | 删除；消费原 writer 返回的本条范围，不从上次 ACK 或较晚 Run 快照倒推 |
-| 后条 raw 等前条完整 ACK 才派发 | 删除；前条进入有序 wire 即释放接纳顺序，各调用分别等待自己的真实回执 |
-| SDK 真实在途窗口已满 | 仅队首等待容量通知，之后重核授权再发送；不定时攒批、不丢弃未发送输入、不自动重试已派发输入 |
-| 历史投影、可选屏幕确认、无关 Session 工作 | 不应成为原始输入的必需前置；相关成本归原消费者缩小范围，不另造调度层 |
+| 授权准备与 Session／Run／daemon 身份 | Core 持有；异步准备的完成顺序不能打乱已接纳的同源输入 |
+| PTY 字节顺序、写入背压与本条 applied range | ctxmux writer 唯一持有；接纳与完成回执分开，背压不能伪装成功 |
+| 语义输入的操作身份、cursor 条件与未知恢复 | Core 与 ctxmux 的 recoverable 合同持有；raw 输入的优化不取消防重复写入 |
+| raw 输入的字节范围 | 取 writer 为本条返回的 applied range；写入前不为获取 cursor 查询 Run，也不从上次 ACK 或较晚的 Run 快照倒推 |
+| 相邻两条 raw 的派发 | 前一条进入有序 wire 即释放接纳顺序，后一条不等前一条的完整 ACK；各调用分别等待自己的回执 |
+| SDK 在途窗口已满 | 只有队首等待容量通知，之后重新核对授权再发送；不定时攒批、不丢弃未发送的输入、不自动重试已派发的输入 |
+| 历史投影、可选的屏幕确认、无关 Session 的工作 | 不作为 raw 输入的前置条件；相关成本由各自消费者缩小范围，不另建调度层 |
 
-**必要事务边界**：程序化 `writeTerminal` 仍服务原 execution bridge 等可恢复操作，保留 `operationId`、原 daemon 和 `expectedByte`；它不是实时按键接口的兼容分支。Desktop 的按键、粘贴和 Main 原生颜色协议回复共用 `RuntimeController.write`／`paste` 的 Host 在途 owner；协议回复不另开连接准备旁路。`writeTerminalBytes` 是 SDK／客户端组合方法，由现有 `runtime.invoke` 与 GUI `sessions:write`／`sessions:paste` 消费，无需另造 CLI 按键命令。空原始字节不发送，无法确认的字节范围保持空值。Core 区分接纳顺序与尚未完成的交易。普通 raw 接纳只随原调用增长；完成集合只保留真实在途项，必要的协议后处理也算本次完成，不能在回执缺失时积累已完成历史的 Promise 尾链。同一 Agent 语义 lane 的输入等待入队时已有交易完整结束，保留原 recoverableInput 的 cursor／operationId 合同。该 lane 不是跨 Client 或全部 Run 写入的全局屏障；通用 Run bytes、其他 Core 与 Native Client 的交错仍由原生 CAS 核对原范围，不能据局部排队推定没有外部输入。posture、handshake、typed response、prompt 恢复与空载荷不随 raw 改道。用户原始输入遇到当前 native-hook 请求时，先等原前驱交易，再重读准确 Session／Run 和 pending request，沿原 CAS 事务保存本次 unknown；晚回执只更新这次捕获的请求与操作，不能误改后来请求。
+事务边界：
 
-**寿命与失败**：输入通道复用 ctxmux 的 FIFO 接纳、命令关联、预算与结果机制，独立于输出 Attachment；detach、换 view 或观察失败不关闭健康输入。原 Run 终局、真实连接关闭或 adapter 连接替换释放对应 handle 与 opening；晚 opening 不得覆盖新 owner。Native 复用原 Run 终局通知收束没有输出 reader 的通道，不新增轮询。SDK 只保未完成命令，Core 只保未完成交易。未发送取消为 not_applied；已发送结果丢失保持 unknown，不自动回放，不关闭健康 Run。下次独立输入可打开新连接，但不是重试旧 unknown。
+- 程序化的 `writeTerminal` 服务 execution bridge 等可恢复操作，保留 `operationId`、daemon 身份与 `expectedByte`；它是独立的可恢复接口，不是实时按键接口的兼容分支。
+- Desktop 的按键、粘贴与 Main 发出的原生颜色协议回复，共用 `RuntimeController.write`／`paste` 的 Host 在途 owner；协议回复不另开连接准备。
+- `writeTerminalBytes` 是 SDK／客户端组合方法，由 `runtime.invoke` 与 GUI 的 `sessions:write`／`sessions:paste` 消费，没有单独的 CLI 按键命令。空字节不发送，无法确认的字节范围保持空值。
+- Core 分开表达接纳顺序与尚未完成的交易。raw 接纳只随调用增长；完成集合只保留真实在途项（必要的协议后处理也计入本次完成），回执缺失时不积累已完成历史的 Promise 尾链。
+- 同一 Agent 语义 lane 的输入，在入队时等待之前的交易完整结束，并保留 recoverableInput 的 cursor 与 operationId 合同。这条 lane 不是跨 Client 或全部 Run 的全局屏障：通用 Run bytes、其他 Core 与 Native Client 的交错写入仍由原生 CAS 核对字节范围，不能凭局部排队推定没有外部输入。
+- posture、handshake、typed response、prompt 恢复与空载荷不随 raw 改道。用户的 raw 输入遇到当前的 native-hook 请求时，先等前一笔交易，再重新读取目标 Session／Run 与 pending request，在 CAS 事务中把本次结果保存为 unknown；晚到的回执只更新这次捕获的请求与操作，不会改到后来的请求。
 
-验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 已实际接纳且字节有序；突发输入经过真实窗口后完整到达；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。诊断区分准备、`input-order`、`input-capacity`、原生写入和 `input-completion-order`；Hosted discovery、Host 事件循环与呈现仍分别归属原消费者，不能拿入队时的 `blockedBy` 快照解释整段等待。没有实际交互或尚未更新的实例不能代签流畅度改善。
+寿命与失败：输入通道复用 ctxmux 的 FIFO 接纳、命令关联、预算与结果机制，独立于输出 Attachment；detach、换 View 或观察失败不关闭健康输入。Run 终局、真实连接关闭或 adapter 连接被替换时，释放对应的 handle 与 opening，晚到的 opening 不得覆盖新 owner。Native 复用 Run 终局通知收束没有输出 reader 的通道，不新增轮询。SDK 只保留未完成的命令，Core 只保留未完成的交易。未发送即取消为 `not_applied`；已发送但结果丢失保持 unknown，不自动回放，也不关闭健康 Run。下一次独立输入可以打开新连接，但它不是对旧 unknown 的重试。
+
+输入诊断的阶段定义在 [performance-diagnostics.ts](../../packages/core/src/performance-diagnostics.ts) 的 `INPUT_PERFORMANCE_STAGES`，区分准备、`input-order`、`input-capacity`、原生写入与 `input-completion-order`。Hosted discovery、Host 事件循环与呈现分别归属各自的消费者；入队时刻的 `blockedBy` 快照只描述那一刻，不能用来解释整段等待。
 
 ## 2. 所有权矩阵
 
-ctxmux 在这个架构中仍是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SDK 不依赖
-AgentMux，单独安装时可以运行任意命令并完成完整 Run 生命周期。AgentMux 是 ctxmux 的高级
-Client：它消费 Runtime 事实并增加 Agent 语义，不成为 ctxmux 的启动宿主、Provider 容器或
-生命周期 Owner。包内固定 ctxmux artifact 只是一项 AgentMux 供应链策略。
+ctxmux 是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SDK 不依赖 AgentMux，单独安装时可以运行任意命令并完成完整的 Run 生命周期。AgentMux 是 ctxmux 的高级 Client：消费 Runtime 事实并增加 Agent 语义，不成为 ctxmux 的启动宿主、Provider 容器或生命周期 Owner。包内固定的 ctxmux artifact 只是 AgentMux 的一项供应链策略。
 
-分层遵循两个判断：对 shell、server、test、script 和 Agent 都成立，并且只能由 PTY、
-process、Backend 或 daemon owner 证明的事实属于 ctxmux；必须理解 Provider、AgentSession、
-Permission、消息、任务或 UI 才成立的判断属于 AgentMux 或 Desktop。
+分层按两条标准判断：对 shell、server、test、script 和 Agent 都成立、且只能由 PTY、process、Backend 或 daemon owner 证明的事实，属于 ctxmux；必须理解 Provider、AgentSession、Permission、消息、任务或 UI 才成立的判断，属于 AgentMux 或 Desktop。
 
-这条边界也约束证据提升：`bytes_applied` 不等于 Prompt 已提交，Output byte range 不等于
-完整 Agent message，Run `exited` 不等于 Agent task succeeded，transport unreachable 也不等于
-远端 Run 已退出。AgentMux 的 semantic event 可以引用 ctxmux Run revision、byte range 和
-lineage，但只有 AgentMux Provider 可以解释这些证据。
+这条边界也约束证据的提升：writer 确认字节已应用不等于 Prompt 已提交，Output byte range 不等于完整的 Agent message，Run `exited` 不等于 Agent task succeeded，transport unreachable 也不等于远端 Run 已退出。AgentMux 的 semantic event 可以引用 ctxmux 的 Run revision、byte range 与 lineage，但只有 AgentMux Provider 可以解释这些证据。
 
-| 关注点 | Owner | 权威源码 |
+| 关注点 | Owner | 源码入口 |
 | --- | --- | --- |
-| PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | [ctxmux-run-adapter.ts](../../packages/core/src/ctxmux-run-adapter.ts)，`decodeChunk` / `emitRunEvent` |
-| Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | 同一 adapter 的 `start` / `stop` / `interrupt` / `resize` |
-| Desktop 工作面控制事务 | Desktop Main 将公共业务服务的工作面请求委托给 Renderer；公共 RPC 与无 UI 的语义服务仍归 Core | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[系统公共接入边界](system-ownership.md#当前接入边界) |
-| Tab/Region 持久布局与绑定 | Core Spatial owner；Renderer reducer 消费原图并投影屏幕 | [空间状态机制](spatial-state.md)、[store.ts](../../apps/desktop/src/renderer/src/store.ts)、[Layout 代数入口](../../packages/layout/README.md) |
-| Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
-| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts)、TerminalView、RuntimeController |
-| Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 不用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。`null` 是「没有 owner 能确认」，不是缺省回启动尺寸；跨客户端 resize 按公开事件投影 | adapter 的 `snapshotCurrentSize` / `liveResizedSize`、[screen-evidence.ts](../../packages/core/src/screen-evidence.ts) |
-| Replay 与 terminal continuation | CtxMux 持有 raw bytes、Gap、checkpoint 与 Resize 顺序；Core 映射公开事实，不生成第二份 Runtime 真相 | adapter 的 `attach` / `observeOutput`；[terminal-continuation.ts](../../packages/core/src/terminal-continuation.ts) 的 `terminalContinuationSteps` |
-| Input（带累计 cursor 的可恢复写入） | CtxMux 公共 SDK 的 `recoverableInput` 持有 recoverable operation；adapter 映射 receipt，不另写一套次数循环或在 unknown 时盲目重发 | `CtxmuxRunAdapter.input` |
-| Core Provider handshake（终端能力握手） | `AgentMuxClient` | `ensureTerminalHandshake` |
-| Desktop OSC 10/11 capability reply（Agent 无 Renderer 时） | `RuntimeController`（Main） | `publish` / `replyToAgentColorQuery` |
-| Desktop OSC 10/11 capability reply（普通 terminal，Renderer 在场） | Renderer（xterm parser handler） | [terminal-capability-replies.ts](../../apps/desktop/src/renderer/src/lib/terminal-capability-replies.ts)、TerminalView |
-| OSC 查询回复所用的前景/背景色 | client-ui shared palette，经 `setTerminalViewColors` 注入 Main | RuntimeController / IPC、[terminal-palettes.ts](../../packages/client-ui/src/theme/terminal-palettes.ts) |
-| xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | [terminal-theme.ts](../../apps/desktop/src/renderer/src/lib/terminal-theme.ts)、shared palette |
-| App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | 同一 theme 文件的边界说明 |
+| PTY raw bytes（stdout／stdin） | ctxmux daemon，经 `CtxmuxRunAdapter` 投影 | [ctxmux-run-adapter.ts](../../packages/core/src/ctxmux-run-adapter.ts) 的 `decodeChunk` / `emitRunEvent` |
+| Run lifecycle（start／stop／interrupt／resize） | ctxmux，经 adapter 暴露稳定投影 | 同一 adapter 的 `start` / `stop` / `interrupt` / `resize` |
+| Desktop 工作面控制事务 | Desktop Main 把公共业务服务的工作面请求委托给 Renderer；公共 RPC 与无 UI 的语义服务归 Core | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[系统接入边界](system-ownership.md#当前接入边界) |
+| Tab／Region 持久布局与绑定 | Core 空间 owner；Renderer reducer 消费同一张图并投影屏幕 | [空间状态机制](spatial-state.md)、[store.ts](../../apps/desktop/src/renderer/src/store.ts)、[Layout 代数入口](../../packages/layout/README.md) |
+| Tab 关闭与后台保留决策 | Desktop Renderer 决定，停止动作经 Core public API 下达；关闭规则见 [Session、Run 与 View](../design/behavior/session-recovery.md#sessionrun-与-view) | 第 2.1 节的关闭事务；[store.ts](../../apps/desktop/src/renderer/src/store.ts) |
+| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定目标 Run；ctxmux 只应用最终提交的 PTY 尺寸。UI 测得的 cols／rows 是请求，ctxmux 应用后的 `current_size` 才是已生效尺寸 | [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts)、TerminalView、RuntimeController |
+| owner 确认的 live PTY 尺寸 | ctxmux 的 `RunInfo.current_size` 与 `RunEvent::Resized`。AgentMux 不用 `RunSpec.size` 冒充当前尺寸，未知保持 `null`：`null` 表示没有 owner 能确认，不是回退到启动尺寸；跨客户端 resize 按公开事件投影 | adapter 的 `snapshotCurrentSize` / `liveResizedSize`、[screen-evidence.ts](../../packages/core/src/screen-evidence.ts) |
+| Replay 与 terminal continuation | ctxmux 持有 raw bytes、Gap、checkpoint 与 Resize 的顺序；Core 映射公开事实，不生成第二份 Runtime 真相 | adapter 的 `attach` / `observeOutput`；[terminal-continuation.ts](../../packages/core/src/terminal-continuation.ts) 的 `terminalContinuationSteps` |
+| 带累计 cursor 的可恢复写入 | ctxmux 公共 SDK 的 `recoverableInput` 持有 recoverable operation；adapter 只映射 receipt，不另写次数循环，unknown 时不盲目重发 | `CtxmuxRunAdapter.input` |
+| Provider 终端能力握手 | `AgentMuxClient` | `ensureTerminalHandshake` |
+| 主题、palette 与 OSC 10/11 颜色回复 | Desktop（Renderer 与 Main 各负责一种场景） | 见 [Terminal 外观](terminal-appearance.md#外观所有权) |
 
-Core 的普通 Tool Hook 由 [`AgentMuxClient`](../../packages/core/src/client.ts) 在原 Registry 更新队列中先计算准确 current→next，再判断单条历史贡献是否可与回执合并。只有没有 outcome、活动边界、待 flush、交互或 continuity 变更的稳态贡献才调用 [`AgentSessionStore.compareAndSwapMetadataWithTimeline`](../../packages/core/src/agent-session-store.ts)。Registry 复用原 CAS、身份与 durability owner，Session 与历史提交结果分别返回；首次 handover 和复杂贡献仍沿原路径。
+Session Store、Timeline 与快照观察的持久事实见[系统职责地图《持久事实与观察投影》](system-ownership.md#持久事实与观察投影)。
 
-FileStore 在原 timeline 顺序、writer 和 SQLite 事务中保存 metadata，用内部 SAVEPOINT 隔离可选历史。只有原 writer 确认 COMMIT 从未尝试、整事务已回滚且 handle／lease 已释放时，才可按原 expected/next 做 metadata-only CAS；未知 COMMIT 和提交后 sync 失败不会重写。Memory Store 同步 stage 受影响的 metadata、输入记录及一条历史版本后再修改原 maps。必需 metadata 错误保真实类型与原因，历史错误仅作辅助明细；准备阶段独有的错误不会触发本次回执的未确认保存状态。保存承诺以[本地持久化合同](../design/behavior/persistence.md#保存合同)为准。
+Provider-specific 的 executable probe、session id、native resume argv、semantic replay、working／waiting／done、Permission、Hook 和 A2A 都不进入 ctxmux。Provider-native Resume 由 AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B 的 provenance 不足时失败关闭，不能自动改成 Level A restart。反过来，daemon activation、Run wait、权威生命周期时间与 revision 等不理解 Agent 也成立的能力，由 ctxmux 公共 SDK 提供，AgentMux 不长期维护第二份实现。
 
-Desktop 的 `RuntimeController.snapshot` 分别读取 Runtime membership 与 Session Timeline。
-单个 Timeline 无法读取时，已确认的同 Host 成员与 Run 事实仍发布；失败只附在原
-`SessionSnapshot.timelineObservation`，携带该 Session 的 Run 与具体原因。Renderer 成员对齐
-保留该 Session 的最后可读页，`sessionServiceNotices` 沿原 Session 的本地与全局服务窗说明
-重读动作，不将整个 Host 置为不可用，也不将缺页补成成功的空记录。恢复后，完整快照的
-对应 Timeline 成功或原 Host／Session／Run 的显式 Timeline 重读只收口该观察失败；别的
-Session、Run 或连接恢复不能代签。状态读取已明确切换到新 Run 时，不再投影旧 Run 的
-观察诊断；旧页仍归 durable Session 保留，旧 Run 迟到的读取不能清除新 Run 的失败。
-Timeline 返回不同 Session 的身份冲突仍明确拒绝。
+本地 Native 激活复用 SDK 的 `activateRuntime` 与 pending／selected 共享观察 owner：SDK 持有 child、fd3 readiness、匹配的 Hello、退出与单 reader 取消；Core 只持有已验证的 artifact、SDK handle 和产品 owner receipt。公开 Hello 的有界观察失败不证明 daemon 死亡：已有的兼容 listener 可以先以 unverified 身份使用，等对应 child 的 readiness 与 Hello 完成后才记录产品归属。晚到的证明通过 SDK 订阅接回原观察；释放 Core consumer 只退订并取消它的 reader，不撤销激活。单次观察错误不是 owner 终局；恢复成功后清除当前失败，未解除的 receipt 与诊断通道服务说明继续保留。产品 receipt 的寻址规则见 [Desktop 与远端 Core 的更新《Native handoff》](desktop-updates.md#native-handoff)。
 
-Provider-specific executable probe、session id、native resume argv、semantic replay、
-working/waiting/done、Permission、Hook 和 A2A 不进入 ctxmux。Provider-native Resume 由
-AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B provenance 不足时失败关闭，不能自动改成
-Level A restart。相反，daemon activation、Run wait、权威生命周期时间与 revision 等不理解
-Agent 也成立的能力应由 ctxmux 公共 SDK 提供，AgentMux 不长期维护第二份实现。
+### 2.1 Tab 关闭事务
 
-本地 Native 激活复用 SDK 的 `activateRuntime` 与 pending/selected 共享观察 owner；SDK 持有
-child、fd3 readiness、匹配 Hello、退出与单 reader 取消。Core 仅持有已验证 artifact、SDK handle
-和产品 owner receipt。公开 Hello 的有界观察失败不证明 daemon 死亡；已有 compatible listener
-可先以 unverified 身份使用，准确原 child 的 readiness 与 Hello 完成后才记录产品归属。晚到证明
-通过 SDK 订阅接回原观察；释放 Core consumer 只退订和取消其 reader，保留原激活。单次观察错误
-不是 owner 终局；准确恢复成功后清除当前失败，保留未解除的 receipt／诊断通道服务说明。
-产品 receipt 路径由 Core `ctxmuxOwnerReceiptPath` 按 runtimeId、daemonInstanceId 与准确 manifest
-digest 共同寻址；不同实例或 artifact 的迟到写入互不覆盖。消费者先取得准确身份，再读取该路径，
-固定旧路径不充当当前证明；旧文件保留，缺少新证明只表示归属 unverified。
+关闭 Tab 时，Desktop 只持有工作面的关闭计划与准入（[workbench-view-close.ts](../../apps/desktop/src/renderer/src/lib/workbench-view-close.ts) 的 `planWorkbenchViewClose`），不接管 Core／ctxmux 的 Stop 事实：
 
-一句话概括所有权分层（`terminal-theme.ts` 注释原文）：*"App chrome owns product
-surfaces, xterm owns terminal appearance, and the PTY/CtxMux path owns bytes only."*
+- 关闭请求同步冻结该 Tab 当时每个 Surface 的 owner。Browser 与需要停止的 Session 是互不从属的资源，cleanup 同时发出；一个长期 pending 的 Browser 不能阻塞 Session Stop。
+- Session Stop 的 owner 同时冻结 RunRef。只关闭展示、共享 Session 或用户确认保留的 Agent Session，不绑定 Run epoch。
+- cleanup 按 owner 逐个收到回执：成功或已被权威事件移除的 owner 从 Tab 消失，失败且仍在的 owner 保持可见，下一次关闭只重试剩余的失败项。一个资源失败不回滚整个 Tab，也不以整个 Tab 相等为条件覆盖关闭期间新增的 Region 或 owner。
+- 关闭期间，针对同一 Tab 的 move、split、Region close、launch，以及针对待 Stop Session 的 attach、refresh、recover、manual stop，都经过同一个 admission；已在途的异步操作在提交时再次核对 owner 与 Run epoch。Recover 已经创建新 Run 但失去 owner 时，用 Core Stop 清理；清理失败时保留一个可发现、可再次关闭的 Tab。
 
-### 2.1 Workbench View 关闭事务
+Renderer 不保存第二份 Run 状态，也没有 Stop ledger、重试 tail 或 fallback。`reconcileWorkbenchViewClose` 逐个比较冻结的 owner 与当前 Region（`sameSurfaceOwner`）：权威的 `run-removed` 先于 API 回执到达而已移除的 Region 不计为失败；同一 Agent Session 已换成新 Run 时，冻结的 RunRef 与当前 Run 不再相等，该 Region 保留并记为关闭期间已变化。只有 owner 仍相等且其资源回执全部成功的 Region 才被移除。行为要求见 [Session、Run 与 View](../design/behavior/session-recovery.md#sessionrun-与-view)。
 
-关闭 Tab View 时，Desktop 只持有 Workbench 关闭计划和准入，不接管 Core/CtxMux 的 Stop
-事实。关闭请求同步冻结该 View 当时每个 Surface 的精确 owner；Browser 与需要停止的 Session
-是互不从属的资源，必须同时发出 cleanup，不能让一个长期 pending 的 Browser 阻塞 Session
-Stop。Session Stop owner 还会冻结精确 RunRef；只关闭 presentation、共享 Session 或明确保留的
-Agent Session 不绑定 Run epoch。
-
-cleanup 以逐 owner receipt 收敛：成功或已被权威事件精确移除的 owner 从 View 消失，失败且仍在的
-owner 保持可见，下一次关闭只重试剩余失败项。不能因为一个资源失败回滚整个 Tab，也不能用完整
-Tab 相等判断覆盖关闭期间的新 Region 或新 owner。关闭期间，针对同一 View 的 move、split、
-Region close、launch，以及针对待 Stop Session 的 attach、refresh、recover、manual stop 都必须经过
-同一 admission；已经在途的异步操作在提交时还要复核精确 owner/Run epoch。Recover 已经创建新
-Run 但失去 owner 时，使用现有 Core Stop 清理；清理失败则保留一个可发现、可再次关闭的 View。
-
-Renderer 不保存第二份 Run 状态，也不建立 Stop ledger、重试 tail 或 fallback。权威
-`run-removed` 可以先于 API receipt 到达；只要它已经精确满足旧 owner，reconcile 必须幂等接受，
-同时绝不能删除同一 Agent Session 后来恢复出的新 Run。
-
-Viewport Resize 是 retained Attachment 的能力，不是只凭 `SessionControl` 就能调用的命令。
-Renderer 只在 Attach 成功后用 Desktop 发出的 `attachmentId` 提交尺寸；Main 从 lease 解析权威
-exact Run，Attach、Resize 与 Detach 由同一 per-Run Attachment 串行器协调。
-[`RuntimeController.stopSession`](../../apps/desktop/src/main/runtime-controller.ts) 不进入该队列：
-决定停止时立即撤销原 lease，再通过 Core 停止精确 Run。前一次 Stop 未回执不会挡住再次停止；
-迟到或排队中的 Resize 因 capability 已失效而结束，不会触达 ctxmux。行为要求见
-[Session 关闭与重试合同](../design/behavior/session-recovery.md#sessionrun-与-view)。
-Agent resize 与 stop 的 Core API 同时要求 `agentSessionId + expectedRun`，旧 View 不能在
-provider-native Resume 后控制同一 Agent Session 的新 Run。
+Viewport Resize 是保留的 Attachment 的能力，不是仅凭 `SessionControl` 就能调用的命令。Renderer 只在 Attach 成功后，用 Desktop 发出的 `attachmentId` 提交尺寸；Main 从 lease 解析权威的 Run，Attach、Resize 与 Detach 由同一个 per-Run Attachment 串行器协调。[`RuntimeController.stopSession`](../../apps/desktop/src/main/runtime-controller.ts) 不进入这个队列：决定停止时立即撤销 lease，再通过 Core 停止目标 Run。前一次 Stop 未回执不会挡住再次停止；迟到或排队中的 Resize 因 capability 已失效而结束，不会触达 ctxmux。Agent 的 resize 与 stop 的 Core API 同时要求 `agentSessionId` 与 `expectedRun`，旧 View 不能在 provider-native Resume 之后控制同一 Agent Session 的新 Run。关闭与重试的行为要求见 [Session、Run 与 View](../design/behavior/session-recovery.md#sessionrun-与-view)。
 
 ## 3. 本地 Shell 与 Run 环境
 
-Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出变量，使用 NUL 分隔与随机边界隔离启动 banner，保留空值、换行和等号。由 shell 自己选择配置文件，不手工 source 某个 dotfile。非导出变量、alias、function 不作为环境传递。交互式读取失败后可使用非交互式登录结果，但会持续显示部分读取告示；全部失败则保留继承环境并告知用户。
+登录 shell 环境的读取由 Core 的 [`prepareProcessEnvironmentFromLoginShell`](../../packages/core/src/login-shell-environment.ts) 实现，Desktop Main（[index.ts](../../apps/desktop/src/main/index.ts)）与独立 Host（[apps/host/src/index.ts](../../apps/host/src/index.ts)）在各自进程启动时调用。Agent Run 由 Host 的 Core 创建，因此 Run 的环境基线来自 Host 进程读到的环境。
 
-Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线；SDK 的 `RunSpec.env` 仍然是 additive，删除 client 的 key 不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
+- 用户 `SHELL`（缺省时 macOS 为 `/bin/zsh`、Linux 为 `/bin/bash`）以交互式登录（`-ilc`）与非交互式登录（`-lc`）两种模式同时启动，共享一个 30 秒总预算，超时以 SIGKILL 结束子进程。交互式结果有效时优先采用，即使非交互式结果先返回。
+- 输出用随机 marker 与 `/usr/bin/env -0` 的 NUL 分隔帧定界，启动 banner 留在帧外，空值、换行与等号原样保留。配置文件由 shell 自己选择，不手工 source 某个 dotfile；非导出变量、alias 与 function 不传递。`_`、`SHLVL`、`PWD`、`OLDPWD` 被丢弃；只采用非交互式结果时，PATH 与继承的 PATH 合并去重。
+- 读到的值不覆盖 `AGENTMUX_*`、`CTXMUX_*`、`HOME` 与 `TMPDIR`／`TMP`／`TEMP`，因为这些变量参与 Core 默认命名空间路径的计算；shell 配置不能把进程改指到另一个状态目录。
+- 只得到非交互式结果时，持续显示部分读取的告示；两种都失败时保留继承的环境并告知用户（`loginShellEnvironmentWarning`）。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品源码与实际安装现场验收分开记录；颜色修复交付证据（本机过程资料：`docs/reviews/resume-terminal-colors-product-delivery.md`） 是可选本机历史记录，缺席时不证明当前候选通过。
+Core 的 `localProcessEnvironment()` 在 daemon 启动及每次本地 Run 创建时读取当前进程环境，Run 显式传入的 env 覆盖这份基线。SDK 的 `RunSpec.env` 是 additive 的：client 删除某个 key，不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 负责终端能力、CLI 路径与 Agent 身份的注入，Desktop 不复制这些语义。
 
-## 4. 完整 ANSI palette 与 Graphite 工作面
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`、`TERM_PROGRAM_VERSION`（取自经 manifest 校验的 `CTXMUX_VERSION`）与 `FORCE_HYPERLINK=1`。[terminal-environment-policy.ts](../../packages/core/src/terminal-environment-policy.ts) 再移除描述宿主 shell 而非新 CLI 的信号：
 
-### 4.1 palette 结构
+- 颜色：`NO_COLOR`，以及值为 `0` 的 `FORCE_COLOR`／`CLICOLOR`；非零的颜色设置保留。
+- 宿主会话：`CI`、`CODEX_CI`、`CLAUDECODE`、`CLAUDE_CODE_CHILD_SESSION`。AgentMux 自身可能从某个 Agent 或 CI shell 启动，这些标记描述的是那个宿主；Claude 会把它们当作子会话或 CI 会话，从而关闭 transcript 与 UI 行为。
 
-终端外观由一份完整的 `ITheme` 决定，SSOT 在 `packages/client-ui/src/theme/terminal-palettes.ts`。
-`TerminalPalette` 类型要求 23 个键：`background`、`foreground`、
-`cursor`、`cursorAccent`、`selection*`、16 个 ANSI 角色（`black`…`brightWhite`），以及 240 色 `extendedAnsi`（索引 16–255）。
-`apps/desktop/test/terminal-theme.test.ts` 断言每个 catalog palette 恰好 23 个键且 `extendedAnsi` 恰好 240 项，杜绝残缺 palette。
+Run 显式传入的值在基线之后合并，调用方仍可以有意设置这些变量。由于 `RunSpec.env` 是 additive 的，`CtxmuxRunAdapter` 的 launch 用 `/usr/bin/env -u … -- program args…` 在 exec 边界显式 unset 合并后仍缺省的策略 key（`missingHostEnvironmentKeys`），再 exec 原程序；PID、PTY、cwd、literal argv 与退出／信号语义不变。新建与 semantic resume 都经过这个边界；已启动进程的环境不能在线改写。这一机制的来由见事故案例[恢复后终端颜色丢失](../casestudy/terminal-colors-lost-after-resume.md)。
 
-当前 Graphite 默认值：
+## 4. 隐藏工作面与冷停（cold-park）
 
-- `background: '#000000'` — Graphite 的稳定纯黑工作面。
-- `foreground: '#ffffff'`。
-- `cursorAccent: '#000000'` — 与工作面保持一致。
-- `black: '#1d1f21'` — ANSI 黑，与工作面是两个不同角色。
+保活与冷停的产品约束见[《Tabbar 与切换保活》](../design/behavior/spaces-and-layout.md#tabbar-与切换保活)；本节只说明当前实现。
 
-完整 palette 让 TUI 能使用 ANSI 背景区分 composer、instruction block 与终端工作面，
-不需要 Desktop 解析或改写 TUI 输出。
+Tab 切换不卸载工作面。[WorkspaceWorkbench](../../apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx) 把一个 Tab Group 的每个 Tab 都留在 DOM 里，非活动 Tab 的 `.pane-body__region` 以 `data-active="false"` 隐藏（[workbench.css](../../apps/desktop/src/renderer/src/styles/workbench.css)：`visibility: hidden`、`pointer-events: none`，并设 `inert`）。
 
-### 4.2 主题边界
+- 不用 `display: none`：被 `display: none` 的子树量不到尺寸，切回时要先重新 fit 一次才能显示正确的行列数。
+- 每个 region 都是 `position: absolute; inset: 0`：隐藏格不占文档流，不会把活动格挤变形。
+- xterm 实例保持存活，切回时没有需要重放的内容，也就不会出现恢复态。
+- `inert` 让隐藏格退出可交互树：Tab 键走不到，页内搜索也不会命中。
+- 切换显示 Workspace 同样只隐藏不卸载：[App.tsx](../../apps/desktop/src/renderer/src/App.tsx) 给非当前的工作面槽加 `.workspace-workbench-slot--parked`（整个工作面区域不可见时给外层加 `.workspace-workbench-registry--parked`），并设 `aria-hidden` 与 `inert`；[workbench-tabs.css](../../apps/desktop/src/renderer/src/styles/workbench-tabs.css) 让它们 `visibility: hidden` 并绝对定位叠放。这些停放槽与非活动 Region 一起使用 `clip-path: inset(50%)` 与 `content-visibility: hidden`（workbench.css），保留 DOM 与可测量的盒子，浏览器可跳过其后代的布局与绘制，后代动画暂停。
 
-当前合同是：
+长期隐藏的重资源由两套独立策略决定何时释放，二者都只选择可释放的 Region owner，不改动 Session、Run、Region、文档或 Browser 身份：
 
-1. **Desktop 主题决定工作面。** Graphite 稳定使用 `#000000`，使 Codex 等 TUI
-   的灰色 composer 与消息表面保持原生层次。
-2. **TUI 决定自己的 surface。** ANSI `black` 保持 `#1d1f21` 且不等于
-   `background`；完整的 16 色角色让 composer、消息块和警告自行分层。Desktop
-   不解析 ANSI 输出，也不为单个 Provider 动态改写 palette。
-3. **OSC 10/11 只报告已选 palette 的真实值。** Renderer 和 Main 使用同一份
-   shared palette；Main 在 Renderer 未 attach 时也必须回复 `#000000`，保证同一 Run
-   在 attach 前后看到一致的宿主背景事实。
+| 策略 | 释放延迟 | 热保留 | 资格条件 |
+| --- | --- | --- | --- |
+| Terminal（[terminal-cold-parking-policy.ts](../../apps/desktop/src/renderer/src/lib/terminal-cold-parking-policy.ts)） | 隐藏满 30 秒才可冷停 | 隐藏 5 分钟内的最多 6 个保持 warm | 不可见、属于当前 Workspace／Topic 导航上下文、已 attached、Core 可重新附着并 replay、没有 pending interaction |
+| Monaco（[surface-memory-budget.ts](../../apps/desktop/src/renderer/src/lib/surface-memory-budget.ts)） | 60 秒 | 5 分钟内最多 4 个 | 不可见、属于当前导航上下文、native owner 存在、可重建、没有未保存或待处理的原生工作 |
+| Browser（同一文件） | 90 秒 | 5 分钟内最多 3 个 | 不可见、native owner 存在、可重建、未受保护；覆盖全部导航位置（规则见[闲置回收覆盖全部导航位置](../design/behavior/browser-workface.md#browser-工作面-1)）；用户关闭 `browser.automaticMemoryRelease` 时不自动释放 |
 
-### 4.3 OSC 10/11 回复的编码
+- 隐藏时长从 Region 隐藏时起算；Terminal 与 Monaco 的导航上下文重新变为当前时也重新计时，Browser 回到导航位置不重置计时。切到另一个 Workspace／Topic 只改变投影：Terminal 与 Monaco 在非当前导航上下文中不计时，切回来不会因为计时器到点而卸载 TerminalView／attachment、制造 replay gap。
+- 选择函数分别是 `selectColdParkedTerminalRegions`（常量 `TERMINAL_COLD_PARK_DELAY_MS`、`TERMINAL_HOT_RETAIN_MS`、`TERMINAL_HOT_RETAIN_LIMIT`）与 `selectSurfaceMemoryReleases`；下一个截止时刻由 `nextTerminalColdParkDelayMs` 与 `nextSurfaceMemoryDeadlineMs` 计算。
+- 超过热保留时长的候选一律可释放；热保留期内的候选按最近隐藏、最近激活排序，超出数量上限的部分可释放。这样即使只有一个隐藏项目，它也不会永远持有 xterm。
+- 资源测量进行时不冷停，测量结束后有 30 秒冷却期；工作面重新可见时冷却期清除。两个协调器（[terminal-cold-parking-coordinator.tsx](../../apps/desktop/src/renderer/src/lib/terminal-cold-parking-coordinator.tsx)、[surface-memory-budget-coordinator.tsx](../../apps/desktop/src/renderer/src/lib/surface-memory-budget-coordinator.tsx)）按下一个截止时刻唤醒，不轮询全部隐藏工作面。
+- Monaco 与 Browser 各自独立计额，一个大 Browser 页面不会占用 Monaco 的热保留名额；Terminal 不使用 Monaco／Browser 的策略模块。
 
-回复格式在 `apps/desktop/src/shared/terminal-osc-color-query.ts`：`cssColorToOscRgb`
-把 `#rrggbb` 转成 `rgb:RRRR/GGGG/BBBB` 的 16-bit 形式（每字节重复成 4 位十六进制），
-`terminalOscColorQueryReply` 据 slot 10/11 选 foreground/background 并包上
-OSC 终止符。`terminal-osc-color-query.test.ts` 锁定该格式
-（如 `#000000 → rgb:0000/0000/0000`）。
+## 5. Attachment 回放、历史只读与尺寸同步
 
-## 5. OSC ready gate、replay 不回复、历史 Run 只读
+### 5.1 历史 Run 只读
 
-Codex 可能在 Renderer 尚未 attach 时就发出 OSC 10/11 查询。若在 Core 完成自己的 Terminal
-handshake（`client.ts`）之前抢答，会与 handshake 争用同一个 CtxMux Input cursor。为此有三条防线：
+`TerminalView` 以 `canControlRun = session.processState === 'running'` 作为总闸：键盘输入、OSC 回复的 `sendInput` 与 viewport 的 live 尺寸同步，都只在 `canControlRun` 时发生。因此已退出的历史 Run 在 UI 上是只读回放，不会向已结束的进程写入按键、尺寸或 OSC 回复。多个 Renderer View 同时附着同一个 Run 时，Main 复用同一个 ctxmux Attachment，后续 View 走 `readRunReplay`（`runtime-controller.ts`）。
 
-### 5.1 Agent 路径：Main 缓冲，Session ready 后再回
+### 5.2 continuation 的恢复与揭示
 
-`RuntimeController.publish`（`runtime-controller.ts`）在每个 `terminal-output` 事件上
-用 `scanTerminalOscColorQueries`（含跨 chunk 的 `remainder`）识别完整或分片的查询：
+Attach continuation 是状态恢复，不是历史动画。`TerminalView.applyContinuation` 先验证公开步骤的顺序，再恢复 checkpoint、应用有序的 Resize 与 Output；合并写入与有界排空只改变消费方式，不改变字节顺序。恢复期间由揭示 owner 隐藏画布，避免把历史重绘帧播放成"终端自己在 resize"。
 
-- 若该 Run 尚未有 ready 的 Agent Session（`readyAgentColorQueryRuns` 无记录），回复被暂存进
-  `pendingAgentColorQueryReplies`，且有 4 KiB 上限。
-- 当 Core 发布 `agent-session` 事件，把该 Run 标记为 ready 并 flush 暂存的回复，
-  经 `replyToAgentColorQuery` → `writeAgent` 写回。
-- Run 结束或移除时清理三张表。
+隐藏画布只为这一个目的服务，所以揭示的前提只有 replay 字节写完。live 视口同步（`startLiveSynchronization`）与 gap redraw 在揭示之后继续：它们改善画面，但不决定画面是否可看；而且它们经 resize 与 attach 争用同一个按 Run 串行的锁，如果排在揭示之前，该 Run 上任何一个卡住的操作都会让揭示永远不到来。
 
-回归测试：`apps/desktop/test/runtime-controller.test.ts`「answers split Codex color queries only after
-Core publishes the ready Agent Session」——先发一个**跨两个 chunk**的 `OSC 10;?;?` 查询，
-断言 `writeAgent` **未**被调用；发布 `agent-session` 后，断言当前 foreground/background 的 OSC 回复被写回。测试来源以同一 shared palette 的 Graphite 纯黑背景核对 Main 回复，不另存一套颜色示例当作当前 palette。
+揭示另有兜底时限 `TERMINAL_REVEAL_DEADLINE_MS`（6 秒，[terminal-reveal.ts](../../apps/desktop/src/renderer/src/lib/terminal-reveal.ts) 的 `terminalRevealDecision`）。到点仍未揭示时强制揭示，把画布交还用户，同时记录 `terminal-reveal-deadline` 事件并显示服务窗。服务窗由 `terminalRevealServiceOutcome` 给出未完成的步骤、当前状态（live 输出已就绪时说明 scrollback 可能不完整，否则说明输出仍在追赶）和恢复动作（重新打开或 resume 该 Session 以重新 replay）；分类复用服务窗的 `agentViabilityFromProcessState`：Run 为 running 时放行并提醒，exited 时交给既有恢复横幅，interrupted 时如实标为无法判断。揭示与输入资格无关：输入只由 `terminalAcceptsInput`（Run 可控且视图未设为只读）决定，不等待输出 Attachment 或揭示。晚到的成功附着会收起这条告示；已经正常揭示时兜底不再发言，慢但成功的恢复不会被补贴一条失败告示。分类与告示的行为边界见[我们的流程坏了，不等于 Agent 坏了](../design/behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)。
 
-### 5.2 普通 terminal 路径：Renderer 内答，但 replay 不答
+ctxmux 的 Replay 有界。Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已被淘汰，保留下来的后缀不能宣称为完整的终端屏幕。Core 与 Renderer 经 `terminalContinuationSteps` 消费公开 continuation：`basic-vt` 的 checkpoint、restore bytes 及之后的有序 output／Resize，或者没有 checkpoint 时的原始字节恢复。restore bytes 是恢复材料，不计为新的 PTY output；checkpoint 能恢复当前画面，不代表缺失的 scrollback 已经补全。
 
-对 `session.kind === 'terminal'`，由 Renderer 的 xterm parser handler 应答
-（`TerminalView.tsx`，`respondFromRenderer: session.kind === 'terminal'`）。
-`installTerminalOscHandlers`（`terminal-capability-replies.ts`）为 slot 10/11
-注册 OSC handler：
+缺失提示放在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一的 Resize owner 临时减少一行再恢复最终网格，促使该 Run 重新输出当前画面；历史 Run 不发送 Resize 或 Input。这只是恢复当前画面的动作，不能作为恢复原始历史或活跃终端连续向上阅读的通过证据，后者按[设计 SSOT](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 验收。
 
-- 仅当 `respondFromRenderer && !isReplaying()` 才回复；`isReplaying` 绑定到
-  `() => replayingContinuation || historicalOutputDepth > 0`（`TerminalView.tsx`）。
-- **无论是否回复都 `return true`**，即 xterm **消费**该 OSC 但在回放期不作答。
+### 5.3 Resize 只提交稳定、最新的网格
 
-意义（`terminal-capability-replies.ts` 注释）：Main 已在无 Renderer 时应答 live 查询；
-xterm 消费 replay 里的旧查询但不再次作答，避免重开 Tab 后把**历史响应**注入当前前台进程。
+DOM 的 `ResizeObserver` 只说明容器几何变了，不代表 xterm 的字符网格已经稳定。`TerminalViewportSynchronizer` 先比较连续帧的 `FitAddon.proposeDimensions()`（`terminal-viewport-sync.ts` 的 `observeViewport`／`continueStableFit`，`MAX_STABILITY_FRAMES = 8`）：网格稳定或达到 8 帧上限后才 fit；xterm 已经等于 proposal 时不做无效 fit。因此拖动分隔条不会把每一帧都变成 Codex 的整屏重排。
 
-### 5.3 历史 Run 只读
+稳定帧门控挡不住一种静止态抖动：拖动已停、容器像素固定，但 WebGL renderer 的 cell metrics 短暂偏离 DOM renderer，使 `proposeDimensions()` 在同一像素几何下于 N 与 N±1 列之间跳动。照此 fit 会让 xterm 先 reflow 一列再弹回，而 wrap→unwrap 不是完美的逆运算，Codex、grok 这类按 diff 绘制的 TUI 会被画花并持续闪烁。`fitAndSynchronize` 因此在网格与 xterm 不一致时，用 `measureViewport()` 读容器的 CSS 像素，与上次成功 fit 的基线 `lastFittedPixels` 比较（`samePixels`，差异小于 1 CSS 像素视为同一几何）：像素未变即判为 cell-metric 抖动，跳过 fit 与 PTY resize；像素确有变化才 fit 并 resize。基线保存副本，调用方复用同一可变对象时不会连带改掉基线。`measureViewport` 由 `TerminalView` 用宿主 div 的 `getBoundingClientRect()` 提供；Synchronizer 要求调用方提供像素 owner，没有纯网格的兼容路径。
 
-`TerminalView` 用 `canControlRun = session.processState === 'running'`
-（`TerminalView.tsx`）作为总闸：
+xterm 的 `onRender` 只用来证明首帧已经可测量：`TerminalView` 收到首个 render 时先注销监听，再请求一次 viewport 同步。普通 TUI 输出不是 geometry 事件，不能持续进入 fit 链路，否则 Codex 重绘与一列宽度波动会形成 render → fit → PTY resize → render 的反馈环。
 
-- 键盘输入仅在 `canControlRun` 时写回。
-- OSC 回复的 `sendInput` 同样受 `canControlRun` 约束。
-- 仅 `canControlRun` 时才启动 viewport 的 live 尺寸同步。
+PTY resize 可能慢于 UI 拖动，所以 synchronizer 只保留一个 in-flight 请求和一个可替换的 pending size（`requestResize`／`drainPendingResizes`）：新尺寸覆盖尚未发送的旧尺寸，最终由 `api.sessions.resize` → Core → ctxmux 应用。历史 Run 因 `live=false` 只在本地 fit 回放画面，不向 PTY 发 resize。
 
-因此已退出的历史 Run 在 UI 上是只读回放，不会向已死进程写入按键、尺寸或 OSC 回复。
-多个 Renderer View 并发 attach 同一 Run 时，Main 复用同一个 CtxMux Attachment、后续 View 走
-`readRunReplay`（`runtime-controller.ts`；测试 `runtime-controller.test.ts`）。
+## 6. Runtime 持久化故障与容量观察
 
-### 5.4 Resize 只提交稳定、最新的网格
+ctxmux 是 WAL、SQLite durable state 与 persistence actor 的唯一 owner；AgentMux 只消费它公开的可用性与故障结果，不在 Desktop 另建 checkpoint、截断或修复逻辑。用户可见的约束（不冒充 Agent 死亡、完整性故障 fail closed、故障类别可分辨）见 [Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。
 
-DOM 的 `ResizeObserver` 只说明容器几何发生了变化，不代表 xterm 的字符网格已经稳定。
-`TerminalViewportSynchronizer` 先比较 `FitAddon.proposeDimensions()` 的连续帧结果
-（`terminal-viewport-sync.ts` 的 `observeViewport`/`continueStableFit`，`MAX_STABILITY_FRAMES=8`）：
-网格稳定或达到 8 帧上限后才执行 fit；若 xterm 已经等于 proposal，则不做无效 fit。这样
-divider 拖拽不会把每一帧都变成 Codex 的整屏重排。
+Core 把 ctxmux 协议错误投影为结构化 [`AgentMuxStorageFailure`](../../packages/core/src/errors.ts)（`stage`、`sqlitePrimaryCode`／`sqliteExtendedCode`、`systemErrno`、`transactionOutcome`），并挂在 [`AgentMuxError.storageFailure`](../../packages/core/src/errors.ts) 上，经公共 RPC／CLI 原样传出。按 Run 的可选观察入口是 [`CtxmuxRunAdapter.observeStorage`](../../packages/core/src/ctxmux-run-adapter.ts)：有能力时返回 [`projectRunStorageFacts`](../../packages/core/src/run-storage-observation.ts) 投影的 memory 水位、persistence owner 水印（`firstFailure`、`storageFailure`、`actorStopped`、queued／offered／confirmed 字节）与 policy 预算；客户端或 Runtime 未声明该能力时返回 `unsupported`，已有 Run 与输入仍可用，容量细节保持未知。[Doctor](../../packages/core/src/doctor.ts) 的 `observeStorage` 路径复用同一诊断。
 
-**Wobble gate：只有容器 CSS 像素真的变化才 fit。** 稳定帧门控挡不住一类静止态抖动——拖拽
-已停、容器像素固定，但 WebGL renderer 的 cell metrics 会短暂偏离 DOM renderer，使
-`proposeDimensions()` 在同一像素几何下于 N 与 N±1 列之间跳动。若照此 fit，xterm 会 reflow
-一列再弹回，而 wrap→unwrap 并非完美逆运算，Codex/grok 这类 diff 绘制的 TUI 会被画花，形成
-持续闪烁。`fitAndSynchronize`（`terminal-viewport-sync.ts` 的 `fitAndSynchronize` /
-`samePixels` / `lastFittedPixels`）因此在网格与 xterm 分歧时，用必需的 `measureViewport()`
-读容器 CSS 像素并与上次成功 fit 的基线比较（差异 < 1 CSS 像素视为同一几何）：像素未变即判为
-cell-metric 抖动，直接跳过 fit 与 PTY resize；像素确有变化才走 fit → resize。基线存副本，避免
-调用方复用同一可变对象时把基线一起改掉。`measureViewport` 由 `TerminalView` 用宿主
-div 的 `getBoundingClientRect()` 提供；Synchronizer 不接受缺少像素 owner 的调用方，也不保留
-纯网格兼容路径。
+结果分类按阶段、事务结果与错误码区分可恢复争用、容量压力与真正的完整性／权限／I/O 故障；SDK 并不以固定枚举名（如 recovered／busy-retry-exhausted／disk-full／corruption）作为公共合同，具体分类以随包 ctxmux 版本为准。Desktop 的 Terminal／Resume 入口沿用这些结构化事实，不把全部底层错误折叠成“Agent resume unavailable”。
 
-xterm 的 `onRender` 只用于证明首帧已经可测量：`TerminalView` 在收到首个 render 时先注销
-监听，再请求一次 viewport 同步。普通 TUI 输出不是 geometry 事件，绝不能持续进入 fit 链路；
-否则 Codex 重绘与一列宽度波动会形成 render → fit → PTY resize → render 的反馈环。
+## 7. 前台物理观察（`observeForeground`）
 
-Attach continuation 是状态恢复，不是历史动画。`TerminalView.applyContinuation` 先验证公开步骤顺序，再恢复 checkpoint、应用 ordered Resize 与 Output；合并和有界排空只改变消费方式，不改变原字节顺序。在恢复阶段通过已有揭示 owner 控制画布，避免将历史重绘帧播放成“终端自己 resize”；失败、未知或 deadline 到期不能永久遮住健康终端。
+Runtime 的公开单次接口是随包 `@ctxmux/sdk` 的 `observeForeground({ runId })`：只选择原 Run；同一次连接的 Hello 身份带出 `runtime`（RuntimeIdentity）与 `observation`（`RunForegroundObservation`）。观察结果分 `observed`（根进程／SID／PTY 作用域、采样区间、opaque incarnation／exec 世代与进程表）、`unknown` 与 `unsupported`；完整物理执行事实归 Runtime。单次采样不冒连续前台通知。
 
-**原子揭示有 deadline，超时后揭示优先于原子性。** 隐藏画布的正当理由只有一个：避免把历史重绘
-帧当动画播出去。它**不是**一个可以无限期持有的权利——`AGENTS.md` 的健康能力边界 在这里的含义是，
-一个我们等不到的步骤不得把一个健康的终端永久藏起来。恢复态此前只有两个出口（全链成功、attach
-抛错），于是"链上某处永不 settle"这一类在界面上表现为**永久转圈**，而 ctxmux、Run、PTY 全都好着。
+Core 当前经 [`CtxmuxRunAdapter.readRuntimeEndpoint`](../../packages/core/src/ctxmux-run-adapter.ts) 用一次性 diagnostic client 调用该接口，以重核端点的 Runtime 身份（`reobserveConnection` 路径）；超时由 `foregroundObservationTimeoutMs` 限定。用户可见的 Focus／手动启动 Agent 身份约束见 [Focus 行为](../design/behavior/focus-context.md)；Desktop Focus 目前不直接调用 `observeForeground`（实现缺口另登记）。
 
-因此揭示的前提收敛为**画面正确所真正依赖的那一步**：replay 字节写完。live 视口同步与 gap redraw
-移到揭示之后继续（它们改善画面，但不决定画面是否可看），**不再阻塞揭示**——此前 `startLiveSynchronization`
-排在揭示之前，它经由 resize 与 attach 争用同一把按 Run 串行的锁，该 Run 上任一卡住的操作都会让
-揭示永不到来。此外揭示本身带一个 deadline：到点仍未揭示则**强制揭示**，画布交还给用户。
+## 8. 防回归测试
 
-强制揭示不得静默：它按健康能力边界 走服务窗告示（第 2 类——我们的步骤没走通，Agent 没坏），说清哪一步
-没走通、现在按什么状态在跑、怎么恢复完整能力。恢复态本身仍是诚实信号，不因"看着烦"而删除；
-被削弱的只是它无限期遮挡画布的权利。
-
-CtxMux 的原始 Replay 有界；Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已经淘汰，保留后缀不能被宣称为完整终端屏幕。当前 Core 与 Renderer 经 `terminalContinuationSteps` 消费公开 continuation：`basic-vt` 的 checkpoint、restore bytes 及后续 ordered output/Resize，或没有 checkpoint 的原始字节恢复。restore bytes 是恢复材料，不计为新的 PTY output；checkpoint 能恢复当前画面不代表缺失 scrollback 已补全。
-
-缺失提示留在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一 Resize Owner 临时减少一行再恢复最终网格，促使同一 Run 重新输出当前画面。历史 Run 不发送 Resize 或 Input。这只是当前画面的恢复动作，不能作为原始历史恢复或活跃终端连续向上阅读的通过证据；后者按[设计 SSOT](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 验收。
-
-PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间尺寸串成 Promise 队列。
-它只保留一个 in-flight 请求和一个可替换的 pending size（`requestResize`/`drainPendingResizes`）；新尺寸覆盖尚未
-发送的旧尺寸，最终由 `api.sessions.resize` → Core → CtxMux 应用。历史 Run 因 `live=false`
-只在本地 fit 回放画面，不向 PTY 发 resize。对应测试锁定了稳定帧等待、同帧合并、历史 Run
-只读，以及 in-flight 期间 `110×30` 被更新的 `120×30` 取代
-（`apps/desktop/test/terminal-viewport-sync.test.ts`）。
-
-## 6. 已发生故障与防回归测试
-
-| 故障/风险 | 防回归测试 | 断言要点 |
+| 故障／风险 | 防回归测试 | 断言要点 |
 | --- | --- | --- |
-| Graphite 工作面或 cursor accent 偏离稳定纯黑 | `apps/desktop/test/terminal-theme.test.ts` | Graphite `background === cursorAccent === '#000000'`；`black === '#1d1f21'` 且与工作面不同 |
-| palette 残缺导致 TUI 无法分层 | `apps/desktop/test/terminal-theme.test.ts` | 每个 catalog palette 恰好 23 键且 `extendedAnsi` 恰好 240 项 |
-| OSC 抢答争用 Input cursor / Session 未就绪即回复 | `apps/desktop/test/runtime-controller.test.ts` | ready 前 `writeAgent` 未调用；ready 后写回 shared Graphite 前景/背景 |
-| 跨 chunk 的 OSC 查询被漏答或重复答 | `apps/desktop/test/terminal-osc-color-query.test.ts` | 分片查询保留 `remainder`，合并后只答一次 |
-| replay 旧查询被再次注入当前进程 | `terminal-capability-replies.ts`（`!isReplaying()` 门控）；`terminal-osc-color-query.test.ts` | 回放期不作答；malformed/颜色变更查询被忽略 |
-| OSC 回复格式漂移 | `terminal-osc-color-query.test.ts` | 16-bit `rgb:RRRR/GGGG/BBBB` 形式 |
-| 历史 Run 被误写输入 | `TerminalView.tsx`（`canControlRun` 门控，见 §5.3） | 非 running 时输入、OSC 回复与 Resize 均不写回 |
-| 拖拽后 Codex 因陈旧 PTY 尺寸队列持续闪烁 | `apps/desktop/test/terminal-viewport-sync.test.ts` | proposal 稳定后才 fit；未发送的中间尺寸被最新网格替换 |
-| 静止态 WebGL/DOM cell-metric 抖动使一列网格反复 reflow 画花 Codex（wobble） | `apps/desktop/test/terminal-viewport-sync.test.ts`（"skips a one-column grid wobble…"、"fits and resizes when container pixels actually change"） | 容器 CSS 像素未变时跳过 fit+resize；像素真变化才 fit（`measureViewport`/`samePixels`） |
-| 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的 one-shot `terminal.onRender` | 首个 render 先 dispose；后续输出不再触发 viewport 同步 |
+| 历史 Run 被误写输入 | `TerminalView.tsx` 的 `canControlRun` 门控（第 5.1 节） | 非 running 时输入、OSC 回复与 Resize 均不写回 |
+| 拖动后 Codex 因陈旧的 PTY 尺寸队列持续闪烁 | `apps/desktop/test/terminal-viewport-sync.test.ts` | proposal 稳定后才 fit；in-flight 期间 `110×30` 被更新的 `120×30` 取代，未发送的中间尺寸被最新网格替换 |
+| 静止态 WebGL／DOM cell-metric 抖动使网格反复 reflow，画花 Codex | `apps/desktop/test/terminal-viewport-sync.test.ts`（"skips a one-column grid wobble…"、"fits and resizes when container pixels actually change"） | 容器 CSS 像素未变时跳过 fit 与 resize；像素确有变化才 fit |
+| 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的一次性 `terminal.onRender` | 首个 render 先 dispose，后续输出不再触发 viewport 同步 |
 | Attach 逐条写入数千个 replay event，历史 TUI 帧看起来像持续 resize | `apps/desktop/test/terminal-replay.test.ts` | replay 合并为一次 parser write；恢复完成前隐藏画布 |
-| 原 Attachment 已取得，回执投影却等待无关 Session 恢复 | [真实 cold Host/Main 附着测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts) | 恢复 pending／确认失败两阶段，原 Agent 与 raw Terminal 均返回准确 Run／PID、已知初始内容和连续 live byte range；无输入重放或新 Run，reader 清理及错误 owner／换 Run 拒绝仍成立 |
-| 原终端可附着，新 Agent 创建仍等待无关恢复 | [同一真实 Main 的独立创建测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts)、[Hosted 创建与来源授权](../../packages/core/test/remote-initial-creation.test.ts)、[原创建检查](../../packages/core/test/remote-creation-exact-read.test.ts)、[冷 fork 来源](../../packages/core/test/current-fork-lifecycle.test.ts) | 创建、读取和来源授权各消费自身准入；准确 Run／输出、重复原操作、未知首次投递、prepared reconcile、变更来源拒绝和原权限边界分别验证，不以 attach 通过代签创建 |
+| 已取得 Attachment，回执投影却等待无关 Session 恢复 | [真实冷 Host／Main 附着测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts) | 恢复 pending 与确认失败两个阶段下，Agent 与 raw Terminal 都返回目标 Run／PID、已知初始内容与连续的 live byte range；没有输入重放或新 Run，reader 清理与错误 owner／换 Run 的拒绝仍成立 |
+| 终端可附着，新 Agent 创建仍等待无关恢复 | [同一真实 Main 的独立创建测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts)、[Hosted 创建与来源授权](../../packages/core/test/remote-initial-creation.test.ts)、[创建检查](../../packages/core/test/remote-creation-exact-read.test.ts)、[冷 fork 来源](../../packages/core/test/current-fork-lifecycle.test.ts) | 创建、读取与来源授权各自消费自己的准入；分别验证目标 Run／输出、重复操作、未知的首次投递、prepared 对账、来源变化时的拒绝与权限边界，不以 attach 通过代表创建通过 |
 
-[测试策略](../testing/strategy.md) 记录整体 oracle 与证据范围；本表列回归意图，测试存在不代表本轮候选已通过。
+外观与 OSC 相关的测试见 [Terminal 外观《防回归测试》](terminal-appearance.md#防回归测试)。[测试策略](../testing/strategy.md)记录整体 oracle 与证据范围；本表列出回归意图，测试存在不代表本轮候选已通过。
 
-## 7. 交叉引用
+## 9. 交叉引用
 
 - [Core 接入说明](../../packages/core/README.md) —— 公共 API 与唯一 Run owner。
-- [终端交互分层](../design/agentmux-terminal-interaction-layers.md) —— 宿主、xterm 与 Agent 的职责。
+- [终端交互分层](terminal-interaction-layers.md) —— 宿主、xterm 与 Agent 的职责。
+- [Terminal 外观](terminal-appearance.md) —— palette、OSC 颜色回复与主题边界。
 - [文档导航](../README.md) —— 产品约束、运行时与验证的阅读入口。
