@@ -1,18 +1,56 @@
-.connector-group-status { display: grid; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-3); min-width: 0; }
+/* Group status popover. Anatomy follows the quiet list-card pattern: one raised card
+   per group (avatar, name, status dot + short line), two directional stat cells, a
+   member table with aligned columns, and one footer line. Fills and soft rings, not
+   outlines. Unfilled text shares one inset (--status-inset) so the left edge is single. */
+.connector-group-status { --status-inset: var(--sp-3); display: grid; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-2); min-width: 0; }
 .connector-group-status small { color: var(--text-3); font-size: var(--fs-meta); white-space: normal; line-height: 1.4; }
-.connector-group-status__traffic { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); padding-block: var(--sp-2); }
-.connector-group-status__traffic > div { display: grid; gap: var(--sp-1); min-width: 0; }
-.connector-group-status__traffic strong { font-size: var(--fs-body); font-weight: 500; }
-.connector-group-status__people-title, .connector-group-status__scope { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
-.connector-group-status__people-title > strong { font-size: var(--fs-meta); font-weight: 500; }
-.connector-group-status__person { display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px minmax(70px, auto); gap: var(--sp-2); align-items: center; min-width: 0; }
-.connector-group-status__person > span, .connector-group-status__person > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); }
-.connector-group-status__person > strong { text-align: right; font-size: var(--fs-meta); font-weight: 500; }
-.connector-group-status__person > small { text-align: right; max-width: 120px; }
-.connector-group-status__recovery { display: grid; gap: var(--sp-2); justify-items: start; }
+
+/* Received / Sent: two stat cells on one tinted strip; the catching-up note spans its foot. */
+.connector-group-status__traffic { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; overflow: hidden; border-radius: var(--radius); background: var(--wash-2); box-shadow: var(--hl); }
+.connector-group-status__traffic > div { display: grid; gap: 2px; align-content: start; min-width: 0; padding: var(--sp-2) var(--status-inset); background: var(--surface-1); }
+.connector-group-status__traffic > div > small:first-child { color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.connector-group-status__traffic strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An unread value is not a fact: quieter weight and color than a recorded time. */
+.connector-group-status__traffic > div[data-observed=false] strong { color: var(--text-2); font-weight: 400; }
+.connector-group-status__traffic > div > small:last-child { overflow-wrap: anywhere; }
+.connector-group-status__hint { grid-column: 1 / -1; padding: var(--sp-2) var(--status-inset); background: var(--surface-1); }
+
+/* Members: one table so the count and access columns line up for every row. */
+.connector-group-status__people { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: var(--sp-4); align-items: center; }
+.connector-group-status__people-title, .connector-group-status__person { display: contents; }
+.connector-group-status__people-title > * { padding: 0 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+.connector-group-status__people-title > strong { padding-left: var(--status-inset); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.connector-group-status__people-title > small:nth-child(2) { text-align: right; }
+.connector-group-status__people-title > small:last-child { padding-right: var(--status-inset); }
+.connector-group-status__person > * { min-height: 30px; display: flex; align-items: center; min-width: 0; }
+.connector-group-status__who { gap: var(--sp-3); padding-left: var(--status-inset); }
+.connector-group-status__who > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-meta); }
+.connector-group-status__person > strong { justify-content: flex-end; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.connector-group-status__person > small { padding-right: var(--status-inset); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); }
+.connector-group-status__person:not([data-observed]) > small { color: var(--text-3); }
+/* A member without a profile image gets a filled initial the size of a real avatar. */
+.connector-group-status__initial { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
+
+.connector-group-status__note { padding: 0 var(--status-inset); }
+/* One footer line: scope summary, check time kept whole, refresh at the right. */
+.connector-group-status__scope { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding-left: var(--status-inset); }
+.connector-group-status__scope > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.connector-group-status__checked { white-space: nowrap; }
+.connector-group-status__scope .agent-connector-text-action { flex: none; }
+
+.connector-group-status__recovery { display: grid; gap: var(--sp-2); justify-items: start; padding: 0 var(--status-inset); }
 .connector-group-status__recovery .primary-button { min-height: 28px; font-size: var(--fs-meta); }
-.connector-header-menu__item > .connector-header-menu__group-heading { display: flex; flex-direction: row; gap: var(--sp-2); min-width: 0; align-items: center; }
+
+/* Group card header: avatar, name and a dot + short status line. Only problems recolor text. */
+.connector-header-menu__item > .connector-header-menu__group-heading { display: flex; flex-direction: row; gap: var(--sp-3); min-width: 0; align-items: center; }
 .connector-header-menu__group-heading > span { min-width: 0; }
+.connector-header-menu__group-heading strong { letter-spacing: -.005em; }
 .connector-header-menu__title > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.connector-header-menu__receiving { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
-.connector-header-menu__receiving[data-state=online] { color: var(--green); }
+/* Beats the generic `.connector-header-menu__item small` block rule so the dot keeps its box and halo. */
+.connector-header-menu__item .connector-header-menu__receiving { display: flex; width: fit-content; align-items: center; gap: 7px; max-width: none; margin-top: 2px; padding: 3px 0 3px 3px; overflow: visible; color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
+.connector-header-menu__receiving::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--neutral-3); }
+.connector-header-menu__receiving[data-state=online]::before { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
+.connector-header-menu__receiving[data-state=recovering]::before { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 18%, transparent); }
+.connector-header-menu__receiving[data-state=recovering] { color: var(--amber-text); }
+.connector-header-menu__receiving[data-state=stopped]::before { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
+.connector-header-menu__receiving[data-state=stopped] { color: var(--red); }

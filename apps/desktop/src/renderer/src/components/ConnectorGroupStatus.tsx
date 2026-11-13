@@ -11,7 +11,9 @@ import { ConnectorConnectionOverview } from './ConnectorConnectionOverview'
 import type { ConnectorGroupAction } from '../lib/connector-group-status'
 import '../styles/connector-group-status.css'
 
-const PersonIcon = semanticIconComponent('object.user'), RefreshIcon = semanticIconComponent('action.refresh')
+const RefreshIcon = semanticIconComponent('action.refresh')
+/** A display initial from the shown name; it identifies nobody. */
+const initial = (name: string) => Array.from(name.trim())[0]?.toLocaleUpperCase() ?? '·'
 const actorKey = (actor: ConnectionMemberAccess['actor']) => JSON.stringify([actor.application.domain, actor.application.appId, actor.idType, actor.userId])
 const clock = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const trafficTime = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : <time dateTime={new Date(value).toISOString()} title={new Date(value).toLocaleString()}>{clock(value)}</time>
@@ -54,28 +56,41 @@ export function ConnectorGroupStatus({ binding, hostingTarget, report, onCheck, 
   const members = facts.people?.observation.state === 'ready' && facts.people.application ? facts.people.members.slice(0, 5) : []
   const profiles = useConnectorEntityProfiles(connection?.config ?? null, members.map(member => ({ kind: 'actor' as const, actor: { application: facts.people!.application!, idType: member.idType, userId: member.userId } })), hostingTarget)
   const needsAction = model.state !== 'online' || model.primary !== 'check'
+  const receivedValue = incoming?.issue || !incoming?.value ? null : received ? trafficTime(received.receivedAt) : 'No recent record'
+  const sentValue = outgoing?.issue || !outgoing?.value ? null : sent ? sent.receipt === 'confirmed' ? trafficTime(sent.receiptObservedAt) : sent.state === 'pending' ? 'Pending' :
+    sent.state === 'unknown' || sent.state === 'dispatching' ? 'Delivery unconfirmed' : sent.state === 'not-applied' ? 'Not sent' : 'No new send' : 'No recent record'
+  const peopleReady = facts.people?.observation.state === 'ready', moreMembers = !!facts.people?.next || (facts.people?.members.length ?? 0) > members.length
+  const unchecked = !!(visible?.issue || facts.issue)
   return <section className="connector-group-status" aria-label="Group status" data-group-status={binding.bindingId}>
     <div className="connector-group-status__traffic">
-      <div><small>Received</small><strong>{incoming?.issue ? 'Not checked' : received ? trafficTime(received.receivedAt) : incoming?.value ? 'No recent record' : 'Not checked'}</strong><small>{received ? received.state === 'refused' ? 'Not submitted to Agent' : 'Saved here' : 'This binding’s recorded window'}</small></div>
-      <div><small>Sent</small><strong>{outgoing?.issue ? 'Not checked' : sent ? sent.receipt === 'confirmed' ? trafficTime(sent.receiptObservedAt) : sent.state === 'pending' ? 'Pending' : sent.state === 'unknown' || sent.state === 'dispatching' ? 'Unconfirmed' : sent.state === 'not-applied' ? 'Not sent' : 'No new send' : outgoing?.value ? 'No recent record' : 'Not checked'}</strong><small>{sent?.receipt === 'confirmed' ? 'Confirmation recorded at' : 'Original message result'}</small></div>
+      <div data-observed={receivedValue !== null}><small>Received</small><strong>{receivedValue ?? 'Not checked'}</strong>
+        <small>{received ? received.state === 'refused' ? 'Not submitted to Agent' : 'Saved in AgentMux' : receivedValue ? 'In this group’s recent window' : 'Recent messages unread'}</small></div>
+      <div data-observed={sentValue !== null}><small>Sent</small><strong>{sentValue ?? 'Not checked'}</strong>
+        <small>{sent?.receipt === 'confirmed' ? 'Delivery confirmed' : sentValue ? sent ? 'Latest reply to this group' : 'In this group’s recent window' : 'Recent replies unread'}</small></div>
+      {model.hint ? <small className="connector-group-status__hint">{model.hint}</small> : null}
     </div>
-    {model.hint ? <small className="connector-group-status__hint">{model.hint}</small> : null}
     <ConnectorConnectionOverview compact binding={binding} connection={connection} report={report} hostingTarget={hostingTarget} onCheck={onCheck} onNavigate={onNavigate} render={({ action, feedback }) => needsAction ? <div className="connector-group-status__recovery">{action}{feedback}</div> : null} />
-    <div className="connector-group-status__people-title"><strong>Members</strong><small>Messages · Agent access</small></div>
-    {members.map(member => {
-      const actor = { application: facts.people!.application!, idType: member.idType, userId: member.userId }
-      const profile = profiles.get(channelMetadataSubjectKey({ kind: 'actor', actor }))?.observation?.profile
-      const access = permissions?.get(actorKey(actor)), effective = access?.effective
-      const labels = effective?.state === 'active' ? effective.capabilities.map(capability => capabilities[capability]) : []
-      const count = incoming?.value ? incoming.value.actors.find(row => row.actorKey === connectionDiagnosisActorKey(target, actor))?.messages ?? 0 : null
-      const label = permissions ? labels.length ? labels.join(', ') : 'No access' : 'Not checked'
-      return <div className="connector-group-status__person" key={actorKey(actor)}>
-        <ChannelProfileAvatar url={profile?.avatarUrl} size={22}><PersonIcon size={14} /></ChannelProfileAvatar><span title={member.name ?? actor.userId}>{profile?.name ?? member.name ?? 'Group member'}</span>
-        <strong title="Messages in this binding’s recorded window">{count ?? '—'}</strong><small title={effective?.state === 'active' ? effective.capabilities.map(capability => capability === 'permission' ? 'Approve Agent permission requests' : capabilities[capability]).join(', ') : label}>{label}</small>
-      </div>
-    })}
-    {!members.length ? <small>{facts.people?.observation.state === 'ready' ? 'No members in this page' : 'Members not checked'}</small> : null}
-    <div className="connector-group-status__scope"><small>{incoming?.value ? `Current binding · ${incoming.value.included} recent messages recorded here` : 'Current binding · activity not checked'}{visible ? ` · checked ${clock(visible.checkedAt)}` : ''}{facts.people?.next || (facts.people?.members.length ?? 0) > members.length ? ' · more members' : ''}</small><button type="button" className="agent-connector-text-action" aria-label="Refresh group status" disabled={checking} onClick={() => { setRequest(value => value + 1); void facts.refresh(undefined, false) }}><RefreshIcon size={12} /></button></div>
-    {visible?.issue || facts.issue ? <small role="status">Some details could not be checked. The original group and controls are kept.</small> : null}
+    <div className="connector-group-status__people" role="table" aria-label="Members">
+      <div className="connector-group-status__people-title" role="row"><strong role="columnheader">Members</strong><small role="columnheader">Messages</small><small role="columnheader">Agent access</small></div>
+      {members.map(member => {
+        const actor = { application: facts.people!.application!, idType: member.idType, userId: member.userId }
+        const profile = profiles.get(channelMetadataSubjectKey({ kind: 'actor', actor }))?.observation?.profile
+        const access = permissions?.get(actorKey(actor)), effective = access?.effective
+        const labels = effective?.state === 'active' ? effective.capabilities.map(capability => capabilities[capability]) : []
+        const count = incoming?.value ? incoming.value.actors.find(row => row.actorKey === connectionDiagnosisActorKey(target, actor))?.messages ?? 0 : null
+        const label = permissions ? labels.length ? labels.join(', ') : 'No access' : '—'
+        const name = profile?.name ?? member.name ?? 'Group member'
+        return <div className="connector-group-status__person" role="row" key={actorKey(actor)} data-observed={permissions ? true : undefined}>
+          <span role="cell" className="connector-group-status__who"><ChannelProfileAvatar url={profile?.avatarUrl} size={22}><span className="connector-group-status__initial" aria-hidden="true">{initial(name)}</span></ChannelProfileAvatar><span title={member.name ?? actor.userId}>{name}</span></span>
+          <strong role="cell" title="Messages in this group’s recent window">{count ?? '—'}</strong>
+          <small role="cell" title={effective?.state === 'active' ? effective.capabilities.map(capability => capability === 'permission' ? 'Approve Agent permission requests' : capabilities[capability]).join(', ') : permissions ? label : 'Agent access not checked'}>{label}</small>
+        </div>
+      })}
+    </div>
+    {!members.length ? <small className="connector-group-status__note">{peopleReady ? 'No members in this page' : 'Members not checked'}</small> : null}
+    <div className="connector-group-status__scope">
+      <small>{unchecked ? 'Some details could not be checked' : incoming?.value ? `${incoming.value.included} recent messages${moreMembers ? ' · more members' : ''}` : 'Activity not checked'}{visible ? <span className="connector-group-status__checked"> · checked {clock(visible.checkedAt)}</span> : null}</small>
+      <button type="button" className="agent-connector-text-action" aria-label="Refresh group status" disabled={checking} onClick={() => { setRequest(value => value + 1); void facts.refresh(undefined, false) }}><RefreshIcon size={12} /></button>
+    </div>
   </section>
 }
