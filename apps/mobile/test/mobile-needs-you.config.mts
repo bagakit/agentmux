@@ -9,6 +9,7 @@ import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtim
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.MOBILE_NEEDS_YOU_MUTATION, report = process.env.MOBILE_NEEDS_YOU_LOADED
 const variants: Record<string, { file: string; before: string; after: string }> = {
+  'premature-attention-zero': { file: 'apps/mobile/src/navigation/use-mobile-attention-catalog.ts', before: 'unconfirmed: !active || !current || !state.confirmed', after: 'unconfirmed: !active || current && !state.confirmed' },
   'drop-unmounted-receipt': { file: 'apps/mobile/src/conversation/use-mobile-interaction-controller.ts', before: 'if (responses.current.get(originalKey) !== original) return', after: 'if (!mounted.current || responses.current.get(originalKey) !== original) return' },
   'late-device-save': { file: 'apps/mobile/src/conversation/use-mobile-interaction-controller.ts', before: 'const retained = await local.save()', after: 'const retained = true' },
   'repeat-confirmed-refresh': { file: 'apps/mobile/src/navigation/MobileNeedsYouAnswer.tsx', before: 'settled && requestKey && answeredRequest.current !== requestKey', after: 'settled && requestKey' },

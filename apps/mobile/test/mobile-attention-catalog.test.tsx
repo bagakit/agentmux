@@ -1,6 +1,7 @@
 import { act, useLayoutEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useMobileAttentionCatalog } from '../src/navigation/use-mobile-attention-catalog'
+import { MobilePrimaryNavigation } from '../src/navigation/MobilePrimaryNavigation'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
@@ -31,6 +32,31 @@ afterEach(async () => {
 })
 
 describe('the shell attention reader', () => {
+  it('keeps the real Focus badge unknown until the first and replacement clients confirm their own counts', async () => {
+    const first = fixture(), replacement = fixture()
+    let confirmFirst!: (value: { catalog: ReturnType<typeof catalog> }) => void
+    let confirmReplacement!: (value: { catalog: ReturnType<typeof catalog> }) => void
+    first.client.forwardRpc = vi.fn(() => new Promise(resolve => { confirmFirst = resolve })) as typeof first.client.forwardRpc
+    replacement.client.forwardRpc = vi.fn(() => new Promise(resolve => { confirmReplacement = resolve })) as typeof replacement.client.forwardRpc
+    function Reader({ client }: { client: typeof first.client }) {
+      const state = useMobileAttentionCatalog(client, true, false)
+      return <MobilePrimaryNavigation current="focus" onSelect={() => {}} needsYou={state.items.length} needsYouUnconfirmed={state.unconfirmed} />
+    }
+    const view = await mount(<Reader client={first.client} />)
+    const badge = () => view.element.querySelector('[data-workface="focus"] .mobile-tab-badge')
+    expect(badge()?.textContent).toBe('?')
+    expect(badge()?.hasAttribute('data-count')).toBe(false)
+    await act(async () => confirmFirst({ catalog: catalog() }))
+    expect(badge()?.textContent).toBe('1')
+    await view.render(<Reader client={replacement.client} />)
+    expect(badge()?.textContent).toBe('?')
+    expect(badge()?.hasAttribute('data-count')).toBe(false)
+    await act(async () => confirmReplacement({ catalog: { ...catalog(), agentPresentation: [] } }))
+    expect(badge()).toBeNull()
+    expect(first.submit).not.toHaveBeenCalled(); expect(replacement.submit).not.toHaveBeenCalled()
+    expect(first.respond).not.toHaveBeenCalled(); expect(replacement.respond).not.toHaveBeenCalled()
+  })
+
   it('does not commit another render when the typed membership is unchanged, including changed unrelated rows', async () => {
     const f = fixture(), timer = intervals(); let commits = 0, unrelated = 0
     f.client.forwardRpc = vi.fn().mockImplementation(async () => ({ catalog: { ...catalog(), agentPresentation: [row,
