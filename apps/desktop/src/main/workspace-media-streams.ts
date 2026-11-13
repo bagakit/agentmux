@@ -34,7 +34,7 @@ type MediaFiles = Pick<WorkspaceFiles, 'openMediaHandle' | 'readMediaPlaylist'>
 type Range = { start: number; end: number }
 type Fail = (status: number, message: string, headers?: Record<string, string>) => void
 
-/** Resources a playlist may name, by extension. Anything else in a playlist refuses that playlist. */
+/** Resources a playlist lease serves, by extension. A playlist may name others; only those requests are refused. */
 const PLAYLIST_RESOURCE_TYPES: Readonly<Record<string, string>> = {
   [WORKSPACE_MEDIA_PLAYLIST_EXTENSION]: 'application/vnd.apple.mpegurl',
   ts: 'video/mp2t', m4s: 'video/iso.segment', mp4: 'video/mp4', m4a: 'audio/mp4',
@@ -107,9 +107,8 @@ export function resolvePlaylistReference(reference: string, playlistPath: string
   })
   if (left === null || left === undefined || left !== right) return { state: 'outside-workspace', path: playlistPath }
   let path: string
-  try { path = previewRequestPath(left) }
+  try { return previewRequestPath(left) }
   catch { return { state: 'unsupported-resource', path: playlistPath } }
-  return Object.hasOwn(PLAYLIST_RESOURCE_TYPES, workspaceFileExtension(path)) ? path : { state: 'unsupported-resource', path: playlistPath }
 }
 
 /**
@@ -358,6 +357,9 @@ export class WorkspaceMediaStreams {
 
   /** A served playlist's segment, opened for this request only through the same confinement. */
   private async respondSegment(lease: PlaylistLease, path: string, request: IncomingMessage, response: ServerResponse, fail: Fail): Promise<void> {
+    // The playlist may name a key, a caption or a rendition this player does not serve; refuse only that resource.
+    const mimeType = PLAYLIST_RESOURCE_TYPES[workspaceFileExtension(path)]
+    if (!mimeType) { lease.fact = { state: 'unsupported-resource', path }; fail(422, 'This playlist resource is not a media type that plays here.'); return }
     let media: WorkspaceMediaHandle
     try { media = await this.files.openMediaHandle(lease.workspace, path) }
     catch (error) {
@@ -375,7 +377,7 @@ export class WorkspaceMediaStreams {
     }
     try {
       if (lease.released) { fail(410, 'This media lease was released.'); return }
-      if (await this.serveBytes(lease, path, media.handle, media.byteLength, PLAYLIST_RESOURCE_TYPES[workspaceFileExtension(path)]!, request, response, fail)) this.clear(lease, path)
+      if (await this.serveBytes(lease, path, media.handle, media.byteLength, mimeType, request, response, fail)) this.clear(lease, path)
     } finally { await media.handle.close().catch(() => {}) }
   }
 
