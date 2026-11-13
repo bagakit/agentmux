@@ -191,6 +191,39 @@ describe('mounted player', () => {
     expect(current).toBe(160)
   })
 
+  it('keeps an unreported live position unknown while playback remains available', async () => {
+    await render(<MediaPlayer lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
+    define(media(), { duration: Number.POSITIVE_INFINITY, seekable: ranges(), paused: true })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    const badge = () => container.querySelector<HTMLButtonElement>('.media-player__live')!
+    expect(badge().getAttribute('aria-label')).toBe('Live position unknown')
+    expect(badge().textContent).toContain('position unknown')
+    expect(badge().dataset.liveEdge).toBe('unknown')
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Play"]')!.click())
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
+    define(media(), { seekable: ranges([0, 10]), currentTime: 9 })
+    await act(async () => { media().dispatchEvent(new Event('progress')) })
+    expect(badge().getAttribute('aria-label')).toBe('Playing live')
+  })
+
+  it('cycles every speed by pointer and keeps keyboard speed changes clamped', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 60 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    for (const rate of [1.25, 1.5, 2, 0.5, 0.75, 1]) {
+      await act(async () => container.querySelector<HTMLButtonElement>('.media-player__speed')!.click())
+      expect(media().playbackRate).toBe(rate)
+      await act(async () => { media().dispatchEvent(new Event('ratechange')) })
+      expect(container.querySelector('.media-player__speed')!.textContent).toBe(`${rate}×`)
+    }
+    const group = container.querySelector<HTMLElement>('[role="group"]')!
+    for (const [rate, key] of [[2, '>'], [0.5, '<']] as const) {
+      media().playbackRate = rate
+      await act(async () => { group.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: true, bubbles: true })) })
+      expect(media().playbackRate).toBe(rate)
+    }
+  })
+
   it('explains a failure by the lease owner fact, not by the media error code alone', async () => {
     const status = vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'deleted', path: 'clip.mp4' })
     const retry = vi.fn()
