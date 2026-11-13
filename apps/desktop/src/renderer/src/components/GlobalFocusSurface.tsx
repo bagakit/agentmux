@@ -53,7 +53,6 @@ import { groupIds, regionIds } from '@agentmux/layout'
 import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
@@ -473,7 +472,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
       }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       <FocusHistorySearch search={historySearch} active={visible} />
-      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context <ThemeActionOpenExternalIcon size={12} /></span></button> : null}
+      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>

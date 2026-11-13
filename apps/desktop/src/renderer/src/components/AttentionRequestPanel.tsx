@@ -11,7 +11,6 @@ import { api } from '../lib/api'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 
@@ -333,7 +332,7 @@ export function AttentionRequestPanel({
       <header className="attention-request-panel__header">
         <div><span>{failed ? failureTitle : request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
         <div className="attention-request-panel__actions">
-          <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ThemeActionOpenExternalIcon size={12} /> Open Session</button>
+          <button type="button" className="small-button" onClick={() => selectSession(session.id)}>Open Session</button>
           <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></button>
         </div>
       </header>

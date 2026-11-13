@@ -8,7 +8,6 @@ import { AgentStatusPromptActions } from './AgentStatusPromptActions'
 import { agentProviderLabel } from './AgentProviderIcon'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 
@@ -47,7 +46,7 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
         <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled}
           disabledReason={disabled ? inputAction : undefined} onSelect={(prompt) => { if (onSelect(prompt)) close(true) }} />
         {reviewReady ? <button type="button" className="agent-state-face__review small-button" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
-          <ThemeActionOpenExternalIcon size={13} aria-hidden="true" /><span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
+          <span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
         </button> : null}
         <details className="agent-state-face__facts"><summary>State details</summary>
           <p>{meaning.description}</p>

@@ -11,7 +11,6 @@ import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
 const ThemeActionAcceptResultsIcon = semanticIconComponent('action.accept-results')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
@@ -63,9 +62,9 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
   }
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
   const resultExplanation = goalResultExplanation(demand)
-  const goalRequestButton = <button type="button" className={!failure && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}<ThemeActionOpenExternalIcon size={13} /></button>
+  const goalRequestButton = <button type="button" className={!failure && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}</button>
   const goalRequestNote = <span className="goals-request-action"><img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /><span className="goals-caption">{recipient.description}</span></span>
-  const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}<ThemeActionOpenExternalIcon size={13} /></button> : null
+  const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
   return <>
     {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <div className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
@@ -97,7 +96,7 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
     </section> : demand.status === 'done' || alignment?.confirmedAt ? <div className="goals-no-results" data-goal-result-state="missing">
       <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div>
       {demand.status === 'done' ? <><p className="goals-condition"><strong>Results not verified</strong></p><p className="goals-muted">Marked done, but no report has checked the work against success criteria.</p></> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
-      <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}<ThemeActionOpenExternalIcon size={13} /></button> : null}{resultRequest}</div>
+      <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}{resultRequest}</div>
     </div> : null}
     {failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><button type="button" className="primary-button" disabled={pending} onClick={() => void reload()}>Reload current proposal</button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null}
   </>
