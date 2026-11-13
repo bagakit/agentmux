@@ -165,10 +165,10 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
     const code = element.error.code, asked = lease.id
     const fact = await api.files.mediaStreamStatus(asked).then(value => value.state, () => 'unknown' as const)
     if (released.current || currentLease.current !== asked) return
-    const view = describeMediaFailure(fact, code, decodedOnce.current)
+    const view = describeMediaFailure(fact, code, decodedOnce.current, lease.kind === 'playlist' ? 'playlist' : 'file')
     if (!view) return
     setDecode('error'); setFailure(view); setBuffering(false)
-  }, [lease.id])
+  }, [lease.id, lease.kind])
 
   const run = useCallback((action: MediaPlayerAction, origin: 'key' | 'pointer') => {
     const element = media.current
