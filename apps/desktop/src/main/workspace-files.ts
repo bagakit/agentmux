@@ -9,7 +9,8 @@ import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from './
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
-import { realpath, stat } from 'node:fs/promises'
+import { constants, type BigIntStats } from 'node:fs'
+import { lstat, open, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
@@ -622,6 +623,36 @@ function moveError(
   return { ...result, finalLocation }
 }
 
+/** File-object identity, with the same fields the native helper compares for one exact file. */
+export type WorkspaceMediaWitness = { device: string; inode: string; size: bigint; mtimeNs: bigint; ctimeNs: bigint }
+export type WorkspaceMediaHandleState = 'same' | 'changed' | 'deleted' | 'outside-workspace'
+export type WorkspaceMediaHandle = {
+  handle: FileHandle
+  witness: WorkspaceMediaWitness
+  byteLength: number
+  /** Compare the pinned object with the path visible inside the Workspace now. */
+  current(): Promise<WorkspaceMediaHandleState>
+}
+
+function mediaWitness(info: BigIntStats): WorkspaceMediaWitness {
+  return { device: info.dev.toString(), inode: info.ino.toString(), size: info.size, mtimeNs: info.mtimeNs, ctimeNs: info.ctimeNs }
+}
+
+/** The path must still name the pinned object, and that object must be unmodified since it was pinned. */
+export function compareMediaWitness(pinned: WorkspaceMediaWitness, opened: WorkspaceMediaWitness, visible: WorkspaceMediaWitness): 'same' | 'changed' {
+  if (visible.device !== pinned.device || visible.inode !== pinned.inode) return 'changed'
+  return opened.size === pinned.size && opened.mtimeNs === pinned.mtimeNs && opened.ctimeNs === pinned.ctimeNs ? 'same' : 'changed'
+}
+
+/** The real target inside the real Workspace root, or the typed fact that it escapes it. */
+async function confinedMediaTarget(workspace: WorkspaceRecord, requestedPath: string): Promise<string | 'outside-workspace'> {
+  const { root, requested } = await localFileScope(workspace, requestedPath)
+  const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(localPathWithin(root, requested))])
+  // assertRealPathWithin has exactly one failure: the target is outside the root.
+  try { assertRealPathWithin(realRoot, realTarget, sep) } catch { return 'outside-workspace' }
+  return realTarget
+}
+
 export class WorkspaceFiles {
   private readonly writeScope = new WorkspaceFileWriteScope()
   private readonly ordinary: OrdinaryWorkspaceFiles
@@ -1043,6 +1074,46 @@ export class WorkspaceFiles {
   /** Main-only bounded snapshot for operation-owned upload staging; one worker scan verifies the bytes. */
   async snapshotBytes(workspace: WorkspaceRecord, requestedPath: string, options: Pick<WorkspaceFileByteReadOptions, 'expectedRevision'> & { signal?: AbortSignal } = {}): Promise<WorkspaceFileByteRead> {
     return await this.readByteRange(workspace, requestedPath, { ...options, offset: 0, maxBytes: WORKSPACE_FILE_MAX_BYTES })
+  }
+
+  /**
+   * A local, read-only handle pinned to the exact file object for ranged playback.
+   * The path is confined to the real Workspace root before and after open, so a link
+   * swapped in between cannot hand out bytes from outside it. Remote Hosts stay unavailable.
+   */
+  async openMediaHandle(workspace: WorkspaceRecord, requestedPath: string): Promise<WorkspaceMediaHandle> {
+    if (this.hostFor(workspace.hostId).kind !== 'local') {
+      throw Object.assign(new Error('Media playback is unavailable for this remote workspace. Remote file execution is not available.'), { code: 'REMOTE_WORKSPACE_PREVIEW_UNAVAILABLE' })
+    }
+    const located = await confinedMediaTarget(workspace, requestedPath)
+    if (located === 'outside-workspace') throw Object.assign(new Error('Path escapes the workspace root'), { code: 'WORKSPACE_PATH_ESCAPE' })
+    const handle = await open(located, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    try {
+      const pinned = await handle.stat({ bigint: true })
+      if (pinned.isDirectory()) throw Object.assign(new Error('This path is a directory, not a file.'), { code: 'EISDIR' })
+      if (!pinned.isFile()) throw Object.assign(new Error('Media playback requires a regular file.'), { code: 'WORKSPACE_MEDIA_NOT_REGULAR' })
+      const witness = mediaWitness(pinned)
+      const current = async (): Promise<WorkspaceMediaHandleState> => {
+        let visible
+        try {
+          const target = await confinedMediaTarget(workspace, requestedPath)
+          if (target === 'outside-workspace') return target
+          visible = await lstat(target, { bigint: true })
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === 'ENOENT' || code === 'ENOTDIR') return 'deleted'
+          throw error
+        }
+        return compareMediaWitness(witness, mediaWitness(await handle.stat({ bigint: true })), mediaWitness(visible))
+      }
+      const state = await current()
+      if (state === 'outside-workspace') throw Object.assign(new Error('Path escapes the workspace root'), { code: 'WORKSPACE_PATH_ESCAPE' })
+      if (state !== 'same') throw Object.assign(new Error('The file changed while it was opened. Reload to play the current file.'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
+      return { handle, witness, byteLength: Number(pinned.size), current }
+    } catch (error) {
+      await handle.close().catch(() => {})
+      throw error
+    }
   }
 
   /** One visible file consumer, one complete bounded snapshot through the existing byte owner. */

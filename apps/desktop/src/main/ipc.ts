@@ -79,6 +79,7 @@ import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams,
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { registerMoteDialogueIpc } from './mote-dialogue-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
+import { WorkspaceMediaStreams } from './workspace-media-streams.js'
 import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
@@ -420,10 +421,11 @@ export async function registerIpc(args: {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
   const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
+  const mediaStreams = new WorkspaceMediaStreams(files, id => config.workspaces.find(item => item.id === id))
   const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
-  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
+  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); mediaStreams.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
   let channelMetadata: ReturnType<typeof registerConnectorIpc> | undefined
   const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); channelMetadata?.releaseReaders() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
@@ -1115,6 +1117,10 @@ export async function registerIpc(args: {
   handleWithEvent('files:releaseHtmlPreview', async (event, id: string) => {
     htmlPreviews.release(id)
   })
+  handleWithEvent('files:openMediaStream', async (event, workspaceId: string, path: string) =>
+    await mediaStreams.open(workspace(config, workspaceId), path))
+  handleWithEvent('files:releaseMediaStream', async (event, id: string) => { mediaStreams.release(id) })
+  handleWithEvent('files:mediaStreamStatus', async (event, id: string) => mediaStreams.status(id))
   handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
     return await diagramPreviews.render(request)
   })
@@ -2470,6 +2476,7 @@ export async function registerIpc(args: {
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
       { owner: 'html-previews', dispose: () => htmlPreviews.dispose() },
+      { owner: 'media-streams', dispose: () => mediaStreams.dispose() },
       { owner: 'file-builds', dispose: () => builds.dispose() },
       { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },
       { owner: 'html-preview-listeners', dispose: () => {

@@ -1767,6 +1767,11 @@ export type AgentMuxDesktopApi = {
     /** Read-only current HTML buffer and confined relative assets, isolated from the host renderer. */
     openHtmlPreview(workspaceId: string, path: string, content: string): Promise<{ id: string; url: string }>
     releaseHtmlPreview(id: string): Promise<void>
+    /** A visible File's playback lease; the URL is valid only while that view holds it. */
+    openMediaStream(workspaceId: string, path: string): Promise<import('./workspace-media-stream').WorkspaceMediaStreamOpenResult>
+    releaseMediaStream(id: string): Promise<void>
+    /** The lease owner's own record of why it stopped serving bytes. */
+    mediaStreamStatus(id: string): Promise<import('./workspace-media-stream').WorkspaceMediaStreamFact>
     /** CPU-heavy DOM engines own a disposable renderer for this request only. */
     renderDiagram(request: import('./file-diagram').FileDiagramRequest): Promise<import('./file-diagram').FileDiagramResult>
     cancelDiagram(id: string): Promise<void>
