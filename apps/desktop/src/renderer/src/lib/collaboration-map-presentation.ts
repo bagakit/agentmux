@@ -41,14 +41,16 @@ export function collaborationRecencyStep(agent: CollaborationAgent | undefined, 
   if (agent?.tier === 'active' || age != null && age < HOUR) return 'recent'
   return age != null && age < 24 * HOUR ? 'today' : 'older'
 }
-/** On-disc icon diameter per step, in world px at full identity. Closed members cap one step lower. */
-const ICON = { recent: 22, today: 17, older: 13 } as const
+/** Face diameter per step, in world px at full identity. Runnable faces sit on a disc;
+ * closed faces have none and fit the closed slot, so their whole scale is one step smaller. */
+const FACE = { runnable: { recent: 22, today: 18, older: 14 }, closed: { recent: 18, today: 15, older: 12 } } as const
 const DISC = 6
+/** The largest glyph a confirmed-closed slot draws; the geometry owner reads this one value. */
+export const COLLABORATION_CLOSED_FACE_MAX = FACE.closed.recent
 
 /** One visual glyph contract, shared by its body, endpoints, legend and settings preview. */
 export function collaborationAgentGlyph(agent: CollaborationAgent | undefined, step: CollaborationRecencyStep) {
-  const closed = agent?.tier === 'closed'
-  const icon = ICON[closed && step === 'recent' ? 'today' : step]
+  const closed = agent?.tier === 'closed', icon = FACE[closed ? 'closed' : 'runnable'][step]
   const radius = closed ? icon / 2 : icon / 2 + DISC / 2
   return { icon, closed, overviewRadius: radius, pointRadius: radius }
 }
@@ -56,7 +58,7 @@ export function collaborationAgentGlyph(agent: CollaborationAgent | undefined, s
 /** Retirement time is a lifecycle record, not observed activity; say which one is shown. */
 export function collaborationRecencyLabel(agent: CollaborationAgent | undefined) {
   if (agent?.lastActivityAt) return `Last activity ${new Date(agent.lastActivityAt).toLocaleString()}`
-  return agent?.retiredAt ? `Closed ${new Date(agent.retiredAt).toLocaleString()}` : 'Activity time unknown'
+  return agent?.retiredAt ? `Retired ${new Date(agent.retiredAt).toLocaleString()}` : 'Activity time unknown'
 }
 
 export const collaborationAgentName = (agent: CollaborationAgent | undefined) => agent?.name ?? agent?.context?.name ?? agent?.sessionId ?? ''

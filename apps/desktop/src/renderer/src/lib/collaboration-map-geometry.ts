@@ -1,5 +1,5 @@
 import type { CollaborationLayoutBox, CollaborationLayoutPoint, CollaborationPath } from './collaboration-layout-engine'
-import { collaborationVisibleHull, type CollaborationVisibleHull } from './collaboration-map-lod'
+import { COLLABORATION_ENVELOPE_PAD, collaborationVisibleHull, type CollaborationVisibleHull } from './collaboration-map-lod'
 import { DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapBoundary, type FocusMapPreferences } from '../../../shared/focus-map-preferences'
 
 const cross = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint, c: CollaborationLayoutPoint) =>
@@ -9,7 +9,7 @@ const cross = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint, c: Coll
 export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { kind: 'area' }>, members: readonly CollaborationLayoutBox[], boundary: FocusMapBoundary = 'bezier') {
   const rectangles = [area.heading, ...members.map(box => ({ ...box, x: box.x - area.x, y: box.y - area.y }))]
   const points = rectangles.flatMap(({ x, y, width, height }, index) => {
-    const pad = index === 0 ? 8 : 18
+    const pad = index === 0 ? 8 : COLLABORATION_ENVELOPE_PAD
     return [{ x: x - pad, y: y - pad }, { x: x + width + pad, y: y - pad },
       { x: x + width + pad, y: y + height + pad }, { x: x - pad, y: y + height + pad }]
   }).sort((a, b) => a.x - b.x || a.y - b.y)

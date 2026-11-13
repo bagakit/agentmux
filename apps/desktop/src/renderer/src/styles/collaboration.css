@@ -64,8 +64,9 @@
 .collaboration-area[data-folded=true] { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .collaboration-area[data-empty=true] { border-radius: var(--radius-sm); }
 .collaboration-agent { position: relative; height: 100%; pointer-events: none; --focus-reply-lines: 2; }
-.collaboration-agent--active:has(.agent-avatar) { --collaboration-body-line: color-mix(in srgb, var(--green) calc((1 - var(--collaboration-identity, 1)) * 50%), var(--line)); }
-.collaboration-agent__body { position: absolute; pointer-events: none; background: var(--surface-1); box-shadow: inset 0 0 0 calc(1px * var(--collaboration-mark-scale, 1)) var(--collaboration-body-line, var(--line)); }
+/* The active ring is a shape cue (2px, not hue alone) that hands over to the card border. */
+.collaboration-agent--active:has(.agent-avatar) { --collaboration-body-line: color-mix(in srgb, var(--green) calc((1 - var(--collaboration-identity, 1)) * 60%), var(--collaboration-disc-line)); --collaboration-ring-width: calc(1px + (1 - var(--collaboration-identity, 1)) * 1px); }
+.collaboration-agent__body { position: absolute; pointer-events: none; background: var(--collaboration-disc); box-shadow: inset 0 0 0 calc(var(--collaboration-ring-width, 1px) * var(--collaboration-mark-scale, 1)) var(--collaboration-body-line, var(--collaboration-disc-line)); }
 .collaboration-agent__identity-layer, .collaboration-agent__detail-layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: auto; }
 .collaboration-agent__identity-layer { display: flex; align-items: center; justify-content: center; }
 .collaboration-agent [inert] { pointer-events: none; }
@@ -142,8 +143,8 @@
 .collaboration-agent__mark[data-tier=closed] .collaboration-agent__avatar { left: 50%; }
 .collaboration-agent__avatar { position: relative; display: grid; place-items: center; flex: 0 0 auto; }
 /* The tier badge rides the Executor face at a fixed corner; recency is the face size. */
-.collaboration-agent__point { position: absolute; right: -2px; bottom: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--text-2); outline: 1.5px solid var(--surface-1); }
-.collaboration-agent--active .collaboration-agent__point { background: var(--green); }
+/* Only states that need noticing carry a badge: active (solid green) and unconfirmed (hollow). */
+.collaboration-agent__point { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); outline: 1.5px solid var(--surface-1); }
 .collaboration-agent__mark[data-tier=closed] { justify-content: center; padding: 0; border: 0; border-radius: 50%; background: transparent; }
 .collaboration-agent--unknown .collaboration-agent__point { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
 /* A confirmed-closed member has no disc: shape, not only tone, says it cannot work now.
@@ -151,8 +152,9 @@
 .collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { background: transparent; box-shadow: none; }
 .collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); transition: filter 150ms ease-out, opacity 150ms ease-out; }
 .collaboration-agent--closed:is(:hover, :focus-within, [data-reading=true]) .agent-avatar { filter: none; opacity: 1; }
-.collaboration-canvas { --collaboration-closed-ink: .62; }
-:root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; }
+/* A raised disc reads as a shape on any region fill; its absence is the closed signal. */
+.collaboration-canvas { --collaboration-closed-ink: .55; --collaboration-disc: color-mix(in srgb, var(--surface-3) 60%, var(--surface-2)); --collaboration-disc-line: color-mix(in srgb, var(--text) 14%, transparent); }
+:root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; --collaboration-disc: var(--surface-0); }
 .collaboration-canvas__progress { position: absolute; top: 12px; right: 12px; color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
 
 @media (max-width: 850px) {
@@ -230,7 +232,6 @@
 .collaboration-area__overview-label[data-empty=true] .collaboration-area__name > strong { font-weight: 400; color: var(--text-2); }
 .collaboration-agent__dot, .collaboration-agent__mark { position: relative; }
 .collaboration-agent__dot .agent-avatar { grid-area: 1 / 1; }
-.collaboration-agent--idle .collaboration-agent__point { background: var(--text-2); }
 .collaboration-canvas__motion { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer; }
 .collaboration-canvas__motion strong { min-width: 17px; font-size: 10px; font-weight: 500; }
 .collaboration-canvas__motion[aria-pressed=true] { color: var(--text); }
@@ -246,18 +247,15 @@
 .collaboration-canvas__legend > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 13px; }
 .collaboration-canvas__legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /* Legend keys reuse the node's own language: a disc with its tier badge, or a bare grey face. */
-.collaboration-node-key { position: relative; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
-.collaboration-node-key::after { content: ''; position: absolute; right: -1px; bottom: -1px; width: 5px; height: 5px; border-radius: 50%; background: var(--text-2); outline: 1.5px solid var(--surface-1); }
-.collaboration-node-key[data-tier=active]::after { background: var(--green); }
+.collaboration-node-key { position: relative; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--collaboration-disc); box-shadow: inset 0 0 0 1px var(--collaboration-disc-line); }
+.collaboration-node-key::after { content: ''; position: absolute; right: -1px; bottom: -1px; width: 5px; height: 5px; border-radius: 50%; background: var(--green); outline: 1.5px solid var(--surface-1); }
+.collaboration-node-key[data-tier=active] { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--green) 55%, var(--collaboration-disc-line)); }
+.collaboration-node-key[data-tier=idle]::after { content: none; }
 .collaboration-node-key[data-tier=unknown]::after { background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--text-2); }
 .collaboration-node-key[data-tier=closed] { background: transparent; box-shadow: none; }
 .collaboration-node-key[data-tier=closed]::after { content: none; }
 .collaboration-node-key[data-tier=closed] .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
-.collaboration-recency-key { display: inline-flex; align-items: center; gap: 3px; }
-.collaboration-recency-key > i { display: block; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--text-3); }
-.collaboration-recency-key > [data-recency=recent] { width: 14px; height: 14px; }
-.collaboration-recency-key > [data-recency=today] { width: 11px; height: 11px; }
-.collaboration-recency-key > [data-recency=older] { width: 8px; height: 8px; }
+.collaboration-recency-key { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
 /* The effective preference overrides reduction only within this Map's presentation. */
 .collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
