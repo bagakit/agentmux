@@ -1323,6 +1323,11 @@ export type BrowserProfileSummary = {
   notes?: string
 }
 
+export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[] }
+
+/** Fields a person can change; null clears the tint, an empty string clears the notes. */
+export type BrowserProfileEdit = { label?: string; tint?: string | null; notes?: string }
+
 export type BrowserProfileDeleteApproval = {
   kind: 'user-confirmed'
   operation: 'delete-profile'
@@ -2031,6 +2036,12 @@ export type AgentMuxDesktopApi = {
     reload(id: string): Promise<BrowserSnapshot>
     switchProfile(id: string, profileId: string): Promise<BrowserSnapshot>
     listProfiles(): Promise<BrowserProfileSummary[]>
+    /** The same list with the revision Main committed; edits must name this revision. */
+    readProfiles(): Promise<BrowserProfileList>
+    /** Main publishes the whole list after every committed change, in revision order. */
+    onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
+    updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary>
+    setDefaultProfile(profileId: string, expectedRevision: number): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>

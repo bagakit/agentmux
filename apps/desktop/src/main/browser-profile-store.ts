@@ -5,11 +5,12 @@ import { app } from 'electron'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import type {
+  BrowserProfileEdit,
   BrowserProfileImportedSource,
   BrowserProfileSummary
 } from '../shared/contracts.js'
 
-export type { BrowserProfileImportedSource, BrowserProfileSummary } from '../shared/contracts.js'
+export type { BrowserProfileEdit, BrowserProfileImportedSource, BrowserProfileSummary } from '../shared/contracts.js'
 
 const BROWSER_PROFILE_METADATA_VERSION = 1
 const BROWSER_PROFILE_FILE_NAME = 'browser-profiles.json'
@@ -128,7 +129,6 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
   }
 }
 
-export type BrowserProfileEdit = { label?: string; tint?: string | null; notes?: string }
 
 export class BrowserProfileRevisionConflict extends Error {
   readonly code = 'BROWSER_PROFILE_REVISION_CONFLICT'

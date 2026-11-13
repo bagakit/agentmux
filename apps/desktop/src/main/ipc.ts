@@ -178,7 +178,7 @@ import type {
   BrowserPresentationOccurrence,
   BrowserPresentationCaptureAck,
   BrowserPresentationActivation,
-  BrowserProfileDeleteApproval,
+  BrowserProfileDeleteApproval, BrowserProfileEdit,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -1914,12 +1914,28 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.switchProfile(id, profileId)
   })
+  // Every surface renders Main's one committed list; nothing in the Renderer keeps its own copy.
+  const publishProfiles = async <T>(change: Promise<T>): Promise<T> => {
+    const result = await change
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() })
+    return result
+  }
   handleWithEvent('browser:listProfiles', async (event) => {
     await browserProfiles.initialize()
     return browserProfiles.listProfiles()
   })
+  handleWithEvent('browser:readProfiles', async (event) => {
+    await browserProfiles.initialize()
+    return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() }
+  })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
-    return await browserProfiles.createProfile(label)
+    return await publishProfiles(browserProfiles.createProfile(label))
+  })
+  handleWithEvent('browser:updateProfile', async (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) => {
+    return await publishProfiles(browserProfiles.updateProfile(profileId, edit, expectedRevision))
+  })
+  handleWithEvent('browser:setDefaultProfile', async (event, profileId: string, expectedRevision: number) => {
+    await publishProfiles(browserProfiles.setDefaultProfile(profileId, expectedRevision))
   })
   handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
     if (browsers.usesProfile(profileId)) {
@@ -1931,7 +1947,7 @@ export async function registerIpc(args: {
     if (graph && savedBrowsersUsingProfile(graph.graph, profileId).length > 0) {
       throw new Error('Browser Profile is still used by a saved Browser that has not been opened since restart')
     }
-    await browserProfiles.deleteProfile(profileId, approval)
+    await publishProfiles(browserProfiles.deleteProfile(profileId, approval))
     const cleared = await browserRecoveryPreviews.clearProfile(profileId)
     if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
   })
@@ -1939,7 +1955,7 @@ export async function registerIpc(args: {
     return await browserProfiles.detectImportSources()
   })
   handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
-    return await browserProfiles.importProfile(sourceToken, label)
+    return await publishProfiles(browserProfiles.importProfile(sourceToken, label))
   })
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
     const scope = resolveInputHistoryScope(target)
