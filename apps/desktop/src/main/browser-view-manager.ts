@@ -1245,6 +1245,17 @@ export class BrowserViewManager {
     this.emitRetentionChange(entry)
   }
 
+  /** Exact native Browser layers for the workface pixel owner; no new page is created. */
+  captureWorkbenchViews(window: BrowserWindow): { browserId: string; navigationId: string; view: WebContentsView }[] {
+    return window.contentView.children.flatMap(child => {
+      const view = child as WebContentsView, browserId = this.browserIdsByView.get(view)
+      const entry = browserId ? this.entries.get(browserId) : undefined
+      return entry && entry.view === view && entry.visible && entry.bounds && this.windowForView(view) === window &&
+        this.owns(entry, view) && !view.webContents.isDestroyed() && view.getVisible()
+        ? [{ browserId: entry.id, navigationId: entry.navigationId, view }] : []
+    })
+  }
+
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */
   visibleNativeBounds(window?: BrowserWindow): BrowserBounds[] {
     return [...this.entries.values()].flatMap(entry =>
