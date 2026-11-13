@@ -39,8 +39,10 @@ it('uses the actual Activity process heading once and preserves the original res
   expect(result).not.toBeNull()
   expect(result.querySelector('.log-turn__who')).toBeNull()
   expect(result.textContent).not.toContain('Recorded activity')
-  // Opening the step reads it: its only tool part shows the payload without a third disclosure.
-  expect(result.querySelector('.conversation-tool-trace__row')?.getAttribute('aria-expanded')).toBe('true')
+  // The step row is the disclosure: its only tool part shows the payload directly, with no
+  // second row repeating the step title.
+  expect(result.querySelector('.conversation-tool-trace__row')).toBeNull()
+  expect(result.querySelector('.conversation-tool-trace__payload--direct')).not.toBeNull()
   expect(result.textContent).toContain('Exact original failed result.')
   expect(result.textContent).toContain('exact-call')
   await click(result.querySelector('[aria-label="Copy tool output"]')!)
@@ -70,7 +72,6 @@ it('keeps the original nodes, expanded body and selection when an unrelated sour
   const head = host.querySelector<HTMLButtonElement>('.wf-head')!
   await click(head); await click(step('result').querySelector('.wf-tool-row--observation')!)
   const result = step('result'), row = result.querySelector('.wf-tool-row--observation')!
-  await click(result.querySelector('.conversation-tool-trace__row')!)
   const pre = result.querySelector('pre')!, text = pre.firstChild!
   const selection = window.getSelection()!, range = document.createRange()
   range.setStart(text, 0); range.setEnd(text, 5); selection.addRange(range)

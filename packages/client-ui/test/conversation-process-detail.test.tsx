@@ -78,7 +78,8 @@ it('real shared reader requests deferred process bodies and expands both origina
   expect(calls.mock.calls.filter(([input]) => input.anchor?.record.source.recordId === 'captured-tool')).toHaveLength(1)
   await click(host, '[data-deferred-process-id="native-tool"] > button')
   await eventually(() => expect(host.querySelector('[data-native-record-id="native-tool"]')).not.toBeNull())
-  await click(host, '[data-native-record-id="native-tool"] .conversation-tool-trace__row')
+  // The opened step shows its only tool part directly; no nested trace row to click.
+  expect(host.querySelector('[data-native-record-id="native-tool"] .conversation-tool-trace__payload--direct')).not.toBeNull()
   expect(host.textContent).toContain('native body')
   expect(calls.mock.calls.filter(([input]) => input.anchor?.record.source.recordId === 'native-tool')).toHaveLength(1)
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()
