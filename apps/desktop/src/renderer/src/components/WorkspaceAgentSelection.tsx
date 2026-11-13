@@ -49,7 +49,7 @@ export function useWorkspaceAgentClose() {
   return {
     requestClose, results, clearResults: () => setResults([]),
     dialog: request !== null ? <ConfirmationDialog open title={`Close ${request.length} Agents?`}
-      description="Stop the selected current Runs. Conversation history and work surfaces are kept for viewing and recovery."
+      description="Stop the selected current Runs. Conversation history is kept for viewing and recovery."
       confirmLabel="Close Agents" intent="danger" onCancel={() => setRequest(null)} onConfirm={confirmClose}
       feedback={<ul className="workspace-agents-tool__close-targets">{request.map(target => <li key={JSON.stringify([target.control.hostId, target.control.agentSessionId])}
         data-session-stop-operation={target.operationId}>

@@ -115,6 +115,7 @@ import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import type { SessionStopOutcome } from '../lib/session-stop-intent'
 import { useSessionStopElapsed } from '../lib/use-session-stop-elapsed'
+import { useSessionStop } from './SessionStop'
 import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
 import {
   useBrowserSurfaceReleased,
@@ -1200,6 +1201,7 @@ function PaneGroup({
   const stopSession = useAppStore.getState().stopSession
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
+  const agentStop = useSessionStop(surfaceVisible)
   const [stopFeedback, setStopFeedback] = useState<Exclude<SessionStopOutcome, { status: 'stopped' }> | null>(null)
   const stopElapsed = useSessionStopElapsed(stopping)
   const placed = useAppStore(state => workbenchDisplayGroupMatches(state.layouts[workspaceId], group.id))
@@ -1310,7 +1312,11 @@ function PaneGroup({
               className="pane-action pane-action--stop"
               title="Stop Run"
               aria-label={`Stop Run ${activeRuntimeSession.label}`}
-              onClick={() => { setStopFeedback(null); setPendingStopSessionId(activeRuntimeSession.id) }}
+              onClick={event => {
+                if (activeRuntimeSession.kind === 'agent') agentStop.requestStop({ id: activeRuntimeSession.id,
+                  hostId: activeRuntimeSession.control.hostId, control: activeRuntimeSession.control }, activeRuntimeSession.label, event.currentTarget)
+                else { setStopFeedback(null); setPendingStopSessionId(activeRuntimeSession.id) }
+              }}
             >
               <ThemeActionStopIcon size={12} />
             </button>
@@ -1381,6 +1387,7 @@ function PaneGroup({
         </div>
       </div>
       </div>
+      {agentStop.dialog}
       <ConfirmationDialog
         open={pendingStopSessionId !== null}
         title={stopFeedback?.status === 'unconfirmed' ? 'Stop not confirmed' : stopFeedback?.status === 'run-changed' ? 'Run changed'
