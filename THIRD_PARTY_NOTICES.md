@@ -12,6 +12,8 @@ The macOS source in `packages/native-desktop/macos` is adapted from Orca commit 
 
 The accessibility-tree walk and cursor-interactive element promotion in `apps/desktop/src/main/browser-page-snapshot.ts` are adapted from the same project. The error model is not: where the original skips an unreachable cross-origin iframe silently, this implementation surfaces it as a named failure.
 
+The following MIT license applies to all three Orca-derived parts above.
+
 MIT License
 
 Copyright (c) 2026 Lovecast Inc.
