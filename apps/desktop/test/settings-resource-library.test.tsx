@@ -8,9 +8,11 @@ import { AgentSettingsPane } from '../src/renderer/src/components/settings/Agent
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { agentsSettingsModule } from '../src/renderer/src/components/settings/modules/agents'
 import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
+import { mobileSettingsModule } from '../src/renderer/src/components/settings/modules/mobile'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { selectSettingsHost } from './helpers/settings-host-ui'
 
 const dom = composerDOM()
 const section = process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION
@@ -39,9 +41,9 @@ beforeEach(async () => {
 })
 afterEach(() => unsubscribe?.())
 
-function LivePane({ kind, active = true }: { kind: 'agents' | 'hosts'; active?: boolean }) {
+function LivePane({ kind, active = true }: { kind: 'agents' | 'hosts' | 'mobile'; active?: boolean }) {
   const current = useAppStore(state => state.config)!
-  const Pane = kind === 'agents' ? agentsSettingsModule.Pane : hostsSettingsModule.Pane
+  const Pane = kind === 'agents' ? agentsSettingsModule.Pane : kind === 'hosts' ? hostsSettingsModule.Pane : mobileSettingsModule.Pane
   return <div className="settings-page"><Pane config={current} active={active} onClose={() => {}} /></div>
 }
 const editor = () => dom.container.querySelector<HTMLElement>('[data-resource-editor]')!
@@ -58,7 +60,10 @@ async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string)
     node.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
-async function select(id: string) { await dom.click(`[data-resource-row="${id}"]`) }
+async function select(id: string) {
+  if (section === 'hosts') await selectSettingsHost(dom.container, id)
+  else await dom.click(`[data-resource-row="${id}"]`)
+}
 async function toggle(selector: string, open: boolean) {
   const node = editor().querySelector<HTMLDetailsElement>(selector)!
   expect(node).not.toBeNull()
@@ -196,13 +201,14 @@ describe.skipIf(section !== 'agents')('Agents resource library', () => {
 describe.skipIf(section !== 'hosts')('Hosts resource library', () => {
   it('single: only mounts the exact SSH field subtree among 24 real connections', async () => {
     await dom.render(<LivePane kind="hosts" />)
+    await dom.click('[aria-label="List"]')
     expect(dom.container.querySelectorAll('[data-resource-row]')).toHaveLength(24)
     expect(dom.container.querySelectorAll('.host-connection-fields'), 'Local detail has no SSH field subtree').toHaveLength(0)
     await select(H)
     expect(dom.container.querySelectorAll('.host-connection-fields'), 'Only the selected Host owns an SSH field subtree').toHaveLength(1)
     expect(dom.container.querySelectorAll('[data-resource-editor]')).toHaveLength(1)
     expect(editor().dataset.resourceEditor).toBe(H)
-    const basic = [...editor().querySelectorAll('.host-edit-grid--basic label > span')].map(node => node.textContent)
+    const basic = [...editor().querySelectorAll('.host-edit-grid--basic label > span')].map(node => node.textContent?.trim())
     expect(basic).toEqual(['Name', 'Host or SSH alias'])
     expect(field('Bound Runtime ID').readOnly).toBe(true)
   })
@@ -250,18 +256,18 @@ describe.skipIf(section !== 'hosts')('Hosts resource library', () => {
   })
   it('keeps device access separate and inactive until opened; ordinary selection does not read authorization', async () => {
     const devices = vi.spyOn(api.deviceManagement, 'ls')
-    await dom.render(<LivePane kind="hosts" />)
+    const render = (opened: boolean) => dom.render(<><LivePane kind="hosts" active={!opened} /><LivePane kind="mobile" active={opened} /></>)
+    await render(false)
     await select(H); await select(J)
     expect(devices).not.toHaveBeenCalled()
-    const disclosure = dom.container.querySelector<HTMLDetailsElement>('.settings-device-access')!
-    await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+    await render(true)
     expect(devices).toHaveBeenCalledExactlyOnceWith({})
-    await dom.render(<LivePane kind="hosts" active={false} />)
+    await render(false)
     expect(devices).toHaveBeenCalledTimes(1)
   })
   it('focuses accurate new Host fields and preserves original workspace confirmation with a legal deletion target', async () => {
     await dom.render(<LivePane kind="hosts" />)
-    await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(node => node.textContent?.includes('Add SSH host'))!.click())
+    await dom.click('[data-add-host]')
     const created = editor().dataset.resourceEditor!
     expect(config.hosts.some(host => host.id === created)).toBe(false)
     expect(name().isConnected).toBe(true); expect(document.activeElement).toBe(name())
