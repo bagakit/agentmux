@@ -43,7 +43,12 @@ const links = (): MoteDialogueLink[] => !history ? [] : periods.map((value, inde
   file: { resource, revision } } as MoteDialogueLink)).map(source => bounded && source.kind === 'main' && source.period?.id === 'period-recent'
     ? { ...source, roleRevision: bounded.link.roleRevision, reference: bounded.link.reference, period: bounded.link.period } : source).reverse()
 const defaults = () => ({ executorId, conversationRollover: { kind: 'idle' as const, idleMs: 45 * 60000 }, ...(bound ? { conversation: reference, conversationRevision: 'original-main-role' } : {}) })
+// A controlled slow read: while it is held the workface shows its reading state, and releasing it continues the same read.
+let reading: Promise<void> | null = null, releaseReading: (() => void) | null = null
+// The reading scene holds the very first read: a cached page would skip the reading state entirely.
+if (new URLSearchParams(location.search).get('readingHeld') === '1') reading = new Promise<void>(resolve => { releaseReading = resolve })
 api.moteDialogue.read = async input => {
+  if (reading) await reading
   if (unknown) throw new Error('主对话的原来源暂未确认，已有工作和输入保留。')
   const page: MoteDialoguePage = { main: { target, identity, status: 'ready', resource, documentRevision: revision,
     roleRevision: bound ? 'original-main-role' : null, current: bound ? reference : null, issue: null }, links: links(), incarnation: 'private-main-periods',
@@ -65,6 +70,7 @@ seed()
 Object.assign(window, { moteStartCapture: { ready: true, facts: original.facts, theme: original.theme,
   history(value: boolean) { history = value; unknown = false; bound = false; seed() },
   unknown() { unknown = true; seed() }, bound() { bound = true; unknown = false; seed() },
+  releaseReading() { const release = releaseReading; reading = null; releaseReading = null; release?.() },
   longName() { original.longNames() },
   rolloverMember() {
     bound = true; unknown = false; history = false; seed()

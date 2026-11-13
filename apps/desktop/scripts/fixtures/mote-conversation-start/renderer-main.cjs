@@ -12,7 +12,8 @@ app.whenReady().then(async () => {
     win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') result.errors.push(details.message) })
     const { read, until, settle, click } = nativeRendererInput(win, result.interactions, '')
     const panel = 'document.querySelector("[data-pmo-teams-topic-floating]:popover-open")'
-    await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', initialUnbound: '1' } })
+    const readingOnly = process.argv.includes('--reading-only')
+    await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', initialUnbound: '1', ...(readingOnly ? { readingHeld: '1' } : {}) } })
     await until('window.moteStartCapture?.ready && document.querySelector(".mote-start .tiptap")', 'Actual full App welcome and Composer')
     await read('window.__connectionsTrustedEvents=window.moteStartCapture.facts().trustedEvents')
     app.focus({ steal: true }); win.show(); win.focus(); win.webContents.focus(); await settle()
@@ -24,6 +25,18 @@ app.whenReady().then(async () => {
       const dom = await read(`(()=>{const n=${surface};return{body:n?.innerText,rect:n?.getBoundingClientRect().toJSON(),viewport:{width:innerWidth,height:innerHeight},scroll:document.querySelector('.mote-start')?.scrollTop,motion:[...document.querySelectorAll('.mote-start .mote-identity-motion')].map(n=>({visible:n.dataset.moteVisible,motion:n.dataset.moteMotion})),draft:document.querySelector('.mote-start .tiptap')?.innerText}})()`)
       assert.ok(dom.rect?.width > 0); const file = name + '.png'
       await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.images.push(file); result.operations.push({ name, dom, facts })
+    }
+    if (process.argv.includes('--reading-only')) {
+      // The person opens a Mote whose Main read is still in flight: identity, Composer and a loading history appear at once.
+      await until(`${panel}.querySelector('.mote-start[data-mode="reading"] .mote-start__portrait') && ${panel}.querySelector('.mote-start-history__skeleton')`, 'Reading shell with portrait and loading history')
+      await capture('18-reading-shell')
+      await click(`js:${panel}.querySelector('.mote-start .tiptap')`); await win.webContents.insertText('先帮我把今天的待办理一下')
+      await until(`${panel}.querySelector('.mote-start [aria-label="Send"]:not([disabled])')`, 'Typed draft enables Send while reading')
+      await click(`js:${panel}.querySelector('.mote-start [aria-label="Send"]')`)
+      await until(`${panel}.querySelector('.mote-first-message[data-stage="held"]')`, 'Sent while reading is held, not created or sent')
+      await capture('19-reading-held-message')
+      await read('window.moteStartCapture.releaseReading()')
+      result.passed = true; return
     }
     if (process.argv.includes('--rollover-later-only')) {
       await read('void(window.moteRolloverVisual=window.moteStartCapture.rolloverMember())')
