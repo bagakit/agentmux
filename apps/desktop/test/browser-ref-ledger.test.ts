@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { healRef, ledgerFromSnapshot } from '../src/main/browser-ref-ledger.js'
 import { BrowserRefLedgerStore, MAX_TRACKED_BROWSERS } from '../src/main/browser-ref-ledger-store.js'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
+import { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 import { nativeInputDouble } from './browser-native-input-double.js'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserPageSnapshot } from '../src/main/../shared/contracts.js'
@@ -288,6 +289,28 @@ describe('派发层：上一轮的 ref 走账本，不许撞进这一轮的新�
     expect(resolved, 'Save 的新 backendNodeId 是 92——解到别的就是按编号撞上的').toBe(92)
     expect(notes, '自愈了却没说——Agent 会把一次按外观的匹配当成干净的成功').not.toHaveLength(0)
     expect(notes[0], '说明里没提这次匹配可能认错').toMatch(/looks the same/)
+  })
+
+  it('认不回来时抛的是「没派发的定位变化」，复核过的恢复和程序自己的 catch 都能据此判安全', async () => {
+    // 认不回来就什么都没点。这个事实要挂在 error 上（kind + effects），不能只是一句话：
+    // 复核过的恢复只认 locator-changed + not-dispatched，裸 Error 会被当成「不知道做没做」。
+    const store = new BrowserRefLedgerStore(join(await mkdtemp(join(tmpdir(), 'agentmux-ref-miss-')), 'l.json'))
+    const first = axTree({ id: 11, role: 'button', name: 'Next' }, { id: 12, role: 'button', name: 'Next' }, { id: 13, role: 'button', name: 'Next' })
+    const second = axTree({ id: 71, role: 'button', name: 'Next' }, { id: 72, role: 'button', name: 'Next' })
+    const contextFor = (nodes: unknown[]): Parameters<typeof createBrowserPageDispatch>[0] => ({
+      session: { ...fakeSession(() => nodes), sendCommand: async (method: string) => method === 'Accessibility.getFullAXTree' ? { nodes }
+        : method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
+        : method === 'Runtime.evaluate' ? { result: { value: '[]' } } : {} } as unknown as BrowserCdpSession,
+      pageInfo: () => ({ url: 'https://example.invalid/', title: 'Example', navigationId: 'nav-1' }),
+      gotoUrl: async () => {}, captureScreenshot: async () => ({}),
+      readLedger: async () => await store.read('b1'), writeLedger: async (ledger) => { await store.write('b1', ledger) }, note: () => {}
+    })
+    const snapshot = (await createBrowserPageDispatch(contextFor(first))('snapshot', [])) as { nodes: { ref: string }[] }
+    const third = snapshot.nodes[2]!.ref
+    const failure = await createBrowserPageDispatch(contextFor(second))('click', [third]).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(BrowserLocalRecoveryFailure)
+    expect((failure as BrowserLocalRecoveryFailure).fact).toEqual({ kind: 'locator-changed', effects: 'not-dispatched' })
+    expect((failure as Error).message).toMatch(/2 others look the same, so nothing was done/)
   })
 
   it('本轮自己发出的 ref 不走账本，也不该留下自愈说明', async () => {
