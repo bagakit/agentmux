@@ -18,6 +18,11 @@ const functions = names.map(name => {
   // Dynamic imports are dependency ports, supplied by the controlled boundaries below.
   return declarations[0]!.getText(ast).replace(/^export /u, '').replace(/^  const \{ (?:createPrivateRuntimeScope|macosHostService, macosHostServiceRegistration|defaultAgentMuxControlSocketPath) \} = await import\([^\n]+\)\n/gmu, '')
 }).join('\n')
+// The window is the module's own constant, so the assertions below pin the shipped value.
+const guard = ast.statements.filter(ts.isVariableStatement)
+  .filter(node => node.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === 'GUI_STARTUP_HANG_GUARD_MS'))
+if (guard.length !== 1) throw new Error('Expected exactly one original GUI_STARTUP_HANG_GUARD_MS')
+const verifier = `${guard[0]!.getText(ast)}\n${functions}`
 
 type Scenario = {
   readyAt?: number
@@ -101,7 +106,7 @@ function launch(scenario: Scenario = {}) {
     },
     rm: async (value: string) => { removed.push(value) }
   }
-  const invoke = new Function(...Object.keys(boundaries), `${functions}\nreturn verifyLaunchServices`)(...Object.values(boundaries))
+  const invoke = new Function(...Object.keys(boundaries), `${verifier}\nreturn verifyLaunchServices`)(...Object.values(boundaries))
   return { result: invoke(app, root) as Promise<void>, facts: () => ({ now, ownerObserved, output, removed, signals, launchTimeouts, stderrReads, runtime }) }
 }
 

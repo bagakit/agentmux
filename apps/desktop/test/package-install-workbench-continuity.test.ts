@@ -13,7 +13,7 @@ const io = vi.hoisted(() => ({
   app: '', candidate: '', pid: 201, cutovers: 0, reads: 0,
   before: null as DesktopClientObservation | null,
   after: null as DesktopClientObservation | null,
-  failAfterRead: false, failEveryRead: false, outgoingMisses: 0, outgoingReads: 0,
+  failAfterRead: false, failEveryRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0,
   tick: 0, nativePlan: null as any, nativeConfirmation: null as any
 }))
 const roots: string[] = []
@@ -56,6 +56,7 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
       return parseDesktopClientObservationForInstall(structuredClone(io.before))
     }
     io.reads++
+    if (io.missesAfterLaunch > 0) { io.missesAfterLaunch--; throw new Error('CONTROL_TIMEOUT') }
     if (io.failEveryRead || io.failAfterRead && io.reads > 1) throw new Error('PRIVATE_RPC_UNAVAILABLE')
     return parseDesktopClientObservationForInstall(structuredClone(io.after))
   }
@@ -70,7 +71,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-install-continuity-')); roots.push(root)
   const home = join(root, 'home'), app = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, tick: 0, nativePlan: null, nativeConfirmation: null })
+  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0, tick: 0, nativePlan: null, nativeConfirmation: null })
   const identity = { schema: 'agentmux.package-identity.v1' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40),
     appVersion: '0.1.0', platform: process.platform, arch: process.arch }
   for (const [directory, sourceCommit] of [[app, 'a'.repeat(40)], [candidate, 'c'.repeat(40)]]) {
@@ -122,8 +123,9 @@ async function fixture() {
   }
   io.before = parseDesktopClientObservation(observation)
   io.after = structuredClone(io.before); io.after.main.pid = 202; io.after.main.package!.sourceCommit = 'c'.repeat(40)
-  // Advance only this test's retry clock; timers and the 30-second product bound remain original.
-  vi.spyOn(Date, 'now').mockImplementation(() => io.tick += 10_000)
+  // Advance only this test's retry clock by one fifth of the product's 300-second GUI hang guard;
+  // timers and the shipped bound remain original.
+  vi.spyOn(Date, 'now').mockImplementation(() => io.tick += 60_000)
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('Live signals are forbidden') })
   return { home, app, candidate }
 }
@@ -378,6 +380,13 @@ it('rejection retains the last successful observation when a later RPC read is u
   // The persisted receipt is a snapshot, not a mutable fixture/owner reference.
   after().focus.executionSessionId = 'later-focus'
   expect(error.transaction.ui.continuity.after).toEqual(expected)
+})
+it('a relaunched GUI that answers after the former 30-second window still commits', async () => {
+  // One missed read already spans a 60-second clock step, beyond the former 30-second window.
+  const f = await fixture(); io.missesAfterLaunch = 1
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed')
+  expect(io.reads).toBe(2)
 })
 it('unavailable activation never invents an after observation', async () => {
   const f = await fixture(); io.failEveryRead = true
