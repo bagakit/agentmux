@@ -16,7 +16,7 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
-  createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
+  createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
@@ -450,6 +450,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     beginGesture(event)
     if (capture) { setGesture(cropRef.current ? 'selection' : currentGestureRef.current || eraseRef.current ? 'mark' : null); track(event) }
   }
+  // A default bubble stays inside the selection or image, a fixed number of screen points from its source at any zoom.
+  const bubblePlacement = () => ({ bounds: documentState.crop ?? originalBounds, gap: CALLOUT_GAP / viewRef.current.scale })
   function beginGesture(event: ReactPointerEvent<HTMLCanvasElement>) {
     if (!active || locked || (event.button !== 0 && event.button !== 1) || (capture && event.button !== 0)) return
     event.currentTarget.focus({ preventScroll: true }); setDiscarding(false)
@@ -506,7 +508,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         : tool === 'cover' ? { id, kind: 'cover', color: '#111827', from: at, to: at }
         : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius)
         : tool === 'spotlight' ? createSpotlightShape(id, '#ffffff', at, at, strengths.spotlightDim)
-        : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom, undefined, documentState.crop ?? originalBounds)
+        : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom, undefined, bubblePlacement())
         : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: nextNoteNumber(documentState.shapes), note: '', from: at, to: at }
         : { id, kind: tool, color, width: stroke, from: at, to: at }
     }
@@ -535,7 +537,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         if (!last || last.x !== at.x || last.y !== at.y) shape.points.push(at)
       } else if (shape.kind === 'callout') {
         // While its source is drawn, the bubble keeps the default place beside it; after release it moves on its own.
-        currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, documentState.crop ?? originalBounds)
+        currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, bubblePlacement())
       } else shape.to = constrained && (shape.kind === 'rect' || shape.kind === 'ellipse' || shape.kind === 'arrow')
         ? constrainedEndpoint(shape.kind, shape.from, at) : at
     }

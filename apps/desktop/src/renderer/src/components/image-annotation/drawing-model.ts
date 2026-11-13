@@ -50,27 +50,38 @@ export function createBlurShape(id: string, color: string, from: ScreenshotPoint
 export function createSpotlightShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, dim = DEFAULT_SPOTLIGHT_DIM): SpotlightShape {
   return { id, color, kind: 'spotlight', from, to, dim: clamp(dim, SPOTLIGHT_DIM_RANGE) }
 }
-const CALLOUT_GAP = 16
-/** Without `at`, the bubble goes beside the source within `bounds` (the image, or a capture's selection): right, else
- * left, else below, else above, and if none fits it is clamped inside so the export never crops it. */
+/** Screen points between a source and its default bubble. The editor passes `CALLOUT_GAP / view scale` as the gap, so it
+ * reads the same at every zoom and pixel ratio; without a gap the model takes one image pixel per point. */
+export const CALLOUT_GAP = 20
+/** Where a default bubble may go: inside `bounds` (the image, or a capture's selection), `gap` image pixels from its source. */
+export interface CalloutPlacement { bounds?: NormalizedRect; gap?: number }
+/** Without `at`, the bubble goes beside the source within the placement bounds: right, else left, else below, else above,
+ * and if none fits it is clamped inside so the export never crops it. */
 export function createCalloutShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, zoom = DEFAULT_CALLOUT_ZOOM,
-  at?: ScreenshotPoint, bounds?: NormalizedRect): CalloutShape {
+  at?: ScreenshotPoint, placement: CalloutPlacement = {}): CalloutShape {
   const source = normalizeRect(from, to), scale = clamp(zoom, CALLOUT_ZOOM_RANGE)
-  return { id, color, kind: 'callout', from, to, zoom: scale, at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, bounds) }
+  return { id, color, kind: 'callout', from, to, zoom: scale, at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, placement) }
 }
 
-function calloutPlacement(source: NormalizedRect, width: number, height: number, bounds?: NormalizedRect): ScreenshotPoint {
-  const right = { x: source.x + source.width + CALLOUT_GAP, y: source.y }
+function calloutPlacement(source: NormalizedRect, width: number, height: number, { bounds, gap = CALLOUT_GAP }: CalloutPlacement): ScreenshotPoint {
+  const right = { x: source.x + source.width + gap, y: source.y }
   if (!bounds) return right
   const fits = (at: ScreenshotPoint) => at.x >= bounds.x && at.y >= bounds.y && at.x + width <= bounds.x + bounds.width && at.y + height <= bounds.y + bounds.height
   const centredX = source.x + source.width / 2 - width / 2
-  const candidates = [right, { x: source.x - CALLOUT_GAP - width, y: source.y },
-    { x: centredX, y: source.y + source.height + CALLOUT_GAP }, { x: centredX, y: source.y - CALLOUT_GAP - height }]
+  const candidates = [right, { x: source.x - gap - width, y: source.y },
+    { x: centredX, y: source.y + source.height + gap }, { x: centredX, y: source.y - gap - height }]
+  const fitting = candidates.find(fits)
+  if (fitting) return fitting
+  const inside = (value: number, start: number, length: number, size: number) => Math.max(start, Math.min(start + length - size, value))
+  const clamped = (at: ScreenshotPoint) => ({ x: inside(at.x, bounds.x, bounds.width, width), y: inside(at.y, bounds.y, bounds.height, height) })
+  const span = (start: number, size: number, from: number, length: number) => Math.min(start + size, from + length) - Math.max(start, from)
+  const overlap = (at: ScreenshotPoint) => Math.max(0, span(at.x, width, source.x, source.width)) * Math.max(0, span(at.y, height, source.y, source.height))
   // Without a full fit, the first place whose width fits is kept and only moved vertically, so it stays beside or below the source.
   const sideways = (at: ScreenshotPoint) => at.x >= bounds.x && at.x + width <= bounds.x + bounds.width
-  const chosen = candidates.find(fits) ?? candidates.find(sideways) ?? right
-  const inside = (value: number, start: number, length: number, size: number) => Math.max(start, Math.min(start + length - size, value))
-  return { x: inside(chosen.x, bounds.x, bounds.width, width), y: inside(chosen.y, bounds.y, bounds.height, height) }
+  const kept = clamped(candidates.find(sideways) ?? right)
+  if (span(kept.x, width, source.x, source.width) < 0 || span(kept.y, height, source.y, source.height) < 0) return kept
+  // When that place would cover or touch the source, the clamped place covering least of it wins, ties in the same order.
+  return candidates.map(clamped).reduce((best, next) => overlap(next) < overlap(best) ? next : best)
 }
 export function calloutBubble(shape: CalloutShape): NormalizedRect {
   const source = normalizeRect(shape.from, shape.to)

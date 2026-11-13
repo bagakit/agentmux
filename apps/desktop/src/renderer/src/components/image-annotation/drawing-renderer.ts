@@ -274,6 +274,8 @@ function drawSpotlight(context: CanvasRenderingContext2D, shape: SpotlightShape)
 }
 
 
+// Device pixels. A leader shorter than six line widths (6 points on a 2x display) reads as a stub, so it is left out.
+const CALLOUT_LINE_WIDTH = 2, CALLOUT_LEADER_MIN = 6 * CALLOUT_LINE_WIDTH
 /** The bubble enlarges what is already painted, so it shows processed mask
  * pixels and never the original under a mask. */
 function drawCallout(context: CanvasRenderingContext2D, shape: CalloutShape): void {
@@ -292,8 +294,10 @@ function drawCallout(context: CanvasRenderingContext2D, shape: CalloutShape): vo
     if (!copy) throw new Error('Screenshot callout requires a 2D canvas')
     copy.drawImage(canvas, left, top, sample.width, sample.height, 0, 0, sample.width, sample.height)
   }
-  context.lineWidth = 2 / transform.a
-  context.beginPath(); context.moveTo(leader.from.x, leader.from.y); context.lineTo(leader.to.x, leader.to.y); context.stroke()
+  context.lineWidth = CALLOUT_LINE_WIDTH / transform.a
+  if (Math.hypot(leader.to.x - leader.from.x, leader.to.y - leader.from.y) * transform.a >= CALLOUT_LEADER_MIN) {
+    context.beginPath(); context.moveTo(leader.from.x, leader.from.y); context.lineTo(leader.to.x, leader.to.y); context.stroke()
+  }
   context.strokeRect(source.x, source.y, source.width, source.height)
   const radius = Math.min(10 / transform.a, bubble.width / 2, bubble.height / 2)
   context.save()
