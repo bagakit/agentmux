@@ -72,7 +72,20 @@ describe('README HTML subset rendering', () => {
     expect(openWorkspaceFile).toHaveBeenCalledWith('docs/guide.md', undefined, expect.anything())
     expect(container.querySelector('a')).toBeNull()
     expect(container.textContent).toContain('script')
+    expect(openHttpLink).toHaveBeenCalledTimes(1); expect(openWorkspaceFile).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('escape')
+  })
+
+  it('opens another file for a heading link in a document, never outside the root and never in conversations', async () => {
+    const openWorkspaceFile = vi.fn()
+    const content = '[Setup](guide.md#setup) [Escape](../../outside.md#x) [Weird](a.md#b#c) <a href="design/spec.md#%E7%A9%BA%E9%97%B4">Spec</a>'
+    await render(<AgentMarkdown documentMode workspaceRoot={WORKSPACE} sourcePath="docs/README.md" openWorkspaceFile={openWorkspaceFile} content={content} />)
+    const buttons = all<HTMLButtonElement>('button.md-link--authored')
+    expect(buttons.map(button => button.textContent)).toEqual(['Setup', 'Spec'])
+    await click(buttons[0]!); await click(buttons[1]!)
+    expect(openWorkspaceFile.mock.calls.map(call => call[0])).toEqual(['docs/guide.md', 'docs/design/spec.md'])
+    await render(<AgentMarkdown workspaceRoot={WORKSPACE} sourcePath="docs/README.md" openWorkspaceFile={openWorkspaceFile} content={'[Setup](guide.md#setup) text'} />)
+    expect(container.querySelector('button.md-link--file')).toBeNull()
   })
 
   it('shows the picture variant that matches the App appearance and switches in place', async () => {

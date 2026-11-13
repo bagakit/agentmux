@@ -1,8 +1,9 @@
 // Mutation proof for the README HTML subset: each mutant breaks one real guard in the
 // implementation and must turn a behavior assertion red; the restored source must pass.
-// Runs in an isolated copy of client-ui/src so the shared tree is never modified.
+// Runs the committed owning config in an isolated copy of client-ui/src so the shared tree is never modified.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
@@ -10,6 +11,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const parser = 'packages/client-ui/src/lib/markdown-html.ts'
 const owner = 'packages/client-ui/src/lib/agent-markdown.ts'
 const renderer = 'packages/client-ui/src/components/AgentMarkdown.tsx'
+const config = 'packages/client-ui/test/markdown-html.config.mts'
 const tests = ['packages/client-ui/test/markdown-html-subset.test.tsx', 'packages/client-ui/test/markdown-html-render.test.tsx', 'packages/client-ui/test/markdown-semantics.test.tsx']
 const mutations = [
   { mode: 'unknown-element-becomes-element', path: parser, from: "if (!BLOCK.has(name) && !INLINE.has(name)) { emit({ kind: 'literal', source: raw }, start, end); return }", to: "if (false) { emit({ kind: 'literal', source: raw }, start, end); return }" },
@@ -26,6 +28,8 @@ const mutations = [
   { mode: 'picture-follows-nothing', path: renderer, from: 'return <>{render(node.variants?.[mode] ?? node.href)}</>', to: 'return <>{render(node.href)}</>' },
   { mode: 'author-width-dropped', path: renderer, from: "return frame ? <span key={key} className=\"md-image-frame\" data-sized=\"\" style={frame}>{content}</span> : <Fragment key={key}>{content}</Fragment>", to: 'return <Fragment key={key}>{content}</Fragment>' },
   { mode: 'alert-label-missing', path: renderer, from: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" />{label}</p>', to: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" /></p>' },
+  { mode: 'fragment-link-escapes-document', path: renderer, from: 'const fragment = context.documentMode && context.openWorkspaceFile ?', to: 'const fragment = context.openWorkspaceFile ?' },
+  { mode: 'fragment-link-skips-root-check', path: renderer, from: 'const anchored = fragment ? classifyMarkdownLinkHref(fragment[1]!, context.workspaceRoot, context.homeDir, context.sourcePath) : null', to: "const anchored = fragment ? { index: 0, length: fragment[1]!.length, path: fragment[1]! } : null" },
   { mode: 'closed-details-searchable', path: renderer, from: 'if (node.kind === \'details\') return node.open ? project(node.children) : []', to: "if (node.kind === 'details') return project(node.children)" },
 ]
 
@@ -33,18 +37,18 @@ const proof = await mkdtemp(join(root, '.tmp/markdown-html-mutation-'))
 const snapshot = join(proof, 'source')
 try {
   await cp(join(root, 'packages/client-ui/src'), join(snapshot, 'packages/client-ui/src'), { recursive: true })
-  for (const path of [...tests, 'package.json', 'packages/client-ui/package.json', 'README.md', 'README.zh-CN.md', 'test/fixture-values.mjs']) {
+  for (const path of [...tests, config, 'package.json', 'packages/client-ui/package.json', 'README.md', 'README.zh-CN.md', 'test/fixture-values.mjs']) {
     await mkdir(join(snapshot, path, '..'), { recursive: true })
     await cp(join(root, path), join(snapshot, path))
   }
   await symlink(join(root, 'node_modules'), join(snapshot, 'node_modules'), 'dir')
   await symlink(join(root, 'packages/client-ui/node_modules'), join(snapshot, 'packages/client-ui/node_modules'), 'dir')
-  await writeFile(join(snapshot, 'mutation.config.mts'), `import { defineConfig } from 'vitest/config'
-export default defineConfig({ root: ${JSON.stringify(snapshot)}, esbuild: { jsx: 'automatic' }, test: { environment: 'happy-dom', include: ${JSON.stringify(tests)} } })\n`)
+  // The committed owning config must name exactly these tests, so the proof and the gate run the same files.
+  assert.ok(tests.every(test => readFileSync(join(root, config), 'utf8').includes(test)), 'Owning config names every proof test')
   async function run(mode) {
     const output = join(proof, `${mode}.json`)
     const exitCode = await new Promise((done, reject) => {
-      const child = spawn(join(root, 'node_modules/.bin/vitest'), ['run', '--config', join(snapshot, 'mutation.config.mts'), '--reporter=json', `--outputFile=${output}`], { cwd: snapshot, stdio: 'ignore' })
+      const child = spawn(join(root, 'node_modules/.bin/vitest'), ['run', '--config', join(snapshot, config), '--reporter=json', `--outputFile=${output}`], { cwd: snapshot, stdio: 'ignore' })
       child.on('error', reject); child.on('exit', done)
     })
     const result = JSON.parse(await readFile(output, 'utf8'))
@@ -61,6 +65,7 @@ export default defineConfig({ root: ${JSON.stringify(snapshot)}, esbuild: { jsx:
   for (const mutation of mutations) {
     const file = join(snapshot, mutation.path), original = await readFile(file, 'utf8')
     assert.equal(original.split(mutation.from).length - 1, 1, `Mutation anchor ${mutation.mode} must exist exactly once`)
+    assert.notEqual(mutation.from, mutation.to)
     try {
       await writeFile(file, original.replace(mutation.from, mutation.to))
       const mutant = await run(mutation.mode)
