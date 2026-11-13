@@ -6,10 +6,14 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 const require=createRequire(import.meta.url),__dirname=fileURLToPath(new URL('.',import.meta.url))
 const {app,BrowserWindow,ipcMain}=require('electron'),fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict'),{pathToFileURL}=require('node:url')
 const root=process.argv[2],mode=process.argv[3],buildRoot=__dirname
+const entryUptimeMs=process.uptime()*1000
+const coreEntry=import.meta.resolve('@agentmux/core')
+const phase=value=>console.error('book_file_restart_phase='+JSON.stringify({schema:'agentmux.book-file-restart-phase.v1',phase:value,uptimeMs:process.uptime()*1000}))
+phase('entry')
 app.on('window-all-closed',()=>{})
 for(const[key,value]of Object.entries({home:process.env.HOME,appData:path.join(root,'app-data'),userData:path.join(root,'profile'),sessionData:path.join(root,'session-data')}))app.setPath(key,value)
 app.whenReady().then(async()=>{
-  const report={mode,pid:process.pid,checks:0,diagnostics:[]};let window,sources,books,files,unsubscribe
+  const report={mode,pid:process.pid,checks:0,diagnostics:[],startup:{entryUptimeMs,coreEntry}};let window,sources,books,files,unsubscribe
   const check=(value,label)=>{report.checks++;assert.ok(value,label)}
   const stage=value=>console.error('book_file_restart_stage='+value)
   try{
@@ -44,6 +48,7 @@ app.whenReady().then(async()=>{
     stage('initialize Store')
     await window.webContents.executeJavaScript('bootBookRestart('+JSON.stringify(mode)+')')
     stage('Store initialized')
+    report.startup.businessUptimeMs=process.uptime()*1000;phase('business')
     const execute=source=>window.webContents.executeJavaScript(source),pause=ms=>new Promise(r=>setTimeout(r,ms))
     const wait=async predicate=>{const until=Date.now()+15000;while(Date.now()<until){const value=await execute('inspectBookRestart()');if(predicate(value))return value;await pause(30)}throw new Error('The original File did not become readable: '+JSON.stringify(await execute('inspectBookRestart()')))}
     let visible=await wait(value=>value.bookState==='ready')

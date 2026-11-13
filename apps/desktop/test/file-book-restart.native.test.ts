@@ -5,4 +5,4 @@ it('restores the original File and reading place through the real Store and both
   expect(result.writer.failure,result.writer.failure).toBeUndefined()
   expect(result.reader.failure,result.reader.failure).toBeUndefined()
   expect(result.reader.restored).toBe(true)
-},120000)
+},300000)

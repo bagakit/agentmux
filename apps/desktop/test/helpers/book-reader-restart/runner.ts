@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname } from 'node:path'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { build, type Plugin } from 'vite'
 import ts from 'typescript'
 import { zip } from '../../../../../packages/editor-extensions/test/books/fixtures'
@@ -59,19 +60,47 @@ export async function runBookRestart(){
     // The driver is copied on every run; its identity belongs to the receipt,
     // not to the reusable production build graph.
     record(driverPath,await readFile(driverPath,'utf8'))
+    // Core stays external, through the real public ESM entry. Bind the exact
+    // compiled owner bytes too; a renderer-only source map did not cover them.
+    const coreEntry=fileURLToPath(import.meta.resolve('@agentmux/core'))
+    const externalCorePaths=[coreEntry,...['client.js','execution-host.js','spatial-state.js'].map(path=>join(dirname(coreEntry),path))]
+    const externalCore:Record<string,{path:string;sha256:string}>={}
+    for(const path of externalCorePaths){const source=await readFile(path,'utf8');record(path,source);externalCore[relative(dirname(coreEntry),path)]={path,sha256:createHash('sha256').update(source).digest('hex')}}
     await copyFile(driverPath,join(buildRoot,'main.mjs'))
     const reports:any[]=[]
     for(const mode of ['writer','reader']){
       const diagnostics:string[]=[]
-      const outcome=await runProbeProcess(require('electron'),[join(buildRoot,'main.mjs'),root,mode,process.env.BOOK_FILE_CAPTURE_DIR??''],{temporaryRoot:root,cwd:repository,env,timeoutMs:45000,onLine:(line:string)=>diagnostics.push(line)})
+      const phases:unknown[]=[],budgets={startupMs:90000,businessMs:45000,wholeProcessMs:135000}
+      let child:import('node:child_process').ChildProcess|undefined,phaseName='startup',budgetExpired:string|null=null,spawnedAt=0
+      let phaseTimer:ReturnType<typeof setTimeout>|undefined,hardStop:ReturnType<typeof setTimeout>|undefined
+      const arm=(ms:number)=>{clearTimeout(phaseTimer);phaseTimer=setTimeout(()=>{budgetExpired=phaseName;child?.kill('SIGTERM');hardStop=setTimeout(()=>{if(child?.exitCode===null&&child.signalCode===null)child.kill('SIGKILL')},1000)},ms)}
+      let outcome
+      try{
+        outcome=await runProbeProcess(require('electron'),[join(buildRoot,'main.mjs'),root,mode,process.env.BOOK_FILE_CAPTURE_DIR??''],{temporaryRoot:root,cwd:repository,env,timeoutMs:budgets.wholeProcessMs,
+          onSpawn:(_identity:unknown,original:import('node:child_process').ChildProcess)=>{child=original;spawnedAt=Date.now();arm(budgets.startupMs)},
+          onLine:(line:string)=>{
+            diagnostics.push(line)
+            const prefix='book_file_restart_phase='
+            if(!line.startsWith(prefix))return
+            const value=JSON.parse(line.slice(prefix.length))
+            if(value.schema!=='agentmux.book-file-restart-phase.v1'||!['entry','business'].includes(value.phase)||!Number.isFinite(value.uptimeMs))throw new Error('Invalid native restart phase receipt')
+            phases.push({...value,wallSinceSpawnMs:Date.now()-spawnedAt})
+            if(value.phase==='business'){phaseName='business';arm(budgets.businessMs)}
+          }})
+      }finally{clearTimeout(phaseTimer);clearTimeout(hardStop)}
       let report:any
       try{report=JSON.parse(await readFile(join(root,mode+'.json'),'utf8'))}catch(error){report={failure:'The native process did not write its report: '+String(error),outcome}}
       report.processDiagnostics=diagnostics
+      report.processPhases=phases;report.phaseBudgets=budgets;report.budgetExpired=budgetExpired
+      if(report.startup?.coreEntry&&fileURLToPath(report.startup.coreEntry)!==coreEntry)throw new Error('The native driver imported a different public Core entry')
       reports.push({outcome,report})
       if(report.failure)break
     }
-    const result={sourceHashes,buildReused:Boolean(cached),writer:reports[0]?.report,reader:reports[1]?.report??{failure:'The writer process did not complete'},processes:reports.map(value=>value.outcome)}
+    const coreChanged:string[]=[]
+    for(const value of Object.values(externalCore))if(createHash('sha256').update(await readFile(value.path)).digest('hex')!==value.sha256)coreChanged.push(value.path)
+    const result={sourceHashes,externalCore,coreChanged,buildReused:Boolean(cached),writer:reports[0]?.report,reader:reports[1]?.report??{failure:'The writer process did not complete'},processes:reports.map(value=>value.outcome)}
     if(process.env.BOOK_FILE_RECEIPT)await writeFile(process.env.BOOK_FILE_RECEIPT,JSON.stringify({schema:'agentmux.book-file-restart.v1',...result},null,2))
+    if(coreChanged.length)throw new Error('External Core changed during the native restart: '+coreChanged.join(', '))
     return result
   }finally{for(const pid of await listProbeProcesses(-1,root))await signalOwnedProbeProcess(pid,root,'SIGKILL');await rm(root,{recursive:true,force:true})}
 }
