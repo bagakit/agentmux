@@ -147,7 +147,10 @@ app.whenReady().then(async()=>{
   await phase('loading-compiled-renderer');await win.loadFile(html);await phase('loaded-compiled-renderer');win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===7');await phase('original-goals-mounted')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope==='workflow-only'){
+  if(scope==='plan-only'){
+   result.mode='plan'
+   await require('./plan.cjs')({evaluate,size,click,capture,waitFor,paint,result})
+  }else if(scope==='workflow-only'){
    await require('./workflow.cjs')({evaluate,size,click,capture,waitFor,paint,result})
   }else if(scope==='cohesion-only'){
    const key=async(key,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key,windowsVirtualKeyCode});await paint()}

@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'
 import { mainMotePreview } from './main-mote'
+import { goalPlanPreview } from './plan'
 import { useAppStore, retainGoalFiniteStartIntent } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
@@ -188,3 +189,5 @@ Object.assign(window, { goalsVisual: { seed,
 Object.assign(window, { goalsProjectLinks: projectLinksPreview(initial, mode => root?.render(<App key={`project-links-${mode}`} />)) })
 
 Object.assign(window, { goalsMainMote: mainMotePreview(initial, () => root?.render(<App key="main-mote" />)) })
+
+Object.assign(window, { goalsPlan: goalPlanPreview(seed, () => root?.render(<App key="goal-plan" />)) })
