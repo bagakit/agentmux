@@ -18,11 +18,12 @@ async function setup(options: { available?: boolean } = {}) {
   const work = { id: 'work-session' }, other = { id: 'other-session' }
   const reports: Array<[string, string | null]> = []
   const decrypt = vi.fn((data: Buffer) => Buffer.from(data.toString('utf8').split('').reverse().join(''), 'utf8').toString('utf8').replace(/^enc:/, ''))
+  // A reversible stand-in for the keychain; the real cipher is Electron safeStorage.
+  const encrypt = vi.fn((text: string) => Buffer.from(('enc:' + text).split('').reverse().join(''), 'utf8'))
   const auth = createBrowserProfileProxyAuth({
     crypto: {
       available: () => options.available ?? true,
-      // A reversible stand-in for the keychain; the real cipher is Electron safeStorage.
-      encrypt: text => Buffer.from(('enc:' + text).split('').reverse().join(''), 'utf8'),
+      encrypt,
       decrypt
     },
     path,
@@ -31,7 +32,7 @@ async function setup(options: { available?: boolean } = {}) {
     report: (profileId, reason) => { reports.push([profileId, reason]) }
   })
   const contents = (session: unknown) => ({ session, isDestroyed: () => false }) as never
-  return { auth, path, work, other, reports, decrypt, contents }
+  return { auth, path, work, other, reports, encrypt, decrypt, contents }
 }
 
 describe('Profile proxy sign-in', () => {
@@ -153,5 +154,20 @@ describe('Profile proxy sign-in', () => {
     expect(reports).toEqual([['p-work', expect.stringContaining('could not be read')]])
     expect(JSON.stringify(reports)).not.toContain(SENTINEL)
     expect(await readFile(path, 'utf8')).toBe(broken)
+  })
+
+  it('keeps a keychain encryption failure from exposing the password or changing saved sign-ins', async () => {
+    const { auth, path, encrypt } = await setup()
+    await auth.set('p-kept', { username: 'kept', password: 'original-password' })
+    const original = await readFile(path, 'utf8')
+    encrypt.mockImplementationOnce(() => { throw new Error(SENTINEL) })
+    const failure = await auth.set('p-work', { username: 'alice', password: SENTINEL }).catch(error => error)
+    expect(failure).toMatchObject({ code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
+    expect(failure.message).not.toContain(SENTINEL)
+    expect(failure.message).toContain('keychain')
+    expect(await readFile(path, 'utf8')).toBe(original)
+    expect(await auth.username('p-kept')).toBe('kept')
+    await auth.set('p-work', { username: 'alice', password: SENTINEL })
+    expect(await auth.username('p-work')).toBe('alice')
   })
 })
