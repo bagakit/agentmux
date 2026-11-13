@@ -437,6 +437,14 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect(field.value).toBe(''); expect(host.querySelector('.topic-knowledge-entry')).toBeNull()
     expect(api.topics.call).toHaveBeenLastCalledWith('topic.knowledge.ls', { topicId: f.first.topicId, limit: 100 })
   })
+  it('marks each knowledge source by its destination and keeps the leave glyph for web pages only', async () => {
+    const f = await fixture()
+    const saved = await entry(f.owner, f.first.topicId, 'Original reference', [{ kind: 'url', url: 'https://example.com/original' }, { kind: 'file', hostId: 'local', path: f.first.directoryPath + '/outcome/original.md' }, { kind: 'notebook', notebookId: 'original-notebook' }])
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    await input(host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!, saved.title); await click(button('Search')); await settle(() => !!host.querySelector('.topic-knowledge-row'))
+    await click(host.querySelector<HTMLButtonElement>('.topic-knowledge-row')!)
+    expect([...host.querySelectorAll('.topic-knowledge-source')].map(source => source.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon'))).toEqual(['action.open-external', 'object.file', 'object.notebook'])
+  })
   it('closes a retained detail to the search input when a partial read removes its result row', async () => {
     const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original reference'), before = useAppStore.getState()
     await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
