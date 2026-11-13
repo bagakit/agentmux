@@ -4,8 +4,8 @@
 It has no Electron, React, Desktop, Core, or Runtime dependency. Callers always pass
 an explicit directory; the package never treats the current working directory as a
 store root.
-Configure `demandDataDirectory` in the calling application and pass that directory
-explicitly.
+The calling application chooses the store root (the Host uses `demands/` beside
+its configuration file) and passes it explicitly.
 
 ```ts
 import { openDemandStore } from '@agentmux/demand'
@@ -40,8 +40,9 @@ Corrupt snapshots and lock failures raise `StoreError` with `code`,
 `phase`, and `path`; they never become an empty replacement.
 
 The standalone `agentmux-demand` binary reads the same API. Pass `--root` (or set
-`AGENTMUX_DEMAND_ROOT`) and use `list`, `show`, `create`, `update`, `link-session`,
-`unlink-session`, `link-project`, `unlink-project`, `activity`, and `decision-log`.
+`AGENTMUX_DEMAND_ROOT`). `agentmux-demand help` prints the current verbs, options
+and safety requirements such as `delete --confirm delete`; the parser is
+[`src/cli.ts`](src/cli.ts).
 
 Goals use the same durable owner. Agents submit `proposeAlignment(id, proposal)`
 and `proposeGrounding(id, proposal)`, or CLI `propose-alignment` / `propose-grounding`
