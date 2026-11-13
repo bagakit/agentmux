@@ -13,6 +13,7 @@ const metadata = 'rebuilds only one exact offscreen Agent node for metadata with
 const motion = 'the formal motion control changes only original event presentation and resumes its elapsed phase'
 const adaptive = 'presents real adaptive membership with one geometry clock and reclaims a deleted interior while preserving the reader'
 export const collaborationCanvasMutations = [
+  { file: camera, name: 'initial-central-occurrence', before: 'const anchor = nearest?.box ?? foldedSummary', after: 'const anchor = occurrences[0]?.box ?? foldedSummary', assertion: 'starts near the area center among equal-tier occurrences regardless of member order' },
   { file: 'components/CollaborationRelationMark.tsx', name: 'creation-category-consumer', before: 'name="object.agent-creation"', after: 'name="object.collaboration"', assertion: 'keeps creation category, original direction and recorded phase distinct through theme, LOD and folding' },
   { file: 'lib/collaboration-relation-presentation.ts', name: 'creation-prepared-success', before: "item.record.phase === 'prepared'", after: 'false', assertion: 'keeps creation category, original direction and recorded phase distinct through theme, LOD and folding' },
   { file: graph, name: 'creation-direction-end', before: '{ markerEnd: `url(#${markerId}-${kind})` }', after: '{ markerStart: `url(#${markerId}-${kind})` }', assertion: 'keeps creation category, original direction and recorded phase distinct through theme, LOD and folding' },

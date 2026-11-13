@@ -12,6 +12,22 @@ const dom = composerDOM()
 const reference = { hostId: 'original-owner', agentSessionId: 'original-peer' }, key = collaborationSubjectKey(reference)
 const agents = new Map<string, CollaborationAgent>([[key, { id: key, subject: reference, sessionId: reference.agentSessionId }]])
 const wanted = new Set([key]), known = new Map<string, CollaborationAgent>(), owner = {}
+
+it('keeps current appearance and unknown activity when late history resolves canonical and Runtime aliases', () => {
+  const source: AgentSessionHistoryDescriptor = { ...reference, state: 'retired', retiredAt: 4242,
+    history: { providerId: 'claude', executorId: 'old-executor', workspacePath: 'original-workspace', createdAt: 1 } }
+  const live: CollaborationAgent = { id: key, subject: reference, sessionId: reference.agentSessionId,
+    tier: 'unknown', providerId: 'codex', executorId: 'current-executor', lastActivityAt: null }
+  for (const id of [key, 'runtime-alias']) {
+    const recorded = { agents: new Map([[id, { id, sessionId: reference.agentSessionId, subject: id === key ? reference : null }]]), relations: [] }
+    const read = { reference, source, issue: null, loading: false }
+    const result = resolveCollaborationIdentities(recorded, new Map([[id, read]]), new Map([[key, live]]))
+    expect(result.agents.get(key)).toMatchObject({ ...live, retiredAt: 4242 })
+    expect(result.sources.get(key)).toBe(source)
+    expect(result.aliases.get(id)).toBe(key)
+    expect(result.agents.size).toBe(1)
+  }
+})
 let identities: ReturnType<typeof useCollaborationIdentities>
 function Reader({ enabled = true, ownerRevision = owner, demand = wanted, members = agents }: { enabled?: boolean; ownerRevision?: object; demand?: Set<string>; members?: Map<string, CollaborationAgent> }) {
   identities = useCollaborationIdentities(members, demand, known, enabled, ownerRevision)

@@ -33,6 +33,21 @@ function nestedWorld() {
 }
 const viewport = { width: 600, height: 400 }
 
+it('starts near the area center among equal-tier occurrences regardless of member order', () => {
+  for (const tier of ['active', 'idle', 'unknown'] as const) {
+    const { areas, agents, geometry, local, remote } = nestedWorld()
+    agents.set(local.id, { ...local, tier }); agents.set(remote.id, { ...remote, tier })
+    const id = collaborationAgentNode('leaf', remote.id), near = geometry.get(id)!
+    geometry.set(id, { ...near, x: 2800, y: 1800 })
+    for (const reversed of [false, true]) {
+      const ordered = areas.map(area => ({ ...area, members: reversed ? [...area.members].reverse() : area.members }))
+      expect(collaborationCameraTarget(geometry, ordered, agents, viewport, { token: {}, areaIds: ['root'] })?.anchor).toBe(id)
+      expect(collaborationCameraTarget(geometry, ordered, agents, viewport, { token: {}, agentId: local.id })?.anchor)
+        .toBe(collaborationAgentNode('leaf', local.id))
+    }
+  }
+})
+
 it('reads custom late summary stages at their complete scale and retains exact point-only Reader destinations', () => {
   const { areas, agents, geometry, remote } = nestedWorld()
   const levels = focusMapPreset(3); levels[2] = { form: 'card', information: 'summary', from: .9, to: 1.2 }
