@@ -48,7 +48,7 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
     expect(entry.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
     const summary = entry.querySelector('summary')!
     expect(summary.textContent).toContain('消息输入'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
-    expect(summary.textContent).not.toContain('Original device'); expect(summary.textContent).not.toContain('Message Tool')
+    expect(summary.textContent).not.toContain('Original device'); expect(summary.textContent).not.toContain('消息工具')
     expect(summary.textContent).not.toContain('source-owner'); expect(summary.querySelector('.log-turn__body')).toBeNull()
     const preview = summary.querySelector<HTMLElement>('.message-disclosure__preview')!
     expect(preview.textContent).toBe(original.replace(/\s+/gu, ' ').trim())
@@ -61,7 +61,7 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
   expect(paragraphs(entries[0]!.querySelector('.log-turn__body')!)).toBe(original)
   await act(async () => entries[0]!.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click()); expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
   await act(async () => entries[0]!.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
-  expect(entries[0]!.textContent).toContain('Original device'); expect(entries[0]!.textContent).toContain('Message Tool')
+  expect(entries[0]!.textContent).toContain('Original device'); expect(entries[0]!.textContent).toContain('消息工具')
   const raw = [...entries[0]!.querySelectorAll<HTMLDetailsElement>('details')].find(detail => detail.firstElementChild?.textContent === 'Original record JSON')!
   expect(raw).toBeDefined(); await openDetails(raw)
   expect(JSON.parse(raw.querySelector('pre')!.textContent!)).toEqual(t.items[0])
@@ -113,7 +113,7 @@ it.each(['shared', 'desktop'])('keeps unassociated originals as independently re
   await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
   await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
-  expect(card.textContent).toContain('same-text'); expect(card.textContent).toContain('Original device'); expect(card.textContent).toContain('Message Tool')
+  expect(card.textContent).toContain('same-text'); expect(card.textContent).toContain('Original device'); expect(card.textContent).toContain('消息工具')
   expect(card.dataset.messageSourceKey).toBe(key); expect(host.textContent).not.toContain('已采用')
 })
 it.each(['failed', 'streaming'] as const)('keeps the original %s input and actual phase visible without an outer send disclosure', async status => {

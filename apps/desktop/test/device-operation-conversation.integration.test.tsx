@@ -208,7 +208,7 @@ describe('Original recorded device-like IDs use the same current conversation re
     await act(async () => { submission!.open = true; submission!.dispatchEvent(new Event('toggle')) })
     const input = card(message.id)
     await act(async () => input.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
-    expect(input.textContent).toContain('Message Tool'); expect(input.textContent).toContain('Tablet'); expect(input.textContent).toContain(f.sourceDevice.hostId)
+    expect(input.textContent).toContain('消息工具'); expect(input.textContent).toContain('Tablet'); expect(input.textContent).toContain(f.sourceDevice.hostId)
     await copy(input, message.content!)
     const body = container.querySelector('[data-native-record-id="device-operation:native-opaque"] .log-turn__body p')!, text = body.firstChild!, range = document.createRange()
     range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range); expect(window.getSelection()!.toString()).toBe('write')

@@ -25,7 +25,7 @@ vi.mock('../src/renderer/src/components/WindowOverlayHost',async importOriginal=
 vi.mock('@floating-ui/dom',()=>({autoUpdate:()=>()=>{},computePosition:async()=>({x:0,y:0}),offset:()=>({}),shift:()=>({}),size:()=>({})}))
 const bridgeCloses:Array<()=>unknown|Promise<unknown>>=[]
 const dom=composerDOM()
-const channelLabels:Record<AgentMessageChannel,string>={terminal:'Terminal','message-tool':'Message Tool',cli:'CLI',api:'API','agent-message':'Agent message',reaction:'快捷回复','question-reply':'Question reply'}
+const channelLabels:Record<AgentMessageChannel,string>={terminal:'终端','message-tool':'消息工具',cli:'CLI',api:'API','agent-message':'Agent 消息',reaction:'快捷回复','question-reply':'问题回复'}
 const sender:AgentOperationDevice={hostId:'source-host',deviceId:'device-local',name:'This Mac'}
 const receivingHost='execution-host'
 const describeSpeaker=()=>({name:'Builder',providerId:'claude' as const})
@@ -92,8 +92,8 @@ describe('One recorded input origin across common reading surfaces',()=>{
  it('forwards exact Core channel metadata through accepted Activity snapshots and refreshed original items',async()=>{
   const{message,timeline}=await submit('message-tool')
   const props={sessionId:'agent-1',executionHostId:receivingHost,capability:'complete-events' as const}
-  await dom.render(<ActivityView {...props} items={timeline.items} timelineSnapshot={timeline}/>);await openInfo();expect(fact(dom.container,'输入渠道')).toBe('Message Tool')
-  await dom.render(<ActivityView {...props} items={timeline.items}/>);expect(dom.container.querySelector('[aria-label="Message details"]')?.getAttribute('aria-expanded')).toBe('true');expect(fact(dom.container,'输入渠道')).toBe('Message Tool');expect(fact(dom.container,'来源 Host')).toBe('source-host');expect(fact(dom.container,'当前执行 Host')).toBe(receivingHost)
+  await dom.render(<ActivityView {...props} items={timeline.items} timelineSnapshot={timeline}/>);await openInfo();expect(fact(dom.container,'输入渠道')).toBe('消息工具')
+  await dom.render(<ActivityView {...props} items={timeline.items}/>);expect(dom.container.querySelector('[aria-label="Message details"]')?.getAttribute('aria-expanded')).toBe('true');expect(fact(dom.container,'输入渠道')).toBe('消息工具');expect(fact(dom.container,'来源 Host')).toBe('source-host');expect(fact(dom.container,'当前执行 Host')).toBe(receivingHost)
  })
  it('keeps native origin honest through actual History, retaining the existing hidden read gate',async()=>{
   await desktopConversationReadBridge(native,bridgeCloses,()=>[{hostId:receivingHost,client:native.client}])
@@ -123,7 +123,7 @@ describe('One recorded input origin across common reading surfaces',()=>{
  })
  it('keeps incoming Agent provenance visible and system origin only inside Info',async()=>{
   const{message}=await submit('agent-message')
-  await dom.render(<ConversationMessage messageId={message.id} conversationSessionId="recipient" content="Other Agent original" speaker={{role:'agent',id:'sender-agent'}} inputSource={message.source}/>);expect(dom.container.querySelector('.log-turn__input-source'),'Incoming Agent origin remains visible').not.toBeNull();expect(dom.container.querySelector('.log-turn__input-source')!.textContent).toContain('Agent message')
+  await dom.render(<ConversationMessage messageId={message.id} conversationSessionId="recipient" content="Other Agent original" speaker={{role:'agent',id:'sender-agent'}} inputSource={message.source}/>);expect(dom.container.querySelector('.log-turn__input-source'),'Incoming Agent origin remains visible').not.toBeNull();expect(dom.container.querySelector('.log-turn__input-source')!.textContent).toContain('Agent 消息')
   await dom.render(<ConversationMessage messageId="system" content="Original app-owned context" speaker={{role:'system',id:'agentmux'}} inputSource={message.source}/>);expect(dom.container.querySelector('.log-turn__input-source')).toBeNull()
  })
  it('emits nonempty public accepted input and production native records for the compiled scene',async()=>{

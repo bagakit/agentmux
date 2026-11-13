@@ -56,7 +56,7 @@ it('the actual Reader through IPC renders an unassociated A2A message card and a
   await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copied).toHaveBeenLastCalledWith(body)
   await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
-  expect(row.textContent).toContain('original-sender'); expect(row.textContent).toContain('Message Tool')
+  expect(row.textContent).toContain('original-sender'); expect(row.textContent).toContain('消息工具')
   expect(row.dataset.conversationItemRef).toBe(originalRef); expect(row.dataset.conversationEventId).toBe(originalId)
   expect(read).toHaveBeenCalled(); expect(rawNative).not.toHaveBeenCalled(); expect(rawCaptured).not.toHaveBeenCalled()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])

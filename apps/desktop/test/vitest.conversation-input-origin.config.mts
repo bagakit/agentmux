@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 const root=resolve(import.meta.dirname,'../../..')
 const changes={
+ 'english-channel':['packages/client-ui/src/lib/conversation-input-source.ts',"'message-tool': '消息工具'","'message-tool': 'Message Tool'"],
  'lose-channel':['packages/client-ui/src/lib/conversation-input-source.ts',"source.kind === 'captured' ? source.channel : undefined","undefined"],
  'native-is-terminal':['packages/client-ui/src/lib/conversation-input-source.ts',"channel === undefined ? '渠道未记录' : channelLabels[channel]","channel === undefined ? 'Terminal' : channelLabels[channel]"],
  'receiver-as-sender':['packages/client-ui/src/components/ConversationInputDetails.tsx',"origin!.device?.hostId ?? '未记录'","executionHostId ?? '未记录'"],
