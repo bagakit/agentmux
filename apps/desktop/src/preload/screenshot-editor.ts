@@ -6,7 +6,7 @@ if (process.isMainFrame) {
     load: () => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'load'),
     finish: (requestId, operationId, image) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'finish', { requestId, operationId, image }),
     cancel: requestId => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'cancel', { requestId }),
-    savePng: (requestId, operationId, image) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'save-png', { requestId, operationId, image }),
+    savePng: (requestId, image, options) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'save-png', { requestId, image, ...options }),
     pin: (requestId, operationId, image) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'pin', { requestId, operationId, image }),
     inspectPin: (requestId, operationId) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'inspect-pin', { requestId, operationId }),
     copyContext: (requestId, operationId, text) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'context', { requestId, operationId, text }),

@@ -57,7 +57,7 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
         if (active.current) { if (result.status === 'completed') { if (editVersion.current === version) setStatus('Context copied') } else setError(result.message) }
         return result.status === 'completed'
       }
-      const result = kind === 'save' ? await api.savePng(input.requestId, mintObjectId(), image) : await pin.pin(image)
+      const result = kind === 'save' ? await api.savePng(input.requestId, image) : await pin.pin(image)
       if (!active.current) return false
       if ('state' in result) {
         if (result.recordedOperation?.state === 'completed') { if (editVersion.current === version) setStatus(result.state === 'open' ? 'Reference pinned' : 'Pinned reference closed') }

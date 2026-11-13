@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
 import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
@@ -125,7 +124,7 @@ import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/c
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { ScreenCapture } from './screen-capture.js'
-import { exportScreenshotPng, writeScreenshotFile } from './screenshot-files.js'
+import { saveScreenshotPng } from './screenshot-files.js'
 import { ScreenshotPins } from './screenshot-pins.js'
 import { ScreenshotSourcePicker } from './screenshot-source-picker.js'
 import { ScreenshotOriginalFiles } from './screenshot-original-files.js'
@@ -1379,25 +1378,10 @@ export async function registerIpc(args: {
     return await pinScreenshot(input.image, input.operationId)
   })
   handleWithEvent('ui:inspectScreenshotPin', async (_event, operationId: string) => await inspectScreenshotPin(operationId))
-  const screenshotExports = new Map<string, { pixels: string; result: Promise<import('../shared/screenshot-output').ScreenshotFileResult> }>()
-  handleWithEvent('ui:exportScreenshot', async (event, input: import('../shared/screenshot-output').ScreenshotPngExport) => {
-    if (!input || typeof input.operationId !== 'string' || !input.operationId.trim()) throw new Error('Keep the original PNG export operation.')
-    const key = JSON.stringify([event.sender.id, input.operationId]), pixels = createHash('sha256').update(JSON.stringify(input.image)).digest('hex')
-    const previous = screenshotExports.get(key)
-    if (previous) {
-      if (previous.pixels !== pixels) throw new Error('The original PNG export cannot change its image.')
-      return await previous.result
-    }
-    const result = exportScreenshotPng(input.image, {
-      chooseFile: async filename => {
-        const parent = BrowserWindow.fromWebContents(event.sender)
-        if (!parent || parent.isDestroyed()) throw new Error('The original image window closed. Your image is kept.')
-        const choice = await dialog.showSaveDialog(parent, { title: 'Save processed PNG', defaultPath: filename, filters: [{ name: 'PNG image', extensions: ['png'] }] })
-        return choice.canceled ? null : choice.filePath ?? null
-      }, writeFile: writeScreenshotFile
-    })
-    screenshotExports.set(key, { pixels, result })
-    return await result
+  handleWithEvent('ui:exportScreenshot', async (event, input: import('../shared/screenshot-output').ScreenshotPngSave) => {
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    if (!parent) throw new Error('The original image window closed. Your image is kept.')
+    return await saveScreenshotPng(input.image, parent, { capturedAt: input.capturedAt })
   })
   const reportScreenshotIssue = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
@@ -1408,7 +1392,7 @@ export async function registerIpc(args: {
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
-    edit: (image, attachToDraft, complete, initialIssue) => screenshotEditor.edit(image, attachToDraft, complete, initialIssue), reportIssue: reportScreenshotIssue,
+    edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), reportIssue: reportScreenshotIssue,
     chooseSource: mode => screenshotSources.choose(mode) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),

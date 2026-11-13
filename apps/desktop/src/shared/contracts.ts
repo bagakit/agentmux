@@ -1829,7 +1829,7 @@ export type AgentMuxDesktopApi = {
     onAppIconIssue(listener: (issue: string | null) => void): () => void
     onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(mode?: import('./screenshot-source').ScreenshotCaptureMode): Promise<string | null>
-    exportScreenshot(input: import('./screenshot-output').ScreenshotPngExport): Promise<import('./screenshot-output').ScreenshotFileResult>
+    exportScreenshot(input: import('./screenshot-output').ScreenshotPngSave): Promise<import('./screenshot-output').ScreenshotFileResult>
     pinScreenshot(input: import('./screenshot-output').ScreenshotPngExport): Promise<import('@agentmux/core').ImageResult>
     inspectScreenshotPin(operationId: string): Promise<import('@agentmux/core').ImageResult>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>

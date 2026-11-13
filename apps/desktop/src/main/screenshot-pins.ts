@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -8,10 +8,10 @@ import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { SCREENSHOT_PIN_CHANNEL } from '../shared/screenshot-pin'
 import { themeBootstrap } from './theme-bootstrap'
-import { exportScreenshotPng, writeScreenshotFile } from './screenshot-files'
+import { saveScreenshotPng } from './screenshot-files'
 import { nativeImageFromBrowserPng } from './browser-image'
 
-type Pin = { id: string; creation: string; actor: ImageActor; window: BrowserWindow; image: BrowserPng;
+type Pin = { id: string; creation: string; createdAt: number; actor: ImageActor; window: BrowserWindow; image: BrowserPng;
   outputs: Map<string, { kind: string; result: Promise<unknown> }> }
 type Operation = { fingerprint: string; record: ImageOperation; result: Promise<void> }
 const sameActor = (a: ImageActor, b: ImageActor) => a.kind === b.kind && a.id === b.id
@@ -99,7 +99,7 @@ export class ScreenshotPins implements AgentMuxRpcImageOwner {
       width: Math.max(260, Math.round(image.width * scale)), height: Math.max(150, Math.round(image.height * scale) + 44),
       minWidth: 220, minHeight: 120, show: false, alwaysOnTop: true, autoHideMenuBar: true,
       webPreferences: { preload: join(import.meta.dirname, '../preload/screenshot-pin.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } })
-    const pin: Pin = { id: mintObjectId(), creation: operation.operationId, actor: structuredClone(operation.actor), window, image,
+    const pin: Pin = { id: mintObjectId(), creation: operation.operationId, createdAt: Date.now(), actor: structuredClone(operation.actor), window, image,
       outputs: new Map() }
     this.pins.set(pin.id, pin)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -145,10 +145,8 @@ export class ScreenshotPins implements AgentMuxRpcImageOwner {
     if (!['copy', 'save'].includes(String(action)) || typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pinned image output operation.')
     const old = pin.outputs.get(params.operationId)
     if (old) { if (old.kind !== action) throw new Error('The original image output cannot change its action.'); return await old.result }
-    const result = action === 'save' ? exportScreenshotPng(pin.image, {
-      chooseFile: async filename => { const selected = await dialog.showSaveDialog(pin.window, { title: 'Save pinned PNG', defaultPath: filename, filters: [{ name: 'PNG image', extensions: ['png'] }] }); return selected.canceled ? null : selected.filePath ?? null },
-      writeFile: writeScreenshotFile
-    }) : this.ports.copy(pin.image).then(() => ({ status: 'completed' }), error => ({ status: 'failed', message: error instanceof Error ? error.message : String(error) }))
+    // A pin carries no capture time, so its saved file is named by the time the pin opened.
+    const result = action === 'save' ? saveScreenshotPng(pin.image, pin.window, { capturedAt: pin.createdAt }) : this.ports.copy(pin.image).then(() => ({ status: 'completed' }), error => ({ status: 'failed', message: error instanceof Error ? error.message : String(error) }))
     pin.outputs.set(params.operationId, { kind: String(action), result })
     return await result
   }

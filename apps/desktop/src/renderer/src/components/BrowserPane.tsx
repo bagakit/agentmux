@@ -300,7 +300,7 @@ function BrowserPaneContent({
   const rebindBoundsObserverRef = useRef<(() => void) | null>(null)
   const screenshotToken = useRef(0)
   const selectionToken = useRef(0)
-  const [screenshot, setScreenshot] = useState<{ kind: 'capture'; capture: BrowserScreenshotCapture; key: number } | { kind: 'open'; key: number } | null>(null)
+  const [screenshot, setScreenshot] = useState<{ kind: 'capture'; capture: BrowserScreenshotCapture; key: number; capturedAt: number } | { kind: 'open'; key: number } | null>(null)
   const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
   if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
     browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
@@ -730,12 +730,12 @@ function BrowserPaneContent({
     setScreenshotCopied(null)
     setScreenshotBusy(true)
     try {
-      const captured = await api.browser.captureScreenshot(tab.browserId)
+      const capturedAt = Date.now(), captured = await api.browser.captureScreenshot(tab.browserId)
       if (screenshotToken.current !== token) return
       if (!browserCaptureMatchesIdentity(captured, browserIdentity.current)) {
         throw new Error('Browser page changed before the screenshot editor opened')
       }
-      setScreenshot({ kind: 'capture', capture: captured, key: token })
+      setScreenshot({ kind: 'capture', capture: captured, key: token, capturedAt })
     } catch (error) {
       if (screenshotToken.current === token) reportError(error)
     } finally {
@@ -817,7 +817,7 @@ function BrowserPaneContent({
       if (screenshotToken.current !== token) return false
       let feedback = kind === 'png' ? 'PNG copied' : 'Context copied'
       if (kind === 'save-png') {
-        const result = await api.ui.exportScreenshot({ operationId: mintObjectId(), image })
+        const result = await api.ui.exportScreenshot({ image, capturedAt: screenshot.kind === 'capture' ? screenshot.capturedAt : Date.now() })
         if (result.status === 'cancelled') return false
         if (result.status !== 'saved') throw new Error(result.message)
         feedback = 'PNG saved · ' + result.path

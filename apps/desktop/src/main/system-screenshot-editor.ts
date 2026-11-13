@@ -1,13 +1,12 @@
-import { BrowserWindow, dialog, ipcMain, nativeTheme, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, nativeTheme, screen, type IpcMainInvokeEvent, type Rectangle } from 'electron'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
-import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput } from '../shared/system-screenshot-editor'
+import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, type ScreenshotEditContext, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput } from '../shared/system-screenshot-editor'
 import { themeBootstrap } from './theme-bootstrap'
-import { exportScreenshotPng, writeScreenshotFile } from './screenshot-files'
-import type { ScreenshotFileResult } from '../shared/screenshot-output'
+import { saveScreenshotPng } from './screenshot-files'
 import type { ScreenshotOriginalApi, ScreenshotOriginalReadResult, ScreenshotOriginalSaveInput, ScreenshotOriginalSaveResult } from '../shared/screenshot-original'
 
 type EditRequest = {
@@ -18,7 +17,6 @@ type EditRequest = {
   pending: boolean
   attempts: Map<string, Promise<SystemScreenshotEditorFinish>>
   attemptFingerprints: Map<string, string>
-  exports: Map<string, { pixels: string; result: Promise<ScreenshotFileResult> }>
   originals: (ScreenshotOriginalApi & { dispose?(): void }) | undefined
   originalReads: Map<string, Promise<ScreenshotOriginalReadResult>>
   originalSaves: Map<string, { fingerprint: string; pending: boolean; result?: ScreenshotOriginalSaveResult; promise: Promise<ScreenshotOriginalSaveResult> }>
@@ -33,19 +31,19 @@ export class SystemScreenshotEditor {
   constructor(private readonly readAppearance: () => AppearanceConfig = () => ({ terminalTheme: 'graphite' }),
     private readonly outputs?: { pin(image: BrowserPng, operationId: string): Promise<import('@agentmux/core').ImageResult>;
       inspectPin?(operationId: string): Promise<import('@agentmux/core').ImageResult>;
-      copyText?(text: string): Promise<void>; savePng?(image: BrowserPng, window: BrowserWindow): Promise<ScreenshotFileResult>;
+      copyText?(text: string): Promise<void>;
       originalFiles?(window: BrowserWindow): ScreenshotOriginalApi & { dispose?(): void } }) {
     ipcMain.handle(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
 
-  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, initialIssue?: string): Promise<void> {
+  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { initialIssue, source }: ScreenshotEditContext = {}): Promise<void> {
     if (this.disposed) throw new Error('The screenshot editor is closed. Start a new capture to edit another image.')
     pngBytes(image)
     let theme: SystemScreenshotEditorInput['theme']
     try { theme = themeBootstrap(this.readAppearance(), nativeTheme.shouldUseDarkColors) }
     catch (error) { theme = { status: 'unavailable', message: 'Saved appearance could not be loaded. ' + message(error) } }
     const window = new BrowserWindow({
-      title: 'Screenshot', width: 1040, height: 760, minWidth: 360, minHeight: 300,
+      title: 'Screenshot', ...editorBounds(source?.rect), minWidth: 360, minHeight: 300,
       show: false, autoHideMenuBar: true,
       ...(theme.status === 'available' && theme.variables['--surface-0'] ? { backgroundColor: theme.variables['--surface-0'] } : {}),
       webPreferences: { preload: join(import.meta.dirname, '../preload/screenshot-editor.cjs'),
@@ -53,8 +51,8 @@ export class SystemScreenshotEditor {
     })
     let settle!: () => void
     const closed = new Promise<void>(resolve => { settle = resolve })
-    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(initialIssue ? { initialIssue } : {}) }, complete, settle,
-      pending: false, attempts: new Map(), attemptFingerprints: new Map(), exports: new Map(), originals: this.outputs?.originalFiles?.(window), originalReads: new Map(), originalSaves: new Map(), contexts: new Map() }
+    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}) }, complete, settle,
+      pending: false, attempts: new Map(), attemptFingerprints: new Map(), originals: this.outputs?.originalFiles?.(window), originalReads: new Map(), originalSaves: new Map(), contexts: new Map() }
     const contents = window.webContents
     this.requests.set(contents, request)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -85,7 +83,7 @@ export class SystemScreenshotEditor {
     if (!request || request.window.isDestroyed() || event.senderFrame !== request.window.webContents.mainFrame)
       throw new Error('This screenshot editor request does not belong to the current window.')
     if (action === 'load') return request.input
-    const params = input as { requestId?: unknown; operationId?: unknown; image?: BrowserPng; text?: unknown; grantId?: unknown; document?: ScreenshotOriginalSaveInput } | undefined
+    const params = input as { requestId?: unknown; operationId?: unknown; image?: BrowserPng; text?: unknown; grantId?: unknown; document?: ScreenshotOriginalSaveInput; logicalSize?: unknown } | undefined
     if (params?.requestId !== request.input.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'cancel') { request.window.close(); return }
     if (['open-original', 'save-original', 'inspect-original', 'original-operation'].includes(String(action))) {
@@ -144,21 +142,11 @@ export class SystemScreenshotEditor {
       return await this.outputs.pin(params.image!, params.operationId)
     }
     if (action === 'save-png') {
-      if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original PNG export operation.')
-      pngBytes(params.image!)
-      const previous = request.exports.get(params.operationId)
-      if (previous) {
-        if (previous.pixels !== createHash('sha256').update(JSON.stringify(params.image)).digest('hex')) throw new Error('The original PNG export cannot change its image.')
-        return await previous.result
-      }
-      const result = this.outputs?.savePng ? this.outputs.savePng(params.image!, request.window) : exportScreenshotPng(params.image!, {
-        chooseFile: async filename => {
-          const choice = await dialog.showSaveDialog(request.window, { title: 'Save processed PNG', defaultPath: filename, filters: [{ name: 'PNG image', extensions: ['png'] }] })
-          return choice.canceled ? null : choice.filePath ?? null
-        }, writeFile: writeScreenshotFile
-      })
-      request.exports.set(params.operationId, { pixels: createHash('sha256').update(JSON.stringify(params.image)).digest('hex'), result })
-      return await result
+      if (params.logicalSize !== undefined && typeof params.logicalSize !== 'boolean') throw new Error('Choose PNG pixels or 1× logical size.')
+      const source = request.input.source
+      if (params.logicalSize && !source) throw new Error('This image has no display scale, so it cannot be saved at 1×. Save PNG keeps its pixels.')
+      return await saveScreenshotPng(params.image!, request.window,
+        { capturedAt: source?.capturedAt ?? Date.now(), ...(params.logicalSize ? { logicalScale: source!.scale } : {}) })
     }
     if (action !== 'finish' || typeof params.operationId !== 'string' || !params.operationId.trim())
       throw new Error('The screenshot completion request is invalid.')
@@ -193,6 +181,14 @@ export class SystemScreenshotEditor {
     for (const request of this.requests.values()) if (!request.window.isDestroyed()) request.window.destroy()
     this.requests.clear()
   }
+}
+
+/** Open the editor centred on the display that holds the capture, clamped into its work area. */
+function editorBounds(rect: Rectangle | undefined): Partial<Rectangle> & { width: number; height: number } {
+  if (!rect) return { width: 1040, height: 760 }
+  const work = screen.getDisplayMatching(rect).workArea
+  const width = Math.min(1040, work.width), height = Math.min(760, work.height)
+  return { width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + (work.height - height) / 2) }
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }

@@ -3,12 +3,24 @@ import type { ThemeBootstrap } from './theme-bootstrap'
 
 export const SYSTEM_SCREENSHOT_EDITOR_CHANNEL = 'screenshot:editor'
 
+/** Where and when the image was captured. `rect` is in global logical points (Electron DIP on macOS). */
+export type ScreenshotCaptureSource = {
+  rect: { x: number; y: number; width: number; height: number }
+  /** Device pixels per point of the captured image. */
+  scale: number
+  /** Epoch milliseconds when capture started. */
+  capturedAt: number
+}
+/** Optional facts of one edit: a delivery problem to show at open, and where the image came from. */
+export type ScreenshotEditContext = { initialIssue?: string; source?: ScreenshotCaptureSource }
+
 export type SystemScreenshotEditorInput = {
   requestId: string
   image: BrowserPng
   attachToDraft: boolean
   theme: ThemeBootstrap
   initialIssue?: string
+  source?: ScreenshotCaptureSource
 }
 export type SystemScreenshotEditorFinish = { status: 'completed' } | { status: 'failed'; message: string }
 
@@ -17,7 +29,8 @@ export type SystemScreenshotEditorApi = {
   load(): Promise<SystemScreenshotEditorInput>
   finish(requestId: string, operationId: string, image: BrowserPng): Promise<SystemScreenshotEditorFinish>
   cancel(requestId: string): Promise<void>
-  savePng(requestId: string, operationId: string, image: BrowserPng): Promise<import('./screenshot-output').ScreenshotFileResult>
+  /** Each call opens one save sheet. `logicalSize` saves at 1× logical points using `source.scale`. */
+  savePng(requestId: string, image: BrowserPng, options?: { logicalSize?: boolean }): Promise<import('./screenshot-output').ScreenshotFileResult>
   pin(requestId: string, operationId: string, image: BrowserPng): Promise<import('@agentmux/core').ImageResult>
   inspectPin(requestId: string, operationId: string): Promise<import('@agentmux/core').ImageResult>
   copyContext(requestId: string, operationId: string, text: string): Promise<SystemScreenshotEditorFinish>
