@@ -16,10 +16,9 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
-// Pinned Node.js 24 LTS. Update both values together from the official SHASUMS256.txt.
-export const NODE_VERSION = 'v24.22.1'
-export const NODE_LINUX_X64_SHA256 = 'eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c'
-const NODE_ARCHIVE = `node-${NODE_VERSION}-linux-x64.tar.gz`
+// The pinned Node.js has one owner in Core; the App's first install uses the same pin.
+const { LINUX_NODE_VERSION: NODE_VERSION, LINUX_NODE_X64_SHA256: NODE_LINUX_X64_SHA256, LINUX_NODE_ARCHIVE: NODE_ARCHIVE } =
+  await import(new URL('../../dist/linux-node.js', import.meta.url).href)
 const NODE_URL = `https://nodejs.org/dist/${NODE_VERSION}/${NODE_ARCHIVE}`
 
 const here = fileURLToPath(new URL('.', import.meta.url))
