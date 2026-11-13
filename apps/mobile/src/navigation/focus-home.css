@@ -1,0 +1,89 @@
+/* Focus home: the needs-you strip and the grouped list with its 64px row anatomy. Loaded with the
+ * directory chunk; the count badge it reuses is first-screen shell styling. */
+
+/* Needs-you strip: tickets that jump straight to the waiting request. */
+.mobile-needs-you { margin: var(--sp-2) calc(-1 * var(--mobile-gutter)) var(--sp-4); }
+.mobile-needs-you > header { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--mobile-gutter) var(--sp-3);
+  color: var(--mobile-attention); font-size: var(--fs-meta); font-weight: 700; }
+.mobile-needs-you > ul { display: flex; gap: var(--sp-4); margin: 0; padding: 0 var(--mobile-gutter) var(--sp-1); list-style: none;
+  overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x proximity; scrollbar-width: none; }
+.mobile-needs-you > ul::-webkit-scrollbar { display: none; }
+.mobile-needs-you li { flex: none; scroll-snap-align: start; }
+.mobile-needs-you-ticket { display: flex; align-items: center; gap: var(--sp-4); max-width: 260px; min-height: 52px; padding: 6px 14px 6px 8px;
+  border: 1px solid var(--mobile-attention-line); border-radius: var(--mobile-radius-group); background: var(--mobile-attention-wash); color: var(--text); text-align: left;
+  transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
+.mobile-needs-you-ticket[data-reason='error'] { border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--mobile-group)); }
+.mobile-needs-you-ticket:active { transform: scale(.97); }
+.mobile-needs-you-ticket > span:last-child { display: grid; min-width: 0; }
+.mobile-needs-you-ticket strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 650; }
+.mobile-needs-you-ticket small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.mobile-needs-you-ticket[data-reason='error'] small { color: var(--red); }
+
+/* Grouped list: one surface per group, hairlines from the avatar's right edge. */
+.mobile-focus-project { margin-top: var(--sp-5); }
+.mobile-spatial-panel .mobile-focus-project > h2 { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; margin: 0 var(--sp-1) var(--sp-2);
+  color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+.mobile-focus-project > h2 > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 650; }
+.mobile-focus-project > h2 > span:last-child { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.mobile-focus-project > .mobile-session-list { border-radius: var(--mobile-radius-group); background: var(--mobile-group); overflow: hidden; }
+.mobile-focus-project .mobile-agent-row { position: relative; }
+.mobile-focus-project .mobile-agent-row + .mobile-agent-row::before { content: ''; position: absolute; top: 0; left: 68px; right: 0; height: 1px; background: var(--mobile-hairline); pointer-events: none; }
+.mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open { display: flex; align-items: center; gap: var(--sp-5);
+  min-height: var(--mobile-row); padding: 10px 4px 10px 14px; border-radius: 0; background: transparent;
+  transition: background-color var(--dur-fast) ease; }
+.mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open:active { background: var(--mobile-group-press); }
+.mobile-focus-project .mobile-agent-row > .mobile-agent-row__more { align-self: center; margin-right: var(--sp-1); color: var(--text-3); }
+.mobile-focus-project .mobile-agent-row[data-needs-you] > .mobile-agent-row__open { background: var(--mobile-attention-wash); box-shadow: inset 3px 0 0 var(--mobile-attention); }
+.mobile-focus-project .mobile-agent-row[data-needs-you='error'] > .mobile-agent-row__open { background: color-mix(in srgb, var(--red) 7%, var(--mobile-group)); box-shadow: inset 3px 0 0 var(--red); }
+
+/* Row anatomy: 40px avatar with a state dot, name + time, coloured state word + recap. */
+.mobile-row-avatar { position: relative; flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--mobile-radius);
+  background: var(--mobile-group-press); }
+.mobile-row-dot { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-radius: 50%; background: var(--neutral-2);
+  box-shadow: 0 0 0 2.5px var(--mobile-group); }
+.mobile-agent-row[data-needs-you] .mobile-row-dot { box-shadow: 0 0 0 2.5px var(--mobile-attention-wash); }
+.mobile-row-dot[data-mark='attention'] { background: var(--mobile-attention); animation: mobile-attention-breathe 1.4s ease-in-out infinite; }
+.mobile-row-dot[data-mark='error'] { background: var(--red); }
+.mobile-row-dot[data-mark='working'] { background: var(--green); }
+.mobile-row-dot[data-mark='results'] { background: var(--success); }
+.mobile-row-dot[data-mark='interrupted'], .mobile-row-dot[data-mark='recovery'] { background: var(--amber); opacity: .7; }
+.mobile-row-dot[data-mark='unknown'], .mobile-row-dot[data-mark='idle'] { background: var(--neutral-2); }
+@keyframes mobile-attention-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .62; } }
+.mobile-row-copy { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.mobile-row-title { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
+.mobile-row-title > strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-lead); font-weight: 600; letter-spacing: -.01em; }
+.mobile-agent-row[data-needs-you] .mobile-row-title > strong, .mobile-agent-row[data-unread] .mobile-row-title > strong { font-weight: 700; }
+.mobile-row-title > time { flex: none; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.mobile-row-detail { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.35; }
+.mobile-row-detail > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-row-state { flex: none; font-weight: 650; }
+.mobile-row-state[data-mark='attention'] { color: var(--mobile-attention); }
+.mobile-row-state[data-mark='error'] { color: var(--red); }
+.mobile-row-state[data-mark='working'] { color: var(--green); }
+.mobile-row-state[data-mark='results'] { color: var(--success); }
+.mobile-row-state[data-mark='interrupted'], .mobile-row-state[data-mark='recovery'] { color: var(--amber-text); }
+.mobile-row-project { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
+
+/* The directory stylesheet loads after the shell; row anatomy is scoped under .mobile-app so the
+ * older compact-list rules cannot override it. Trees (Space, Mote) share the anatomy at 56px. */
+.mobile-app .mobile-spatial-panel .mobile-session-list > li > button.mobile-agent-row__open { gap: var(--sp-5); min-height: 56px; }
+.mobile-app .mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open { min-height: var(--mobile-row); }
+.mobile-app .mobile-row-copy { display: grid; gap: 3px; min-width: 0; }
+.mobile-app .mobile-row-title > strong { font-size: var(--fs-lead); font-weight: 600; line-height: 1.3; }
+.mobile-app .mobile-agent-row[data-needs-you] .mobile-row-title > strong, .mobile-app .mobile-agent-row[data-unread] .mobile-row-title > strong { font-weight: 700; }
+.mobile-app .mobile-row-detail > .mobile-row-state { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 3px; min-width: 0; max-width: 52%;
+  text-align: left; font-size: var(--fs-meta); line-height: 1.35; }
+.mobile-app .mobile-row-detail > .mobile-row-state:empty, .mobile-app .mobile-row-detail > .mobile-row-state:not(:has(> span[title])) { display: none; }
+.mobile-app .mobile-row-detail > .mobile-row-state > span[title] { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
+.mobile-app .mobile-row-detail > .mobile-row-state > .focus-state-mark { margin: 0; flex: none; }
+.mobile-app .mobile-row-detail > .mobile-session-recap { flex: 1 1 0; min-width: 0; font-size: var(--fs-meta); line-height: 1.35; }
+.mobile-app .mobile-focus-project .mobile-session-locations { margin-top: -10px; padding: 0 14px 2px 68px; color: var(--text-3); font-size: var(--fs-micro); }
+.mobile-app .mobile-focus-project .mobile-session-locations > summary { display: flex; align-items: center; min-height: 28px; cursor: pointer; list-style: none; }
+.mobile-app .mobile-focus-project .mobile-session-locations > summary::-webkit-details-marker { display: none; }
+.mobile-app .mobile-focus-project .mobile-session-locations > button { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0; background: transparent; color: var(--text-2); text-align: left; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-row-dot[data-mark='attention'] { animation: none; }
+  .mobile-needs-you-ticket { transition: background-color var(--dur-fast) ease; }
+  .mobile-needs-you-ticket:active { transform: none; }
+}

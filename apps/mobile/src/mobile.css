@@ -140,7 +140,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-session-list { padding: 0; margin: 0; list-style: none; }
 .mobile-session-list button { width: 100%; text-align: left; background: transparent; display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 0; min-height: 56px; }
 .mobile-session-list button > span:nth-child(2) { display: grid; gap: 5px; min-width: 0; }
-.mobile-session-list strong { font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
+.mobile-session-list strong { font-size: var(--fs-lead); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-session-list small { font-size: var(--fs-meta); color: var(--text-3); }
 .mobile-session-list button > svg { flex: 0 0 auto; color: var(--text-3); }
 .mobile-session-list button > svg:last-child { margin-left: auto; }
@@ -317,10 +317,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-drawer > p { color: var(--text-3); font-size: var(--fs-meta); margin: 2px 0 12px; }
 .mobile-drawer .mobile-menu-row { border: 0; }
 .mobile-session-copy { flex: 1; min-width: 0; gap: 2px; }
-.mobile-session-copy strong { font-size: var(--fs-body); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-session-state small { font-size: var(--fs-micro); margin: 0; color: var(--text-3); }
-.mobile-session-state[data-state='waiting'], .mobile-session-state[data-state='blocked'] { color: var(--amber); }
-.mobile-session-state[data-state='working'] { color: var(--green); }
 .mobile-object-avatar { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--mobile-radius-group); overflow: visible; }
 .mobile-project-avatar { background: var(--surface-2); color: var(--text-2); font-size: var(--fs-body); font-weight: 600; border-radius: var(--mobile-radius); }
 .mobile-object-avatar .space-object-icon { display: contents; }
@@ -336,8 +332,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-connect-page > p { color: var(--text-2); line-height: 1.7; font-size: var(--fs-body); max-width: 300px; }
 .mobile-app { position: fixed; top: var(--mobile-viewport-top, 0px); left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; height: var(--mobile-viewport-height, 100dvh); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; background: var(--mobile-page); font-size: var(--fs-body); line-height: 1.45; }
 .mobile-session-project { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
-.mobile-session-state { flex: none; display: grid; gap: 3px; text-align: right; color: var(--text-2); font-size: var(--fs-micro); }
-.mobile-executor-avatar { position: relative; width: 22px; height: 22px; flex: none; display: grid; place-items: center; }
 .mobile-agent-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .mobile-agent-row > .mobile-agent-row__open { min-width: 0; width: 100%; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 .mobile-agent-row > :not(button) { grid-column: 1 / -1; }

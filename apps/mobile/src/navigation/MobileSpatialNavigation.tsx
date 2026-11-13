@@ -19,8 +19,11 @@ import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
 import { MobileAgentRow } from './MobileAgentRow'
 import { MobileHeaderMenu } from './MobileHeaderMenu'
-import type { MobileAgentPresentation } from './mobile-agent-status'
-import { ordinaryUnknownAgentStatus } from './mobile-agent-status'
+import { ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
+import { mobileNeedsYouReason, type MobileNeedsYouItem } from './needs-you'
+import { formatMobileClock } from '../presentation/time'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
+import './focus-home.css'
 import { useMobileWebCatalogObservation } from '../mobile-web/use-mobile-web-observation'
 import './navigation.css'
 
@@ -32,15 +35,15 @@ export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxH
   visible?: boolean; sessions?: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
   onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void
-  /** Publishes the original presentation rows this directory already read, for the shell's needs-you counts. */
-  onPresentation?(client: AgentMuxHostedClient | null, rows: readonly MobileAgentPresentation[] | undefined): void }
+  /** The shell's needs-you facts; presentation only. */
+  needsYou?: readonly MobileNeedsYouItem[]; onPresentation?(client: AgentMuxHostedClient | null, rows: readonly MobileAgentPresentation[] | undefined): void }
 type Region = Catalog['regions'][number]
 /** A discovered SID is navigable even before the SDK has hydrated its metadata. */
 type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<Pick<AgentMuxAgentSession, 'providerId'>>
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, onPresentation, visible = true }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -240,12 +243,27 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       if (!directoryMounted.current || current.client !== client || !current.connected || current.home !== home || current.spaceId !== spaceId) return false
       refresh(count => count + 1)
     }
-    return <li key={key} className="mobile-agent-row"><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} onOpen={() => openSession(session.agentSessionId, object)}>
-      <span className="mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={row?.avatar} /></span>
-      <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name !== '名称未确认' ? object.name : tabName || object.name}</strong>{tabName && tabName !== object.name && object.name !== '名称未确认' && <small className="mobile-session-location">{tabName}</small>}{row && <small className="mobile-session-recap" title={row.recap ? `${row.recap.source} · ${row.recap.text}` : row.detail}>{row.recap?.text ?? '暂无已确认摘要'}</small>}{context && <small className="mobile-session-location" title={`${context.displayWorkspaceId} / ${context.groupId}`}>{context.displayWorkspaceId} · {context.groupId}</small>}</span>
-      <span className="mobile-session-state" data-state={status}>{!ordinaryUnknownAgentStatus(row) && <>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} />}<span title={stateLabel}>{stateLabel}</span></>}<small>{row?.providerId ?? session.providerId ?? '元信息未确认'}</small></span>
-    </MobileAgentRow>{candidates.length > 1 && <details className="mobile-session-locations"><summary>{candidates.length} 个原展示位置</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
-      {(place.spaceId ? directory.owners.get(place.spaceId)?.name : undefined) ?? 'Space 未确认'} · {directory.tabsById.get(place.tabId)?.name ?? 'Tab'} · {place.displayWorkspaceId} / {place.groupId}
+    const mark = row?.stateMark ?? (status === 'working' ? 'working' : status === 'error' ? 'error' : undefined)
+    // The shell owns the Hosted pending-interaction read; rows only consume its result.
+    const attention = mobileNeedsYouReason(row)
+    const quiet = ordinaryUnknownAgentStatus(row)
+    const shownMark = attention === 'waiting' ? 'attention' : attention === 'error' ? 'error' : quiet ? 'idle' : mark ?? 'idle'
+    const clock = formatMobileClock(row?.lastActivityAt)
+    const title = object.name !== '名称未确认' ? object.name : tabName || object.name
+    const showProject = !row?.projectGroup && object.project !== '项目未确认'
+    return <li key={key} className="mobile-agent-row" {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
+      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} onOpen={() => openSession(session.agentSessionId, object)}>
+      <span className="mobile-row-avatar mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={row?.avatar} size={24} /><span className="mobile-row-dot" data-mark={shownMark} aria-hidden="true" /></span>
+      <span className="mobile-row-copy mobile-session-copy">
+        <span className="mobile-row-title"><strong>{title}</strong>{clock && <time dateTime={new Date(row!.lastActivityAt!).toISOString()}>{clock}</time>}</span>
+        <span className="mobile-row-detail"><span className="mobile-row-state mobile-session-state" data-state={status} data-mark={shownMark}>
+          {!quiet && <>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} />}<span title={stateLabel}>{stateLabel}</span></>}
+          <small className="mobile-visually-hidden">{providerId ? agentProviderLabel(providerId) : '元信息未确认'}</small></span>
+          {showProject && <span className="mobile-row-project mobile-session-project">{object.project}</span>}
+          <span className="mobile-session-recap" title={row?.recap ? row.recap.text : row?.detail}>{row?.recap?.text ?? (tabName && tabName !== title ? tabName : providerId ? agentProviderLabel(providerId) : '')}</span></span>
+      </span>
+    </MobileAgentRow>{candidates.length > 1 && <details className="mobile-session-locations"><summary>在 {candidates.length} 处打开</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
+      {(place.spaceId ? directory.owners.get(place.spaceId)?.name : undefined) ?? '空间未确认'} · {directory.tabsById.get(place.tabId)?.name ?? 'Tab'}
     </button>)}</details>}</li>
   }
   const rows = catalog?.agentPresentation ?? []
@@ -349,10 +367,21 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
+      {needsYou.length > 0 && !query.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
+        <header><span>需要你</span><span className="mobile-tab-badge" aria-hidden="true">{needsYou.length}</span></header>
+        <ul>{needsYou.map(item => {
+          const session = reference(item.agentSessionId), object = identity(session), row = directory.rows.get(item.agentSessionId)
+          return <li key={item.agentSessionId}><button type="button" className="mobile-needs-you-ticket" data-reason={item.reason}
+            aria-label={`${object.name} · ${item.reason === 'error' ? '出错' : '需要你'} · 打开对话`} onClick={() => openSession(item.agentSessionId, object)}>
+            <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-dot" data-mark={item.reason === 'error' ? 'error' : 'attention'} aria-hidden="true" /></span>
+            <span><strong>{object.name}</strong><small>{item.reason === 'error' ? '出错 · 需要处理' : row?.projectGroup?.name ?? object.project}</small></span>
+          </button></li>
+        })}</ul>
+      </section>}
       {[...projectRows].map(([key, { project, values }]) => {
         const matchingValues = filteredSessions(values)
         if (!matchingValues.length) return null
-        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '项目未确认'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
+        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
       })}
       {!rows.length && <p className="mobile-spatial-empty">Focus 呈现尚未确认；原会话保留。</p>}
       {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
