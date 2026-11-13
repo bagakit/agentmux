@@ -6,3 +6,6 @@ import * as DropdownMenu from './HoverDropdownMenu'
 export type WorkbenchMenuParts = Pick<typeof ContextMenu,
   'Item' | 'Label' | 'Group' | 'Separator' | 'Sub' | 'SubTrigger' | 'SubContent' | 'Portal'>
 export const WorkbenchMenuScope = createContext<WorkbenchMenuParts>(DropdownMenu)
+
+/** A submitted action dismisses only its invoking menu; its operation stays with its owner. */
+export const WorkbenchMenuSubmit = createContext<() => void>(() => {})

@@ -8,7 +8,8 @@ import { type OpenDestination, type OpenHttpLinkOrigin } from '../lib/open-desti
 import { CURRENT_FORK_DESTINATIONS, currentForkRequest, currentForkSourceMatches, currentForkUnavailableReason,
   retainedCurrentForkOperation, reviewCurrentFork, type CurrentForkReview, type CurrentForkSession } from '../lib/agent-current-fork'
 import { OpenDestinationBar } from './OpenDestinationBar'
-import { WorkbenchMenuScope } from './WorkbenchMenuScope'
+import { WorkbenchMenuScope, WorkbenchMenuSubmit } from './WorkbenchMenuScope'
+import { agentOperationKey, beginAgentOperation, settleAgentCreation, updateAgentOperation, type AgentOperationFeedback } from '../lib/agent-operation-feedback'
 import { SelectionField } from './SelectionField'
 import { agentNewTabDestinations, requireAgentNewTabDestination, type AgentNewTabDestination } from '../lib/agent-new-tab-destination'
 import { spatialCatalog } from '../lib/space-agent-control'
@@ -21,10 +22,11 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
 
 type ForkState = { review: CurrentForkReview | null; operationId: string | null; busy: boolean; dispatching: boolean;
-  report: AgentMuxSpaceMutationReport | null; notice: string | null; destinations?: ReturnType<typeof agentNewTabDestinations> }
-const emptyState = (): ForkState => ({ review: null, operationId: null, busy: false, dispatching: false, report: null, notice: null })
-type Controls = { reason: string | null; readOnly: boolean; state: ForkState; derived?: CurrentForkReview['derived'] | undefined; begin(): void; cancel(): void;
-  select(destination: OpenDestination, newTab?: AgentNewTabDestination): void; inspect(): void }
+  report: AgentMuxSpaceMutationReport | null; notice: string | null; operation: AgentOperationFeedback | null; destinations?: ReturnType<typeof agentNewTabDestinations> }
+const emptyState = (): ForkState => ({ review: null, operationId: null, busy: false, dispatching: false, report: null, notice: null, operation: null })
+const creationSettled = (report: AgentMuxSpaceMutationReport | null | undefined) => report?.outcome === 'opened' || report?.outcome === 'retired'
+type Controls = { reason: string | null; readOnly: boolean; unsettled: boolean; state: ForkState; derived?: CurrentForkReview['derived'] | undefined; begin(): void; cancel(): void;
+  select(destination: OpenDestination, newTab: AgentNewTabDestination | undefined, submitted: () => void): void; inspect(): void }
 
 /** Lives with SessionPane, outside the dismissible menu, so an unknown operation is retained. */
 export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, sessionSource = false }: {
@@ -33,19 +35,31 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
   function restoredState(): ForkState {
     const current = useAppStore.getState()
     const operationId = retainedCurrentForkOperation(session, current.spatialRequests ?? {})
-    return { ...emptyState(), operationId, notice: operationId ? 'Earlier fork operation retained. Check its receipt without repeating creation.' : null }
+    const operation: AgentOperationFeedback | null = operationId && session ? { kind: 'fork', operationId, phase: 'unconfirmed', startedAt: Date.now(),
+      subject: { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, regionId: linkOrigin.regionId } } : null
+    return { ...emptyState(), operationId, operation, notice: operationId ? 'Earlier fork operation retained. Check its receipt without repeating creation.' : null }
   }
   const [state, setState] = useState<ForkState>(restoredState)
+  const operationKey = state.operation ? agentOperationKey(state.operation) : null
+  const sharedOperation = useAppStore(current => operationKey ? current.agentOperations[operationKey] : undefined)
   const stateRef = useRef(state)
   const mounted = useRef(true)
-  const owner = useRef(session?.id)
+  const ownerKey = JSON.stringify([session?.id, session?.control.hostId, session?.control.agentSessionId, session?.control.run.runId])
+  const owner = useRef(ownerKey)
   const receiptRevision = useRef(0)
   stateRef.current = state
   function update(next: ForkState) { stateRef.current = next; if (mounted.current) setState(next) }
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
-    if (owner.current !== session?.id) { owner.current = session?.id; update(restoredState()) }
-  }, [session?.id])
+    if (owner.current !== ownerKey) { owner.current = ownerKey; update(restoredState()) }
+  }, [ownerKey])
+  useEffect(() => { if (state.operation && !state.review) beginAgentOperation(state.operation) }, [state.operation, state.review])
+  useEffect(() => {
+    if (sharedOperation?.report && stateRef.current.operationId === sharedOperation.operationId && stateRef.current.report !== sharedOperation.report) {
+      receiptRevision.current += 1
+      update({ ...stateRef.current, report: sharedOperation.report, notice: sharedOperation.message ?? null })
+    }
+  }, [sharedOperation])
   function currentSession(review: CurrentForkReview) {
     const matches = useAppStore.getState().sessions.filter((value): value is CurrentForkSession => value.kind === 'agent' && value.id === review.origin.sessionId &&
       value.control.agentSessionId === review.source.agentSessionId && value.control.hostId === review.hostId)
@@ -64,11 +78,32 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
       update({ ...stateRef.current, ...patch })
     }
   }
-  async function select(destination: OpenDestination, newTab?: AgentNewTabDestination) {
+  function observedOperation(operation: AgentOperationFeedback) {
+    return useAppStore.getState().agentOperations[agentOperationKey(operation)]
+  }
+  function acceptReport(operation: AgentOperationFeedback, report: AgentMuxSpaceMutationReport) {
+    const held = observedOperation(operation)
+    const previous = held?.report ?? (stateRef.current.operationId === operation.operationId ? stateRef.current.report : null)
+    // Successful decoration may already be dismissed. Its original receipt still
+    // fences an older unknown reply and a retired child never becomes live again.
+    if (previous?.outcome === 'retired' || previous?.agent &&
+      (previous.outcome === 'opened' || previous.outcome === 'partial') && report.outcome !== 'opened' && report.outcome !== 'retired') {
+      if (held) settleAgentCreation(operation, previous)
+      return previous
+    }
+    settleAgentCreation(operation, report)
+    return observedOperation(operation)?.report ?? null
+  }
+  async function select(destination: OpenDestination, newTab: AgentNewTabDestination | undefined, submitted: () => void) {
     const review = stateRef.current.review
     if (!review || stateRef.current.busy || stateRef.current.dispatching || readOnly) return
-    // Lock this operation synchronously, before the first await or another click.
-    update({ ...stateRef.current, busy: true, notice: null })
+    const operation: AgentOperationFeedback = { kind: 'fork', operationId: review.operationId,
+      subject: { hostId: review.hostId, agentSessionId: review.source.agentSessionId, regionId: review.origin.regionId },
+      phase: 'pending', startedAt: Date.now() }
+    // Freeze and retain the submitted intent before yielding the menu or awaiting preparation.
+    beginAgentOperation(operation)
+    update({ ...stateRef.current, review: null, operation, busy: true, notice: null })
+    submitted()
     let dispatched = false
     try {
       requireOriginalRegion(review)
@@ -88,54 +123,64 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
       const confirmedDestination = review.placement === 'session' && newTab ? requireAgentNewTabDestination(newTab, inspected.catalog, current.layouts, { hostId: review.hostId }) : undefined
       const request = currentForkRequest(review, currentSession(review), inspected.catalog, destination, focus, confirmedDestination)
       dispatched = true
-      // Keep the admitted operation locked while permitting read-only reconciliation.
-      publish(review.operationId, { review: null, busy: false, dispatching: true })
+      publish(review.operationId, { busy: false, dispatching: true })
       const result = await current.executeControl(request)
       if (result.operation !== 'agent.open') throw new Error('Fork returned an unrelated receipt. Inspect its original operation.')
-      // An inspection may confirm the operation before its older creation reply arrives.
-      if (stateRef.current.report?.outcome !== 'opened' || result.outcome === 'opened') {
-        publish(review.operationId, { report: result, notice: null })
-      }
+      const report = acceptReport(operation, result)
+      publish(review.operationId, { report, notice: observedOperation(operation)?.message ?? null })
     } catch (cause) {
-      publish(review.operationId, { review: null, notice: `${presentError(cause)}${dispatched ? ' Inspect this operation; do not repeat creation.' : ' Fork was not dispatched.'}`,
-        ...(!dispatched ? { operationId: null, busy: false } : {}) })
+      const notice = `${presentError(cause)}${dispatched ? ' Inspect this operation; do not repeat creation.' : ' Fork was not dispatched.'}`
+      const held = observedOperation(operation)
+      updateAgentOperation(operation, { phase: held?.report?.agent ? held.phase : dispatched ? 'unconfirmed' : 'failed', message: notice })
+      publish(review.operationId, { notice, ...(!dispatched ? { operationId: null, busy: false } : {}) })
     } finally { publish(review.operationId, dispatched ? { dispatching: false } : { busy: false }) }
   }
   async function inspect() {
-    const operationId = stateRef.current.operationId
-    if (!operationId || stateRef.current.busy || readOnly) return
-    const revision = receiptRevision.current
+    const { operationId, operation } = stateRef.current
+    if (!operationId || !operation || stateRef.current.busy || readOnly) return
+    beginAgentOperation({ ...operation, phase: 'unconfirmed', ...(stateRef.current.report ? { report: stateRef.current.report } : {}) })
+    const revision = receiptRevision.current, observed = observedOperation(operation)
     update({ ...stateRef.current, busy: true, notice: null })
     try {
       const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-check:${mintObjectId()}`,
         operation: 'space.inspect', target: { requestId: operationId } })
       if (result.operation !== 'space.inspect') throw new Error('Operation inspection returned an unrelated result.')
-      // A read started before the creation receipt cannot replace its newer facts.
-      if (receiptRevision.current !== revision) return
-      publish(operationId, { report: result.request?.report ?? null, notice: result.request?.known
-        ? result.request.report ? null : 'The original operation is known; its result remains unconfirmed.'
-        : 'The original operation has not been observed. Creation has not been repeated.' })
-    } catch (cause) { publish(operationId, { notice: presentError(cause) }) }
-    finally { publish(operationId, { busy: false }) }
+      // Both menu and card inspections are fenced behind a newer original-operation receipt.
+      if (receiptRevision.current !== revision || observedOperation(operation) !== observed) return
+      const report = result.request?.report ? acceptReport(operation, result.request.report) : null
+      const notice = result.request?.known ? report ? null : 'The original operation is known; its result remains unconfirmed.'
+        : 'The original operation has not been observed. Creation has not been repeated.'
+      if (!report) updateAgentOperation(operation, { phase: observed?.report?.agent ? observed.phase : 'unconfirmed', message: notice ?? undefined })
+      publish(operationId, { report: report ?? observed?.report ?? null, notice })
+    } catch (cause) {
+      if (receiptRevision.current === revision && observedOperation(operation) === observed) {
+        updateAgentOperation(operation, { phase: observed?.report?.agent ? observed.phase : 'unconfirmed', message: presentError(cause) })
+        publish(operationId, { notice: presentError(cause) })
+      }
+    } finally { publish(operationId, { busy: false }) }
   }
   return (origin = linkOrigin, derived) => {
     if (!session) return null
     const reason = currentForkUnavailableReason(session, origin, readOnly, sessionSource)
     // One controller per Session: the official Fork and each fork-based action share its operation and receipt.
     const mine = (state.review?.derived?.id ?? null) === (derived?.id ?? null)
-    return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={mine ? state : { ...emptyState(), busy: state.busy, dispatching: state.dispatching }} derived={derived} begin={() => {
-      if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
+    const presented = sharedOperation?.report ? { ...state, report: sharedOperation.report } : state
+    return <AgentCurrentForkControls reason={reason} readOnly={readOnly} unsettled={Boolean(state.operationId && !state.review && !creationSettled(presented.report))}
+      state={mine ? presented : { ...emptyState(), busy: state.busy, dispatching: state.dispatching }} derived={derived} begin={() => {
+      const operationState = stateRef.current, report = operationState.operation ? observedOperation(operationState.operation)?.report ?? operationState.report : operationState.report
+      if (reason || operationState.review && operationState.busy || operationState.operationId && !creationSettled(report)) return
       const review = reviewCurrentFork(session, origin, mintObjectId(), sessionSource, derived)
       const current = useAppStore.getState()
       update({ ...emptyState(), operationId: review.operationId, review, ...(sessionSource ? { destinations: agentNewTabDestinations(spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? []), current.layouts, { hostId: session.control.hostId }) } : {}) })
     }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
-      select={(destination, newTab) => { void select(destination, newTab) }} inspect={() => { void inspect() }} />
+      select={(destination, newTab, submitted) => { void select(destination, newTab, submitted) }} inspect={() => { void inspect() }} />
   }
 }
 
 /** Menu presentation only. Closing/Escape unmounts this view, not its operation controller. */
-export function AgentCurrentForkControls({ reason, readOnly, state, derived, begin, cancel, select, inspect }: Controls) {
+export function AgentCurrentForkControls({ reason, readOnly, unsettled, state, derived, begin, cancel, select, inspect }: Controls) {
   const DropdownMenu = useContext(WorkbenchMenuScope)
+  const submitted = useContext(WorkbenchMenuSubmit)
   const reviewRef = useRef<HTMLDivElement>(null)
   const [destinationKey, setDestinationKey] = useState('')
   const selectedDestination = state.destinations?.find(item => item.value === destinationKey)?.destination
@@ -157,10 +202,9 @@ export function AgentCurrentForkControls({ reason, readOnly, state, derived, beg
     reviewRef.current?.closest('[role=menu]')?.querySelector<HTMLElement>('[data-current-fork-action]')?.focus()
     cancel()
   }
-  const pending = state.operationId && !state.review && state.report?.outcome !== 'opened'
   return <>
     <DropdownMenu.Item className="tab-context-menu__item" data-current-fork-action={derived ? undefined : ''} data-derived-action={derived?.id}
-      disabled={Boolean(reason || state.busy || state.dispatching || pending)} onSelect={event => { event.preventDefault(); begin() }}>
+      disabled={Boolean(reason || state.review && state.busy || unsettled)} onSelect={event => { event.preventDefault(); begin() }}>
       {derived ? <DerivedActionIcon size={14} /> : <ConversationForkIcon size={14} />}<span>{derived ? `${derived.label}…` : 'Fork current conversation…'}</span>
     </DropdownMenu.Item>
     {reason && !derived ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span>{reason}</span></DropdownMenu.Label> : null}
@@ -175,13 +219,13 @@ export function AgentCurrentForkControls({ reason, readOnly, state, derived, beg
         : state.review.placement === 'session' ? <>
           <SelectionField label="Fork destination" value={destinationKey} onValueChange={setDestinationKey} options={[{ value: '', label: 'Choose an existing destination' }, ...state.destinations ?? []]} />
           {!state.destinations?.length ? <span>No existing destination is confirmed. Keep this Agent and choose an available Space first.</span> : null}
-          <button type="button" className="small-button" disabled={!selectedDestination} onClick={() => select('tab', selectedDestination)}>Fork in new Tab</button>
+          <button type="button" className="small-button" disabled={!selectedDestination} onClick={() => select('tab', selectedDestination, submitted)}>Fork in new Tab</button>
         </> : <OpenDestinationBar canSplit allowedDestinations={CURRENT_FORK_DESTINATIONS}
-          accessibleContext="Choose where to fork the current conversation" onSelect={select} />}
+          accessibleContext="Choose where to fork the current conversation" onSelect={destination => select(destination, undefined, submitted)} />}
       <button type="button" className="agent-current-fork__cancel" disabled={state.busy} onClick={cancelReview}><ThemeActionCancelIcon size={13} />Cancel fork</button>
     </div> : null}
     {state.operationId && !state.review ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork" data-current-fork-operation={state.operationId}>
-      <strong>{state.busy ? 'Checking fork…' : state.report?.outcome === 'opened' ? 'Fork opened' : state.dispatching ? 'Fork request pending' : 'Fork needs review'}</strong>
+      <strong>{state.busy ? 'Checking fork…' : state.report?.outcome === 'retired' ? 'Fork target closed' : state.report?.outcome === 'opened' ? 'Fork opened' : state.dispatching ? 'Fork request pending' : 'Fork needs review'}</strong>
       <span>Operation: {state.operationId}</span>
       {state.report?.agent ? <span>New Session: {state.report.agent.agentSessionId}{state.report.agent.runId ? ` · Run: ${state.report.agent.runId}` : ' · Run unknown'}</span> : null}
       {state.report?.to ? <span>Region: {state.report.to.regionId}</span> : null}

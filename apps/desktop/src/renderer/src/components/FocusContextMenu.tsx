@@ -19,7 +19,7 @@ import type { TakeoverSource } from '../lib/session-takeover'
 import { FocusAgentWorkspaceMenu } from './FocusAgentWorkspaceMenu'
 import { focusAgentMenuLocation, requireFocusAgentMenuLocation } from '../lib/focus-agent-menu-location'
 import { AgentMenuContent } from './AgentMenuContent'
-import { WorkbenchMenuScope } from './WorkbenchMenuScope'
+import { WorkbenchMenuScope, WorkbenchMenuSubmit } from './WorkbenchMenuScope'
 import { useAgentNativeSourceControls } from './AgentNativeSourceControls'
 import { agentMenuRunMatches, agentMenuSession } from '../lib/agent-menu-target'
 import { executionHostProjection } from '../lib/region-execution-host'
@@ -139,7 +139,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
           if (actionOwnsFocus.current || connector.dialogOpen || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
           else onRestoreFocus()
         }}>
-        <WorkbenchMenuScope.Provider value={ContextMenu}>
+        <WorkbenchMenuScope.Provider value={ContextMenu}><WorkbenchMenuSubmit.Provider value={() => onOpenChange(false)}>
           <AgentMenuContent name={context.name} executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'}
             sessionId={context.control?.agentSessionId}
             executionHost={executionHostProjection(context.control?.hostId ?? context.hostId, context.workspacePath, host)}
@@ -162,7 +162,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
               identityActions: <ContextMenu.Item className="tab-context-menu__item" onSelect={() => {
               actionOwnsFocus.current = true; onRename()
             }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item> }} />
-        </WorkbenchMenuScope.Provider>
+        </WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}{connector.dialog}{reading?.mode === 'history' ? <AgentSessionReadingSurface source={reading.source} label={reading.label} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}

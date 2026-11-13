@@ -14,7 +14,7 @@ import { AgentMenuContent } from './AgentMenuContent'
 import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { useSessionStop } from './SessionStop'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { WorkbenchMenuScope } from './WorkbenchMenuScope'
+import { WorkbenchMenuScope, WorkbenchMenuSubmit } from './WorkbenchMenuScope'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { HostBadge } from './HostBadge'
@@ -56,6 +56,13 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   const stop = useSessionStop(active)
   const moreTrigger = useRef<HTMLButtonElement>(null)
   const menuObservation = useRegionMenuObservation()
+  const [localMenuOpen, setLocalMenuOpen] = useState(false)
+  function changeMenu(open: boolean) { setLocalMenuOpen(open); menuObservation.onOpen(open) }
+  function submitMenu() {
+    setLocalMenuOpen(false)
+    if (menuObservation.onSubmitted) menuObservation.onSubmitted()
+    else menuObservation.onOpen(false)
+  }
   const nativeSource = useAgentNativeSourceControls({ session: nativeSession ?? null, readOnly })
   useLayoutEffect(() => {
     if (sessionKind !== 'agent' || !menuObservation.setAgentMenuAvailable) return
@@ -118,7 +125,11 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label}
           Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal} />) : null }} />
   function closeMenuFocus(event: Event) {
-    if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null) event.preventDefault()
+    const closing = event.target as Element | null
+    const owner = closing?.ownerDocument ?? moreTrigger.current?.ownerDocument
+    const focused = owner?.activeElement
+    const laterFocus = closing?.nodeType === 1 && focused && focused !== owner?.body && !closing.contains(focused)
+    if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null || laterFocus) event.preventDefault()
     handoffFocus.current = false
   }
   const header = <header className="agent-region-header"
@@ -132,7 +143,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     {resultReview}
     {!readOnly && connectorSession?.kind === 'agent' ? <AgentConnections session={connectorSession} regionId={regionId} visible={active} /> : null}
     {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
-    <DropdownMenu.Root {...(menuObservation.moreOpen !== undefined ? { open: menuObservation.moreOpen } : {})} onOpenChange={menuObservation.onOpen}>
+    <DropdownMenu.Root open={menuObservation.moreOpen ?? localMenuOpen} onOpenChange={changeMenu}>
       <DropdownMenu.Trigger ref={moreTrigger} className="agent-region-header__more"
         aria-label={`More actions for ${name}${nativeSession && nativeSourceLabel(nativeSession) ? `; ${nativeSourceLabel(nativeSession)}` : ''}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
         onPointerDown={event => event.stopPropagation()}>
@@ -143,7 +154,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         data-menu-entry="more" data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}
         onCloseAutoFocus={closeMenuFocus}>
-        <WorkbenchMenuScope.Provider value={DropdownMenu}>{content(DropdownMenu)}</WorkbenchMenuScope.Provider>
+        <WorkbenchMenuScope.Provider value={DropdownMenu}><WorkbenchMenuSubmit.Provider value={submitMenu}>{content(DropdownMenu)}</WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     {sessionKind === 'agent' && menuObservation.setAgentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
@@ -153,7 +164,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           closeMenuFocus(event)
           menuObservation.onContextCloseAutoFocus?.(event)
         }}>
-        <WorkbenchMenuScope.Provider value={ContextMenu}>{content(ContextMenu, menuObservation.contextualMenu)}</WorkbenchMenuScope.Provider>
+        <WorkbenchMenuScope.Provider value={ContextMenu}><WorkbenchMenuSubmit.Provider value={submitMenu}>{content(ContextMenu, menuObservation.contextualMenu)}</WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </header>

@@ -130,6 +130,7 @@ type ContextualMenu = { source: RegionContextSource; contribution: RegionContext
 
 const RegionMenuContext = createContext<{
   entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean
+  onSubmitted?(): void
   moreOpen?: boolean; setAgentMenuAvailable?: (available: boolean) => void
   contextualMenu?: RegionContextContribution | null; contextSource?: RegionContextSource | null
   setContextSource?(source: RegionContextSource | null): void
@@ -330,6 +331,7 @@ export function RegionContextMenu({
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
     <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: openMore, moreOpen, setAgentMenuAvailable,
+      onSubmitted: () => { openMore(false); openContext(false); connector.onOpen(false) },
       contextualMenu: contribution, contextSource: contextualMenu?.source ?? null, setContextSource, refreshContextSource,
       clearContextSource, onContextCloseAutoFocus, dialogOpen: connector.dialogOpen || restart.dialog !== null }}>
       <ContextMenu.Root open={contextOpen} onOpenChange={openContext}>
