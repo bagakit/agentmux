@@ -14,11 +14,30 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
+const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const specifications = {
+  modeless: {
+    tests: [modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    mutations: [{ label: 'hit-first-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: "if (tool !== 'erase' && tool !== 'crop') {", replace: "if (tool === 'select') {", test: modeless,
+      consumer: 'a drawing tool moves the existing mark it presses instead of drawing over it', failure: /must not add a rectangle/ },
+    { label: 'auto-select-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'edit(doc => commitShape(doc, shape)); setSelectedId(shape.id)', replace: 'edit(doc => commitShape(doc, shape))', test: modeless,
+      consumer: 'a new rectangle stays selected so Color recolors it without switching to Select', failure: /actual new rectangle is selected/ },
+    { label: 'click-threshold-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const click = down !== null && Math.hypot(up.x - down.at.x, up.y - down.at.y) < CLICK_DISTANCE', replace: 'const click = false', test: modeless,
+      consumer: 'a click without travel adds no region mark and no Undo entry', failure: /actual stray click creates no rectangle/ },
+    { label: 'escape-closes-at-once', source: component + 'ImageAnnotationEditor.tsx',
+      find: "if (textDraftRef.current) finishText('', true)", replace: 'if (true) onCancel()', test: modeless,
+      consumer: 'Escape peels selection and tool before asking to discard unkept marks', failure: /first Escape clears the selection/ },
+    { label: 'kept-output-confirmation-ignored', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'if (confirmed === true) { setExported(kept); setDiscarding(false) }', replace: 'void confirmed', test: modeless,
+      consumer: 'an output the host confirms as kept lets Escape close without asking', failure: /actual confirmed output needs no discard bar/ }]
+  },
   enhancements: {
     tests: ['apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-editing.test.tsx',
       'apps/desktop/test/image-annotation-compact-toolbar.test.tsx', 'apps/desktop/test/annotation-toolbar-focus.test.tsx'],
@@ -36,7 +55,7 @@ const specifications = {
       test: 'apps/desktop/test/image-annotation-editing.test.tsx',
       consumer: 'keeps Enter for multiline input and commits exact custom-colored text only on modifier Enter', failure: /ordinary Enter must remain a native newline/ },
     { label: 'save-png-callback-omitted', source: component + 'ImageAnnotationEditor.tsx',
-      find: "else if (action === 'save-png') onSavePng?.(input)", replace: "else if (action === 'save-png') void input",
+      find: "'save-png': onSavePng,", replace: "'save-png': undefined,",
       test: 'apps/desktop/test/image-annotation-editing.test.tsx',
       consumer: 'draws one brush mask in original pixels and undoes the whole gesture while all output actions consume the same edited snapshot', failure: /called at least once/ },
     { label: 'compact-tool-selection-omitted', source: component + 'AnnotationToolbar.tsx',
