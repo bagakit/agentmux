@@ -144,6 +144,7 @@ describe('T-007 original Survey selected content frame', () => {
   it('refuses the later mapping of the same Zone, preserving the original file body and exact resource reference', async () => {
     const view = await fixture()
     await view.click('原研究目录'); await view.click('original.md')
+    await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 10))); expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown') })
     await mkdir(join(view.path, 'remapped')); await writeFile(join(view.path, 'remapped/original.md'), '# 另一个映射的正文')
     view.remap(join(view.path, 'remapped')); await view.click('刷新文件')
     expect(view.rpc).toHaveBeenLastCalledWith('file.read', { zoneId: view.zone.zoneId, path: 'original.md', expectedResource: { hostId: 'local', workspaceId: view.workspace.id, workspacePath: view.path } })
