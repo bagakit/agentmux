@@ -75,7 +75,9 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote' | 'motes'>(() =>
     initial.current?.view ?? (restoration ? 'management' : !manualOnly && !navigationRequest?.moteLarkOrigin && !origin && ownEnrollment ? 'enrollment' : 'loading'))
   const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
-  useEffect(() => { if (!active) setMoteSelection(current => current?.create ? { ...current, create: false } : current) }, [active])
+  // The pane stays mounted while another section is shown, so drafts survive; a typed secret is private
+  // material and never outlives leaving, it is asked for again on return.
+  useEffect(() => { if (!active) { setMoteSelection(current => current?.create ? { ...current, create: false } : current); setSecret('') } }, [active])
   const [libraryRevision, setLibraryRevision] = useState(0)
   const identities = useMoteIdentityReadings(active && localMoteCatalog, libraryRevision, hostingTarget)
   const [saveNotice, setSaveNotice] = useState('')
@@ -266,7 +268,6 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     } catch (error) { setIssue(presentError(error)) }
   }
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
-  if (!active) return null
   const originalLocator = restoration ?? readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })])
   if (!hostingTarget) return <section className="connector-setup" data-owner-unconfirmed>
     <h3>Original bot Host not recorded</h3><p className="settings-group-note">The original request and draft are kept. Checking another Host cannot confirm this result. Choose a Host above to manage its bots separately.</p>

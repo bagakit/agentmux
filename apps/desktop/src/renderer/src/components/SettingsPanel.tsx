@@ -233,7 +233,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
           const paneVisible = visible && active === pane && !(searching && showResults)
           return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
             {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div> : null}
-            <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest} />
+            <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest?.section === pane ? navigationRequest : undefined} />
           </div>
         })}
       </main>

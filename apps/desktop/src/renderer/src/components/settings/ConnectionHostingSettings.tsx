@@ -46,7 +46,6 @@ export function ConnectionHostingSettings(props: { active: boolean; platform: { 
     return () => abort.abort()
   }, [request, props.active])
   const key = JSON.stringify([channel, target]), connections = useMemo(() => connectionSettingsPort(target ?? null), [key])
-  if (!props.active) return null
   return <div className="settings-pane-stack channel-settings">
     <ChannelHeaderControl key={props.platform.adapterId} platform={props.platform} />
     <div className="channel-environment">
