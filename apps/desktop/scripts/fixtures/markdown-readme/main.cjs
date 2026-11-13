@@ -24,10 +24,16 @@ async function frame(name, extra = {}) {
 async function imagesSettled() {
   await wait(`(()=>{const p=${preview};if(!p)return false;const imgs=[...p.querySelectorAll('img')];return imgs.every(i=>i.complete)&&!p.querySelector('.file-markdown-image__loading')})()`, 30000)
 }
+/** Scroll an exact target into the frame; a missing target fails the capture instead of silently framing the top. */
 async function scrollTo(selector, offset = 0) {
-  await evaluate(`(()=>{const p=${preview};const t=p.querySelector(${JSON.stringify(selector)});p.scrollTop=t?Math.max(0,t.getBoundingClientRect().top-p.getBoundingClientRect().top+p.scrollTop-${offset}):0})()`)
+  const found = await evaluate(`(()=>{const p=${preview};const t=p.querySelector(${JSON.stringify(selector)});if(!t)return false;p.scrollTop=Math.max(0,t.getBoundingClientRect().top-p.getBoundingClientRect().top+p.scrollTop-${offset});return true})()`)
+  assert.ok(found, 'Capture target exists before framing: ' + selector)
+  await paint(); await imagesSettled()
+  // Lazy images grow after their bytes arrive; frame the same target again once layout settles.
+  await evaluate(`(()=>{const p=${preview};const t=p.querySelector(${JSON.stringify(selector)});p.scrollTop=Math.max(0,t.getBoundingClientRect().top-p.getBoundingClientRect().top+p.scrollTop-${offset})})()`)
   await paint(); await imagesSettled()
 }
+
 async function capture(name) {
   await evaluate(`filePreviewProbe.open(${JSON.stringify(name)})`)
   await wait(`Boolean(filePreviewProbe.activeRegion()?.querySelector('.editor-header'))`)
@@ -45,7 +51,9 @@ async function capture(name) {
     await scrollTo('.md-container'); await frame(`${slug}-hero-${theme}`, { theme, document: name })
     await scrollTo('.md-alert', 160); await frame(`${slug}-alert-${theme}`, { theme, document: name })
     await scrollTo('.md-html-table--layout', 120); await frame(`${slug}-cards-${theme}`, { theme, document: name })
-    await scrollTo('img[alt^="AgentMux in three layers"], img[alt*="三层"]', 80); await frame(`${slug}-architecture-${theme}`, { theme, document: name })
+    await scrollTo('h2[data-md-anchor^="architecture"], h2[data-md-anchor*="架构"]', 24)
+    await wait(`(()=>{const i=[...${preview}.querySelectorAll('.file-markdown-image img')].find(i=>/architecture-(dark|light)/.test(i.title));return Boolean(i&&i.naturalWidth>0&&i.title.includes('architecture-${theme}'))})()`)
+    await frame(`${slug}-architecture-${theme}`, { theme, document: name })
   }
 }
 app.whenReady().then(async () => { try {
