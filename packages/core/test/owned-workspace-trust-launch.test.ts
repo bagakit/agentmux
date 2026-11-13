@@ -102,3 +102,16 @@ describe('Core pre-trusts AgentMux-owned homes before launching a Provider there
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED' }))
   })
 })
+
+describe('a Core launch starts the native start window for its Hook binding', () => {
+  it('records when the created Run’s Hook binding became active, and forgets it with the binding', async () => {
+    await create(home)
+    const inner = client as unknown as { hookBindings: Map<string, unknown>; hookBindingActivatedAt: Map<string, number>; forgetHookBinding(runId: string): void }
+    expect(inner.hookBindings.has('private-run')).toBe(true)
+    const at = inner.hookBindingActivatedAt.get('private-run')
+    expect(typeof at).toBe('number')
+    expect(Date.now() - at!).toBeLessThan(10_000)
+    inner.forgetHookBinding('private-run')
+    expect(inner.hookBindingActivatedAt.has('private-run')).toBe(false)
+  })
+})
