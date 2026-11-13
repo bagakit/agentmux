@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, type CapsuleInputPort, type CapsuleInputRequest, type CapsuleInputResult,
   type AgentInputSubmissionReceipt } from '@agentmux/core'
-import { parseCapsuleRpcParams, type CapsuleInteraction, type CapsuleParamsMap, type CapsulePort,
+import { formatCapsuleAnswer, parseCapsuleRpcParams, type CapsuleInteraction, type CapsuleParamsMap, type CapsulePort,
   type CapsulePreparedReply, type CapsuleInputObservation, type CapsuleJson } from '@agentmux/core/capsule'
 import type { RuntimeController } from './runtime-controller.js'
 
@@ -10,6 +10,10 @@ type Confirmation = { params: Reply; original: CapsuleInteraction; runId: string
   retainedInput?: { inputOperationId: string; expectedRun: { runId: string } };
   prepared?: CapsulePreparedReply; dispatched: boolean }
 const principal = () => ({ kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` })
+
+// The confirmed answer is the whole prompt; Core owns its readable envelope.
+const answerPrompt = (confirmation: Confirmation): string => formatCapsuleAnswer({ capsuleId: confirmation.params.capsuleId,
+  interactionId: confirmation.params.interactionId, question: confirmation.original.question, answer: confirmation.params.answer })
 
 /** Owns only this live native confirmation. Durable answer/input facts stay with Capsule and Core. */
 export class CapsuleReplyAuthority implements CapsuleInputPort {
@@ -78,17 +82,14 @@ export class CapsuleReplyAuthority implements CapsuleInputPort {
         interactionId: confirmation.params.interactionId, inputOperationId: request.inputOperationId,
         target: { ...confirmation.original.target! }, expectedRun: { runId: confirmation.runId }, principal: principal(),
         // Page content remains explicitly attributed data in the person's confirmed answer.
-        prompt: JSON.stringify({ source: 'capsule-response', capsuleId: confirmation.params.capsuleId,
-          interactionId: confirmation.params.interactionId, question: confirmation.original.question, answer: request.answer }) }
+        prompt: answerPrompt(confirmation) }
       confirmation.prepared = prepared
       return { phase: 'prepare', prepared }
     }
     const prepared = input.prepared, confirmation = this.confirmations.get(prepared.operationId)
     if (!confirmation || prepared.capsuleId !== confirmation.params.capsuleId || prepared.interactionId !== confirmation.params.interactionId ||
       !isDeepStrictEqual(prepared.target, confirmation.original.target) || prepared.expectedRun.runId !== confirmation.runId ||
-      !isDeepStrictEqual(prepared.principal, principal()) || prepared.prompt !== JSON.stringify({ source: 'capsule-response',
-        capsuleId: confirmation.params.capsuleId, interactionId: confirmation.params.interactionId,
-        question: confirmation.original.question, answer: confirmation.params.answer }) ||
+      !isDeepStrictEqual(prepared.principal, principal()) || prepared.prompt !== answerPrompt(confirmation) ||
       (confirmation.retainedInput ? prepared.inputOperationId !== confirmation.retainedInput.inputOperationId ||
         !isDeepStrictEqual(prepared.expectedRun, confirmation.retainedInput.expectedRun)
         : !confirmation.prepared || !isDeepStrictEqual(confirmation.prepared, prepared)))
