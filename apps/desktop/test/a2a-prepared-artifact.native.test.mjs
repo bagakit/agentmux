@@ -6,16 +6,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
-import { a2aArtifactInventory, prepareA2aArtifact, verifyA2aPreparedArtifact } from '../scripts/lib/a2a-prepared-artifact.mjs'
+import { pathToFileURL } from 'node:url'
+import { a2aArtifactInventory, prepareA2aArtifact, readA2aPreparedSource, verifyA2aPreparedArtifact } from '../scripts/lib/a2a-prepared-artifact.mjs'
 
 const exec = promisify(execFile), sha = value => createHash('sha256').update(value).digest('hex')
 const temporary = async fn => { const root = await realpath(await mkdtemp(join(tmpdir(), 'a2a-artifact-test-'))); try { await fn(root) } finally { await rm(root, { recursive: true, force: true }) } }
-async function fixture(root) {
+async function fixture(root, sourcePath = 'owner.mjs') {
   const put = async (path, value, mode) => { await mkdir(join(root, path, '..'), { recursive: true }); await writeFile(join(root, path), value, mode ? { mode } : undefined) }
   const git = async args => (await exec('git', args, { cwd: root })).stdout.trim()
   await git(['init', '-q'])
-  await put('owner.mjs', 'export const source = "fixed"\n')
-  await git(['add', 'owner.mjs'])
+  await put(sourcePath, 'export const source = "fixed"\n')
+  await git(['add', sourcePath])
   await git(['-c', 'user.name=Proof fixture', '-c', 'user.email=proof@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Record proof fixture'])
   const identity = { schema: 'agentmux.package-identity.v1', appVersion: '0.1.0', platform: process.platform, arch: process.arch,
     sourceCommit: await git(['rev-parse', 'HEAD']), sourceTree: await git(['rev-parse', 'HEAD^{tree}']) }
@@ -34,7 +35,7 @@ async function fixture(root) {
   const descriptor = { schema: 'agentmux.a2a-prepared-input.v1', origin: await ref('origin.json'), buildRecord: await ref('build.log'), sourceReview: await ref('review.md'),
     buildDisposition: { compilation: 'completed', installation: 'unknown', sourceFinalization: 'not-reached', exitCode: 1 } }
   await put('input.json', JSON.stringify(descriptor)); await mkdir(join(root, 'private'))
-  return { root, input: join(root, 'input.json'), privateRoot: join(root, 'private'), sourcePaths: ['owner.mjs'], identity, core: join(root, core) }
+  return { root, input: join(root, 'input.json'), privateRoot: join(root, 'private'), sourcePaths: [sourcePath], identity, core: join(root, core) }
 }
 
 test('inventory retains executable modes and internal links but refuses borrowed or unresolved code', async () => temporary(async root => {
@@ -73,8 +74,39 @@ test('wrong Core identity is refused before copying or launching any candidate',
   assert.deepEqual(await readdir(options.privateRoot), [])
 }))
 
+test('source reads retain declared Git bytes and reject undeclared or changed source claims', async () => temporary(async root => {
+  const prepared = await prepareA2aArtifact(await fixture(root))
+  await writeFile(join(root, 'owner.mjs'), 'concurrent checkout changes\n')
+  assert.equal((await readA2aPreparedSource(prepared, { root, path: 'owner.mjs' })).toString(), 'export const source = "fixed"\n')
+  await assert.rejects(readA2aPreparedSource(prepared, { root, path: 'other.mjs' }), { name: 'AssertionError' })
+  prepared.sourceSnapshot.files['owner.mjs'] = sha('other source')
+  await assert.rejects(readA2aPreparedSource(prepared, { root, path: 'owner.mjs' }), { name: 'AssertionError' })
+  prepared.sourceSnapshot.files['owner.mjs'] = sha('export const source = "fixed"\n')
+  const mutable = structuredClone(prepared); mutable.identity.sourceCommit = mutable.sourceSnapshot.commit = 'HEAD'
+  await assert.rejects(readA2aPreparedSource(mutable, { root, path: 'owner.mjs' }), { name: 'AssertionError', message: /immutable full Git objects/u })
+}))
+
+test('the model source selection survives a deleted live product file and preserves the original missing harness failure', async () => temporary(async root => {
+  const sourcePath = 'packages/core/src/owner.ts', options = await fixture(root, sourcePath)
+  await rm(join(root, sourcePath))
+  const module = pathToFileURL(join(import.meta.dirname, '../../../packages/core/scripts/lib/a2a-private-model-proof.mjs')).href
+  const program = `const {launchPrivateA2aProof}=await import(process.argv[1]);try{const result=await launchPrivateA2aProof(JSON.parse(process.argv[2]));process.exitCode=0;console.log(JSON.stringify({result}))}catch(error){console.log(JSON.stringify({escaped:error.message}))}`
+  const { stdout } = await exec(process.execPath, ['--input-type=module', '-e', program, module, JSON.stringify({ repository: root,
+    sourceInputs: [sourcePath, 'missing-harness.mjs'], coordinatorEntry: join(root, 'missing-coordinator.mjs'),
+    preparedArtifact: options.input, freezeCandidate: true, executableName: process.execPath, name: 'source-selection-test' })],
+  { env: { ...process.env, CODEX_HOME: join(root, 'unavailable-private-auth') } })
+  const { result, escaped } = JSON.parse(stdout.trim().split('\n').at(-1))
+  assert.equal(escaped, undefined); assert.equal(result.passed, false)
+  const receipt = JSON.parse(await readFile(result.launcher, 'utf8'))
+  assert.match(receipt.failure.message, /missing-harness\.mjs/u)
+  assert.equal(receipt.sourceBefore, undefined); assert.equal(receipt.sourceAfter, undefined)
+  assert.equal(receipt.coordinatorPid, undefined); assert.equal(receipt.cleanup.privateRootRemoved, true)
+}))
+
 test('verification rejects a truncated Core join, promoted build outcome and changed provenance', async () => temporary(async root => {
   const prepared = await prepareA2aArtifact(await fixture(root))
+  const empty = structuredClone(prepared); empty.sourceSnapshot.files = {}
+  await assert.rejects(verifyA2aPreparedArtifact(empty, { root }), { name: 'AssertionError', message: /source snapshot must be nonempty/u })
   const truncated = structuredClone(prepared); delete truncated.coreGraph['dist/unit-100.js']
   await assert.rejects(verifyA2aPreparedArtifact(truncated, { root }), { name: 'AssertionError', message: /same-Core graph/u })
   const promoted = structuredClone(prepared); promoted.buildDisposition.installation = 'passed'
