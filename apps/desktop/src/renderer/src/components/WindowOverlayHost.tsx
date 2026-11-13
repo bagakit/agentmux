@@ -50,7 +50,12 @@ function bindWindowOverlayTopLayer(host: HTMLElement): void {
   const observer = new (document.defaultView?.MutationObserver ?? MutationObserver)(records => {
     let opened = false
     const admit = (node: Element) => {
-      if (eligible(node) && !active.has(node)) { active.add(node); opened = true }
+      if (eligible(node) && !active.has(node)) {
+        active.add(node)
+        // A focused menu button can disclose its tooltip between pointerdown
+        // and pointerup. Reopening that same host interrupts the native click.
+        if (node.getAttribute('role') !== 'tooltip') opened = true
+      }
     }
     for (const record of records) {
       if (record.type === 'attributes') admit(record.target as Element)
@@ -74,8 +79,8 @@ function bindWindowOverlayTopLayer(host: HTMLElement): void {
     }
     if (!opened && shown) return
     // Native popovers and HTML dialogs share the top layer. A newer window
-    // overlay must enter after its invoker. Reordering has no focus side effect
-    // for a manual popover: Radix still owns modality, focus and Escape.
+    // menu or dialog must enter after its invoker. A tooltip joins an already
+    // shown host without moving that host through the native top layer again.
     if (shown) host.hidePopover()
     host.showPopover()
   })
