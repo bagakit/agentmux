@@ -460,6 +460,7 @@ export type AppConfig = {
   profile?: import('./user-profile').UserProfile
   focus?: import('./focus-preferences').FocusPreferences
   notes?: import('./notes-preferences').NotesPreferences
+  markdown?: import('./markdown-preferences').MarkdownPreferences
   goals?: import('@agentmux/host/goals-preferences').GoalsPreferences
   /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
   continuity?: Partial<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityPolicy>

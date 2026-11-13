@@ -45,6 +45,7 @@ import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
 import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '../shared/user-profile.js'
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_TOPIC_PRESENTATIONS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS, FOCUS_RECENT_INPUTS, FOCUS_MAP_MOTION } from '../shared/focus-preferences.js'
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
+import { MARKDOWN_READING_TYPEFACES, MARKDOWN_READING_WIDTHS, validMarkdownReadingFontSize } from '../shared/markdown-preferences.js'
 import { GOALS_VIEW_IDS } from '@agentmux/host/goals-preferences'
 import { validateAutomationPreferences } from '../shared/automation-preferences.js'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit } from '../shared/browser-start-page.js'
@@ -313,6 +314,8 @@ const configSchema = z
     browser: browserSchema,
     focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), topicPresentation: z.enum(FOCUS_TOPIC_PRESENTATIONS).optional(), linkDestination: z.enum(['region', 'tab']).optional(), replyLines: z.number().refine(value => (FOCUS_REPLY_LINES as readonly number[]).includes(value)).optional(), previewTrigger: z.enum(FOCUS_PREVIEW_TRIGGERS).optional(), recentInputs: z.number().refine(value => (FOCUS_RECENT_INPUTS as readonly number[]).includes(value)).optional(), mapMotion: z.enum(FOCUS_MAP_MOTION).optional(), map: focusMapSchema.optional() }).strict().optional(),
     notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
+    markdown: z.object({ readingWidth: z.enum(MARKDOWN_READING_WIDTHS).optional(), readingTypeface: z.enum(MARKDOWN_READING_TYPEFACES).optional(),
+      readingFontSize: z.number().refine(validMarkdownReadingFontSize).optional() }).strict().optional(),
     goals: z.object({ defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional(), requesterAsSupervisor: z.boolean().optional() }).strict().optional(),
     continuity: z.object({
       activeRecovery: z.enum(['automatic', 'manual']).optional(),

@@ -10,6 +10,7 @@ import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolve
 import { resolveFocusMapPreferences, DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
+import { resolveMarkdownPreferences, type MarkdownPreferences } from './markdown-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'
 import { resolveAutomationPreferences, type AutomationPreferences, type AutomationDefaults } from './automation-preferences'
@@ -52,6 +53,10 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'notes') return resolveNotesPreferences(value as NotesPreferences | undefined)
   if (path === 'notes.fontSize') return value ?? resolveNotesPreferences(undefined).fontSize
   if (path === 'notes.contentWidth') return value ?? resolveNotesPreferences(undefined).contentWidth
+  if (path === 'markdown') return resolveMarkdownPreferences(value as MarkdownPreferences | undefined)
+  if (path === 'markdown.readingWidth') return value ?? resolveMarkdownPreferences(undefined).readingWidth
+  if (path === 'markdown.readingTypeface') return value ?? resolveMarkdownPreferences(undefined).readingTypeface
+  if (path === 'markdown.readingFontSize') return value ?? resolveMarkdownPreferences(undefined).readingFontSize
   if (path === 'goals') return resolveGoalsPreferences(value as GoalsPreferences | undefined)
   if (path === 'goals.defaultView') return value ?? resolveGoalsPreferences(undefined).defaultView
   if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
@@ -100,7 +105,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
+    if (path === 'a2a' || path === 'notes' || path === 'markdown' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'agentDerivedActions') {
