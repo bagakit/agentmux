@@ -4,6 +4,7 @@ import { parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
+import { runIndependentCheckpoints } from './store/storage-checkpoint'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
 import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
 import { editComposerInputImages, restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
@@ -4560,10 +4561,11 @@ async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void
   const request = includeSpatial ? ++spatialSaveRequest : ++localSaveRequest
   const current = () => request === (includeSpatial ? spatialSaveRequest : localSaveRequest)
   try {
-    if (includeSpatial) await checkpointSpatialWorkbench()
-    if (includeSpatial) await checkpointWorkbenchUserState()
-    else if (!__AGENTMUX_WEB_PREVIEW__) await persistentWorkbenchStorage.flush()
-    await api.ui.requestStorageFlush()
+    await runIndependentCheckpoints([
+      ...(includeSpatial ? [checkpointSpatialWorkbench, checkpointWorkbenchUserState]
+        : __AGENTMUX_WEB_PREVIEW__ ? [] : [() => persistentWorkbenchStorage.flush()]),
+      () => api.ui.requestStorageFlush()
+    ])
     if (current() && failureRevision === workbenchSaveFailureRevision &&
         (__AGENTMUX_WEB_PREVIEW__ || desktopUserDocument.unreadFragments().length === 0) &&
         (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
