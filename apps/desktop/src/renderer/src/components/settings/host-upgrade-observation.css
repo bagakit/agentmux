@@ -2,4 +2,13 @@
 .host-upgrade__observation > div { min-width: 0; display: grid; gap: var(--sp-1); }
 .host-upgrade__observation dt { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .host-upgrade__observation dd { min-width: 0; margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.host-upgrade__versions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--sp-3); margin: 0; }
+.host-upgrade__versions > div { min-width: 0; }
+.host-upgrade__versions dt, .host-upgrade__versions > span, .host-upgrade__read-time { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.host-upgrade__versions dd { margin: var(--sp-1) 0 0; color: var(--text); font-weight: 550; font-size: var(--fs-body); overflow-wrap: anywhere; }
+.host-upgrade__versions dd > small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.host-upgrade__original, .host-upgrade__review { display: grid; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.host-upgrade__original > strong, .host-upgrade__review > strong { font-size: var(--fs-body); font-weight: 550; }
+.host-upgrade__review > span, .host-upgrade__review > p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.host-upgrade__original > .field-hint { margin: 0; }
 @container (max-width: 360px) { .host-upgrade__observation { grid-template-columns: minmax(0, 1fr); } }

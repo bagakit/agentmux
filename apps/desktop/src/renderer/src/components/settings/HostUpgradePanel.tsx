@@ -8,171 +8,181 @@ import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
 import './host-upgrade-observation.css'
 
-const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
-const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
-const ThemeStatusInfoIcon = semanticIconComponent('status.info')
-const UpgradeHostIcon = semanticIconComponent('action.upgrade-host')
-const ThemeActionCopyIcon = semanticIconComponent('action.copy')
-const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const LoadingIcon = semanticIconComponent('status.loading')
+const UpgradeIcon = semanticIconComponent('action.upgrade-host')
+const CopyIcon = semanticIconComponent('action.copy')
+const DownIcon = semanticIconComponent('navigation.down')
 const STAGE_LABELS: Record<RemoteCoreUpgradeReceipt['stage'], string> = {
   preparing: 'Preparing the candidate', staged: 'Candidate staged', stopping: 'Stopping the original Core',
   starting: 'Starting the updated Core', verifying: 'Verifying the original Runtime', completed: 'Verification completed'
 }
-
-type State = {
-  input?: SshHostConfig
-  check?: RemoteCoreUpgradeCheck
-  receipt?: RemoteCoreUpgradeReceipt
-  operationId?: string
-  busy?: 'checking' | 'upgrading' | 'inspecting' | undefined
-  error?: string | undefined
-}
+type Operation = { input: SshHostConfig; id: string; receipt?: RemoteCoreUpgradeReceipt; candidate?: RemoteCoreUpgradeCheck['candidate'] | undefined; error?: string | undefined }
+type Review = { input: SshHostConfig; check: RemoteCoreUpgradeCheck }
+type State = { input: SshHostConfig; check?: RemoteCoreUpgradeCheck; checkApplied?: boolean; operation?: Operation; review?: Review | undefined;
+  busy?: 'checking' | 'upgrading' | 'inspecting' | 'reconnecting' | undefined; error?: string | undefined }
 function route({ label: _label, ...host }: SshHostConfig): Omit<SshHostConfig, 'label'> { return host }
 function matches(a: SshHostConfig, b: SshHostConfig): boolean { return configValuesEqual(route(a), route(b)) }
+function belongs(state: State, host: SshHostConfig): boolean {
+  return matches(state.input, host) || Boolean(state.operation && (matches(state.operation.input, host) ||
+    state.operation.receipt?.remoteCommand && state.operation.receipt.status !== 'failed' &&
+    matches({ ...state.operation.input, remoteCommand: state.operation.receipt.remoteCommand }, host)))
+}
+const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+const version = (value: string | null | undefined) => value ?? 'Unknown'
+const contentLabel = (source: string | null | undefined, digest: string | undefined) => source ? `Source ${source.slice(0, 10)}` : digest ? `Content ${digest.slice(0, 12)}` : 'Source unknown'
+function ReadTime({ at, label = 'Read' }: { at: number; label?: string }) {
+  return <span>{label} <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString()}</time></span>
+}
 
-/** Presentation owns only its current input. The public maintenance owner retains transactions. */
-export function HostUpgradePanel({ host, committed, active }: {
-  host: SshHostConfig
-  committed: SshHostConfig | undefined
-  active: boolean
-}) {
-  const [state, setState] = useState<State>({})
-  const [copyState, setCopyState] = useState<{ input: SshHostConfig; text: string; status: 'copying' | 'copied' | 'failed'; error?: string }>()
-  const latestCopyRequest = useRef<object | undefined>(undefined)
-  // Pending presentation keeps the initiating action role; eligibility still uses the fresh check.
-  const pendingPrimary = useRef(false)
-  const autoCheckedInput = useRef<SshHostConfig | undefined>(undefined)
+/** Local review intent only. The original maintenance owner retains every operation. */
+export function HostUpgradePanel({ host, committed, active }: { host: SshHostConfig; committed: SshHostConfig | undefined; active: boolean }) {
+  const [entries, setEntries] = useState<State[]>([])
+  const state = entries.find(item => belongs(item, host))
   const currentHost = useRef(host), currentCommitted = useRef(committed)
   currentHost.current = host; currentCommitted.current = committed
+  const autoChecked = useRef<SshHostConfig | undefined>(undefined)
+  const inFlight = useRef(new Set<string>())
   const saved = committed !== undefined && matches(host, committed)
-  const displayInput = state.receipt && state.receipt.status !== 'failed' && state.receipt.remoteCommand && state.input
-    ? { ...state.input, remoteCommand: state.receipt.remoteCommand } : state.input
-  const current = displayInput !== undefined && (matches(displayInput, host) ||
-    (state.receipt?.status === 'unknown' || state.receipt?.status === 'running') && state.input !== undefined && matches(state.input, host))
-  const busy = state.busy !== undefined
-  const receipt = current ? state.receipt : undefined
-  const check = current ? state.check : undefined
-  const uncertain = current && state.operationId && (state.error !== undefined || receipt?.status === 'unknown' || receipt?.status === 'running')
-  const detail = current ? state.error ?? receipt?.detail ?? check?.detail : undefined
-  const needsRecheck = Boolean(check && !check.eligible || current && state.error && !state.operationId || receipt?.status === 'completed' || receipt?.status === 'failed')
-  const retainedOperation = Boolean(state.operationId && state.input &&
-    (matches(state.input, host) || displayInput && matches(displayInput, host)))
-
-  useEffect(() => {
-    if (!active || !saved) { autoCheckedInput.current = undefined; return }
-    // Re-entering while this exact input is already in flight joins that check.
-    if (busy && state.input && matches(state.input, host)) autoCheckedInput.current = state.input
-    // One visible saved target, once per entry/input. Unknown original operations
-    // keep their receipt; checking never admits or replays a deployment.
-    if (busy) return
-    if (retainedOperation && (state.receipt?.status !== 'completed' && state.receipt?.status !== 'failed' || autoCheckedInput.current)) {
-      autoCheckedInput.current = structuredClone(host)
-      return
-    }
-    if (autoCheckedInput.current && matches(autoCheckedInput.current, host)) return
-    autoCheckedInput.current = structuredClone(host)
-    void upgrade(false)
-  }, [active, saved, host, busy, retainedOperation, state.input, state.receipt?.status])
-
-  async function upgrade(runUpgrade = true): Promise<void> {
+  const check = state?.check && matches(state.check.input as SshHostConfig, host) ? state.check : undefined
+  const operation = state?.operation, receipt = operation?.receipt, review = state?.review
+  const busy = state?.busy !== undefined
+  const unresolved = Boolean(operation && (!receipt || receipt.status === 'unknown' || receipt.status === 'running'))
+  const adoptionNeeded = receipt?.status === 'completed' && receipt.connectionAdoption?.state !== 'connected'
+  const runtimeBlocked = check?.reason === 'runtime-update-required'
+  const ready = !state?.error && !state?.checkApplied && check?.eligible && check.reason === 'ready' && check.expected
+  const otherOperationHost = operation && operation.input.id !== host.id
+  function update(input: SshHostConfig, change: (previous: State) => State) {
+    setEntries(previous => {
+      const index = previous.findIndex(item => belongs(item, input))
+      if (index === -1) return [...previous, change({ input })]
+      return previous.map((item, i) => i === index ? change(item) : item)
+    })
+  }
+  function admitted(input: SshHostConfig) { return active && currentCommitted.current && matches(input, currentHost.current) && matches(input, currentCommitted.current) }
+  async function run(input: SshHostConfig, kind: NonNullable<State['busy']>, action: () => Promise<void>) {
+    const key = JSON.stringify(route(input))
+    if (inFlight.current.has(key)) return
+    inFlight.current.add(key)
+    update(input, previous => ({ ...previous, busy: kind, error: undefined }))
+    try { await action() }
+    catch (error) { update(input, previous => kind === 'checking' || !previous.operation ? { ...previous, error: message(error) }
+      : { ...previous, operation: { ...previous.operation, error: message(error) } }) }
+    finally { inFlight.current.delete(key); update(input, previous => ({ ...previous, busy: undefined })) }
+  }
+  async function inspectVersions() {
     if (!active || !saved || busy) return
     const input = structuredClone(host)
-    pendingPrimary.current = Boolean(check?.eligible && !needsRecheck)
-    setState({ input, busy: 'checking' })
-    let operationId: string | undefined
-    try {
-      const check = await api.hosts.upgradeCheck(input)
-      // A changed draft or same-ID external replacement cannot borrow this check.
-      if (!matches(input, currentHost.current) || !currentCommitted.current || !matches(input, currentCommitted.current)) {
-        setState({ input, check }); return
-      }
-      if (check.latestOperation?.status === 'unknown' || check.latestOperation?.status === 'running') {
-        setState({ input, check, receipt: check.latestOperation, operationId: check.latestOperation.operationId }); return
-      }
-      if (!runUpgrade || !check.eligible || !check.expected) { setState({ input, check }); return }
-      operationId = mintObjectId()
-      setState({ input, check, operationId, busy: 'upgrading' })
-      const receipt = await api.hosts.upgrade(input, check.expected, operationId)
-      setState({ input, check, operationId, receipt })
-    } catch (error) {
-      setState({ input, ...(operationId ? { operationId } : {}),
-        error: error instanceof Error ? error.message : String(error) })
-    }
+    await run(input, 'checking', async () => {
+      const result = await api.hosts.upgradeCheck(input)
+      update(input, previous => ({ ...previous, check: result, checkApplied: false, review: undefined,
+        ...(result.latestOperation ? { operation: { input: result.latestOperation.input as SshHostConfig, id: result.latestOperation.operationId,
+          receipt: result.latestOperation, candidate: result.latestOperation.candidate ?? (previous.operation?.id === result.latestOperation.operationId ? previous.operation.candidate : undefined) } } : {}) }))
+    })
   }
-  async function inspect(): Promise<void> {
-    if (!active || busy || !state.operationId || !state.input) return
-    const captured = state
-    pendingPrimary.current = Boolean(check?.eligible && !needsRecheck)
-    setState({ ...captured, busy: 'inspecting' })
-    try {
-      const receipt = await api.hosts.upgradeInspect(captured.input!, captured.operationId!)
-      setState({ ...captured, busy: undefined, ...(receipt ? { receipt, error: undefined } : {
-        error: 'The original upgrade has no confirmed receipt. Check this connection before trying a new update.' }) })
-    } catch (error) { setState({ ...captured, busy: undefined, error: error instanceof Error ? error.message : String(error) }) }
+  useEffect(() => {
+    if (!active || !saved) { autoChecked.current = undefined; return }
+    if (busy || autoChecked.current && matches(autoChecked.current, host)) return
+    autoChecked.current = structuredClone(host)
+    void inspectVersions()
+  }, [active, saved, host, busy])
+  function beginReview() {
+    if (!ready || !check || !admitted(host) || busy || unresolved) return
+    const input = structuredClone(host)
+    update(input, previous => ({ ...previous, review: { input, check: structuredClone(check) } }))
   }
-  const runtimeBlocked = !busy && !receipt && check?.reason === 'runtime-update-required' && !check.eligible
-  const coreSource = check?.candidate.sourceCommit ?? 'Unknown'
-  const status = busy ? state.busy === 'checking' ? 'Checking upgrade' : state.busy === 'inspecting' ? 'Checking original result' : 'Upgrading and reconnecting' :
-    receipt?.status === 'completed' ? 'Upgrade complete' : uncertain ? 'Upgrade result unconfirmed' : receipt?.status === 'failed' ? 'Upgrade not completed' : needsRecheck ?
-      runtimeBlocked ? 'Automatic upgrade unavailable' : 'Upgrade check unconfirmed' : check?.eligible ? 'Ready to upgrade' : 'Remote service update'
-  const description = !saved ? 'Save this connection before upgrading.' : busy ? state.busy === 'checking' ?
-    'Checking whether this host can be updated without interrupting its existing Agents.' : state.busy === 'inspecting' ?
-    'Reading the original update result. This does not start another update.' : 'Updating the remote service and verifying the original connection.' :
-    receipt?.status === 'completed' ? 'The remote Core was updated and the original connection was verified.' : uncertain ?
-    'The previous update result is not confirmed. Check that original operation before starting another update.' : receipt?.status === 'failed' ?
-    'The update did not complete. Recheck its availability before trying again.' : runtimeBlocked ?
-    'This host needs a runtime update that this version of AgentMux cannot safely perform. Existing Agents are left unchanged.' : needsRecheck ?
-    'We could not confirm whether this host can be updated. Review the connection settings, then check again.' :
-    'Update this host using the Core bundled with AgentMux, then reconnect to the original Sessions.'
-  const diagnostics = current && (check || state.operationId || state.error) ? [
-    `Host: ${host.label} (${host.id})`, `Address: ${host.hostname}`, `Status: ${status}`,
-    check ? `Reason: ${check.reason}` : undefined, detail ? `Details: ${detail}` : undefined,
-    check ? `App Core source: ${coreSource}` : undefined,
-    check ? `Update digest: ${check.candidate.digest}` : undefined,
-    check ? `Required Runtime protocol: ${check.candidate.protocolVersion}` : undefined,
-    state.operationId ? `Operation: ${state.operationId}` : undefined,
+  async function confirmUpgrade() {
+    if (!review?.check.expected || !admitted(review.input) || busy || unresolved) return
+    const captured = review
+    // Confirmation applies exactly the reviewed tuple. A new check cannot replace it here.
+    await run(captured.input, 'upgrading', async () => {
+      const operationId = mintObjectId()
+      update(captured.input, previous => ({ ...previous, checkApplied: true, review: undefined, operation: {
+        input: captured.input, id: operationId, candidate: captured.check.candidate } }))
+      try {
+        const result = await api.hosts.upgrade(captured.input, captured.check.expected!, operationId)
+        update(captured.input, previous => ({ ...previous, operation: { input: captured.input, id: operationId,
+          candidate: result.candidate ?? captured.check.candidate, receipt: result } }))
+      } catch (error) {
+        update(captured.input, previous => ({ ...previous, operation: { input: captured.input, id: operationId,
+          candidate: captured.check.candidate, error: message(error) } }))
+      }
+    })
+  }
+  async function readOriginal(reconnect = false) {
+    if (!active || busy || !operation || reconnect && receipt?.status !== 'completed') return
+    const captured = operation
+    await run(captured.input, reconnect ? 'reconnecting' : 'inspecting', async () => {
+      const result = reconnect ? await api.hosts.upgradeReconnect(captured.input, captured.id) : await api.hosts.upgradeInspect(captured.input, captured.id)
+      update(captured.input, previous => ({ ...previous, operation: result ? { ...captured, receipt: result,
+        candidate: result.candidate ?? captured.candidate, error: undefined } : { ...captured, error: 'No confirmed receipt was returned for the original upgrade.' } }))
+    })
+  }
+  const status = !saved ? 'Save the connection first' : state?.busy === 'checking' ? 'Checking versions' : state?.busy === 'upgrading' ? 'Upgrading Core'
+    : state?.busy === 'inspecting' ? 'Checking original result' : state?.busy === 'reconnecting' ? 'Reconnecting to updated Core' : state?.error ? 'Upgrade check unconfirmed'
+      : unresolved ? 'Original upgrade needs checking' : adoptionNeeded && !ready ? 'Connection confirmation needed' : check?.reason === 'up-to-date' ? 'Up to date' : runtimeBlocked ? 'Automatic upgrade unavailable' : ready ? 'Ready for review' : receipt?.status === 'completed' ? 'Deployment completed' : 'Version check unconfirmed'
+  const detail = state?.error ?? operation?.error ?? receipt?.detail ?? check?.detail
+  const diagnostics = state && (check || operation || state.error) ? [
+    `Host: ${host.label} (${host.id})`, `Status: ${status}`, detail ? `Details: ${detail}` : undefined,
+    `Deployed Core version: ${check?.current.state === 'available' ? version(check.current.version) : 'Unknown'}`,
+    check?.current.state === 'available' ? `Deployed Core source: ${check.current.sourceCommit ?? 'Unknown'}` : undefined,
+    check?.current.state === 'available' ? `Deployed content digest: ${check.current.deploymentDigest}` : undefined,
+    `App Core version: ${version(check?.candidate.version)}`, `App Core source: ${check?.candidate.sourceCommit ?? 'Unknown'}`,
+    check ? `App candidate digest: ${check.candidate.digest}` : undefined,
+    check ? `App Core owner API protocol: ${check.candidate.ownerProtocolVersion ?? 'Unknown'}` : undefined,
+    check ? `Required Native protocol: ${check.candidate.requiredNativeProtocolVersion}` : undefined,
+    operation ? `Operation: ${operation.id}` : undefined,
+    operation ? `Original candidate version: ${version(operation.candidate?.version)}` : undefined,
+    operation ? `Original candidate digest: ${receipt?.expected.candidateDigest ?? operation.candidate?.digest ?? 'Unknown'}` : undefined,
     receipt ? `Original result: ${receipt.status} / ${receipt.stage}` : undefined
   ].filter(value => value !== undefined).join('\n') : undefined
+  const [copyState, setCopyState] = useState<{ input: SshHostConfig; text: string; status: 'copying' | 'copied' | 'failed'; error?: string }>()
+  const latestCopy = useRef<object | undefined>(undefined)
   const copy = copyState && diagnostics === copyState.text && matches(copyState.input, host) ? copyState : undefined
-  async function copyDiagnostics(): Promise<void> {
+  async function copyDiagnostics() {
     if (!diagnostics || copy?.status === 'copying') return
-    const captured = { input: structuredClone(host), text: diagnostics }
-    latestCopyRequest.current = captured
+    const captured = { input: structuredClone(host), text: diagnostics }; latestCopy.current = captured
     setCopyState({ ...captured, status: 'copying' })
     let failure: string | undefined
-    const copied = await copyTextToClipboard(captured.text, error => {
-      failure = error instanceof Error ? error.message : String(error)
-    })
-    if (latestCopyRequest.current !== captured) return
-    setCopyState({ ...captured, status: copied ? 'copied' : 'failed', ...(failure ? { error: failure } : {}) })
+    const copied = await copyTextToClipboard(captured.text, error => { failure = message(error) })
+    if (latestCopy.current === captured) setCopyState({ ...captured, status: copied ? 'copied' : 'failed', ...(failure ? { error: failure } : {}) })
   }
-  return <section className="host-upgrade" data-host-upgrade={host.id}>
-    <div className="host-upgrade__heading">
-      <span className="host-upgrade__title">{busy ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : receipt?.status === 'completed' ? <ThemeStatusCompletedIcon size={14} /> : check && !check.eligible || uncertain ? <ThemeStatusInfoIcon size={14} /> : <UpgradeHostIcon size={14} />}<strong role="status">{status}</strong></span>
-    </div>
-    <p className="field-hint host-upgrade__description">{description}</p>
-    {receipt ? <dl className="host-upgrade__observation" aria-label="Original update receipt">
-      <div><dt>Last reported stage</dt><dd data-upgrade-stage={receipt.stage}>{STAGE_LABELS[receipt.stage]}</dd></div>
-      <div><dt>Receipt updated</dt><dd><time dateTime={new Date(receipt.updatedAt).toISOString()}>{new Date(receipt.updatedAt).toLocaleString()}</time></dd></div>
-    </dl> : null}
-    {runtimeBlocked ? <p className="host-upgrade__next-step">Copy the diagnostics for whoever maintains this host to arrange a supported runtime update. Recheck availability after that update is installed.</p> : null}
-    <div className="host-upgrade__actions">
-      {runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
-      <button type="button" data-upgrade-action className={(busy ? pendingPrimary.current : check?.eligible && !needsRecheck) ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (uncertain ? inspect() : upgrade(!needsRecheck))}>
-        {busy ? 'Working…' : uncertain ? 'Check original result' : needsRecheck ? 'Recheck availability' : 'Upgrade and reconnect'}
+  return <section className="host-upgrade" data-host-upgrade={host.id} aria-label="Remote Core update">
+    <div className="host-upgrade__heading"><span className="host-upgrade__title">{busy ? <LoadingIcon size={14} animation="spin" /> : <UpgradeIcon size={14} />}<strong role="status">{status}</strong></span></div>
+    <dl className="host-upgrade__versions" aria-label="Current and target Core versions">
+      <div><dt>{state?.checkApplied ? 'Last read before upgrade' : `Deployed on ${host.label}`}</dt><dd data-upgrade-current-version>{check?.current.state === 'available' ? version(check.current.version) : 'Unknown'}<small>{check?.current.state === 'available' ? contentLabel(check.current.sourceCommit, check.current.deploymentDigest) : 'Source unknown'}</small></dd></div>
+      <span aria-hidden="true">→</span>
+      <div><dt>Bundled with this app</dt><dd data-upgrade-candidate-version>{version(check?.candidate.version)}<small>{contentLabel(check?.candidate.sourceCommit, check?.candidate.digest)}</small></dd></div>
+    </dl>
+    <p className="field-hint host-upgrade__description">{!saved ? 'Save this connection before checking or upgrading.' : state?.busy === 'upgrading' ? 'Updating the original Core service and verifying its retained Runtime. Existing Agent runs are retained.' : state?.busy === 'inspecting' ? 'Reading the original operation result. This does not start another upgrade.' : state?.busy === 'reconnecting' ? 'Connecting this app to the original completed deployment. No new upgrade starts.' : state?.busy === 'checking' ? 'Reading the original service and this app’s candidate. No upgrade starts during a check.' : state?.error ? 'The latest check did not confirm new facts. Existing work remains available.' : unresolved ? 'The original upgrade has no confirmed final result. Current version facts remain separate.' : adoptionNeeded && !ready ? 'The original deployment completed. Reconnect to confirm this app’s connection to it.' : runtimeBlocked ? 'This host needs a Native Runtime update that this app cannot safely perform. Existing Agents are retained.' : check?.reason === 'up-to-date' ? 'The deployed Core matches this app’s candidate. No update is needed.' : ready ? 'Review the target and maintenance impact before confirming an upgrade.' : receipt?.status === 'completed' ? 'The original deployment completed. Check versions to read current deployment and app candidate facts.' : 'Read the original service and this app’s update candidate. No upgrade starts during a check.'}</p>
+    {check ? <div className="host-upgrade__read-time"><ReadTime at={check.current.observedAt} label={state?.checkApplied ? 'Last read before upgrade' : state?.error ? 'Last confirmed check' : 'Checked'} /></div> : null}
+    {operation ? <div className="host-upgrade__original" aria-label="Original update receipt">
+      <strong>{receipt?.status === 'completed' ? 'Deployment completed' : receipt?.status === 'failed' ? 'Original upgrade did not complete' : receipt?.status === 'running' ? 'Original upgrade is in progress' : 'Original upgrade result unconfirmed'}</strong>
+      {otherOperationHost ? <p className="field-hint">Original Host: {operation.input.label} ({operation.input.id}). Actions below address that original Host.</p> : null}
+      {receipt ? <dl className="host-upgrade__observation"><div><dt>Last reported stage</dt><dd data-upgrade-stage={receipt.stage}>{STAGE_LABELS[receipt.stage]}</dd></div><div><dt>Receipt updated</dt><dd><ReadTime at={receipt.updatedAt} label="" /></dd></div></dl> : null}
+      <p className="field-hint">{unresolved ? 'Check this original operation before starting another upgrade.' : receipt?.status === 'completed' ? receipt.connectionAdoption?.state === 'connected' ? 'Connection verified at the time below. Current channel status is shown by the Host connection hint.' : 'The deployment is complete. This app’s connection to it is not confirmed.' : 'Check current versions before reviewing another upgrade.'}</p>
+      {receipt?.status === 'completed' ? <div className="host-upgrade__read-time">Connection: {receipt.connectionAdoption?.state === 'connected' ? 'verified' : receipt.connectionAdoption?.state === 'pending-confirmation' ? 'waiting for confirmation' : 'unconfirmed'}{receipt.connectionAdoption ? <> · <ReadTime at={receipt.connectionAdoption.readAt} /></> : null}</div> : null}
+    </div> : null}
+    {review && matches(review.input, host) ? <div className="host-upgrade__review" aria-label="Review upgrade">
+      <strong>Review upgrade for {review.input.label}</strong><span>{review.input.hostname} · {contentLabel(review.check.candidate.sourceCommit, review.check.candidate.digest)}</span>
+      <p>Install Core {version(review.check.candidate.version)} on this device. The Core service will restart and this app will reconnect. Existing Agent runs and Sessions are retained.</p>
+      <div className="host-upgrade__actions"><button type="button" className="primary-button" data-upgrade-confirm disabled={busy || !saved} onClick={() => void confirmUpgrade()}>Confirm upgrade</button><button type="button" className="small-button" data-upgrade-cancel disabled={busy} onClick={() => update(review.input, previous => ({ ...previous, review: undefined }))}>Cancel</button></div>
+    </div> : <div className="host-upgrade__actions">
+      <button type="button" data-upgrade-action className={state?.busy === 'upgrading' || ready && !unresolved ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (unresolved ? readOriginal() : ready ? beginReview() : adoptionNeeded ? readOriginal(true) : inspectVersions())}>
+        {busy ? state?.busy === 'checking' ? 'Checking…' : state?.busy === 'inspecting' ? 'Checking original result…' : state?.busy === 'reconnecting' ? 'Reconnecting…' : 'Upgrading…' : unresolved ? 'Check original result' : ready ? 'Review upgrade' : adoptionNeeded ? otherOperationHost ? `Reconnect ${operation.input.label}` : 'Reconnect to updated Core' : 'Check versions'}
       </button>
-    </div>
-    {diagnostics ? <details className="host-upgrade__details">
-      <summary>Technical details <ThemeNavigationDownIcon size={13} /></summary>
-      <div className="host-upgrade__diagnostics">
-        {detail ? <div><span className="host-upgrade__detail-label">Original diagnostic</span><p className="host-upgrade__diagnostic-message">{detail}</p></div> : null}
-        <dl className="host-upgrade__facts">
-          {check ? <><div><dt>App Core source</dt><dd><code>{coreSource}</code></dd></div><div><dt>Update digest</dt><dd><code>{check.candidate.digest}</code></dd></div><div><dt>Required Runtime protocol</dt><dd>{check.candidate.protocolVersion}</dd></div></> : null}
-          {state.operationId ? <div><dt>Original operation</dt><dd><code>{state.operationId}</code>{receipt ? <span>{receipt.status} · {receipt.stage}</span> : null}</dd></div> : null}
-        </dl>
-        {!runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
-      </div>
-    </details> : null}
-    {copy?.status === 'copied' ? <p className="host-upgrade__copy-feedback" role="status">{runtimeBlocked ? 'Diagnostics copied. Share them to resolve the update path.' : 'Diagnostics copied.'}</p> : copy?.status === 'failed' ? <p className="host-upgrade__copy-feedback host-upgrade__copy-feedback--error" role="alert">Could not copy diagnostics. Try again.{copy.error ? ` ${copy.error}` : ''}</p> : null}
+      {check && !unresolved && !adoptionNeeded && ready ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void inspectVersions()}>Check again</button> : null}
+      {ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-reconnect disabled={busy || !saved} onClick={() => void readOriginal(true)}>Reconnect original update{otherOperationHost ? ` · ${operation.input.label}` : ''}</button> : null}
+      {!ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void inspectVersions()}>Check versions</button> : null}
+    </div>}
+    {runtimeBlocked ? <p className="field-hint host-upgrade__next-step">Share the diagnostics with this host’s maintainer to arrange a supported Native Runtime update.</p> : null}
+    {diagnostics ? <details className="host-upgrade__details"><summary>Technical details <DownIcon size={13} /></summary><div className="host-upgrade__diagnostics">
+      {detail ? <div><span className="host-upgrade__detail-label">Original diagnostic</span><p className="host-upgrade__diagnostic-message">{detail}</p></div> : null}
+      <dl className="host-upgrade__facts">
+        {check?.current.state === 'available' ? <><div><dt>Deployed Core source</dt><dd><code>{check.current.sourceCommit ?? 'Unknown'}</code></dd></div><div><dt>Deployed content digest</dt><dd><code>{check.current.deploymentDigest}</code></dd></div></> : null}
+        {check ? <><div><dt>App Core source</dt><dd><code>{check.candidate.sourceCommit ?? 'Unknown'}</code></dd></div><div><dt>App candidate digest</dt><dd><code>{check.candidate.digest}</code></dd></div><div><dt>Core owner API protocol · deployed / app</dt><dd>{check.current.state === 'available' ? check.current.ownerProtocolVersion : 'Unknown'} / {check.candidate.ownerProtocolVersion ?? 'Unknown'}</dd></div><div><dt>Native protocol · current / required</dt><dd>{check.current.state === 'available' ? check.current.native.protocolVersion : 'Unknown'} / {check.candidate.requiredNativeProtocolVersion}</dd></div></> : null}
+        {operation ? <><div><dt>Original operation</dt><dd><code>{operation.id}</code></dd></div><div><dt>Original upgrade candidate version</dt><dd>{version(operation.candidate?.version)}</dd></div><div><dt>Original upgrade candidate digest</dt><dd><code>{operation.receipt?.expected.candidateDigest ?? operation.candidate?.digest ?? 'Unknown'}</code></dd></div></> : null}
+      </dl><button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><CopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button>
+    </div></details> : null}
+    {copy?.status === 'copied' ? <p className="host-upgrade__copy-feedback" role="status">Diagnostics copied.</p> : copy?.status === 'failed' ? <p className="host-upgrade__copy-feedback host-upgrade__copy-feedback--error" role="alert">Could not copy diagnostics. Try again.{copy.error ? ` ${copy.error}` : ''}</p> : null}
   </section>
 }
