@@ -207,7 +207,7 @@ import {
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTimelineItem } from './agent-activity-state.js'
 import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, AgentCapabilitySnapshot, AgentCatalogEntry, AgentExecutorId, AgentProviderId, AgentMuxAgentPasteInput, AgentMuxAgentWriteInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentNativeActivityEvent, AgentCurrentActivity, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentPromptMessageContent, AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxObservationOrigin, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentMuxInteractionOperationIntent, AgentMuxRun, AgentMuxRunAppliedSize, AgentMuxRunAttachment, AgentMuxRunAttachmentView, AgentMuxRunDataEvent, AgentMuxRunInputAck, AgentMuxRunInputData, AgentMuxRunInputOperation, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeIdentity, AgentMuxRuntimeResourceSnapshot, AgentNativeSessionHandle, AgentNativeResumeSource, AgentNativeSessionCatalog, AgentNativeSessionCandidate, AgentNativeHistoryReadOptions, AgentProviderSessionHistoryPage, AgentNativeHistoryResourceReadOptions, AgentProviderSessionHistoryResourceReadResult, AgentSessionHistoryMetadata, AgentSessionHistoryPage, AgentSessionHistoryPageOptions, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentSessionQuestionReplyReceipt, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentSessionHistoryObservation, AgentSessionHistoryObservationOptions, AgentSessionHistoryObservationHandle, AgentTerminalCapabilityState, AgentTerminalOutputChannelState, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot, AgentStatus, NativeHookEnvelope } from './types.js'
-import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
+import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHistoryProgress } from './session-history.js'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
 import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
@@ -3877,9 +3877,14 @@ export class AgentMuxClient {
     }
     const controller = new AbortController()
     this.providerReads.add(controller)
-    const timer = setTimeout(() => controller.abort(new AgentMuxError(
-      'Native Provider reading timed out.', `${prefix}_TIMEOUT`
-    )), SESSION_HISTORY_TIMEOUT_MS)
+    // Times out only after a stall: every completed physical read of this page restarts the wait.
+    const stalled = () => controller.abort(new AgentMuxError(
+      'Native Provider reading made no progress and timed out.', `${prefix}_TIMEOUT`))
+    let timer = setTimeout(stalled, SESSION_HISTORY_TIMEOUT_MS)
+    const unwatch = watchSessionHistoryProgress(controller.signal, () => {
+      if (controller.signal.aborted) return
+      clearTimeout(timer); timer = setTimeout(stalled, SESSION_HISTORY_TIMEOUT_MS)
+    })
     let abort!: () => void
     const cancelled = new Promise<never>((_resolve, reject) => {
       abort = () => reject(controller.signal.reason)
@@ -3893,7 +3898,7 @@ export class AgentMuxClient {
         return Promise.race([operation, cancelled])
       },
       close: (): void => {
-        clearTimeout(timer)
+        clearTimeout(timer); unwatch()
         controller.signal.removeEventListener('abort', abort)
         const release = (): void => { this.providerReads.delete(controller) }
         if (currentRead) void currentRead.then(release, release)

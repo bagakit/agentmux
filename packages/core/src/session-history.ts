@@ -16,6 +16,20 @@ import type {
 export const SESSION_HISTORY_MAX_PAGE_BYTES = 4 * 1024 * 1024
 export const SESSION_HISTORY_TIMEOUT_MS = 10_000
 
+/**
+ * A history read stops only after SESSION_HISTORY_TIMEOUT_MS without progress. The owner of a read
+ * registers its signal; each completed physical read reports progress on that same signal, which
+ * restarts the owner's wait. A read that keeps making progress is never cut off by elapsed time alone.
+ */
+const historyReadProgress = new WeakMap<AbortSignal, () => void>()
+export function watchSessionHistoryProgress(signal: AbortSignal, onProgress: () => void): () => void {
+  historyReadProgress.set(signal, onProgress)
+  return () => { if (historyReadProgress.get(signal) === onProgress) historyReadProgress.delete(signal) }
+}
+export function reportSessionHistoryProgress(signal: AbortSignal): void {
+  historyReadProgress.get(signal)?.()
+}
+
 function invalid(): never {
   throw new AgentMuxError('Provider returned an invalid native history page.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
 }

@@ -4,7 +4,7 @@ import { open, stat, type FileHandle } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
+import { reportSessionHistoryProgress, SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
 import parser from 'stream-json/parser.js'
 import Assembler from 'stream-json/assembler.js'
 import type { Token } from 'stream-json/parser.js'
@@ -29,6 +29,7 @@ type Cursor = {
 /** Physical source boundaries; end includes the original newline when present. */
 export type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number; end: number }
 
+/** startedAt is the page's last progress: each completed physical read moves it, so the deadline measures a stall. */
 export type NativeHistoryReadBudget = { bytesRead: number; startedAt: number }
 
 function failure(code: string, message: string): never {
@@ -80,6 +81,8 @@ export async function readNativeHistoryBytes(
   if (bytesRead !== length) {
     failure('SOURCE_CHANGED', 'Native transcript was truncated during reading.')
   }
+  budget.startedAt = Date.now()
+  reportSessionHistoryProgress(signal)
   return data
 }
 
