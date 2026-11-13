@@ -191,4 +191,56 @@ Reads return at most 64 KiB of metadata; use `nextAfterSequence` when `hasMore` 
 response cannot be attributed later. URLs are capped at 8192 characters, methods at 64 and MIME types
 at 256; a truncated observation is marked and cannot satisfy an exact URL/method wait. URL credentials,
 headers and request/response bodies are omitted. Child documents, worker requests and WebSocket
-messages are outside this main-document HTTP scope. These are observations, not network mocking.
+messages are outside this main-document HTTP scope. Observation readers do not install request rules.
+
+
+Install explicit request rules before the action, and withdraw the same program's rules afterward:
+
+```js
+const configured = await routeRequests([
+  {match: {url: {contains: "/api/items"}, method: "GET"}, action: "mock",
+   status: 200, headers: {"Content-Type": "application/json"}, body: '{"items":[]}'},
+  {match: {url: {contains: "/telemetry"}}, action: "abort"}
+]);
+try {
+  const page = await snapshot();
+  await click(page.nodes.find(node => node.name === "Load items").ref);
+} finally {
+  // active means configured; hits distinguish matched requests and native-acknowledged outcomes.
+  console.log(await unrouteRequests());
+}
+```
+
+Rules use the same exact URL or `{contains: "..."}` and uppercase method matching as observation.
+The first match wins; `continue` preserves the original request. Mock bodies are static UTF-8 text.
+Response headers cannot set Profile cookies or override transport framing. The JSON definition is
+bounded to 1 MiB. Only HTTP(S) requests from the original main frame are mocked or aborted;
+unmatched requests and requests from other frames continue. Workers, WebSocket messages and
+child documents are outside this rule scope. The activation receipt confirms configuration,
+not a request hit. Withdrawal returns `hits`: matched, fulfilled, aborted, continued and
+unconfirmed request counts, without retaining request bodies or private headers.
+
+`setNetworkConditions({offline: true})` or
+`setNetworkConditions({latencyMs: 150, downloadBytesPerSecond: 65536, uploadBytesPerSecond: -1})`
+sets main-document HTTP(S) offline simulation and native HTTP(S) latency/throughput rules
+in an independent CDP session on this original page.
+`-1` is unlimited throughput; explicit limits are positive bytes per second. `clearNetworkConditions()` withdraws this same set.
+Offline uses native request failure, takes precedence over mock rules, and reports
+`offlineScope: "main-document-http"`. Latency and throughput use native URL rules.
+These rules affect native transport; they do not override `navigator.onLine`, Profile proxy
+settings or another CDP client's rules. Child/worker coverage is not confirmed. An engine
+without the required native command reports application as unconfirmed and retains the
+Browser; inspect the exact result and withdraw before changing configuration.
+
+Rule and condition sets belong to this program and document. Navigation, Stop, disconnect or
+program completion ends that exact native session through the original cleanup owner.
+Cleanup observation is bounded; an unconfirmed detach keeps a warning and its original scope
+for late completion, while Stop releases operation ownership. Other page consumers remain
+attached. Do not configure and
+withdraw concurrently. A failed native acknowledgement means `unknown`, not an automatic
+retry or permission to repeat the page action. Explicit withdrawal can be retried on the same
+configuration; replacing a set requires confirming that its predecessor was withdrawn.
+
+These four network-configuration functions require a host that offers an isolated native network session.
+Embedded Desktop and standalone CDP targets provide it. A shared extension target does not currently
+advertise these configuration functions; its ordinary actions and request readers remain available.
