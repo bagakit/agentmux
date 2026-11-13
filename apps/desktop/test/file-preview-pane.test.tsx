@@ -134,6 +134,37 @@ describe('real format preview pane', () => {
     await render(<FilePreviewPane surface={file} />)
     expect(open).toHaveBeenCalledTimes(2)
   })
+  it('a hidden media File comes back paused where it was, with its volume and speed; another File starts fresh', async () => {
+    let issued = 0
+    vi.spyOn(api.files, 'openMediaStream').mockImplementation(async () => ({ status: 'ready', id: `lease-${++issued}`, url: `http://127.0.0.1:1/lease-${issued}/clip.mp4`, kind: 'video', mimeType: 'video/mp4', byteLength: 3 }))
+    vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const { file } = seed('long.mp4'); seed('other.mp4')
+    // Each element reports a 2-hour duration; writes land on the element itself.
+    const duration = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'duration')
+    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { configurable: true, get: () => 7_200 })
+    const at = (element: HTMLMediaElement, time: number) => { let value = time; Object.defineProperty(element, 'currentTime', { configurable: true, get: () => value, set: next => { value = next } }) }
+    try {
+      await render(<FilePreviewPane surface={file} />)
+      const first = container.querySelector('video')!
+      at(first, 4_800); first.volume = 0.4; first.playbackRate = 1.5
+      await render(<FilePreviewPane surface={file} visible={false} />)
+      await render(<FilePreviewPane surface={file} />)
+      const again = container.querySelector('video')!
+      expect(again).not.toBe(first)
+      at(again, 0)
+      await act(async () => { again.dispatchEvent(new Event('loadedmetadata')) })
+      expect(again.currentTime).toBe(4_800); expect(again.volume).toBe(0.4); expect(again.playbackRate).toBe(1.5)
+      expect(play).not.toHaveBeenCalled()
+      await render(<FilePreviewPane surface={surface('other.mp4')} />)
+      const other = container.querySelector('video')!
+      at(other, 0)
+      await act(async () => { other.dispatchEvent(new Event('loadedmetadata')) })
+      expect(other.currentTime).toBe(0); expect(other.volume).toBe(1)
+    } finally {
+      if (duration) Object.defineProperty(HTMLMediaElement.prototype, 'duration', duration); else delete (HTMLMediaElement.prototype as { duration?: number }).duration
+    }
+  })
   it('an unrelated store update does not rescan Workspaces for a playing media File', async () => {
     vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-quiet', url: 'http://127.0.0.1:1/lease-quiet/clip.mp4', kind: 'video', mimeType: 'video/mp4', byteLength: 3 })
     vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)

@@ -259,6 +259,23 @@ describe('mounted player', () => {
     expect(fullscreen).toHaveBeenCalledTimes(1)
   })
 
+  it('a resumed position applies even when metadata arrived before the listeners', async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'readyState')
+    Object.defineProperty(HTMLMediaElement.prototype, 'readyState', { configurable: true, get() { return 1 } })
+    Object.defineProperty(HTMLMediaElement.prototype, 'duration', { configurable: true, get() { return 600 } })
+    let time = 0
+    Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { configurable: true, get() { return time }, set(value: number) { time = value } })
+    try {
+      const resume = { current: { time: 321, volume: 0.3, muted: true, rate: 2 } }
+      await render(<MediaPlayer lease={lease()} name="cached.mp4" onRetry={() => {}} resume={resume} />)
+      expect(time).toBe(321); expect(media().muted).toBe(true); expect(media().playbackRate).toBe(2)
+      expect(resume.current).toBeNull()
+    } finally {
+      if (original) Object.defineProperty(HTMLMediaElement.prototype, 'readyState', original); else delete (HTMLMediaElement.prototype as { readyState?: number }).readyState
+      delete (HTMLMediaElement.prototype as { duration?: number }).duration; delete (HTMLMediaElement.prototype as { currentTime?: number }).currentTime
+    }
+  })
+
   it('an audio file uses the always-visible card with a primary play disc', async () => {
     await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
     expect(media().tagName).toBe('AUDIO')
