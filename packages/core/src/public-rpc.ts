@@ -252,6 +252,7 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlInput
   'agent.restart': import('./agent-session-recovery/restart-contract.js').AgentMuxAgentRestartIdentity
   'agent.restart.inspect': import('./agent-session-recovery/restart-contract.js').AgentMuxAgentRestartIdentity
+  'agent.stop.inspect': import('./agent-stop-receipt.js').AgentMuxAgentStopIdentity
   'agent.refresh': { agentSessionId: string }
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmationInput
   'agent.native.ls': { hostId: string; executorId: string; workspacePath?: string }
@@ -354,6 +355,7 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlResult
   'agent.restart': { session: Awaited<ReturnType<AgentMuxClient['restartAgent']>> }
   'agent.restart.inspect': Awaited<ReturnType<AgentMuxClient['inspectAgentRestart']>>
+  'agent.stop.inspect': Awaited<ReturnType<AgentMuxClient['inspectAgentStop']>>
   'agent.refresh': { session: ReturnType<AgentMuxClient['agentSession']> }
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmation
   'agent.native.ls': import('./types.js').AgentNativeSessionCatalog & { hostId: string; executorId: string }
@@ -471,7 +473,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'notebook.scan': 'long', 'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
-  whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.binding': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.binding': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.stop.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.automation.pause': 'short', 'agent.automation.inspect': 'short',
   'agent.input.observation': 'short',

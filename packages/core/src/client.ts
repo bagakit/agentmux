@@ -169,6 +169,8 @@ import {
 import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation, type CtxmuxAdapterInputChannel } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentStopIdentity, type AgentMuxAgentStopIdentity, type AgentMuxAgentStopInspection, type AgentMuxAgentStopReceipt,
+  type AgentMuxAgentStopRecord, type AgentMuxAgentStopRuntime, type AgentMuxAgentStopStage, type AgentMuxAgentStopStageName } from './agent-stop-receipt.js'
 import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
@@ -305,6 +307,15 @@ type AgentCreationExecution = AgentCreationResourceContext & {
   initialEnvelope?: Parameters<DurableAgentMuxMessageQueue['append']>[0]
   assertHostCurrent?: () => Promise<void>
 }
+type AgentStopAdmission = {
+  session: AgentMuxAgentSession
+  reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>
+  stopOperation: CtxmuxAdapterStopOperation
+  operationId: string
+  admission: 'new' | 'retained'
+  stages: AgentMuxAgentStopStage[]
+}
+
 type ActiveAgentCreation = {
   kind: 'direct' | 'host'
   wake?: () => boolean
@@ -886,8 +897,8 @@ export class AgentMuxClient {
   private readonly agentStopFlights = new Map<string, {
     readers: number
     retired: boolean
-    admission: Promise<{ session: AgentMuxAgentSession; reservation: AgentMuxLifecycleReservation; stopOperation: CtxmuxAdapterStopOperation }>
-    retirement?: Promise<void>
+    admission: Promise<AgentStopAdmission>
+    retirement?: Promise<AgentMuxAgentStopReceipt>
   }>()
   // 「这个 runId 的进程已经终结」这条**观察结果**的台账，与上面那条**意图**台账分居两处、语义不同：
   // 意图是我们想不想关，这条是内核报没报它已经没了。「这个 run 再不会有 hook 事件」的权威终点有**两条**
@@ -7922,66 +7933,110 @@ export class AgentMuxClient {
     await this.signalTerminal(expectedRun, signal)
   }
 
-  async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<void> {
+  /**
+   * Stop one exact Session/Run and retire the Session. The receipt names the operation, the Runtime's
+   * own stop disposition and every stage's outcome. A caller operationId fixes the lifecycle identity,
+   * so an explicit retry with the same id continues the same Stop; a retained open Stop for this Run
+   * always wins. Readers that join an in-flight Stop get its receipt with admission `joined`.
+   */
+  async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, options: { operationId?: string } = {}): Promise<AgentMuxAgentStopReceipt> {
     this.requireConnected()
     const flightKey = JSON.stringify([agentSessionId, expectedRun.runId])
     let flight = this.agentStopFlights.get(flightKey)
+    const joined = Boolean(flight)
     if (!flight) {
-      flight = { readers: 0, retired: false, admission: this.prepareAgentStop(agentSessionId, expectedRun) }
+      flight = { readers: 0, retired: false, admission: this.prepareAgentStop(agentSessionId, expectedRun, options.operationId) }
       this.agentStopFlights.set(flightKey, flight)
     }
     flight.readers++
+    const asReader = (receipt: AgentMuxAgentStopReceipt) => joined ? { ...structuredClone(receipt), admission: 'joined' as const } : receipt
     try {
-      const { session, reservation, stopOperation } = await flight.admission
-      if (flight.retirement) return await flight.retirement
+      const admission = await flight.admission
+      if (flight.retirement) return asReader(await flight.retirement)
+      const { session, stopOperation } = admission
+      const stages = [...admission.stages], reservation = admission.reservation
+      const fail = async (stage: AgentMuxAgentStopStageName, startedAt: number, error: unknown): Promise<never> => {
+        const code = error instanceof AgentMuxError ? error.code : 'AGENT_STOP_FAILED', endedAt = Date.now()
+        stages.push({ stage, startedAt, endedAt, outcome: 'failed', errorCode: code })
+        const progress = { operationId: admission.operationId, stages,
+          failure: { stage, code, message: (error instanceof Error ? error.message : String(error)).slice(0, 1024), observedAt: endedAt } }
+        // The original failure stays the answer. A lost progress write leaves inspect showing an open
+        // Stop without the failed stage, which is still true; it never replaces the failure itself.
+        await this.registry.recordStopProgress(reservation, progress).catch(() => {})
+        throw error
+      }
       // Each explicit retry can reconcile the original operation independently.
       // A stalled Runtime receipt reader must not block the next Stop reader.
       let run: CtxmuxAdapterRun | null = null
+      const observedAt = Date.now()
       try {
         run = await this.requireCurrentAgentRun(session)
       } catch (error) {
-        if (flight.retirement) return await flight.retirement
-        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION_BINDING') throw error
+        if (flight.retirement) return asReader(await flight.retirement)
+        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION_BINDING') await fail('runtime-observe', observedAt, error)
       }
-      if (flight.retirement) return await flight.retirement
+      if (flight.retirement) return asReader(await flight.retirement)
+      const observed: AgentMuxAgentStopRuntime['observed'] = !run ? 'not-found' : run.state.type
+      stages.push({ stage: 'runtime-observe', startedAt: observedAt, endedAt: Date.now(), outcome: run ? 'ok' : 'not-found' })
+      let disposition: AgentMuxAgentStopRuntime['stop'] = 'not-required'
+      const stopAt = Date.now()
       if (run?.state.type === 'running') {
-        try { await this.kernel.stop(stopOperation) }
+        // One durable write before the only step that can hang on the Runtime. It is evidence, not a
+        // precondition: if it cannot be written the Stop still goes ahead and retires with its full record.
+        await this.registry.recordStopProgress(reservation, { operationId: admission.operationId, stages }).catch(() => {})
+        try { disposition = (await this.kernel.stop(stopOperation)).disposition }
         catch (error) {
-          if (flight.retirement) return await flight.retirement
-          if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+          if (flight.retirement) return asReader(await flight.retirement)
+          if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') await fail('runtime-stop', stopAt, error)
+          disposition = 'not-found'
         }
-      } else if (run) await this.releaseRunAttachment(session.run)
+        stages.push({ stage: 'runtime-stop', startedAt: stopAt, endedAt: Date.now(), outcome: disposition === 'not-found' ? 'not-found' : 'ok' })
+      } else {
+        if (run) await this.releaseRunAttachment(session.run)
+        stages.push({ stage: 'runtime-stop', startedAt: stopAt, endedAt: Date.now(), outcome: 'skipped' })
+      }
       // A late original reader joins the same retirement, even after the Session
       // leaves the registry. A failed cleanup permits explicit retry of that tail.
       if (!flight.retirement) {
-        const retirement = this.retireStoppedAgent(session, reservation, () => { flight.retired = true })
+        const record = { operationId: admission.operationId, lifecycleOperationId: reservation.operationId, runtime: { observed, stop: disposition }, stages }
+        const retirement = this.retireStoppedAgent(session, reservation, record, admission.admission, () => { flight.retired = true })
         flight.retirement = retirement
         void retirement.catch(() => { if (!flight.retired && flight.retirement === retirement) delete flight.retirement })
       }
-      await flight.retirement
+      return asReader(await flight.retirement)
     } finally {
       flight.readers--
       if (!flight.readers && this.agentStopFlights.get(flightKey) === flight) this.agentStopFlights.delete(flightKey)
     }
   }
 
-  private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef) {
+  private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef, callerOperationId?: string): Promise<AgentStopAdmission> {
+    const startedAt = Date.now()
     const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before its Run was stopped.', 'STALE_AGENT_SESSION')
     }
-    const retained = (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0]
-    const operationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, mintObjectId())
-    const stopOperation = retained?.kind === 'stop' ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, operationId)
-    const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, operationId, stopOperation)
+    // The registry admits only this exact Run's original Stop for a targeted claim.
+    const retained = (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0] as
+      Extract<AgentMuxLifecycleReservation, { kind: 'stop' }> | undefined
+    // A retained Stop keeps the identity it was admitted with, never the retry's; a Stop admitted
+    // before its caller identity was recorded has only its lifecycle identity.
+    const operationId = retained ? retained.progress?.operationId ?? retained.operationId : callerOperationId ?? mintObjectId()
+    const lifecycleOperationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, operationId)
+    const admitted: AgentMuxAgentStopStage = { stage: 'admission', startedAt, endedAt: startedAt, outcome: 'ok' }
+    const stopOperation = retained ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, lifecycleOperationId)
+    admitted.endedAt = Date.now()
+    const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, lifecycleOperationId, stopOperation,
+      { operationId, stages: [admitted] })
     // Intent is recorded only after admission succeeds. Keep this prepared
     // identity through observation/receipt/cleanup failures until retirement;
     // no individual reader can release another reader's accepted operation.
     this.stopRequestedRuns.add(expectedRun.runId)
-    return { session, reservation, stopOperation }
+    return { session, reservation, stopOperation, operationId, admission: retained ? 'retained' : 'new', stages: [admitted] }
   }
 
-  private async retireStoppedAgent(session: AgentMuxAgentSession, reservation: AgentMuxLifecycleReservation, onRetired: () => void): Promise<void> {
+  private async retireStoppedAgent(session: AgentMuxAgentSession, reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>,
+    record: AgentMuxAgentStopRecord, admission: AgentStopAdmission['admission'], onRetired: () => void): Promise<AgentMuxAgentStopReceipt> {
     const agentSessionId = session.agentSessionId
     await this.hookBindings.get(session.run.runId)?.close()
     // A lost Store commit ACK can leave this old reader unconfirmed while the
@@ -7991,11 +8046,14 @@ export class AgentMuxClient {
     }
     this.forgetHookBinding(session.run.runId)
     this.settleHookRestore(session)
+    const commitAt = Date.now()
+    const final: AgentMuxAgentStopRecord = { ...record, stages: [...record.stages, { stage: 'retire-commit', startedAt: commitAt, endedAt: commitAt, outcome: 'ok' }] }
     const cleanup = await Promise.allSettled([
       this.acp.unbind(agentSessionId),
-      this.registry.commitLifecycle(reservation, null).then(onRetired)
+      this.registry.commitStop(reservation, final).then(retired => { onRetired(); return retired })
     ])
-    if (cleanup[1]?.status === 'fulfilled') {
+    const stored = cleanup[1]?.status === 'fulfilled' ? cleanup[1].value : null
+    if (stored) {
       this.recovery.wake(agentSessionId)
       this.runPids.delete(session.run.runId)
       if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
@@ -8003,11 +8061,41 @@ export class AgentMuxClient {
       }
       this.publisher.publish({
         type: 'run-removed', agentSessionId, run: { ...session.run },
-        evidence: { source: 'user', observedAt: Date.now(), run: { ...session.run } }
+        evidence: { source: 'user', observedAt: stored.observedAt, run: { ...session.run } }
       })
     }
     const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but Agent Session cleanup failed.')
+    return { agentSessionId, expectedRun: { ...session.run }, operationId: final.operationId, lifecycleOperationId: final.lifecycleOperationId,
+      admission, runtime: { ...final.runtime }, retiredAt: stored!.observedAt, stages: structuredClone(final.stages) }
+  }
+
+  /**
+   * Read one Stop from its owner's exact rows only: the Session's reservation, its retirement and its
+   * metadata. Nothing is started, stopped or claimed, and absence of a row is never read as stopped.
+   */
+  async inspectAgentStop(value: AgentMuxAgentStopIdentity): Promise<AgentMuxAgentStopInspection> {
+    const { agentSessionId, expectedRun, operationId } = parseAgentStopIdentity(value)
+    const [reservation, retired, metadata] = await Promise.all([this.store.readLifecycleReservation(agentSessionId),
+      this.store.readRetiredAgentSession(agentSessionId), this.store.readMetadata(agentSessionId)])
+    const base = { agentSessionId, expectedRun: { ...expectedRun }, observedAt: Date.now() }
+    const matched = (actual: string | undefined) => operationId === undefined ? {} : { operationIdMatched: actual === operationId }
+    if (reservation?.kind === 'stop' && reservation.expectedRun.runId === expectedRun.runId) {
+      return { ...base, phase: 'stopping', canRetry: true, lifecycleOperationId: reservation.operationId, ...matched(reservation.progress?.operationId ?? reservation.operationId),
+        ...(reservation.progress ? { stages: structuredClone(reservation.progress.stages) } : {}),
+        ...(reservation.progress?.failure ? { failure: { ...reservation.progress.failure } } : {}) }
+    }
+    if (retired?.run.runId === expectedRun.runId && !metadata) {
+      return { ...base, phase: 'retired', canRetry: false, retiredAt: retired.observedAt,
+        ...(retired.stop ? { lifecycleOperationId: retired.stop.lifecycleOperationId, stages: structuredClone(retired.stop.stages), runtime: { ...retired.stop.runtime } } : {}),
+        ...matched(retired.stop?.operationId) }
+    }
+    if (reservation && reservation.kind !== 'stop') {
+      const holder = { kind: reservation.kind, operationId: reservation.operationId }
+      return { ...base, phase: 'unconfirmed', canRetry: false, holder }
+    }
+    if (metadata?.run.runId === expectedRun.runId && !reservation) return { ...base, phase: 'not-requested', canRetry: true, ...matched(undefined) }
+    return { ...base, phase: 'unconfirmed', canRetry: false }
   }
 
   async bindAcp(agentSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {
@@ -8065,8 +8153,15 @@ export class AgentMuxClient {
         } catch (error) {
           if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
         }
-        if (run?.state.type === 'running') await this.kernel.stop(reservation.stopOperation)
-        await this.registry.commitLifecycle(reservation, null)
+        // Each attempt records its own stages after the original admission, so the row stays bounded.
+        const observedAt = Date.now(), stages = (reservation.progress?.stages ?? []).filter(stage => stage.stage === 'admission').slice(0, 1)
+        stages.push({ stage: 'runtime-observe', startedAt: observedAt, endedAt: Date.now(), outcome: run ? 'ok' : 'not-found' })
+        const stopAt = Date.now()
+        const disposition = run?.state.type === 'running' ? (await this.kernel.stop(reservation.stopOperation)).disposition : 'not-required'
+        stages.push({ stage: 'runtime-stop', startedAt: stopAt, endedAt: Date.now(), outcome: run?.state.type === 'running' ? 'ok' : 'skipped' },
+          { stage: 'retire-commit', startedAt: Date.now(), endedAt: Date.now(), outcome: 'ok' })
+        await this.registry.commitStop(reservation, { operationId: reservation.progress?.operationId ?? reservation.operationId,
+          lifecycleOperationId: reservation.operationId, runtime: { observed: run ? run.state.type : 'not-found', stop: disposition }, stages })
         continue
       }
       let retiredRuns: AgentMuxRunRef[] = []

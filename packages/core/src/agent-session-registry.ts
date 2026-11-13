@@ -1,3 +1,4 @@
+import type { AgentMuxAgentStopProgress, AgentMuxAgentStopRecord } from './agent-stop-receipt.js'
 import type { ResumeResolutionRequest } from './agent-prepared-resume.js'
 import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { mintObjectId } from './object-id.js'
@@ -294,14 +295,16 @@ export class AgentMuxAgentSessionRegistry {
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
     operationId: string,
-    stopOperation: AgentMuxRecoverableStopOperation
+    stopOperation: AgentMuxRecoverableStopOperation,
+    progress: AgentMuxAgentStopProgress
   ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>>
   async reserveExisting(
     kind: 'resume' | 'stop',
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
     operationId: string,
-    stopOperation?: AgentMuxRecoverableStopOperation
+    stopOperation?: AgentMuxRecoverableStopOperation,
+    progress?: AgentMuxAgentStopProgress
   ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' | 'stop' }>> {
     const session = this.get(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
@@ -317,7 +320,8 @@ export class AgentMuxAgentSessionRegistry {
           agentSessionId,
           operationId,
           expectedRun,
-          stopOperation: stopOperation!
+          stopOperation: stopOperation!,
+          progress: progress!
         })
     if (reservation.kind === 'create' || reservation.kind === 'reopen') {
       throw new AgentMuxError('Existing lifecycle reservation changed kind.', 'INVALID_AGENT_SESSION_STORE')
@@ -485,10 +489,30 @@ export class AgentMuxAgentSessionRegistry {
     reservation: AgentMuxLifecycleReservation,
     session: AgentMuxStoredAgentSession | null
   ): Promise<AgentMuxStoredAgentSession | null> {
+    return (await this.commit(reservation, session)).session
+  }
+
+  /** Commit one user Stop with its own record; returns the exact retirement the Store committed. */
+  async commitStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, stop: AgentMuxAgentStopRecord): Promise<AgentMuxRetiredAgentSession> {
+    const { retired } = await this.commit(reservation, null, stop)
+    if (!retired) throw new AgentMuxError('Stop lifecycle did not persist Agent Session retirement.', 'INVALID_AGENT_SESSION_STORE')
+    return retired
+  }
+
+  /** Record how far one exact open Stop got, on its own reservation row. */
+  async recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void> {
+    await this.store.recordStopProgress(reservation, progress)
+  }
+
+  private async commit(
+    reservation: AgentMuxLifecycleReservation,
+    session: AgentMuxStoredAgentSession | null,
+    stop?: AgentMuxAgentStopRecord
+  ): Promise<{ session: AgentMuxStoredAgentSession | null; retired: AgentMuxRetiredAgentSession | null }> {
     const normalized = session ? normalizeStoredAgentSession(session) : null
     return await this.enqueue(reservation.agentSessionId, async () => {
       const commit: { retired: AgentMuxRetiredAgentSession | null } = { retired: null }
-      await this.persist(normalized, async () => { commit.retired = await this.store.commitLifecycle(reservation, normalized) })
+      await this.persist(normalized, async () => { commit.retired = await this.store.commitLifecycle(reservation, normalized, stop) })
       const previous = this.sessions.get(reservation.agentSessionId)
       if (previous) this.forget(previous)
       if (!normalized) {
@@ -510,7 +534,7 @@ export class AgentMuxAgentSessionRegistry {
         }
         this.noteMetadataChange('sessions', reservation.agentSessionId)
         this.sessions.delete(reservation.agentSessionId)
-        return null
+        return { session: null, retired: commit.retired }
       }
       if (reservation.kind === 'reopen') {
         this.noteMetadataChange('retirements', normalized.agentSessionId)
@@ -521,7 +545,7 @@ export class AgentMuxAgentSessionRegistry {
         }
       }
       this.remember(normalized)
-      return this.get(normalized.agentSessionId)
+      return { session: this.get(normalized.agentSessionId), retired: null }
     })
   }
 
@@ -670,6 +694,7 @@ export class AgentMuxAgentSessionRegistry {
         operationId: string
         expectedRun: AgentMuxRunRef
         stopOperation: AgentMuxRecoverableStopOperation
+        progress: AgentMuxAgentStopProgress
       }
   )): Promise<AgentMuxLifecycleReservation> {
     const now = Date.now()
@@ -689,7 +714,8 @@ export class AgentMuxAgentSessionRegistry {
             ...base,
             kind: 'stop',
             expectedRun: { ...input.expectedRun },
-            stopOperation: { ...input.stopOperation }
+            stopOperation: { ...input.stopOperation },
+            progress: structuredClone(input.progress)
           }
     await this.store.reserveLifecycle(reservation)
     return reservation

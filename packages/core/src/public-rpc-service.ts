@@ -139,6 +139,7 @@ import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcReco
 import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseAgentRestartInput } from './agent-session-recovery/restart-contract.js'
+import { parseAgentStopIdentity } from './agent-stop-receipt.js'
 import { observeHostRuntime, parseTailcatListenerObservation } from './host-runtime-observation.js'
 import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
@@ -150,7 +151,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -353,6 +354,7 @@ const NATIVE_FIELDS = {
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
   'agent.restart': ['agentSessionId', 'expectedRun', 'operationId'],
   'agent.restart.inspect': ['agentSessionId', 'expectedRun', 'operationId'],
+  'agent.stop.inspect': ['agentSessionId', 'expectedRun', 'operationId'],
   'agent.refresh': ['agentSessionId'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
@@ -1425,6 +1427,20 @@ export class AgentMuxRpcService {
       const result = method === 'agent.restart' ? { session: await selected.client.restartAgent(input) }
         : await selected.client.inspectAgentRestart(input)
       return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.stop.inspect') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
+        throw new AgentMuxError('Inspecting a Stop requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = parseAgentStopIdentity(params)
+      // A Stop's Session is either still active or already retired; both are this owner's history sources.
+      const owners = (await Promise.all((await this.clients()).map(async entry => ({ ...entry, sources: await entry.client.sessionHistorySources() }))))
+        .filter(entry => entry.sources.some(source => source.agentSessionId === input.agentSessionId && source.hostId === (entry.client.forwardRpc ? 'local' : entry.hostId)))
+      if (owners.length !== 1) throw new AgentMuxError('The exact Session does not have one confirmed Host owner.', owners.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
+      const client = owners[0]!.client
+      context.signal?.throwIfAborted()
+      if (client.forwardRpc) return await client.forwardRpc(method, input as AgentMuxRpcParams<typeof method>, context) as AgentMuxRpcResult<M>
+      return parseRpcNativeResult(method, await client.inspectAgentStop(input), input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.reopen' || method === 'agent.reopen.check') {
       if (context.caller !== undefined || !context.principal ||

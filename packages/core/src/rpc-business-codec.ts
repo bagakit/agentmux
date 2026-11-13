@@ -249,6 +249,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'interrupt': case 'resume': case 'stop':
       if (request.operation === 'resume' && result.operation === 'resume' && result.resolution && ![result.resolution.operationId, result.resolution.originalOperationId].includes(request.requestId)) fail()
+      // A new Stop answers with this request's identity; a retained or joined original Stop answers with its own.
+      if (result.operation === 'stop' && result.receipt && (result.receipt.agentSessionId !== actual.agentSessionId ||
+        result.receipt.admission === 'new' && result.receipt.operationId !== request.requestId)) fail()
       if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail()
       break
     case 'file.build':

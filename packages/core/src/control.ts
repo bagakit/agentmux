@@ -840,7 +840,8 @@ export type AgentMuxControlResult =
   | AgentMuxControlCrashLogResult
   | { operation: 'interrupt'; agentSessionId: string }
   | { operation: 'resume'; agentSessionId: string; runId: string; resolution?: AgentMuxResumeResolution }
-  | { operation: 'stop'; agentSessionId: string }
+  /** The receipt is present when the executing owner returns Core's Stop receipt for this request. */
+  | { operation: 'stop'; agentSessionId: string; receipt?: import('./agent-stop-receipt.js').AgentMuxAgentStopReceipt }
   | { operation: 'demand.list'; demands: AgentMuxDemand[] }
   | ({ operation: 'demand.patrol-all' } & import('./space-control.js').AgentMuxSpaceMutationReport)
   | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }

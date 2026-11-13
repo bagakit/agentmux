@@ -1,4 +1,5 @@
 import { parseResumeResolution } from './agent-session-recovery/resume-resolution.js'
+import { parseAgentStopReceipt } from './agent-stop-receipt.js'
 import { parseRendererAllocationsInput, parseRendererAllocationsResult } from './renderer-allocations.js'
 import { isObjectId } from './object-id.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
@@ -1504,7 +1505,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'list.active-agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseControlActiveAgents(result.agents) } }
   if (operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.resolution === undefined ? {} : { resolution: parseResumeResolution(result.resolution) }) } }
-  if (operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'stop') {
+    const agentSessionId = identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId,
+      ...(result.receipt === undefined ? {} : { receipt: parseAgentStopReceipt(result.receipt, { agentSessionId }) }) } }
+  }
   if (operation === 'demand.list') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demands: Array.isArray(result.demands) ? result.demands.map(parseDemand) : (() => { throw new AgentMuxError('Control demand list is invalid.', 'CONTROL_PROTOCOL_ERROR') })() } }
   if (operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: result.demand === null ? null : parseDemand(result.demand), goalContinuations: Array.isArray(result.goalContinuations) ? result.goalContinuations.map(parseGoalContinuationLoop) : (() => { throw new AgentMuxError('Goal continuations are unconfirmed.', 'CONTROL_PROTOCOL_ERROR') })() } }
   if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.assign' || operation === 'demand.start' || operation === 'demand.handoff' || operation === 'demand.delete' || operation === 'demand.link-session' || operation === 'demand.link-project') {

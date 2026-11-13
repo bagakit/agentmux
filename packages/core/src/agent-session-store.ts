@@ -46,6 +46,7 @@ import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from
 import {
   normalizeAgentTimelineMutation
 } from './session-timeline.js'
+import { parseAgentStopProgress, parseAgentStopRecord, type AgentMuxAgentStopProgress, type AgentMuxAgentStopRecord } from './agent-stop-receipt.js'
 import {
   normalizeNativeSessionId,
   normalizeNativeTranscriptPath,
@@ -152,6 +153,8 @@ export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
       kind: 'stop'
       expectedRun: AgentMuxRunRef
       stopOperation: AgentMuxRecoverableStopOperation
+      /** How far this Stop got; written before the Runtime stop and when a stage fails. */
+      progress?: AgentMuxAgentStopProgress
     }
 )
 
@@ -171,6 +174,8 @@ export type AgentMuxRetiredAgentSession = {
   observedAt: number
   history?: AgentSessionHistoryMetadata
   activityCommit?: AgentActivityCommit
+  /** The Stop that produced this retirement. */
+  stop?: AgentMuxAgentStopRecord
 }
 
 type ContinuityControlStoredResult = { receipt: AgentMuxContinuityControlReceipt } & (
@@ -278,10 +283,16 @@ export type AgentMuxAgentSessionStore = {
     retiredRuns?: readonly AgentMuxRunRef[]
   ): Promise<void>
   retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void>
-  /** A user Stop returns the exact retirement it committed; every other lifecycle returns null. */
+  /** Record how far one exact open Stop got, on its own reservation row. */
+  recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void>
+  /**
+   * A user Stop returns the exact retirement it committed, carrying the Stop's own record;
+   * every other lifecycle returns null and takes no Stop record.
+   */
   commitLifecycle(
     reservation: AgentMuxLifecycleReservation,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    stop?: AgentMuxAgentStopRecord
   ): Promise<AgentMuxRetiredAgentSession | null>
   readCapturedHistory(agentSessionId: string, input?: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   readInputConversationProjection(agentSessionId: string, after?: string): Promise<ReturnType<typeof readCapturedInputProjection>>
@@ -574,7 +585,8 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
       ...(source.preparedDispatch === undefined ? {} : { preparedDispatch: preparedResumeDispatch(source.preparedDispatch, preparedSession, base.operationId) }),
       ...(restart ? { restart } : {}), ...(resolution ? { resolution } : {}), ...(source.ownerReleased === true ? { ownerReleased: true as const } : {}) }
   }
-  return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation! }
+  return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation!,
+    ...(source.progress === undefined ? {} : { progress: parseAgentStopProgress(source.progress) }) }
 }
 
 function sameSession(
@@ -748,7 +760,8 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
-    ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) })
+    ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) }),
+    ...(source.stop === undefined ? {} : { stop: parseAgentStopRecord(source.stop) })
   }
 }
 
@@ -2475,6 +2488,30 @@ function restartStartNotAppliedReservation(current: AgentMuxLifecycleReservation
   return lifecycleReservation({ ...retained, restart: { ...current.restart, startNotApplied: failure } }) as Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
 }
 
+type StopReservation = Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>
+
+/** Progress belongs to the same Stop owner and keeps the caller identity recorded at admission. */
+function stopProgressReservation(current: AgentMuxLifecycleReservation | undefined, expected: StopReservation, value: AgentMuxAgentStopProgress): StopReservation {
+  const progress = parseAgentStopProgress(value)
+  if (!current || current.kind !== 'stop' || !sameReservationOwner(current, expected) || current.expectedRun.runId !== expected.expectedRun.runId) {
+    throw new AgentMuxError('The original Stop owner changed before its progress was recorded.', 'STALE_AGENT_SESSION')
+  }
+  if (current.progress && current.progress.operationId !== progress.operationId) {
+    throw new AgentMuxError('Stop progress belongs to another operation.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return lifecycleReservation({ ...current, progress }) as StopReservation
+}
+
+/** Only a Stop retirement carries a Stop record, and only the record of that same lifecycle operation. */
+function stopRecordFor(reservation: AgentMuxLifecycleReservation, value: AgentMuxAgentStopRecord | undefined): AgentMuxAgentStopRecord | undefined {
+  if (value === undefined) return undefined
+  const record = parseAgentStopRecord(value)
+  if (reservation.kind !== 'stop' || record.lifecycleOperationId !== reservation.operationId) {
+    throw new AgentMuxError('The Stop record belongs to another lifecycle operation.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return record
+}
+
 function preparedResumeReservation(current: AgentMuxLifecycleReservation | undefined,
   expected: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> {
   if (!current || current.kind !== 'resume' || !sameReservationOwner(current, expected)) throw new AgentMuxError('Resume reservation changed before preparation.', 'STALE_AGENT_SESSION')
@@ -3031,11 +3068,18 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     this.retiredAgentSessions = retainedSessions
   }
 
+  async recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void> {
+    const next = stopProgressReservation(this.reservations.get(reservation.agentSessionId), reservation, progress)
+    this.reservations.set(next.agentSessionId, structuredClone(next))
+  }
+
   async commitLifecycle(
     value: AgentMuxLifecycleReservation,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    stop?: AgentMuxAgentStopRecord
   ): Promise<AgentMuxRetiredAgentSession | null> {
     const reservation = lifecycleReservation(value)
+    const stopRecord = stopRecordFor(reservation, stop)
     const currentReservation = this.reservations.get(reservation.agentSessionId)
     if (!currentReservation || !sameReservationOwner(currentReservation, reservation)) {
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
@@ -3069,7 +3113,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             observedAt: Date.now(),
             history: sessionHistoryMetadata(previous),
             continuityControlReceipts: continuityControlReceipts(previous),
-            ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
+            ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
+            ...(stopRecord ? { stop: stopRecord } : {})
           }])
         : this.retiredAgentSessions,
       retiredRuns
@@ -3790,14 +3835,22 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }, undefined, CROSS_SESSION_WRITE)
   }
 
+  async recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void> {
+    await this.enqueue(async () => {
+      this.replaceReservation(this.db, stopProgressReservation(this.reservationRow(this.db, reservation.agentSessionId), reservation, progress))
+    }, undefined, reservation.agentSessionId)
+  }
+
   async commitLifecycle(
     value: AgentMuxLifecycleReservation,
-    next: AgentMuxStoredAgentSession | null
+    next: AgentMuxStoredAgentSession | null,
+    stop?: AgentMuxAgentStopRecord
   ): Promise<AgentMuxRetiredAgentSession | null> {
     let committed: AgentMuxRetiredAgentSession | null = null
     await this.enqueue(async () => {
       const reservation = lifecycleReservation(value)
-      if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next); return }
+      const stopRecord = stopRecordFor(reservation, stop)
+      if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next, stopRecord); return }
       this.commitSessionLifecycle(reservation, next)
     }, undefined, value.agentSessionId)
     return committed
@@ -3843,7 +3896,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
    * transaction. Every check reads only that Session's rows; unrelated Sessions, accumulated
    * retirements and their prompt records are neither read nor rewritten.
    */
-  private commitStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, next: AgentMuxStoredAgentSession | null): AgentMuxRetiredAgentSession {
+  private commitStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, next: AgentMuxStoredAgentSession | null, stop: AgentMuxAgentStopRecord | undefined): AgentMuxRetiredAgentSession {
     const db = this.db, id = reservation.agentSessionId
     const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(id)
     const current = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
@@ -3874,7 +3927,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       observedAt: Date.now(),
       history: sessionHistoryMetadata(previous),
       continuityControlReceipts: continuityControlReceipts(previous),
-      ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
+      ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
+      ...(stop ? { stop } : {})
     })
     db.prepare('INSERT INTO retired_sessions (id, json) VALUES (?, ?)').run(id, JSON.stringify(retired))
     this.dirty = true

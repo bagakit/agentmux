@@ -1754,7 +1754,8 @@ export class CtxmuxRunAdapter {
     catch (error) { throw translateCtxmuxError(error) }
   }
 
-  async stop(operation: CtxmuxAdapterStopOperation): Promise<void> {
+  /** Returns the Runtime's own receipt for how the Run reached quiescence. */
+  async stop(operation: CtxmuxAdapterStopOperation): Promise<{ disposition: 'graceful' | 'forced' }> {
     let recovery: Awaited<ReturnType<CtxmuxClient['attachRecoverableStop']>> | null = null
     try {
       await this.detach(operation.runId)
@@ -1762,6 +1763,7 @@ export class CtxmuxRunAdapter {
         operation as RecoverableStopOperation,
         0
       )
+      return { disposition: recovery.stop.receipt.disposition }
     } catch (error) {
       throw translateCtxmuxError(error)
     } finally {
