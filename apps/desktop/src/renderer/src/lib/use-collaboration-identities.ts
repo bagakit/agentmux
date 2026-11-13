@@ -87,9 +87,11 @@ export function useCollaborationIdentities(agents: ReadonlyMap<string, Collabora
   return useMemo(() => ({ reads, retry }), [reads, retry])
 }
 
-/** Resolve only authoritative exact references, retaining original evidence while joining shared endpoints. */
+/** Resolve only authoritative exact references, retaining original evidence while joining shared endpoints.
+ * Live agents in `known` have authoritative runtime facts (tier, providerId, executorId, lastActivityAt);
+ * the history source confirms subject identity and provenance but must not overwrite live runtime fields. */
 export function resolveCollaborationIdentities(recorded: { agents: ReadonlyMap<string, CollaborationAgent>; relations: readonly CollaborationRelation[] },
-  reads: ReadonlyMap<string, IdentityRead>) {
+  reads: ReadonlyMap<string, IdentityRead>, known: ReadonlyMap<string, CollaborationAgent> = new Map()) {
   const agents = new Map(recorded.agents), sources = new Map<string, AgentSessionHistoryDescriptor>(), aliases = new Map<string, string>()
   for (const [id, read] of reads) {
     const agent = recorded.agents.get(id)
@@ -98,7 +100,17 @@ export function resolveCollaborationIdentities(recorded: { agents: ReadonlyMap<s
       `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · ${source.history?.providerId ?? 'Provider unrecorded'} · ${source.hostId}`), canonical = member.id
     aliases.set(id, canonical); sources.set(canonical, source)
     if (id !== canonical) agents.delete(id)
-    agents.set(canonical, { ...agent, ...member })
+    // A live session's tier, executor and activity are more authoritative than the retained descriptor.
+    // History confirms the subject and provenance; it does not demote a running or exited session.
+    const live = known.get(id) ?? known.get(canonical)
+    const merged: CollaborationAgent = { ...agent, ...member }
+    if (live) {
+      if (live.tier != null) merged.tier = live.tier
+      if (live.providerId != null) merged.providerId = live.providerId
+      if (live.executorId != null) merged.executorId = live.executorId
+      if (live.lastActivityAt != null) merged.lastActivityAt = live.lastActivityAt
+    }
+    agents.set(canonical, merged)
   }
   const relations = new Map<string, CollaborationRelation>()
   for (const relation of recorded.relations) {

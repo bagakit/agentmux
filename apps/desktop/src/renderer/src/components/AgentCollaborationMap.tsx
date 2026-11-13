@@ -105,7 +105,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   const recordedFacts = useMemo(() => project(reading.facts, history.sources), [project, reading.facts, history.sources])
   const recorded = useMemo(() => ({ ...recordedFacts, agents: new Map([...areaReferences, ...recordedFacts.agents]) }), [recordedFacts, areaReferences])
   const metadata = useCollaborationIdentities(recorded.agents, wanted, catalog.agents, enabled, facts.config?.hosts)
-  const resolved = useMemo(() => resolveCollaborationIdentities(recorded, metadata.reads), [recorded, metadata.reads])
+  const resolved = useMemo(() => resolveCollaborationIdentities(recorded, metadata.reads, catalog.agents), [recorded, metadata.reads, catalog.agents])
   const descriptors = useMemo(() => new Map([...resolved.sources, ...catalog.history]), [resolved.sources, catalog.history])
   const contextDemand = useMemo(() => new Set([...wanted].map(id => resolved.aliases.get(id) ?? id)), [wanted, resolved.aliases])
   const contextCache = useRef(new Map<string, { session: Facts['sessions'][number] | AgentSessionHistoryDescriptor; name: string | undefined; workspace: ReturnType<typeof workspaceForSession>; topicId: ReturnType<typeof topicIdForSession>; context: FocusContext }>())
