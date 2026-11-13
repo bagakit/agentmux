@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import { repositoryRoot } from './goal-cross-host-source.mjs'
 
-export const planningOwners = ['apps/host/src/goal-discussions.ts', 'packages/demand/src/discussion.ts',
+export const planningOwners = ['apps/host/src/goal-discussions.ts', 'apps/host/src/goal-pmo-origin.ts', 'packages/demand/src/discussion.ts', 'packages/demand/src/demand-store.ts',
   'packages/core/src/control.ts', 'packages/core/src/control-codec.ts', 'packages/core/src/agentmux-cli-commands.ts',
   'packages/core/src/goal-role-guidance.ts', 'packages/core/src/generated/agentmux-guides.ts']
 export const planningMutations = {
@@ -14,7 +14,21 @@ export const planningMutations = {
     anchor: "if (request.mode !== 'open' && request.requestId !== original?.requestOperationId)",
     replacement: "if (request.mode !== 'open' && request.mode !== 'plan' && request.requestId !== original?.requestOperationId)" },
   'planning-reconcile': { path: 'apps/host/src/goal-discussions.ts',
-    anchor: 'if (!prior) {', replacement: "if (!prior || request.mode === 'plan') {" }
+    anchor: 'if (!prior) {', replacement: "if (!prior || request.mode === 'plan') {" },
+  'legacy-initialize': { path: 'packages/demand/src/demand-store.ts',
+    anchor: 'demand.discussionOperationId = operationId',
+    replacement: "if (!demand.discussionOperationId) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Mutant refuses explicit legacy discussion.'); demand.discussionOperationId = operationId" },
+  'legacy-cas': { path: 'packages/demand/src/demand-store.ts',
+    anchor: "if (demand.updatedAt !== expectedUpdatedAt) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed before preparing its original discussion.')",
+    replacement: "if (false) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed before preparing its original discussion.')" },
+  'legacy-winner': { path: 'apps/host/src/goal-discussions.ts',
+    anchor: 'return intent(winner, request, context)', replacement: 'throw error' },
+  'legacy-origin': { path: 'apps/host/src/goal-discussions.ts',
+    anchor: "goal.discussionOperationId === await goalPmoOperation({ goalId: goal.id, creationOperationId: goal.creationOrigin.operationId }, 'create')",
+    replacement: 'true' },
+  'legacy-binding': { path: 'apps/host/src/goal-discussions.ts',
+    anchor: "state = await options.spatial.read()\n        if (!state) return unavailable('The original Core spatial document is unavailable before discussion creation.')\n        binding = readGoalDiscussionBinding(state.graph, goal.id)",
+    replacement: '// Mutant uses the stale pre-reservation absence.' }
 }
 export function instrumentPlanningSource(source, absolutePath, consumer) {
   const path = relative(repositoryRoot, absolutePath)

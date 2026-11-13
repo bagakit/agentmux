@@ -75,7 +75,7 @@ it('requires the original Goal revision before freezing a first discussion inten
   expect(prepared.demand).toMatchObject({ description: changed.demand.description, discussionIntent: intent })
 })
 
-it('retains a Goal without discussion provenance and never adopts it through preparation or repeated creation', async () => {
+it('keeps a legacy Goal untouched until an explicit first discussion atomically saves its operation and intent', async () => {
   const { root, store } = await fixture()
   await store.create({ id: 'retained', title: 'Retained Goal', description: 'Original body', sessionIds: ['original-session'], tags: ['original-tag'] })
   await store.addDecision('retained', { id: 'retained-decision', question: 'Keep which identity?', decision: 'The original one.', rationale: 'Preserve its evidence.', actorId: null })
@@ -83,8 +83,6 @@ it('retains a Goal without discussion provenance and never adopts it through pre
   const reopened = openDemandStore({ root })
   expect(await reopened.get('retained')).toEqual(original)
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
-  await expect(reopened.prepareDiscussion('retained', 'unobserved-discussion', intent, original!.updatedAt))
-    .rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
   await expect(reopened.create({ id: 'retained', title: 'Retained Goal' }, {
     operationId: 'another-create', discussionOperationId: 'unobserved-discussion', creationOrigin: { requesterAsSupervisor: true }
   })).rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
@@ -93,4 +91,44 @@ it('retains a Goal without discussion provenance and never adopts it through pre
   expect(await openDemandStore({ root }).get('retained')).toEqual(original)
   expect((await reopened.get('retained'))?.discussionOperationId).toBeUndefined()
   expect((await reopened.get('retained'))?.discussionIntent).toBeUndefined()
+  const publications: unknown[] = []
+  reopened.subscribe(snapshot => {
+    const goal = snapshot.demands.find(value => value.id === 'retained')!
+    publications.push({ operationId: goal.discussionOperationId, intent: goal.discussionIntent })
+  })
+  const prepared = await reopened.prepareDiscussion('retained', 'explicit-discussion', intent, original!.updatedAt)
+  expect(publications).toEqual([{ operationId: 'explicit-discussion', intent }])
+  const { updatedAt: _old, ...retained } = original!, { updatedAt: _new, discussionOperationId, discussionIntent, ...after } = prepared.demand
+  expect(after).toEqual(retained)
+  expect(discussionOperationId).toBe('explicit-discussion'); expect(discussionIntent).toEqual(intent)
+  expect(prepared.demand.creationOrigin).toBeUndefined(); expect(prepared.demand.supervisorSessionId).toBeNull()
+  expect((await openDemandStore({ root }).get('retained'))!.discussionIntent).toEqual(intent)
+})
+
+it('concurrent explicit first discussions retain one winner and cannot overwrite it even after reading its new revision', async () => {
+  const { root, store } = await fixture(), original = (await store.create({ id: 'legacy', title: 'Original legacy Goal' })).demand
+  const second = { ...intent, requestOperationId: 'second-request', mode: 'plan' as const }
+  const results = await Promise.allSettled([
+    store.prepareDiscussion('legacy', 'first-operation', intent, original.updatedAt),
+    openDemandStore({ root }).prepareDiscussion('legacy', 'second-operation', second, original.updatedAt)
+  ])
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+  expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+  const saved = (await store.get('legacy'))!, before = await readFile(store.storePath, 'utf8')
+  expect(saved.discussionIntent).toEqual(saved.discussionOperationId === 'first-operation' ? intent : second)
+  expect(await store.prepareDiscussion('legacy', saved.discussionOperationId!, saved.discussionIntent!, original.updatedAt)).toMatchObject({ replayed: true })
+  expect(await readFile(store.storePath, 'utf8')).toBe(before)
+  const loserOperation = saved.discussionOperationId === 'first-operation' ? 'second-operation' : 'first-operation'
+  const loserIntent = loserOperation === 'first-operation' ? intent : second
+  await expect(store.prepareDiscussion('legacy', loserOperation, loserIntent, saved.updatedAt)).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect(await readFile(store.storePath, 'utf8')).toBe(before)
+})
+
+it('a changed legacy Goal does not gain any discussion fields from a stale first reservation', async () => {
+  const { store } = await fixture(), original = (await store.create({ id: 'legacy', title: 'Original legacy Goal' })).demand
+  const changed = await store.update('legacy', { description: 'Keep the newer human intent.' })
+  const bytes = await readFile(store.storePath, 'utf8')
+  await expect(store.prepareDiscussion('legacy', 'stale-operation', intent, original.updatedAt)).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
+  expect(await store.get('legacy')).toEqual(changed.demand)
 })

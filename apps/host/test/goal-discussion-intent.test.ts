@@ -7,6 +7,7 @@ import { createHostGoalDiscussions } from '../src/goal-discussions.js'
 import { ScratchTopics } from '../src/mote-resources.js'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/mote-topic-model.js'
 import type { AgentMuxControlRequest } from '@agentmux/core/control'
+import { goalPmoOperation } from '../src/goal-pmo-origin.js'
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0)) await close() })
 async function fixture() {
@@ -90,4 +91,47 @@ it('freezes a first planning request with its actual Goal and read/save instruct
   expect(context).toBe(note)
   await expect(f.owner.execute({ ...request, mode: 'grill' }, {})).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
   expect(f.call).toHaveBeenCalledTimes(1)
+})
+it('an explicit legacy discussion uses a distinct original source and preserves pending Goal creation provenance', async () => {
+  const f = await fixture()
+  await f.demands.create({ id: 'legacy', title: 'Original legacy Goal' }, { operationId: 'same-request', creationOrigin: { requesterAsSupervisor: true } })
+  const before = (await f.demands.get('legacy'))!
+  const request = { ...f.request, demandId: 'legacy', requestId: 'same-request', mode: 'plan' as const, executorId: 'claude' }
+  await expect(f.owner.execute(request, {})).rejects.toThrow('native-boundary')
+  const goal = (await f.demands.get('legacy'))!, expected = await goalPmoOperation({ goalId: goal.id, creationOperationId: request.requestId }, 'discussion-create')
+  expect(goal.discussionOperationId).toBe(expected); expect(expected).toMatch(/^goal_pmo_create_/u)
+  expect(expected).not.toBe(await goalPmoOperation({ goalId: goal.id, creationOperationId: request.requestId }, 'create'))
+  expect(goal.discussionIntent).toMatchObject({ requestOperationId: request.requestId, mode: 'plan', prompt: 'Make a plan for this existing Goal: legacy.' })
+  expect(goal.creationOrigin).toEqual(before.creationOrigin); expect(goal.supervisorSessionId).toBeNull(); expect(goal.participations).toEqual(before.participations)
+  const call = f.call.mock.calls[0]![1] as any
+  expect(call.operationId).toBe(expected)
+  expect(await f.owner.contextForSpatialOpen({ ...call, schemaVersion: 1, operation: 'agent.open', requestId: expected })).toBe(goal.discussionIntent!.agentMuxNote)
+})
+
+it('a canonical binding contributed during reservation prevents any replacement creation', async () => {
+  const f = await fixture()
+  await f.demands.create({ id: 'legacy', title: 'Retained work' })
+  const prepare = f.demands.prepareDiscussion.bind(f.demands)
+  vi.spyOn(f.demands, 'prepareDiscussion').mockImplementation(async (...args) => {
+    const receipt = await prepare(...args)
+    f.bot()
+    f.graph.tabs[0]!.regionIds = ['original-region']
+    f.graph.resources['owned:goal-discussion:legacy'] = { schema: 'agentmux.goal-discussion-binding.v1', tabId: 'original-tab', regionId: 'original-region',
+      recipient: { kind: 'agent', hostId: 'local', agentSessionId: 'original-bot' } }
+    return receipt
+  })
+  await expect(f.owner.execute({ ...f.request, demandId: 'legacy', mode: 'plan', executorId: 'claude' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
+  expect(f.call).not.toHaveBeenCalled()
+  expect(f.graph.resources['owned:goal-discussion:legacy'].recipient.agentSessionId).toBe('original-bot')
+  expect((await f.demands.get('legacy'))!.discussionIntent?.mode).toBe('plan')
+})
+
+it('failed spatial observation never reserves a legacy discussion or reaches Native creation', async () => {
+  const f = await fixture()
+  await f.demands.create({ id: 'legacy', title: 'Retained work' })
+  const before = await f.demands.get('legacy')
+  const owner = createHostGoalDiscussions({ configurationPath: '', demands: f.demands, spatial: { read: async () => null } as never,
+    runtime: {} as never, call: f.call as never, confirmParticipation: async () => {} })
+  await expect(owner.execute({ ...f.request, demandId: 'legacy', mode: 'plan' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
+  expect(await f.demands.get('legacy')).toEqual(before); expect(f.call).not.toHaveBeenCalled()
 })
