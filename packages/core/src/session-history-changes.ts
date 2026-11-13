@@ -26,13 +26,7 @@ export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistor
   tail?: true
   /** Cut-only at the original source beginning, without consuming its first record. Not combined with after/tail. */
   head?: true
-  /** With `after` only: the source was rewritten in place before that cut. Resume
-   * just after the newest record still byte-identical to one of these consumed
-   * records (newest first); the anchor record itself is not returned again. */
-  atRecords?: readonly ConversationRecordAnchor[]
 }
-/** One consumed native record: its Provider ID and the sha256 of its exact physical bytes. */
-export type ConversationRecordAnchor = { recordId: string; digest: string }
 export type ProviderConversationChangesPage = { source: AgentSessionHistorySource; items: AgentSessionHistoryItem[]; digests?: Readonly<Record<string, string>>; cursor: string; more: boolean }
 
 function rpcString(value: unknown, label: string): string {

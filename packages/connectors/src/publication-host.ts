@@ -36,14 +36,7 @@ export interface PublicationPermissionsPort {
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
 type SourceRead = { observation: ConnectionDeliverySourceObservation; checkpoint: ConversationCheckpoint | null }
-type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined; rewrite?: ConversationChangesInput['rewrite'] } | undefined
-  /** Native cut whose anchored rewrite read reached a decided result; cleared by explicit recovery. */
-  rewriteTried?: string | undefined }
-/** The anchored rewrite read compares only the native cut; other source cuts never make it new. */
-const rewriteCutKey = (checkpoint: ConversationCheckpoint) => {
-  const native = checkpoint.frontier.cuts.find(cut => cut.kind === 'native')
-  return native ? JSON.stringify(native.checkpoint.cursor) : undefined
-}
+type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -329,7 +322,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !this.authorized(binding)) return
       // A valid coverage/route envelope can exceed the interactive default before
       // any content fits. Use Core's existing wire bound for this background reader.
-      const state: NonNullable<Lane['read']> = lane.read, input: ConversationChangesInput = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}), ...(state.rewrite ? { rewrite: state.rewrite } : {}) }
+      const state: NonNullable<Lane['read']> = lane.read, input: ConversationChangesInput = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input) }
       catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, state.after); return }
@@ -338,20 +331,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const unavailable = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') &&
         (value.current === 'unavailable' || value.current === 'unsupported' || value.gaps.length > 0))
       nativeFailure = unavailable ? { ...(unavailable.gaps[0]?.code ? { code: unavailable.gaps[0].code } : {}) } : undefined
-      // The original source was rewritten in place before this cut. Resume after this
-      // Binding's newest consumed native record still byte-identical in the source; Core
-      // returns only later records. Nothing is accepted from this page. Only the native
-      // cut decides what the anchors compare, so captured progress is not a new cut. A
-      // decided anchored read (still rewritten, or a different source) is not repeated
-      // for the same native cut until an explicit recovery; a transient one is retried.
-      const nativeCut = rewriteCutKey(state.after)
-      if (state.rewrite) {
-        if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' || nativeFailure?.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') lane.rewriteTried = nativeCut
-      } else if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' && !state.cursor && !state.pending && lane.rewriteTried !== nativeCut) {
-        const anchors = this.store.rewriteAnchors(binding)
-        if (anchors.length) { lane.view = undefined; lane.viewId = undefined; lane.read = { after: state.after, rewrite: { anchors } }; reads--; continue }
-        lane.rewriteTried = nativeCut
-      }
+      // A record match cannot establish that a rewritten range omitted nothing.
+      // Keep the original native cut and explicit gap; independent captured facts
+      // and the original admitted Outbox continue through their existing owners.
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') {
         state.pending = consumed.pending
@@ -932,8 +914,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (authority === null) throw new AgentMuxError('The original publication authority could not be read. Existing work is retained.', 'PUBLICATION_STORAGE_UNCONFIRMED')
     if (!authority.authorized) return { disposition: 'disabled' as const, observation: { state: 'disabled' as const } }
     const lane = this.ensureLane(binding), disposition = lane.work ? 'joined' as const : 'requested' as const
-    // An explicit recovery may try the anchored rewrite read of the same cut again.
-    lane.rewriteTried = undefined
+    // Explicit recovery observes the same original cut; it grants no jump or replay.
     if (!lane.work) this.wake(lane)
     return { disposition, observation: this.observation(binding.bindingId, binding.revision),
       ...(lane.sourceRead ? { sourceObservation: { ...lane.sourceRead.observation } } : {}) }

@@ -451,48 +451,6 @@ export class NativeJsonlHistoryReader {
     return saved
   }
 
-  /** After an in-place rewrite of this same physical source, position the
-   * changes read just after the newest record that is still byte-identical to
-   * one the caller consumed. Anchors are the caller's newest consumed records as
-   * Provider ID plus the sha256 of the record's exact physical bytes. One backward
-   * scan from the old cut over this source's own prefix, under the read's ordinary
-   * time budget; only the Provider's cheap ID is computed. The anchors are the newest consumed records, so the first record the scan
-   * meets with a consumed ID decides: identical bytes resume after it, different
-   * bytes mean new content took an identity the caller already published, and the
-   * read is refused with the original cut kept. */
-  async seekChangesAfterRecord(after: string, anchors: readonly { recordId: string; digest: string }[], identify: (row: Record<string, unknown>, start: number) => string | null): Promise<void> {
-    const saved = this.savedChangesCut(after)
-    if (!anchors.length) return failure('REWRITTEN', 'No original consumed record was supplied for this rewritten source.')
-    if ((await this.prefixFingerprints(Math.min(saved.offset, this.cut))).head !== saved.head) return failure('SOURCE_CHANGED', 'The original conversation source was replaced.')
-    const digests = new Map<string, Set<string>>()
-    for (const anchor of anchors) { const set = digests.get(anchor.recordId) ?? new Set<string>(); set.add(anchor.digest); digests.set(anchor.recordId, set) }
-    // Start from the last complete record boundary at or before the old cut.
-    let end = Math.min(saved.offset, this.cut)
-    if (end > 0 && (await this.read(end - 1, 1))[0] !== 10) {
-      let boundary = 0
-      for (let at = end; at > 0;) {
-        const start = Math.max(0, at - 64 * 1024), newline = (await this.read(start, at - start)).lastIndexOf(10)
-        if (newline !== -1) { boundary = start + newline + 1; break }
-        at = start
-      }
-      end = boundary
-    }
-    const original = { position: this.position, lastRecordEnd: this.lastRecordEnd }
-    this.position = end
-    try {
-      for (let record = await this.readPrevious(); record; record = await this.readPrevious()) {
-        const id = identify(record.value, record.start), wanted = id === null ? undefined : digests.get(id)
-        if (!wanted) continue
-        if (!wanted.has(await this.recordDigest(record))) return failure('REWRITTEN', 'The rewritten source reuses a consumed record identity for different content. The original cut is retained.')
-        this.forwardPosition = record.end
-        this.lastForwardStart = undefined
-        await this.verifyUnchanged()
-        return
-      }
-    } finally { this.position = original.position; this.lastRecordEnd = original.lastRecordEnd }
-    return failure('REWRITTEN', 'No original consumed record remains in the rewritten source.')
-  }
-
   /** sha256 of one record's exact physical bytes, excluding its newline: stable across reads.
    * Hashed in bounded reads, because one record can exceed a single physical read. */
   async recordDigest(record: Pick<NativeJsonlHistoryRecord, 'start' | 'end'>): Promise<string> {
@@ -593,14 +551,10 @@ const RECORD_DIGEST_READ_BYTES = 1024 * 1024
 /** Physical append iteration is shared; the original Provider alone interprets each row. */
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
   convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>,
-  /** The Provider's record ID without materialization; required to resume a rewritten source. */
+  /** The Provider supplies record identity so returned original bytes can carry digests. */
   identify?: (row: Record<string, unknown>, start: number) => string | null): Promise<ProviderConversationChangesPage> {
   if (context.head && (context.after !== undefined || context.tail)) return failure('INVALID_CURSOR', 'A beginning checkpoint cannot include another source position.')
-  if (context.atRecords) {
-    if (context.after === undefined || context.tail || context.head || context.through !== undefined) return failure('INVALID_CURSOR', 'A rewrite anchor requires only its original saved cut.')
-    if (!identify) return failure('REWRITTEN', 'This Provider cannot resume a rewritten source in place.')
-    await reader.seekChangesAfterRecord(context.after, context.atRecords, identify)
-  } else await reader.seekChanges(context.after, context.tail === true)
+  await reader.seekChanges(context.after, context.tail === true)
   if (context.through !== undefined) await reader.limitChanges(context.through)
   const items: AgentSessionHistoryItem[] = [], digests: Record<string, string> = {}
   let bytes = 0
@@ -614,6 +568,8 @@ export async function readNativeConversationChanges(reader: NativeJsonlHistoryRe
       if (!items.length) throw new AgentMuxError('The original change cannot fit its materialized page.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
       reader.repeatNext(); break
     }
+    // Versions of one native identity must remain separate accepted pages.
+    if (items.some(previous => previous.id === item.id)) { reader.repeatNext(); break }
     items.push(item); bytes += size
     if (identify) digests[item.id] = await reader.recordDigest(entry)
   }

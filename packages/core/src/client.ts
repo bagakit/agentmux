@@ -2760,8 +2760,8 @@ export class AgentMuxClient {
   }
 
   async readConversationChanges(input: ConversationChangesInput, options: ConversationReadOptions = {}): Promise<ConversationChangesPage> {
-    // A rewrite anchor is an explicit recovery intent; validate it at the owner as on the wire.
-    if (input.rewrite) parseConversationChangesInput(input)
+    // Reject invalid fields before source lookup, as on the public wire.
+    parseConversationChangesInput(input)
     return this.observeConversationRead(input, 'changes', async () => {
       const owner = await this.conversationReader(input, options)
       parseConversationCheckpoint(input.checkpoint, input)
@@ -2819,7 +2819,7 @@ export class AgentMuxClient {
       nativePage: (cursor, limit) => this.readSessionHistoryPage(input.agentSessionId, { ...sourceOptions, limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeCheckpoint: async position => (await this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions,
         ...(position === 'beginning' ? { head: true as const } : { tail: true as const }), ...(options.signal ? { signal: options.signal } : {}) }, source)).checkpoint,
-      nativeChanges: (checkpoint, limit, through, atRecords) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(atRecords ? { atRecords } : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
+      nativeChanges: (checkpoint, limit, through) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
   }
 
@@ -3620,7 +3620,7 @@ export class AgentMuxClient {
     return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true; atRecords?: readonly import('./session-history-changes.js').ConversationRecordAnchor[] },
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true },
     originalSource?: AgentSessionHistorySource): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
@@ -3640,7 +3640,7 @@ export class AgentMuxClient {
       const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
         command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
-        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}), ...(options.atRecords ? { atRecords: options.atRecords.map(anchor => ({ ...anchor })) } : {}) }))
+        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
       const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, ...(page.digests ? { digests: page.digests } : {}), checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })

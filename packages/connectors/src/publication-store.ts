@@ -16,7 +16,7 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDeliveryRetrySource, parseConnectionDeliveryContinuation, type ConnectionDeliveryRetrySource, type ConnectionDeliveryContinuation, type ConnectionDeliveryRetryInput, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef, type ConversationRewriteAnchor, CONVERSATION_REWRITE_MAX_ANCHORS } from '@agentmux/core/conversation'
+import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope' | 'executionRuntimeId' | 'inputTarget' | 'publicationBoundary'>
@@ -127,8 +127,6 @@ const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item &&
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
 const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) => encode([source.providerId, source.nativeSessionId])
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
-/** The retained rewrite anchors share the frontier row's Binding key, beside the 'unified' cut. */
-const REWRITE_ANCHOR_KEY = 'rewrite-anchors'
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 /** A neighboring observation revision does not replace an unchanged original image effect. */
@@ -588,34 +586,6 @@ export class PublicationStore {
   private saveDecision(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, id: string, revision: string, value: unknown): void {
     this.decisionWrite.run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
-  /** Newest native records this exact Binding revision has accepted, newest first, as
-   * Provider ID plus the digest of their exact physical bytes. They are written in the
-   * same transaction that advances the durable cut and read only when that source was
-   * rewritten in place. Reading anchors, not delivery or publication receipts. */
-  rewriteAnchors(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): ConversationRewriteAnchor[] {
-    const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), REWRITE_ANCHOR_KEY)
-    if (!row) return []
-    const saved = JSON.parse(String(row.checkpoint_json)) as unknown
-    return Array.isArray(saved) ? saved.filter((value): value is ConversationRewriteAnchor => !!value && typeof value.recordId === 'string' && typeof value.digest === 'string' && /^[a-f0-9]{64}$/u.test(value.digest)) : []
-  }
-  /** Prepend this page's accepted native records to the retained anchors, bounded. */
-  private advanceRewriteAnchors(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, units: readonly ConversationUnit[]): void {
-    const page: ConversationRewriteAnchor[] = []
-    for (const record of units.flatMap(unit => unit.records)) {
-      if (record.reference?.source.kind === 'native' && record.order.kind === 'native-page' && record.order.recordDigest)
-        page.push({ recordId: record.reference.source.recordId, digest: record.order.recordDigest })
-    }
-    if (!page.length) return
-    // Units arrive oldest first; anchors are kept newest first without duplicate IDs.
-    const merged: ConversationRewriteAnchor[] = [], seen = new Set<string>()
-    for (const anchor of [...page.reverse(), ...this.rewriteAnchors(boundary)]) {
-      if (seen.has(anchor.recordId)) continue
-      seen.add(anchor.recordId); merged.push(anchor)
-      if (merged.length === CONVERSATION_REWRITE_MAX_ANCHORS) break
-    }
-    this.database.prepare('INSERT INTO connector_publication_frontier VALUES (?, ?, ?, ?) ON CONFLICT(binding_id, binding_revision, source_key) DO UPDATE SET checkpoint_json=excluded.checkpoint_json')
-      .run(...scopeKey(boundary), REWRITE_ANCHOR_KEY, encode(merged))
-  }
   /** Reuse only this accepted original part's exact derived image; no second resource cache. */
   retainedDiagram(boundary: PublicationBoundary, part: ConversationContentRef, text: string,
     textSha256: string, start: number, end: number): PublicationImage | undefined {
@@ -910,7 +880,6 @@ export class PublicationStore {
       this.accountInputAliases(boundary, units)
       for (const projectionId of replyProjections) this.refreshReplyMetadata(boundary, projectionId, options.fragmentText)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
-      this.advanceRewriteAnchors(boundary, units)
     })
   }
   /** A public captured span represents only its exact accepted native text wrapper. */

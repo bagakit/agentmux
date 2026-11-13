@@ -174,7 +174,6 @@ export async function readPiConversationChanges(context: ProviderConversationCha
     await validateHeader(reader, context)
     // Pi parent links decide branch continuity; the original cut stays authoritative.
     await reader.seekChanges(context.after, context.tail === true)
-    if (context.atRecords) throw new AgentMuxError('Pi conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_REWRITTEN')
     const previous = await reader.readBeforeChanges()
     let leaf = previous && previous.value.type !== 'session' ? entryIdentity(previous.value).id : null
     const visited = new Set(leaf === null ? [] : [leaf])
