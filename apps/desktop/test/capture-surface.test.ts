@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { crc32, deflateSync } from 'node:zlib'
-import { CaptureSurface, type CaptureSurfaceSession } from '../src/main/capture-surface'
+import { join } from 'node:path'
+import ipc from '../src/main/ipc.ts?raw'
+import { CaptureSurface, type CaptureSurfaceSession, type CaptureSurfaceTiming } from '../src/main/capture-surface'
 import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT } from '../src/shared/capture-surface'
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 
 const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], workbench: [] as any[],
   displays: [] as Array<{ id: number; bounds: { x: number; y: number; width: number; height: number }; displayFrequency?: number; scaleFactor?: number }>, cursor: { x: 0, y: 0 },
   screenListeners: new Map<string, Array<(...args: any[]) => void>>(), appListeners: new Map<string, Array<() => void>>(), focus: vi.fn(),
-  focused: null as unknown, saves: [] as unknown[] }))
+  focused: null as unknown, saves: [] as unknown[], loadWindow: undefined as (() => Promise<void>) | undefined }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   class Window extends EventEmitter {
@@ -16,7 +18,7 @@ vi.mock('electron', async () => {
     show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.visible = true }); focus = vi.fn()
     setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
     setOpacity = vi.fn((value: number) => { this.opacity = value }); getOpacity = () => this.opacity
-    loadFile = vi.fn(async () => { this.emit('ready-to-show') }); loadURL = this.loadFile
+    loadFile = vi.fn(async () => { await electron.loadWindow?.(); this.emit('ready-to-show') }); loadURL = this.loadFile
     constructor(readonly options: any) { super(); electron.windows.push(this) }
     static getFocusedWindow() { return electron.focused }
     static getAllWindows() { return [...electron.workbench, ...electron.windows] }
@@ -62,12 +64,13 @@ const result = pngFromBytes(png(4, 2))
 let surface: CaptureSurface, ports: ReturnType<typeof makePorts>
 function makePorts() {
   return { native: vi.fn(() => ({ captureDisplays: vi.fn(async () => frames()) })), appearance: () => ({ terminalTheme: 'graphite' as const }),
-    pin: vi.fn(async (..._args: unknown[]) => ({ state: 'open' } as never)), copyText: vi.fn(async (_text: string) => {}), returnFocus: vi.fn() }
+    pin: vi.fn(async (..._args: unknown[]) => ({ state: 'open' } as never)), copyText: vi.fn(async (_text: string) => {}), returnFocus: vi.fn(),
+    recordTiming: vi.fn(async (_timing: CaptureSurfaceTiming) => {}) }
 }
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   electron.handlers.clear(); electron.windows = []; electron.workbench = []; electron.screenListeners.clear(); electron.appListeners.clear(); electron.saves = []
-  electron.focus.mockClear(); electron.focused = null; electron.cursor = { x: -1, y: 0 }
+  electron.focus.mockClear(); electron.focused = null; electron.cursor = { x: -1, y: 0 }; electron.loadWindow = undefined
   electron.displays = [{ id: 1, bounds: main, scaleFactor: 2 }, { id: 7, bounds: side, scaleFactor: 1 }]
   ports = makePorts()
   surface = new CaptureSurface(ports)
@@ -106,6 +109,100 @@ it('captures every display once and opens one transparent overlay per display at
     expect(window.setBounds).toHaveBeenCalledTimes(2)
   }
   expect(overlays[0]!.input).toMatchObject({ frame: main, scale: 2, attachToDraft: true, expandable: true, background: 'included', backgrounds: { included: { image: { width: 8, height: 6 } } } })
+})
+
+function pending<T>() {
+  let resolve!: (value: T) => void, reject!: (error: Error) => void
+  const promise = new Promise<T>((accept, refuse) => { resolve = accept; reject = refuse })
+  return { promise, resolve, reject }
+}
+const loadEvent = (window: any) => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame })
+
+it('boots hidden overlay renderers while both current exposures are pending and releases only their new inputs', async () => {
+  const included = pending<ReturnType<typeof frames>>(), excluded = pending<ReturnType<typeof frames>>()
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const captureDisplays = vi.fn().mockImplementationOnce(() => included.promise).mockImplementationOnce(() => excluded.promise)
+  ports.native.mockReturnValue({ captureDisplays })
+  const outcome = surface.present(session({ background: 'excluded' }))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(electron.windows, 'Renderer preparation does not wait for native pixels').toHaveLength(2)
+  expect(electron.windows.every(window => window.loadFile.mock.calls.length === 1 && !window.visible), 'both hidden renderers load during the first exposure').toBe(true)
+  const window = electron.windows[0]!, handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!
+  let received = false
+  const input = handler(loadEvent(window), 'load').then(value => { received = true; return value }, error => { received = true; return { loadFailed: error.message } })
+  await vi.advanceTimersByTimeAsync(1600)
+  expect(received, 'an early load waits for this capture, not a previous frame').toBe(false)
+  expect(electron.windows.every(window => !window.visible), 'fallback cannot expose shells before the new data exists').toBe(true)
+  included.resolve(frames())
+  await vi.advanceTimersByTimeAsync(34)
+  expect(captureDisplays).toHaveBeenCalledTimes(2)
+  expect(received, 'the excluded background is part of the same original input').toBe(false)
+  expect(electron.windows.every(window => !window.visible), 'prepared overlays never enter either grab').toBe(true)
+  const second = frames(); second.capturedAt += 100
+  excluded.resolve(second)
+  await vi.advanceTimersByTimeAsync(0)
+  const loaded = await input
+  expect(loaded.background).toBe('excluded')
+  expect(loaded.backgrounds.excluded.capturedAt).toBe(second.capturedAt)
+  for (const overlay of electron.windows) {
+    const value = await handler(loadEvent(overlay), 'load')
+    await handler(loadEvent(overlay), 'presented', { requestId: value.requestId, background: value.background })
+  }
+  expect(electron.windows.every(window => window.showInactive.mock.calls.length === 1)).toBe(true)
+  expect(ports.recordTiming).toHaveBeenCalledWith(expect.objectContaining({ includedMs: expect.any(Number), excludedMs: expect.any(Number), dataReadyMs: expect.any(Number) }))
+  await handler(loadEvent(window), 'cancel', { requestId: loaded.requestId })
+  expect(await outcome).toEqual({ state: 'cancelled' })
+})
+
+it('cancel releases an early load without waiting for native pixels and a late result cannot revive or replace the next capture', async () => {
+  const late = pending<ReturnType<typeof frames>>()
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockImplementationOnce(() => late.promise).mockResolvedValue(frames()) })
+  const outcome = surface.present(session())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(electron.windows).toHaveLength(2)
+  let released = false
+  const old = electron.windows[0]!, loaded = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(old), 'load').then(() => { released = true; return 'unexpected input' }, error => { released = true; return error.message })
+  old.destroy()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(released, 'cancel releases load before the old native producer returns').toBe(true)
+  expect(await loaded).toContain('no longer current')
+  expect(await outcome).toEqual({ state: 'cancelled' })
+  const next = await opened()
+  const count = electron.windows.length
+  late.resolve({ ...frames(), capturedAt: 0 })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(electron.windows, 'the old producer creates no late overlay').toHaveLength(count)
+  expect(next.overlays.every(overlay => !overlay.window.dead && overlay.input.backgrounds.included.capturedAt !== 0)).toBe(true)
+  expect(old.showInactive).not.toHaveBeenCalled()
+})
+
+it.each(['native', 'renderer'] as const)('a %s startup failure releases early loads and destroys only the current hidden overlays', async failing => {
+  const native = pending<ReturnType<typeof frames>>(), renderer = pending<void>()
+  ports.native.mockReturnValue({ captureDisplays: vi.fn(() => native.promise) })
+  if (failing === 'renderer') electron.loadWindow = () => renderer.promise
+  const outcome = surface.present(session()).then(() => 'unexpected success', error => error.message)
+  await vi.advanceTimersByTimeAsync(0)
+  const loaded = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(electron.windows[0]!), 'load').then(() => 'unexpected input', error => error.message)
+  if (failing === 'native') native.reject(new Error('native startup failed'))
+  else renderer.reject(new Error('renderer startup failed'))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(electron.windows.every(window => window.dead && !window.visible), 'failed preparation never leaves a live hidden overlay').toBe(true)
+  expect(await loaded).toContain('no longer current')
+  expect(await outcome).toContain(failing + ' startup failed')
+  native.resolve(frames())
+})
+
+it('rejects frames that match a changed current layout but no longer match the prepared overlay bounds', async () => {
+  const native = pending<ReturnType<typeof frames>>()
+  ports.native.mockReturnValue({ captureDisplays: vi.fn(() => native.promise) })
+  const outcome = surface.present(session()).then(() => 'unexpected success', error => error.code)
+  await vi.advanceTimersByTimeAsync(0)
+  const moved = { ...main, x: 1 }, captured = frames()
+  electron.displays[0]!.bounds = moved; captured.displays[0]!.frame = moved
+  native.resolve(captured)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(electron.windows.every(window => window.dead && !window.visible)).toBe(true)
+  expect(await outcome).toBe('display_configuration_changed')
 })
 
 it('gives each overlay its windows in frozen-frame pixels, clipped to that display, front to back', async () => {
@@ -312,7 +409,50 @@ it('logs one timing line from present() to frames, each display painted and show
     expect(timing).toMatchObject({ settleMs: 0, displays: 2 })
     expect([timing.framesMs, ...timing.presentedMs, timing.shownMs].every((value: unknown) => typeof value === 'number' && value >= 0), JSON.stringify(timing)).toBe(true)
     expect(timing.presentedMs).toHaveLength(2)
+    expect(timing).toMatchObject({ schema: 'agentmux.capture-timing.v1', includedMs: expect.any(Number), excludedMs: null,
+      windowsStartedMs: expect.any(Number), windowsLoadedMs: [expect.any(Number), expect.any(Number)], dataReadyMs: expect.any(Number) })
+    expect(ports.recordTiming).toHaveBeenCalledExactlyOnceWith(timing)
+    expect(ports.recordTiming.mock.invocationCallOrder[0]!).toBeGreaterThan(Math.max(...overlays.map(overlay => overlay.window.showInactive.mock.invocationCallOrder[0])))
   } finally { info.mockRestore() }
+})
+
+it.each(['throw', 'reject'] as const)('a timing writer that will %s only warns after showing and never blocks screenshot delivery', async failure => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  ports.recordTiming.mockImplementationOnce(() => { if (failure === 'throw') throw new Error('disk unavailable'); return Promise.reject(new Error('disk unavailable')) })
+  try {
+    const { overlays, outcome, session } = await opened()
+    void outcome.catch(() => {})
+    expect(ports.recordTiming, 'writing is absent from the image preparation critical path').not.toHaveBeenCalled()
+    await overlays[0]!.call('presented'); await overlays[1]!.call('presented')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('disk unavailable'))
+    expect(overlays.every(overlay => overlay.window.visible && !overlay.window.dead)).toBe(true)
+    await overlays[0]!.call('select')
+    await overlays[0]!.call('finish', { image: result, selection })
+    expect(session.complete).toHaveBeenCalledOnce()
+    expect(await outcome).toEqual({ state: 'completed' })
+  } finally { warning.mockRestore() }
+})
+
+it('the production IPC timing port writes only the latest small diagnostic after earlier writes settle, and recovers from write failure', async () => {
+  const from = '  let captureTimingWrite = Promise.resolve()', until = '  // The editor returns focus only'
+  expect(ipc.split(from), 'the production registration is unambiguous').toHaveLength(2)
+  const registration = ipc.slice(ipc.indexOf(from), ipc.indexOf(until, ipc.indexOf(from)))
+  const first = pending<void>(), paths: string[] = [], contents: string[] = []
+  const writeFile = vi.fn((path: string, content: string) => { paths.push(path); contents.push(content); return paths.length === 1 ? first.promise : Promise.resolve() })
+  let actual: { recordTiming(timing: unknown): Promise<void> } | undefined
+  const bind = new Function('CaptureSurface', 'getNativeDesktopOwner', 'config', 'pinScreenshot', 'copyScreenshotText', 'returnScreenshotFocus', 'writeFile', 'join', 'app', registration)
+  bind(class { constructor(ports: typeof actual) { actual = ports } }, ports.native, { appearance: {} }, ports.pin, ports.copyText, ports.returnFocus, writeFile, join, { getPath: () => '/private-fixture-data' })
+  expect(actual, 'the actual Main registration supplies the production timing port').toBeDefined()
+  const old = actual!.recordTiming({ schema: 'first' }).catch(error => error.message)
+  const latest = actual!.recordTiming({ schema: 'latest' })
+  await Promise.resolve(); await Promise.resolve()
+  expect(paths).toEqual(['/private-fixture-data/capture-timing.json'])
+  first.reject(new Error('disk busy'))
+  expect(await old).toBe('disk busy')
+  await latest
+  expect(paths).toEqual(['/private-fixture-data/capture-timing.json', '/private-fixture-data/capture-timing.json'])
+  expect(contents.map(content => JSON.parse(content))).toEqual([{ schema: 'first' }, { schema: 'latest' }])
 })
 
 it('returns focus to the previous app once when the capture started elsewhere', async () => {
@@ -526,7 +666,8 @@ it.each(['missing', 'scale'] as const)('rejects a %s display in the current froz
   const outcome = surface.present(session())
   void outcome.catch(() => {})
   await vi.advanceTimersByTimeAsync(0)
-  expect(electron.windows, 'mismatched frames never become overlays').toHaveLength(0)
+  expect(electron.windows, 'both prepared shells are accounted for').toHaveLength(2)
+  expect(electron.windows.every(window => window.dead && !window.visible), 'mismatched frames never become visible overlays').toBe(true)
   await expect(outcome).rejects.toMatchObject({ code: 'display_configuration_changed' })
 })
 
