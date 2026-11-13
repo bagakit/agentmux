@@ -429,6 +429,7 @@ Hook 观察区分解析、排队、owner 执行、持久完成与回执读取。
 Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／Provider 关联和已持久原生身份；这些已知事实只来自 Core，事件正文不能自称可信身份。恢复后仍沿同一事实识别主会话，不能靠上一次内存中的归属替代持久身份，也不能因生成恢复命令就改变关联。Provider 解释原生 Session 的明确父系与主／子事实；主身份未知或父系事实不足时，保留原始 trace 和未知，不能将同目录、Message 的引用父级或界面选择猜成主 Session。
 
 - AgentMux Hook 的安装、读取、更新和卸载必须只作用于 AgentMux 自己的受管配置作用域；Provider 的共享配置文件仍保留用户和项目已有条目，不能把 AgentMux Hook 当成共享默认值。
+- AgentMux 不往用户项目注入文件。Provider 能以启动参数加载 AgentMux 自有内容时（例如 Claude 的 `--plugin-dir`），受管模块放在 AgentMux 自己的状态目录，按启动参数加载，不写进工作区；工作区中残留的旧受管副本不再被加载，也不被 AgentMux 删除或改写。只能通过工作区配置生效的 Provider 仍沿上一条只写受管条目。
 - Hook 事件必须携带并校验 AgentMux Session/Run 关联身份。没有该关联、关联不匹配或无法确认来源的 Provider 事件不得触发 AgentMux ingress；应记录可诊断的降级事实，不影响外部 Provider 会话继续工作。
 - Hook 探测、合并或安装失败属于流程问题时，健康 Agent 继续可用；服务窗说明哪一步未完成、当前按什么能力运行和恢复动作。只有 Agent/进程本身明确终止才允许阻断。
 - Doctor 必须逐 Provider 如实报告 Hook 安装策略，包括不受管与无 Hook 的情况；Runtime 不可达也不能把这些策略改成全局默认值。策略声明不代表磁盘配置已安装，实际磁盘安装状态是另一项事实，不能混在同一字段中。
