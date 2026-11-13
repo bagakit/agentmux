@@ -35,8 +35,10 @@ async function unit(mutation) {
   console.log(label + ': ' + (mutation ? 'semantic red' : 'green'))
 }
 try {
-  const defaults = JSON.parse(await readFile(join(root, '.tmp/browser-clipboard-permissions/electron-evidence.json'), 'utf8'))
+  const defaults = await readFile(join(root, '.tmp/browser-clipboard-permissions/electron-evidence.json'), 'utf8')
+    .then(JSON.parse).catch(error => { if (error.code === 'ENOENT') return {}; throw error })
   const pointer = option('--electron-evidence') ?? process.env.AGENTMUX_CLIPBOARD_EVIDENCE ?? defaults.path
+  assert.ok(pointer, 'Supply the original completed Electron evidence; this verifier never repeats clipboard writes')
   const proofPath = resolve(root, pointer), proof = JSON.parse(await readFile(proofPath, 'utf8'))
   assert.equal(proof.schema, 'agentmux.browser-clipboard-electron-receipt.v1'); assert.equal(proof.passed, true); assert.deepEqual(proof.remaining, [])
   assert.equal(proof.process.exitConfirmed, true); assert.equal(proof.process.exitCode, 0)
