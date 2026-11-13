@@ -19,6 +19,7 @@
 - [注意力处理与结果审查闭环](#注意力处理与结果审查闭环)
 - [Agents 入口与 Activity 详情归一](#agents-入口与-activity-详情归一)
 - [共享 Agent 菜单](#共享-agent-菜单)
+- [Agent 派生动作](#agent-派生动作)
 - [Agents、队列与 Message Tools](#agents队列与-message-tools)
 - [Provider 与人机交互的分层收敛](#provider-与人机交互的分层收敛)
 - [Agent 全局状态：唯一事实与投影](#agent-全局状态唯一事实与投影)
@@ -191,13 +192,24 @@ AgentMux Session 持有一个已确认的原生语义目标；原生前台正在
 
 ## 共享 Agent 菜单
 
-Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共享 Agent 菜单组件。通用 Agent 资料、动作及其资格消费原 Session 事实与控制器；Focus 同样接齐已满足资格的通用 Session 能力，不能因入口位于泳道而仅装配简化的停止／重启菜单。各入口通过扩展位提供自己的上下文与特定动作，不复制一套通用菜单，也不另建动作注册表、状态 Store 或 Provider 检测器。菜单打开、关闭或所处页面不改变已确认的 Agent 能力；只读、原身份、操作确认及回执继续由原动作 owner 裁决。
+Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共享 Agent 菜单组件。通用 Agent 资料、动作及其资格消费原 Session 事实与控制器；Focus 同样接齐已满足资格的通用 Session 能力，不能因入口位于泳道而仅装配简化的停止／重启菜单。各入口通过扩展位提供自己的上下文与特定动作，不复制一套通用菜单，也不另建状态 Store 或 Provider 检测器；派生动作的唯一目录与顺序只由[Agent 派生动作](#agent-派生动作)持有，各入口消费同一份解析结果。菜单打开、关闭或所处页面不改变已确认的 Agent 能力；只读、原身份、操作确认及回执继续由原动作 owner 裁决。
 
 菜单明确区分准确 Host／Session／Run 的会话动作与需要准确空间 occurrence 的动作。Focus 按 Agent 聚合，无确认位置或有多个位置时不借当前焦点、同名对象或首位置构造 Tab／Region 目标；已有准确 Session 控制不因缺少位置而消失。原卡片导航和改名编辑、终端正文的复制／粘贴／路径／输出上下文、Region 布局动作各由调用入口提供，仍遵循[Focus 卡片](focus-context.md#卡片内容预览与-agent-操作)和[Agent Region](spaces-and-layout.md#agent-region-关闭与身份入口)的原对象与焦点边界。
 
 菜单中的 Executor 头像提供复制对应原生 Session ID 的直接动作，与 `Copy Agent Link` 的 amux 对象链接明确区分。原生 ID 只取准确 Agent 由 Core 已采用的 typed `nativeHandle` 中的原生 Session ID，完整复制原值；不从标题、终端文字、记录路径、amux Session ID、Run ID、未采用的观察或候选推导。该动作只读已有身份，不自动检查、采用、切换或恢复对话。原生身份未知、类型或对象不匹配时明确说明本次没有复制，不将占位文字或其他身份写入剪贴板；这次复制的缺口不影响原菜单、健康 Agent、输入或其他已确认能力。头像图形复用[Executor 身份组件](#executor-身份组件与信息面板)，本次复制动作与完整键鼠说明由共享菜单持有。
 
 通用复制和已有一级布局动作保持直接可达；长说明、连接设置与维护等低频内容按需进入，不把所有资料和系统扩展平铺成整页长菜单。按需收纳不删除能力、隐藏必要服务问题或改写权限：失败步骤、当前运行状态与可达恢复入口仍沿原服务窗可发现，准确目标不成立只拒绝该次操作。复用与扩展不增加逐卡历史扫描、后台轮询或无关 Session 订阅；原确认取消、菜单关闭和返回仍保较晚主动焦点、草稿、原工作面与健康 Run。具体密度只定义在[Agent 菜单的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
+
+## Agent 派生动作
+
+派生动作从一个准确的原 Session 出发另起一个新会话，原 Session、Run、工作面与未发送草稿保持不变，不向原 Session 发送任何输入。它与会话生命周期分开：菜单先列派生动作组，再列会话生命周期组（Restart Session、Stop Agent，Stop 末项），两组的成员、顺序与分隔呈现只见[Agent More 的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
+
+- **官方动作。** Take over、Fork current conversation 与 Pass on experience 为官方默认提供，行为与确认各归原合同：[接手原会话的工作](session-recovery.md#接手原会话的工作)、[从 Region 显式 fork 到新工作面](session-recovery.md#从-region-显式-fork-到新工作面)与[Agent 工作经验的转正](knowledge-workflows.md#agent-工作经验的转正)。官方动作只读，用户只能显示或隐藏；隐藏只影响菜单，不移除恢复失败时等其他入口的 Take over。
+- **用户动作。** 用户可新增自己的派生动作：菜单名、起点（新 Agent 读取原工作，可任选 Agent；或 Provider 原生 Fork 当前对话）、动作自有的指令正文，以及仅对新 Agent 起点有意义的默认 Agent。指令归动作所有，不引用 Prompts：Prompt 是输入框片段且需识别词，派生指令是交给新会话的任务说明。默认 Agent 只决定候选的首位与初始焦点，不跳过选择或自动创建。
+- **唯一目录。** 官方动作定义在 Core，不复制进用户列表；用户列表与官方动作的显隐由 Settings 的唯一 owner 保存，缺席即「没有用户动作、官方全部显示」且不回写，显式空列表保持为空。菜单、Settings 与公共 CLI 读取同一解析顺序：显示中的官方动作在前，用户动作按保存顺序在后。
+- **发起与呈现。** 新 Agent 起点沿 Take over 的同一中央选择区域与创建链路，显示「原 Agent → 动作名」、完整指令预览与 Agent 候选，只有明确选择才创建；它是与 Take over 不同的操作身份，并随发起时的指令冻结，晚到回执与重复点击沿该身份核对。新 Agent 的首条输入由 Core 同一组合函数生成：完整原会话上下文读取方式、原任务与诊断，加上用户指令；名称为「原 Agent 名 - 动作名」。Fork 起点沿原 Fork 审阅与目的地选择，指令作为分叉会话的首条消息。只读视图不提供用户动作。
+- **位置。** 有唯一已确认 Region 时，动作在该 Region 中央就地展开；Focus 卡片先导航到该 Region，再交由该 Region 准确消费，Session 或 Run 变化则不打开并说明。无位置或多位置时不猜位置，就地在 Focus 工作区一侧展开并显式选择目的地，不使用独立 Dialog 或全局遮罩。
+- **公共能力。** 定义经 `settings derived-actions ls|inspect|create|update|delete` 发现与编辑，官方动作只读、只接受显隐变更；用户动作经 `agent open --derive ACTION --from-session SID [--executor ID]` 在显式已有目的地执行。Core 在受理前读取同一定义与准确原 Session，展开为普通新 Agent 或原生 Fork 内容，与 App 菜单同一提示组合；托管 Agent 只能从自己的 Session 派生，官方动作沿各自原命令。未知结果沿原 operation id 查询，不另铸新身份重发。
 
 ## Agents、队列与 Message Tools
 
