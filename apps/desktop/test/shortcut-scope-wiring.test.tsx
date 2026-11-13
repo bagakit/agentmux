@@ -6,6 +6,8 @@ import ts from 'typescript'
 import { SHORTCUT_BINDINGS, SHORTCUT_SCOPES, bindingById, monacoKeybindingFor } from '../src/renderer/src/lib/shortcut-registry.js'
 import { windowShortcutHandlers, type WorkbenchShortcutStore } from '../src/renderer/src/lib/workbench-shortcuts.js'
 import { launcherKeydownLaunches } from '../src/renderer/src/lib/launcher-submit.js'
+import { browserShortcutAction } from '../src/renderer/src/lib/browser-shortcuts.js'
+import { BROWSER_PAGE_SHORTCUTS } from '../src/shared/browser-page-shortcuts.js'
 import { terminalShortcutHandlers } from '../src/renderer/src/lib/terminal-shortcuts.js'
 import { matchComposerShortcut } from '@agentmux/client-ui/composer-keyboard'
 import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
@@ -281,6 +283,22 @@ const SCOPE_INTERROGATIONS = new Map<string, (ids: readonly string[]) => void>([
         launcherKeydownLaunches(chord, true, { ...ready, installedExecutorCount: 0 }),
         '一个 executor 都没装还启动了——就绪判定没在起作用'
       ).toBe(false)
+    }
+  ],
+  [
+    'browser',
+    (ids) => {
+      // Browser 壳的判定同样是导出的纯函数（BrowserPane 的 keydown 只转发它的结果），直接调。
+      for (const id of ids) {
+        const binding = bindingById(id)!
+        const action = BROWSER_PAGE_SHORTCUTS.find(shortcut => shortcut.id === id)?.action
+        for (const isMac of [true, false]) {
+          const chord = isMac ? binding.mac : binding.other
+          const event = { key: chord.key, metaKey: isMac && chord.primary, ctrlKey: !isMac && chord.primary, shiftKey: chord.shift, altKey: chord.alt }
+          expect(browserShortcutAction(event, isMac), `browser 绑定 ${id} 在 ${isMac ? 'mac' : 'other'} 上没有变成它声明的动作`).toBe(action)
+          expect(browserShortcutAction({ ...event, isComposing: true } as typeof event, isMac), `输入法组字中的 ${id} 被抢走了`).toBeNull()
+        }
+      }
     }
   ]
 ])

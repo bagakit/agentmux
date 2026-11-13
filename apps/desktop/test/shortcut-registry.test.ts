@@ -84,7 +84,11 @@ describe('binding id set', () => {
       'workbench.swap-region.up',
       // launcher scope: the start page's own handler. Its whole point is firing INSIDE the prompt textarea,
       // which is why it cannot be an un-gated window binding — see ShortcutScope's comment.
-      'launcher.submit'
+      'launcher.submit',
+      // browser scope: one Browser surface's own handler, declared once for its chrome and native page.
+      'browser.focus-address',
+      'browser.reload',
+      'browser.find'
     ].sort())
   })
 
@@ -176,10 +180,11 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
   it('every letter-class binding requires Shift off mac (so it can never be a bare Ctrl+letter)', () => {
     // Direct structural read: the bottom line lives on keyClass 'letter'. If someone flattens a letter
     // binding to bare Ctrl off mac, its `other.shift` flips to false and this fails — for that specific
-    // binding, not just a sampled one. Editor.save is the deliberate exception (its own scope, no shell).
+    // binding, not just a sampled one. Editor.save is the deliberate exception (its own scope, no shell);
+    // so is the Browser scope, whose bare Ctrl+L/R/F are every browser's own and have no shell underneath.
     for (const binding of SHORTCUT_BINDINGS) {
       if (binding.keyClass !== 'letter') continue
-      if (binding.scope === 'editor') continue
+      if (binding.scope === 'editor' || binding.scope === 'browser') continue
       expect(binding.other.shift, `${binding.id} must require Shift off mac`).toBe(true)
       expect(binding.other.primary, `${binding.id} rides the primary (Ctrl) chord off mac`).toBe(true)
     }
@@ -432,6 +437,16 @@ describe('exact chord matching per binding', () => {
   it('editor save: bare Cmd/Ctrl+S both platforms (editor scope has no readline underneath)', () => {
     expect(matchShortcut(event({ key: 's', metaKey: true }), true, { scope: 'editor' })).toBe('editor.save')
     expect(matchShortcut(event({ key: 's', ctrlKey: true }), false, { scope: 'editor' })).toBe('editor.save')
+  })
+
+  it('browser keys: bare Cmd/Ctrl+L, R and F on both platforms, only in browser scope', () => {
+    for (const [key, id] of [['l', 'browser.focus-address'], ['r', 'browser.reload'], ['f', 'browser.find']] as const) {
+      expect(matchShortcut(event({ key, metaKey: true }), true, { scope: 'browser' })).toBe(id)
+      expect(matchShortcut(event({ key, ctrlKey: true }), false, { scope: 'browser' })).toBe(id)
+      expect(matchShortcut(event({ key, ctrlKey: true }), true, { scope: 'browser' })).toBeNull()
+      expect(matchShortcut(event({ key, metaKey: true, shiftKey: true }), true, { scope: 'browser' })).toBeNull()
+      expect(matchShortcut(event({ key, metaKey: true }), true, { scope: 'window' })).toBeNull()
+    }
   })
 
   it('Shift is matched exactly — Cmd+Shift+F is a distinct chord, not Cmd+F', () => {
