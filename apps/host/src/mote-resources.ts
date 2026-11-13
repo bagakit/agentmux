@@ -723,6 +723,13 @@ export async function readOriginalMoteConfiguration(path: string): Promise<unkno
   if (!isAbsolute(path)) throw new Error('The original absolute Mote configuration path is unavailable.')
   return JSON.parse(await readFile(path, 'utf8'))
 }
+/** The Mote, Topic and legacy Scratch roots this Host creates under the one local Scratch workspace. */
+export async function moteOwnedWorkspaceRoots(path: string): Promise<readonly string[]> {
+  const raw = await readOriginalMoteConfiguration(path) as { workspaces?: unknown }
+  const scratch = Array.isArray(raw?.workspaces) ? raw.workspaces.filter((value): value is { id: string; hostId: string; path: string } =>
+    !!value && typeof value === 'object' && value.id === SCRATCH_WORKSPACE_ID && value.hostId === 'local' && typeof value.path === 'string') : []
+  return scratch.length === 1 ? Object.values(scratchTopicStorageRoots(scratch[0]!.path)) : []
+}
 /** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */
 export async function readConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {
   let raw: unknown

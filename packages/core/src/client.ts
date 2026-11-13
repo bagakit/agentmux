@@ -63,7 +63,7 @@ import type { AgentMuxRunStorageObservation } from './run-storage-observation.js
 
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding
@@ -493,6 +493,11 @@ export type AgentMuxClientOptions = {
    * Tests inject one over an isolated state directory to keep hook writes out of the real `$HOME`.
    */
   hookInstaller?: AgentManagedHookInstaller
+  /**
+   * Directories this Host itself creates and owns (Mote and Topic homes). A Provider that asks for
+   * folder trust is pre-trusted only inside them; user Projects keep their native prompt.
+   */
+  ownedWorkspaceRoots?: () => Promise<readonly string[]>
 }
 
 export type AgentMuxAgentRuntimeStatus = {
@@ -803,6 +808,7 @@ export class AgentMuxClient {
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
   private readonly hookInstaller: AgentManagedHookInstaller
+  private readonly ownedWorkspaceRoots: () => Promise<readonly string[]>
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
   private unsubscribeConnectionLost: (() => void) | null = null
@@ -1033,6 +1039,7 @@ export class AgentMuxClient {
     )
     this.hookInstaller = options.hookInstaller
       ?? new AgentManagedHookInstaller(join(defaultCtxmuxStateDirectory(), 'hooks'))
+    this.ownedWorkspaceRoots = options.ownedWorkspaceRoots ?? (async () => [])
     this.acp = new AgentMuxAcpBridge(
       {
         onEvent: async (agentSessionId, event, evidence) => {
@@ -1143,6 +1150,7 @@ export class AgentMuxClient {
         },
         forgetPendingBinding: operationId => { this.pendingLifecycleBindings.delete(operationId) },
         ensureManagedHooks: (...args) => this.ensureManagedHooks(...args),
+        prepareOwnedWorkspaceTrust: (...args) => this.prepareOwnedWorkspaceTrust(...args),
         requireHookIngressOwner: (...args) => this.requireHookIngressOwner(...args),
         settleHookRestore: (...args) => this.settleHookRestore(...args),
         observeHookRestoreFailure: (...args) => this.observeHookRestoreFailure(...args),
@@ -5225,6 +5233,7 @@ export class AgentMuxClient {
         input.env ?? {},
         hookBinding.endpoint
       )
+      await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {})
       const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
       let preparedCreation: AgentMuxPreparedCreation | undefined
       if (reservation.kind === 'create') {
@@ -5644,6 +5653,36 @@ export class AgentMuxClient {
         }`,
         evidence: { source: 'user', observedAt: Date.now() }
       })
+    }
+  }
+
+  /**
+   * Accept the Provider's folder-trust prompt for an AgentMux-owned home before its launch, so the
+   * first input reaches a composer instead of the prompt. Any failure leaves the launch unchanged:
+   * the native prompt still appears and the person can answer it in the terminal.
+   */
+  private async prepareOwnedWorkspaceTrust(
+    provider: AgentProvider,
+    workspacePath: string,
+    agentSessionId: string,
+    env: Readonly<Record<string, string>>
+  ): Promise<void> {
+    if (!provider.prepareOwnedWorkspaceTrust) return
+    const target = resolve(workspacePath)
+    try {
+      const ownedRoot = (await this.ownedWorkspaceRoots()).map(root => resolve(root))
+        .find(root => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep))
+      if (!ownedRoot) return
+      const receipt = await provider.prepareOwnedWorkspaceTrust({ ownedRoot, workspacePath: target, env })
+      if (receipt.status !== 'unconfirmed') return
+      this.publisher.publish({ type: 'agent-error', agentSessionId, code: receipt.code,
+        message: `${provider.label} folder trust for this AgentMux home is unconfirmed, so it may ask whether to trust the folder. ` +
+          `Answer that prompt in the terminal; the Agent launch continues. ${receipt.issue ?? ''}`.trim(),
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED',
+        message: `${provider.label} folder trust for this AgentMux home is unconfirmed; the Agent launch continues. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
     }
   }
 

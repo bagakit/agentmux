@@ -564,6 +564,7 @@ export class AgentSessionRunLifecycle {
         input.env ?? {},
         hookBinding.endpoint
       )
+      await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {})
       if (reservation.kind === 'reopen') {
         const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: reopenedPriorRuns(reservation.expectedRetirement),
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
