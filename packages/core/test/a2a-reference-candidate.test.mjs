@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { assertJoinedReferenceCandidate, assertReferenceProductCandidate, assertNativeSourcePair, nativeSourceConditions, referenceProofSha as sha } from '../scripts/lib/a2a-reference-proof.mjs'
+import { assertJoinedReferenceCandidate, assertLoadedNativeSources, assertReferenceProductCandidate, assertNativeSourcePair, nativeSourceConditions, referenceProofSha as sha } from '../scripts/lib/a2a-reference-proof.mjs'
+import { idleInputMutations } from './fixtures/a2a-idle-input-proof.mjs'
 
 function candidate(prepared = true) {
   const sources = Object.fromEntries(Array.from({ length: 40 }, (_, index) => ['packages/core/src/owner-' + index + '.ts', sha('source-' + index)]))
@@ -66,6 +67,9 @@ const drifts = [
   ['a different explicit origin descriptor', facts => { facts.delivery.preparation.input.sha256 = sha('other input') }],
   ['a changed dependency inventory', facts => { facts.modelPreparation.artifact.inventory.sha256 = sha('other dependencies') }],
   ['a source missing from an otherwise large fixed source map', facts => { delete facts.fixedCoreSources['packages/core/src/owner-39.ts'] }],
+  ['a Core export manifest missing from the immutable source join', facts => {
+    facts.delivery.sources['packages/core/package.json'] = facts.model.sourceBefore['packages/core/package.json'] = sha('original exports')
+  }],
   ['matching test sources that both differ from the fixed product', facts => {
     facts.delivery.sources['packages/core/src/owner-39.ts'] = facts.model.sourceBefore['packages/core/src/owner-39.ts'] = sha('different source')
   }],
@@ -77,8 +81,9 @@ for (const [name, change] of drifts) test('rejects ' + name, () => {
 })
 
 const mutation = 'final-input-fence-is-omitted'
-const dependency = () => ({ file: 'dependency.ts', originalSHA256: sha('dependency'), sha256: sha('dependency'), bytes: 10 })
-const target = edited => ({ file: 'prompt-submission.ts', originalSHA256: sha('original owner'), sha256: sha(edited ? 'edited owner' : 'original owner'),
+const dependency = () => ({ file: 'packages/identity/src/index.ts', originalSHA256: sha('dependency'), sha256: sha('dependency'), bytes: 10 })
+const owner = 'packages/core/src/prompt-submission.ts'
+const target = edited => ({ file: owner, originalSHA256: sha('original owner'), sha256: sha(edited ? 'edited owner' : 'original owner'),
   bytes: Buffer.byteLength(edited ? 'edited owner' : 'original owner'), ...(edited ? { mutation } : {}) })
 
 test('pairs historical compiler conditions while allowing exactly the declared owner mutation', () => {
@@ -87,8 +92,8 @@ test('pairs historical compiler conditions while allowing exactly the declared o
 
 test('rejects individually valid dependency versions that differ between RED and restore', () => {
   const red = [target(true), dependency()], restored = [target(false), { ...dependency(), originalSHA256: sha('new dependency'), sha256: sha('new dependency') }]
-  assert.doesNotThrow(() => nativeSourceConditions(red, 'prompt-submission.ts'))
-  assert.doesNotThrow(() => nativeSourceConditions(restored, 'prompt-submission.ts'))
+  assert.doesNotThrow(() => nativeSourceConditions(red, owner))
+  assert.doesNotThrow(() => nativeSourceConditions(restored, owner))
   assert.throws(() => assertNativeSourcePair(red, restored, mutation), assert.AssertionError)
 })
 
@@ -103,4 +108,22 @@ test('rejects undeclared compilation edits and malformed source conditions', () 
   assert.throws(() => nativeSourceConditions([{ ...dependency(), file: '../foreign.ts' }]), assert.AssertionError)
   assert.throws(() => nativeSourceConditions([{ ...dependency(), originalSHA256: 'invalid' }]), assert.AssertionError)
   assert.throws(() => nativeSourceConditions([{ ...dependency(), bytes: 0 }]), assert.AssertionError)
+  assert.throws(() => nativeSourceConditions([{ ...target(true), file: 'prompt-submission.ts' }], 'prompt-submission.ts'), assert.AssertionError)
+})
+
+test('binds every loaded file of a fixed selection to its selected bytes and refuses one it does not hold', () => {
+  const [file, before, after] = idleInputMutations[mutation], path = 'packages/core/src/' + file
+  const source = 'prefix ' + before + ' suffix', edited = source.replace(before, after), helper = 'export const helper = 1\n'
+  const files = new Map([[path, source], ['packages/identity/src/index.ts', helper]])
+  const record = (name, text, original = text) => ({ file: name, originalSHA256: sha(original), sha256: sha(text), bytes: Buffer.byteLength(text) })
+  const red = [{ ...record(path, edited, source), mutation }, record('packages/identity/src/index.ts', helper)]
+  const fixed = { files, hashes: { [path]: sha(source) }, complete: true }
+  assert.doesNotThrow(() => assertLoadedNativeSources(red, fixed))
+  assert.throws(() => assertLoadedNativeSources([...red, record('packages/relay/src/index.ts', 'live relay')], fixed), /outside the fixed commit/u)
+  assert.doesNotThrow(() => assertLoadedNativeSources([...red, record('packages/relay/src/index.ts', 'live relay')], { ...fixed, complete: false }))
+  assert.throws(() => assertLoadedNativeSources([record('packages/identity/src/index.ts', 'live identity edit')], fixed), assert.AssertionError)
+  assert.throws(() => assertLoadedNativeSources([{ ...red[0], bytes: red[0].bytes + 1 }], fixed), assert.AssertionError)
+  assert.throws(() => assertLoadedNativeSources(red, { ...fixed, hashes: { [path]: sha('declared elsewhere') } }), assert.AssertionError)
+  // A record that claims another original but compiled the selected edit is still not the selected source.
+  assert.throws(() => assertLoadedNativeSources([{ ...red[0], originalSHA256: sha('live original') }], { ...fixed, hashes: {} }), assert.AssertionError)
 })
