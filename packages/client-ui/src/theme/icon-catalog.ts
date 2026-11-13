@@ -461,7 +461,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'editor.markdown-alert-important': { label: 'Markdown important alert', glyph: 'message-square-warning' },
   'editor.markdown-alert-warning': { label: 'Markdown warning alert', glyph: 'triangle-alert' },
   'editor.markdown-alert-caution': { label: 'Markdown caution alert', glyph: 'octagon-alert' },
-  'editor.markdown-reading-layout': { label: 'Markdown reading layout', glyph: 'type' },
+  'editor.markdown-reading-layout': { label: 'Markdown reading layout', glyph: 'a-large-small' },
   'space.agent': { label: 'Agent space icon', glyph: 'bot' },
   'space.book': { label: 'Book space icon', glyph: 'book-open' },
   'space.bookmark': { label: 'Bookmark space icon', glyph: 'bookmark' },

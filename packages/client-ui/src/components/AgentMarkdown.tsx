@@ -115,6 +115,11 @@ function resolveLink(node: Extract<InlineNode, { kind: 'link' }>, context: Inlin
   }
   const file = context.openWorkspaceFile ? classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath) : null
   if (file) return { kind: 'file', file } as const
+  // A document link to another file's heading (`guide.md#setup`) opens that file, as on GitHub. The fragment
+  // is only dropped; the remaining target passes the same single-decode, root-confined classification.
+  const fragment = context.documentMode && context.openWorkspaceFile ? /^([^#?]+)#[^#]*$/u.exec(node.href.trim()) : null
+  const anchored = fragment ? classifyMarkdownLinkHref(fragment[1]!, context.workspaceRoot, context.homeDir, context.sourcePath) : null
+  if (anchored) return { kind: 'file', file: anchored } as const
   const url = parseHttpLinkUrl(node.href)
   return url ? { kind: 'http', url } as const : { kind: 'text' } as const
 }
@@ -179,7 +184,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-anchor', target.anchor)}><Inline nodes={node.children} context={labelContext} /></button>
     if (target.kind === 'file' && context.openWorkspaceFile) {
       const open = context.openWorkspaceFile, file = target.file
-      return <button key={key} type="button" className="md-link md-link--file" title={file.path}
+      return <button key={key} type="button" className="md-link md-link--file md-link--authored" title={file.path}
         onClick={event => open(file.path, referenceRevealLocation(file), event)}><Inline nodes={node.children} context={labelContext} /></button>
     }
     if (target.kind !== 'http') return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>

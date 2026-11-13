@@ -46,6 +46,9 @@
 .md-link--file { color: inherit; font-family: var(--font-mono); text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color var(--dur-fast) ease; }
 .md-link--file:hover { color: var(--green); text-decoration-color: currentColor; }
 .md-code .md-link--file { font-family: inherit; }
+/* An authored document link to a file reads like any other link, as on GitHub; detected bare paths keep the mono style. */
+.md-document .md-link--authored { color: var(--green-2); font-family: inherit; text-decoration-color: currentColor; }
+.md-document .md-link--authored:hover { color: var(--green); }
 
 .md-image-attachment { padding: 0; border: 0; background: none; color: var(--green-2); font: inherit; cursor: pointer; }
 .md-image-attachment:hover { color: var(--green); }
@@ -74,6 +77,10 @@
 .md-document .md-table { min-width: 100%; }
 .md-document .md-table th { background: var(--surface-1); }
 .md-document .md-table th, .md-document .md-table td { padding: var(--sp-3) var(--sp-4); vertical-align: top; }
+/* Document tables wrap prose cells as GitHub does; short label columns stay on one line, code never splits mid-token. */
+.md-document .md-table td { white-space: normal; overflow-wrap: break-word; min-width: 8ch; }
+.md-document .md-table th { white-space: nowrap; }
+.md-document .md-table code { white-space: nowrap; }
 .md-document .md-block-code { border: 1px solid var(--line-soft); box-shadow: none; }
 .md-document .md-block-code[data-language]::before { display: block; content: attr(data-language); margin-bottom: var(--sp-3); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-meta); }
 .md-document .md-footnotes { margin-top: var(--sp-6); }
@@ -151,7 +158,10 @@ th.md-html-cell { color: var(--text-2); font-weight: 620; }
 .md-html-table--layout .md-html-cell { padding: var(--sp-4); border: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .md-html-table--layout .md-html-cell .md-image-frame { margin-bottom: var(--sp-3); }
 .md-html-table--layout .md-html-cell img { border-radius: var(--radius-sm); }
-.md-html-table--layout .md-sub { display: inline-block; margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
+/* Card captions follow GitHub's <sub>: smaller and quieter than the title, but a readable paragraph, not a footnote. */
+.md-html-table--layout .md-sub { display: block; margin-top: var(--sp-2); color: var(--text-2); font-size: .86em; line-height: 1.55; vertical-align: baseline; }
+.md-html-table--layout .md-html-cell > .md-paragraph > strong:first-of-type { display: inline-block; margin-top: var(--sp-1); color: var(--text); font-size: 1.04em; line-height: 1.35; }
+.md-html-table--layout .md-html-cell .md-link { color: var(--green-2); }
 
 .md-details { min-width: 0; border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); }
 .md-details__summary { padding: var(--sp-3) var(--sp-4); color: var(--text); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
