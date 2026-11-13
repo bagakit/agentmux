@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SurfaceState } from './SurfaceState'
-import bannerUrl from '../../../../resources/startup-background.png'
+import bannerUrl from '@agentmux/client-ui/brand/heroes/origin-launch.avif'
 
 const ThemeStatusWaitingIcon = semanticIconComponent('status.waiting')
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')

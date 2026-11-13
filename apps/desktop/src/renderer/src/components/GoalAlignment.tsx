@@ -8,7 +8,7 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { goalResultExplanation } from '../lib/goal-presentation'
 import { GoalEvidence } from './GoalEvidence'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
-import dialogueArtworkUrl from '../../../../resources/artwork/demand-dialogue.png'
+import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')

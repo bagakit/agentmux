@@ -1,10 +1,10 @@
 import { useId } from 'react'
-import capsuleArt from '../../assets/settings/capsule-keepsake.png'
-import goalsArt from '../../assets/settings/goals-companions.png'
-import spaceArt from '../../assets/settings/space-workchamber.png'
-import focusArt from '../../assets/settings/focus-workframe.png'
-import surveyArt from '../../assets/settings/survey-prism.png'
-import recallArt from '../../assets/settings/recall-fold.png'
+import capsuleArt from '@agentmux/client-ui/brand/illustrations/concepts/capsule-keepsake.png'
+import goalsArt from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
+import spaceArt from '@agentmux/client-ui/brand/illustrations/concepts/space-workchamber.png'
+import focusArt from '@agentmux/client-ui/brand/illustrations/concepts/focus-workframe.png'
+import surveyArt from '@agentmux/client-ui/brand/illustrations/concepts/survey-prism.png'
+import recallArt from '@agentmux/client-ui/brand/illustrations/concepts/recall-fold.png'
 import './settings-concept-intro.css'
 
 /** Read-only illustrations. Configuration and execution remain with each pane. */

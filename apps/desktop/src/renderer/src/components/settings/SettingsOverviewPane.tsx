@@ -2,7 +2,7 @@ import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsModule, SettingsNavGroup } from './settings-catalog'
-import bannerUrl from '../../../../../resources/settings-banner.png'
+import bannerUrl from '@agentmux/client-ui/brand/heroes/origin-banner.avif'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 

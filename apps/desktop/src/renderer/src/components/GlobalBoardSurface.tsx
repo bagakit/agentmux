@@ -23,8 +23,8 @@ import { GlobalGoalPatrolControl } from './GlobalGoalPatrolControl'
 import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
-import goalsArtUrl from '../assets/settings/goals-companions.png'
-import goalsHeaderArtUrl from '../assets/goals/goals-companions-header.png'
+import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
+import goalsHeaderArtUrl from '@agentmux/client-ui/brand/illustrations/goals/goals-companions-header.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')

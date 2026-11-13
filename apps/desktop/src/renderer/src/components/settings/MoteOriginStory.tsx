@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
-import roleTeam from '../../assets/mote-origin/role-team.png'
-import topicWork from '../../assets/mote-origin/topic-work.png'
-import grownTeam from '../../assets/mote-origin/grown-team.png'
+import roleTeam from '@agentmux/client-ui/brand/illustrations/mote-origin/role-team.png'
+import topicWork from '@agentmux/client-ui/brand/illustrations/mote-origin/topic-work.png'
+import grownTeam from '@agentmux/client-ui/brand/illustrations/mote-origin/grown-team.png'
 
 const chapters = [
   {
