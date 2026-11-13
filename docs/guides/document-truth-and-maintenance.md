@@ -43,7 +43,7 @@
 | 状态与观察 | 明确被观察对象、事实来源和观察范围；未知不推导终局，进程状态不代替输入能力或任务结果。 |
 | 唯一事实来源 | 定义留在行为或接口 owner；机制解释引用实际源码，操作和验证引用原合同。相邻文档只保本页所需的关系与入口。 |
 
-例如，Space、Zone、Tab、Region 的定义归[空间模型](../design/behavior/spaces-and-layout.md#空间模型)；Tab Group 的展示组织、AgentSession／Run 的执行身份以及资源 Workspace 均沿各自原定义。讨论“Space 入口”时明确这是 Work 的视图；讨论 Agent 的空间归属时引用同一持久 Space 身份，不能另造组织层 Space。
+例如，Space、Zone、Tab、Region 的定义归[概念词典](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)；Tab Group 的展示组织、AgentSession／Run 的执行身份以及资源 Workspace 均沿各自原定义。讨论“Space 入口”时明确这是 Work 的视图；讨论 Agent 的空间归属时引用同一持久 Space 身份，不能另造组织层 Space。
 
 ## 把每个指代落到明确对象
 
