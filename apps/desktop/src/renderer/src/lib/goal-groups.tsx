@@ -11,11 +11,13 @@ const SUMMARY: Record<GoalStage, (count: number) => string> = {
   you: count => `${count} need${count === 1 ? 's' : ''} you`, attention: count => `${count} need${count === 1 ? 's' : ''} attention`,
   define: count => `${count} to define`, agents: count => `${count} with agents`, unknown: count => `${count} unknown`, finished: count => `${count} finished`
 }
-const STAGE_ICONS = {
-  you: semanticIconComponent('status.needs-input'), attention: semanticIconComponent('status.warning'),
-  define: semanticIconComponent('object.goal'), agents: semanticIconComponent('status.working'),
-  unknown: semanticIconComponent('status.unknown'), finished: semanticIconComponent('status.completed')
-} satisfies Record<GoalStage, unknown>
+/** One distinct glyph per stage, so the mark still reads without its color. */
+export const GOAL_STAGE_ICON_NAMES = {
+  you: 'object.user', attention: 'status.warning', define: 'object.idea',
+  agents: 'status.working', unknown: 'status.unknown', finished: 'status.completed'
+} as const satisfies Record<GoalStage, string>
+const STAGE_ICONS = Object.fromEntries(Object.entries(GOAL_STAGE_ICON_NAMES).map(([stage, name]) => [stage, semanticIconComponent(name)])) as
+  Record<GoalStage, ReturnType<typeof semanticIconComponent>>
 if (GOAL_GROUP_ORDER.length !== GOAL_STAGES.length) throw new Error('Every Goal stage needs one reading position.')
 
 export type GoalGroup = { stage: GoalStage; goals: DemandProjection[] }
