@@ -228,6 +228,29 @@ try {
   assert.equal(blocked.code, 1); assert.match(blocked.stderr, /only a ready node/u)
   await call('a', 'supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('first') })
   assert.deepEqual((await call('b', null, ['goal', 'ls', '--all'])).goals, [])
+  stage('typed-question-answer-and-signed-peer-inbox')
+  const sourceMessageId = 'private-ssh-source-first', questionMessageId = 'private-ssh-question', answerMessageId = 'private-ssh-answer'
+  await call('b', 'worker', ['agent', 'send', '--input', '-'], { target: { kind: 'reply', sourceMessageId },
+    operationId: 'private-ssh-question-operation', messageId: questionMessageId, text: 'Which exact original criterion should I check?' })
+  const question = await call('b', 'worker', ['message', 'dispatch', 'report', '--source-message', sourceMessageId, '--reply-message', questionMessageId, '--kind', 'question'])
+  assert.equal(question.kind, 'dispatch-event-submission')
+  const pendingQuestion = await call('a', 'supervisor', ['message', 'dispatch', 'sync', '--source-message', sourceMessageId, '--host', 'worker-b'])
+  assert.ok(pendingQuestion.dispatch.events.some(event => event.kind === 'question' && event.replyMessageId === questionMessageId))
+  assert.equal(pendingQuestion.dispatch.originAwaits, true)
+  assert.equal(pendingQuestion.remoteSource.runtimeId, b.owner.runtimeId)
+  const preparedAnswer = await call('a', 'supervisor', ['agent', 'send', '--input', '-'], { target: { kind: 'reply', sourceMessageId: questionMessageId },
+    operationId: 'private-ssh-answer-operation', messageId: answerMessageId, text: 'Check the exact original signed report and keep its evidence.' })
+  assert.equal(preparedAnswer.transport.state, 'outbox')
+  const beforePush = (await call('a', 'supervisor', ['message', 'read', '--host', 'local', '--message-id', answerMessageId])).message
+  assert.equal(beforePush.peerInbox, undefined, 'A prepared answer must not claim a receiving-Core inbox receipt')
+  await call('a', 'supervisor', ['message', 'dispatch', 'sync', '--source-message', sourceMessageId, '--host', 'worker-b'])
+  const answerAtB = (await call('b', 'worker', ['message', 'read', '--host', 'local', '--message-id', answerMessageId])).message
+  assert.equal(answerAtB.envelope.replyTo, questionMessageId); assert.equal(answerAtB.envelope.threadId, 'private-ssh-thread-first')
+  assert.equal(answerAtB.envelope.senderRuntimeId, a.owner.runtimeId); assert.equal(answerAtB.envelope.recipientRuntimeId, b.owner.runtimeId)
+  const confirmedAnswer = (await call('a', 'supervisor', ['message', 'read', '--host', 'local', '--message-id', answerMessageId])).message
+  assert.equal(confirmedAnswer.peerInbox.runtimeId, b.owner.runtimeId); assert.equal(confirmedAnswer.peerInbox.messageId, answerMessageId)
+  assert.equal(confirmedAnswer.peerInbox.sequence, answerAtB.sequence)
+  facts.push({ case: 'actual-ssh-typed-question-answer-and-peer-receipt', question, pendingQuestion, beforePush, answerAtB, confirmedAnswer })
   const report = { operationId: 'private-ssh-report', replyMessageId: 'private-ssh-reply', authorAgentSessionId: workerId,
     grounding: { alignmentRevision, summary: 'Original remote worker report.', checks: [{ criterionId: 'signed-report', outcome: 'met', evidence: ['checks/remote.log:1'], note: '' }] } }
   const submission = await call('b', 'worker', ['goal', 'report', '--input', '-'], { goalId, operationId: 'private-ssh-delegate-first', sourceMessageId: 'private-ssh-source-first', report })
