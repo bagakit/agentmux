@@ -135,6 +135,13 @@ describe('first Core install', () => {
   it('keeps an install unknown when the new Core never confirms its identity', async () => {
     const f = await fixture(), check = await f.manager.check(host); f.ownerNotReady()
     expect(await f.manager.install(host, { ...check.expected!, keepRunning: 'start-script' }, 'silent')).toMatchObject({ status: 'unknown', stage: 'confirming' })
+    const record = join(f.root, 'install-operations', 'silent.json'), before = await readFile(record, 'utf8'), effects = [...f.effects]
+    const observed = await f.manager.inspect(host, 'silent')
+    expect(observed).toMatchObject({ status: 'unknown', stage: 'confirming' })
+    expect(observed?.detail).toContain('This read-only identity check was not confirmed: not serving yet')
+    expect(observed?.detail).toContain('No installation step was repeated')
+    expect(await readFile(record, 'utf8')).toBe(before)
+    expect(f.effects).toEqual(effects)
   })
 
   it.each([['no Runtime ID', { availability: 'connected' }], ['an empty Runtime ID', { runtimeId: '', availability: 'connected' }],
