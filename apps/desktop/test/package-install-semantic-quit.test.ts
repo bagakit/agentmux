@@ -17,6 +17,7 @@ type Scope = {
   events: string[]; signals: [number, string][]; cutover: boolean
   beforeQuit?: () => Promise<void>
   afterGuiQuit?: () => void
+  beforeSemanticStop?: () => void
   completeActivation?: boolean
   afterLaunch?: () => void
 }
@@ -36,8 +37,12 @@ vi.mock('node:child_process', async importOriginal => {
     const rows = [f.omitSystemAncestor ? null : system, f.gui, f.host, f.worker, f.run ?? null, daemon].filter((row): row is Row => row !== null)
     if (command === process.execPath && args[1] === '--bootstrap') {
       expect(args[0]).toMatch(/package-semantic-host\.mjs$/)
+      if (f.events.includes('normal-gui-quit')) {
+        f.beforeSemanticStop?.(); f.beforeSemanticStop = undefined
+      }
       f.events.push('public-owner')
-      return { stdout: JSON.stringify({ hostProcessId: f.publicPid, storePath: f.publicStore }), stderr: '' }
+      return { stdout: JSON.stringify({ hostProcessId: f.publicPid, storePath: f.publicStore,
+        socketPath: join(f.root, 'native.sock'), owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } }), stderr: '' }
     }
     if (command === '/usr/bin/python3') {
       const requested = args.slice(2).map(Number)
@@ -110,6 +115,12 @@ vi.mock('node:fs/promises', async importOriginal => {
   } }
 })
 
+// These scenarios own a foreground Host, not a registered launchd job.
+vi.mock('../../host/dist/macos-service.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../host/dist/macos-service.js')>(),
+  macosHostServiceRegistration: async () => null
+}))
+
 vi.mock('../scripts/package-runtime-upgrade.mjs', async importOriginal => {
   const actual = await importOriginal<typeof import('../scripts/package-runtime-upgrade.mjs')>()
   return { ...actual,
@@ -122,6 +133,7 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async importOriginal => {
     requireOutgoingWorkbenchStorage: () => {},
     prepareUiRuntime: async () => { await boundary.scope?.beforeQuit?.(); return { privateObservation: true } },
     confirmUiRuntime: async () => {}, closeRuntimeUpgrade: async () => {},
+    confirmUiTerminalRebindings: async () => [],
     assertUiRuntimeObservation: (before: unknown) => { expect(before).toBeTruthy() }
   }
 })
@@ -183,8 +195,50 @@ async function install(f: Scope, intent = 'full') {
     result => ({ error: null, native: result.native, result }), (error: unknown) => ({
       error: error instanceof Error ? error.message : String(error),
       ownership: (error as { transaction?: { ui?: { ownership?: unknown } } }).transaction?.ui?.ownership,
+      transaction: (error as { transaction?: unknown }).transaction,
       native: (error as { transaction?: { native?: { status: string } } }).transaction?.native }))
 }
+
+it.each(['mode-unconfirmed', 'ancestry-unconfirmed'] as const)(
+  'the installer returns the exact semantic-stop ownership refusal (%s)', async gap => {
+    const f = await fixture({ worker: true })
+    f.worker!.ppid = 1
+    const retainedHost = { ...f.host!, ppid: 1 }
+    f.completeActivation = true
+    f.beforeSemanticStop = () => {
+      if (gap === 'mode-unconfirmed') f.workerMode = 'unknown'
+      else f.worker!.ppid = 998
+    }
+    f.afterLaunch = () => { f.host = retainedHost; f.publicPid = retainedHost.pid }
+    const outcome = await install(f, 'ui-only')
+    if (process.env.SEMANTIC_STOP_FACTS) await appendFile(process.env.SEMANTIC_STOP_FACTS, JSON.stringify({
+      gap, error: outcome.error, transaction: outcome.transaction, ownership: outcome.ownership,
+      signals: f.signals, cutover: f.cutover, retainedHostPid: f.host?.pid
+    }) + '\n', { mode: 0o600 })
+    expect(outcome.error, 'The original guard must still refuse before stopping or replacing anything').toContain('Semantic Host namespace')
+    expect(f.events).toContain('normal-gui-quit')
+    expect(f.events).toContain('candidate-launched')
+    expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
+    expect(f.host).toEqual(retainedHost)
+    expect(outcome.transaction).toMatchObject({ intent: 'ui-only', ui: { status: 'restored' }, native: { status: 'deferred' } })
+    expect(outcome.ownership, 'The real transaction consumer must receive the same fresh stop observation').toMatchObject({
+      schema: 'agentmux.semantic-host-stop-ownership-diagnostic.v1', stage: 'semantic-host-stop',
+      preparedOwner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner',
+        process: { uid: process.getuid!(), pid: 211, ppid: 201, birth: retainedHost.birth } },
+      freshOwner: { uid: process.getuid!(), pid: 211, ppid: 1, birth: retainedHost.birth },
+      serving: [212], namespace: [211], blockerPids: [212],
+      blockers: [{ affected: { identity: { uid: process.getuid!(), pid: 212, ppid: gap === 'mode-unconfirmed' ? 1 : 998 },
+        mode: { status: gap === 'mode-unconfirmed' ? 'unknown' : 'bound' },
+        admission: { classification: 'unknown', source: gap } },
+      ancestry: { termination: gap === 'mode-unconfirmed' ? 'system-root' : 'missing-parent',
+        missingPid: gap === 'mode-unconfirmed' ? null : 998 } }]
+    })
+    const serialized = JSON.stringify(outcome.ownership)
+    expect(serialized).not.toContain('file-worker.js')
+    expect(serialized).not.toContain('agentmux-host.js')
+    expect(serialized).not.toContain('--store')
+    expect(serialized).not.toContain('ELECTRON_RUN_AS_NODE')
+  })
 
 it('the default full installer completes GUI quit while only its fenced semantic owner survives', async () => {
   const f = await fixture(), outcome = await install(f)
