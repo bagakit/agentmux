@@ -102,7 +102,9 @@ async function capture() {
   liveEncoder = spawn('ffmpeg', ['-v', 'error', '-re', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=660', '-t', '90',
     '-c:v', 'libx264', '-preset', 'veryfast', '-g', '25', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '6',
     '-hls_flags', 'delete_segments+temp_file', path.join(workspacePath, 'live/live.m3u8')], { stdio: 'ignore' })
-  for (let waited = 0; waited < 20000; waited += 250) { try { if ((await fs.readFile(path.join(workspacePath, 'live/live.m3u8'), 'utf8')).split('#EXTINF').length > 3) break } catch {} await sleep(250) }
+  // Open it once the list carries a full window, as a stream that has been running does; a list of three
+  // two-second segments leaves Chromium no margin at the live edge on a loaded machine.
+  for (let waited = 0; waited < 30000; waited += 250) { try { if ((await fs.readFile(path.join(workspacePath, 'live/live.m3u8'), 'utf8')).split('#EXTINF').length > 6) break } catch {} await sleep(250) }
   report.checks.openPlayersBeforeLive = await evaluate(`[...document.querySelectorAll('.media-player video, .media-player audio')].map(m=>({src:(m.getAttribute('src')||'').split('/').pop(),net:m.networkState,paused:m.paused,parked:Boolean(m.closest('[data-active="false"],.workspace-workbench-slot--parked'))}))`)
   report.checks.openSocketsBeforeLive = report.requests.filter(entry => !entry.closed).length
   const liveStart = Date.now()
