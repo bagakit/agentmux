@@ -8,10 +8,11 @@ import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
+const conversationOnly = process.argv.includes('--conversation-only')
 const directory = path.join(root, '.bagakit/mote-frame-rethink/frame-ui', 'capture-' + crypto.randomUUID())
 const compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: 'mote-continuous-frame-full-app', source: {}, images: {},
+const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: conversationOnly ? 'mote-conversation-presence-full-app' : 'mote-continuous-frame-full-app', source: {}, images: {},
   boundary: 'Original App/PmoTeamsTopicFloatingPanel/MoteSpaceFrame/WorkspaceWorkbench/SessionPane/Composer/Store and CSS in private Electron. Original Core conversation projector/codec consumes controlled typed source pages. Exact private Sessions/Run/Space bindings and finite API/native ports only; no real user App/Run, Provider, model, package, install or native recovery claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
@@ -71,12 +72,14 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script>window.closedTabSetup={phase:"module-loading",errors:[]};window.addEventListener("error",e=>window.closedTabSetup.errors.push(String(e.error?.stack||e.message)));window.addEventListener("unhandledrejection",e=>window.closedTabSetup.errors.push(String(e.reason?.stack||e.reason)));</script><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--unknown-only') ? ['--unknown-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(conversationOnly ? ['--conversation-only'] : process.argv.includes('--unknown-only') ? ['--unknown-only'] : [])],
     { cwd: root, env, timeoutMs: 300000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, process.argv.includes('--unknown-only') ? 1 : 8, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, conversationOnly ? 9 : process.argv.includes('--unknown-only') ? 1 : 8, 'Every named real product scene must be captured')
+  if (conversationOnly) for (const file of ['apps/desktop/src/renderer/src/components/MoteConversationIdentity.tsx', 'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/components/CapturedConversationMessage.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationSubmissionMetadata.tsx'])
+    assert.ok(receipt.source[file], 'Original conversation presence consumer required: ' + file)
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
   receipt.sourceDrift = []
   for (const [file, expected] of Object.entries(receipt.source)) if (sha(await fs.readFile(path.resolve(root, file))) !== expected) receipt.sourceDrift.push(file)
