@@ -17,8 +17,8 @@ const BRAND_HEROES: BrandHeroTable = {
 }
 
 export type ResolvedBrandHero = {
-  /** The realm this surface was set to show; Origin when the choice is unknown or unobserved. */
-  realm: AppIconId
+  /** The observed user realm; null when the choice is unknown or unobserved. */
+  realm: AppIconId | null
   /** URL of the one image this surface loads. */
   art: string
   /** The realm the shown art belongs to, which is what its colophon names. */
@@ -33,8 +33,8 @@ export type ResolvedBrandHero = {
  * about the user's realm. Nothing here writes or remembers a choice.
  */
 export function resolveBrandHeroFrom(heroes: BrandHeroTable, surface: BrandHeroSurface, saved: unknown, observed = true): ResolvedBrandHero {
-  const realm = observed && (saved === undefined || isAppIconId(saved)) ? resolveAppIcon(saved) : ORIGIN_REALM
-  const artRealm = heroes[realm] ? realm : ORIGIN_REALM
+  const realm = observed && (saved === undefined || isAppIconId(saved)) ? resolveAppIcon(saved) : null
+  const artRealm = realm !== null && heroes[realm] ? realm : ORIGIN_REALM
   const hero = heroes[artRealm] ?? heroes[ORIGIN_REALM]
   return { realm, art: hero[surface], artRealm, colophon: APP_ICON_CATALOG[artRealm].realm }
 }

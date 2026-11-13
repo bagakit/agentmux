@@ -33,7 +33,7 @@ export function brandRealms(): BrandRealm[] {
   return APP_ICON_IDS.map(id => {
     const hero = (surface: BrandHeroSurface) => {
       const resolved = resolveBrandHero(surface, id)
-      return { realm: resolved.realm, art: resolved.art, artRealm: resolved.artRealm, colophon: resolved.colophon, borrowed: resolved.artRealm !== resolved.realm }
+      return { realm: id, art: resolved.art, artRealm: resolved.artRealm, colophon: resolved.colophon, borrowed: resolved.artRealm !== id }
     }
     return { id, label: APP_ICON_CATALOG[id].label, realm: APP_ICON_CATALOG[id].realm, material: APP_ICON_CATALOG[id].material,
       icon: appIconUrl(id), isDefault: id === DEFAULT_APP_ICON, isOrigin: id === ORIGIN_REALM, heroes: { launch: hero('launch'), banner: hero('banner') } }
