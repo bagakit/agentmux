@@ -86,7 +86,7 @@ it('a contributed module reaches Overview, sidebar, compact menu, search and its
   expect(new Set(catalog.map(module => module.id))).toEqual(new Set([...registration.originalIds, 'fixture-module']))
   expect(catalog).toHaveLength(registration.originalIds.length + 1)
   const navigation = settingsNavGroups('').flatMap(group => group.items)
-  expect(settingsNavGroups('').find(group => group.id === 'browser-use')?.items.map(module => module.id)).toEqual(['browser', 'capsule', 'browser-agent-control'])
+  expect(settingsNavGroups('').find(group => group.id === 'browser-use')?.items.map(module => module.id)).toEqual(['browser', 'browser-profiles', 'capsule', 'browser-agent-control'])
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
   expect(navigation).toHaveLength(catalog.length)
   expect(navigation.map(module => module.id)).toEqual(catalog.map(module => module.id))
