@@ -930,6 +930,17 @@ it('maps a press on the relaid-out preview through the size the page now has', a
   expect(f.source.webContents.sendInputEvent.mock.calls[0]![0]).toMatchObject({ type: 'mouseDown', x: 240, y: 256 })
 })
 
+it('keeps the page size while its card is clipped by the reading window', async () => {
+  const f = await fixture(), host = layoutHost(f)
+  const placements = f.addChildView.mock.calls.length
+  // Scrolling across the window edge clips the card's rectangle; the page area itself is unchanged.
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, inputVisible: false, bounds: { x: 24, y: 0, width: 480, height: 96 } })
+  expect(size(f.source)).toEqual({ width: 480, height: 240 })
+  expect(f.addChildView).toHaveBeenCalledTimes(placements)
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { x: 24, y: 36, width: 480, height: 512 } })
+  expect(size(f.source)).toEqual({ width: 480, height: 512 })
+})
+
 it('relays out the source being prepared for capture inside its hidden shell', async () => {
   const f = await fixture(), host = layoutHost(f)
   f.manager.armPresentationCapture(f.app as never, f.frame as never, host.leaseId)
