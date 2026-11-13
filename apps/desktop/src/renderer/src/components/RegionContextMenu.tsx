@@ -19,6 +19,7 @@ const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const AgentIcon = semanticIconComponent('object.agent')
 const RegionIcon = semanticIconComponent('object.region')
 const InformationIcon = semanticIconComponent('status.info')
@@ -209,7 +210,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
         className="tab-context-menu__item"
         onSelect={entry.onSelect}
       >
-        <ThemeActionOpenExternalIcon size={14} />
+        <ThemeObjectTabIcon size={14} />
         <span>Move to New Tab</span>
       </Item>
     )

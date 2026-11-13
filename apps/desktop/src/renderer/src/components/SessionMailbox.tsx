@@ -58,7 +58,7 @@ const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectMailIcon = semanticIconComponent('object.mail')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
-const RevealIcon = semanticIconComponent('action.open-external')
+const RevealIcon = semanticIconComponent('action.locate')
 
 
 type MailboxSelection = { scope: string; folder: Folder; key: string; original?: AgentSessionUserMessage }

@@ -162,7 +162,7 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
       </div> : null}
       {scene === 'links' ? <div className="focus-settings-preview__links" data-destination={values.linkDestination} data-open={resourceOpen}>
         <div className="focus-settings-preview__tabs"><span data-selected={!resourceOpen || values.linkDestination === 'region'}>Agent</span>{resourceOpen && values.linkDestination === 'tab' ? <span data-selected>Resource</span> : null}</div>
-        <div className="focus-settings-preview__resource-layout"><section><ResolvedAgentAvatar label="Example Executor" providerId="codex" size={24} /><strong>Refine the workspace</strong><p>The source is ready to inspect.</p><button type="button" onClick={() => setResourceOpen(true)} className="focus-settings-preview__link">Open example source <SemanticIcon name="action.open-external" size={12} /></button></section>
+        <div className="focus-settings-preview__resource-layout"><section><ResolvedAgentAvatar label="Example Executor" providerId="codex" size={24} /><strong>Refine the workspace</strong><p>The source is ready to inspect.</p><button type="button" onClick={() => setResourceOpen(true)} className="focus-settings-preview__link">Open example source</button></section>
           {resourceOpen ? <section className="focus-settings-preview__resource"><SemanticIcon name="object.file" size={24} /><strong>Original source</strong><p>{values.linkDestination === 'region' ? 'The Agent stays beside it.' : 'The resource has its own Tab in Space.'}</p><button type="button" className="small-button" onClick={() => setResourceOpen(false)}>Try again</button></section> : null}</div>
       </div> : null}
     </div>
