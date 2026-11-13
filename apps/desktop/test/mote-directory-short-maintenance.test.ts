@@ -9,7 +9,7 @@ import { migrateTopicDirectories, type DirectoryMaintenanceOptions } from '../sc
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { observeClientRpcSnapshot } from '../src/main/rpc-client-observations'
+import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { inspectDirectoryIdentity, normalizeDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
 import { scratchIdentityContext, resolveScratchTopicDirectory } from '../src/main/scratch-topic-directories'
 import { spatialSources, directoryIdentity, homeZoneId } from '../src/shared/space-addresses'

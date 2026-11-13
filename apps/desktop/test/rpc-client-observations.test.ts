@@ -9,7 +9,7 @@ import { directoryIdentity } from '../src/shared/space-addresses.js'
 import { moteDirectoryName } from '../src/main/scratch-directory-identity.mjs'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { SCRATCH_DIRECTORY_IDENTITY_PATH } from '../src/main/scratch-topic-directories.js'
-import { observeClientRpcSnapshot } from '../src/main/rpc-client-observations.js'
+import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { parseRpcNativeResult } from '../../../packages/core/src/rpc-native-codec.js'
 
 const roots: string[] = []

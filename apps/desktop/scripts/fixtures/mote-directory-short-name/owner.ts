@@ -1,5 +1,5 @@
 export { ScratchTopics } from '../../../src/main/scratch-topics'
-export { observeClientRpcSnapshot } from '../../../src/main/rpc-client-observations'
+export { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 export { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 
 export { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
