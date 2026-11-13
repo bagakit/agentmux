@@ -206,6 +206,12 @@ describe('real format preview pane', () => {
     expect(release).toHaveBeenCalledWith('lease-list-1')
     expect(container.querySelector('video')?.getAttribute('src')).toBe('http://127.0.0.1:1/lease-list-2/vod.m3u8')
     expect(container.textContent).not.toContain('Playing the saved playlist')
+    // An encoder appending to a live list changes the File's revision from outside this view; the player's own
+    // reloads read that, and restarting it on every append would stall it at the live edge.
+    await act(async () => { useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, revision: 'encoder-append' } } })) })
+    await settle()
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('video')?.getAttribute('src')).toBe('http://127.0.0.1:1/lease-list-2/vod.m3u8')
   })
   it('a lease that arrives after its view was hidden or retargeted is released, never shown', async () => {
     const pending = new Map<string, (value: Awaited<ReturnType<typeof api.files.openMediaStream>>) => void>()
