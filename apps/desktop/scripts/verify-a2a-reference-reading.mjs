@@ -14,15 +14,21 @@ const sources = [
   'apps/desktop/scripts/probe-process.mjs',
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
-  'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts',
+  'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts', 'packages/core/src/session-history-content.ts',
+  'packages/core/src/session-user-messages.ts', 'packages/core/src/conversation-stream.ts', 'packages/core/src/conversation-author.ts',
+  'packages/core/src/amux-protocol-definition.ts',
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
-  ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload'].map(name => `packages/client-ui/src/components/${name}.tsx`),
+  ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload', 'ContentCopyButton', 'ConversationAmuxProtocol', 'ConversationProgressiveBody'].map(name => `packages/client-ui/src/components/${name}.tsx`),
+  'packages/client-ui/src/platform.tsx', 'packages/client-ui/src/lib/use-content-copy-action.ts',
   'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css',
   'packages/client-ui/test/a2a-reference-reading.test.tsx', 'packages/client-ui/test/conversation-leading-context.test.tsx',
+  'apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx',
+  'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/clipboard-copy.ts',
   'apps/desktop/src/renderer/src/components/MailboxA2A.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'packages/client-ui/src/components/InputMailboxRecords.tsx',
   'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx', 'apps/desktop/test/session-mailbox-author-boundary.test.tsx'
 ]
+const currentTestInput = path => sources.includes(path) || path.startsWith('test/') || /\/(?:test|scripts\/fixtures|scripts\/lib)\//u.test(path)
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const local = path => { assert.ok(!isAbsolute(path) && !path.split('/').includes('..')); return join(root, path) }
 async function execute(executable, args, directory, name, environment = {}) {
@@ -53,9 +59,17 @@ async function testFacts(run, mutation) {
   const inputs = (await readFile(local(run.loaded), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   assert.ok(inputs.length > 0 && inputs.every(input => !isAbsolute(input.path) && !input.path.startsWith('.worktrees/')))
   for (const input of inputs) {
-    const original = await readFile(local(input.path), 'utf8')
+    const path = local(input.path), edited = mutation?.path === input.path
+    assert.match(input.sourceSHA256, /^[a-f0-9]{64}$/u); assert.match(input.compilerInputSHA256, /^[a-f0-9]{64}$/u)
+    assert.ok(Number.isInteger(input.bytes) && input.bytes > 0, 'Actual compiler input bytes are recorded')
+    // A loaded dependency is an original test condition, not a claim about the latest checkout.
+    if (!currentTestInput(input.path)) {
+      assert.equal(edited, false, 'Every mutation target must have an explicit owning source')
+      assert.equal(input.compilerInputSHA256, input.sourceSHA256, 'Unmodified recorded dependency: ' + input.path)
+      continue
+    }
+    const original = await readFile(path, 'utf8')
     assert.equal(input.sourceSHA256, sha(original), 'Actual test consumer source: ' + input.path)
-    const edited = mutation?.path === input.path
     if (edited) assert.equal(original.split(mutation.before).length, 2, 'One exact behavior target')
     const compiled = edited ? original.replace(mutation.before, mutation.after) : original
     assert.equal(input.compilerInputSHA256, sha(compiled)); assert.equal(input.bytes, Buffer.byteLength(compiled))
@@ -72,9 +86,25 @@ async function testFacts(run, mutation) {
   }
   return { cases: cases.map(test => test.fullName).sort(), inputs }
 }
+function testInputConditions(facts, target) {
+  const inputs = new Map()
+  for (const input of facts.inputs) {
+    const condition = input.path === target ? [input.path, input.sourceSHA256]
+      : [input.path, input.sourceSHA256, input.compilerInputSHA256, input.bytes]
+    if (inputs.has(input.path)) assert.deepEqual(inputs.get(input.path), condition, 'Original module conditions changed within one test run: ' + input.path)
+    else inputs.set(input.path, condition)
+  }
+  return [...inputs.values()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)
+}
+function assertTestPair(failed, restored, edit) {
+  assert.deepEqual(failed.cases, restored.cases, 'Original RED/restore test cases are identical')
+  assert.deepEqual(testInputConditions(failed, edit.path), testInputConditions(restored, edit.path),
+    'Original RED/restore loading conditions differ outside the target compiler input: ' + edit.label)
+}
 function mergeSources(target, inputs) {
   for (const [path, digest] of Object.entries(inputs)) {
     local(path)
+    if (!currentTestInput(path)) continue
     if (target[path]) assert.equal(target[path], digest, 'One candidate across all actual consumers: ' + path)
     target[path] = digest
   }
@@ -96,6 +126,7 @@ async function reusableTest(run, mutation, label, receipt) {
 }
 async function prepare(preparation, reusePath) {
   for (const edit of readingMutations) {
+    assert.ok(edit.path.includes('/src/') && sources.includes(edit.path), 'Mutation targets one declared production owner: ' + edit.label)
     assert.equal((await readFile(local(edit.path), 'utf8')).split(edit.before).length, 2, 'One exact current mutation owner: ' + edit.label)
     await access(local(edit.test))
   }
@@ -105,21 +136,28 @@ async function prepare(preparation, reusePath) {
     assert.deepEqual(reused.mutations.map(item => item.label), readingMutations.map(item => item.label), 'Explicit test reuse requires the complete original mutation collection')
   }
   const directory = join(area, 'run-' + Date.now()); await mkdir(directory, { recursive: true })
-  const receipt = { schema: 'agentmux.a2a-reference-reading.v1', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
+  const receipt = { schema: 'agentmux.a2a-reference-reading.v1', boundary: 'Current A2A owners and test/harness inputs remain exact; production owners join the fixed product. Other actual loaded dependency hashes retain their original test conditions, without a current-main claim.', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
   try {
     for (const path of sources) receipt.sources[path] = sha(await readFile(local(path)))
-    if (reused) receipt.reusedTests = { path: reusePath, sha256: sha(await readFile(reusePath)), boundary: 'Only original test runs whose actual source and compiler inputs are revalidated; changed test subsets, product execution and types run anew.' }
+    if (reused) receipt.reusedTests = { path: reusePath, sha256: sha(await readFile(reusePath)), boundary: 'Only original runs with current owning inputs and recorded unmodified dependency conditions revalidated; changed owning subsets, product execution and types run anew.' }
     receipt.baseline = (reused && await reusableTest(reused.baseline, undefined, 'baseline', receipt)) || await tests(directory, 'baseline')
     const baseline = await testFacts(receipt.baseline)
     assert.ok(baseline.cases.length >= 100, 'Core, shared reading and Desktop adjacent consumers must all run')
     mergeSources(receipt.sources, Object.fromEntries(baseline.inputs.map(input => [input.path, input.sourceSHA256])))
     for (const [index, edit] of readingMutations.entries()) {
       const prior = reused?.mutations[index]
-      const mutant = (prior && await reusableTest(prior.mutant, edit, edit.label, receipt)) || await tests(directory, edit.label, edit)
-      const restored = (prior && await reusableTest(prior.restored, undefined, edit.label + '-restored', receipt)) || await tests(directory, edit.label + '-restored', undefined, edit.test)
+      let mutant = (prior && await reusableTest(prior.mutant, edit, edit.label, receipt)) || await tests(directory, edit.label, edit)
+      let restored = (prior && await reusableTest(prior.restored, undefined, edit.label + '-restored', receipt)) || await tests(directory, edit.label + '-restored', undefined, edit.test)
       // A restored subset selects the same file, with no compiler mutation.
-      const failed = await testFacts(mutant, edit), green = await testFacts(restored)
-      assert.deepEqual(failed.cases, green.cases)
+      let failed = await testFacts(mutant, edit), green = await testFacts(restored)
+      try { assertTestPair(failed, green, edit) } catch (error) {
+        (receipt.invalidatedTests ??= []).push({ label: edit.label + '-pair', reason: error.message, mutant, restored })
+        console.log(edit.label + ': RED/restore conditions differ; rerunning this pair once')
+        mutant = await tests(directory, edit.label + '-pair', edit)
+        restored = await tests(directory, edit.label + '-pair-restored', undefined, edit.test)
+        failed = await testFacts(mutant, edit); green = await testFacts(restored)
+        assertTestPair(failed, green, edit)
+      }
       mergeSources(receipt.sources, Object.fromEntries([...failed.inputs, ...green.inputs].map(input => [input.path, input.sourceSHA256])))
       receipt.mutations.push({ label: edit.label, mutant, restored })
       console.log(edit.label + ': behavior RED → original GREEN' + (prior && mutant === prior.mutant && restored === prior.restored ? '; original runs reused after current-input validation' : ''))
@@ -151,7 +189,7 @@ async function verify() {
   assert.deepEqual(receipt.mutations.map(item => item.label), readingMutations.map(item => item.label))
   for (const [index, edit] of readingMutations.entries()) {
     const item = receipt.mutations[index], mutant = await testFacts(item.mutant, edit), restored = await testFacts(item.restored)
-    assert.deepEqual(mutant.cases, restored.cases)
+    assertTestPair(mutant, restored, edit)
   }
   assert.equal(receipt.types.exitCode, 0); assert.deepEqual(receipt.types.argv, ['--filter', '@agentmux/client-ui', 'typecheck'])
   const productBytes = await readFile(receipt.product.path); assert.equal(sha(productBytes), receipt.product.sha256)
