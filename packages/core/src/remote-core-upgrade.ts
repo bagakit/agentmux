@@ -22,10 +22,15 @@ export type RemoteCoreUpgradeExpected = {
   targetDigest: string; runtimeId: string; ownerInstanceId: string; processId: number; startTicks: string
   candidateDigest: string; nativeInstanceId: string; nativeProcessId: number; nativeStartTicks: string
 }
-export type RemoteCoreUpgradeCandidate = Pick<PortableCoreArtifact, 'digest' | 'sourceCommit' | 'protocolVersion'>
+export type RemoteCoreUpgradeCandidate = Pick<PortableCoreArtifact, 'digest' | 'sourceCommit' | 'version' | 'ownerProtocolVersion' | 'requiredNativeProtocolVersion'>
+export type RemoteCoreCurrentObservation =
+  | { state: 'available'; observedAt: number; version: string | null; sourceCommit: string | null; deploymentDigest: string;
+      ownerProtocolVersion: number; runtimeId: string; ownerInstanceId: string; processId: number;
+      native: { instanceId: string; buildId: string; protocolVersion: number } }
+  | { state: 'unavailable'; observedAt: number; code: string; detail: string }
 export type RemoteCoreUpgradeCheck = {
-  input: RemoteCoreUpgradeHost; candidate: RemoteCoreUpgradeCandidate; eligible: boolean; detail: string
-  reason: 'ready' | 'runtime-update-required' | 'unverified'
+  input: RemoteCoreUpgradeHost; current: RemoteCoreCurrentObservation; candidate: RemoteCoreUpgradeCandidate; eligible: boolean; detail: string
+  reason: 'ready' | 'up-to-date' | 'runtime-update-required' | 'unverified'
   expected?: RemoteCoreUpgradeExpected
   latestOperation?: RemoteCoreUpgradeReceipt
 }
@@ -34,14 +39,17 @@ export type RemoteCoreUpgradeReceipt = {
   status: 'running' | 'completed' | 'failed' | 'unknown'
   stage: 'preparing' | 'staged' | 'stopping' | 'starting' | 'verifying' | 'completed'
   detail: string; remoteCommand?: string; updatedAt: number
+  candidate?: RemoteCoreUpgradeCandidate
+  /** Main/config owner projection only; never rewrites the Core deployment outcome. */
+  connectionAdoption?: { state: 'pending-confirmation' | 'connected' | 'unconfirmed'; readAt: number; code?: string; detail?: string }
 }
 type Launch = { node: string; cli: string; cwd: string; processId: number; startTicks: string; env: Record<string, string>
   stateDirectory: string; runtimeDirectory: string; storePath: string; nativeSha256: string; nativeProcessId: number; nativeStartTicks: string
   nativeArtifactDirectory: string; nativeManifestSha256: string; nativeInstanceId: string; nativeRuntimeId: string; nativeBuildId: string
-  platform: string; deploymentDigest: string }
+  platform: string; deploymentDigest: string; version: string | null; sourceCommit: string | null }
 export type RemoteCoreUpgradeNativeRun = { runId: string; pid: number | null; state: AgentMuxRunState; outputBytes: number; inputBytes: number | null }
 type RunObservation = RemoteCoreUpgradeNativeRun & { agentSessionId: string }
-export type RemoteCoreMaintenanceOwner = { runtimeId: string; ownerInstanceId: string; processId: number
+export type RemoteCoreMaintenanceOwner = { runtimeId: string; ownerInstanceId: string; processId: number; protocolVersion: number
   ctxmux: { instanceId: string; processId: number | null; buildIdentity: string; protocolVersion: number } }
 export type RemoteCoreMaintenanceObservation = { owner: RemoteCoreMaintenanceOwner
   bootstrap: { storePath: string; hostProcessId: number; sessions: { agentSessionId: string; run: { runId: string } }[] }
@@ -119,7 +127,7 @@ export class RemoteCoreUpgradeManager {
     try { return JSON.parse(result.stdout.trim()) as T }
     catch { throw new AgentMuxError('The maintenance command returned an unknown receipt.', 'CORE_UPGRADE_RESPONSE_UNKNOWN') }
   }
-  private async observe(input: RemoteCoreUpgradeHost): Promise<Observed> {
+  private async observe(input: RemoteCoreUpgradeHost, qualifyNative = true): Promise<Observed> {
     if (input.kind !== 'ssh' || !input.remoteCommand?.startsWith('/') || !input.remoteSocketPath?.startsWith('/') || !input.runtimeId) {
       throw new AgentMuxError('Save an explicit remote Core command, socket and verified Runtime identity before upgrading.', 'CORE_UPGRADE_UNAVAILABLE')
     }
@@ -135,7 +143,7 @@ export class RemoteCoreUpgradeManager {
     if (observed.owner.runtimeId !== input.runtimeId || observed.owner.processId !== physical.processId || observed.bootstrap.storePath !== physical.storePath) {
       throw new AgentMuxError('The maintenance observation belongs to another process, Native or Store.', 'CORE_UPGRADE_UNAVAILABLE')
     }
-    assertAgentMuxRuntimeCompatibility(observed.nativeRuntime)
+    if (qualifyNative) assertAgentMuxRuntimeCompatibility(observed.nativeRuntime)
     // Recheck OS leases, image and package after the producer's strict read.
     const after = await this.program<LaunchInspection & { ownerReceipt: OwnerReceiptObservation }>(input, '/usr/bin/python3', ['-c', INSPECT_CORE_OWNER], {
       pid: physical.processId, startTicks: physical.startTicks, nativePid: physical.nativeProcessId,
@@ -156,24 +164,40 @@ export class RemoteCoreUpgradeManager {
       ownerInstanceId: observed.owner.ownerInstanceId, processId: observed.owner.processId, startTicks: observed.launch.startTicks,
       candidateDigest: artifact.digest, nativeInstanceId: observed.owner.ctxmux.instanceId, nativeProcessId: observed.launch.nativeProcessId, nativeStartTicks: observed.launch.nativeStartTicks }
   }
+  private candidateSummary(artifact: PortableCoreArtifact): RemoteCoreUpgradeCandidate {
+    return { digest: artifact.digest, sourceCommit: artifact.sourceCommit, version: artifact.version,
+      ownerProtocolVersion: artifact.ownerProtocolVersion, requiredNativeProtocolVersion: artifact.requiredNativeProtocolVersion }
+  }
   async check(input: RemoteCoreUpgradeHost): Promise<RemoteCoreUpgradeCheck> {
-    const captured = structuredClone(input), artifact = await this.artifact()
-    const candidate = { digest: artifact.digest, sourceCommit: artifact.sourceCommit, protocolVersion: artifact.protocolVersion }
-    if (captured.kind === 'ssh' && captured.transport === 'tailcat') return { input: captured, candidate, eligible: false, reason: 'unverified',
-      detail: 'Core maintenance requires an explicitly configured SSH Linux x64 headless service. Tailcat does not install or upgrade a remote Mac.' }
+    const captured = structuredClone(input), artifact = await this.artifact(), candidate = this.candidateSummary(artifact)
+    let observed: Observed | undefined
+    let current: RemoteCoreCurrentObservation
+    try {
+      // Reading the exact current producer is independent of a new admission,
+      // uncertain historical operations and this candidate's Native compatibility.
+      observed = await this.observe(captured, false)
+      current = { state: 'available', observedAt: Date.now(), version: observed.launch.version, sourceCommit: observed.launch.sourceCommit,
+        deploymentDigest: observed.launch.deploymentDigest, ownerProtocolVersion: observed.owner.protocolVersion,
+        runtimeId: observed.owner.runtimeId, ownerInstanceId: observed.owner.ownerInstanceId, processId: observed.owner.processId,
+        native: { instanceId: observed.owner.ctxmux.instanceId, buildId: observed.owner.ctxmux.buildIdentity, protocolVersion: observed.owner.ctxmux.protocolVersion } }
+    } catch (error) {
+      current = { state: 'unavailable', observedAt: Date.now(), code: error instanceof AgentMuxError ? error.code : 'CORE_OBSERVATION_UNAVAILABLE', detail: errorText(error) }
+    }
     const latestOperation = await this.latest(captured)
-    const prior = latestOperation ? { latestOperation } : {}
-    if (latestOperation?.status === 'unknown' || latestOperation?.status === 'running') return { input: captured, candidate, ...prior, eligible: false, reason: 'unverified',
+    const base = { input: captured, candidate, current, ...(latestOperation ? { latestOperation } : {}) }
+    if (latestOperation?.status === 'unknown' || latestOperation?.status === 'running') return { ...base, eligible: false, reason: 'unverified',
       detail: '此前的升级结果尚未确认。请复查原操作；不会再次停止或启动 Core。' }
     const scoped = await this.unconfirmedInScope(captured)
-    if (scoped) return { input: captured, candidate, ...prior, eligible: false, reason: 'unverified',
+    if (scoped) return { ...base, eligible: false, reason: 'unverified', latestOperation: scoped,
       detail: `同一 Core 的连接 ${scoped.input.id} 有未确认的维护操作 ${scoped.operationId}。请复查该原操作；不会再次停止或启动 Core。` }
+    if (!observed) return { ...base, eligible: false, reason: 'unverified', detail: current.state === 'unavailable' ? current.detail : 'The original Core could not be observed.' }
+    if (observed.launch.deploymentDigest === candidate.digest) return { ...base, eligible: false, reason: 'up-to-date', detail: 'The original Core already runs this exact bundled deployment.' }
     try {
-      const observed = await this.observe(captured)
-      return { input: captured, candidate, ...prior, eligible: true, reason: 'ready', expected: this.expected(captured, artifact, observed),
+      assertAgentMuxRuntimeCompatibility(observed.nativeRuntime)
+      return { ...base, eligible: true, reason: 'ready', expected: this.expected(captured, artifact, observed),
         detail: '已核对原 Core、启动目录和 Runtime。升级仅重启 Core 服务，保留原 Session 和运行进程。' +
           (observed.ownerReceipt.status === 'matching' ? '' : ` 产品来源回执${observed.ownerReceipt.status === 'missing' ? '缺失' : '未确认'}；当前进程、映像与公开身份已独立核对，健康 Runtime 保持可用。`) }
-    } catch (error) { return { input: captured, candidate, ...prior, eligible: false,
+    } catch (error) { return { ...base, eligible: false,
       reason: error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN' ? 'runtime-update-required' : 'unverified', detail: errorText(error) } }
   }
   private path(operationId: string): string {
@@ -295,6 +319,7 @@ export class RemoteCoreUpgradeManager {
       await this.save(value)
       const artifact = await this.artifact(), observed = await this.observe(input)
       if (JSON.stringify(this.expected(input, artifact, observed)) !== JSON.stringify(expected)) throw new AgentMuxError('The checked owner or candidate changed. Check again before upgrading.', 'CONFIG_CONFLICT')
+      value.receipt.candidate = this.candidateSummary(artifact)
       value.observed = observed
       const stage = await this.program<{ releaseDirectory: string; remoteCommand: string; digest: string }>(input, observed.launch.node, ['-e', STAGE_CORE], {
         stateDirectory: observed.launch.stateDirectory, node: observed.launch.node, digest: artifact.digest, operationId,
@@ -356,7 +381,7 @@ export class RemoteCoreUpgradeManager {
   private async nativeRuns(input: RemoteCoreUpgradeHost, launch: Launch, releaseDirectory: string, instanceId: string): Promise<RemoteCoreUpgradeNativeRun[]> {
     const result = await this.program<{ instanceId: string; protocolVersion: number; runs: RemoteCoreUpgradeNativeRun[] }>(input, launch.node, ['-e', NATIVE_RUN_INVENTORY], {
       releaseDirectory, socketPath: join(launch.runtimeDirectory, 'ctxmux.sock'), instanceId })
-    if (result.instanceId !== instanceId || result.protocolVersion !== (await this.artifact()).protocolVersion || !Array.isArray(result.runs)) throw new AgentMuxError('The original Native inventory is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+    if (result.instanceId !== instanceId || result.protocolVersion !== (await this.artifact()).requiredNativeProtocolVersion || !Array.isArray(result.runs)) throw new AgentMuxError('The original Native inventory is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     for (const run of result.runs) if (typeof run.runId !== 'string' || !run.runId ||
       !['running', 'exited', 'interrupted'].includes(run.state) || run.pid !== null && (!Number.isSafeInteger(run.pid) || run.pid < 1) ||
       !Number.isSafeInteger(run.outputBytes) || run.outputBytes < 0 || run.inputBytes !== null && (!Number.isSafeInteger(run.inputBytes) || run.inputBytes < 0)) {

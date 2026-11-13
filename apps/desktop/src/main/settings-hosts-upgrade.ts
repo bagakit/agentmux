@@ -6,6 +6,7 @@ import type { RuntimeController } from './runtime-controller.js'
 
 /** Main owns saved Host bindings; the Core maintenance owner owns deployment. */
 export class SettingsHostsUpgradeOwner {
+  private readonly adoptions = new Map<string, { targetDigests: string[]; value: NonNullable<RemoteCoreUpgradeReceipt['connectionAdoption']> }>()
   constructor(private readonly manager: RemoteCoreUpgradeManager, private readonly config: ConfigOwner,
     private readonly runtime: Pick<RuntimeController, 'checkHost'>) {}
   private capture(value: unknown): HostConfig {
@@ -24,23 +25,32 @@ export class SettingsHostsUpgradeOwner {
   }
   async check(value: unknown): Promise<RemoteCoreUpgradeCheck> {
     const captured = this.capture(value), check = await this.manager.check(captured)
-    const receipt = check.latestOperation
-    // Maintenance qualifies the old Core independently of the ordinary SDK handshake.
-    if (receipt?.status !== 'completed' || captured.kind === 'ssh' && captured.remoteCommand === receipt.remoteCommand) return check
-    const { expected: _expected, ...unconfirmed } = check
-    return { ...unconfirmed, eligible: false, reason: 'unverified', latestOperation: { ...receipt, status: 'unknown', stage: 'verifying',
-      detail: '远端 Core 已升级，保存的连接命令尚未更新。复查原操作，不要重复升级。' } }
+    return check.latestOperation ? { ...check, latestOperation: await this.project(check.latestOperation) } : check
   }
   async upgrade(value: unknown, expected: RemoteCoreUpgradeExpected, operationId: string): Promise<RemoteCoreUpgradeReceipt> {
     const captured = await this.saved(value)
-    return await this.reconnect(await this.manager.upgrade(captured, expected, operationId), captured)
+    return await this.adopt(await this.manager.upgrade(captured, expected, operationId), captured)
   }
   async inspect(value: unknown, operationId: string): Promise<RemoteCoreUpgradeReceipt | null> {
     const captured = this.capture(value)
     const receipt = await this.manager.inspect(captured, operationId)
-    return receipt ? await this.reconnect(receipt, captured) : null
+    return receipt ? await this.project(receipt) : null
   }
-  private async reconnect(receipt: RemoteCoreUpgradeReceipt, captured: HostConfig): Promise<RemoteCoreUpgradeReceipt> {
+  /** Explicit confirmation of this original operation; never starts a deployment. */
+  async reconnect(value: unknown, operationId: string): Promise<RemoteCoreUpgradeReceipt | null> {
+    const captured = await this.saved(value)
+    const receipt = await this.manager.inspect(captured, operationId)
+    return receipt ? await this.adopt(receipt, captured) : null
+  }
+  private async project(receipt: RemoteCoreUpgradeReceipt): Promise<RemoteCoreUpgradeReceipt> {
+    if (receipt.status !== 'completed' || !receipt.remoteCommand || receipt.input.kind !== 'ssh') return receipt
+    const saved = await this.config.inspect(current => current.hosts.find(host => host.id === receipt.input.id))
+    const known = this.adoptions.get(receipt.operationId)
+    const adoption = known && saved && known.targetDigests.includes(remoteCoreUpgradeTargetDigest(saved)) ? known.value : {
+      state: 'pending-confirmation' as const, readAt: Date.now(), detail: 'The Core deployment completed. Confirm reconnect to adopt and verify its saved connection.' }
+    return { ...receipt, connectionAdoption: adoption }
+  }
+  private async adopt(receipt: RemoteCoreUpgradeReceipt, captured: HostConfig): Promise<RemoteCoreUpgradeReceipt> {
     if (receipt.status !== 'completed' || !receipt.remoteCommand || captured.kind !== 'ssh') return receipt
     const next = { ...captured, remoteCommand: receipt.remoteCommand }
     try {
@@ -52,9 +62,14 @@ export class SettingsHostsUpgradeOwner {
         return { ...current, hosts: current.hosts.map(host => host.id === captured.id ? { ...next, label: host.label } : host) }
       })
       await this.runtime.checkHost(next)
-      return { ...receipt, detail: 'Core 已升级并重新连接；原 Runtime、Session 和运行进程保留。' }
+      const connectionAdoption = { state: 'connected' as const, readAt: Date.now(), detail: 'The saved Core connection was adopted and verified at this receipt time. This is not a continuous connection-health observation.' }
+      this.adoptions.set(receipt.operationId, { targetDigests: [remoteCoreUpgradeTargetDigest(next)], value: connectionAdoption })
+      return { ...receipt, connectionAdoption }
     } catch (error) {
-      return { ...receipt, status: 'unknown', stage: 'verifying', detail: `远端 Core 已升级，连接设置尚未核实：${error instanceof Error ? error.message : String(error)}。复查原操作，不要重复升级。` }
+      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'CORE_CONNECTION_UNCONFIRMED'
+      const connectionAdoption = { state: 'unconfirmed' as const, readAt: Date.now(), code, detail: 'The Core deployment completed, but its saved connection was not confirmed. Inspect this original operation before another explicit reconnect.' }
+      this.adoptions.set(receipt.operationId, { targetDigests: [remoteCoreUpgradeTargetDigest(captured), remoteCoreUpgradeTargetDigest(next)], value: connectionAdoption })
+      return { ...receipt, connectionAdoption }
     }
   }
 }

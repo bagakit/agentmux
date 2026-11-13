@@ -1,4 +1,5 @@
 import type { AgentMuxClient } from './client.js'
+import type { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protocol.js'
 import type { AgentCatalogEntry, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRuntimeIdentity,
   AgentMuxClientEventListener, AgentMuxClientEventListenerOptions,
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from './types.js'
@@ -200,7 +201,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
 }
 
 export type AgentMuxRuntimeOwnerIdentity = {
-  runtimeId: string; ownerInstanceId: string; protocolVersion: 2; processId: number
+  runtimeId: string; ownerInstanceId: string; protocolVersion: typeof AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION; processId: number
   /** Current publicly confirmed Native identity. null is unconfirmed, never a dead Run fact. */
   ctxmux: AgentMuxRuntimeIdentity | null
   /** Semantic control-owner observation, independent of Native readiness. */

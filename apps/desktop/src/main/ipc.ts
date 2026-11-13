@@ -670,7 +670,7 @@ export async function registerIpc(args: {
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
-    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
+    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, runtimeIncidents ?? args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
@@ -796,6 +796,7 @@ export async function registerIpc(args: {
   handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
   handle('hosts:upgrade', async (input: HostConfig, expected: RemoteCoreUpgradeExpected, operationId: string) => await hostUpgrades.upgrade(input, expected, operationId))
   handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))
+  handle('hosts:upgradeReconnect', async (input: HostConfig, operationId: string) => await hostUpgrades.reconnect(input, operationId))
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
   handleWithEvent('ui:exportTheme', async (event, document: unknown, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {

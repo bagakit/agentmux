@@ -348,6 +348,7 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.upgrade-check'; input: AgentMuxControlSettingsResourceFields; id?: never }
   | { operation: 'settings.hosts.upgrade'; id: string; expected: import('./remote-core-upgrade.js').RemoteCoreUpgradeExpected }
   | { operation: 'settings.hosts.upgrade-inspect'; id: string }
+  | { operation: 'settings.hosts.upgrade-reconnect'; id: string }
 )
 export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
 export type AgentMuxControlSettingsHostsResult =
@@ -357,6 +358,7 @@ export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
   | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
   | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
+  | { operation: 'settings.hosts.upgrade-reconnect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields; readonly?: boolean; document?: AgentMuxControlSettingsResourceFields }
 /** Unreadable authored records remain in their owner; these diagnostics never imply deletion. */
 export type AgentMuxControlSettingsResourceIssue = { id: string; message: string }
@@ -1105,6 +1107,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'settings.hosts.upgrade-check': 'long',
   'settings.hosts.upgrade': 'long',
   'settings.hosts.upgrade-inspect': 'long',
+  'settings.hosts.upgrade-reconnect': 'long',
   'settings.executors.refresh': 'long',
   'settings.set': 'long',
   'settings.browser.default.inspect': 'short',

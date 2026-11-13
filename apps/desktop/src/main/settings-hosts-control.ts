@@ -46,11 +46,12 @@ export async function executeSettingsHostsControl(
   }
   const input = request.id !== undefined ? owner.current.hosts.find(host => host.id === request.id) : 'input' in request ? request.input : undefined
   if (input === undefined) throw Object.assign(new Error(`Host not found: ${request.id}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
-  if (request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') {
+  if (request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect') {
     if (!upgrades) throw Object.assign(new Error('The original service has no Core maintenance owner.'), { code: 'CONTROL_UNAVAILABLE' })
     if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await upgrades.check(input) }
     if (request.operation === 'settings.hosts.upgrade') return { operation: request.operation, receipt: await upgrades.upgrade(input, request.expected, request.requestId) }
     if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await upgrades.inspect(input, request.requestId) }
+    if (request.operation === 'settings.hosts.upgrade-reconnect') return { operation: request.operation, receipt: await upgrades.reconnect(input, request.requestId) }
   }
   const result = await checkSettingsHost(input, runtime)
   return { operation: request.operation, ...result, input: structuredClone(result.input) as AgentMuxControlSettingsResourceFields }

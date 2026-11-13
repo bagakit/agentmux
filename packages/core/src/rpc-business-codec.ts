@@ -57,7 +57,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if ((method === 'goal.activity.append' || method === 'goal.activity.inspect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Goal activity append/check requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
-  if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect') && typeof source.operationId !== 'string') {
+  if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
   if (method === 'space.mote.preferences.save' && typeof source.operationId !== 'string') {
@@ -312,7 +312,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (request.id !== undefined ? check.input.id !== request.id : !isDeepStrictEqual(check.input, request.input)) fail()
       break
     }
-    case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': {
+    case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': case 'settings.hosts.upgrade-reconnect': {
       const receipt = actual.receipt as { input: { id: string }; operationId: string; expected: unknown } | null
       if (request.operation === 'settings.hosts.upgrade' && !receipt) fail()
       if (receipt && (receipt.input.id !== request.id || receipt.operationId !== request.requestId ||
@@ -405,7 +405,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
   // Maintenance receipts already own operationId; it is not a Control requestId.
-  const legacy = method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' ? body
+  const legacy = method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
     : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business

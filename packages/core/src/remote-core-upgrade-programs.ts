@@ -115,7 +115,9 @@ daemon=next((item for item in manifest.get('binaries',[]) if item.get('name')=='
 if not os.path.isabs(native_executable) or os.path.realpath(native_executable)!=native_executable or not daemon or os.path.join(artifact,daemon['path'])!=native_executable or manifest.get('schema')!='ctxmux.local-artifacts.v1' or manifest.get('support',{}).get('platform')!='linux' or manifest.get('support',{}).get('architecture')!='x64' or daemon.get('sha256')!=native_sha or sha(native_executable)!=native_sha:
  raise RuntimeError('Original Native artifact does not match its exact executing image.')
 manifest_sha=sha(manifest_path)
-result={'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':manifest_sha,'platform':'linux-x64','deploymentDigest':deployment['digest']}
+package_version=json.loads(text(os.path.join(root,'package.json'))).get('version')
+release_source=json.loads(text(os.path.join(root,'release.json'))).get('sourceCommit') if 'release.json' in seen else None
+result={'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':manifest_sha,'platform':'linux-x64','deploymentDigest':deployment['digest'],'version':package_version if isinstance(package_version,str) and package_version else None,'sourceCommit':release_source if isinstance(release_source,str) and release_source else None}
 # The caller derives this exact address only after public Core/Native identity agrees.
 # Receipt contents never select the current instance or override these OS facts.
 if 'receipt' in p:
@@ -158,7 +160,7 @@ function nativeScope(){
 let currentNative;
 function ownerFacts(owner){
  if(owner.runtimeId!==p.runtimeId||owner.processId!==launch.processId||owner.availability!=='connected'||!owner.ctxmux||owner.ctxmux.instanceId!==currentNative.daemonInstanceId||owner.ctxmux.buildIdentity!==currentNative.buildId||owner.ctxmux.processId!==null&&owner.ctxmux.processId!==launch.nativeProcessId)throw Error('The original owner or Native identity is unconfirmed');
- return {runtimeId:owner.runtimeId,ownerInstanceId:owner.ownerInstanceId,processId:owner.processId,
+ return {runtimeId:owner.runtimeId,ownerInstanceId:owner.ownerInstanceId,processId:owner.processId,protocolVersion:owner.protocolVersion,
   ctxmux:{instanceId:owner.ctxmux.instanceId,processId:owner.ctxmux.processId,buildIdentity:owner.ctxmux.buildIdentity,protocolVersion:owner.ctxmux.protocolVersion}};
 }
 void(async()=>{

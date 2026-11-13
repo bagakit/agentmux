@@ -1646,6 +1646,7 @@ export type AgentMuxDesktopApi = {
     upgradeCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreUpgradeCheck>
     upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
+    upgradeReconnect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   connections: {
     hostingTarget(source?: string | { runtimeId: string }): Promise<ConnectionHostingTarget>

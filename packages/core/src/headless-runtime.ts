@@ -1,6 +1,7 @@
 import { AgentExecutionBindingService } from './agent-execution-coordinator.js'
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
+import { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protocol.js'
 import { chmod, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -86,7 +87,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       let ctxmux: AgentMuxRuntimeOwnerIdentity['ctxmux'] = null
       try { ctxmux = client!.runtimeIdentity() }
       catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_DISCONNECTED') throw error }
-      return { runtimeId, ownerInstanceId, protocolVersion: 2, processId: process.pid, ctxmux, availability: 'connected' }
+      return { runtimeId, ownerInstanceId, protocolVersion: AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION, processId: process.pid, ctxmux, availability: 'connected' }
     }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }

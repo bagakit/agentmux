@@ -212,7 +212,8 @@ const api: AgentMuxPreloadApi = {
     trustCreationSource: (host, expected) => ipcRenderer.invoke('hosts:trustCreationSource', host, expected),
     upgradeCheck: (host: HostConfig) => ipcRenderer.invoke('hosts:upgradeCheck', host),
     upgrade: (host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string) => ipcRenderer.invoke('hosts:upgrade', host, expected, operationId),
-    upgradeInspect: (host: HostConfig, operationId: string) => ipcRenderer.invoke('hosts:upgradeInspect', host, operationId)
+    upgradeInspect: (host: HostConfig, operationId: string) => ipcRenderer.invoke('hosts:upgradeInspect', host, operationId),
+    upgradeReconnect: (host: HostConfig, operationId: string) => ipcRenderer.invoke('hosts:upgradeReconnect', host, operationId)
   },
   applications: {
     call: (method, params) => ipcRenderer.invoke('applications:call', method, params)

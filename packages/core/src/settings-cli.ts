@@ -79,8 +79,8 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
       if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Upgrade input requires expected and operationId.')
       return { method: 'settings.hosts.upgrade', params: { ...body as Record<string, unknown>, id } }
     }
-    if (action === 'upgrade-inspect' && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) {
-      return { method: 'settings.hosts.upgrade-inspect', params: { id, operationId: args[4] } }
+    if ((action === 'upgrade-inspect' || action === 'upgrade-reconnect') && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) {
+      return { method: `settings.hosts.${action}`, params: { id, operationId: args[4] } }
     }
   }
   if (resource === 'workspaces' && action === 'register' && args.length === 4 && id === '--input') {

@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import type { RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeExpected, RemoteCoreUpgradeHost, RemoteCoreUpgradeReceipt,
+import type { RemoteCoreCurrentObservation, RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeExpected, RemoteCoreUpgradeHost, RemoteCoreUpgradeReceipt,
   RemoteCoreMaintenanceOwner, RemoteCoreMaintenanceObservation } from './remote-core-upgrade.js'
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new AgentMuxError('Upgrade DTO has invalid fields.', 'CONTROL_PROTOCOL_ERROR')
@@ -23,9 +23,9 @@ function positive(value: unknown): number {
   return result
 }
 function maintenanceOwner(value: unknown): RemoteCoreMaintenanceOwner {
-  const p = record(value, ['runtimeId', 'ownerInstanceId', 'processId', 'ctxmux'])
+  const p = record(value, ['runtimeId', 'ownerInstanceId', 'processId', 'protocolVersion', 'ctxmux'])
   const native = record(p.ctxmux, ['instanceId', 'processId', 'buildIdentity', 'protocolVersion'])
-  return { runtimeId: text(p.runtimeId), ownerInstanceId: text(p.ownerInstanceId), processId: positive(p.processId), ctxmux: {
+  return { runtimeId: text(p.runtimeId), ownerInstanceId: text(p.ownerInstanceId), processId: positive(p.processId), protocolVersion: positive(p.protocolVersion), ctxmux: {
     instanceId: text(native.instanceId), processId: native.processId === null ? null : positive(native.processId),
     buildIdentity: text(native.buildIdentity), protocolVersion: count(native.protocolVersion) } }
 }
@@ -95,22 +95,56 @@ function host(value: unknown): RemoteCoreUpgradeHost {
   return p as unknown as RemoteCoreUpgradeHost
 }
 function candidate(value: unknown): RemoteCoreUpgradeCandidate {
-  const p = record(value, ['digest', 'sourceCommit', 'protocolVersion'])
-  return { digest: digest(p.digest), sourceCommit: p.sourceCommit === null ? null : text(p.sourceCommit), protocolVersion: count(p.protocolVersion) }
+  const p = record(value, ['digest', 'sourceCommit', 'version', 'ownerProtocolVersion', 'requiredNativeProtocolVersion'])
+  return { digest: digest(p.digest), sourceCommit: p.sourceCommit === null ? null : text(p.sourceCommit), version: p.version === null ? null : text(p.version),
+    ownerProtocolVersion: p.ownerProtocolVersion === null ? null : positive(p.ownerProtocolVersion), requiredNativeProtocolVersion: positive(p.requiredNativeProtocolVersion) }
+}
+function current(value: unknown): RemoteCoreCurrentObservation {
+  const p = record(value, ['state', 'observedAt', 'version', 'sourceCommit', 'deploymentDigest', 'ownerProtocolVersion', 'runtimeId', 'ownerInstanceId', 'processId', 'native', 'code', 'detail'])
+  const observedAt = count(p.observedAt)
+  if (p.state === 'unavailable') {
+    if (Object.keys(p).some(key => !['state', 'observedAt', 'code', 'detail'].includes(key))) throw new AgentMuxError('Unavailable current Core has serving facts.', 'CONTROL_PROTOCOL_ERROR')
+    return { state: 'unavailable', observedAt, code: text(p.code), detail: text(p.detail) }
+  }
+  if (p.state !== 'available' || p.code !== undefined || p.detail !== undefined) throw new AgentMuxError('Current Core observation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const native = record(p.native, ['instanceId', 'buildId', 'protocolVersion'])
+  return { state: 'available', observedAt, version: p.version === null ? null : text(p.version), sourceCommit: p.sourceCommit === null ? null : text(p.sourceCommit),
+    deploymentDigest: digest(p.deploymentDigest), ownerProtocolVersion: positive(p.ownerProtocolVersion), runtimeId: text(p.runtimeId), ownerInstanceId: text(p.ownerInstanceId), processId: positive(p.processId),
+    native: { instanceId: text(native.instanceId), buildId: text(native.buildId), protocolVersion: positive(native.protocolVersion) } }
 }
 export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgradeReceipt {
-  const p = record(value, ['input', 'operationId', 'expected', 'status', 'stage', 'detail', 'remoteCommand', 'updatedAt'])
+  const p = record(value, ['input', 'operationId', 'expected', 'status', 'stage', 'detail', 'remoteCommand', 'updatedAt', 'candidate', 'connectionAdoption'])
   if (!['running', 'completed', 'failed', 'unknown'].includes(text(p.status)) || !['preparing', 'staged', 'stopping', 'starting', 'verifying', 'completed'].includes(text(p.stage))) throw new AgentMuxError('Upgrade outcome is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (p.status === 'completed' && (p.stage !== 'completed' || !p.remoteCommand)) throw new AgentMuxError('Completed upgrade lacks its serving command.', 'CONTROL_PROTOCOL_ERROR')
-  return { input: host(p.input), operationId: text(p.operationId), expected: parseRemoteCoreUpgradeExpected(p.expected),
+  const expected = parseRemoteCoreUpgradeExpected(p.expected), target = p.candidate === undefined ? undefined : candidate(p.candidate)
+  if (target && target.digest !== expected.candidateDigest) throw new AgentMuxError('Original operation candidate belongs to another admission.', 'CONTROL_PROTOCOL_ERROR')
+  let connectionAdoption: RemoteCoreUpgradeReceipt['connectionAdoption']
+  if (p.connectionAdoption !== undefined) {
+    const a = record(p.connectionAdoption, ['state', 'readAt', 'code', 'detail'])
+    if (p.status !== 'completed' || !['pending-confirmation', 'connected', 'unconfirmed'].includes(text(a.state))) throw new AgentMuxError('Connection adoption lacks its completed deployment.', 'CONTROL_PROTOCOL_ERROR')
+    connectionAdoption = { state: a.state as NonNullable<RemoteCoreUpgradeReceipt['connectionAdoption']>['state'], readAt: count(a.readAt),
+      ...(a.code === undefined ? {} : { code: text(a.code) }), ...(a.detail === undefined ? {} : { detail: text(a.detail) }) }
+  }
+  return { input: host(p.input), operationId: text(p.operationId), expected,
     status: p.status as RemoteCoreUpgradeReceipt['status'], stage: p.stage as RemoteCoreUpgradeReceipt['stage'], detail: text(p.detail),
-    ...(p.remoteCommand === undefined ? {} : { remoteCommand: text(p.remoteCommand) }), updatedAt: count(p.updatedAt) }
+    ...(p.remoteCommand === undefined ? {} : { remoteCommand: text(p.remoteCommand) }), updatedAt: count(p.updatedAt),
+    ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }) }
 }
 export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCheck {
-  const p = record(value, ['input', 'candidate', 'eligible', 'reason', 'detail', 'expected', 'latestOperation'])
+  const p = record(value, ['input', 'current', 'candidate', 'eligible', 'reason', 'detail', 'expected', 'latestOperation'])
   if (typeof p.eligible !== 'boolean' || p.eligible !== (p.expected !== undefined)) throw new AgentMuxError('Upgrade eligibility does not match its checked admission.', 'CONTROL_PROTOCOL_ERROR')
-  if (!['ready', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
-  return { input: host(p.input), candidate: candidate(p.candidate), eligible: p.eligible, reason: p.reason as RemoteCoreUpgradeCheck['reason'], detail: text(p.detail),
+  if (!['ready', 'up-to-date', 'runtime-update-required', 'unverified'].includes(text(p.reason)) || p.eligible !== (p.reason === 'ready')) throw new AgentMuxError('Upgrade reason does not match its eligibility.', 'CONTROL_PROTOCOL_ERROR')
+  const serving = current(p.current), target = candidate(p.candidate), input = host(p.input)
+  if (serving.state === 'available' && input.kind === 'ssh' && input.runtimeId && serving.runtimeId !== input.runtimeId ||
+      p.reason === 'up-to-date' && (serving.state !== 'available' || serving.deploymentDigest !== target.digest)) throw new AgentMuxError('Current Core belongs to another update target.', 'CONTROL_PROTOCOL_ERROR')
+  if (p.expected !== undefined) {
+    const admission = parseRemoteCoreUpgradeExpected(p.expected)
+    if (serving.state !== 'available' || admission.candidateDigest !== target.digest || admission.runtimeId !== serving.runtimeId ||
+        admission.ownerInstanceId !== serving.ownerInstanceId || admission.processId !== serving.processId || admission.nativeInstanceId !== serving.native.instanceId) {
+      throw new AgentMuxError('Upgrade candidate or current owner differs from checked admission.', 'CONTROL_PROTOCOL_ERROR')
+    }
+  }
+  return { input, current: serving, candidate: target, eligible: p.eligible, reason: p.reason as RemoteCoreUpgradeCheck['reason'], detail: text(p.detail),
     ...(p.expected === undefined ? {} : { expected: parseRemoteCoreUpgradeExpected(p.expected) }),
     ...(p.latestOperation === undefined ? {} : { latestOperation: parseRemoteCoreUpgradeReceipt(p.latestOperation) }) }
 }

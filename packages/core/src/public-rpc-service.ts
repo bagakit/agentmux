@@ -1814,6 +1814,11 @@ export class AgentMuxRpcService {
       return parsed as AgentMuxRpcResult<M>
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-reconnect') &&
+          (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+            typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0'))) {
+        throw new AgentMuxError('Core maintenance writes require a transport-approved user or device without a managed Agent caller. Original operations, read-only diagnostics and Runs were retained.', 'CONTROL_PERMISSION_DENIED')
+      }
       const internalCaller: AgentMuxControlCaller | undefined = caller
         ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined
       const originalControlOperation = AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS]

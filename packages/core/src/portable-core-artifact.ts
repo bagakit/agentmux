@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProcess } from './process-runner.js'
 import { AgentMuxError } from './errors.js'
 
 export type PortableCoreArtifact = {
   digest: string
   sourceCommit: string | null
-  protocolVersion: number
+  version: string | null
+  ownerProtocolVersion: number | null
+  requiredNativeProtocolVersion: number
   nativeBuild: string
   nativeDigest: string
   archivePath: string
@@ -65,9 +67,18 @@ export async function createPortableCoreArtifact(directory: string, packageRoot 
   // Desktop's local bin may use Electron. The remote entry point always uses the
   // original qualified Node executable; its deployment wrapper is written remotely.
   await writeFile(join(root, 'bin', 'amux'), '#!/usr/bin/env node\nimport "../dist/agentmux.js"\n', { mode: 0o755 })
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { version?: unknown }
+  const version = typeof pkg.version === 'string' && pkg.version ? pkg.version : null
+  let ownerProtocolVersion: number | null = null
+  // Import only the candidate's finite, dependency-free declaration. The file is
+  // included below in the content inventory and the serving Core imports it too.
+  try {
+    const declaration = await import(pathToFileURL(join(root, 'dist/runtime-owner-protocol.js')).href)
+    if (Number.isSafeInteger(declaration.AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION) && declaration.AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION > 0) ownerProtocolVersion = declaration.AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ERR_MODULE_NOT_FOUND') throw error }
   let sourceCommit: string | null = null
   try {
-    const release = JSON.parse(await readFile(join(packageRoot, 'release.json'), 'utf8')) as { sourceCommit?: string }
+    const release = JSON.parse(await readFile(join(root, 'release.json'), 'utf8')) as { sourceCommit?: string }
     sourceCommit = release.sourceCommit ?? null
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -98,6 +109,6 @@ export async function createPortableCoreArtifact(directory: string, packageRoot 
   if (packed.exitCode !== 0) throw new AgentMuxError(`Could not assemble portable Core: ${packed.stderr}`, 'CORE_ARTIFACT_UNAVAILABLE')
   const native = manifest.binaries.find(binary => binary.path === 'bin/ctxmuxd')
   if (!native) throw new AgentMuxError('Portable Core has no Native daemon artifact.', 'CORE_ARTIFACT_UNAVAILABLE')
-  return { digest, sourceCommit, protocolVersion: manifest.product.protocol, nativeBuild: manifest.source.commit, nativeDigest: native.sha256,
+  return { digest, sourceCommit, version, ownerProtocolVersion, requiredNativeProtocolVersion: manifest.product.protocol, nativeBuild: manifest.source.commit, nativeDigest: native.sha256,
     archivePath, archiveDigest: sha(await readFile(archivePath)), files }
 }

@@ -384,7 +384,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsResourceBudget(request, code)
     return request
   }
-  if (source.operation === 'settings.hosts.upgrade' || source.operation === 'settings.hosts.upgrade-inspect') {
+  if (source.operation === 'settings.hosts.upgrade' || source.operation === 'settings.hosts.upgrade-inspect' || source.operation === 'settings.hosts.upgrade-reconnect') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', ...(source.operation === 'settings.hosts.upgrade' ? ['expected'] : [])], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, id: text(source.id, 'Host ID', code) }
@@ -1341,7 +1341,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { item: resourceItem(result.item), changed: result.changed } })
   }
-  if (operation === 'settings.hosts.upgrade-check' || operation === 'settings.hosts.upgrade' || operation === 'settings.hosts.upgrade-inspect') {
+  if (operation === 'settings.hosts.upgrade-check' || operation === 'settings.hosts.upgrade' || operation === 'settings.hosts.upgrade-inspect' || operation === 'settings.hosts.upgrade-reconnect') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
     settingsResourceBudget(source, code)

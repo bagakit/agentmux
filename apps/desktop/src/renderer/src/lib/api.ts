@@ -490,7 +490,8 @@ const mockApi: AgentMuxDesktopApi = {
     trustCreationSource: async () => { throw new Error('Source trust requires explicit approval in the original desktop. This preview cannot grant authorization.') },
     upgradeCheck: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
     upgrade: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
-    upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
+    upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
+    upgradeReconnect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
   },
   applications: {
     call: async () => { throw new Error('Application access requires the original desktop service and configured application connectors. This preview cannot read or transfer authorization.') }

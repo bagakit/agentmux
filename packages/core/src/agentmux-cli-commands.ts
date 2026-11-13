@@ -964,6 +964,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.hosts.upgrade-check', '<id>|--input <file|->', 'Check the original SSH Core and exact offline update candidate without changing it.', 1),
   settings('settings.hosts.upgrade', '<id> --input <file|->', 'Upgrade the checked original Core, carrying expected and operationId.', 1),
   settings('settings.hosts.upgrade-inspect', '<id> --operation-id ID', 'Inspect the original Core update without replaying it.', 1),
+  settings('settings.hosts.upgrade-reconnect', '<id> --operation-id ID', 'Explicitly adopt the verified connection from this original completed Core update; never redeploy.', 1),
   settings('settings.workspaces.register', '--input <file|->', 'Register an existing directory; this does not run Git, focus or start an Agent.'),
   empty('settings.browser-default.inspect', 'Read current HTTP and HTTPS default handlers through this desktop host.'),
   empty('settings.browser-default.open-settings', 'Request system default-browser settings; does not change the default.'),

@@ -78,6 +78,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'settings.hosts.upgrade-check': 'settings.hosts.upgrade-check',
   'settings.hosts.upgrade': 'settings.hosts.upgrade',
   'settings.hosts.upgrade-inspect': 'settings.hosts.upgrade-inspect',
+  'settings.hosts.upgrade-reconnect': 'settings.hosts.upgrade-reconnect',
   'settings.executors.refresh': 'settings.executors.refresh',
   'settings.workspaces.register': 'settings.workspaces.add',
   'settings.browser-default.inspect': 'settings.browser.default.inspect',
