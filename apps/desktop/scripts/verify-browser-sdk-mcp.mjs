@@ -91,9 +91,13 @@ try {
 } catch(error) {receipt.error=String(error?.stack??error);throw error}
 finally {
   const profile=join(work,'state/engine-profile')
-  const ps=await promisify(execFile)('ps',['-axo','pid=,args='])
-  receipt.remaining=ps.stdout.split('\n').filter(line=>line.includes(profile)).map(line=>line.trim())
+  const remaining = async () => (await promisify(execFile)('ps',['-axo','pid=,args='])).stdout.split('\n').filter(line=>line.includes(profile)).map(line=>line.trim())
+  receipt.remaining=await remaining()
+  // Browser.close acknowledges before the original OS processes necessarily exit.
+  const until=Date.now()+3000
+  while(receipt.remaining.length && Date.now()<until){await new Promise(resolve=>setTimeout(resolve,100));receipt.remaining=await remaining()}
   if(!receipt.remaining.length){await rm(profile,{recursive:true,force:true});receipt.privateEngineProfileRemoved=true}
   if(receipt.remaining.length||row.mcpProcess?.exitConfirmed===false)receipt.passed=false
   await persist();process.stderr.write('SDK/MCP proof receipt: '+join(output,'receipt.json')+'\n')
+  if(!receipt.passed)process.exitCode=1
 }
