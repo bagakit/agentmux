@@ -74,12 +74,12 @@ it('original floating Tab-strip selection records the actual Agent, and reopenin
 
 it('a member stays directly usable until the actual return-to-main action; ordinary reopening returns to main', async () => {
   mainAgent(); await app.mount(); await open(); assertSelected(defaultTab, defaultAgent.id)
-  expect(app.panel().querySelector('[aria-label="Return to main Agent"]')).toBeNull()
+  expect(app.panel().querySelector('[aria-label="返回主 Agent"]')).toBeNull()
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
   const before = useAppStore.getState()
   useAppStore.getState().setAgentComposerDraft(neighborTab.layout.activeRegionId, 'Keep the revised scope here')
   await open(); assertSelected()
-  await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Return to main Agent"]')!)
+  await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="返回主 Agent"]')!)
   assertSelected(defaultTab, defaultAgent.id)
   expect(useAppStore.getState().agentComposerDrafts[neighborTab.layout.activeRegionId]).toBe('Keep the revised scope here')
   expect(useAppStore.getState().sessions).toBe(before.sessions)

@@ -15,6 +15,7 @@ import { saveMobileHome } from '../src/navigation/home-preference'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, fixture, mount, mounted, session } from './conversation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
+import { mobileAgentStateLabel } from '../src/navigation/mobile-agent-status'
 
 type Row = NonNullable<AgentMuxSpaceCatalog['agentPresentation']>[number]
 const sid = 'session-original', hostId = 'host-original'
@@ -103,7 +104,10 @@ it('keeps original Team reasons and a read-only refresh folded on demand while r
   const detail = unknown.querySelector<HTMLDetailsElement>('.mobile-agent-status-details')!
   expect(detail.open).toBe(false); expect(detail.querySelector('summary')?.textContent).toBe('状态与来源')
   await click(detail.querySelector('summary')!)
-  expect(detail.textContent).toContain('不代表对话已结束'); expect(detail.textContent).toContain(rows[0]!.stateLabel)
+  expect(detail.textContent).toContain('不代表对话已结束')
+  // The details read the same Chinese state as the row, never the Host's English label.
+  expect(detail.querySelector('.mobile-agent-status-details__label')?.textContent).toBe(mobileAgentStateLabel(rows[0]!))
+  expect(detail.textContent).not.toContain(rows[0]!.stateLabel)
   expect(detail.textContent).toContain(rows[0]!.detail)
   await click(button(detail, '刷新状态')); expect(refresh).toHaveBeenCalledOnce()
   expect(view.element.textContent).toContain('权限请求 · 允许原文件读取？'); expect(view.element.textContent).toContain('等待答复 · 选择原方案？')
@@ -141,7 +145,7 @@ async function appMenu(missingPresentation = false) {
 }
 it('actual App menu retains the original reason and queues only the original directory refresh until its sheet closes', async () => {
   const f = await appMenu(), reads = f.directoryReads()
-  expect(f.detail.textContent).toContain(rows[0]!.stateLabel); expect(f.detail.textContent).toContain(rows[0]!.detail)
+  expect(f.detail.textContent).toContain(mobileAgentStateLabel(rows[0]!)); expect(f.detail.textContent).toContain(rows[0]!.detail)
   await click(button(f.detail, '刷新状态'))
   expect(f.detail.textContent).toContain('回到目录时重新读取')
   expect(f.directoryReads()).toBe(reads)

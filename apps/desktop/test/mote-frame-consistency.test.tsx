@@ -58,13 +58,13 @@ it('Profile keeps saved identity while connections are an explicit disclosure ra
 it('the compact team opens its original members in the shared overlay and closes without sending', async () => {
   await app.mount()
   const before = useAppStore.getState()
-  await moteClick(button(header(), 'Team work'))
+  await moteClick(button(header(), '团队协作'))
   const panel = document.querySelector<HTMLElement>('.mote-cooperation__popover')!
   expect(panel).not.toBeNull()
   expect(panel.querySelectorAll('[data-mote-member]')).toHaveLength(2)
   expect(panel.querySelector('.mote-cooperation__identity')).toBeNull()
-  expect(button(panel, 'Cooperation settings')).toBeDefined()
-  await moteClick(button(panel, 'Close team work'))
+  expect(button(panel, '协作设置')).toBeDefined()
+  await moteClick(button(panel, '关闭团队协作'))
   expect(document.querySelector('.mote-cooperation__popover')).toBeNull()
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(useAppStore.getState().tabs).toBe(before.tabs)

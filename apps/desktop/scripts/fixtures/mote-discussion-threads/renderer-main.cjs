@@ -60,7 +60,7 @@ app.whenReady().then(async () => {
   await until(panel + '.innerText.includes("原主角色暂未确认")', 'Unknown refresh service, original body preserved')
   await capture('07-main-unconfirmed-history-retained')
   await load(false, true)
-  await until(panel + '.innerText.includes("Configure default Executor")', 'Unbound Main setup, no guessed Executor')
+  await until(panel + '.innerText.includes("设置默认执行器")', 'Unbound Main setup, no guessed Executor')
   await capture('08-unbound-main-configure')
   await load(true)
   await until(panel + '.querySelector(".activity-feed__empty-reading.full-page-loading--loading")?.checkVisibility()', 'Initial exited Main reading phase')
