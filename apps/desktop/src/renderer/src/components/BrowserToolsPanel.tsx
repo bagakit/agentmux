@@ -62,7 +62,7 @@ export const BrowserToolsPanel = memo(function BrowserToolsPanel({ workspace, vi
         saving={savingBrowserToolbar}
         onSave={saveBrowserToolbar}
       /> : null}
-      <BrowserProfilesPanel browsers={browserSurfaces} allBrowsers={allBrowserSurfaces} />
+      <BrowserProfilesPanel />
       <BrowserAnnotationsPanel
         annotations={browserAnnotations}
         currentNavigationByBrowserId={currentNavigationByBrowserId}
