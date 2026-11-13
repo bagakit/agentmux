@@ -11,6 +11,7 @@ type EntryState = { status:'idle'|'reading'|'recovering'|'unconfirmed'|'unavaila
 /** Core's reason that the exact Main cannot be resumed, in words that name the way forward. */
 export function moteMainUnavailableIssue(reason: string): string {
   switch (reason) {
+    case 'native-conversation-absent': return '主 Agent 在开始对话前就已退出，没有可接续的原生对话。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
     case 'native-handle-unavailable': return '主 Agent 已退出，且没有留下可接续的原生对话，无法原样恢复。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
     case 'native-conversation-absent': return '主 Agent 在留下任何可接续的原生对话之前就已退出，没有可以续接的内容。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
     case 'provider-resume-unsupported': return '这个主 Agent 的 Provider 不支持恢复原对话。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
