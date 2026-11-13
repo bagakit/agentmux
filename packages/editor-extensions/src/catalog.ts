@@ -24,7 +24,8 @@ export const WORKSPACE_FILE_PREVIEW_FORMATS = {
   webm: { kind: 'video', mimeType: 'video/webm', sourceEditable: false },
   mov: { kind: 'video', mimeType: 'video/quicktime', sourceEditable: false },
   ogv: { kind: 'video', mimeType: 'video/ogg', sourceEditable: false },
-  pdf: { kind: 'pdf', mimeType: 'application/pdf', sourceEditable: false }
+  pdf: { kind: 'pdf', mimeType: 'application/pdf', sourceEditable: false },
+  fb2: { kind: 'book', engine: 'fb2', mimeType: 'application/x-fictionbook+xml', sourceEditable: true, language: 'xml' },
 } as const
 
 export type WorkspaceFilePreviewFormat = (typeof WORKSPACE_FILE_PREVIEW_FORMATS)[keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS]
@@ -98,12 +99,12 @@ export function workspaceFileFormat(path: string) {
   const sourcePreview = source?.preview ?? null
   return {
     extension, media, sourcePreview,
-    language: source?.language ?? null,
+    language: source?.language ?? (media && 'language' in media ? media.language : null),
     formatter: formatterFormats.get(extension) ?? null,
     mime: media?.mimeType ?? source?.mime ?? 'text/plain',
     previewConfirmation: source?.confirmation ?? null,
     sourceEditable: media?.sourceEditable ?? true,
-    defaultMode: media && !media.sourceEditable || sourcePreview === 'svg' || sourcePreview === 'note' || sourcePreview === 'playlist'
+    defaultMode: media && (!media.sourceEditable || media.kind === 'book') || sourcePreview === 'svg' || sourcePreview === 'note' || sourcePreview === 'playlist'
       ? 'preview' as const : 'edit' as const,
     browserPreview: extension === 'html' || extension === 'htm'
   }

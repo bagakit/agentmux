@@ -336,7 +336,7 @@ import {
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
-import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
+import { workspaceFileFormat, workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import { noteDirectorySourceKey, type NoteDirectoryRead } from './lib/note-directory-sources'
 import {
   advanceDocumentLifetime,
@@ -8016,6 +8016,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async setEditorRegionMode(regionId, workspaceId, path, mode) {
     set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
+    const format = workspaceFileFormat(path), key = documentKey(workspaceId, path)
+    if (mode !== 'preview' && format.sourceEditable && format.media?.kind === 'book' && !get().documents[key]) {
+      await loadPersistedFileDocument(workspaceId, path)
+    }
     // Only entering diff triggers a load, and only when this Region has no diff yet — switching back
     // and forth must not refetch. An explicit refresh goes through reloadRegionDiff.
     if (mode === 'diff' && !Object.hasOwn(get().editorRegionDiffs, regionId)) {
@@ -8607,6 +8611,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const splitAnchor = placement?.split ? originalTab?.regions[placement.split.regionId] : undefined
     let expectedSurface = placement?.split || placement?.launcher ? undefined : exactRegionId ? originalTab?.regions[exactRegionId] : undefined
     let bookmarkOpened = false
+    const previewFormat = workspaceFilePreviewFormat(path)
+    const explicitBookSource = Boolean((openAsText || location) && previewFormat?.kind === 'book' && previewFormat.sourceEditable)
     let result: FileOpenResult = { placement: { status: 'unconfirmed', tabId: null, regionId: null },
       data: { kind: 'unconfirmed', reason: null }, navigation: background ? 'background' : 'unconfirmed' }
     const rememberPlacement = () => {
@@ -8693,6 +8699,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const mayReveal = () => (background || !navigationSignal?.aborted && intentVersion === fileOpenIntentVersion && !cancelled) && resourceCurrent()
     const selectProjection = () => {
+      if (explicitBookSource && exactRegionId && expectedSurface?.kind === 'file' && get().tabs[destinationTabId!]?.regions[exactRegionId] === expectedSurface) {
+        set(state => ({ editorRegionModes: { ...state.editorRegionModes, [exactRegionId!]: 'edit' } }))
+      }
       if (background) return
       // This is an explicit original File action, not discovery or arbitrary selection.
       const document = get().documents[documentKey(workspaceId, path)]
@@ -8803,7 +8812,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     if (!background) prepareFileSurface(path, effectiveFileRegionMode(navigation.editorRegionModes, exactRegionId ?? '', path,
-      navigation.documentIssues[documentKey(workspaceId, path)]?.kind === 'binary'))
+      navigation.documentIssues[documentKey(workspaceId, path)]?.kind === 'binary', Boolean(navigation.documents[documentKey(workspaceId, path)] && navigation.dirtyDocuments[documentKey(workspaceId, path)])))
     try {
       // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
       // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
@@ -8826,8 +8835,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return !background && intentVersion === fileOpenIntentVersion
       }
       // Media has a File identity, but never a UTF-8 buffer. Only its visible pane reads bytes.
-      const format = workspaceFilePreviewFormat(path)
-      if (!placement?.fileOnly && format && !format.sourceEditable || get().documentIssues[key]?.kind === 'binary') {
+      const format = previewFormat
+      if (format && (!format.sourceEditable || format.kind === 'book' && !explicitBookSource) || get().documentIssues[key]?.kind === 'binary') {
         if (!mayReveal()) return false
         releaseNavigation()
 

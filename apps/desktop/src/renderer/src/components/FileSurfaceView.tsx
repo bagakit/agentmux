@@ -30,7 +30,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const key = documentKey(surface.workspaceId, surface.path)
   const doc = useAppStore(state => state.documents[key])
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary')
-  const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
+  const dirty = useAppStore(state => Boolean(state.documents[key] && state.dirtyDocuments[key]))
   const saving = useAppStore(state => Boolean(state.savingDocuments[key]))
   const workspace = useWorkspaceResource(surface.workspaceId)
   const workspaceRoot = workspace?.path ?? ''
@@ -43,7 +43,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const svg = format.sourcePreview === 'svg'
   const html = format.browserPreview
   const note = format.sourcePreview === 'note'
-  const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
+  const savedBook = format.media?.kind === 'book' && format.sourceEditable
+  const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary, Boolean(state.documents[key] && state.dirtyDocuments[key])))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
   const retainedNotePreview = useRef<{ key: string; overBudget: boolean } | null>(null)
@@ -85,8 +86,13 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     return result.written > WORKSPACE_FILE_MAX_BYTES || result.read < doc.content.length
   }, [visible, released, previewing, doc?.content, format.sourcePreview, note])
 
+  if (savedBook && previewing) {
+    return <FilePreviewPane tabId={tabId} surface={surface} visible={visible && !released} hasUnsavedSource={dirty}
+      onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }}
+      {...(!binary || doc ? { onShowSource: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, 'edit') } } : {})} />
+  }
   if (!format.sourceEditable || (!doc && binary)) {
-    return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
+    return <FilePreviewPane tabId={tabId} surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
   }
   const openReference = (path: string, location?: { line: number; column?: number }) => {
     try {
@@ -142,7 +148,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       }} /> : null : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
-      {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
+      {...(savedBook ? { previewReadsSavedFile: true } : {})}
+      {...(format.sourcePreview || savedBook ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
         <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><ThemeActionRevealIcon size={13} />Preview saved file</DropdownMenu.Item>
         {dirty ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving || !isLocal} onSelect={() => void previewSavedHtml(true)}><ThemeActionSaveIcon size={13} />Save & Preview</DropdownMenu.Item> : null}

@@ -49,18 +49,21 @@ export function EditorUnavailableState({
   canReveal,
   onReveal,
   message,
-  onRetry
+  onRetry,
+  onPreview
 }: {
   canReveal: boolean
   onReveal: () => void
   message?: string
   onRetry?: () => void
+  onPreview?: () => void
 }) {
   return (
     <section className="pane-state pane-state--error">
       <strong>{message ? 'File could not be read' : 'File is no longer available'}</strong>
       <span>{message ?? 'Refresh the explorer and open it again.'}</span>
       {onRetry ? <button className="small-button" onClick={onRetry}><ThemeActionRefreshIcon size={13} /> Retry</button> : null}
+      {onPreview ? <button className="small-button" onClick={onPreview}>Preview saved file</button> : null}
       {canReveal ? (
         <button className="small-button" onClick={onReveal}>
           <ThemeObjectFolderOpenIcon size={13} /> {revealInFileManagerLabel()}
@@ -94,6 +97,7 @@ export function EditorPane({
   visible = true,
   preview,
   onTogglePreview,
+  previewReadsSavedFile = false,
   extraActions
 }: {
   tabId: string
@@ -102,9 +106,11 @@ export function EditorPane({
   visible?: boolean
   preview?: ReactNode
   onTogglePreview?: () => void
+  previewReadsSavedFile?: boolean
   extraActions?: ReactNode
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
+  const previewLabel = previewReadsSavedFile ? 'Preview saved file' : 'Preview current content'
   const noteName = useNoteFileName(surface.workspaceId, surface.path)
   const note = workspaceFileFormat(surface.path).sourcePreview === 'note'
   const presentation = useWorkbenchBrowserPresentation()
@@ -130,7 +136,7 @@ export function EditorPane({
   })
   const keptCount = useAppStore(state => state.retainedDocumentDrafts[key]?.length ?? 0)
   const dirty = useAppStore((state) => {
-    return Boolean(state.dirtyDocuments[key])
+    return Boolean(state.documents[key] && state.dirtyDocuments[key])
   })
   const issue = useAppStore((state) => {
     return state.documentIssues[key]
@@ -155,7 +161,7 @@ export function EditorPane({
   // Diff is a display MODE of this same file Region, not a separate surface kind: it carries no
   // identity beyond the file it compares, so it lives as per-Region ephemeral state keyed by regionId
   // (never persisted — a diff depends on git HEAD and is transient; reopening returns to edit).
-  const regionMode = useAppStore((state) => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, issue?.kind === 'binary'))
+  const regionMode = useAppStore((state) => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, issue?.kind === 'binary', Boolean(state.documents[key] && state.dirtyDocuments[key])))
   const previewing = regionMode === 'preview'
   const regionDiff = useAppStore((state) => Object.hasOwn(state.editorRegionDiffs, surface.regionId) ? state.editorRegionDiffs[surface.regionId] : undefined)
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
@@ -199,9 +205,11 @@ export function EditorPane({
   if (released) return <EditorReleasedState />
 
   if (!document) {
-    if (!issue) return <FullPageLoadingSurface scope="region" phase="loading" visible={visible} title="Loading file" detail={visible ? 'Reading file content' : 'File content loads when shown'} />
+    if (!issue) return <FullPageLoadingSurface scope="region" phase="loading" visible={visible} title="Loading file" detail={visible ? 'Reading file content' : 'File content loads when shown'}
+      actions={previewReadsSavedFile && onTogglePreview ? <button className="small-button" onClick={onTogglePreview}>Preview saved file</button> : undefined} />
     return (
       <EditorUnavailableState
+        {...(previewReadsSavedFile && onTogglePreview ? { onPreview: onTogglePreview } : {})}
         {...(issue.kind === 'read-error' ? { message: issue.message, onRetry: () => { void reload(tabId, surface.regionId) } } : {})}
         canReveal={isLocalWorkspace}
         onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError)}
@@ -257,7 +265,7 @@ export function EditorPane({
         <div className="editor-header__actions">
           {note ? <div className="note-view-controls" ref={noteToolbarRef} /> : null}
           {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-description={metadataIssues.length ? metadataIssues.join(' · ') : undefined} aria-expanded={drawerOpen} title={metadataIssues.length ? metadataIssues.join(' · ') : undefined} onClick={event => drawerOpen ? setDrawer(null) : openActivity(metadataIssues.length ? 'drafts' : 'versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}{metadataIssues.length ? <ThemeStatusUnknownIcon className="note-recovery-metadata" size={12} /> : null}</button> : null}
-          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionPreviewIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : previewLabel} onClick={onTogglePreview} title={previewing ? 'Show source' : previewLabel}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionPreviewIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
             : conflict ? note ? <button type="button" className="small-button" onClick={event => openActivity('drafts', event.currentTarget)}>Review changes</button> : <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
               : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>

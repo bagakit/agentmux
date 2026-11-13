@@ -11,15 +11,18 @@ export function storedFileRegionMode(modes: Readonly<Record<string, EditorRegion
 }
 
 export function fileSupportsInlinePreview(path: string): boolean {
-  return workspaceFileFormat(path).sourcePreview !== null
+  const format = workspaceFileFormat(path)
+  return format.sourcePreview !== null || format.media?.kind === 'book'
 }
 
 export function effectiveFileRegionMode(modes: Readonly<Record<string, EditorRegionMode>>, regionId: string,
-  path: string, binary = false): EditorRegionMode {
+  path: string, binary = false, dirty = false): EditorRegionMode {
   const format = workspaceFileFormat(path)
-  if (binary || !format.sourceEditable) return 'preview'
+  if (!format.sourceEditable || binary && !(dirty && format.media?.kind === 'book')) return 'preview'
   const stored = storedFileRegionMode(modes, regionId)
   if (stored === 'diff' || stored === 'edit' || stored === 'preview' && fileSupportsInlinePreview(path)) return stored
+  // A recovered editable book draft must remain reachable; an explicit saved Preview still wins.
+  if (dirty && format.media?.kind === 'book') return 'edit'
   return format.defaultMode
 }
 
