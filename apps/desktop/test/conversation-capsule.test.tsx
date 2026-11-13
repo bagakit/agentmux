@@ -176,6 +176,16 @@ it('mounts trusted questions only for the original injected page and preserves u
   expect(close).not.toHaveBeenCalled()
 })
 
+it('owns its page layout: the card declares the layout host and floats the preview notice on the page area', async () => {
+  await render(`![Original page](${first})`)
+  await vi.waitFor(() => expect(register).toHaveBeenCalledTimes(1))
+  const input = register.mock.calls[0]![0] as { occurrence: { layoutHost?: true; location: unknown } }
+  expect(input.occurrence.layoutHost).toBe(true)
+  expect(input.occurrence.location).toEqual({ kind: 'inline' })
+  expect(container.querySelector('.conversation-capsule .browser-presentation')?.getAttribute('data-notice')).toBe('overlay')
+  expect(container.querySelector('.conversation-capsule video')?.getAttribute('style')).toContain('object-fit: contain')
+})
+
 it('releases only after a late native lease has actually been removed', async () => {
   let finish!: (value: { leaseId: string }) => void
   register.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
