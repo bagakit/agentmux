@@ -26,6 +26,42 @@ app.whenReady().then(async () => {
       assert.ok(dom.rect?.width > 0); const file = name + '.png'
       await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.images.push(file); result.operations.push({ name, dom, facts })
     }
+    if (process.argv.includes('--main-menu-only')) {
+      await read('window.moteStartCapture.bound()')
+      await until(`${panel}.querySelector('.mote-main-actions__trigger') && ${panel}.querySelector('.mote-workface__original:not([hidden]) .tiptap')`, 'Original current Main and its menu')
+      const trigger = `js:${panel}.querySelector('.mote-main-actions__trigger')`
+      await click(trigger)
+      await until('document.querySelector(".mote-main-actions__menu")', 'Main menu opens in its shared overlay')
+      await capture('20-main-menu-wide')
+      // The shared overlay consumes Escape before the fixture's ordinary bubbling listener.
+      await read('window.moteMainMenuKeys=[];window.addEventListener("keydown",event=>window.moteMainMenuKeys.push({key:event.key,trusted:event.isTrusted}),{capture:true,once:true})')
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' }); await settle()
+      const keys = await read('window.moteMainMenuKeys')
+      assert.ok(keys.some(event => event.key === 'Escape' && event.trusted), 'The real captured Escape reaches the original shared overlay')
+      result.interactions.push({ kind: 'native-renderer-key', key: 'Escape', capture: keys })
+      await until('!document.querySelector(".mote-main-actions__menu") && document.activeElement?.matches(".mote-main-actions__trigger")', 'Escape closes the menu and returns focus')
+      await click(trigger)
+      await click('js:[...document.querySelectorAll(".mote-main-actions__menu button")].find(node=>node.textContent==="选择已有主 Agent／设置")')
+      await until('document.querySelector(".mote-quick-mode-dialog")', 'Main settings open through the original menu')
+      await click('[aria-label="Close quick mode"]')
+      await until('!document.querySelector(".mote-quick-mode-dialog") && document.activeElement?.matches(".mote-main-actions__trigger")', 'Closing settings returns to the Main trigger')
+      await settle()
+      assert.equal(await read('document.querySelectorAll("[role=menu][data-state=open]").length'), 0, 'Closing Main settings does not open a background Agent menu')
+      result.focus = await read('({className:document.activeElement.className,text:document.activeElement.textContent})')
+      await capture('21-main-settings-closed-focus')
+      assert.equal(await read('document.querySelectorAll("[role=menu][data-state=open]").length'), 0, 'The captured focus-return frame has no background Agent menu')
+      win.setContentSize(640, 720); await settle()
+      await click(trigger); await until('document.querySelector(".mote-main-actions__menu")', 'Narrow Main menu')
+      await capture('22-main-menu-narrow')
+      await click(`js:${panel}.querySelector('.mote-workface__original:not([hidden]) .tiptap')`)
+      await until('!document.querySelector(".mote-main-actions__menu")', 'A complete native outside click dismisses the menu')
+      await capture('23-main-menu-outside-closed')
+      result.initial = before; result.final = await read('window.moteStartCapture.facts()')
+      const runsByIdentity = rows => Object.fromEntries(rows.map(row => [row.id, row.control]))
+      assert.deepEqual(result.final.identities, before.identities); assert.deepEqual(runsByIdentity(result.final.runs), runsByIdentity(before.runs)); assert.deepEqual(result.final.drafts, before.drafts)
+      result.passed = true; return
+    }
     if (process.argv.includes('--reading-only')) {
       // The person opens a Mote whose Main read is still in flight: identity, Composer and a loading history appear at once.
       await until(`${panel}.querySelector('.mote-start[data-mode="reading"] .mote-start__portrait') && ${panel}.querySelector('.mote-start-history__skeleton')`, 'Reading shell with portrait and loading history')
