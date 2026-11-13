@@ -107,7 +107,10 @@ expired refs and a changed document require a fresh snapshot. The verified Works
 FileList is verified. The receipt contains relative paths, names, byte counts and revisions.
 Selected-file snapshots remain available after script completion until that Browser navigates
 or closes. If assignment or acknowledgement is uncertain, inspect the original input and do
-not automatically repeat it. File chooser dialogs are unsupported; select the actual input.
+not automatically repeat it. When a click makes the page open a file chooser (a styled upload
+button, or an input inside a frame), no system picker appears during the program; `pageInfo()`
+returns `fileChooser: {handle, mode}` and `uploadFiles(handle, paths)` fills it the same verified
+way. A newer chooser replaces the handle, and navigation voids it.
 
 The receipt carries `result` (whatever the program returned), `logs` (everything it printed,
 including on failure), and `outcome`, which is one of four:
