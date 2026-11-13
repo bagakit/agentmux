@@ -682,7 +682,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     navigationId: id(source.navigationId, 'Browser navigation identity is invalid.', 'INVALID_CONTROL_REQUEST') }
   if (source.operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, ...(source.workspaceId === undefined ? {} : { workspaceId: id(source.workspaceId, 'Browser Workspace is invalid.', 'INVALID_CONTROL_REQUEST') }) }
-  if (isBrowserTaskControlOperation(source.operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ...parseBrowserTaskControlPayload(source) }
+  if (isBrowserTaskControlOperation(source.operation)) {
+    const { caller: rawCaller, ...payload } = source
+    const owner = optionalCaller(rawCaller)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ...parseBrowserTaskControlPayload(payload), ...(owner ? { caller: owner } : {}) }
+  }
   if (source.operation === 'browser.run') {
     // caller 是可选的：CLI 直接发一条也合法（那时没有 managed caller）。没有 self 语义，所以不像别的
     // 操作那样需要"self 必须配 caller"那道闸——browserId 永远是显式的。

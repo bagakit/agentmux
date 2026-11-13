@@ -38,6 +38,8 @@ export type BrowserProfileControlNetwork =
 export type BrowserProfileControlProfile = {
   id: string; label: string; createdAt: number; isDefault: boolean; source: BrowserProfileControlSource | null; hue?: number; notes?: string
   network?: BrowserProfileControlNetwork
+  /** false when the person turned Agents off for this Profile; absent means Agents may use it. */
+  agentAccess?: false
 }
 /** One Browser that holds the Profile: open has a native owner now, saved restores into it later. */
 export type BrowserProfileControlUse = { browserId: string; workspaceId?: string; title: string; url: string; state: 'open' | 'saved' }
@@ -142,7 +144,8 @@ function network(value: unknown, code: string): BrowserProfileControlNetwork {
 }
 
 function profile(value: unknown, code: string): BrowserProfileControlProfile {
-  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network'], code, 'Browser Profile')
+  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess'], code, 'Browser Profile')
+  if (row.agentAccess !== undefined && row.agentAccess !== false) fail(code, 'Browser Profile Agent access is invalid.')
   if (typeof row.isDefault !== 'boolean') fail(code, 'Browser Profile default flag is invalid.')
   const source = row.source === null ? null : (() => {
     const imported = record(row.source, ['browserLabel', 'profileLabel', 'importedAt', 'importedCookies', 'skippedCookies', 'skippedByReason'], code, 'Browser Profile source')
@@ -153,7 +156,8 @@ function profile(value: unknown, code: string): BrowserProfileControlProfile {
   return { id: identity(row.id, code, 'Browser Profile ID'), label: text(row.label, code, 'Browser Profile label'), createdAt: count(row.createdAt, code, 'Browser Profile creation time'),
     isDefault: row.isDefault, source, ...(row.hue === undefined ? {} : { hue: hue(row.hue, code) }),
     ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }),
-    ...(row.network === undefined ? {} : { network: network(row.network, code) }) }
+    ...(row.network === undefined ? {} : { network: network(row.network, code) }),
+    ...(row.agentAccess === false ? { agentAccess: false as const } : {}) }
 }
 function usage(value: unknown, code: string): BrowserProfileControlUsage {
   const row = record(value, ['browsers', 'complete'], code, 'Browser Profile usage')

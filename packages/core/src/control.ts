@@ -133,7 +133,11 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'BROWSER_PROFILE_REVISION_CONFLICT',
   'BROWSER_PROFILE_NOT_FOUND',
   'BROWSER_PROFILE_DELETE_REQUIRES_PERSON',
-  'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
+  'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED',
+  // The person turned Agents off for this Browser's Profile; retrying cannot change that, a person can.
+  'BROWSER_PROFILE_AGENT_ACCESS_OFF',
+  // The Profile is not confirmed yet, so whether Agents may use it is unknown; retry once Profiles load.
+  'BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
@@ -676,7 +680,8 @@ export type AgentMuxControlCrashLogResult =
 
 export type AgentMuxControlRequest =
   | PendingMessageControlRequest
-  | (RequestBase & BrowserTaskControlPayload)
+  // An Agent's task run or batch carries its caller, so Main decides automation by who is asking.
+  | (RequestBase & BrowserTaskControlPayload & { caller?: AgentMuxControlCaller })
   | ToolkitRequest
   | AgentMuxControlMetricsRequest
   | AgentMuxSpaceControlRequest
