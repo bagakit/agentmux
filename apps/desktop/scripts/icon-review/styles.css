@@ -142,13 +142,16 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-famil
 .brand-realm__heroes{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;min-width:0}
 .brand-realm__heroes h4,.brand-commons h4{margin:0 0 8px;color:var(--muted);font-size:11px;font-weight:550;letter-spacing:.04em}
 .brand-hero{position:relative;margin:0;overflow:hidden;border-radius:10px;background:#0f1211;aspect-ratio:16/9}
-.brand-realm__banner{display:grid;gap:14px;align-content:start}
-.brand-hero--launcher{aspect-ratio:2/1}.brand-hero--launcher img{object-position:right top}
-.brand-hero--overview{aspect-ratio:6/1}.brand-hero--overview img{object-position:center}
+.brand-realm__heroes>div{display:flex;flex-direction:column;min-width:0}
+.brand-realm__banner{gap:14px}.brand-realm__banner>div{display:flex;flex-direction:column;min-height:0}.brand-realm__banner>div:first-child{flex:1}
+.brand-hero--launcher{flex:1;min-height:120px;aspect-ratio:auto}.brand-hero--launcher img{object-position:right top}
+.brand-hero--overview{aspect-ratio:5/1}.brand-hero--overview img{object-position:center}
 .brand-hero img{width:100%;height:100%;object-fit:cover;object-position:68% center;transition:transform .5s cubic-bezier(.2,.7,.2,1)}
 .brand-hero:hover img{transform:scale(1.025)}
-.brand-hero .brand-colophon{position:absolute;right:12px;bottom:10px;color:#c9d2cc;font:500 10px/1 var(--mono);letter-spacing:.08em}
-.brand-hero__lineage{position:absolute;left:12px;top:10px;padding:3px 7px;border-radius:999px;background:#0c0e12a6;color:#c9d2cc;font-size:10px}
+.brand-hero::after{content:'';position:absolute;inset:auto 0 0 auto;width:62%;height:56px;background:linear-gradient(to top left,#0c0e12b3,transparent 70%);pointer-events:none}
+.brand-hero--launcher::after{display:none}
+.brand-hero .brand-colophon{position:absolute;z-index:1;right:12px;bottom:10px;color:#dfe6e1;font:500 10px/1 var(--mono);letter-spacing:.08em}
+.brand-realm__lineage{grid-column:1/-1;display:flex;gap:6px;margin:0 0 2px;color:var(--muted);font-size:12px}
 .brand-hero[data-borrowed=true] img{filter:saturate(.82)}
 .brand-commons,.brand-ip,.brand-marks{display:grid;gap:14px}
 .brand-commons>header h3,.brand-ip>header h3,.brand-marks>header h3{margin:0 0 4px;font-size:15px;font-weight:600}

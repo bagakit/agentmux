@@ -174,7 +174,9 @@ function renderBrand() {
   // Each card is cropped the way its product surface crops the same art. Launch and the Settings
   // strip carry the colophon; the Launcher is a work entry and shows none, as in the product.
   const heroCard=(realm,surface,place,colophon)=>{const hero=realm.heroes[surface];
-    return `<figure class="brand-hero brand-hero--${place}" data-surface="${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy">${colophon?`<figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>`:''}${hero.borrowed?'<span class="brand-hero__lineage">借原境 · 祖先的画</span>':''}</figure>`;};
+    return `<figure class="brand-hero brand-hero--${place}" data-surface="${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy">${colophon?`<figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>`:''}</figure>`;};
+  // Lineage is said once per realm, beside the heroes it explains, instead of on every card.
+  const lineage=realm=>realm.heroes.launch.borrowed?`<p class="brand-realm__lineage" data-lineage><span aria-hidden="true">↳</span>这个境还没有自己的大图，借原境的画：原境是所有境的祖先。</p>`:'';
   const commons=ThemeBridge.brandCommons().map(({group,items})=>({group,items:items.filter(item=>!needle||[item.id,item.title,item.file].join(' ').toLowerCase().includes(needle))})).filter(({items})=>items.length);
   const avatars=ThemeBridge.brandAvatars().filter(item=>!needle||[item.id,item.title,item.series].join(' ').toLowerCase().includes(needle));
   const marks=ThemeBridge.providerMarks().filter(item=>!needle||[item.id,item.label].join(' ').toLowerCase().includes(needle));
@@ -186,7 +188,7 @@ function renderBrand() {
       ${focus?`<article class="brand-realm" data-realm="${focus.id}" role="tabpanel">
         <div class="brand-realm__portrait"><img src="${escape(focus.icon)}" alt="${escape(focus.label)} App 图标" width="128" height="128"><div class="brand-realm__sizes" aria-label="实际尺寸">${[16,32,64].map(size=>`<span><img src="${escape(focus.icon)}" alt="" width="${size}" height="${size}"><small>${size}</small></span>`).join('')}</div>
           <h3>${escape(focus.label)}</h3><p>${escape(focus.material)}</p>${focus.isOrigin?'<p class="brand-realm__note">所有境的祖先，唯一画齐大图的境。</p>':''}</div>
-        <div class="brand-realm__heroes"><div><h4>启动</h4>${heroCard(focus,'launch','launch',true)}</div><div class="brand-realm__banner"><div><h4>Launcher 背景</h4>${heroCard(focus,'banner','launcher',false)}</div><div><h4>Settings 概览</h4>${heroCard(focus,'banner','overview',true)}</div></div></div>
+        <div class="brand-realm__heroes">${lineage(focus)}<div><h4>启动</h4>${heroCard(focus,'launch','launch',true)}</div><div class="brand-realm__banner"><div><h4>Launcher 背景</h4>${heroCard(focus,'banner','launcher',false)}</div><div><h4>Settings 概览</h4>${heroCard(focus,'banner','overview',true)}</div></div></div>
       </article>`:''}
     </section>
     <section class="brand-commons" aria-label="工坊插画"><header><h3>工坊 · 所有境共用</h3><p>所有境的 Agent 与 Mote 在这里相遇工作。插画不随所选的境切换，也不加题款。</p></header>
