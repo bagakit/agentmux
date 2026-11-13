@@ -243,8 +243,42 @@ describe('CDP 逃生口必须把协议结果交回 Agent', () => {
       detach: () => {}
     } as unknown as BrowserPageTransport
 
-    await expect(dispatchOn(session)('cdp', ['Target.activateTarget', { targetId: 'target-1' }]))
+    await expect(dispatchOn(session)('cdp', ['Page.reload', {}]))
       .rejects.toThrow('Target closed')
+  })
+
+  it('越出当前页面的命令在发出前就被拒，带类型码和应改用的能力', async () => {
+    const calls: string[] = []
+    const session = {
+      sendCommand: async (method: string) => { calls.push(method); return {} },
+      frames: new Map(), endedReason: null, frameDiscoveryFailure: null, observe: () => () => {}, detach: () => {}
+    } as unknown as BrowserPageTransport
+    for (const method of ['Network.getAllCookies', 'Storage.clearDataForOrigin', 'Target.createTarget', 'Security.setIgnoreCertificateErrors']) {
+      const failure = await dispatchOn(session)('cdp', [method, {}]).catch((error: unknown) => error) as { fact?: unknown; message?: string }
+      expect(failure.fact, method).toEqual({ kind: 'cdp-scope', effects: 'not-dispatched' })
+      expect(failure.message, method).toMatch(/Nothing was sent\./)
+    }
+    expect(calls, 'a refused command must never reach the page').toEqual([])
+  })
+
+  it('经 cdp 发的原生输入走 Main 的派发回执，不会被当成人工接管', async () => {
+    const order: string[] = []
+    const session = {
+      sendCommand: async (method: string) => { order.push(`send:${method}`); return {} },
+      frames: new Map(), endedReason: null, frameDiscoveryFailure: null, observe: () => () => {}, detach: () => {}
+    } as unknown as BrowserPageTransport
+    const dispatch = createBrowserPageDispatch({
+      session, pageInfo: () => ({ url: 'https://example.test/', title: 't', navigationId: 'nav-1' }),
+      gotoUrl: async () => {}, captureScreenshot: async () => ({}),
+      readLedger: async () => null, writeLedger: async () => {}, note: () => {},
+      beginNativeInput: async () => ({
+        input: async <T,>(command: () => Promise<T>) => { order.push('receipt:open'); try { return await command() } finally { order.push('receipt:close') } },
+        end: () => { order.push('end') }
+      })
+    })
+    await dispatch('cdp', ['Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 }])
+    await dispatch('cdp', ['Runtime.evaluate', { expression: '1' }])
+    expect(order).toEqual(['receipt:open', 'send:Input.dispatchMouseEvent', 'receipt:close', 'end', 'send:Runtime.evaluate'])
   })
 })
 
