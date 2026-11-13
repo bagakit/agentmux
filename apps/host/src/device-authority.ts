@@ -4,6 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile, parseDeviceConnection, type TrustedDevice, type DeviceConnection, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
 
+/** Devices that may hold live authorization at once. Revoked records stay to refuse their keys and do not count. */
 const MAX_DEVICES = 100
 
 interface DeviceRecord extends TrustedDevice {
@@ -33,7 +34,7 @@ function denied(): AgentMuxError { return new AgentMuxError('Device authorizatio
 function stateFrom(value: unknown): AuthorityState {
   const state = value as Partial<AuthorityState> | null
   if (!state || state.schema !== 'agentmux.device-authority.v1' || typeof state.hostId !== 'string'
-    || !state.hostId || !Array.isArray(state.devices) || state.devices.length > MAX_DEVICES) {
+    || !state.hostId || !Array.isArray(state.devices)) {
     throw new AgentMuxError('The durable Host device identity cannot be read. Preserve this file and restore its original identity.', 'CONTROL_PROTOCOL_ERROR')
   }
   const ids = new Set<string>(), hashes = new Set<string>()
@@ -54,7 +55,7 @@ function stateFrom(value: unknown): AuthorityState {
 export class DeviceAuthority {
   private readonly activityIssues = new Map<string, string>()
   private readonly connectionIssues = new Map<string, string>()
-  /** Latest metadata only: at most MAX_DEVICES patches, one scheduled writer, no event log. */
+  /** Latest metadata only: at most one patch per device record, one scheduled writer, no event log. */
   private readonly pendingObservations = new Map<string, DeviceObservation>()
   private observationScheduled = false
   private diskUnconfirmed = false
@@ -213,7 +214,9 @@ export class DeviceAuthority {
     await this.change(state => {
       const existing = state.devices.find(device => device.credentialHash === hash)
       if (existing) { if (existing.revokedAt !== undefined) throw denied(); admitted = publicDevice(this.observedDevice(existing)); return state }
-      if (state.devices.length >= MAX_DEVICES) throw new AgentMuxError('Device admission is full. Existing Sessions remain available.', 'CONTROL_OWNER_BUSY')
+      if (state.devices.filter(device => device.revokedAt === undefined).length >= MAX_DEVICES) {
+        throw new AgentMuxError('Device admission is full. Revoke a device you no longer use to admit a new one; existing Sessions remain available.', 'CONTROL_OWNER_BUSY')
+      }
       let deviceId: string
       do { deviceId = mintObjectId() } while (state.devices.some(device => device.deviceId === deviceId))
       const record: DeviceRecord = { deviceId, name: `设备 ${hash.slice(0, 6)}`, createdAt: this.now(), credentialHash: hash, credentialKind: 'relay-key' }
