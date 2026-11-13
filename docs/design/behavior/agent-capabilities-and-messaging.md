@@ -432,7 +432,7 @@ Hook 观察区分解析、排队、owner 执行、持久完成与回执读取。
 Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／Provider 关联和已持久原生身份；这些已知事实只来自 Core，事件正文不能自称可信身份。恢复后仍沿同一事实识别主会话，不能靠上一次内存中的归属替代持久身份，也不能因生成恢复命令就改变关联。Provider 解释原生 Session 的明确父系与主／子事实；主身份未知或父系事实不足时，保留原始 trace 和未知，不能将同目录、Message 的引用父级或界面选择猜成主 Session。
 
 - AgentMux Hook 的安装、读取、更新和卸载必须只作用于 AgentMux 自己的受管配置作用域；Provider 的共享配置文件仍保留用户和项目已有条目，不能把 AgentMux Hook 当成共享默认值。
-- AgentMux 不往用户项目注入文件。Provider 能随启动携带 AgentMux Hook 时就随启动携带，不写进工作区：Claude 的受管 Hook 与模块放在 AgentMux 状态目录下一个按内容修订号命名、写入后不再改动的插件里，由 `--plugin-dir` 加载；Codex 的受管 Hook 作为每次启动的 `-c hooks.<Event>` session flags 传入。Hook 命令经 Run 环境定位发起它的 Core 的运行器，插件内容不含安装路径。随启动携带 Hook 的 Run 只接受它自己这次启动声明的调用；工作区里早先写入的 AgentMux 条目仍会被 Provider 执行，但 AgentMux 运行器不为它们投递任何事件，产品代码也不删除或改写它们。只能通过工作区配置生效的 Provider 仍沿上一条只写受管条目。
+- AgentMux 不往用户项目注入文件。Provider 能随启动携带 AgentMux Hook 时就随启动携带，不写进工作区：Claude 的受管 Hook 与模块放在 AgentMux 状态目录下一个按内容修订号命名、写入后不再改动的插件里，由 `--plugin-dir` 加载；Codex 的受管 Hook 作为每次启动的 `-c hooks.<Event>` session flags 传入。Hook 命令经 Run 环境定位发起它的 Core 的运行器，插件内容不含安装路径。随启动携带 Hook 且载体已准备完成的 Run 只接受它自己这次启动声明的调用；载体准备失败时保留既有回调入口并给出非阻塞服务窗。工作区里早先写入的 AgentMux 条目仍会被 Provider 执行，但当前版本的 AgentMux 运行器不为已准备完成的 Run 投递这些旧调用的事件，产品代码也不删除或改写它们。旧副本或已删除路径不受当前运行器的门控保证，须按准确在用范围另行处置。只能通过工作区配置生效的 Provider 仍沿上一条只写受管条目。
 - 随启动携带的 Hook 没有可读的工作区配置。它的「已安装」指：下一次启动将携带的受管内容是当前版本，并且 Provider 公开的原生加载与禁用事实没有否定它；能从 Provider 读到原生加载结果时按该结果判定，读不到时如实报告未知。
 - Hook 事件必须携带并校验 AgentMux Session/Run 关联身份。没有该关联、关联不匹配或无法确认来源的 Provider 事件不得触发 AgentMux ingress；应记录可诊断的降级事实，不影响外部 Provider 会话继续工作。
 - Hook 探测、合并或安装失败属于流程问题时，健康 Agent 继续可用；服务窗说明哪一步未完成、当前按什么能力运行和恢复动作。只有 Agent/进程本身明确终止才允许阻断。
