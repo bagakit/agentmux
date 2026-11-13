@@ -281,6 +281,12 @@ it('grabs at once when no AgentMux window was on screen, and waits two frames of
   const first = surface.present(session())
   await vi.advanceTimersByTimeAsync(0)
   expect(captureDisplays, 'nothing faded, so the grab does not wait').toHaveBeenCalledOnce()
+  expect(electron.windows, 'the same frozen frame is ready without a needless compositor wait').toHaveLength(2)
+  const readyWindow = electron.windows[0]!
+  let loaded = false
+  void electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: readyWindow.webContents, senderFrame: readyWindow.webContents.mainFrame }, 'load').then(() => { loaded = true }, () => {})
+  await vi.advanceTimersByTimeAsync(0)
+  expect(loaded, 'the frozen input, not only an early native request, is ready at once').toBe(true)
   surface.dispose(); await first
   surface = new CaptureSurface(ports)
   electron.displays = [{ id: 1, bounds: main, scaleFactor: 2, displayFrequency: 120 }, { id: 7, bounds: side, scaleFactor: 1, displayFrequency: 30 }]
