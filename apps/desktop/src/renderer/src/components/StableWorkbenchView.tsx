@@ -165,6 +165,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     return element
   })
   const [placedHostId, setPlacedHostId] = useState(homeId)
+  const wasVisible = useRef(false)
   const [placementRequest, setWindowPlacement] = useState<{ placement: WorkbenchWindowPlacement | null; revision: number }>({ placement: null, revision: 0 })
   const windowPlacement = placementRequest.placement
   const placementRevision = useRef(0)
@@ -224,6 +225,14 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
         // reading selection or scroll here otherwise flushes unused layout.
         const oldDocument = host.ownerDocument
         const crossDocument = oldDocument !== destination.ownerDocument
+        const parent = host.parentElement
+        // A live hidden View need not be moved back into an inert home. That
+        // browser move destroys its scroll/selection even with moveBefore.
+        // Keep the actual placement until reveal; explicit/window and detached
+        // placements still run below and keep their original confirmations.
+        if (!presentedVisible && wasVisible.current && !crossDocument && host.isConnected && parent?.isConnected && parent.id === placedHostId &&
+          oldDocument.getElementById(placedHostId) === parent &&
+          !windowPlacement && placementWaiters.current.length === 0) return true
         const hadDocumentFocus = crossDocument && oldDocument.hasFocus()
         const ranges = crossDocument ? captureReadingRanges(host) : []
         const activeElement = crossDocument ? oldDocument.activeElement : null
@@ -256,6 +265,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       }
       setHostDocument(host.ownerDocument)
       setPlacedHostId(destinationId)
+      if (presentedVisible && host.isConnected && host.parentElement === destination) wasVisible.current = true
       if (placementWaiters.current.length && hostDocument === host.ownerDocument && placedHostId === destinationId) {
         // A committed DOM placement is applied even when its document cannot paint.
         queueMicrotask(() => {
