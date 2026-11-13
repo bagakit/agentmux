@@ -414,7 +414,7 @@ Space 等完整工作面目录中的 Launcher 提供可发现的创建 Agent 入
 
 `space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间的原 App 图片（PNG、JPEG、GIF、WebP、SVG 或图标格式）。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
 
-Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主身份默认龙不用于其他对象。Focus 的原显示名、项目、Executor头像、recap、项目分组和状态由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。
+Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主 Mote 的默认身份不用于其他对象。Focus 的原显示名、项目、Executor头像、recap、项目分组和状态由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。
 
 手机目录完整消费原呈现 owner 的名称、项目、详情和 recap，不另加任意字段长度限制或截断正常数据。传输容量沿既有公共消息预算，不用重复的更小字段预算阻断原可用目录。中文／emoji 不能导致整个 Focus、Mote 目录失效；验收包含原呈现生产者到实际公共 codec 的链路及原内容保真。
 
