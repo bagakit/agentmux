@@ -51,8 +51,8 @@ function png(width: number, height: number): Buffer {
 }
 const main = { x: 0, y: 0, width: 4, height: 3 }, side = { x: -2, y: -1, width: 2, height: 2 }
 const frames = () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [
-  { displayId: 1, frame: main, scale: 2, isMain: true, png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
-  { displayId: 7, frame: side, scale: 1, isMain: false, png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
+  { displayId: 1, frame: main, scale: 2, png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
+  { displayId: 7, frame: side, scale: 1, png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
 const result = pngFromBytes(png(4, 2))
 
 let surface: CaptureSurface, ports: ReturnType<typeof makePorts>
@@ -136,8 +136,15 @@ it('primary delivery runs the session delivery once with the selection in global
   await overlays[0]!.call('select')
   expect(await overlays[0]!.call('finish', { image: result, selection })).toEqual({ status: 'completed' })
   expect(s.complete).toHaveBeenCalledExactlyOnceWith(result, { rect: { x: 1, y: 1, width: 2, height: 1 }, scale: 2, capturedAt: 1_700_000_000_000 }, 'fixture-engine')
+  expect(overlays.every(row => row.window.dead), 'a confirmed primary delivery closes every overlay').toBe(true)
   expect(await outcome).toEqual({ state: 'completed' })
-  expect(overlays.every(row => row.window.dead)).toBe(true)
+})
+
+it('a selection on a display left of and above the main one keeps its negative global origin', async () => {
+  const { overlays, session: s } = await opened()
+  await overlays[1]!.call('select')
+  await overlays[1]!.call('finish', { image: pngFromBytes(png(1, 1)), selection: { x: 1, y: 0, width: 1, height: 1 } })
+  expect(s.complete).toHaveBeenCalledExactlyOnceWith(expect.anything(), { rect: { x: -1, y: -1, width: 1, height: 1 }, scale: 1, capturedAt: 1_700_000_000_000 }, 'fixture-engine')
 })
 
 it('a failed primary delivery keeps every overlay and reports the reason', async () => {
@@ -163,6 +170,7 @@ it('expand ends the surface with the full frozen frame, the selection and the ma
   await overlays[0]!.call('select')
   const handoff = { shapes: [{ id: 'r', kind: 'rect' }], crop: selection, tool: 'rect' }
   await overlays[0]!.call('expand', { handoff })
+  expect(overlays.every(row => row.window.dead), 'the window editor replaces every overlay').toBe(true)
   expect(await outcome).toEqual({ state: 'expanded', image: overlays[0]!.input.image, handoff,
     source: { rect: { x: 1, y: 1, width: 2, height: 1 }, scale: 2, capturedAt: 1_700_000_000_000 } })
   expect(overlays.every(row => row.window.dead)).toBe(true)
@@ -173,13 +181,13 @@ it('Esc on any display cancels and closes every overlay', async () => {
   const { overlays, outcome } = await opened()
   await overlays[0]!.call('select')
   await overlays[1]!.call('cancel')
+  expect(overlays.every(row => row.window.dead), 'Esc closes every overlay').toBe(true)
   expect(await outcome).toEqual({ state: 'cancelled' })
-  expect(overlays.every(row => row.window.dead)).toBe(true)
 })
 
 it('a display without pixels shows its issue, cannot select, and the others stay selectable', async () => {
   const issued = frames()
-  issued.displays[1] = { displayId: 7, frame: side, scale: 1, isMain: false, issue: 'macOS did not confirm this display' } as never
+  issued.displays[1] = { displayId: 7, frame: side, scale: 1, issue: 'macOS did not confirm this display' } as never
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => issued) })
   const { overlays } = await opened()
   expect(overlays[1]!.input).toMatchObject({ issue: 'macOS did not confirm this display' })
@@ -193,15 +201,15 @@ it('a display layout change ends the capture, while a work area change keeps it'
   for (const listener of electron.screenListeners.get('display-metrics-changed')!) listener({}, {}, ['workArea'])
   expect(overlays.some(row => row.window.dead)).toBe(false)
   for (const listener of electron.screenListeners.get('display-metrics-changed')!) listener({}, {}, ['scaleFactor'])
+  expect(overlays.every(row => row.window.dead), 'a scale change closes every overlay').toBe(true)
   await expect(outcome).rejects.toMatchObject({ code: 'display_configuration_changed' })
-  expect(overlays.every(row => row.window.dead)).toBe(true)
 })
 
 it('a crashed overlay renderer ends the capture', async () => {
   const { overlays, outcome } = await opened()
   overlays[1]!.window.webContents.emit('render-process-gone')
+  expect(overlays.every(row => row.window.dead), 'a crashed renderer closes every overlay').toBe(true)
   await expect(outcome).rejects.toThrow('stopped responding')
-  expect(overlays.every(row => row.window.dead)).toBe(true)
 })
 
 it('fades visible AgentMux windows out of the grab and restores them when the surface ends', async () => {
@@ -210,13 +218,15 @@ it('fades visible AgentMux windows out of the grab and restores them when the su
     focus: vi.fn(), setOpacity: vi.fn((value: number) => { workbench.opacity = value }) })
   const hidden = Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => false, isMinimized: () => false, setOpacity: vi.fn() })
   electron.workbench = [workbench, hidden]; electron.focused = workbench
-  const captureDisplays = vi.fn(async () => { expect(workbench.opacity, 'faded before the grab').toBe(0); return frames() })
+  let opacityAtGrab: number | null = null
+  const captureDisplays = vi.fn(async () => { opacityAtGrab = workbench.opacity; return frames() })
   ports.native.mockReturnValue({ captureDisplays })
   const outcome = surface.present(session())
   await vi.advanceTimersByTimeAsync(299)
   expect(captureDisplays, 'macOS settles the fade before the grab').not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(1)
   expect(captureDisplays).toHaveBeenCalledOnce()
+  expect(opacityAtGrab, 'faded before the grab').toBe(0)
   expect(hidden.setOpacity, 'a hidden window is not touched').not.toHaveBeenCalled()
   await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: electron.windows[0]!.webContents, senderFrame: electron.windows[0]!.webContents.mainFrame }, 'cancel',
     { requestId: (await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: electron.windows[0]!.webContents, senderFrame: electron.windows[0]!.webContents.mainFrame }, 'load')).requestId })
@@ -244,7 +254,10 @@ it('refuses another window, an embedded frame and a stale request', async () => 
 it('a second capture while one is open is refused and the notice brings the selection display forward', async () => {
   const { overlays } = await opened()
   await overlays[0]!.call('select')
-  await expect(surface.present(session())).rejects.toThrow('already in progress')
+  const second = surface.present(session()).then(() => 'opened', (error: Error) => error.message)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(await Promise.race([second, Promise.resolve('still opening')]), 'refused at once, with no second surface').toContain('already in progress')
+  expect(electron.windows, 'no second overlay set').toHaveLength(2)
   expect(surface.notice('Finish or cancel this screenshot first')).toBe(true)
   expect(overlays[0]!.window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'notice', message: 'Finish or cancel this screenshot first' })
   expect(overlays[0]!.window.focus).toHaveBeenCalled()
