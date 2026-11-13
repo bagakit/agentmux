@@ -16,7 +16,9 @@ import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxBrowserControl, AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserReleaseReceipt } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
+import type { BrowserProfileControlPayload, BrowserProfileControlResult } from './browser-profile-control.js'
 export * from './browser-default.js'
+export * from './browser-profile-control.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
@@ -123,7 +125,15 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'BROWSER_HUMAN_CONTROL_ACTIVE',
   'BROWSER_AGENT_CONTROL_ACTIVE',
   // An accepted identity belongs to its original receipt; repeating it is not a new run.
-  'BROWSER_OPERATION_ALREADY_EXISTS'
+  'BROWSER_OPERATION_ALREADY_EXISTS',
+  // Profile owner refusals keep their own recovery: wait for the Browsers, read again, retry the
+  // same read, edit the latest list, or ask the person. CONTROL_FAILED would hide which one applies.
+  'BROWSER_PROFILE_IN_USE',
+  'BROWSER_PROFILE_USAGE_UNKNOWN',
+  'BROWSER_PROFILE_REVISION_CONFLICT',
+  'BROWSER_PROFILE_NOT_FOUND',
+  'BROWSER_PROFILE_DELETE_REQUIRES_PERSON',
+  'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
@@ -684,6 +694,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlSettingsSetRequest
   | AgentMuxControlSettingsBrowserLinksRequest
   | (RequestBase & BrowserDefaultPayload)
+  | (RequestBase & BrowserProfileControlPayload)
   | AgentMuxControlSettingsWorkspaceAddRequest
   | AgentMuxControlSettingsResourceRequest
   | AgentMuxControlSettingsHostsRequest
@@ -810,6 +821,7 @@ export type AgentMuxControlResult =
   | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
   | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry; requestId?: string }
   | BrowserDefaultResult
+  | BrowserProfileControlResult
   | { operation: 'settings.browser.links.list'; entries: AgentMuxControlSettingsBrowserLinkEntry[] }
   | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
@@ -1131,6 +1143,14 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.release': 'long',
   'browser.targets': 'short',
   'browser.history': 'short',
+  // Profile reads answer from Main's cached list; usage also reads saved Tabs, still local and bounded.
+  'browser.profile.ls': 'short',
+  'browser.profile.inspect': 'short',
+  // Writes wait for the durable metadata write; delete also clears the Profile's website data.
+  'browser.profile.create': 'long',
+  'browser.profile.update': 'long',
+  'browser.profile.set-default': 'long',
+  'browser.profile.delete': 'long',
   'browser.task.assets': 'short',
   'browser.task.reliability': 'short',
   'browser.task.run': 'long',

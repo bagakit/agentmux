@@ -6203,6 +6203,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {
       throw Object.assign(new Error('Crash log diagnostics belong to the Main owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.create' ||
+        request.operation === 'browser.profile.update' || request.operation === 'browser.profile.set-default' || request.operation === 'browser.profile.delete') {
+      throw Object.assign(new Error('Browser Profiles belong to the Main Profile owner.'), { code: 'CONTROL_FAILED' })
+    }
     if (request.operation === 'settings.get' || request.operation === 'settings.set' ||
         request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.executors.refresh' ||

@@ -168,6 +168,7 @@ const name = (f: Flags): string | null => {
   if (Number(f.values.has('--name')) + Number(f.booleans.has('--clear')) !== 1) invalid('Rename requires exactly one of --name or --clear.')
   return f.booleans.has('--clear') ? null : value(f, '--name', true)!
 }
+const PROFILE_NOTICE = 'Browser Profiles belong to the Desktop host. Results carry Profile ids, labels, hues, notes, import summaries and Browser uses; never storage locations, cookies or credentials.'
 const SAVE_NOTICE = 'A missing complete reply leaves the operation unconfirmed. Read back the exact business identity before deciding; do not automatically retry a write. Save requests do not prove disk durability.'
 const GIT_TARGET = { '--workspace': 'data', '--host': 'data', '--workspace-path': 'data' } as const
 const gitTarget = (f: Flags) => ({ workspaceId: id(f, '--workspace', true), expectedResource: { hostId: id(f, '--host', true), workspacePath: value(f, '--workspace-path', true)! } })
@@ -698,6 +699,28 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('browser.task.stop', '--browser ID --run ID', 'Stop an exact task run while retaining its original progress cursor.', { '--browser': 'data', '--run': 'data' }, f => ({ browserId: id(f, '--browser', true), runId: id(f, '--run') })),
   command('browser.input.inspect', '--host-id HOST --operation-id ID', 'Read the original captured input scene and message digest; no body or live Browser grant.', { '--host-id': 'data', ...OP }, f => parseAgentInputContextCaptureReference({ hostId: id(f, '--host-id', true), operationId: id(f, '--operation-id') }), 'The Host identifies the capture owner; operation-id is the original input ID, independently of the Browser operation ID. Managed Agents may read only captures addressed to their own Session on the exact execution Host. This read supplies no author, permission or delivery conclusion.'),
   command('browser.history', '[--browser ID]', 'Read retained Browser operation history.', { '--browser': 'data' }, f => fields(f, { '--browser': 'browserId' })),
+  empty('browser.profile.ls', 'List Browser Profiles with the list revision that edits must name.'),
+  command('browser.profile.inspect', '--profile ID', 'Read one Browser Profile and the open and saved Browsers that use it.', { '--profile': 'data' },
+    f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' complete:false means saved Tabs could not be read; the list then names only open Browsers.'),
+  command('browser.profile.create', '--label TEXT', 'Create an empty Browser Profile with its own sign-ins and site data.', { '--label': 'data' },
+    f => ({ label: value(f, '--label', true)! }), PROFILE_NOTICE),
+  command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT]', 'Rename a Browser Profile or change its hue or notes.',
+    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data' }, f => {
+      if (f.values.has('--hue') && f.booleans.has('--clear-hue')) invalid('Choose a hue or explicitly clear it, not both.')
+      const revision = Number(value(f, '--expected-revision', true))
+      if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the non-negative revision from browser profile ls.')
+      const hue = f.values.has('--hue') ? Number(value(f, '--hue', true)) : undefined
+      if (hue !== undefined && !Number.isInteger(hue)) invalid('--hue must be an integer from 0 to 359.')
+      const edit = { ...(f.values.has('--label') ? { label: value(f, '--label', true)! } : {}),
+        ...(f.booleans.has('--clear-hue') ? { hue: null } : hue === undefined ? {} : { hue }),
+        ...(f.values.has('--notes') ? { notes: value(f, '--notes', true)! } : {}) }
+      if (!Object.keys(edit).length) invalid('Name at least one of --label, --hue, --clear-hue or --notes.')
+      return { profileId: id(f, '--profile', true), expectedRevision: revision, edit }
+    }, PROFILE_NOTICE + ' --expected-revision is the revision from browser profile ls or inspect; an older one is refused with BROWSER_PROFILE_REVISION_CONFLICT and nothing changes, so read again and retry. --hue is an identity color from 0 to 359; hues near red, amber, green or blue read as a status and are refused. An empty --notes clears the notes.'),
+  command('browser.profile.set-default', '--profile ID', 'Make one Browser Profile the default for Browsers created later.', { '--profile': 'data' },
+    f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Existing Browsers keep their Profile; only Browsers opened later without --profile use the new default.'),
+  command('browser.profile.delete', '--profile ID', 'Delete one Browser Profile and clear its sign-ins and site data.', { '--profile': 'data' },
+    f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Requires a person or device; a managed Agent caller is refused with BROWSER_PROFILE_DELETE_REQUIRES_PERSON and should ask the person. The default Profile cannot be deleted. A Profile still used by an open or saved Browser is refused with BROWSER_PROFILE_IN_USE, listing those Browsers in details; if saved Tabs cannot be read the answer is BROWSER_PROFILE_USAGE_UNKNOWN and nothing is deleted.'),
   command('browser.inspect', '--operation-id ID', 'Inspect one exact retained Browser operation.', OP, f => ({ operationId: id(f, '--operation-id') })),
   command('browser.stop', '--operation-id ID', 'Stop an active Browser operation; return retained state if finished.', OP, f => ({ operationId: id(f, '--operation-id') }), 'For an embedded Browser, Stop cancels execution while Agent control and input isolation remain; only the person can Take control through the trusted UI. For an active operation on an external shared tab, explicit stop ends only that original tab\'s sharing grant; other targets retain their grants. The original tab stays open. Another action on it requires an explicit share. A finished operation returns its retained terminal state without ending its sharing grant. Reader cancellation only detaches the reader and does not stop the operation or end sharing.'),
   { ...command('browser.follow', '--operation-id ID [--after-sequence N]', 'Follow retained operation progress and Gap facts.', { ...OP, '--after-sequence': 'value' }, f => ({ operationId: id(f, '--operation-id'), ...numbers(f, { '--after-sequence': 'afterSequence' }) })), stream: true },

@@ -254,6 +254,7 @@ import { RemoteCoreUpgradeManager, type RemoteCoreUpgradeExpected } from '@agent
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
+import { executeBrowserProfileControl, isBrowserProfileControlRequest } from './browser-profile-control.js'
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
@@ -683,6 +684,8 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
     }
+    if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
+      { profiles: browserProfiles, usage: profileUsage }, nameChangeRequests.getStore()?.context.actor)
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)

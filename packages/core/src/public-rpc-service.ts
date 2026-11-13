@@ -1861,6 +1861,13 @@ export class AgentMuxRpcService {
       return parsed as AgentMuxRpcResult<M>
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      // Deleting a Profile clears its sign-ins and site data. Only a transport-approved person or device
+      // may do it; Main builds the approval from that trusted caller, never from business params.
+      if (method === 'browser.profile.delete' && (context.caller !== undefined || !context.principal ||
+          !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' || !context.principal.id.trim())) {
+        throw new AgentMuxError('Deleting a Browser Profile requires a person or device, not a managed Agent. The Profile, its Browsers and the Agent remain available; ask the person to delete it.',
+          'BROWSER_PROFILE_DELETE_REQUIRES_PERSON')
+      }
       if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-reconnect') &&
           (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
             typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0'))) {

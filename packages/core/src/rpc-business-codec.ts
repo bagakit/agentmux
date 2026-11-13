@@ -16,6 +16,7 @@ import { AgentMuxError } from './errors.js'
 import { isToolkitRequest, assertToolkitResultTarget, type ToolkitResult } from './toolkit.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from './browser-task-control.js'
+import { isBrowserProfileControlOperation, assertBrowserProfileControlTarget, type BrowserProfileControlPayload, type BrowserProfileControlResult } from './browser-profile-control.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
 import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
@@ -101,7 +102,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (method === 'toolkit.stop' && body.input !== undefined) {
     const p = rpcRecord(body.input, ['executionId']); delete body.input; Object.assign(body, p)
   }
-  if (operation !== 'browser.restore' && operation !== 'browser.release' && operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
+  if (operation !== 'browser.restore' && operation !== 'browser.release' && !isBrowserProfileControlOperation(operation) && operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
     'browser.stop', 'agent.open', 'demand.patrol-all'].includes(operation)
@@ -172,6 +173,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isToolkitRequest(request)) { assertToolkitResultTarget(request, result as ToolkitResult); return }
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
+  }
+  if (isBrowserProfileControlOperation(request.operation)) {
+    assertBrowserProfileControlTarget(request as BrowserProfileControlPayload, result as BrowserProfileControlResult)
+    return
   }
   const actual = result as unknown as Record<string, unknown>
   if (request.operation === 'demand.create' || request.operation === 'demand.update') {

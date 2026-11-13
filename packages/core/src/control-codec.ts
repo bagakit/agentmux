@@ -10,6 +10,7 @@ import { parseRendererAnimationsInput, parseRendererAnimationsResult } from './r
 import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
+import { isBrowserProfileControlOperation, parseBrowserProfileControlPayload, parseBrowserProfileControlResult } from './browser-profile-control.js'
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
 import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/demand'
@@ -348,6 +349,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
     }
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
+  if (isBrowserProfileControlOperation(source.operation)) {
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ...parseBrowserProfileControlPayload(source, ['schemaVersion', 'requestId', 'operation']) }
   }
   if (source.operation === 'settings.browser.default.inspect' || source.operation === 'settings.browser.default.open-settings') {
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
@@ -1306,6 +1310,10 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     if (executable === undefined) throw new AgentMuxError('Missing executable fact is invalid.', code)
     return resourceReceipt({ ...base, result: { input, executable, availability: fields.availability, ...(cause ? { cause } : {}) } })
+  }
+  if (isBrowserProfileControlOperation(operation)) {
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserProfileControlResult(operation, source.result) } as AgentMuxControlSuccessReceipt
   }
   if (operation === 'settings.browser.default.inspect' || operation === 'settings.browser.default.open-settings') {
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
