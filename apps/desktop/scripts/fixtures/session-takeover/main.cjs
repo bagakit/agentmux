@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs/promises'), path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const [html, privateRoot, evidence, mode, spatialModule, frameScope] = process.argv.slice(2)
+const [html, privateRoot, evidence, mode, spatialModule, frameScope, qualification, nativeMutant] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { mode, processId: process.pid, passed: false, frames: [], frameObservations: [], frameScope: frameScope ?? 'all', userSessionTouched: false,
@@ -134,10 +134,15 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 940, height: 740, show: false, frame: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.cjs') } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) errors.push(message) })
-    await win.loadFile(html)
+    await win.loadFile(html, qualification === 'agent-operations' ? { query: { agentOperations: '1' } } : undefined)
     win.webContents.debugger.attach('1.3')
     await wait(`Boolean(window.takeoverProbe) && document.documentElement.dataset.takeoverReady`)
     result.nativeDevicePixelRatio = await evaluate('devicePixelRatio')
+    if (qualification === 'agent-operations') {
+      const { runAgentOperations } = require('./agent-operations-main.cjs')
+      await runAgentOperations({ win, result, evaluate, wait, click, key, size, frame, painted, originalTerminalReady, spatial, evidence, mode, nativeMutant })
+      result.consoleErrors = errors; result.passed = true; return
+    }
     if (mode === 'first') {
       result.initial = await evaluate('takeoverProbe.facts()')
       result.originalVisibleBaseline = await originalTerminalReady()

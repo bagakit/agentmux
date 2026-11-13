@@ -1,5 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import React from 'react'
+import { configureOperationSources, installOperationFixture } from './agent-operations'
+import { persistedAgentOperations } from '../../../src/renderer/src/lib/agent-operation'
 import { flushSync } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
@@ -43,6 +45,7 @@ function terminalFacts() {
     }), attachments: [...terminalAttachments], timeline: [...terminalTimeline] }
 }
 addEventListener('resize', () => terminalTimeline.push({ kind: 'window-resize', sampledAt: Date.now(), dpr: devicePixelRatio, width: innerWidth, height: innerHeight }))
+const agentOperationsMode = new URLSearchParams(location.search).get('agentOperations') === '1'
 const bridge = (window as any).takeoverNative
 const boot = await bridge.boot()
 const originalConfig = await api.config.get(), originalSnapshot = await api.sessions.snapshot()
@@ -62,11 +65,15 @@ const initialSnapshot = boot?.snapshot ?? {
   })),
   browsers: []
 }
-let nativeSnapshot = structuredClone(initialSnapshot)
 let creations = boot?.creations ?? {}
+if (agentOperationsMode) configureOperationSources(initialSnapshot, creations, Boolean(boot), boot?.operationFixture?.originals)
+let nativeSnapshot = structuredClone(initialSnapshot)
+let operationFixture: ReturnType<typeof installOperationFixture> | undefined
+const saveRuntime = () => bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations, ...(operationFixture ? { operationFixture: operationFixture.state() } : {}) })
 const launches: unknown[] = [], trusted: unknown[] = [], flushes: unknown[] = []
 const nativeReads: unknown[] = []
 let failureMode = false
+const previewAttachmentRuns = new Set(originalSnapshot.sessions.map(session => JSON.stringify([session.control.hostId, session.id, session.control.run.runId])))
 const launchApi = api.sessions.launchAgent
 const attachApi = api.sessions.attach
 const resizeApi = api.sessions.resize
@@ -115,19 +122,26 @@ api.sessions.recover = async control => {
   return { kind: 'reattachable', session: structuredClone(session) }
 }
 api.sessions.attach = async (control, afterByte = 0) => {
-  const id = control.kind === 'agent' ? control.agentSessionId : control.runId
-  const session = nativeSnapshot.sessions.find(item => item.id === id)
-  if (!session) throw new Error('The controlled Native API has no exact source Session for this attachment.')
+  const session = nativeSession(control, 'attach')
+  const id = session.id
+  const previewKnown = previewAttachmentRuns.has(JSON.stringify([control.hostId, id, control.run.runId]))
   let result
-  try { result = await attachApi(control, afterByte) }
-  catch {
-    // Native facts are the only controlled boundary. On the second process the
-    // generic web API has no newly created Agent; return its preserved identity
-    // with an explicit, synthetic readable terminal representation.
+  if (previewKnown) {
+    result = await attachApi(control, afterByte)
+    if (result.session.control.kind !== control.kind || result.session.control.hostId !== control.hostId ||
+      result.session.control.run.runId !== control.run.runId || result.session.id !== id) {
+      throw new Error('Original preview Attachment returned another exact Host, Session or Run.')
+    }
+  } else {
+    // This exact source is retained by the explicitly controlled Native owner,
+    // but not present in this process's independent web-preview API. Do not
+    // catch arbitrary attachment failures or borrow a same-id preview Run.
     const data = 'Ready to continue.\r\n', bytes = new TextEncoder().encode(data)
     result = { attachmentId: crypto.randomUUID(), session, gap: null, resizeRevision: 0,
       replay: afterByte ? [] : [{ type: 'data', runId: control.run.runId, startByte: 0, endByte: bytes.length, data, dataBytes: bytes }] }
   }
+  nativeReads.push({ operation: 'attach', control: structuredClone(control), result: structuredClone(session.control),
+    representation: previewKnown ? 'same-process-preview' : 'retained-controlled-native' })
   // Controlled Native byte facts must agree with the complete replay; the
   // generic preview snapshot deliberately reports zero and cannot serve as a
   // basic-vt owner. This is fixture protocol completion, never a hidden notice.
@@ -144,11 +158,12 @@ api.sessions.launchAgent = async input => {
   launches.push(structuredClone(input))
   if (failureMode) throw new Error('The private Native creation response is unavailable. The same request must be inspected; no automatic retry was sent.')
   const result = await launchApi(input)
+  previewAttachmentRuns.add(JSON.stringify([result.session.control.hostId, result.session.id, result.session.control.run.runId]))
   result.created.creation = { createOperationId: input.createOperationId!, initialPrompt: input.prompt?.trim() ? 'confirmed' : 'not-requested' }
   creations[result.created.agentSessionId] = result.created
   nativeSnapshot.sessions.push(result.session)
   nativeSnapshot.timelines[result.session.id] = result.timeline!
-  await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
+  await saveRuntime()
   return result
 }
 api.executors.detect = async (id, hostId) => {
@@ -161,13 +176,14 @@ api.spatial.read = () => bridge.spatialRead()
 api.spatial.commit = input => bridge.spatialCommit(input)
 api.spatial.onChange = () => () => {}
 api.ui.requestStorageFlush = async () => { flushes.push(Date.now()); await bridge.flush() }
+if (agentOperationsMode) operationFixture = installOperationFixture({ snapshot: nativeSnapshot, creations, boot, saveRuntime, terminalFacts })
 await useAppStore.getState().initialize()
 const workspaceId = config.workspaces[0]!.id
 await useAppStore.getState().selectWorkspace(workspaceId)
 if (!boot) {
   // Set up the isolated first workface once. This is fixture preparation before
   // any operation; the second Renderer receives no tabs/layout/draft seed.
-  const state = useAppStore.getState(), seeded = nativeSnapshot.sessions.slice(0, 2).map((session, index) =>
+  const state = useAppStore.getState(), seeded = nativeSnapshot.sessions.slice(0, agentOperationsMode ? 3 : 2).map((session, index) =>
     createWorkbenchTab(`takeover-original-${index}`, { regionId: `takeover-original-region-${index}`,
       kind: 'agent', phase: 'attached', workspaceId, sessionId: session.id }))
   useAppStore.setState({ tabs: { ...state.tabs, ...Object.fromEntries(seeded.map(tab => [tab.id, tab])) },
@@ -175,19 +191,19 @@ if (!boot) {
       [...Object.values(state.tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => tab.id), ...seeded.map(tab => tab.id)]) } })
 }
 function origin(index: number) {
-  const id = nativeSnapshot.sessions[index]!.id, state = useAppStore.getState()
+  const id = agentOperationsMode ? operationFixture!.facts().originals[index]! : nativeSnapshot.sessions[index]!.id, state = useAppStore.getState()
   const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'agent' && region.sessionId === id))!
   if (!tab) throw new Error('Original fixture Agent has no actual production Workbench Region')
   const region = Object.values(tab.regions).find(region => region.kind === 'agent' && region.sessionId === id)!
   const group = state.layouts[workspaceId]!.groups.find(group => group.tabOrder.includes(tab.id))!
   return { tabId: tab.id, regionId: region.regionId, groupId: group.id, workspaceId, sessionId: id }
 }
-const initialOrigins = [origin(0), origin(1)]
+const initialOrigins = agentOperationsMode ? operationFixture!.facts().originals.flatMap((id, index) => Object.values(useAppStore.getState().tabs).some(tab => Object.values(tab.regions).some(region => region.kind === 'agent' && region.sessionId === id)) ? [origin(index)] : []) : [origin(0), origin(1)]
 if (!boot) {
   useAppStore.getState().renameAgent(initialOrigins[0].sessionId, 'Implementation coordinator')
   useAppStore.getState().renameAgent(initialOrigins[1].sessionId, 'Independent reviewer')
   for (const source of initialOrigins) useAppStore.getState().setAgentComposerDraft(source.sessionId, 'Unsent original draft — keep this work and its exact source.')
-  await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
+  await saveRuntime()
 }
 function focus(index: number) {
   const source = initialOrigins[index]
@@ -206,8 +222,9 @@ const root = createClientUiRoot(document.getElementById('root')!)
 let focusProjection = false
 function render() {
   const source = initialOrigins[0]
-  flushSync(() => root.render(<>
-    <section hidden={!focusProjection} style={{ width: focusProjection ? '100%' : 0, height: '100%', display: focusProjection ? 'flex' : 'none', flexDirection: 'column' }} aria-label="Original Workbench View in Focus">
+  flushSync(() => root.render(<div className={agentOperationsMode ? 'operation-probe-layout' : undefined} style={{ display: 'flex', width: '100%', height: '100%', minWidth: 0 }}>
+    {operationFixture ? <operationFixture.OperationCards /> : null}
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}><section hidden={!focusProjection} style={{ width: focusProjection ? '100%' : 0, height: '100%', display: focusProjection ? 'flex' : 'none', flexDirection: 'column' }} aria-label="Original Workbench View in Focus">
       <div id="takeover-focus-slot" style={{ flex: 1, minHeight: 0, display: 'flex' }} />
     </section>
     <div style={{ width: focusProjection ? 0 : '100%', height: '100%', overflow: 'hidden' }}>
@@ -215,8 +232,8 @@ function render() {
         hostId: 'takeover-focus-slot', active: true, visible: true, surface: 'focus',
         reference: { displayWorkspaceId: workspaceId, groupId: source.groupId, tabId: source.tabId, regionId: source.regionId }
       }] } : undefined} />
-    </div>
-  </>))
+    </div></div>
+  </div>))
 }
 render()
 if (!boot) focus(0)
@@ -226,11 +243,11 @@ function facts() {
     sessions: state.sessions.map(session => ({ id: session.id, control: session.control })),
     nativeSessions: nativeSnapshot.sessions.map(session => ({ id: session.id, control: session.control })),
     nativeReads: [...nativeReads],
-    requests: state.spatialRequests, origins: initialOrigins, launches: [...launches], trusted: [...trusted], flushes: [...flushes],
+    operations: state.agentOperations, persistedOperations: persistedAgentOperations(state.agentOperations), requests: state.spatialRequests, origins: initialOrigins, launches: [...launches], trusted: [...trusted], flushes: [...flushes],
     workbenchSaveWarning: state.workbenchSaveWarning, persisted: localStorage.getItem('agentmux-workbench-v1'), bootRestored: Boolean(boot) }
 }
 Object.assign(window, { takeoverProbe: {
-  focus, facts, terminalFacts, appearance(appAppearance: 'dark' | 'light') {
+  focus, facts, terminalFacts, operations: operationFixture, appearance(appAppearance: 'dark' | 'light') {
     const result = updateThemeSelection({ appAppearance })
     if (!result.applied) throw new Error(result.reason)
   }, failure(value: boolean) { failureMode = value },
@@ -247,7 +264,7 @@ Object.assign(window, { takeoverProbe: {
     creations[agentSessionId] = retired
     nativeSnapshot.sessions = nativeSnapshot.sessions.filter(session => session.id !== agentSessionId)
     delete nativeSnapshot.timelines[agentSessionId]
-    await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
+    await saveRuntime()
     return structuredClone(retired)
   },
   inspect(requestId: string) {
@@ -260,13 +277,14 @@ Object.assign(window, { takeoverProbe: {
     return JSON.stringify(saved.graph.layouts) === JSON.stringify(state.layouts) &&
       JSON.stringify(saved.graph.tabLayouts) === JSON.stringify(Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, tab.layout]))) &&
       JSON.stringify(preferences?.spatialRequests) === JSON.stringify(state.spatialRequests) &&
-      JSON.stringify(preferences?.agentComposerDrafts) === JSON.stringify(state.agentComposerDrafts)
+      JSON.stringify(preferences?.agentComposerDrafts) === JSON.stringify(state.agentComposerDrafts) &&
+      (!agentOperationsMode || JSON.stringify(preferences?.agentOperations) === JSON.stringify(persistedAgentOperations(state.agentOperations)))
   },
   async seal() {
     // saved() observes completion of the actual Core/presentation writers before
     // shutdown. This flush only commits Chromium's already-written preferences;
     // it never exports replacement topology or reseeds the next Renderer.
-    await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
+    await saveRuntime()
     await bridge.flush()
     return facts()
   }

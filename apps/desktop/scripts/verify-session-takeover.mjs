@@ -12,9 +12,18 @@ if (process.argv.includes('--native')) {
   // Consume an existing exact-candidate capture. A Tracker-wide receipt refresh
   // must not rerun real Electron operations or invalidate reviewed images.
   try {
+    assert.ok(!process.argv.some(value => value.startsWith('--native-mutant=')), 'Mutation cannot consume a normal candidate receipt')
     const captured = JSON.parse(await readFile(join(evidence, 'receipt.json'), 'utf8'))
     const hash = value => createHash('sha256').update(value).digest('hex')
     assert.equal(captured.passed, true)
+    if (process.argv.includes('--agent-operations')) {
+      assert.equal(captured.qualification, 'agent-operations-v1', 'A takeover-only receipt cannot certify agent operations')
+      assert.equal(captured.schema, 'agentmux.agent-operations-native.v1')
+      assert.ok(captured.processes?.[0]?.rendered?.agentOperations?.scenarios.length >= 8)
+      assert.ok(captured.processes?.[0]?.rendered?.agentOperations?.costSamples.length >= 6)
+      assert.ok(captured.processes?.[1]?.rendered?.agentOperations?.restart?.operationReferencesPreserved)
+      assert.ok(captured.processes?.[1]?.rendered?.agentOperations?.restart?.noReplay)
+    }
     assert.equal(captured.processes.length, 2)
     assert.ok(captured.frames.length > 0 && captured.cleanup.privateRootRemoved)
     assert.deepEqual(captured.cleanup.remaining, [])
@@ -32,7 +41,7 @@ if (process.argv.includes('--native')) {
     process.exit(0)
   } catch { /* Missing, failed or changed input requires fresh actual capture. */ }
   const { runNative } = await import('./fixtures/session-takeover/native.mjs')
-  await runNative(evidence)
+  await runNative(evidence, { agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) })
   process.exit(0)
 }
 const sha = value => createHash('sha256').update(value).digest('hex')

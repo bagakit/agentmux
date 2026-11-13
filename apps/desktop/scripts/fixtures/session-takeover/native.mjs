@@ -2,9 +2,11 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { currentWorkspaceAliases } from './workspace-aliases.mjs'
 import { listProbeProcesses, signalOwnedProbeProcess, runProbeProcess } from '../../probe-process.mjs'
 
 const fixture = fileURLToPath(new URL('./', import.meta.url)), repo = resolve(fixture, '../../../../..')
@@ -23,34 +25,57 @@ async function artifacts(directory) {
   return files
 }
 export async function runNative(requestedEvidence, options = {}) {
+  if (options.nativeMutant !== undefined) assert.equal(options.nativeMutant, 'hidden-motion-runs', 'A native source mutation must be explicitly supported')
   const evidence = resolve(repo, requestedEvidence ?? ".tmp/session-takeover-fixture/native")
   await mkdir(evidence, { recursive: true })
   const privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-takeover-renderer-")))
   const out = join(privateRoot, 'renderer'), sourceBefore = {}, styleBefore = {}, logs = []
-  const receipt = { schema: 'agentmux.session-takeover-native.v1', passed: false, frames: [], processes: [],
+  const receipt = { schema: options.agentOperations ? 'agentmux.agent-operations-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.nativeMutant ? 'agent-operations-mutation-v1' : options.agentOperations ? 'agent-operations-v1' : 'takeover-only', sourceMutations: [], passed: false, frames: [], processes: [],
     userSessionTouched: false, independentVisualReview: 'pending',
     scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. A controlled Native retirement challenges a stale Renderer projection; trusted user choices create a distinct successor operation and both requests remain inspectable after restart. Native session facts/creation API remain controlled preview; this receipt does not prove vendor CLI or ctxmux process execution; Core exact Store/Hosted creation inspection has separate source-test evidence.',
     controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.', }
   let failure
   try {
-    receipt.fixtureBefore = Object.fromEntries(await Promise.all(['entry.tsx', 'main.cjs', 'preload.cjs', 'index.html', 'native.mjs'].map(async name => [name, hash(await readFile(join(fixture, name)))])))
+    receipt.fixtureBefore = Object.fromEntries(await Promise.all((await readdir(fixture)).filter(name => /\.(tsx|cjs|mjs|html|md)$/.test(name)).map(async name => [name, hash(await readFile(join(fixture, name)))])))
     await symlink(join(core, 'node_modules'), join(privateRoot, 'node_modules'))
     const { build: nodeBuild } = await import(coreRequire.resolve('esbuild'))
     const spatialModule = join(privateRoot, 'spatial-store.mjs')
+    const workspace = await currentWorkspaceAliases(repo)
+    for (const path of workspace.manifests) sourceBefore[path.slice(repo.length + 1)] = hash(await readFile(path))
+    const workspaceCode = path => workspace.directories.some(directory => path.startsWith(directory + '/')) || path.startsWith(desktop + '/')
+    const workspaceEscape = /\/(?:packages\/[^/]+|apps\/(?:desktop|host))\/(?:src|dist|test|scripts|brand)\//
+    const assertOwnWorkspace = async path => {
+      const actual = await realpath(path)
+      if (workspaceEscape.test(actual)) assert.ok(actual.startsWith(repo + '/'), 'Workspace code escaped the current checkout: ' + actual)
+      return actual
+    }
     const spatialBuild = await nodeBuild({ absWorkingDir: repo, entryPoints: [join(core, 'src/spatial-state.ts')], outfile: spatialModule,
-      platform: 'node', format: 'esm', bundle: true, packages: 'external', metafile: true, logLevel: 'silent' })
-    receipt.coreSpatialInputs = Object.fromEntries(await Promise.all(Object.keys(spatialBuild.metafile.inputs).map(async path => [path, hash(await readFile(resolve(repo, path)))])))
+      platform: 'node', format: 'esm', bundle: true, packages: 'external', alias: { '@agentmux/identity': join(repo, 'packages/identity/src/index.ts') }, metafile: true, logLevel: 'silent' })
+    receipt.coreSpatialInputs = Object.fromEntries(await Promise.all(Object.keys(spatialBuild.metafile.inputs).map(async path => { await assertOwnWorkspace(resolve(repo, path)); return [path, hash(await readFile(resolve(repo, path)))] })))
     receipt.coreSpatialModuleSha256 = hash(await readFile(spatialModule))
     const { build } = await import(require.resolve('vite'))
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
-      resolve: { dedupe: ['react', 'react-dom'] },
+      resolve: { dedupe: ['react', 'react-dom'], alias: workspace.aliases, conditions: ['browser', 'import', 'default'] },
       worker: { format: 'es' },
       plugins: [{ name: 'bind-current-takeover-renderer-inputs', enforce: 'pre', async transform(_source, id) {
-        if (!id.includes('?') && (id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(repo, 'packages/client-ui/src') + '/') || id.startsWith(join(core, 'dist') + '/') || id.startsWith(fixture)))
-          sourceBefore[id.slice(repo.length + 1)] = hash(await readFile(id))
+        const file = id.split('?')[0]
+        if (!file.startsWith('\0') && workspaceEscape.test(file)) await assertOwnWorkspace(file)
+        if (!file.startsWith('\0') && workspaceCode(file) && existsSync(file)) {
+          const actual = await assertOwnWorkspace(file)
+          sourceBefore[actual.slice(repo.length + 1)] = hash(await readFile(actual))
+        }
+        if (options.nativeMutant && id.endsWith('/renderer/src/components/AgentOperationFeedback.tsx')) {
+          const before = `visible && decoration.phase === 'pending'`, after = `decoration.phase === 'pending'`
+          assert.equal(_source.split(before).length - 1, 1, 'Native mutation targets one actual production visibility predicate')
+          const code = _source.replace(before, after)
+          receipt.sourceMutations.push({ mutant: options.nativeMutant, file: id.slice(repo.length + 1), source: hash(_source), loaded: hash(code) })
+          return { code, map: null }
+        }
       }, async generateBundle() {
-        for (const path of this.getWatchFiles()) if (path.endsWith('.css') && (path.startsWith(join(desktop, 'src') + '/') || path.startsWith(join(repo, 'packages/client-ui/src') + '/')))
-          styleBefore[path.slice(repo.length + 1)] = hash(await readFile(path))
+        for (const path of this.getWatchFiles()) if (path.endsWith('.css') && workspaceCode(path)) {
+          const actual = await assertOwnWorkspace(path)
+          styleBefore[actual.slice(repo.length + 1)] = hash(await readFile(actual))
+        }
       } }],
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
       build: { outDir: out, emptyOutDir: true, commonjsOptions: { include: [/node_modules/, /xterm-locked-925/] } } })
@@ -61,10 +86,15 @@ export async function runNative(requestedEvidence, options = {}) {
     for (const path of ['components/SessionTakeoverSurface.tsx', 'components/AgentExecutorPicker.tsx', 'components/SessionPane.tsx', 'lib/session-takeover.ts'])
       assert.ok(sourceBefore['apps/desktop/src/renderer/src/' + path], 'Actual private bundle consumes production ' + path)
     assert.ok(styleBefore['apps/desktop/src/renderer/src/styles/session-takeover.css'])
+    if (options.agentOperations) {
+      for (const path of ['components/FocusContextRow.tsx', 'components/AgentOperationFeedback.tsx', 'components/AgentCurrentForkControls.tsx', 'lib/agent-operation-feedback.ts', 'lib/session-stop-background.ts']) assert.ok(sourceBefore['apps/desktop/src/renderer/src/' + path], 'Agent-operation qualification actually consumes ' + path)
+      assert.ok(styleBefore['apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'])
+    }
+    if (options.preflight) { receipt.preflight = { compiled: true, finalCandidateExecuted: false }; await writeFile(join(evidence, 'preflight.json'), JSON.stringify(receipt, null, 2)); return receipt }
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
-    for (const mode of ['first', 'second']) {
+    for (const mode of options.nativeMutant ? ['first'] : ['first', 'second']) {
       const lines = []
-      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all'], {
+      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.agentOperations ? 'agent-operations' : 'takeover-only', options.nativeMutant ?? ''], {
         temporaryRoot: privateRoot, cwd: repo, env, timeoutMs: 115000, onLine: line => lines.push(line)
       })
       await writeFile(join(evidence, mode + '-process.log'), lines.join('\n'))
@@ -77,12 +107,25 @@ export async function runNative(requestedEvidence, options = {}) {
       assert.equal(rendered.passed, true, JSON.stringify(rendered.failure))
       receipt.frames.push(...rendered.frames)
     }
+    if (options.nativeMutant) {
+      assert.equal(receipt.sourceMutations.length, 1, 'Native mutation was consumed by the actual production bundle')
+      throw new Error('Native visibility mutation survived its actual animation-work oracle')
+    }
     assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
     assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)
+    if (options.agentOperations) {
+      for (const process of receipt.processes) assert.equal(process.rendered.agentOperations?.qualification, 'agent-operations-v1')
+      assert.ok(receipt.processes[0].rendered.agentOperations.scenarios.length >= 8)
+      assert.ok(receipt.processes[0].rendered.agentOperations.costSamples.length >= 6)
+      assert.ok(receipt.processes[0].rendered.agentOperations.motion.length >= 5)
+      assert.ok(receipt.processes[1].rendered.agentOperations.restart.operationReferencesPreserved)
+      assert.ok(receipt.processes[1].rendered.agentOperations.restart.noReplay)
+    } else {
     assert.ok(receipt.processes[0].rendered.closedTarget.staleProjectionIgnored)
     assert.ok(receipt.processes[0].rendered.closedTarget.inspectedWithoutLaunch)
     assert.ok(receipt.processes[1].rendered.restart.closedTarget.requestsPreserved)
     assert.ok(receipt.processes[1].rendered.restart.closedTarget.noReplay)
+    }
     receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sourceBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
     receipt.stylesAfter = Object.fromEntries(await Promise.all(Object.keys(styleBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
     assert.deepEqual(receipt.sourceAfter, sourceBefore, 'Actual product and fixture inputs did not change during capture')
@@ -114,6 +157,6 @@ export async function runNative(requestedEvidence, options = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const evidence = process.argv.find(value => value.startsWith('--evidence='))?.slice('--evidence='.length)
-  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all' }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
+  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all', agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
   catch (error) { console.error(error.message); process.exitCode = 1 }
 }
