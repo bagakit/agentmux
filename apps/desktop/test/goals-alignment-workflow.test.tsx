@@ -129,7 +129,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   it('states that an agreed goal has no report yet and keeps checking secondary to the current work', async () => {
     await save(proposal, true); await mount()
     expect(next()).toBe('Goal agreed · No result report')
-    expect(container.querySelector('.goals-no-results')?.textContent).toContain('No result report yet. Start one task with an assigned Agent')
+    expect(container.querySelector('.goals-no-results')?.textContent).toContain('Agents work on this goal next. Ask for a result check when the work is ready.')
     expect(container.querySelector('.goals-grounding')).toBeNull()
     expect(button('Ask agent to check work').classList.contains('goals-button--primary')).toBe(false)
     expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(false)

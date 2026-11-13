@@ -194,3 +194,24 @@ describe('Goal definition heading', () => {
     expect(proposalHeading.querySelector('[data-semantic-icon="object.goal"]')).not.toBeNull()
   })
 })
+
+describe('Normal-path copy reads as guidance, not disclaimers', () => {
+  it('says what Accept and finish does in one clause and drops the reassurance chain', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'review' }); await dom.render(<GlobalBoardSurface />)
+    const results = dom.container.querySelector('.goals-grounding')!
+    expect(results.textContent).toContain('Accept and finish also closes the goal.')
+    expect(results.textContent).not.toContain('Original Agents keep running')
+    expect(results.textContent).not.toContain('ends its scheduled follow-up')
+  })
+
+  it('names the next move for an agreed goal without a report in one sentence', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'agent' }); await dom.render(<GlobalBoardSurface />)
+    const missing = dom.container.querySelector('.goals-no-results')!
+    expect(missing.querySelector('.goals-muted')!.textContent).toBe('Agents work on this goal next. Ask for a result check when the work is ready.')
+  })
+
+  it('does not caption Collaboration with what selection does not do', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'agent' }); await dom.render(<GlobalBoardSurface />)
+    expect(dom.container.querySelector('.goal-collaboration')!.textContent).not.toContain('Selection does not start execution')
+  })
+})
