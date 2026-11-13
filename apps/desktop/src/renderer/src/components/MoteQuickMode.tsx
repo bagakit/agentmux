@@ -166,7 +166,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement
         if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
-      <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
+      <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · {loading ? 'Reading saved settings' : !saved ? 'Saved settings unconfirmed' : 'Saved settings loaded'}</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
         <label htmlFor={id + '-agent'}><ThemeObjectAgentIcon size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
         <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
