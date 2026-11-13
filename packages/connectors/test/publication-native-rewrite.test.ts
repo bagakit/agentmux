@@ -147,6 +147,50 @@ it('a failed anchored read keeps the cut, sends nothing, and is not repeated for
   expect(f.dispatched).toHaveLength(sentBefore)
 }, 30_000)
 
+it('a transient failure of the anchored read does not use up its attempt, and captured progress is not a new cut', async () => {
+  const f = await fixture()
+  await appendFile(f.transcript, assistant('reply-published', 'Published before the interruption'))
+  const kept = Buffer.from(await readFile(f.transcript))
+  f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.state === 'confirmed')).toBe(true), { timeout: 8000 })
+  await appendFile(f.transcript, tool('vanished-call', 'only in the old bytes')); f.host.refresh(); await f.idle()
+  const sentBefore = f.dispatched.length
+  // The first anchored read meets a transient Core failure before any bytes are compared.
+  const reader = f.client as unknown as { nativeHistoryChangesPage(...args: unknown[]): Promise<unknown> }
+  const primitive = reader.nativeHistoryChangesPage.bind(reader)
+  let busy = 1
+  vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args: unknown[]) => {
+    if ((args[1] as { atRecords?: unknown }).atRecords && busy-- > 0) throw new core.AgentMuxError('Controlled transient anchored read', 'AGENT_SESSION_HISTORY_BUSY')
+    return await primitive(...args)
+  })
+  await writeFile(f.transcript, Buffer.concat([kept, Buffer.from(assistant('reply-after-resume', 'Reply after the busy anchored read'))]))
+  // The busy attempt compared nothing, so a later ordinary wake tries the anchored read again and resumes.
+  f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.payload.kind === 'speech' && op.payload.text === 'Reply after the busy anchored read' && op.state === 'confirmed')).toBe(true), { timeout: 8000 })
+  expect(f.anchoredReads()).toBeGreaterThanOrEqual(2)
+  expect(f.dispatched.slice(sentBefore).map(value => value.text)).toEqual(['Reply after the busy anchored read'])
+}, 30_000)
+
+it('a decided anchored failure is not repeated when only the captured cut advances', async () => {
+  const f = await fixture()
+  await appendFile(f.transcript, assistant('reply-published', 'Published before the interruption')); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.state === 'confirmed')).toBe(true), { timeout: 8000 })
+  await f.idle()
+  const header = (await readFile(f.transcript, 'utf8')).split('\n')[0]!
+  await writeFile(f.transcript, header + '\n' + assistant('reply-rewritten', 'Different bytes in place of every consumed record'))
+  f.host.refresh(); await f.idle()
+  await vi.waitFor(async () => expect((await f.host.list(f.input)).sourceObservation).toMatchObject({ code: 'AGENT_SESSION_HISTORY_REWRITTEN' }), { timeout: 8000 })
+  expect(f.anchoredReads()).toBe(1)
+  // Captured activity moves the unified frontier; the native cut and its comparison do not change.
+  for (let index = 0; index < 3; index++) {
+    await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.binding.agentSessionId, item: { id: 'captured-after-' + index,
+      agentSessionId: f.binding.agentSessionId, kind: 'system_message', status: 'complete', source: 'agentmux', createdAt: index + 1, updatedAt: index + 1,
+      title: 'Captured activity', content: 'captured ' + index } })
+    f.host.refresh(); await f.idle()
+  }
+  expect(f.anchoredReads()).toBe(1)
+}, 30_000)
+
 it('a rewrite reported through the page coverage, not only by exception, uses published records as anchors', async () => {
   const f = await fixture()
   await appendFile(f.transcript, assistant('reply-only-published', 'The only consumed reply'))
