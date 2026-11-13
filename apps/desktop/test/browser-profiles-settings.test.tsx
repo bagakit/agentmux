@@ -151,7 +151,7 @@ describe('Settings › Browser Profiles', () => {
   it('lists live and not-yet-loaded Browsers as in use and never offers to delete that Profile', async () => {
     await select('Northwind client')
     const uses = [...container.querySelectorAll('.browser-profile-editor__uses li')].map(li => li.textContent)
-    expect(uses).toEqual(['Launch boardOpen', 'Release notesNot loaded yet'])
+    expect(uses).toEqual(['Launch boardRunning', 'Release notesNot loaded yet'])
     expect($('.browser-profile-editor__who small')?.textContent).toContain('Open in 1 Browser')
   })
 
