@@ -2,11 +2,11 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space/Zone/Tab/Region 的稳定身份、关系与持久布局归 Core，Project/Workspace 是资源来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run；公开 Control 表达空间目标和回执，client 持有可见表面与焦点。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[空间 CLI 使用合同](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置与 Git owner，并消费 Core 的持久空间和公开 Agent API。
+产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space/Zone/Tab/Region 的稳定身份、关系与持久布局归 Core，Project/Workspace 是资源来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run；公开 Control 表达空间目标和回执，client 持有可见表面与焦点。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置与 Git owner，并消费 Core 的持久空间和公开 Agent API。
 
 常用入口：[Terminal 调用](#terminal-调用) · [Agent 调用与输入](#agent-调用与输入) · [原生对话读取](#原生对话读取) · [Runtime 边界](#runtime-边界)。
 
-系统用法直接阅读 [guides](guides/README.md)，也可用 `amux --skill`／`amux MODULE --skill` 按需读取同源内容。修改指南后运行 `pnpm generate:guides`，用 `pnpm check:guides` 核对生成结果；正文、共享片段和代码事实的维护边界见该目录说明。
+系统用法直接阅读 [guides](guides/README.md)，也可用 `amux --skill`／`amux MODULE --skill` 按需读取同源内容。修改指南后运行 `pnpm --filter @agentmux/core generate:guides`，用 `pnpm --filter @agentmux/core check:guides` 核对生成结果；正文、共享片段和代码事实的维护边界见该目录说明。
 
 当前 Local Run 只由随包 [Darwin manifest](vendor/ctxmux/darwin-arm64/manifest.json) 与 [Linux manifest](vendor/ctxmux/linux-x64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、同一 SDK tarball 和 darwin-arm64 / linux-x64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
@@ -90,15 +90,16 @@ Core 和 ctxmux 都不能把它暗中降为 Level A restart。
 ## Terminal 调用
 
 ```ts
-import { connectLocalAgentMuxRuntime } from '@agentmux/core'
+import { connectLocalAgentMuxRuntime, mintObjectId } from '@agentmux/core'
 
 const client = await connectLocalAgentMuxRuntime()
 const run = await client.createTerminal({ workspacePath: process.cwd() })
 const attachment = await client.attachTerminal(run.runId, 0)
 const secondViewReplay = await client.readRunReplay(run, 0)
+if (run.acceptedInputBytes === null) throw new Error('The Run has not confirmed its input cursor')
 await client.writeTerminal(run, {
   ownerInstanceId: client.runtimeIdentity().instanceId,
-  operationId: crypto.randomUUID(),
+  operationId: mintObjectId(),
   expectedByte: run.acceptedInputBytes,
   data: 'pwd\n'
 })
@@ -113,7 +114,7 @@ Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTermin
 
 `refreshRunAttachment(run, afterByte, view, operationId?)` 沿同一个 retained owner 重开该 Client 对原 Run 的观察连接：先打开并核对 snapshot，再替换 live pump；打开失败保原 owner，不停止 Run，也不发送 Input。它与只读 `readRunReplay` 的结果范围不同。刷新直接产生的状态投影携带通用 `observationOrigin`（精确 Run 与 operation），仍是事实更新，不构成新的输入执行意图；独立 Hook、重连及 live output 不带该来源。实际新 attachment 只确认观察连接建立，不是 Run 活性或 Input 送达回执。
 
-Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `agent output` 与 `agent output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
+Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `agent output` 与 `agent output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的[「ordered bytes 的公开传输边界」](../../docs/design/behavior/terminal-reading.md#ordered-bytes-的公开传输边界)。
 
 Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
 
@@ -170,7 +171,7 @@ PTY 字节接受、Hook connection written、ACP adapter acknowledgement 和准�
 await client.connect() // Load Session and Provider observation on the same Runtime.
 const session = await client.createAgent({
   providerId: 'codex',
-  executorId: 'codex-full-auto',
+  executorId: 'codex',
   workspacePath: process.cwd(),
   injectAgentMuxGuide: true,
   prompt: 'Inspect the failing test'
@@ -190,9 +191,10 @@ const byNative = client.resolveAgentSession({
 ```ts
 const { session, creation } = await client.createAgentWithDelivery({
   providerId: 'codex',
-  executorId: 'codex-full-auto',
+  executorId: 'codex',
   workspacePath: process.cwd(),
-  createOperationId: crypto.randomUUID(),
+  injectAgentMuxGuide: true,
+  createOperationId: mintObjectId(),
   prompt: 'Inspect the failing test'
 })
 console.log(session.agentSessionId, creation.initialPrompt)
@@ -280,7 +282,7 @@ amux connection service configure --input service-policy.json
 amux connection service inspect --operation-id connector-off
 ```
 
-开关作用于当前 endpoint 的整个 Connector 自动收发，不改写每个应用的 enabled。
+省略 `adapterId` 时开关作用于当前 endpoint 的整个 Connector 自动收发；指定 `adapterId` 选择该 adapter 的独立 policy 及其修订，全局或单个应用关闭时不因此开启收发。两者都不改写每个应用的 enabled。
 configure 沿 transport-approved user/device 权限与原 operationId/CAS 回执；请求未知时
 保原输入查 inspect，get 的当前值不代 ACK。宿主的持久、默认与恢复边界见
 [Connection owner 使用说明](../connectors/README.md#connector-service-policy)。
@@ -398,9 +400,9 @@ await client.dispose()
 ## Notebook 目录 API 与 CLI
 
 知识目录不需要 App。`@agentmux/core/notebook-store` 的 `AgentMuxNotebookStore` 负责
-`notebooks.sqlite`，位置跟随原 NotesStorage owner 的实际 Notes 目录，默认是
-`~/.agentmux/notes/notebooks.sqlite`。`AGENTMUX_STATE_DIRECTORY` 决定 locator 与旧目录导入入口，
-Desktop 消费同一目录 owner。旧 JSON 目录只作一次导入输入并保留备份。
+`notebooks.root.json` 及相邻的 `notebooks.root.json.files/`，位置跟随原 NotesStorage owner 的实际 Notes 目录，默认是
+`~/.agentmux/notes/notebooks.root.json`。`AGENTMUX_STATE_DIRECTORY` 决定 locator 与旧目录导入入口，
+Desktop 消费同一目录 owner。旧 SQLite／JSON 目录只作一次导入输入并保留备份。
 `@agentmux/core/notebook-catalog` 导出 `NotebookState`、`NotebookWrite`、`NotebookChange`
 和严格读取类型。正文由原资源 Host/Workspace 的文件能力持有，目录保存准确引用、
 页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/knowledge-workflows.md#recallnotebook-与块知识)
@@ -435,7 +437,7 @@ amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID 
 | `rename-page` | `noteId, title` | 改页面标题，保原 Note/Block 与文件 |
 | `source` | `noteId, source` | 追加来源；不覆盖已有来源身份 |
 | `organize` | `noteId, topic` | 记录已确认的 Topic 整理；不是空间关系创建命令 |
-| `relocate` | `noteId, resource` | 记录原文件能力已确认的真实新位置；不是文件移动命令 |
+| `relocate` | `noteId, resource, from?` | 记录原文件能力已确认的真实新位置；不是文件移动命令 |
 | `follow` / `unfollow` | `noteId` | 持久关注／取消关注自己；身份来自可信调用者 |
 
 `resource` 为 `{ hostId, workspaceId, workspacePath, path }`，`path` 相对原 Workspace。
