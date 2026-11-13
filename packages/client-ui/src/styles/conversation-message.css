@@ -152,6 +152,7 @@
 }
 .log-turn__system-toggle > svg { flex: none; transition: transform var(--dur-fast) ease; }
 .log-turn__system-title { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.log-turn__system-toggle > .log-turn__system-title:last-child { max-width: 100%; flex-shrink: 1; }
 .log-turn__system-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-turn__system-toggle[aria-expanded='true'] svg { transform: rotate(90deg); }
 .log-turn__system-toggle:hover { color: var(--text); }
