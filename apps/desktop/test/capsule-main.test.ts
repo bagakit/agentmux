@@ -160,6 +160,26 @@ it('does not turn a page sender, App subframe, local RPC user or forged envelope
   expect((await h.rpc.call('capsule.interaction.inspect', { capsuleId: h.params.capsuleId, interactionId: h.params.interactionId })).interaction.status).toBe('pending')
 })
 
+it('answers a page to its authenticated creating Agent and reports a page without a recipient as unable to ask', async () => {
+  const h = await fixture()
+  const content = join(h.directory, 'content')
+  // The real Core RPC derives the caller from the Agent credential, not from any field the page or producer writes.
+  const own = await h.rpc.call('capsule.create', { operationId: 'agent-page', sourcePath: content, mode: 'injected',
+    source: { agentSessionId: 'claimed-by-producer' } }, { credentials: h.credentials })
+  expect(own.record.target).toEqual({ hostId: 'local', agentSessionId: 'producer' })
+  const personal = await h.rpc.call('capsule.create', { operationId: 'person-page', sourcePath: content, mode: 'injected' })
+  expect(personal.record.target).toBeUndefined()
+  const asked = async (page: typeof own) => {
+    if (page.endpoint.status !== 'available') throw new Error('The fixture page must be serving')
+    const sender = { mainFrame: {}, getURL: () => page.endpoint.status === 'available' ? page.endpoint.url : '', isDestroyed: () => false, send: vi.fn() }
+    bridge.nativeDocument = { sender, frame: sender.mainFrame, record: page.record, browserId: 'browser-' + page.record.capsuleId,
+      navigationId: 'document-' + page.record.capsuleId, instanceId: page.endpoint.instanceId }
+    return await h.invoke('capsule:document', ['capabilities', {}], sender)
+  }
+  expect(await asked(own)).toMatchObject({ interaction: true, humanReply: false })
+  expect(await asked(personal)).toMatchObject({ interaction: false, humanReply: false })
+})
+
 it('takes an exact App confirmation through Host and Unix dispatch into real Core input and its durable source', async () => {
   const h = await fixture()
   const result = await h.invoke('capsules:reply', [h.params]) as import('@agentmux/core/capsule').CapsuleReplyResult
