@@ -114,7 +114,13 @@ describe('Goals whole-page current facts, reading and return through mounted own
   it('states current facts in nonempty rows, then only navigates to corresponding target/result content', async () => {
     const entries = [goal('outline'), goal('decision', { alignment: { ...alignment, openQuestions: ['Should resume happen automatically?'] } }), goal('confirm', { alignment }), goal('agreed', { alignment: { ...alignment, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) } }), goal('results', { alignment: { ...alignment, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) }, grounding }), goal('unknown', { alignment: { ...alignment, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) }, grounding: { ...grounding, checks: [{ ...grounding.checks[0]!, outcome: 'unknown', evidence: [] }] } }), goal('stale', { alignment: { ...alignment, revision: 2, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) }, grounding })]
     useAppStore.setState({ demands: Object.fromEntries(entries.map(entry => [entry.id, entry])) }); await mount()
-    expect([...dom.container.querySelectorAll('.goals-row__next')].map(node => node.textContent), 'Goal rows describe actual current target/result facts').toEqual(['Goal needs an outline', 'Decision needed', 'Goal ready for confirmation', 'Goal agreed · No result report', 'Results ready for review', 'Results need checking', 'Results need updating'])
+    const byGroup = [...dom.container.querySelectorAll<HTMLElement>('[data-goal-group]')].map(group => [group.dataset.goalGroup, [...group.querySelectorAll('.goals-row__next')].map(node => node.textContent)])
+    expect(byGroup, 'Goal rows describe actual current target/result facts, grouped by whose turn it is').toEqual([
+      ['you', ['Goal ready for confirmation', 'Results ready for review']],
+      ['attention', ['Results need checking', 'Results need updating']],
+      ['define', ['Goal needs an outline', 'Decision needed']],
+      ['agents', ['Goal agreed · No result report']]
+    ])
     const row = dom.container.querySelector<HTMLElement>('[data-demand-id="confirm"]')!
     expect(row.querySelector('.goals-row__open')).not.toBeNull()
     await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
