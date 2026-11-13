@@ -1,21 +1,25 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, rmdir, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rm, rmdir, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { claudeGlobalConfigPath, claudeTrustKey, prepareClaudeOwnedWorkspaceTrust } from '../../src/providers/claude-workspace-trust.js'
 
 /**
  * Pre-trusting an AgentMux-owned home is what stops Claude's "Is this a project you trust?"
- * dialog from eating the first question (its cursor rests on "No, exit"). Each case below
- * names the property that would be lost if the module were changed.
+ * dialog from eating the first question (its cursor rests on "No, exit"). The Host confirms the
+ * home; this module records trust for it the way Claude reads it back. Each case names the
+ * property that would be lost if the module were changed.
  */
 describe('Claude owned-workspace trust', () => {
   let base: string, home: string, motes: string, workspace: string, config: string
   const env = () => ({ HOME: home })
-  const read = async () => JSON.parse(await readFile(config, 'utf8')) as { projects: Record<string, Record<string, unknown>>; [key: string]: unknown }
+  const read = async (path = config) => JSON.parse(await readFile(path, 'utf8')) as { projects: Record<string, Record<string, unknown>>; [key: string]: unknown }
+  const prepare = (workspacePath = workspace, environment: Record<string, string> = env()) =>
+    prepareClaudeOwnedWorkspaceTrust({ workspacePath, env: environment })
 
   beforeEach(async () => {
+    // A real temporary root: on macOS tmpdir() itself sits behind the /var -> /private/var symlink.
     base = await realpath(await mkdtemp(join(tmpdir(), 'amx-claude-trust-')))
     home = join(base, 'home'); motes = join(home, '.agentmux', 'motes'); workspace = join(motes, 'a1b2c3d4e5f60718')
     await mkdir(workspace, { recursive: true })
@@ -25,96 +29,117 @@ describe('Claude owned-workspace trust', () => {
   })
   afterEach(async () => { await rm(base, { recursive: true, force: true }) })
 
-  it('trusts the owned root once and keeps every other key byte-for-byte', async () => {
+  it('trusts exactly the confirmed home once and keeps every other key byte-for-byte', async () => {
     const before = await read()
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
-    expect(receipt).toMatchObject({ status: 'trusted', trustKey: claudeTrustKey(motes), configPath: config })
+    const receipt = await prepare()
+    expect(receipt).toMatchObject({ status: 'trusted', trustKey: workspace, configPath: config })
     const after = await read()
-    expect(after.projects[motes]).toEqual({ hasTrustDialogAccepted: true })
-    // Only one project entry is added; onboarding, account and other projects are untouched.
-    expect({ ...after, projects: { ...after.projects, [motes]: undefined } }).toEqual({ ...before, projects: { ...before.projects, [motes]: undefined } })
+    expect(after.projects[workspace]).toEqual({ hasTrustDialogAccepted: true })
+    // Only that one entry is added: not the root above it, and not onboarding, account or other projects.
+    expect(after.projects[motes]).toBeUndefined()
+    expect({ ...after, projects: { ...after.projects, [workspace]: undefined } }).toEqual({ ...before, projects: { ...before.projects, [workspace]: undefined } })
     expect((await stat(config)).mode & 0o777).toBe(0o600)
   })
 
-  it('does not rewrite the file when the root is already trusted', async () => {
-    await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
+  it('does not rewrite the file when the home is already trusted', async () => {
+    await prepare()
     const past = new Date(Date.now() - 60_000)
     await utimes(config, past, past)
     const pinned = (await stat(config)).mtimeMs
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
+    const receipt = await prepare()
     expect(receipt.status).toBe('already-trusted')
     expect((await stat(config)).mtimeMs).toBe(pinned)
   })
 
   it('keeps an existing entry and only flips its trust flag', async () => {
     const value = await read()
-    value.projects[motes] = { hasTrustDialogAccepted: false, allowedTools: ['Read'], lastSessionId: 's' }
+    value.projects[workspace] = { hasTrustDialogAccepted: false, allowedTools: ['Read'], lastSessionId: 's' }
     await writeFile(config, JSON.stringify(value, null, 2))
-    await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
-    expect((await read()).projects[motes]).toEqual({ hasTrustDialogAccepted: true, allowedTools: ['Read'], lastSessionId: 's' })
+    await prepare()
+    expect((await read()).projects[workspace]).toEqual({ hasTrustDialogAccepted: true, allowedTools: ['Read'], lastSessionId: 's' })
   })
 
   it('never creates a missing configuration: Claude owns its own onboarding', async () => {
     await rm(config)
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
+    const receipt = await prepare()
     expect(receipt).toMatchObject({ status: 'unconfirmed', code: 'CLAUDE_CONFIG_ABSENT' })
     await expect(stat(config)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('refuses a workspace outside the owned root and leaves the file alone', async () => {
-    const project = join(base, 'project'); await mkdir(project)
-    const before = await readFile(config, 'utf8')
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: project, env: env() })
-    expect(receipt).toMatchObject({ status: 'not-applicable', trustKey: null })
-    expect(await readFile(config, 'utf8')).toBe(before)
-  })
-
-  it('refuses a workspace that escapes the owned root through a symlink', async () => {
-    const outside = join(base, 'outside'); await mkdir(outside)
-    const link = join(motes, 'linked'); await symlink(outside, link)
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: link, env: env() })
-    expect(receipt.status).toBe('not-applicable')
-    expect((await read()).projects[motes]).toBeUndefined()
-  })
-
-  it('refuses a path outside the root that only resolves into it: Claude looks trust up by the spelled path', async () => {
-    const alias = join(base, 'alias'); await symlink(workspace, alias)
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: alias, env: env() })
-    expect(receipt.status).toBe('not-applicable')
-    expect((await read()).projects[motes]).toBeUndefined()
-  })
-
-  it('answers an already-trusted root without waiting on a lock Claude is holding', async () => {
-    await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
-    await mkdir(`${config}.lock`)
-    const started = Date.now()
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
-    expect(receipt.status).toBe('already-trusted')
-    expect(Date.now() - started).toBeLessThan(1_000)
-  })
-
-  it('trusts a git home exactly, not the root, because Claude stops at an untrusted repository', async () => {
-    await mkdir(join(workspace, '.git'))
-    const nested = join(workspace, 'packages', 'app'); await mkdir(nested, { recursive: true })
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: nested, env: env() })
+  it('records the real path for a home launched through an alias, because Claude looks trust up by its realpath cwd', async () => {
+    // A retained Session can still name its home through an old address, such as
+    // `scratch/topic--...` -> `../motes/<id>`. Claude starts in the physical directory.
+    const scratch = join(home, '.agentmux', 'scratch'); await mkdir(scratch)
+    const alias = join(scratch, 'topic--launcher--leader'); await symlink('../motes/a1b2c3d4e5f60718', alias)
+    const receipt = await prepare(alias)
     expect(receipt).toMatchObject({ status: 'trusted', trustKey: workspace })
     const after = await read()
     expect(after.projects[workspace]).toEqual({ hasTrustDialogAccepted: true })
-    expect(after.projects[motes]).toBeUndefined()
+    expect(after.projects[alias]).toBeUndefined()
   })
 
-  it('leaves a foreign repository inside a home untrusted, so Claude still asks about it', async () => {
-    const vendor = join(workspace, 'refs', 'vendor'); await mkdir(join(vendor, '.git'), { recursive: true })
+  it('records the real path when an ancestor of the home is a symlink, such as a relocated ~/.agentmux', async () => {
+    const physical = join(base, 'volume', 'agentmux'); await mkdir(join(physical, 'motes', 'f0e1d2c3b4a59687'), { recursive: true })
+    const linkedRoot = join(home, 'linked-agentmux'); await symlink(physical, linkedRoot)
+    const spelled = join(linkedRoot, 'motes', 'f0e1d2c3b4a59687')
+    const receipt = await prepare(spelled)
+    expect(receipt).toMatchObject({ status: 'trusted', trustKey: join(physical, 'motes', 'f0e1d2c3b4a59687') })
+    const after = await read()
+    expect(after.projects[join(physical, 'motes', 'f0e1d2c3b4a59687')]).toEqual({ hasTrustDialogAccepted: true })
+    expect(after.projects[spelled]).toBeUndefined()
+  })
+
+  it('reports an unresolvable home as unconfirmed without writing', async () => {
     const before = await readFile(config, 'utf8')
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: join(vendor), env: env() })
-    expect(receipt).toMatchObject({ status: 'not-applicable', code: 'WORKSPACE_FOREIGN_REPOSITORY' })
+    const receipt = await prepare(join(motes, 'missing-home'))
+    expect(receipt).toMatchObject({ status: 'unconfirmed', trustKey: null, code: 'CLAUDE_TRUST_UNCONFIRMED' })
     expect(await readFile(config, 'utf8')).toBe(before)
+  })
+
+  it('writes through a symlinked configuration to its target and keeps the link, as Claude does', async () => {
+    // A dotfiles layout: ~/.claude.json -> dotfiles/claude.json.
+    const dotfiles = join(base, 'dotfiles'); await mkdir(dotfiles)
+    const target = join(dotfiles, 'claude.json')
+    await writeFile(target, await readFile(config, 'utf8'), { mode: 0o600 }); await rm(config)
+    await symlink('../dotfiles/claude.json', config)
+    const receipt = await prepare()
+    expect(receipt).toMatchObject({ status: 'trusted', configPath: config })
+    expect((await lstat(config)).isSymbolicLink()).toBe(true)
+    expect(await readlink(config)).toBe('../dotfiles/claude.json')
+    expect((await read(target)).projects[workspace]).toEqual({ hasTrustDialogAccepted: true })
+    expect((await stat(target)).mode & 0o777).toBe(0o600)
+    // The temporary file was staged beside the real target and renamed onto it; nothing is left behind.
+    expect((await readdir(dotfiles)).sort()).toEqual(['claude.json'])
+    expect((await readdir(home)).filter(name => name.includes('agentmux-'))).toEqual([])
+  })
+
+  it('keeps Claude\'s lock beside the spelled configuration path even when it is a symlink', async () => {
+    const dotfiles = join(base, 'dotfiles'); await mkdir(dotfiles)
+    await writeFile(join(dotfiles, 'claude.json'), await readFile(config, 'utf8')); await rm(config)
+    await symlink(join(dotfiles, 'claude.json'), config)
+    await mkdir(`${config}.lock`)
+    const pending = prepare()
+    await new Promise(done => setTimeout(done, 120))
+    // Still waiting on Claude's lock at the spelled path, so nothing was written yet.
+    expect((await read(join(dotfiles, 'claude.json'))).projects[workspace]).toBeUndefined()
+    await rmdir(`${config}.lock`)
+    expect((await pending).status).toBe('trusted')
+    await expect(stat(join(dotfiles, 'claude.json.lock'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('answers an already-trusted home without waiting on a lock Claude is holding', async () => {
+    await prepare()
+    await mkdir(`${config}.lock`)
+    const started = Date.now()
+    const receipt = await prepare()
+    expect(receipt.status).toBe('already-trusted')
+    expect(Date.now() - started).toBeLessThan(1_000)
   })
 
   it('waits for a Claude-held lock and keeps the key Claude wrote meanwhile', async () => {
     const lock = `${config}.lock`
     await mkdir(lock)
-    const pending = prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
+    const pending = prepare()
     await new Promise(done => setTimeout(done, 120))
     // Claude, holding its lock, saves a new key; it then releases.
     const value = await read(); value.numStartups = 7
@@ -123,19 +148,19 @@ describe('Claude owned-workspace trust', () => {
     expect((await pending).status).toBe('trusted')
     const after = await read()
     expect(after.numStartups).toBe(7)
-    expect(after.projects[motes]).toEqual({ hasTrustDialogAccepted: true })
+    expect(after.projects[workspace]).toEqual({ hasTrustDialogAccepted: true })
     await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reclaims an abandoned lock older than proper-lockfile\'s stale window', async () => {
     const lock = `${config}.lock`; await mkdir(lock)
     const old = new Date(Date.now() - 30_000); await utimes(lock, old, old)
-    expect((await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })).status).toBe('trusted')
+    expect((await prepare()).status).toBe('trusted')
   })
 
   it('reports an unparseable configuration as unconfirmed without writing', async () => {
     await writeFile(config, '{ not json')
-    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: motes, workspacePath: workspace, env: env() })
+    const receipt = await prepare()
     expect(receipt.status).toBe('unconfirmed')
     expect(await readFile(config, 'utf8')).toBe('{ not json')
   })
@@ -146,6 +171,13 @@ describe('Claude owned-workspace trust', () => {
     await writeFile(join(dir, '.config.json'), '{}')
     expect(await claudeGlobalConfigPath({ HOME: home, CLAUDE_CONFIG_DIR: dir })).toBe(join(dir, '.config.json'))
     expect(await claudeGlobalConfigPath({ HOME: home })).toBe(join(home, '.claude.json'))
+  })
+
+  it('keys a folder by its NFC real path', async () => {
+    // Created decomposed (e + U+0301); Claude records the composed form (U+00E9).
+    const decomposed = join(base, 'café'); await mkdir(decomposed)
+    expect(await claudeTrustKey(decomposed)).toBe(join(base, 'café'))
+    expect(await claudeTrustKey(join(dirname(workspace), '.', 'a1b2c3d4e5f60718'))).toBe(workspace)
   })
 
   it('is the Claude Provider\'s registered capability', () => {
