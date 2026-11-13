@@ -80,9 +80,11 @@ export class ScreenCapture {
         // that editor, which a cancel returns to and a completion closes, so the editor's own close returns focus as before.
         const held: { editor: Promise<void> | null } = { editor: null }
         const surface = async (retaking: boolean): Promise<CaptureSurfaceOutcome['state']> => {
-          const outcome = await this.ports.present({ attachToDraft, expandable: true, returnFocus: returnFocus && !retaking, complete })
+          // Once the original draft has its image, a retaken surface and its editor only copy; the draft is never attached twice.
+          const attaching = attachToDraft && !originalDelivered
+          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete })
           if (outcome.state !== 'expanded') return outcome.state
-          const editing = this.ports.edit(outcome.image, attachToDraft, complete,
+          const editing = this.ports.edit(outcome.image, attaching, complete,
             { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool,
               ...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })
           // After the editor's first Copy this capture has returned and nobody awaits a retaken editor, so its failure is reported here.
