@@ -14,13 +14,14 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'pointing'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|pointing')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'snapping', 'pointing'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|snapping|pointing')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
 const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
+const snapping = 'apps/desktop/test/image-annotation-snapping.test.ts'
 const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.tsx'
 const specifications = {
   pointing: {
@@ -156,6 +157,74 @@ const specifications = {
     { label: 'capture-measure-every-render', source: component + 'ImageAnnotationEditor.tsx',
       find: '}, [capture, barShown, sizeText, label, busy, busyLabel, confirmingDiscard])', replace: '})', test: capture,
       consumer: 'moving a selection forces no layout of the toolbar or size chip', failure: /pointer moves that keep the size measure nothing/ }]
+  },
+  snapping: {
+    tests: [snapping, capture],
+    mutations: [{ label: 'snap-threshold-ignored', source: component + 'snapping.ts',
+      find: 'if (gap <= threshold && gap < best)', replace: 'if (gap < best)', test: snapping,
+      consumer: 'snaps within 6 screen points and leaves anything farther exactly where it is', failure: /a point 12 px from the left edge lands on it|a point 13 px away stays put/ },
+    { label: 'snap-distance-wrong', source: component + 'snapping.ts',
+      find: 'export const SNAP_DISTANCE = 6', replace: 'export const SNAP_DISTANCE = 8', test: capture,
+      consumer: 'snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', failure: /beyond 6 points no guide shows/ },
+    { label: 'snap-mark-centre-omitted', source: component + 'snapping.ts',
+      find: 'x.push(rect.x, rect.x + rect.width / 2, rect.x + rect.width)', replace: 'x.push(rect.x, rect.x + rect.width)', test: snapping,
+      consumer: 'offers marks their edges and centre, and windows and the selection their edges only', failure: /every candidate line in image pixels/ },
+    { label: 'snap-resize-moves-every-edge', source: component + 'snapping.ts',
+      find: "return { x: handle.includes('w') ? [rect.x] : handle.includes('e') ? [right] : [], y: handle.includes('n') ? [rect.y] : handle.includes('s') ? [bottom] : [] }",
+      replace: 'return { x: [rect.x, right], y: [rect.y, bottom] }', test: snapping,
+      consumer: 'snaps a resized rect only by the edges its handle moves', failure: /an east handle moves only the right edge/ },
+    { label: 'snap-gesture-unsnapped', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (capture && !unsnapped) at = snapPoint(at, constrained)\n', replace: '', test: capture,
+      consumer: 'snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', failure: /one vertical guide runs across the frame/ },
+    { label: 'snap-command-ignored', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (capture && !unsnapped) at = snapPoint(at, constrained)\n', replace: '    if (capture) at = snapPoint(at, constrained)\n', test: capture,
+      consumer: 'snaps a moved selection and drawn and moved marks, and holding Command suspends it', failure: /with Command held a drawn mark follows the pointer exactly/ },
+    { label: 'snap-drawn-mark-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    else if (drawn && REGION_KINDS.has(drawn.kind)) features = end\n', replace: '', test: capture,
+      consumer: 'snaps a moved selection and drawn and moved marks, and holding Command suspends it', failure: /a drawn region mark lands on the selection edge/ },
+    { label: 'snap-moved-mark-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '      features = transform.handle ? end : rectFeatures(offset(box, transform.start), null)', replace: '      features = transform.handle ? end : null', test: capture,
+      consumer: 'snaps a moved selection and drawn and moved marks, and holding Command suspends it', failure: /a moved mark lands on another mark edge/ },
+    { label: 'snap-view-scale-ignored', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'SNAP_DISTANCE / viewRef.current.scale', replace: 'SNAP_DISTANCE', test: capture,
+      consumer: 'snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', failure: /one vertical guide runs across the frame|the corner landed on the front window corner/ },
+    { label: 'snap-guides-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (snapped.guides.x.length || snapped.guides.y.length) guidesRef.current = snapped.guides\n', replace: '', test: capture,
+      consumer: 'snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', failure: /one vertical guide runs across the frame/ },
+    { label: 'snap-guides-kept-after-release', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'lastErasePoint.current = null; panRef.current = null; downRef.current = null; guidesRef.current = null;', replace: 'lastErasePoint.current = null; panRef.current = null; downRef.current = null;', test: capture,
+      consumer: 'snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', failure: /the guides disappear on release/ },
+    { label: 'window-hit-backmost', source: component + 'ImageAnnotationEditor.tsx',
+      find: '  function windowAt(at: ScreenshotPoint): NormalizedRect | null { return windows.find(window => rectContains(window, at)) ?? null }',
+      replace: '  function windowAt(at: ScreenshotPoint): NormalizedRect | null { return windows.findLast(window => rectContains(window, at)) ?? null }', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /the front window lights first where both contain the pointer/ },
+    { label: 'window-click-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: "const target = crop.mode === 'create' && click && !crop.original ? windowAt(crop.start) : null", replace: 'const target = null as NormalizedRect | null', test: capture,
+      consumer: 'a click without travel selects the window under it, clipped to the frame, and claims it', failure: /a window click claims the selection/ },
+    { label: 'window-click-unclipped', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const box = target ? intersectRect(target, originalBounds) : cropGestureRect(crop, originalBounds)', replace: 'const box = target ?? cropGestureRect(crop, originalBounds)', test: capture,
+      consumer: 'a click without travel selects the window under it, clipped to the frame, and claims it', failure: /the back window is clipped to the frame/ },
+    { label: 'window-hover-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    lightWindow(crop ? null : windowAt(spot))\n', replace: '', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /the front window lights first where both contain the pointer/ },
+    { label: 'window-hover-repaints-every-move', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (rect === (litWindowRef.current?.rect ?? null)) return\n', replace: '', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /moves that light no other window repaint nothing/ },
+    { label: 'window-fade-ignores-reduced-motion', source: component + 'ImageAnnotationEditor.tsx',
+      find: "since: ownerWindow.matchMedia('(prefers-reduced-motion: reduce)').matches ? -Infinity : null", replace: 'since: null', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /reduced motion shows the highlight whole/ },
+    { label: 'window-fade-never-finishes', source: component + 'ImageAnnotationEditor.tsx',
+      find: '        if (fading) schedulePaint()\n', replace: '', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /the fade asks for its next frame/ },
+    { label: 'window-fade-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    context.globalAlpha = 1 - (1 - progress) ** 2\n', replace: '', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /its first frame begins the fade/ },
+    { label: 'window-leave-keeps-highlight', source: component + 'ImageAnnotationEditor.tsx',
+      find: '() => { setHover(null); lightWindow(null) }', replace: '() => setHover(null)', test: capture,
+      consumer: 'lights the topmost window under the pointer before a selection, fading in over 90 ms', failure: /leaving the frame clears the highlight/ },
+    { label: 'overlay-windows-unwired', source: 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx',
+      find: ' windows={input.windows}', replace: '', test: capture,
+      consumer: 'the capture overlay hands its frozen windows to the editor, so a click there selects one', failure: /a click on a frozen window claims the selection/ }]
   },
   modeless: {
     tests: [modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
@@ -300,6 +369,7 @@ const inputs = [...tests, ...(slice === 'documents' ? [component + 'document.ts'
   'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/test/helpers/client-ui-render.tsx']),
   'apps/desktop/scripts/verify-image-annotation.mjs', owningConfig, 'apps/desktop/scripts/radix-overlay-aliases.ts',
   'apps/desktop/electron.vite.config.ts', 'vitest.config.ts', 'vitest.dist-freshness.ts']
+for (const mutation of specification.mutations) if (!inputs.includes(mutation.source)) inputs.push(mutation.source)
 for (const directory of directories) for (const name of await readdir(directory)) {
   const file = directory + '/' + name
   if (/\.(?:tsx?|css)$/.test(name) && !inputs.includes(file)) inputs.push(file)
