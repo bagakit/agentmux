@@ -856,6 +856,30 @@ it('draws activity newer than the minute map clock at the most recent step', asy
   } finally { vi.useRealTimers() }
 })
 
+it('locates in the current canvas before its resize observation arrives and preserves later manual framing', async () => {
+  const scene = scenario(3), id = [...scene.agents.keys()][0]!
+  await loaded(scene)
+  const node = captured.nodes.find(node => node.type === 'agent' && node.data.agent.id === id)!
+  const box = node.data.box as engine.CollaborationLayoutBox
+  const canvas = dom.container.querySelector<HTMLElement>('.collaboration-canvas')!
+  let currentHeight = 200
+  vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, left: 0, top: 0, width: 600, height: currentHeight, right: 600, bottom: currentHeight, toJSON: () => ({}) }))
+  const locate = { token: {}, agentId: id }
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, locate }))
+  await settleCollaborationCanvas(() => {
+    const transform = captured.store!.getState().transform
+    expect(transform[0]).toBeCloseTo(300 - box.x - box.width / 2)
+    expect(transform[1]).toBeCloseTo(100 - box.y - box.height / 2)
+    expect(transform[2]).toBe(1)
+  })
+  const framed = captured.store!.getState().transform
+  await viewport(framed[0], framed[1], 600, 200)
+  currentHeight = 360
+  await viewport(framed[0] + 37, framed[1] - 19, 600, 360)
+  await act(async () => new Promise(resolve => setTimeout(resolve, 35)))
+  expect(captured.store!.getState().transform).toEqual([framed[0] + 37, framed[1] - 19, 1])
+})
+
 it('queries only nearby geometry while panning summary demand and original routes', async () => {
   for (const count of [24, 96]) {
     const scene = scenario(count), visible = vi.fn()

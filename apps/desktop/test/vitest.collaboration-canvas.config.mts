@@ -13,6 +13,7 @@ const metadata = 'rebuilds only one exact offscreen Agent node for metadata with
 const motion = 'the formal motion control changes only original event presentation and resumes its elapsed phase'
 const adaptive = 'presents real adaptive membership with one geometry clock and reclaims a deleted interior while preserving the reader'
 export const collaborationCanvasMutations = [
+  { file: graph, name: 'locate-current-canvas-size', before: 'const bounds = canvas.current?.getBoundingClientRect()', after: 'const bounds = undefined', assertion: 'locates in the current canvas before its resize observation arrives and preserves later manual framing' },
   { file: 'lib/collaboration-map-lod.ts', name: 'distant-screen-density', before: 'return distant ? mix(4 / (diameter * zoom), scale, collaborationDistantFaceInk(zoom)) : scale', after: 'return scale', assertion: 'reveals older Executor faces from distant points without changing identity, layout or route contact' },
   { file: graph, name: 'distant-original-face', before: 'faceInk = glyph.distant ? collaborationDistantFaceInk(zoom) : 1', after: 'faceInk = 1', assertion: 'reveals older Executor faces from distant points without changing identity, layout or route contact' },
   { file: graph, name: 'distant-route-consumer', before: 'record.targetPointRadius, preferences, record.sourceDistant, record.targetDistant)', after: 'record.targetPointRadius, preferences)', assertion: 'reveals older Executor faces from distant points without changing identity, layout or route contact' },
