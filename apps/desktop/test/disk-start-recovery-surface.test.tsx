@@ -126,6 +126,20 @@ it('settles only on the original Core retry-stopped event, retaining the final u
   expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
 
+it('retains the latest storage cause, not the first, after the original retry stops', async () => {
+  await mount()
+  await receive(event('local', sid, 'ENOSPC: first storage cause.'))
+  await receive(event('local', sid, 'EDQUOT: latest storage cause.'))
+  const stopped = event()
+  if (stopped.event.type !== 'agent-error') throw new Error('Expected fixture diagnostic')
+  stopped.event.code = 'AGENT_CREATION_RESOURCE_RETRY_STOPPED'
+  stopped.event.message = 'Automatic creation retry ended. Original operation result is unknown.'
+  await receive(stopped)
+  const details = dom.container.querySelector('.session-connecting__diagnostic')
+  expect(details?.textContent).toContain('EDQUOT: latest storage cause.')
+  expect(details?.textContent).not.toContain('ENOSPC: first storage cause.')
+})
+
 function button(label: string) {
   const target = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === label)
   expect(target, `Button ${label}`).toBeDefined()
