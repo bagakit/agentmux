@@ -19,7 +19,7 @@
 import { SHORTCUT_BINDINGS, chordForPlatform, type Chord, type ShortcutBinding } from './shortcut-registry'
 
 /** A cheat-sheet group id, derived from (scope, gate). Not a new taxonomy — a projection of existing fields. */
-export type CheatSheetGroupId = 'system' | 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher' | 'message-tool'
+export type CheatSheetGroupId = 'system' | 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher' | 'message-tool' | 'browser'
 
 export interface CheatSheetRow {
   /** The registry binding id — the anchor that ties a rendered row back to its SSOT entry. */
@@ -52,6 +52,7 @@ export function groupIdForBinding(binding: ShortcutBinding): CheatSheetGroupId {
     case 'editor': return 'editor'
     case 'launcher': return 'launcher'
     case 'message-tool': return 'message-tool'
+    case 'browser': return 'browser'
     case 'window':
       // window scope splits on the gate: the two un-gated gestures are global (reach the user mid-typing);
       // everything else is a workbench action suppressed inside editable inputs.
@@ -77,7 +78,8 @@ export const CHEAT_SHEET_GROUPS: readonly { id: CheatSheetGroupId; title: string
   { id: 'launcher', title: 'Start page' },
   { id: 'message-tool', title: 'Message Tool' },
   { id: 'terminal', title: 'Terminal' },
-  { id: 'editor', title: 'Editor' }
+  { id: 'editor', title: 'Editor' },
+  { id: 'browser', title: 'Browser' }
 ]
 
 /** How a single key renders: arrows to glyphs, Enter and function keys spelled out, letters upper-cased, digits/symbols as-is. */

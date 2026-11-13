@@ -1,6 +1,7 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COMPOSER_KEYBOARD_BINDINGS } from '@agentmux/client-ui/composer-keyboard'
 import { SCREENSHOT_SHORTCUTS } from '../../../shared/screenshot-shortcut'
+import { BROWSER_PAGE_SHORTCUTS } from '../../../shared/browser-page-shortcuts'
 // Desktop's complete shortcut inventory: local bindings plus declarations owned by shared surfaces.
 // Chord, stable id, scope, and the platform bottom line are each expressed exactly once at their owner.
 // Before this, the same "which key is which action" decision was scattered
@@ -25,6 +26,7 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * - `editor`  — Monaco's own keybinding table while the editor owns focus.
  * - `launcher`— the start page's own keydown handler, live only while that surface has focus.
  * - `message-tool` — the shared Composer's editor and suggestion list; its own matcher dispatches these.
+ * - `browser` — a Browser surface's own keydown handler, live while focus is inside that surface's chrome.
  * A binding belongs to exactly one scope; that is the model, not one flat if over every key.
  *
  * **A scope is where a binding is evaluated, NOT a claim that it is alone there.** `window` is co-active
@@ -49,7 +51,7 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * shadows any future terminal/editor binding on the same chord. A scope keeps it reachable exactly where
  * it means something. `INNER_SCOPES` below is what makes the collision guard see it.
  */
-export const SHORTCUT_SCOPES = ['system', 'window', 'terminal', 'editor', 'launcher', 'message-tool'] as const
+export const SHORTCUT_SCOPES = ['system', 'window', 'terminal', 'editor', 'launcher', 'message-tool', 'browser'] as const
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number]
 
 /**
@@ -204,6 +206,10 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   // The shared Composer is the dispatch owner; Desktop only projects its declaration for discovery.
   ...COMPOSER_KEYBOARD_BINDINGS.map(({ chord, id, keyClass, label, description }): ShortcutBinding => ({
     id, keyClass, label, description, scope: 'message-tool', mac: chord, other: chord
+  })),
+  // The Browser surface's own handler; bare Ctrl off mac, as in every browser — no readline underneath.
+  ...BROWSER_PAGE_SHORTCUTS.map(({ id, label, chord }): ShortcutBinding => ({
+    id, label, scope: 'browser', keyClass: 'letter', mac: chord, other: chord
   })),
   // --- window: global navigation (fires even while typing) ---
   {

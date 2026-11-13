@@ -9,6 +9,10 @@ import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import { BrowserSourceNavigation } from './BrowserSourceNavigation'
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
 import { BrowserFindBar } from './BrowserFindBar'
+import { browserShortcutAction } from '../lib/browser-shortcuts'
+import type { BrowserPageShortcutAction } from '../../../shared/browser-page-shortcuts'
+import { isMacPlatform } from '../lib/host-platform'
+import { surfaceOwnsChord } from '../lib/surface-chord-owners'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
@@ -572,6 +576,15 @@ function BrowserPaneContent({
   // 一出现就预先勾着——用户扫一眼点 Open，等于替他记住了一件他没答应的事。
   useEffect(() => setRememberAppLink(false), [tab.appLinkPrompt?.scheme])
   const { restoring, restoreError, retryConnection, nativeLifecycleRef } = connection
+  const reloadPage = () => {
+    if (busy || released || restoring) return
+    if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId))
+  }
+  const runPageAction = (key: string, action: BrowserPageShortcutAction) => {
+    if (action === 'find') openFind(key)
+    else if (action === 'focus-address') addressInputs.current.get(key)?.current?.focus()
+    else reloadPage()
+  }
   const recoveryVisible = (visible || presentations.some(presentation => presentation.visible)) && Boolean(
     tab.error || released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null)
   const previewKey = JSON.stringify([tab.browserId, tab.profileId, tab.mode, tab.workspaceId, tab.navigationId])
@@ -1388,7 +1401,14 @@ function BrowserPaneContent({
         ) : null}
     </>
     return (
-    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`} ref={node => { if (node) traceAnchors.current.set(key, node); else traceAnchors.current.delete(key) }}>
+    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`} ref={node => { if (node) traceAnchors.current.set(key, node); else traceAnchors.current.delete(key) }}
+      onKeyDown={event => {
+        const nested = event.defaultPrevented || event.target instanceof Element && surfaceOwnsChord(event.target, event.nativeEvent)
+        const action = nested ? null : browserShortcutAction(event.nativeEvent, isMacPlatform())
+        if (!action) return
+        event.preventDefault()
+        runPageAction(key, action)
+      }}>
       <form
         className="browser-toolbar"
         onSubmit={(event) => {
@@ -1413,7 +1433,7 @@ function BrowserPaneContent({
         <button type="button" className="browser-toolbar__reload" aria-label={connectionUnavailable ? 'Retry browser connection' : 'Reload'}
           title={connectionUnavailable ? restoring ? 'Waiting for the original page connection' : 'Retry the original page connection' : 'Reload'}
           disabled={busy || released || restoring}
-          onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
+          onClick={reloadPage}>
           {tab.loading || busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>
         <label>

@@ -20,6 +20,7 @@ function scopeDescription(binding: ShortcutBinding): string {
     case 'editor': return 'Editor · when an editor has focus'
     case 'launcher': return 'Start page · in the prompt input'
     case 'message-tool': return 'Message Tool · in the message editor or its suggestion list'
+    case 'browser': return 'Browser · when a Browser page or its toolbar has focus'
   }
 }
 
