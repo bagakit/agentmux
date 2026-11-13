@@ -13,7 +13,7 @@ const WORK_ID = '22222222-2222-4222-8222-222222222222'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-// The exact file shape every existing install has on disk today: no revision, tint or notes.
+// The exact file shape every existing install has on disk today: no revision, hue or notes.
 const existingFile = JSON.stringify({
   version: 1,
   defaultProfileId: DEFAULT_ID,
@@ -41,22 +41,22 @@ describe('Browser Profile identity edits', () => {
     expect(first.profiles.map(p => [p.id, p.label, p.isDefault])).toEqual([[DEFAULT_ID, 'Default', true], [WORK_ID, 'Work', false]])
     expect(await readFile(path, 'utf8')).toBe(existingFile)
 
-    const renamed = await store.updateProfile(WORK_ID, { label: 'Northwind client', tint: '#82B3F2', notes: 'Launch QA' }, 0)
+    const renamed = await store.updateProfile(WORK_ID, { label: 'Northwind client', hue: 288, notes: 'Launch QA' }, 0)
     expect(renamed.revision).toBe(1)
-    expect(renamed.profile).toMatchObject({ id: WORK_ID, label: 'Northwind client', tint: '#82B3F2', notes: 'Launch QA', isDefault: false })
+    expect(renamed.profile).toMatchObject({ id: WORK_ID, label: 'Northwind client', hue: 288, notes: 'Launch QA', isDefault: false })
     expect(renamed.profile.source).toMatchObject({ importedCookies: 10 })
     expect(browserProfilePartition(WORK_ID)).toBe(`persist:agentmux-browser-profile:${WORK_ID}`)
 
     const reread = await new BrowserProfileStore(path).list()
     expect(reread.revision).toBe(1)
-    expect(reread.profiles.find(p => p.id === WORK_ID)).toMatchObject({ label: 'Northwind client', tint: '#82B3F2', notes: 'Launch QA' })
+    expect(reread.profiles.find(p => p.id === WORK_ID)).toMatchObject({ label: 'Northwind client', hue: 288, notes: 'Launch QA' })
   })
 
-  it('clears tint and notes explicitly and leaves untouched fields as they were', async () => {
+  it('clears the hue and notes explicitly and leaves untouched fields as they were', async () => {
     const { store } = await fixture()
-    await store.updateProfile(WORK_ID, { tint: '#8de3ae', notes: 'x' }, 0)
-    const cleared = await store.updateProfile(WORK_ID, { tint: null, notes: '' }, 1)
-    expect(cleared.profile).not.toHaveProperty('tint')
+    await store.updateProfile(WORK_ID, { hue: 300, notes: 'x' }, 0)
+    const cleared = await store.updateProfile(WORK_ID, { hue: null, notes: '' }, 1)
+    expect(cleared.profile).not.toHaveProperty('hue')
     expect(cleared.profile).not.toHaveProperty('notes')
     expect(cleared.profile.label).toBe('Work')
   })
@@ -71,9 +71,10 @@ describe('Browser Profile identity edits', () => {
     expect(await readFile(path, 'utf8')).toBe(before)
   })
 
-  it('rejects an invalid tint or label without writing', async () => {
+  it('rejects a status-colored hue or an invalid label without writing', async () => {
     const { path, store } = await fixture()
-    await expect(store.updateProfile(WORK_ID, { tint: 'blue' }, 0)).rejects.toThrow('#rrggbb')
+    await expect(store.updateProfile(WORK_ID, { hue: 143 }, 0)).rejects.toThrow('clear of status colors')
+    await expect(store.updateProfile(WORK_ID, { hue: 400 }, 0)).rejects.toBeInstanceOf(Error)
     await expect(store.updateProfile(WORK_ID, { label: ' padded ' }, 0)).rejects.toBeInstanceOf(Error)
     expect(await readFile(path, 'utf8')).toBe(existingFile)
   })
