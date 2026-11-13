@@ -117,7 +117,10 @@ async function capture(iteration: number) {
     overlays[0]!.webContents.debugger.attach('1.3')
     await overlays[0]!.webContents.executeJavaScript('document.querySelector("canvas").focus()')
     await overlays[0]!.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(error => { if (!overlays[0]!.isDestroyed()) throw error })
-  } else await overlays[0]!.webContents.executeJavaScript('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')
+  } else {
+    // Cancellation destroys this exact Renderer, so its JS response is not the operation receipt.
+    await Promise.race([outcome, overlays[0]!.webContents.executeJavaScript('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')])
+  }
   assert.deepEqual(await outcome, { state: 'cancelled' })
   assert.equal(host.getOpacity(), 0.65, 'both Esc and exact bridge cancellation restore original host opacity')
   assert.ok(overlays.every((window: BrowserWindow) => window.isDestroyed()), 'the capture releases all of its shells')
