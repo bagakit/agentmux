@@ -6,6 +6,8 @@ import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { AgentSettingsPane } from '../src/renderer/src/components/settings/AgentSettingsPane'
 import { HostProjectsPane } from '../src/renderer/src/components/settings/HostProjectsPane'
+import { executorEnvironmentRevision } from '../src/shared/executor-probe-context'
+import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore, executorDetectionKey } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -18,7 +20,7 @@ const config = { ...composerConfig, executors: {
 } }
 beforeEach(async () => {
   useAppStore.setState({ config, providerCatalog: await api.providers.list(), hostChecks: { local: { state: 'ready', detail: 'Ready' } },
-    detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}) })
+    executorDetections: {}, hostExecutorInventories: {}, detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}) })
 })
 async function fill(selector: string, value: string) {
   const node = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!
@@ -34,7 +36,7 @@ async function category(title: string) {
   expect(trigger).not.toBeNull()
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
   const choices = [...document.querySelectorAll<HTMLElement>('.settings-section-menu [role="menuitemradio"]')]
-  expect(choices.map(node => node.textContent)).toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
+  expect(choices.map(node => node.textContent)).toEqual(['Overview', ...settingsNavGroups('').flatMap(group => group.items.map(item => item.title))])
   const item = choices.find(node => node.textContent === title)!
   expect(item).not.toBeUndefined()
   await act(async () => item.click())
@@ -58,23 +60,27 @@ it('finds one of 51 Host projects by path, preserves folder drafts, and distingu
   expect(dom.container.querySelectorAll('.host-projects__list [data-registered-folder]')).toHaveLength(51)
 })
 
-it('keeps the same open editor, native focus, and draft when availability changes and filtering hides it', async () => {
+it('keeps the same open editor, native focus, and draft when availability changes and filtering narrows its library', async () => {
   await dom.render(<AgentSettingsPane config={config} onSave={async () => {}} executorId="reviewer" />)
-  const card = dom.container.querySelector<HTMLDetailsElement>('#executor-settings-reviewer')!
+  const card = dom.container.querySelector<HTMLElement>('#executor-settings-reviewer')!
   const name = card.querySelector<HTMLInputElement>('[data-executor-name]')!
-  expect(card.open).toBe(true)
+  expect(card.dataset.resourceEditor).toBe('reviewer')
   await fill('#executor-settings-reviewer [data-executor-name]', 'My reviewer')
   await act(async () => name.focus())
+  const input = { executorId: 'reviewer', providerId: config.executors.reviewer.providerId, command: config.executors.reviewer.command,
+    environmentRevision: executorEnvironmentRevision(config.executors.reviewer.env), host: config.hosts[0]! }
   await act(async () => useAppStore.setState({ executorDetections: {
-    [executorDetectionKey('local', 'reviewer')]: { state: 'ready', detail: 'Available' }
+    [executorDetectionKey('local', 'reviewer')]: { state: 'ready', input, result: { input, executable: input.command, availability: 'available' } }
   } }))
+  expect(card.querySelector('.check-pill')!.textContent).toBe('Available')
   expect(dom.container.querySelector('#executor-settings-reviewer')).toBe(card)
-  expect(card.open).toBe(true)
+  expect(card.dataset.resourceEditor).toBe('reviewer')
   expect(document.activeElement).toBe(name)
   expect(name.value).toBe('My reviewer')
   await fill('[aria-label="Filter executors"]', 'no-match')
-  expect(card.hidden).toBe(true)
-  expect(dom.container.querySelector('.settings-resource-empty[role="status"]')!.textContent).toContain('No executors match')
+  expect(card.hidden).toBe(false)
+  expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(0)
+  expect(dom.container.querySelector('[aria-label="Executors"] .settings-resource-empty[role="status"]')!.textContent).toContain('No executors match')
   await fill('[aria-label="Filter executors"]', 'REVIEWER')
   expect(card.hidden).toBe(false)
   expect(card.querySelector('[data-executor-name]')).toBe(name)
@@ -95,34 +101,34 @@ it('saves common edits without dropping closed launch configuration and keeps im
   await fill('#executor-settings-reviewer [data-executor-name]', 'Named review')
   await dom.click('.settings-pane-actions button')
   expect(save).toHaveBeenCalledExactlyOnceWith({ ...config.executors, reviewer: { ...config.executors.reviewer, label: 'Named review' } }, config.executors)
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Changes saved')
+  expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toContain('Changes saved')
 })
 
 it('creates a reachable focused editor, leaves existing IDs unchanged and allows Provider selection only for the new executor', async () => {
+  const existing = structuredClone(config.executors)
   await dom.render(<AgentSettingsPane config={config} onSave={async () => {}} />)
   await fill('[aria-label="Filter executors"]', 'not-found')
-  await dom.click('.settings-pane-toolbar button')
-  const added = dom.container.querySelector<HTMLDetailsElement>('#executor-settings-codex-2')!
-  expect(added).not.toBeNull()
-  expect(added.open).toBe(true)
-  expect(added.hidden).toBe(false)
-  const name = added.querySelector<HTMLInputElement>('[data-executor-name]')!
+  const add = [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(node => node.textContent?.trim() === 'Add executor')!
+  expect(add).toBeDefined(); await act(async () => add.click())
+  const added = () => dom.container.querySelector<HTMLElement>('[data-resource-editor]')!
+  expect(added().dataset.resourceEditor).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+  const name = added().querySelector<HTMLInputElement>('[data-executor-name]')!
   expect(document.activeElement).toBe(name)
   expect([name.selectionStart, name.selectionEnd]).toEqual([0, name.value.length])
   expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Filter executors"]')!.value).toBe('')
-  expect(added.querySelector('select:not([aria-label])')).not.toBeNull()
-  expect(dom.container.querySelectorAll('.agent-settings-card')).toHaveLength(3)
-  const provider = added.querySelector<HTMLSelectElement>('select:not([aria-label])')!
+  expect(added().querySelector('[data-executor-provider]')).not.toBeNull()
+  expect(dom.container.querySelectorAll('.agent-settings-card')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('[aria-label="Executors"] [data-resource-row]')).toHaveLength(Object.keys(existing).length + 1)
   const choose = async (value: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(provider, value)
-    provider.dispatchEvent(new Event('change', { bubbles: true }))
+    const provider = added().querySelector<HTMLSelectElement>('[data-executor-provider]')!
+    provider.value = value; provider.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await choose('claude')
-  const command = added.querySelector<HTMLInputElement>('.settings-launch-config__fields > label input')!
-  expect(command.value).toBe('claude')
-  await fill('#executor-settings-codex-2 .settings-launch-config__fields > label input', _hygiene_fixturePath("custom/claude"))
+  expect(added().querySelector<HTMLInputElement>('[aria-label="Executor executable"]')!.value).toBe('claude')
+  await fill('[data-resource-editor] [aria-label="Executor executable"]', _hygiene_fixturePath("custom/claude"))
   await choose('codex')
-  expect(command.value).toBe(_hygiene_fixturePath("custom/claude"))
+  expect(added().querySelector<HTMLInputElement>('[aria-label="Executor executable"]')!.value).toBe(_hygiene_fixturePath("custom/claude"))
+  expect(config.executors).toEqual(existing)
 })
 
 it('keeps edits and actionable failure feedback on a rejected save, then saves the same draft on retry', async () => {
@@ -142,9 +148,9 @@ it('uses the complete grouped category picker and preserves executor drafts when
   await fill('#executor-settings-reviewer [data-executor-name]', 'Preserved')
   await category('Browser')
   expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Browser')
-  await category('Agents')
+  await category('Agent CLIs')
   expect(dom.container.querySelector<HTMLInputElement>('#executor-settings-reviewer [data-executor-name]')!.value).toBe('Preserved')
-  expect(dom.container.querySelector<HTMLDetailsElement>('#executor-settings-reviewer')!.open).toBe(true)
+  expect(dom.container.querySelector<HTMLElement>('#executor-settings-reviewer')!.dataset.resourceEditor).toBe('reviewer')
 })
 
 it('dismisses the category menu before closing Settings and returns focus to its trigger', async () => {
@@ -171,7 +177,7 @@ it('changes explicit launch posture without splitting literal argv or trimming u
   await dom.render(<AgentSettingsPane config={special} onSave={save} executorId="reviewer" />)
   await dom.click('#executor-settings-reviewer .settings-launch-action button')
   expect(save).toHaveBeenCalledExactlyOnceWith({ reviewer: { ...special.executors.reviewer,
-    args: ['--model', 'review model', '--literal', 'a\'b"c', '', '--dangerously-bypass-approvals-and-sandbox']
+    args: ['--model', 'review model', '--literal', 'a\'b"c', '', '--sandbox', 'danger-full-access', '--ask-for-approval', 'never']
   } }, special.executors)
 })
 
@@ -181,7 +187,7 @@ it('appends an advanced argument without changing any existing literal argument'
   const save = vi.fn(async () => {})
   await dom.render(<AgentSettingsPane config={special} onSave={save} executorId="reviewer" />)
   await dom.click('#executor-settings-reviewer .settings-launch-config > summary')
-  const selector = '#executor-settings-reviewer .settings-launch-config textarea'
+  const selector = '#executor-settings-reviewer [aria-label="Executor arguments"]'
   const before = dom.container.querySelector<HTMLTextAreaElement>(selector)!.value
   expect(before).toContain("'gpt 5'")
   await fill(selector, `${before}\n--effort high`)
@@ -192,7 +198,7 @@ it('appends an advanced argument without changing any existing literal argument'
 it('keeps invalid quoted arguments as a draft and reports both save and explicit launch-action failures', async () => {
   const save = vi.fn(async () => {})
   await dom.render(<AgentSettingsPane config={config} onSave={save} executorId="reviewer" />)
-  const selector = '#executor-settings-reviewer .settings-launch-config textarea'
+  const selector = '#executor-settings-reviewer [aria-label="Executor arguments"]'
   await fill(selector, '--model "unfinished')
   await dom.click('.settings-pane-actions button')
   expect(save).not.toHaveBeenCalled()
