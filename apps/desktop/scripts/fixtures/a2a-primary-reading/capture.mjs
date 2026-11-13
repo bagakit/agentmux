@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -28,7 +28,8 @@ export async function capturePrimaryReading({ root, evidence, scene, metadata = 
   }
   try {
     await mkdir(evidence, { recursive: true })
-    for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) { const file = resolve(fixture, entry.name); bind(file, await readFile(file)) }
+    for (const file of [fileURLToPath(import.meta.url), resolve(desktop, 'scripts/candidate-package-resolve.mjs'),
+      resolve(desktop, 'scripts/probe-process.mjs'), resolve(fixture, 'index.html'), resolve(fixture, 'main.cjs')]) bind(file, await readFile(file))
     const alias = [candidateAlias(root, { browser: true, source: true, onManifest: bind })]
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
     const candidate = { name: 'actual-primary-reading-input', enforce: 'pre', async transform(_code, id) {

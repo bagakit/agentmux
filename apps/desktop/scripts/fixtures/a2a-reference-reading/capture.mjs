@@ -45,7 +45,9 @@ export async function captureA2aReferenceReading({ root, evidence, styleMutation
   capture.boundary = 'Current production ActivityView and SessionMailbox in a private Renderer. Original notice and message DTOs come from the actual journal and public Core Reader; Renderer IO, mailbox input leaves and clipboard writes are controlled. No installed App, model, user Session or system clipboard is operated. Public CLI and registered IPC are separately verified.'
   capture.inputs = Object.fromEntries(Object.entries(capture.inputs).map(([file, sha256]) => [file, { sha256 }]))
   for (const file of [test, 'apps/desktop/test/helpers/a2a-primary-reading-fixture.ts',
-    'apps/desktop/test/vitest.a2a-message-metadata.config.mts', 'apps/desktop/scripts/fixtures/a2a-primary-reading/capture.mjs'])
+    'apps/desktop/test/vitest.a2a-message-metadata.config.mts',
+    'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.scene.config.mts',
+    'apps/desktop/scripts/fixtures/a2a-reference-reading/capture.mjs'])
     capture.inputs[file] = { sha256: hash(await readFile(resolve(root, file))) }
   capture.frames = capture.render.frames.map(frame => ({ ...frame, path: resolve(evidence, frame.file) }))
   capture.scene = { file: relative(root, scene), sha256: hash(await readFile(scene)) }
