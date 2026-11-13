@@ -234,3 +234,6 @@ export * from './app-capture.js'
 export type { ConversationSnapshotInput, ConversationSnapshotReleaseInput, ConversationSnapshotPage, ConversationSnapshotReleaseResult } from './conversation-snapshot.js'
 
 export * from './agent-session-usage.js'
+
+export type { AgentMuxBrowserLifecycleIntent, AgentMuxBrowserLifecycleReceipt } from './browser-lifecycle.js'
+export { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'

@@ -1,3 +1,4 @@
+import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
@@ -12,11 +13,11 @@ import { browserPageMemory } from '../shared/browser-page-memory.js'
 import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
-import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
+import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
-import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
-import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
-import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
+import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
+import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
+import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
 
 import { BaseWindow, dialog, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -47,7 +48,7 @@ import type {
   BrowserPresentationViewportPoint, BrowserPresentationMouseModifier
 } from '../shared/contracts.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
-import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
+import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
 import { resolveBrowserAddress } from '../shared/browser-address.js'
@@ -62,8 +63,8 @@ import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
-import { installBrowserPageInterrupts, describeBrowserPageDialog, BROWSER_PAGE_DIALOG_ANSWERS, BROWSER_PAGE_MAIN_READS, type BrowserPageInterrupts } from './browser-page-interrupts.js'
-import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from './browser-step-effects.js'
+import { installBrowserPageInterrupts, describeBrowserPageDialog, isBrowserPageDialogAnswer, BROWSER_PAGE_DIALOG_ANSWERS, BROWSER_PAGE_MAIN_READS, type BrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
+import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from '@agentmux/browser/browser-step-effects'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
@@ -71,28 +72,28 @@ import { BrowserSitePermissions, browserPermissionOrigin, type BrowserPermission
 import type { BrowserSitePermission, BrowserSitePermissionAnswer, BrowserSitePermissionDecision, BrowserSitePermissionState } from '../shared/browser-site-permissions.js'
 import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels } from './browser-image.js'
-import { createBrowserPageDispatch } from './browser-page-dispatch.js'
-import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
-import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from './browser-operation-step.js'
-import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
+import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from '@agentmux/browser/browser-operation-step'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import {
   appLinkOutcome,
   appLinkRefusedMessage,
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
-import { runBrowserScript } from './browser-script-runner.js'
+import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
 import { buildReplayScript } from './browser-replay-compiler.js'
-import { captureBrowserPageSnapshot, type BrowserCdpSender } from './browser-page-snapshot.js'
+import { captureBrowserPageSnapshot, type BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
-import type { BrowserOperationJournal } from './browser-operation-journal.js'
-import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
-import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
+import type { BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from '@agentmux/browser/browser-step-evidence'
+import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
-import { BrowserResultArtifactStore } from './browser-result-artifact.js'
-import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtifactChunk } from '../shared/browser-result-artifact.js'
-import type { BrowserStructuredOutputReceipt } from '../shared/browser-structured-output.js'
-import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
+import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
+import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtifactChunk } from '@agentmux/browser/model/browser-result-artifact'
+import type { BrowserStructuredOutputReceipt } from '@agentmux/browser/model/browser-structured-output'
+import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import { BrowserDemonstrationInterpreter } from './browser-demonstration-interpretation.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
@@ -103,7 +104,7 @@ import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js
 import { runBrowserTaskBatch, type BrowserTaskRunBudget } from './browser-task-batch.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { recoverBrowserTaskStep, runBrowserTaskNavigation } from './browser-local-recovery.js'
-import { sanitizeBrowserElementSelection } from './browser-selection.js'
+import { sanitizeBrowserElementSelection } from '@agentmux/browser/browser-selection'
 import {
   BROWSER_SELECTION_WORLD_ID,
   buildBrowserAnnotationMarkerScript,
@@ -111,7 +112,7 @@ import {
   buildBrowserElementSelectionScript,
   buildSelectedBrowserElementExpression,
   buildCancelBrowserElementSelectionScript
-} from './browser-selection-script.js'
+} from '@agentmux/browser/browser-selection-script'
 
 type BrowserStorage =
   | { mode: 'normal'; profileId: string; partition: string }
@@ -3629,13 +3630,13 @@ export class BrowserViewManager {
       ...(interrupts ? { interrupts } : {}),
       inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
       ...(Number.isFinite(deadlineMillis) ? { remainingMillis: () => deadlineMillis - performance.now() } : {}),
-      ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
+      ...(this.downloads && signal ? { downloads: browserDownloadPort({ store: this.downloads, signal, context: () => {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before download.')
         return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
           navigationId: entry.navigationId, url: view.webContents.getURL(), contents: view.webContents }
-      } } } : {}),
-      ...(this.uploads ? { uploads: { store: this.uploads, context: () => {
+      } }) } : {}),
+      ...(this.uploads ? { uploads: browserUploadPort({ store: this.uploads, context: () => {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before upload.')
         return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
@@ -3645,7 +3646,7 @@ export class BrowserViewManager {
             if (signal?.aborted) throw new Error('This Browser operation stopped before file assignment could be confirmed.')
             return entry.navigationId
           } }
-      } } } : {}),
+      } }) } : {}),
       structuredOutput: {
         source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,
           operationId: operation.id, navigationId: entry.navigationId } },
@@ -3764,7 +3765,7 @@ export class BrowserViewManager {
               beforeAction(step)
             } } : {}) })
           // An answer is not raced: the page may open its next dialog before the answer's reply arrives.
-          value = interrupts && !BROWSER_PAGE_DIALOG_ANSWERS.has(name) && !BROWSER_PAGE_MAIN_READS.has(name)
+          value = interrupts && !isBrowserPageDialogAnswer(name, args) && !BROWSER_PAGE_MAIN_READS.has(name)
             ? await interrupts.race(call, () => changesPage) : await call()
           if (action !== undefined) await feedback?.completeAction(action)
         }

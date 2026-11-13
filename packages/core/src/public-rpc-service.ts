@@ -174,6 +174,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client' | 'externalAuthor'>>
 export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'execute'> & {
+  /** Exact capabilities composed by a specialized host; absence preserves the normal complete service. */
+  exposedMethods?: ReadonlySet<AgentMuxRpcMethod>
   execute?(request: AgentMuxControlRequest, nameContext?: AgentMuxNameContext,
     originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult>
   /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
@@ -738,8 +740,12 @@ export class AgentMuxRpcService {
     return parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: mintObjectId(), operation, ...body })
   }
+  private assertExposed(method: AgentMuxRpcMethod): void {
+    if (this.ports.exposedMethods && !this.ports.exposedMethods.has(method)) throw new AgentMuxError('This endpoint has no composed owner for this capability. Its other original capabilities remain available.', 'HOST_CAPABILITY_UNAVAILABLE')
+  }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    this.assertExposed(method)
     if (method === 'app.mobile.report') {
       const input = parseMobileWebReportParams(params)
       const caller = await this.authenticated(context)
@@ -2277,7 +2283,7 @@ export class AgentMuxRpcService {
         result = resolveSpatialRegion(state.graph,{tabId,regionId,direction:p.direction as import('./spatial-layout.js').SplitDirection}); break
       }
       case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines', connection: 'responded',
-        endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() }, publication: this.ports.endpointPublication?.() ?? null }; break
+        endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() }, publication: this.ports.endpointPublication?.() ?? null, ...(this.ports.exposedMethods ? { methods: [...this.ports.exposedMethods] } : {}) }; break
       case 'system.storage': {
         const hostId = rpcString(p.hostId, 'Host ID'), runId = rpcString(p.runId, 'Run ID')
         const owner = (await this.clients()).find(entry => entry.hostId === hostId)
@@ -3745,6 +3751,7 @@ export class AgentMuxRpcService {
 
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     onEvent: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcServiceSubscription<M>> {
+    this.assertExposed(method)
     if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.subscribe(method, hosted.params, onEvent as (event: import('./hosted-client-contract.js').AgentMuxHostedStreamEvent) => void | Promise<void>,

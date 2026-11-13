@@ -576,6 +576,12 @@ export type AgentMuxControlDemandActivityReadRequest = RequestBase & { operation
  */
 export type AgentMuxControlBrowserRestoreRequest = RequestBase & { operation: 'browser.restore'; browserId: string }
 export type AgentMuxControlBrowserReleaseRequest = RequestBase & { operation: 'browser.release'; browserId: string; navigationId: string }
+export type AgentMuxControlBrowserCreateRequest = RequestBase & {
+  operation: 'browser.create'; operationId: string; url: string; caller?: AgentMuxControlCaller
+}
+export type AgentMuxControlBrowserCloseRequest = RequestBase & {
+  operation: 'browser.close'; operationId: string; browserId: string; navigationId: string; caller?: AgentMuxControlCaller
+}
 export type AgentMuxControlBrowserTargetsRequest = RequestBase & { operation: 'browser.targets'; workspaceId?: string }
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'
@@ -750,6 +756,8 @@ export type AgentMuxControlRequest =
   | AgentMuxControlBrowserRunRequest
   | AgentMuxControlBrowserRestoreRequest
   | AgentMuxControlBrowserReleaseRequest
+  | AgentMuxControlBrowserCreateRequest
+  | AgentMuxControlBrowserCloseRequest
   | AgentMuxControlBrowserTargetsRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -783,6 +791,8 @@ export type AgentMuxControlBrowserRunOutcome =
 /** Stable operation facts returned with a Browser run receipt. The detailed step
  * vocabulary is intentionally opaque to Core; Desktop owns Browser semantics. */
 export type AgentMuxControlBrowserOperation = {
+  lifecycleIntent?: import('./browser-lifecycle.js').AgentMuxBrowserLifecycleIntent
+  lifecycleReceipt?: import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt
   id: string
   browserId: string
   operator: { id: string; name: string; providerId?: string }
@@ -889,6 +899,8 @@ export type AgentMuxControlResult =
       // 收窄全部失效。receipt 侧改名，wire 侧的字段名不动（那是协议，见 control-host 的读取点）。
       runOperation: AgentMuxControlBrowserOperation
     }
+  | { operation: 'browser.create'; receipt: import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt; target?: AgentMuxBrowserTarget }
+  | { operation: 'browser.close'; receipt: import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt }
   | { operation: 'browser.restore'; target: AgentMuxBrowserTarget }
   | { operation: 'browser.release'; receipt: AgentMuxBrowserReleaseReceipt }
   | ({ operation: 'browser.targets' } & AgentMuxBrowserTargetsResult)
@@ -1168,6 +1180,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 而掐死的表现是 CONTROL_TIMEOUT，看起来像页面出了事。子进程自己还有一道更紧的超时兜底（脚本执行器
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
+  'browser.create': 'long',
+  'browser.close': 'long',
   'browser.restore': 'long',
   'browser.release': 'long',
   'browser.targets': 'short',

@@ -2,6 +2,7 @@ import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordD
 import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
 import { readingProjection, sameReadingPosition, type FileViewReadingBinding, type FileViewReadingProjection, type FileViewReadings } from './lib/file-view-reading'
 import { encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, type FileViewReadingOwner } from '../../shared/workbench-user-state'
+import { isStandaloneBrowserObjectRequest, unsupportedDesktopBrowserObject } from '../../shared/browser-object-host-policy.js'
 import type { AgentOperationReferences } from './lib/agent-operation'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput } from '../../shared/browser-task-creation'
 import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
@@ -6365,6 +6366,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal, options): Promise<AgentMuxControlResult> {
+    if (isStandaloneBrowserObjectRequest(request)) throw unsupportedDesktopBrowserObject()
     if (request.operation === 'demand.patrol-all') return await executeGlobalGoalPatrol({
       get, execute: inner => api.goals.execute(inner)
     }, request)

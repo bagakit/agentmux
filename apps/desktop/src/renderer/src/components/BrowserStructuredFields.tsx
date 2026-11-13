@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BROWSER_RESULT_MAX_READ_BYTES, type BrowserResultArtifactChunk, type BrowserResultArtifactReference,
-  type BrowserResultReadOptions } from '../../../shared/browser-result-artifact'
-import type { BrowserStructuredFieldSummary, BrowserStructuredOutputReceipt } from '../../../shared/browser-structured-output'
+  type BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
+import type { BrowserStructuredFieldSummary, BrowserStructuredOutputReceipt } from '@agentmux/browser/model/browser-structured-output'
 
 export type BrowserStructuredResultReader = (reference: BrowserResultArtifactReference, options: BrowserResultReadOptions) => Promise<BrowserResultArtifactChunk>
 type RawRead = { key: string; text: string; offset: number; returnedBytes: number; nextOffset: number | null; error?: string }

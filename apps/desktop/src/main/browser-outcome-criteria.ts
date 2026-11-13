@@ -1,13 +1,13 @@
-import type { BrowserOperation } from '../shared/browser-operation.js'
-import type { BrowserStepEvidenceRead } from '../shared/browser-step-evidence.js'
+import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import { BROWSER_RESULT_MAX_READ_BYTES, type BrowserResultArtifactChunk, type BrowserResultArtifactReference,
-  type BrowserResultReadOptions } from '../shared/browser-result-artifact.js'
-import type { BrowserDownloadChunk, BrowserDownloadReadOptions, BrowserDownloadReceipt, BrowserDownloadReference } from '../shared/browser-download.js'
-import type { BrowserStructuredSource } from '../shared/browser-structured-output.js'
+  type BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
+import type { BrowserDownloadChunk, BrowserDownloadReadOptions, BrowserDownloadReceipt, BrowserDownloadReference } from '@agentmux/browser/model/browser-download'
+import type { BrowserStructuredSource } from '@agentmux/browser/model/browser-structured-output'
 import { BROWSER_OUTCOME_LIMITS, parseBrowserOutcomeCriteriaRequest,
   type BrowserOutcomeAssetRun, type BrowserOutcomeConditionResult, type BrowserOutcomeEvaluation, type BrowserOutcomeHumanFact,
-  type BrowserOutcomeRegistration, type BrowserRegisteredOutcomeCriterion } from '../shared/browser-outcome-criteria.js'
-import { parseBrowserStructuredOutputDocument, parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
+  type BrowserOutcomeRegistration, type BrowserRegisteredOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
+import { parseBrowserStructuredOutputDocument, parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
 
 export type BrowserOutcomeCurrent = {
   workspaceId: string | null; browserId: string; navigationId: string

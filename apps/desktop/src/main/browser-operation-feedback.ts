@@ -1,7 +1,7 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
-import type { BrowserCdpSender } from './browser-page-snapshot.js'
+import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
 import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 export { BROWSER_OPERATION_FEEDBACK_WORLD_NAME }

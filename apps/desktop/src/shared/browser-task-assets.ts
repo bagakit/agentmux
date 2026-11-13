@@ -1,6 +1,6 @@
-import type { BrowserReplayTarget } from './browser-operation.js'
-import type { BrowserOutcomeHumanFact } from './browser-outcome-criteria.js'
 import type { BrowserTaskCreateInput } from './browser-task-creation.js'
+import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOutcomeHumanFact } from '@agentmux/browser/model/browser-outcome-criteria'
 
 export type BrowserTaskHumanCheckpoint = BrowserOutcomeHumanFact & { pendingCursor: number }
 export type BrowserTaskRunIdentity = { runId: string; browserId: string; assetId: string; version: number }

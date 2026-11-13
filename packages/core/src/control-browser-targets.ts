@@ -19,7 +19,7 @@ function parseBrowserCertificateRequest(value: unknown): AgentMuxBrowserCertific
     issuer: text(row.issuer, 65536, true), validFrom: text(row.validFrom, 200), validTo: text(row.validTo, 200), scope: 'profile-connections' }
 }
 
-const sources = new Set(['embedded', 'external'])
+const sources = new Set(['embedded', 'external', 'standalone'])
 const statuses = new Set(['ready', 'disconnected', 'revoked', 'closed', 'unavailable'])
 const capabilities = new Set(BROWSER_PAGE_CAPABILITY_NAMES)
 function text(value: unknown, limit: number, empty = false): string {
@@ -90,9 +90,9 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (!sources.has(String(row.source)) || !statuses.has(String(row.status))) throw new AgentMuxError('Browser target identity or status is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (!Array.isArray(row.capabilities) || row.capabilities.length > capabilities.size || row.capabilities.some(item => typeof item !== 'string' || !capabilities.has(item))) throw new AgentMuxError('Browser target capabilities are invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (row.cdpMethods !== undefined && (!Array.isArray(row.cdpMethods) || row.cdpMethods.length > 128 || row.cdpMethods.some(item => typeof item !== 'string' || !/^[A-Z][A-Za-z]+\.[A-Za-z]+$/.test(item)))) throw new AgentMuxError('Browser target CDP subset is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  const workspaceId = row.source === 'embedded' && row.workspaceId === null ? null : text(row.workspaceId, 200)
+  const workspaceId = row.source !== 'external' && row.workspaceId === null ? null : text(row.workspaceId, 200)
   if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.navigationId === undefined && (row.source === 'external' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
   if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
   const profile = row.profile === undefined ? undefined : parseBrowserProfileRef(row.profile)
   if (profile && (row.source !== 'embedded' || row.mode === 'private')) throw new AgentMuxError('Only a normal embedded Browser has a Profile.', 'CONTROL_PROTOCOL_ERROR')

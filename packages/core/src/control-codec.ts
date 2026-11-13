@@ -1,3 +1,4 @@
+import { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
 import { parseResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { parseAgentStopReceipt } from './agent-stop-receipt.js'
 import { parseRendererAllocationsInput, parseRendererAllocationsResult } from './renderer-allocations.js'
@@ -684,6 +685,21 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     } as AgentMuxControlRequest
   }
   if (source.operation === 'focus') return parseDesktopFocusRequest(source)
+  if (source.operation === 'browser.create' || source.operation === 'browser.close') {
+    const create = source.operation === 'browser.create'
+    settingsFields(source, ['schemaVersion','requestId','operation','operationId','caller', ...(create ? ['url'] : ['browserId','navigationId'])], 'INVALID_CONTROL_REQUEST')
+    const owner = optionalCaller(source.caller)
+    const common = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
+      operationId: identity(source.operationId, 'Browser lifecycle requires its original operation identity.', 'INVALID_CONTROL_REQUEST'), ...(owner ? { caller: owner } : {}) }
+    if (create) {
+      const url = text(source.url, 'Browser URL is invalid.', 'INVALID_CONTROL_REQUEST')
+      try { if (!['http:', 'https:', 'about:'].includes(new URL(url).protocol)) throw new Error() }
+      catch { throw new AgentMuxError('Browser create requires an HTTP(S) or about URL.', 'INVALID_CONTROL_REQUEST') }
+      return { ...common, operation: 'browser.create', url }
+    }
+    return { ...common, operation: 'browser.close', browserId: identity(source.browserId, 'Browser identity is invalid.', 'INVALID_CONTROL_REQUEST'),
+      navigationId: identity(source.navigationId, 'Browser document identity is invalid.', 'INVALID_CONTROL_REQUEST') }
+  }
   if (source.operation === 'browser.restore') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, browserId: id(source.browserId, 'Browser identity is invalid.', 'INVALID_CONTROL_REQUEST') }
   if (source.operation === 'browser.release') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
@@ -1595,6 +1611,14 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), activities: result.activities.map(parseControlDemandActivity), diskDurability: 'confirmed' } }
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
+  if (operation === 'browser.create' || operation === 'browser.close') {
+    const receipt = parseBrowserLifecycleReceipt(result.receipt)
+    if (receipt.intent.kind !== (operation === 'browser.create' ? 'create' : 'close')) throw new AgentMuxError('Browser lifecycle receipt belongs to another intent.', 'CONTROL_PROTOCOL_ERROR')
+    if (operation === 'browser.close') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt } }
+    const target = result.target === undefined ? undefined : parseBrowserTarget(result.target)
+    if (target && target.id !== receipt.browserId || receipt.status === 'created' && (!target || target.status !== 'ready')) throw new AgentMuxError('Browser creation has no original target confirmation.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt, ...(target ? { target } : {}) } }
+  }
   if (operation === 'browser.release') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     ok: true, operation, result: { receipt: parseBrowserReleaseReceipt(result.receipt) } }
   if (operation === 'browser.restore') {
@@ -1715,6 +1739,10 @@ function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
     try { completion = parseBrowserCompletionFacts(source.completion, { operationId, browserId }) }
     catch { completionWarning = BROWSER_COMPLETION_UNAVAILABLE_WARNING }
   }
+  const lifecycleIntent = source.lifecycleIntent === undefined ? undefined : parseBrowserLifecycleIntent(source.lifecycleIntent)
+  const lifecycleReceipt = source.lifecycleReceipt === undefined ? undefined : parseBrowserLifecycleReceipt(source.lifecycleReceipt)
+  if (lifecycleReceipt && (lifecycleReceipt.operationId !== operationId || lifecycleReceipt.browserId !== browserId || !lifecycleIntent ||
+      JSON.stringify(lifecycleIntent) !== JSON.stringify(lifecycleReceipt.intent))) throw new AgentMuxError('Browser lifecycle receipt belongs to another original operation or intent.', 'CONTROL_PROTOCOL_ERROR')
   const warning = [source.warning === undefined ? undefined : text(source.warning, 'Control browser operation warning is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     completionWarning].filter(Boolean).join(' ')
   return {
@@ -1731,6 +1759,8 @@ function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
     summary: text(source.summary, 'Control browser operation summary is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     url: text(source.url, 'Control browser operation url is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     steps: source.steps,
+    ...(lifecycleIntent ? { lifecycleIntent } : {}),
+    ...(lifecycleReceipt ? { lifecycleReceipt } : {}),
     ...(source.replayOf === undefined ? {} : { replayOf: identity(source.replayOf, 'Control browser operation replay id is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
     ...(completion ? { completion } : {}),
     ...(source.control === undefined ? {} : { control: parseBrowserControl(source.control) }),

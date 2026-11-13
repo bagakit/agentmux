@@ -1,5 +1,5 @@
-import type { BrowserOperation } from './browser-operation.js'
-import type { BrowserOutcomeAssetRun, BrowserOutcomeCriterion, BrowserRegisteredOutcomeCriterion } from './browser-outcome-criteria.js'
+import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOutcomeAssetRun, BrowserOutcomeCriterion, BrowserRegisteredOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
 import type { BrowserTaskAssetRun, BrowserTaskAssetState, BrowserTaskVersion } from './browser-task-assets.js'
 import { browserTaskNextIndex } from './browser-task-path.js'
 

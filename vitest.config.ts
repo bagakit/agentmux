@@ -60,6 +60,7 @@ function nestedWorktreeGlobs(): string[] {
 }
 
 export default defineConfig({
+  resolve: { alias: { '@agentmux/browser': join(import.meta.dirname, 'packages/browser/src') } },
   /**
    * `__AGENTMUX_WEB_PREVIEW__` 是 vite 的构建期常量（`apps/desktop/electron.vite.config.ts:22`
    * 注入 `'false'`），`lib/api.ts` 在**模块作用域**读它来决定走 mock 还是 desktop 桥。plain

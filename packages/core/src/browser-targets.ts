@@ -43,7 +43,7 @@ export type AgentMuxBrowserProfileRef = { id: string; label: string }
 export type AgentMuxBrowserTarget = {
   id: string
   workspaceId: string | null
-  source: 'embedded' | 'external'
+  source: 'embedded' | 'external' | 'standalone'
   /** Only present when the original page owner knows its storage mode. */
   mode?: AgentMuxBrowserMode
   /** A normal embedded page's Profile; absent for private pages, Capsules, external tabs and unknown ownership. */

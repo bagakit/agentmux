@@ -1,22 +1,9 @@
 import type { BrowserTaskStep, BrowserTaskStepExecution } from '../shared/browser-task-assets.js'
-import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
-import type { BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
+import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
 
-/**
- * What Main refused or could not confirm. Only locator-changed and navigation-failed can earn a
- * bounded local retry; every other kind, and every error that is not this one, has none.
- */
-export type BrowserRecoveryFailureKind = 'locator-changed' | 'navigation-failed' | 'cdp-scope' | 'page-dialog'
-
-/** Only Main creates this error. Script/page error text never grants retry authority. */
-export class BrowserLocalRecoveryFailure extends Error {
-  readonly fact: Readonly<{ kind: BrowserRecoveryFailureKind; effects: 'not-dispatched' | 'unknown' }>
-  constructor(message: string, kind: BrowserRecoveryFailureKind, effects: 'not-dispatched' | 'unknown') {
-    super(message)
-    this.name = 'BrowserLocalRecoveryFailure'
-    this.fact = Object.freeze({ kind, effects })
-  }
-}
+import { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/browser-recovery-failure'
+export { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/browser-recovery-failure'
 
 /** A rejected navigation may already have sent requests or changed the document. Never resend it. */
 export async function runBrowserTaskNavigation(load: () => Promise<unknown>): Promise<void> {

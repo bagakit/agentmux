@@ -38,6 +38,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@agentmux/browser':
+        specifier: workspace:*
+        version: link:../../packages/browser
       '@agentmux/capsule':
         specifier: workspace:*
         version: link:../../packages/capsule
@@ -401,6 +404,31 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/browser:
+    dependencies:
+      '@agentmux/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agentmux/native-desktop':
+        specifier: workspace:*
+        version: link:../native-desktop
+      fs-native-extensions:
+        specifier: 1.5.1
+        version: 1.5.1
+      puppeteer-core:
+        specifier: 25.16.0
+        version: 25.16.0(yauzl@2.10.0)
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/capsule:
     dependencies:

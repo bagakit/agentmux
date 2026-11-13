@@ -55,7 +55,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view', 'file.format': 'file.format', 'file.build': 'file.build', 'file.build.inspect': 'file.build.inspect', 'file.build.cancel': 'file.build.cancel',
   'terminal.open': 'open.terminal', 'browser.open': 'open.browser',
   'git.open': 'open.git',
-  'browser.release': 'browser.release', 'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
+  'browser.create': 'browser.create', 'browser.close': 'browser.close', 'browser.release': 'browser.release', 'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation',
   'browser.profile.ls': 'browser.profile.ls', 'browser.profile.inspect': 'browser.profile.inspect',
   'browser.profile.folder.create': 'browser.profile.folder.create', 'browser.profile.folder.rename': 'browser.profile.folder.rename', 'browser.profile.folder.delete': 'browser.profile.folder.delete',
@@ -454,7 +454,7 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
   'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
-  'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null }
+  'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null; methods?: AgentMuxRpcMethod[] }
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams

@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../shared/browser-task-creation.js'
 import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, durableWriteFile } from '@agentmux/core'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
-import type { BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-operation.js'
+import type { BrowserReplayStep, BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
 import type { BrowserScriptRunReport } from '../shared/contracts.js'
 import type {
   BrowserTaskAsset, BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskAssetRunInput,
@@ -17,7 +17,7 @@ import type {
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 import { compileBrowserTaskCheck } from './browser-task-check.js'
-import { parseBrowserOutcomeCriteriaRequest } from '../shared/browser-outcome-criteria.js'
+import { parseBrowserOutcomeCriteriaRequest } from '@agentmux/browser/model/browser-outcome-criteria'
 import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS, BROWSER_TASK_MAX_RETRIES, BROWSER_TASK_WAIT_MAX_MILLIS } from '../shared/browser-task-path.js'
 import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from './browser-task-branch.js'
 import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROWSER_TASK_BATCH_MAX_MILLIS, BROWSER_TASK_BATCH_MAX_BYTES, type BrowserTaskBatchHost, type BrowserTaskRunBudget } from './browser-task-batch.js'

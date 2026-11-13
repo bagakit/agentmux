@@ -109,7 +109,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (operation !== 'browser.restore' && operation !== 'browser.release' && !isBrowserProfileControlOperation(operation) && operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
-    'browser.stop', 'agent.open', 'demand.patrol-all', 'browser.task.run', 'browser.task.batch'].includes(operation)
+    'browser.stop', 'browser.create', 'browser.close', 'agent.open', 'demand.patrol-all', 'browser.task.run', 'browser.task.batch'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
   const parsed = parseAgentMuxControlRequest(input)
@@ -234,6 +234,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
           (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
       if (request.operation === 'message.pending.send' && actual.pendingId !== request.pendingId) fail()
       break
+    case 'browser.create': case 'browser.close': {
+      const receipt = actual.receipt as import('./browser-lifecycle.js').AgentMuxBrowserLifecycleReceipt
+      if (receipt?.operationId !== request.operationId || receipt.intent.kind !== (request.operation === 'browser.create' ? 'create' : 'close')) fail()
+      if (request.operation === 'browser.close' && (receipt.browserId !== request.browserId || receipt.intent.kind !== 'close' || receipt.intent.navigationId !== request.navigationId)) fail()
+      break
+    }
     case 'browser.restore':
       if ((actual.target as { id?: string })?.id !== request.browserId) fail()
       break
@@ -417,7 +423,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
   // Maintenance receipts already own operationId; it is not a Control requestId.
-  const legacy = method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
+  const legacy = method === 'browser.create' || method === 'browser.close' || method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
     : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business

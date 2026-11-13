@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useId, useState, type MouseEvent } from 'react'
-import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '../../../shared/browser-outcome-criteria'
+import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '@agentmux/browser/model/browser-outcome-criteria'
 
 type Props = {
   evaluation?: BrowserOutcomeEvaluation | null

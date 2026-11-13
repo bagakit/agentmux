@@ -1,6 +1,6 @@
 import type { WebContents } from 'electron'
-import type { BrowserCdpSender } from './browser-page-snapshot.js'
-import type { BrowserPageTransport } from './browser-page-transport.js'
+import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
 
 /**
  * 一次驱动期间的 CDP 会话：attach、拿到每个 frame 的 sender、用完 detach。

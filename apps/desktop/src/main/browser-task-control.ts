@@ -1,6 +1,6 @@
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
 import type { AgentMuxBrowserTaskSource, BrowserTaskCreateInput, BrowserTaskCreateStatus } from '@agentmux/core/control'
-import type { BrowserOperation } from '../shared/browser-operation.js'
+import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 

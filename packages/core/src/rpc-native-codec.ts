@@ -101,7 +101,7 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { assertDispatchEventKind, assertDispatchMessage } from './agent-handoff.js'
 import { isAgentDeliveryState } from './agent-message.js'
 import { parseRpcControlResult, rpcRecord } from './rpc-business-codec.js'
-import type { AgentMuxRpcCredentials, AgentMuxRpcMethod } from './public-rpc.js'
+import { isAgentMuxRpcMethod, type AgentMuxRpcCredentials, type AgentMuxRpcMethod } from './public-rpc.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult } from './public-rpc-device.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult } from './public-rpc-host-settings.js'
 
@@ -1136,7 +1136,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         array(p.locations,item => { const l = record(item); if (l.tabId !== record(params).tabId || !p.region || l.regionId !== record(p.region).regionId) fail() })
         break
       }
-      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection', 'publication']); if (p.publication !== null) parseControlEndpointState(p.publication); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
+      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection', 'publication', 'methods']); if (p.methods !== undefined && (!Array.isArray(p.methods) || p.methods.some(method => !isAgentMuxRpcMethod(method)) || new Set(p.methods).size !== p.methods.length)) fail(); if (p.publication !== null) parseControlEndpointState(p.publication); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'tailcat', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) }
         else if (endpoint.transport === 'tailcat') { string(endpoint.address); string(endpoint.keyFile) }
         else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }

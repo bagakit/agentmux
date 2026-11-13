@@ -1,5 +1,5 @@
-import type { BrowserPageTransport } from './browser-page-transport.js'
-import type { BrowserCdpSender } from './browser-page-snapshot.js'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import { ExternalBrowserRequestFailure, type ExternalBrowserBridge, type ExternalBrowserBinding,
   type ExternalBrowserConnection, type ExternalBrowserOperationOwner, type ExternalBrowserEvent } from './browser-external-bridge.js'
 import { EXTERNAL_AUTO_ATTACH } from '../../browser-extension/protocol.js'

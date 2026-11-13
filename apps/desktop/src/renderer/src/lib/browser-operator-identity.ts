@@ -1,5 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { BrowserOperator } from '../../../shared/browser-operation'
+import type { BrowserOperator } from '@agentmux/browser/model/browser-operation'
 import { agentSessionPresentationIndex } from './session-presentation'
 
 /** No Host is implied by the focused page or by a Browser's execution location. */

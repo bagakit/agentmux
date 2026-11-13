@@ -1,0 +1,41 @@
+{
+  "name": "@agentmux/browser",
+  "version": "0.1.0",
+  "description": "Host-owned Browser kernel and standalone CDP host",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agentmux/core": "workspace:*",
+    "@agentmux/native-desktop": "workspace:*",
+    "puppeteer-core": "25.16.0",
+    "zod": "^4.0.0",
+    "fs-native-extensions": "1.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "bin": {
+    "amux-browser": "./dist/bin.js"
+  }
+}

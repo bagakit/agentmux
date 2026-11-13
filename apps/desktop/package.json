@@ -83,7 +83,8 @@
     "@agentmux/connectors": "workspace:*",
     "@agentmux/identity": "workspace:*",
     "@agentmux/editor-extensions": "workspace:*",
-    "tar-stream": "3.2.2"
+    "tar-stream": "3.2.2",
+    "@agentmux/browser": "workspace:*"
   },
   "devDependencies": {
     "@electron/osx-sign": "2.7.1",

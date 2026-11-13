@@ -27,11 +27,7 @@ const OWN_INPUT_TYPES = new Set(['mouseMove', 'mouseEnter', 'mouseLeave', 'mouse
   'gesturePinchBegin', 'gesturePinchUpdate', 'gesturePinchEnd'])
 
 /** One Agent action's native input on one page. `end` must be called exactly once, in a finally. */
-export type BrowserOwnDispatch = {
-  /** Sends one `Input.*` command under Main's receipt. */
-  input<T>(command: () => Promise<T>): Promise<T>
-  end(): void
-}
+export type BrowserOwnDispatch = import('@agentmux/browser/browser-page-transport').BrowserNativeInput
 
 /**
  * Begin one Agent action's native input on `contents`.

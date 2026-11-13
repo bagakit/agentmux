@@ -1,4 +1,4 @@
-import type { BrowserReplayStep } from './browser-operation.js'
+import type { BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import type { BrowserDemonstrationSuggestion } from './browser-demonstration-semantics.js'
 
 /** Human demonstrations are reviewable drafts, never execution permission. */

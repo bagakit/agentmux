@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { BrowserOperation, BrowserOperationStep } from '../../../shared/browser-operation'
-import type { BrowserStepEvidenceRead } from '../../../shared/browser-step-evidence'
+import type { BrowserOperation, BrowserOperationStep } from '@agentmux/browser/model/browser-operation'
+import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import { api } from '../lib/api'
 import { BrowserStructuredFields } from './BrowserStructuredFields'
 
