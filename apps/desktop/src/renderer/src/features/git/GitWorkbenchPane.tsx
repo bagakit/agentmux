@@ -14,7 +14,7 @@ import { GitDiffCanvas } from './diff/GitDiffCanvas'
 const ThemeGitCommitIcon = semanticIconComponent('git.commit')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
@@ -95,7 +95,7 @@ function InlineCommitDiff({ surface, visible, released }: Required<Pick<PaneProp
     <header className="editor-header"><span title={file.origPath ? file.origPath + ' → ' + file.path : file.path}>{file.path}</span>
       <div className="editor-header__actions">
         <button className="icon-button" aria-label="Reload fixed diff" title="Reload fixed diff" disabled={Boolean(diff?.loading)} onClick={() => void load(surface.regionId)}><ThemeActionRefreshIcon size={13} /></button>
-        <button className="icon-button" aria-label="Open diff in separate tab" title="Open diff in separate tab" onClick={() => openDiff(surface.workspaceId, { kind: 'commit', snapshot: { hostId: surface.scope.hostId, repoPath: surface.scope.repoPath, ...selection }, file })}><ThemeActionOpenExternalIcon size={13} /></button>
+        <button className="icon-button" aria-label="Open diff in separate tab" title="Open diff in separate tab" onClick={() => openDiff(surface.workspaceId, { kind: 'commit', snapshot: { hostId: surface.scope.hostId, repoPath: surface.scope.repoPath, ...selection }, file })}><ThemeObjectTabIcon size={13} /></button>
         <button className="icon-button" aria-label="Close file diff" title="Close file diff" onClick={() => selectFile(surface.regionId, null)}><ThemeActionCloseIcon size={13} /></button>
       </div>
     </header>

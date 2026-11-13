@@ -11,7 +11,7 @@ import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
 import { fileWorkbenchIdentity } from '../lib/file-workbench-state'
 import { useAppStore } from '../store'
 
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectFileIcon = semanticIconComponent('object.file')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
@@ -73,7 +73,7 @@ export function TopicKnowledgeDocumentReader({ document: original, refresh, onCl
     if (event.key === 'Escape' && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); onClose() }
   }}>
     <header><span><strong title={original.title}>{original.title}</strong><small title={original.target.path}>Original file · {original.target.path}</small></span>
-      <button type="button" className="icon-button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ThemeActionOpenExternalIcon size={13} /></button>
+      <button type="button" className="icon-button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ThemeObjectFileIcon size={13} /></button>
       <button type="button" className="icon-button" aria-label="Close document detail" title="Back to results" onClick={onClose}><ThemeActionCloseIcon size={13} /></button>
     </header>
     <div className="topic-knowledge-entry__body">

@@ -7,7 +7,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeControlCheckboxMixedIcon = semanticIconComponent('control.checkbox-mixed')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 
 
 /** Relationship truth and mutations stay at the shared owner; Radix owns disclosure and focus. */
@@ -69,7 +69,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         aria-label={`Open linked Topic: ${topic.name}, ${topic.hostId}, ${displayPath(topic.directoryPath, topic.hostId)}`}
         data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${displayPath(topic.directoryPath, topic.hostId)}`}
         onSelect={() => onOpenTopic(topic.spaceId)}>
-        <ThemeActionOpenExternalIcon size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
+        <ThemeObjectTopicIcon size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.Item>)}
     </> : null}
     {error ? <div className="survey-topic-menu__notice">{error}</div> : null}
