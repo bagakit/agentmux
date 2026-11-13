@@ -59,6 +59,29 @@ export function activityTestFiles(root = repository) {
   return result
 }
 
+/** Candidate-pinned signatures shared by the complete checker and bounded compiler tests. */
+export function createActivityTestCompilerHost(root, options) {
+  root = realpathSync(root)
+  const host = ts.createCompilerHost(options), resolutions = new Map(), manifests = new Map()
+  host.resolveModuleNames = (names, containingFile) => names.map(specifier => {
+    if (!specifier.startsWith('@agentmux/')) return ts.resolveModuleName(specifier, containingFile, options, ts.sys).resolvedModule
+    const file = candidateResolve(root, specifier, { types: true,
+      onManifest: (path, bytes) => manifests.set(relative(root, path), bytes.toString()) })
+    assert.ok(realpathSync(file).startsWith(root + '/'), 'Actual first-party test signature belongs to this checkout')
+    resolutions.set(specifier, relative(root, file))
+    const extension = file.endsWith('.d.mts') ? ts.Extension.Dmts : file.endsWith('.d.cts') ? ts.Extension.Dcts
+      : file.endsWith('.d.ts') ? ts.Extension.Dts : {
+        '.ts': ts.Extension.Ts, '.tsx': ts.Extension.Tsx, '.mts': ts.Extension.Mts, '.cts': ts.Extension.Cts,
+        '.js': ts.Extension.Js, '.jsx': ts.Extension.Jsx, '.mjs': ts.Extension.Mjs, '.cjs': ts.Extension.Cjs,
+        '.json': ts.Extension.Json
+      }[extname(file)]
+    // Validate the actual export first; existing Vite declarations then own non-code resource types.
+    if (extension === undefined) return undefined
+    return { resolvedFileName: file, extension, isExternalLibraryImport: false }
+  })
+  return { host, resolutions, manifests }
+}
+
 /** Same strict test options, narrowed roots; all diagnostics of this original program count. */
 export function checkActivityTests(root = repository) {
   root = realpathSync(root)
@@ -67,20 +90,7 @@ export function checkActivityTests(root = repository) {
   const testRoots = roots.length
   for (const file of parsed.fileNames) if (/\.d\.[cm]?ts$/u.test(file) && !roots.includes(file)) roots.push(file)
   const options = { ...parsed.options, noEmit: true, incremental: false }
-  const host = ts.createCompilerHost(options), resolutions = new Map(), manifests = new Map()
-  host.resolveModuleNames = (names, containingFile) => names.map(specifier => {
-    if (!specifier.startsWith('@agentmux/')) return ts.resolveModuleName(specifier, containingFile, options, ts.sys).resolvedModule
-    const file = candidateResolve(root, specifier, { types: true,
-      onManifest: (path, bytes) => manifests.set(relative(root, path), bytes.toString()) })
-    assert.ok(realpathSync(file).startsWith(root + '/'), 'Actual first-party test signature belongs to this checkout')
-    resolutions.set(specifier, relative(root, file))
-    // Vite's existing wildcard declarations type assets; CSS is not a TypeScript source file.
-    if (file.endsWith('.css')) return undefined
-    const extension = file.endsWith('.d.mts') ? ts.Extension.Dmts : file.endsWith('.mts') ? ts.Extension.Mts
-      : file.endsWith('.d.ts') ? ts.Extension.Dts : file.endsWith('.tsx') ? ts.Extension.Tsx
-        : extname(file) === '.mjs' ? ts.Extension.Mjs : ts.Extension.Ts
-    return { resolvedFileName: file, extension, isExternalLibraryImport: false }
-  })
+  const { host, resolutions, manifests } = createActivityTestCompilerHost(root, options)
   const program = ts.createProgram(roots, options, host)
   const diagnostics = ts.getPreEmitDiagnostics(program)
   return { roots, testRoots, diagnostics, program, resolutions, manifests }
