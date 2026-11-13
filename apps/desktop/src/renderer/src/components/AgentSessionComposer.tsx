@@ -28,7 +28,7 @@ import {
 } from '../lib/composer-history'
 import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
-import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
+import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
@@ -325,6 +325,7 @@ export function AgentSessionComposer({
           unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
             : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
           ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
+          wakesItself: session?.kind === 'agent' && steerEntryWakesItself(entry, session.control.run.runId),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && (steerEntryTargetsRun(entry, session.control.run.runId) ||
               agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),

@@ -23,3 +23,12 @@ export function steerQueueCanDrainNow(
 export function steerEntryTargetsRun(entry: { runId?: string }, runId: string): boolean {
   return entry.runId === runId
 }
+
+// Conservative: true only for an entry the queue's own background pass will deliver to this Run once
+// nothing blocks it, with no explicit Send. A row may promise automatic delivery only when this holds;
+// other entries can still go out through an explicit Send, so they keep their own label.
+export function steerEntryWakesItself(entry: { runId?: string; archived?: boolean; awaitingExplicitSend?: boolean;
+  directInputBinding?: unknown; promptCondition?: unknown }, runId: string): boolean {
+  return !entry.archived && !entry.awaitingExplicitSend && !entry.directInputBinding &&
+    entry.promptCondition === null && steerEntryTargetsRun(entry, runId)
+}
