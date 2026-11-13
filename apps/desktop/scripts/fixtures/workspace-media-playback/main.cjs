@@ -74,7 +74,7 @@ async function capture() {
   await evaluate(`mediaPlaybackProbe.theme("light")`); await evaluate(`mediaPlaybackProbe.showControls("promo.mp4")`); await frame('video-controls-light')
   await evaluate(`mediaPlaybackProbe.theme("dark")`)
   report.checks.totalBytes = sentFor('promo.mp4')
-  assert.ok(report.checks.totalBytes < 55_314_157, 'Watching and seeking did not read the whole file')
+  assert.ok(report.checks.totalBytes < size, `Watching and seeking did not read the whole file: ${report.checks.totalBytes} of ${size}`)
 
   // 2. A narrow Region keeps play, mute, time and full screen reachable.
   await evaluate(`mediaPlaybackProbe.split("promo.mp4", "notes.md", 0.34)`); await sleep(400)
