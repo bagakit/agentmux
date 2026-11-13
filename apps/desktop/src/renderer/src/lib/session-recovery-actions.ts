@@ -7,7 +7,7 @@ import { scratchTopicsForWorkspace, scratchTopicKind } from './scratch-topic-sna
 import { spatialCatalog } from './space-agent-control'
 import { useAppStore, retainRecoveryMessageIntent, agentRegionExecution, rereadAgentRegionExecution, adoptAgentRegionObservation } from '../store'
 
-export type RecoveryMode = 'analyze'
+export type RecoveryMode = 'analyze' | 'start-new'
 export type RecoverySource = SessionHistoryReference & {
   workspaceId: string; tabId: string; regionId: string; displayWorkspaceId: string; groupId?: string
   diagnostic: string
@@ -94,7 +94,7 @@ export async function recoveryOperationId(source: RecoverySource, mode: Recovery
 }
 
 const shellWord = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'"
-export function recoveryReferenceNote(source: RecoverySource, mode: RecoveryMode, historySource: 'captured' | 'native'): string {
+export function recoveryReferenceNote(source: RecoverySource, mode: 'analyze', historySource: 'captured' | 'native'): string {
   const reference = `--host ${shellWord(source.hostId)} --session ${shellWord(source.agentSessionId)}`
   return [
     `Original Agent Session reference: ${JSON.stringify({ hostId: source.hostId, agentSessionId: source.agentSessionId, historySource, mode })}`,
@@ -158,7 +158,7 @@ async function readRecoveryDelivery(target: Pick<RecoveryMoteTarget, 'hostId' | 
   return timeline.items.some(item => item.id === `prompt:${requestId}` && item.agentSessionId === target.agentSessionId && item.kind === 'user_message' && item.status === 'complete')
 }
 
-export async function createRecoveryAgent(source: RecoverySource, mode: RecoveryMode, executorId: string,
+export async function createRecoveryAgent(source: RecoverySource, mode: 'analyze', executorId: string,
   historySource: 'captured' | 'native', current: () => boolean): Promise<RecoveryActionResult> {
   const requestId = await recoveryOperationId(source, mode)
   assertSource(source, current)
@@ -186,6 +186,37 @@ export async function createRecoveryAgent(source: RecoverySource, mode: Recovery
   return { requestId, report: result, kind: result.outcome === 'opened' ? 'confirmed' : 'unknown', message: result.outcome === 'opened'
     ? 'New analysis Agent created in a separate Tab. The original Session is retained.'
     : `Creation is unconfirmed. ${result.issues.map(item => item.message).join(' ')}` }
+}
+
+/**
+ * The one working path once Core holds no native conversation to continue: a new conversation with
+ * the original Executor and execution directory, in a new Tab beside the original. It is a user's
+ * new Session, not recovery; it sends nothing, and the original Session, Tab and draft stay.
+ */
+export async function startNewConversation(source: RecoverySource, executorId: string, current: () => boolean): Promise<RecoveryActionResult> {
+  const requestId = await recoveryOperationId(source, 'start-new')
+  assertSource(source, current)
+  const original = await inspectRecoveryRequest(source, 'start-new')
+  if (original) return original
+  assertSource(source, current)
+  const state = useAppStore.getState()
+  if (!state.config?.executors[executorId]) throw new Error('The original Agent configuration is no longer saved. Choose another Agent with Take over; this Session is kept.')
+  const scratch = state.config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? [])
+  const location = catalog.locations.find(item => item.tabId === source.tabId && item.regionId === source.regionId &&
+    item.displayWorkspaceId === source.displayWorkspaceId && (!source.groupId || item.groupId === source.groupId))
+  if (!location?.zoneId) throw new Error('The original Project placement is unconfirmed. Its Session and work remain; re-read the same Project before starting a new conversation.')
+  const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: true,
+    destination: { ...(location.spaceId ? { spaceId: location.spaceId } : {}), zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId,
+      groupId: location.groupId, newTab: true },
+    content: { kind: 'new-agent', executorId }
+  }, undefined, { besideTabId: source.tabId, authorize: () => current() && ownsRecoverySource(source), recovery: {
+    hostId: source.hostId, agentSessionId: source.agentSessionId, tabId: source.tabId, regionId: source.regionId, mode: 'start-new', executorId
+  } })
+  if (result.operation !== 'agent.open') throw new Error('Creation returned another operation; its result is unknown. Check the original request.')
+  return { requestId, report: result, kind: result.outcome === 'opened' ? 'confirmed' : 'unknown', message: result.outcome === 'opened'
+    ? 'A new conversation started beside the original. The original Session is kept.'
+    : `The new conversation is unconfirmed. ${result.issues.map(item => item.message).join(' ')}` }
 }
 
 export async function analyzeWithRecoveryMote(source: RecoverySource, target: RecoveryMoteTarget,

@@ -8,7 +8,7 @@ import type {
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
   AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxZoneFact, AgentMuxSpaceBindingReport, AgentMuxSpaceBindingTarget, TopicCategory
 } from '@agentmux/core/control'
-import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, regionIds,
+import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, insertTabAfter, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -61,6 +61,8 @@ export type SpatialControlPorts = {
 }
 /** Local UI context, separate from the public spatial request and user prompt. */
 export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; browserAgent?: SpatialRequestBinding['browserAgent']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target';
+  /** Local display order: a new Tab goes right after this exact Tab when it is in the target Group. */
+  besideTabId?: string
   /** Local UI activation, independent of public cross-context spatial focus. */
   localFocus?: { surface: 'survey'; reference: WorkbenchProjectionSelection }
 }
@@ -245,7 +247,7 @@ async function executeBinding(ports: SpatialControlPorts, topics: readonly Scrat
 
 /** One workbench snapshot. Moves detach precisely one leaf; neither Session nor Runtime is touched. */
 export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], target: Destination,
-  surface: AgentWorkbenchSurface, from?: AgentMuxSpaceAddress): Pick<SpatialWorkbench, 'tabs' | 'layouts'> {
+  surface: AgentWorkbenchSurface, from?: AgentMuxSpaceAddress, besideTabId?: string): Pick<SpatialWorkbench, 'tabs' | 'layouts'> {
   let tabs = { ...state.tabs }
   let layouts = { ...state.layouts }
   if (from) {
@@ -276,7 +278,8 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
     let layout = layouts[address.displayWorkspaceId] ?? createWorkspaceLayout(address.groupId)
     const groupId = address.groupId
     const previousLayout = layout
-    layout = addTabOrThrow(layout, groupId, address.tabId)
+    layout = besideTabId && layout.groups.find(group => group.id === groupId)?.tabOrder.includes(besideTabId)
+      ? insertTabAfter(layout, besideTabId, address.tabId) : addTabOrThrow(layout, groupId, address.tabId)
     layout = { ...layout, activeGroupId: previousLayout.activeGroupId, groups: layout.groups.map(group => {
       const previous = previousLayout.groups.find(item => item.id === group.id)
       return previous?.activeTabId ? { ...group, activeTabId: previous.activeTabId, recentTabIds: previous.recentTabIds } : group
@@ -702,7 +705,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (forkParent && zone.hostId !== forkExecutionHostId) failure('AGENT_FORK_HOST_MISMATCH', 'Choose a display destination on the source Host. The source execution directory is retained.')
     const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent ? 'launching' : 'attached',
       regionId: target.address.regionId, workspaceId: executionWorkspace?.id ?? target.address.workspaceId, sessionId: existingAgent?.id ?? sessionId }
-    const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)
+    const placement = applySpatialPlacement(ports.get(), topics, target, surface, from, options?.besideTabId)
     if (from && !request.focus) ports.preserveMovedFocus?.(from)
     // Record the known removal before patch synchronously captures the durable graph.
     if (from && !Object.hasOwn(placement.tabs, from.tabId)) ports.recordRemovedTab?.(from.tabId)

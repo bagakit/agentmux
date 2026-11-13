@@ -8,19 +8,22 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, recoveryMoteTargets,
-  type RecoveryMode, type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
+import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, recoveryMoteTargets, startNewConversation,
+  type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
 
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
 
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
-export function SessionRecoveryActions({ source, restoring, hideRestore = false, restoreDisabled = false, restoreLabel = 'Restore original', restoreIcon = 'action.resume-session', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
+export function SessionRecoveryActions({ source, restoring, hideRestore = false, restoreDisabled = false, restoreLabel = 'Restore original', restoreIcon = 'action.resume-session', workingLabel = 'Restoring…', onRestore, onTakeOver, startNew }: {
   source: RecoverySource; restoring: boolean; hideRestore?: boolean; restoreDisabled?: boolean; restoreLabel?: string; restoreIcon?: 'action.resume-session' | 'action.refresh' | 'status.waiting'; workingLabel?: string; onRestore: () => void; onTakeOver?: ((trigger: HTMLButtonElement) => void) | undefined
+  /** Core holds no native conversation to continue: one primary action starts a new one with the original Executor. Replaces Restore. */
+  startNew?: { executorId: string } | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
-  const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
+  const [mode, setMode] = useState<'analyze' | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
   const config = useAppStore(state => mode ? state.config : null)
   const tabs = useAppStore(state => mode === 'analyze' ? state.tabs : null), sessions = useAppStore(state => mode === 'analyze' ? state.sessions : null)
   const topics = useAppStore(state => mode === 'analyze' ? state.scratchTopicSnapshots : null)
@@ -51,7 +54,7 @@ export function SessionRecoveryActions({ source, restoring, hideRestore = false,
       if (!live) return
       setOperationId(id)
       const binding = useAppStore.getState().spatialRequests[id], retained = binding?.recovery
-      if (retained) { setExecutorId(retained.executorId ?? ''); setHistorySource(retained.historySource); setDestination(binding.operation === 'agent.message' ? 'mote' : 'agent') }
+      if (binding && retained?.mode === 'analyze') { setExecutorId(retained.executorId ?? ''); setHistorySource(retained.historySource); setDestination(binding.operation === 'agent.message' ? 'mote' : 'agent') }
       if (binding?.recoveryRecipient) setMoteKey(JSON.stringify([binding.recoveryRecipient.topicId, binding.recoveryRecipient.tabId, binding.recoveryRecipient.regionId, binding.recoveryRecipient.agentSessionId]))
       const pending = Object.entries(useAppStore.getState().agentSteerQueues).find(([, entries]) => entries.some(entry => entry.operationId === id))
       const retainedNote = pending?.[1].find(entry => entry.operationId === id)?.agentMuxNote
@@ -81,7 +84,7 @@ export function SessionRecoveryActions({ source, restoring, hideRestore = false,
   }
   const canSubmit = existing || (destination === 'agent' ? Boolean(executorId && config?.executors[executorId]) : Boolean(target))
   return <div className="session-recovery-actions">
-    {hideRestore ? null : <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
+    {startNew ? <StartNewConversation source={source} executorId={startNew.executorId} /> : hideRestore ? null : <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
       <SemanticIcon name={restoreIcon} size={12} /> {restoring ? workingLabel : restoreLabel}
     </button>}
     {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={event => onTakeOver(event.currentTarget)}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
@@ -123,4 +126,34 @@ export function SessionRecoveryActions({ source, restoring, hideRestore = false,
       </DocumentOverlayPortal>
     </Dialog.Root>
   </div>
+}
+
+/**
+ * The one working action once Core holds no native conversation to continue. Its operation identity is
+ * derived from the original Session and placement, so repeated clicks, remounts and the retired surface
+ * all read the one original creation rather than starting another.
+ */
+function StartNewConversation({ source, executorId }: { source: RecoverySource; executorId: string }) {
+  const [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
+  const active = useRef(true), submitting = useRef(false)
+  const scope = JSON.stringify([source.hostId, source.agentSessionId, source.tabId, source.regionId, executorId]), selection = useRef(scope)
+  selection.current = scope
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+  useEffect(() => setIssue(null), [scope])
+  async function start() {
+    if (submitting.current) return
+    submitting.current = true; setBusy(true); setIssue(null)
+    const captured = scope, current = () => active.current && selection.current === captured
+    try {
+      const result = await startNewConversation(source, executorId, current)
+      if (current() && result.kind !== 'confirmed') setIssue(result.message)
+    } catch (failure) { if (current()) setIssue(presentError(failure)) }
+    finally { submitting.current = false; if (active.current) setBusy(false) }
+  }
+  return <>
+    <button type="button" className="primary-button" disabled={busy} aria-busy={busy} onClick={() => void start()}>
+      <ThemeActionCreateConversationIcon size={12} /> {busy ? 'Starting…' : 'Start a new conversation here'}
+    </button>
+    {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'New conversation unconfirmed', mode: issue, restore: 'Press it again to check the same request; nothing is resent.' } }} /> : null}
+  </>
 }

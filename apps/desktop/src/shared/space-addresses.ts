@@ -99,10 +99,10 @@ export type SpatialRequestBinding = {
   /** Original selected tool resource, independent of display and Agent Run cwd. */
   toolWorkspace?: { id: string; hostId: string; path: string }
   /** User's recovery choice. Correlation only; Core remains the creation/history owner. */
-  recovery?: {
-    hostId: string; agentSessionId: string; tabId: string; regionId: string
-    mode: 'takeover' | 'analyze'; historySource: 'captured' | 'native'; executorId?: string
-  }
+  recovery?: { hostId: string; agentSessionId: string; tabId: string; regionId: string } & (
+    | { mode: 'takeover' | 'analyze'; historySource: 'captured' | 'native'; executorId?: string }
+    /** A new conversation with the original Executor once Core holds none to continue; reads no history. */
+    | { mode: 'start-new'; executorId: string; historySource?: never })
   /** An explicit message recipient reference, never a payload or delivery receipt. */
   recoveryRecipient?: { hostId: string; agentSessionId: string; topicId: string; tabId: string; regionId: string }
   /** Exact source of this admitted fork, including before a new Session can be observed. */

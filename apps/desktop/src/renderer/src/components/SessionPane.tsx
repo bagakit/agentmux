@@ -635,6 +635,10 @@ export function SessionPane({
     session?.status.continuityConflict
   )
   const takeoverOriginal = takeoverExecution(sessionId, historyCatalogue.sources)
+  // Core holds no native conversation to continue: the one working action starts a new one with the
+  // original Executor. A neutral, final fact; not a failure and not a second notice.
+  const startNew = continuityNotice?.remedy.kind === 'start-new' && session?.status.continuityReason === 'native-conversation-absent' && takeoverOriginal?.executorId
+    ? { executorId: takeoverOriginal.executorId } : undefined
   const takeoverKey = JSON.stringify([activitySourceKey, takeoverOriginal?.hostId, takeoverOriginal?.cwd])
   useEffect(() => {
     if (takeoverSelection !== null && takeoverSelection.key !== takeoverKey) setTakeoverSelection(null)
@@ -1032,7 +1036,7 @@ export function SessionPane({
   const gaveUpReconnecting =
     disconnected && session.status.detail === CONNECTION_UNRECOVERABLE_DETAIL
   const exitNotice = sessionExitPresentation(session)
-  const recoveryTitle = pendingResume ? continuityNotice!.title : exitNotice?.title ?? recoverableFrontendNotice?.title ?? (continuityNotice
+  const recoveryTitle = pendingResume || startNew ? continuityNotice!.title : exitNotice?.title ?? recoverableFrontendNotice?.title ?? (continuityNotice
       ? continuityNotice.title
       : gaveUpReconnecting
         ? `Can’t reach this host`
@@ -1041,7 +1045,7 @@ export function SessionPane({
           : exited
             ? `${noun} process exited`
             : `${noun} session unavailable`)
-  const recoveryDetail = pendingResume ? continuityNotice!.reason : [exitNotice?.detail ?? recoverableFrontendNotice?.detail,
+  const recoveryDetail = pendingResume || startNew ? continuityNotice!.reason : [exitNotice?.detail ?? recoverableFrontendNotice?.detail,
     continuityNotice ? session.status.detail ?? continuityNotice.reason : undefined].filter(Boolean).join(' ') ||
     humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
 
@@ -1077,7 +1081,7 @@ export function SessionPane({
     <button type="button" className={frontendSurface ? 'primary-button' : 'small-button'} disabled={recovering || refreshing} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Checking…' : recoverableFrontendNotice.actionLabel ?? 'Resume'}
     </button>
-  ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={recovering || refreshing}
+  ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={recovering || refreshing} startNew={startNew}
     workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
     restoreIcon={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'action.refresh' : continuityNotice?.remedy.kind === 'wait' ? 'status.waiting' : 'action.resume-session'}
     restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
@@ -1091,7 +1095,7 @@ export function SessionPane({
     step: 'Original Session recheck failed', mode: originalReadError.message,
     restore: 'Re-read original to check again. Your Session and draft are kept.'
   } }} /> : null
-  const identityNotice = !pendingResume && (exitNotice || frontendSurface) && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const identityNotice = !pendingResume && !startNew && (exitNotice || frontendSurface) && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
     step: continuityNotice.title, mode: session.status.detail ?? continuityNotice.reason,
     restore: continuityNotice.remedy.kind === 'refresh' ? 'Re-read original checks again without restarting the Agent or resending messages.' : 'Recovery remains a separate explicit action.'
   } }} /> : null
@@ -1125,14 +1129,14 @@ export function SessionPane({
   const recoveryOperation = session.kind === 'agent' && exited ? currentRunRecoveryOperation(session) : frontendRecovery
   const recoveryJoin = session.kind === 'agent' && recoveryOperation ? currentContinuitySupervision(session) : null
   const recoverySupervision = recoveryJoin?.attempt.operationId === recoveryOperation?.operationId ? recoveryJoin?.root.supervision : undefined
-  const restoreFailed = continuityNotice || session.status.state === 'error' && coreRestorePresentation?.kind !== 'unconfirmed'
+  const restoreFailed = !startNew && (continuityNotice || session.status.state === 'error' && coreRestorePresentation?.kind !== 'unconfirmed')
   const restorePresentation = pendingResume ? { phase: recovering ? 'recovering' as const : 'parked' as const,
     title: recovering ? 'Checking recovery' : continuityNotice!.title, detail: continuityNotice!.reason } : coreRestorePresentation?.kind === 'restoring' ? { ...coreRestorePresentation, phase: 'recovering' as const } : pendingAgentRestore ? {
     phase: recovering ? 'recovering' as const : restoreFailed ? 'failed' as const : 'parked' as const,
-    title: recovering ? 'Restoring your session' : exitNotice?.title ?? (continuityNotice ? continuityNotice.title
+    title: recovering ? 'Restoring your session' : startNew ? continuityNotice!.title : exitNotice?.title ?? (continuityNotice ? continuityNotice.title
       : restoreFailed ? recoveryTitle
         : coreRestorePresentation?.title ?? (exited ? 'Agent process exited' : 'Session state unconfirmed')),
-    detail: exitNotice?.detail ?? (continuityNotice ? session.status.detail ?? continuityNotice.reason : undefined) ?? (restoreFailed
+    detail: startNew ? continuityNotice!.reason : exitNotice?.detail ?? (continuityNotice ? session.status.detail ?? continuityNotice.reason : undefined) ?? (restoreFailed
       ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
       : coreRestorePresentation?.detail ?? (exited && !session.runUnobserved
         ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
