@@ -64,3 +64,8 @@
   .full-page-loading__art { transform: none; transition: none; }
   .full-page-loading__light { background: none; }
 }
+/* A colophon names the realm of the art shown, like the signature line under a print. It's static
+   decoration: tertiary text, never Mint, outside the pointer parallax, and gone when space is tight. */
+.full-page-loading__colophon { position: absolute; right: clamp(var(--sp-6), 3vw, var(--sp-8)); bottom: clamp(var(--sp-6), 3vh, var(--sp-8)); }
+.brand-colophon { color: var(--text-3); font: 500 var(--fs-micro)/1 var(--font-mono); letter-spacing: .08em; white-space: nowrap; pointer-events: none; user-select: none; }
+@container (max-width: 440px) { .full-page-loading__colophon { display: none; } }

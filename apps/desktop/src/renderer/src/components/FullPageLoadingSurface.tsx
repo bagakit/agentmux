@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SurfaceState } from './SurfaceState'
-import bannerUrl from '@agentmux/client-ui/brand/heroes/origin-launch.avif'
+import { api } from '../lib/api'
+import { resolveBrandHero } from '../lib/brand-hero'
 
 const ThemeStatusWaitingIcon = semanticIconComponent('status.waiting')
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
@@ -62,6 +63,23 @@ function WaitingActivity({ surface, visible }: { surface: RefObject<HTMLElement 
     <span>{seconds >= 15 ? 'Still waiting' : 'Waiting'}</span>
     <span className="full-page-loading__elapsed" aria-label="Time waiting in this view">{seconds}s</span>
   </span>
+}
+
+/**
+ * The app launch paints before configuration loads, so its realm comes from the synchronous
+ * theme bootstrap Main answered for this window. The art is chosen once per mount and never
+ * swapped after first paint; a load failure hides it and leaves the stage readable.
+ */
+function AppLaunchArt() {
+  const [hero] = useState(() => {
+    const initial = api.ui.initialTheme
+    return initial?.status === 'available' ? resolveBrandHero('launch', initial.appIcon) : resolveBrandHero('launch', undefined, false)
+  })
+  return <div className="full-page-loading__atmosphere" aria-hidden="true" data-realm={hero.realm} data-art-realm={hero.artRealm}>
+    <img className="full-page-loading__art" src={hero.art} alt="" onError={(event) => { event.currentTarget.hidden = true }} />
+    <div className="full-page-loading__light" />
+    <span className="brand-colophon full-page-loading__colophon">{hero.colophon}</span>
+  </div>
 }
 
 /**
@@ -136,10 +154,7 @@ export function FullPageLoadingSurface({
       aria-live="polite"
       aria-busy={busy}
     >
-      {scope === 'app' ? <div className="full-page-loading__atmosphere" aria-hidden="true">
-        <img className="full-page-loading__art" src={bannerUrl} alt="" onError={(event) => { event.currentTarget.hidden = true }} />
-        <div className="full-page-loading__light" />
-      </div> : null}
+      {scope === 'app' ? <AppLaunchArt /> : null}
       <SurfaceState className="full-page-loading__stage"
         activity={busy && children == null ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : undefined}
         identity={!busy && scope === 'region' && children == null ? <ThemeStatusInfoIcon size={22} aria-hidden="true" /> : undefined}

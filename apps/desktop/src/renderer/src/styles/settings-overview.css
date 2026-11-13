@@ -64,3 +64,5 @@
   .settings-overview__entry, .settings-overview__shortcut, .settings-overview__entry > svg:last-child { transition: none; }
   .settings-overview__entry:is(:hover, :focus-visible) > svg:last-child { transform: none; }
 }
+.settings-overview__colophon { position: absolute; z-index: 2; right: var(--sp-6); bottom: var(--sp-5); }
+@container settings-home (max-width: 640px) { .settings-overview__colophon { display: none; } }

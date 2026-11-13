@@ -2,7 +2,7 @@ import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsModule, SettingsNavGroup } from './settings-catalog'
-import bannerUrl from '@agentmux/client-ui/brand/heroes/origin-banner.avif'
+import { resolveBrandHero } from '../../lib/brand-hero'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
@@ -14,6 +14,8 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
   onOpen: (section: Module['id']) => void
   active?: boolean
 }) {
+  // The saved choice, never the Appearance draft: the hero shows what the app is set to.
+  const hero = resolveBrandHero('banner', config.appearance.appIcon)
   const shortcuts = groups.flatMap(group => group.items)
     .filter(item => item.overviewShortcut !== undefined)
     .sort((left, right) => left.overviewShortcut! - right.overviewShortcut!)
@@ -28,8 +30,9 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
 
   return (
     <div className="settings-content__scroll settings-overview" data-settings-overview data-document-visible={active && documentVisible}>
-      <div className="settings-overview__hero">
-        <img className="settings-overview__art" src={bannerUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
+      <div className="settings-overview__hero" data-realm={hero.realm} data-art-realm={hero.artRealm}>
+        <img className="settings-overview__art" src={hero.art} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
+        <span className="brand-colophon settings-overview__colophon" aria-hidden="true">{hero.colophon}</span>
         <span className="settings-overview__sweep" aria-hidden="true" />
         <div className="settings-overview__identity"><strong>AgentMux</strong><p>Configure your agents, tools<br />and workspace.</p></div>
       </div>

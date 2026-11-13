@@ -49,6 +49,7 @@ import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-ex
 import { SettingsNavigation } from './SettingsNavigation'
 import { useContext } from 'react'
 import { WorkbenchProjectionContext } from '../lib/workbench-projection'
+import { resolveBrandHero } from '../lib/brand-hero'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -131,6 +132,8 @@ export function NewTabSurface({
   const [executionPreparing, setExecutionPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const config = useAppStore((state) => state.config)
+  // One resolver owns hero art; the stylesheet only places whatever image this surface is given.
+  const launcherHero = resolveBrandHero('banner', config?.appearance.appIcon, config !== null).art
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
@@ -420,7 +423,7 @@ export function NewTabSurface({
   return (
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
-      style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties} body={<>
+      style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
 
 
