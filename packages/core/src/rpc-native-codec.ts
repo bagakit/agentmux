@@ -128,7 +128,11 @@ function agentCapabilities(value: unknown): void {
       if (new Set(categories as unknown[]).size !== (categories as unknown[]).length) fail()
     }
   }
-  if (capabilities.nativeConversationInput !== undefined && record(capabilities.nativeConversationInput, ['managedRuns']).managedRuns !== true) fail()
+  if (capabilities.nativeConversationInput !== undefined) {
+    const input = record(capabilities.nativeConversationInput, ['managedRuns', 'interactionQueue', 'idleQueue'])
+    if (input.managedRuns !== true || input.interactionQueue !== undefined && input.interactionQueue !== true) fail()
+    if (input.idleQueue !== undefined) bool(input.idleQueue)
+  }
   if (capabilities.nativeInterruption !== undefined && capabilities.nativeInterruption !== true) fail()
   if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['native-input'])
   if (capabilities.terminal !== true) fail()

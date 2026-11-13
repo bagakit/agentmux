@@ -549,7 +549,13 @@ export type AgentCapabilities = {
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
   promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }
   /** Explicit selected-source input; only supported original managed Runs have its private transport. */
-  nativeConversationInput?: { managedRuns: true }
+  nativeConversationInput?: {
+    managedRuns: true
+    /** An explicit ordinary message has a semantic queue independent of the current interaction. */
+    interactionQueue?: true
+    /** False narrows the adapter to ordinary messages; its existence does not then offer idle-only automation. */
+    idleQueue?: boolean
+  }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
@@ -1203,6 +1209,8 @@ export type AgentNativePromptInputPlan = Readonly<{
   threadId: string
   /** Original Core-issued correlation frozen in the durable claim; not idempotency or adoption. */
   clientCorrelation?: string
+  /** This prepared source queues ordinary messages without answering the original interaction. */
+  interactionQueue?: true
 } & (
   /** Manual input authorizes the actor's atomic idle start or busy append. */
   { operation: 'start-or-steer'; expectedTurnId?: never } |

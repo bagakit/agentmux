@@ -406,11 +406,13 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
 
 function nativePromptPlan(value: unknown): import('./types.js').AgentNativePromptInputPlan {
   const plan = record(value, 'native prompt plan')
-  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'operation', 'expectedTurnId', 'clientCorrelation'].includes(key))) {
+  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'operation', 'expectedTurnId', 'clientCorrelation', 'interactionQueue'].includes(key)) ||
+      plan.interactionQueue !== undefined && plan.interactionQueue !== true) {
     throw new AgentMuxError('Invalid native prompt plan.', 'INVALID_AGENT_SESSION_STORE')
   }
   const common = { kind: 'native-rpc' as const, protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
-    threadId: string(plan.threadId, 'native input thread'), ...(plan.clientCorrelation === undefined ? {} : { clientCorrelation: string(plan.clientCorrelation, 'original native input correlation', 8192) }) }
+    threadId: string(plan.threadId, 'native input thread'), ...(plan.clientCorrelation === undefined ? {} : { clientCorrelation: string(plan.clientCorrelation, 'original native input correlation', 8192) }),
+    ...(plan.interactionQueue === true ? { interactionQueue: true as const } : {}) }
   if (plan.operation === 'start-or-steer' || plan.operation === 'queue-idle') {
     if (plan.expectedTurnId !== undefined) throw new AgentMuxError('A native start or idle queue plan cannot claim an exact turn.', 'INVALID_AGENT_SESSION_STORE')
     return { ...common, operation: plan.operation }

@@ -3,6 +3,70 @@ import { runProcess } from './process-runner.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeNativeTranscriptPath } from './agent-native-locator.js'
 import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import type { Socket } from 'node:net'
+import { isAbsolute } from 'node:path'
+
+/** Named Unix endpoints held by this exact process; a connected peer is checked separately. */
+export async function nativeProcessUnixSockets(processId: number, signal: AbortSignal): Promise<string[]> {
+  return (await nativeProcessUnixSocketOwners(processId, signal)).map(value => value.path)
+}
+
+/** Kernel-observed Unix endpoint owners, bounded to one original process or Runtime group. */
+export async function nativeProcessUnixSocketOwners(processId: number, signal: AbortSignal, scope: 'process' | 'run-group' = 'process'): Promise<{ processId: number; path: string }[]> {
+  signal.throwIfAborted()
+  if (process.platform !== 'darwin' || !Number.isSafeInteger(processId) || processId <= 0) throw unavailable('The original Unix endpoints are unconfirmed on this Host.')
+  const options = { signal, timeoutMs: 2_000, maxOutputBytes: 64 * 1024 }
+  if (scope === 'run-group') {
+    const group = await runProcess('ps', ['-p', String(processId), '-o', 'pgid='], options)
+    if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) throw unavailable('The original Unix endpoint process group changed.')
+  }
+  const output = await runProcess('lsof', ['-nP', '-a', scope === 'run-group' ? '-g' : '-p', String(processId), '-U', '-F0pgftn'], options)
+  if (output.exitCode === 1 && !output.stdout && !output.stderr) return []
+  if (output.exitCode !== 0 || output.stderr || !output.stdout.endsWith('\0\n')) throw unavailable('The original Unix endpoints could not be fully observed.')
+  let pid = 0, group = 0, file: Record<string, string> = {}
+  const paths = new Map<string, { processId: number; path: string }>()
+  const finish = () => {
+    if (!Object.keys(file).length) return
+    if (!Number.isSafeInteger(pid) || pid <= 0 || (scope === 'process' ? pid !== processId : group !== processId) ||
+        !/^\d+$/u.test(file.f ?? '') || file.t !== 'unix') throw unavailable('The Unix endpoint observation changed its process identity.')
+    if (file.n && isAbsolute(file.n) && !/[\0\r\n]/u.test(file.n)) paths.set(JSON.stringify([pid, file.n]), { processId: pid, path: file.n })
+    file = {}
+  }
+  for (const part of output.stdout.split('\0')) {
+    const field = part.replace(/^\n/u, '')
+    if (!field) continue
+    if (field[0] === 'p') { finish(); pid = Number(field.slice(1)); group = 0 }
+    else if (field[0] === 'g') group = Number(field.slice(1))
+    else if (field[0] === 'f') { finish(); file.f = field.slice(1) }
+    else if (field[0] === 't' || field[0] === 'n') file[field[0]] = field.slice(1)
+    else throw unavailable('The Unix endpoint observation is incomplete.')
+  }
+  finish()
+  signal.throwIfAborted()
+  return [...paths.values()]
+}
+
+/** Inspect this connected descriptor without sending bytes or opening a replacement connection. */
+export async function nativeUnixSocketPeerBirth(socket: Socket, processId: number, signal: AbortSignal): Promise<string> {
+  signal.throwIfAborted()
+  const fd = (socket as Socket & { _handle?: { fd?: number } })._handle?.fd
+  if (process.platform !== 'darwin' || !Number.isSafeInteger(fd) || fd! < 0) throw unavailable('The connected native peer is unconfirmed.')
+  const executable = fileURLToPath(new URL('../dist/native-socket-peer-darwin', import.meta.url))
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = spawn(executable, ['--socket-peer'], { stdio: [fd!, 'pipe', 'pipe'], signal, timeout: 2_000, killSignal: 'SIGKILL' })
+    const chunks: Buffer[] = []
+    let size = 0, invalid = false
+    child.stdout!.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 4096) { invalid = true; child.kill('SIGKILL') } else chunks.push(chunk) })
+    child.stderr!.on('data', () => { invalid = true })
+    child.once('error', () => reject(unavailable('The connected native peer could not be observed.')))
+    child.once('close', code => code === 0 && !invalid ? resolve(Buffer.concat(chunks).toString('utf8')) : reject(unavailable('The connected native peer is unconfirmed.')))
+  })
+  signal.throwIfAborted()
+  let value: unknown
+  try { value = JSON.parse(output) } catch { throw unavailable('The connected native peer receipt is incomplete.') }
+  return processBirthReceipt(value, processId, 'native-socket-peer')
+}
 
 export type NativeProcessFile = {
   processId: number
@@ -139,9 +203,13 @@ export async function nativeProcessBirth(processId: number, signal: AbortSignal)
   if (result.exitCode !== 0 || result.stderr) throw unavailable('The original kernel process identity is unconfirmed.')
   let value: unknown
   try { value = JSON.parse(result.stdout) } catch { throw unavailable('The kernel process identity receipt is incomplete.') }
+  return processBirthReceipt(value, processId, 'native-process-identity')
+}
+
+function processBirthReceipt(value: unknown, processId: number, type: 'native-process-identity' | 'native-socket-peer'): string {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw unavailable('The kernel process identity receipt is incomplete.')
   const identity = value as Record<string, unknown>
-  if (identity.type !== 'native-process-identity' || identity.schema !== 1 || identity.pid !== processId ||
+  if (identity.type !== type || identity.schema !== 1 || identity.pid !== processId ||
       identity.uid !== process.getuid?.() || !Number.isSafeInteger(identity.uid) ||
       typeof identity.startSec !== 'string' || !/^[1-9]\d*$/u.test(identity.startSec) ||
       typeof identity.startUsec !== 'string' || !/^(?:0|[1-9]\d{0,5})$/u.test(identity.startUsec)) {

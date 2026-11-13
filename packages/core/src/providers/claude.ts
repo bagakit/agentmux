@@ -5,6 +5,7 @@ import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
+import { prepareClaudeNativeInput } from './claude-native-input.js'
 import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
@@ -189,6 +190,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
     readConversationChanges: readClaudeConversationChanges,
     discoverNativeSession: discoverClaudeNativeSession,
+    prepareNativeInput: prepareClaudeNativeInput,
     listNativeSessions: listClaudeNativeSessions,
     assertNativeResumeSource: assertClaudeNativeResumeSource,
     observeSessionHistory: observeNativeJsonlHistory,
@@ -203,6 +205,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
         turnOutcomes: { observation: ['failed'] },
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, nativeInterruption: true, replyCorrelation: 'none',
+        nativeConversationInput: { managedRuns: true, interactionQueue: true, idleQueue: false },
         providerFork: { current: true },
         usage: CLAUDE_USAGE_CAPABILITY
       }

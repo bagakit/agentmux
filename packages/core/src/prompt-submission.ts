@@ -640,6 +640,9 @@ export class AgentPromptSubmissionCoordinator {
       throw new AgentMuxError('This original prompt belongs to the previous native conversation. Its operation and receipt are retained; it will not replay into the current source. Raw Agent input remains available.', 'AGENT_PROMPT_SOURCE_CHANGED')
     }
     let nativeFutureAdmissionReady = false
+    const explicitConversationInput = execution === 'immediate' && inputKey.kind === 'prompt' && message?.authorHuman === true &&
+      (admissionIntent?.kind === 'native-conversation' || admissionIntent?.kind === 'session-conversation') &&
+      expectedCompletionId === undefined && expectedFutureIntent === undefined && !control?.idleOnly && !control?.nativeIdleOnly
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       assertSession?.(current)
       if (transportQualification && (transportQualification.agentSessionId !== current.agentSessionId ||
@@ -650,7 +653,11 @@ export class AgentPromptSubmissionCoordinator {
       const pending = current.pendingInteraction
       const unanswered = pending && [pending.request, ...(pending.additionalRequests ?? [])].some(request =>
         request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded)
-      if (unanswered) throw new AgentMuxError(
+      // Only a prepared, frozen semantic queue can carry this new explicit message while
+      // preserving the original request. A method, catalog entry or PTY plan grants nothing.
+      const interactionQueue = explicitConversationInput && selectedCarrier.kind === 'native' &&
+        selectedCarrier.plan.interactionQueue === true && selectedCarrier.plan.operation === 'start-or-steer'
+      if (unanswered && !interactionQueue) throw new AgentMuxError(
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
     const beforeInput = control && (async (): Promise<void> => {
@@ -738,6 +745,8 @@ export class AgentPromptSubmissionCoordinator {
     const sessionConversation = admissionIntent?.kind === 'session-conversation'
     const defaultSemanticInput = (sessionConversation || execution === 'default' && admissionIntent?.kind === 'exact-condition') && !rejoiningFrozenPlan
     const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
+    const nativeInputAvailable = provider.prepareNativeInput !== undefined &&
+      (!nativeIdleOnly || provider.catalog.capabilities.nativeConversationInput?.idleQueue !== false)
     // An original Core initialization input already names its Provider-confirmed
     // native object. An unknown transcript locator cannot revoke that input:
     // prepareNativeInput still verifies the exact live actor/object before claim.
@@ -745,7 +754,7 @@ export class AgentPromptSubmissionCoordinator {
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
       const selected = hasSelectedNativeTarget(current)
-      if (!defaultSemanticInput || !sessionConversation && !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput ||
+      if (!defaultSemanticInput || !sessionConversation && !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !nativeInputAvailable ||
           this.deps.registry.isDurabilityUnconfirmed(current.agentSessionId) ||
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
@@ -786,7 +795,7 @@ export class AgentPromptSubmissionCoordinator {
     const target: { source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string } | undefined =
       admissionIntent?.kind === 'native-conversation' ? admissionIntent : source ? { source } : undefined
     if (target) {
-      if (!provider.prepareNativeInput || run.pid === null || session.hostId !== 'local' || target.source.providerId !== session.providerId || !message) {
+      if (!nativeInputAvailable || run.pid === null || session.hostId !== 'local' || target.source.providerId !== session.providerId || !message) {
         throw new AgentMuxError('This exact native input target has no confirmed Provider transport. The original terminal remains available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
       }
       const original = nativeOriginal!, processId = run.pid

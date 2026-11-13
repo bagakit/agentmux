@@ -15,11 +15,13 @@ export type ConversationInvocation = {
   callId: string
 }
 export type ConversationInvocationRef = ConversationRef & ConversationInvocation
+/** A queue-consumer identity proves adoption only; it is never a native turn identity. */
+export type ConversationNativeInputTarget = { turnId: string; queuedSubmissionId?: never } | { queuedSubmissionId: string; turnId?: never }
 /** Produced at the original Provider/Core normalization boundary, never decoded from an opaque item ID. */
 export type ConversationRecordProvenance = {
   sameEvent?: ConversationItemRef
   /** Canonical Provider item identity; physical recordId remains independent. */
-  nativeInput?: { source: AgentSessionHistorySource; semanticItemId: string; turnId: string; clientCorrelation: string }
+  nativeInput?: { source: AgentSessionHistorySource; semanticItemId: string; clientCorrelation: string } & ConversationNativeInputTarget
   /** Core confirmed this native item against the original durable input claim. No sharing/control authority. */
   adoptedInput?: { key: import('./agent-prompt-condition.js').AgentPromptInputKey; purpose?: 'a2a-notification' }
   nativeInvocationScope?: Omit<ConversationInvocation, 'callId'>
@@ -61,7 +63,7 @@ export type ConversationInputRecord = Pick<ConversationSourceRecord, 'id' | 'ref
     | { kind: 'captured'; item: Pick<AgentTimelineItem, 'kind' | 'source' | 'inputRef' | 'a2aNotificationId' | 'conversation'> }
 }
 /** Bounded original-reading witnesses, not a claim of whole-Session uniqueness. No bodies or write authority. */
-export type ConversationInputWitness = { record: ConversationItemRef; recordRevision: string; semanticItemId: string; turnId: string; clientCorrelation: string; key?: AgentPromptInputKey }
+export type ConversationInputWitness = { record: ConversationItemRef; recordRevision: string; semanticItemId: string; clientCorrelation: string; key?: AgentPromptInputKey } & ConversationNativeInputTarget
 export type ConversationInputAdoptionContext = { unconfirmed?: true; witnesses: readonly ConversationInputWitness[] }
 /** Internal aggregation keeps each event’s uncertainty on its original input keys. */
 export type ConversationInputAdoptionEvidence = ConversationInputAdoptionContext & { unconfirmedKeys?: ReadonlySet<string> }
@@ -165,6 +167,15 @@ export function conversationEventAuthor(records: readonly ConversationSourceReco
   if (authors.size > 1) return { author: { kind: 'unknown' }, conflictingRecordIds: explicit.map(value => value.record.id) }
   return { author: authors.values().next().value ?? conversationRecordAuthor(primary, sessionId), conflictingRecordIds: [] }
 }
+/** A native queue consumer is evidence of the original Core input, never a new speech producer. */
+export function conversationEventPrimary(records: readonly ConversationSourceRecord[], anchorId: string): ConversationSourceRecord {
+  const primary = records.find(record => record.id === anchorId) ?? records.find(record => record.original.kind === 'native') ?? records[0]!
+  if (primary.original.kind === 'native' && primary.original.item.conversation?.nativeInput?.queuedSubmissionId !== undefined) {
+    const key = conversationInputKey(primary)
+    if (key) return records.find(record => record.original.kind === 'captured' && conversationInputKey(record) === key) ?? primary
+  }
+  return primary
+}
 function selectors(record: ConversationSourceRecord): ConversationSelector[] {
   const original = record.original
   return original.kind === 'native' ? original.item.contentParts.map((_, partIndex) => ({ kind: 'native-part', partIndex }))
@@ -260,16 +271,22 @@ export const conversationInputWitnessTurn = (record: ConversationItemRef, turnId
 export const conversationInputWitnessGroup = (fact: ConversationInputWitness): string => {
   const source = fact.record.source
   return JSON.stringify([fact.record.hostId, fact.record.agentSessionId, source.kind === 'native' ? source.providerId : null,
-    source.kind === 'native' ? source.nativeSessionId : null, fact.turnId, fact.clientCorrelation])
+    source.kind === 'native' ? source.nativeSessionId : null,
+    fact.queuedSubmissionId === undefined ? ['turn', fact.turnId] : ['queued', fact.queuedSubmissionId], fact.clientCorrelation])
 }
 export function conversationNativeInputWitness(record: ConversationInputRecord): ConversationInputWitness | undefined {
-  if (record.original.kind !== 'native' || record.original.item.kind !== 'user-message' || record.reference?.source.kind !== 'native') return undefined
+  if (record.original.kind !== 'native' || record.reference?.source.kind !== 'native') return undefined
   const fact = record.original.item.conversation?.nativeInput, adopted = record.original.item.conversation?.adoptedInput
   // A branded canonical candidate supplies no input key or adoption authority.
-  // Only an exact qualified witness can relate its complete token/source/turn to a key.
+  // Only an exact qualified witness can relate its complete token/source/target to a key.
+  const target = fact && (fact.queuedSubmissionId === undefined
+    ? record.original.item.kind === 'user-message' && record.original.item.turnId === fact.turnId && typeof fact.turnId === 'string'
+      ? { turnId: fact.turnId } : undefined
+    : fact.turnId === undefined && record.original.item.turnId === undefined && fact.queuedSubmissionId === fact.clientCorrelation
+      ? { queuedSubmissionId: fact.queuedSubmissionId } : undefined)
   return fact && fact.clientCorrelation.startsWith('amux-input-v1.') && fact.clientCorrelation.length <= 8192 &&
-    (!adopted || conversationInputKey(record)) && record.original.item.turnId === fact.turnId && sameSource(fact.source, record.reference.source)
-    ? { record: record.reference, recordRevision: record.revision, semanticItemId: fact.semanticItemId, turnId: fact.turnId,
+    target && (!adopted || conversationInputKey(record)) && sameSource(fact.source, record.reference.source)
+    ? { record: record.reference, recordRevision: record.revision, semanticItemId: fact.semanticItemId, ...target,
       clientCorrelation: fact.clientCorrelation, ...(adopted ? { key: adopted.key } : {}) } : undefined
 }
 /** Merge wire contexts without promoting one event's unknown input into a whole-window failure. */
@@ -318,7 +335,9 @@ export function conversationInputAdoptionEdges(records: readonly ConversationInp
   }
   const keysByTurn = new Map<string, Set<string>>(), keysByOriginal = new Map<string, Set<string>>()
   for (const [key, facts] of byKey) for (const fact of facts) {
-    for (const [map, id] of [[keysByTurn, conversationInputWitnessTurn(fact.record, fact.turnId)], [keysByOriginal, conversationRecordId(fact.record)]] as const) {
+    const targets = [[keysByOriginal, conversationRecordId(fact.record)],
+      ...(fact.turnId === undefined ? [] : [[keysByTurn, conversationInputWitnessTurn(fact.record, fact.turnId)]] as const)] as const
+    for (const [map, id] of targets) {
       const keys = map.get(id) ?? new Set<string>(); keys.add(key); map.set(id, keys)
     }
   }
@@ -491,7 +510,7 @@ function projectConversationGraph<Event>(input: ConversationStreamInput,
   const events = ordered.map(id => {
     const group = groups.get(id)!
 
-    const primary = byId.get(id) ?? group.find(record => record.original.kind === 'native') ?? group[0]!
+    const primary = conversationEventPrimary(group, id)
     const related = [...new Set(group.flatMap(record => [...(relationsByRecord.get(record.id) ?? [])]))]
     const coalesces = conversationEventCoalesces(group, id, input.nativeSource, adopted.targets)
     const localRecords = new Map(group.map(record => [record.id, record])), inputKeys = new Set(group.flatMap(record => [...(adopted.recordKeys.get(record.id) ?? [])]))

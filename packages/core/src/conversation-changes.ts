@@ -6,7 +6,7 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationNativeInputWitness, conversationInputKey,
+import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationEventPrimary, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationNativeInputWitness, conversationInputKey,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-stream.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -332,9 +332,12 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
   if (rawAdoption && (rawAdoption.unconfirmed !== undefined && rawAdoption.unconfirmed !== true || !Array.isArray(rawAdoption.witnesses))) return bad()
   const inputAdoption: import('./conversation-stream.js').ConversationInputAdoptionContext | undefined = rawAdoption ? {
     ...(rawAdoption.unconfirmed ? { unconfirmed: true as const } : {}), witnesses: (rawAdoption.witnesses as unknown[]).map(value => {
-      const w = rpcRecord(value, ['record', 'recordRevision', 'semanticItemId', 'turnId', 'clientCorrelation', 'key'], 'CONTROL_PROTOCOL_ERROR'), record = itemRef(w.record, ref, accepted), key = w.key === undefined ? undefined : validateAgentPromptInputKey(w.key), semanticItemId = text(w.semanticItemId), recordRevision = revision(w.recordRevision), turnId = text(w.turnId), clientCorrelation = text(w.clientCorrelation, 8192)
+      const w = rpcRecord(value, ['record', 'recordRevision', 'semanticItemId', 'turnId', 'queuedSubmissionId', 'clientCorrelation', 'key'], 'CONTROL_PROTOCOL_ERROR'), record = itemRef(w.record, ref, accepted), key = w.key === undefined ? undefined : validateAgentPromptInputKey(w.key), semanticItemId = text(w.semanticItemId), recordRevision = revision(w.recordRevision), clientCorrelation = text(w.clientCorrelation, 8192)
+      if ((w.turnId === undefined) === (w.queuedSubmissionId === undefined)) return bad()
       if (record.source.kind !== 'native' || key && key.agentSessionId !== ref.agentSessionId || !clientCorrelation.startsWith('amux-input-v1.')) return bad()
-      const fact = { record, recordRevision, semanticItemId, turnId, clientCorrelation, ...(key ? { key } : {}) }
+      const target = w.queuedSubmissionId === undefined ? { turnId: text(w.turnId) } : { queuedSubmissionId: text(w.queuedSubmissionId, 8192) }
+      if (target.queuedSubmissionId !== undefined && target.queuedSubmissionId !== clientCorrelation) return bad()
+      const fact = { record, recordRevision, semanticItemId, ...target, clientCorrelation, ...(key ? { key } : {}) }
       const local = byId.get(conversationRecordId(record))
       if (local?.revision === recordRevision && !same(conversationNativeInputWitness(local), fact)) return bad('The retained input witness contradicts a local original.')
       return fact
@@ -353,7 +356,7 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
   }))
   const anchors = conversationRecordAnchors(records, targets).anchors
   if (records.some(record => record.id !== id && anchors.get(record.id) !== id)) return bad('Conversation event identity has no original canonical relation.')
-  const primary = byId.get(id) ?? records.find(record => record.original.kind === 'native') ?? records[0]!
+  const primary = conversationEventPrimary(records, id)
   if (e.role !== conversationRecordRole(primary) || !same(e.author, conversationEventAuthor(records, primary, ref.agentSessionId).author)) return bad()
   const accounted = new Set<string>()
   const content = e.content.map(value => {

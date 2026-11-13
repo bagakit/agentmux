@@ -9,8 +9,8 @@ const unavailable = (message: string): AgentMuxError => new AgentMuxError(messag
 
 /** A declared main transcript actively open for writing in this exact Run process group.
  * SessionStart alone can arrive late or belong to a child; it never proves current identity. */
-type NativeRecord = { file: NativeProcessFile; id: string }
-async function locate(context: AgentProviderNativeSessionDiscoveryContext, target?: NativeRecord): Promise<NativeRecord[]> {
+export type ClaudeNativeRecord = { file: NativeProcessFile; id: string }
+export async function locateClaudeNativeSessions(context: Pick<AgentProviderNativeSessionDiscoveryContext, 'processId' | 'signal'>, target?: ClaudeNativeRecord): Promise<ClaudeNativeRecord[]> {
   const files = (await nativeProcessFiles(context.processId, context.signal))
     .filter(file => (file.access === 'w' || file.access === 'u') && file.path.endsWith('.jsonl') &&
       (!target || file.path === target.file.path))
@@ -41,10 +41,10 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext, targe
 }
 
 export async function discoverClaudeNativeSession(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null> {
-  const originals = await locate(context)
-  const witness = (original: NativeRecord): AgentProviderNativeSessionWitness => {
-    const assertRecord = async (target?: NativeRecord): Promise<void> => {
-      const records = await locate(context, target)
+  const originals = await locateClaudeNativeSessions(context)
+  const witness = (original: ClaudeNativeRecord): AgentProviderNativeSessionWitness => {
+    const assertRecord = async (target?: ClaudeNativeRecord): Promise<void> => {
+      const records = await locateClaudeNativeSessions(context, target)
       if (records.length > 1) throw new AgentMuxError('Several writable main native transcripts are open; current conversation is ambiguous.', 'AGENT_NATIVE_IDENTITY_AMBIGUOUS')
       const current = records[0]
       // A descriptor is a replaceable handle; the original owner and file object must remain.

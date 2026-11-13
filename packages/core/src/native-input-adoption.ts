@@ -15,7 +15,10 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
   if (!key && !native.clientCorrelation.startsWith('amux-input-v1.')) return original
   const unconfirmed = (): AgentSessionHistoryItem => ({ ...original, conversationDiagnostic: { code: 'CONVERSATION_INPUT_ADOPTION_UNCONFIRMED',
     message: 'The original native input cannot be confirmed against its exact durable claim. Its complete record remains readable; no input is replayed.' } })
-  if (!key || !ref.hostId || key.agentSessionId !== ref.agentSessionId || item.kind !== 'user-message' || native.turnId !== item.turnId ||
+  const queued = native.queuedSubmissionId !== undefined
+  if (!key || !ref.hostId || key.agentSessionId !== ref.agentSessionId ||
+      (queued ? native.turnId !== undefined || item.turnId !== undefined || native.queuedSubmissionId !== native.clientCorrelation
+        : item.kind !== 'user-message' || native.turnId !== item.turnId) ||
       !isDeepStrictEqual(native.source, source)) return unconfirmed()
   try {
     signal?.throwIfAborted()
@@ -34,6 +37,10 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
     // An editable native queue entry adopts the frozen answer only while its
     // actual content still matches. A retained correlation alone is insufficient.
     const frozenContent = item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
+    // The queue record observes consumption of one original submission, not a turn
+    // receipt. Retained peer metadata never substitutes for the frozen input body.
+    if (queued && (plan.operation !== 'start-or-steer' || plan.interactionQueue !== true || plan.expectedTurnId !== undefined ||
+        claim.native.outcome === 'admitted' || !frozenContent)) return unconfirmed()
     const defaultInput = (key.kind === 'message' || questionReply && isDeepStrictEqual(questionReply.source, source)) &&
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.expectedTurnId === undefined &&

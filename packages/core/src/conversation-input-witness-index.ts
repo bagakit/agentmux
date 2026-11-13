@@ -36,8 +36,10 @@ export class ConversationInputWitnessIndex {
       if (!next) continue
       const group = conversationInputWitnessGroup(next), key = conversationInputWitnessKey(next)
       this.groups.set(group, mergeConversationInputWitness(this.group(group), next))
-      const turn = conversationInputWitnessTurn(next.record, next.turnId), turnGroups = this.turns.get(turn) ?? new Set<string>()
-      turnGroups.add(group); this.turns.set(turn, turnGroups)
+      if (next.turnId !== undefined) {
+        const turn = conversationInputWitnessTurn(next.record, next.turnId), turnGroups = this.turns.get(turn) ?? new Set<string>()
+        turnGroups.add(group); this.turns.set(turn, turnGroups)
+      }
       if (key) {
         const groups = this.keys.get(key) ?? new Set<string>()
         groups.add(group); this.keys.set(key, groups)

@@ -26,14 +26,16 @@ export function parseConversationProvenance(value: unknown): ConversationRecordP
   const native = p.nativeInput === undefined ? undefined : object(p.nativeInput)
   const source = native === undefined ? undefined : object(native.source)
   const adopted = p.adoptedInput === undefined ? undefined : object(p.adoptedInput)
-  if (native && Object.keys(native).some(key => !['source', 'semanticItemId', 'turnId', 'clientCorrelation'].includes(key)) ||
+  if (native && (Object.keys(native).some(key => !['source', 'semanticItemId', 'turnId', 'queuedSubmissionId', 'clientCorrelation'].includes(key)) ||
+      (native.turnId === undefined) === (native.queuedSubmissionId === undefined)) ||
       source && Object.keys(source).some(key => !['providerId', 'nativeSessionId'].includes(key)) ||
       adopted && (Object.keys(adopted).some(key => !['key', 'purpose'].includes(key)) || adopted.purpose !== undefined && adopted.purpose !== 'a2a-notification' || !native)) throw new AgentMuxError('Invalid native input provenance.', 'INVALID_CONVERSATION_PROVENANCE')
   if (p.invocations !== undefined && (!Array.isArray(p.invocations) || p.invocations.length > 4096)) throw new AgentMuxError('Invalid recorded invocation extent.', 'INVALID_CONVERSATION_PROVENANCE')
   const nativeScope = p.nativeInvocationScope === undefined ? undefined : invocationScope(p.nativeInvocationScope)
   return {
     ...(native && source ? { nativeInput: { source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) },
-      semanticItemId: text(native.semanticItemId), turnId: text(native.turnId), clientCorrelation: text(native.clientCorrelation) } } : {}),
+      semanticItemId: text(native.semanticItemId), clientCorrelation: text(native.clientCorrelation),
+      ...(native.queuedSubmissionId === undefined ? { turnId: text(native.turnId) } : { queuedSubmissionId: text(native.queuedSubmissionId) }) } } : {}),
     ...(adopted ? { adoptedInput: { key: validateAgentPromptInputKey(adopted.key), ...(adopted.purpose === 'a2a-notification' ? { purpose: 'a2a-notification' as const } : {}) } } : {}),
     ...(nativeScope ? { nativeInvocationScope: { source: nativeScope.source, subject: nativeScope.subject, scope: nativeScope.scope } } : {}),
     ...(p.sameEvent === undefined ? {} : { sameEvent: parseConversationLandmarkRef(p.sameEvent) }),

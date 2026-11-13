@@ -1,6 +1,8 @@
 /* Read-only Darwin process identity. libc/libproc owns these facts. */
 #include <libproc.h>
 #include <sys/proc_info.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +22,15 @@ static struct proc_bsdinfo process(pid_t pid) {
   return value;
 }
 int main(int argc,char **argv) {
+  if(argc==2 && !strcmp(argv[1],"--socket-peer")) {
+    pid_t pid=0; socklen_t length=sizeof(pid); uid_t uid; gid_t gid;
+    if(getsockopt(STDIN_FILENO,SOL_LOCAL,LOCAL_PEERPID,&pid,&length)!=0 ||
+        length!=sizeof(pid) || pid<=0 || getpeereid(STDIN_FILENO,&uid,&gid)!=0 || uid!=getuid()) failure("socket-peer");
+    struct proc_bsdinfo value=process(pid);
+    printf("{\"type\":\"native-socket-peer\",\"schema\":1,\"pid\":%u,\"uid\":%u,\"startSec\":\"%llu\",\"startUsec\":\"%llu\"}\n",
+      value.pbi_pid,value.pbi_uid,value.pbi_start_tvsec,value.pbi_start_tvusec);
+    return 0;
+  }
   if(argc==3 && !strcmp(argv[1],"--process-executable")) {
     char *end=NULL;long number=strtol(argv[2],&end,10);
     if(!end||*end||number<=0||number>INT_MAX)failure("original-process");

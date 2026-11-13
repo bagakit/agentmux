@@ -22,6 +22,7 @@ import { ComposerFileReferences } from './ComposerFileReferences'
 import { expandComposerInput, expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
 import { composerSubmitMode, SEND_AFTER_REQUEST_ENDS } from '../lib/composer-submit-mode'
+import { interactionNativeComposerBinding } from '../lib/interaction-native-composer-binding'
 import {
   caretAtFirstLine,
   caretAtLastLine
@@ -207,10 +208,8 @@ export function AgentSessionComposer({
   const completion = useComposerCandidates({ scope: JSON.stringify([sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
     active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId,
     providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
-  // A pending request is only a timing fact for input. Every send gesture still goes through the store,
-  // which keeps it unbound in the Session queue until Core settles that exact request; nothing here
-  // reaches the open native dialog. Only the wording tells the user when it will go out.
   const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
+  const nativeQueuePending = session?.kind === 'agent' && Boolean(interactionNativeComposerBinding(session))
 
   function acceptsMoteMainInput(): boolean {
     const direct = motePresentation.moteInputIntent === 'member' || moteWorkface?.memberIntent
@@ -381,7 +380,7 @@ export function AgentSessionComposer({
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
         disabled={!submitMode.canSubmit}
         inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : requestPending
-          ? `${SEND_AFTER_REQUEST_ENDS}.` : !submitMode.canSubmit ? submitMode.placeholder
+          ? nativeQueuePending ? 'Send to the Agent’s message queue. The request remains open.' : `${SEND_AFTER_REQUEST_ENDS}.` : !submitMode.canSubmit ? submitMode.placeholder
             : session.processState !== 'running' || session.status.state === 'disconnected'
               ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
@@ -406,9 +405,9 @@ export function AgentSessionComposer({
         {...(session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
-      placeholder={submitMode.placeholder}
+      placeholder={nativeQueuePending ? 'Message the Agent; the request stays open…' : submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
-      {...(requestPending ? { submitLabel: SEND_AFTER_REQUEST_ENDS } : {})}
+      {...(requestPending && !nativeQueuePending ? { submitLabel: SEND_AFTER_REQUEST_ENDS } : {})}
       onHistoryRecall={historyRecall}
       {...(historyPhase ? { historyNavigation: historyPhase } : {})}
       {...(activeFile ? { activeFile } : {})}

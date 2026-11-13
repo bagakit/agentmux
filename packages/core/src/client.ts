@@ -6291,6 +6291,9 @@ export class AgentMuxClient {
     if (originalImages && !isDeepStrictEqual(originalImages.map(({ observation: _observation, ...reference }) => reference), input.inputImages)) throw new AgentMuxError(
       'The selected images differ from the original input. Its existing input and resources were retained.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (input.admissionIntent !== undefined) {
+      // Controlled waiting does not retain this private idle-only restriction.
+      // Refuse this invocation before saving rather than silently sending ordinary input.
+      if (context?.nativeIdleOnly) throw new AgentMuxError('Controlled input cannot drop its original idle-only restriction.', 'INVALID_AGENT_PROMPT')
       this.validateControlledPrompt(input)
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
       const session = await this.currentStoredAgentSession(input.agentSessionId)

@@ -2,7 +2,7 @@ import { isCompleteConversationRecord, type ConversationProcessHeader, type Conv
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
 import { projectConversationTimeline, projectConversationEventFacts, type ConversationProjectionInput } from './conversation-timeline.js'
-import { conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationTimeline } from './conversation-stream.js'
+import { conversationRecordRole, conversationRecordAuthor, conversationEventPrimary, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationTimeline } from './conversation-stream.js'
 export { projectSessionInputs, sessionInputMailboxAuthor, type SessionInputGroup } from './session-inputs.js'
 export { capturedToolEdit, type ConversationToolEdit } from './conversation-tool-edit.js'
 
@@ -150,7 +150,7 @@ function createConversationRecordAdapter<Event extends ConversationEventFacts>(i
   }
   function adaptEvent(event: Event): AdaptedConversationRecord<Event> {
     // A canonical anchor may be unread. The complete accepted contribution is still readable.
-    const record = records.get(event.anchorId) ?? records.get(event.content[0]?.recordId ?? '') ?? records.get(event.recordIds[0]!)!
+    const record = conversationEventPrimary(event.recordIds.map(id => records.get(id)!), event.anchorId)
     const projectedParts = parts(event.content.filter(slot => slot.placement === 'body'))
     const original = record.original
     const contentParts = original.kind === 'native' && projectedParts.length === original.item.contentParts.length

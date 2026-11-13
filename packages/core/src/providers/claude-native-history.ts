@@ -6,6 +6,7 @@ import type { ProviderConversationChangesContext, ProviderConversationChangesPag
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
 import { normalizeSessionHistoryMetrics } from '../session-history.js'
+import { nativeInputCorrelationKey } from '../native-input-correlation.js'
 import {
   isNativeText,
   nativeJsonStringify,
@@ -19,6 +20,18 @@ import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPag
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function queuedCommand(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const attachment = record.type === 'attachment' ? object(record.attachment) : undefined
+  return attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' && isNativeText(attachment.prompt)
+    ? attachment : undefined
+}
+
+function queuedCorrelation(record: Record<string, unknown>): string | undefined {
+  const attachment = queuedCommand(record), correlation = attachment?.source_uuid
+  return record.isSynthetic !== true && record.isCompactSummary !== true && record.isApiErrorMessage !== true &&
+    typeof correlation === 'string' && nativeInputCorrelationKey(correlation) ? correlation : undefined
 }
 
 function formatToolResultOutput(content: unknown): NativeTextValue {
@@ -74,11 +87,11 @@ function parts(content: unknown): AgentSessionHistoryContentPart[] {
 
 function convert(record: Record<string, unknown>, start: number): AgentSessionHistoryItem {
   const message = object(record.message)
-  const attachment = record.type === 'attachment' ? object(record.attachment) : undefined
+  const attachment = queuedCommand(record)
   // Claude accepts mid-turn prompts as attachments, not additional user turns.
   // Queue logs and the rendered system wrapper do not establish accepted speech.
-  const queuedInput = attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' &&
-    isNativeText(attachment.prompt)
+  const queuedInput = attachment !== undefined
+  const correlatedQueue = queuedCorrelation(record) !== undefined
   const content = queuedInput ? attachment.prompt : message?.content
   const blocks = Array.isArray(content) ? content : []
   const messageParts = message ? parts(content) : undefined
@@ -96,12 +109,15 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   // written by Claude itself (origin task-notification, promptSource system), not typed
   // by a person, so it is a system record of the conversation, not the user's speech.
   const originKind = object(record.origin)?.kind
+  const queuedOrigin = object(attachment?.origin)?.kind
+  const queuedPeer = queuedInput && (attachment.isMeta === true || attachment.humanTurn === false ||
+    typeof queuedOrigin === 'string' && queuedOrigin !== 'human')
   const systemOriginInput = record.type === 'user' && !queuedInput && !isToolResultTurn && !isGenerated &&
     (record.promptSource === 'system' || typeof originKind === 'string' && originKind !== 'human')
   let kind: AgentSessionHistoryItem['kind']
   if ((record.type === 'system' || systemOriginInput) && message && content !== undefined && !isGenerated) {
     kind = 'system-message'
-  } else if (isNeutralActivity) {
+  } else if (isNeutralActivity || queuedPeer || correlatedQueue) {
     kind = 'activity'
   } else if (record.type === 'user' || queuedInput) {
     // Tool result turns in Claude are sent under role 'user', often with tool_use_result on the record
@@ -134,7 +150,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
     ...(messagePhase === undefined ? {} : { messagePhase }),
-    contentParts: (messageParts ?? (queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }]))
+    contentParts: (messageParts ?? (queuedInput && (kind === 'user-message' || correlatedQueue) ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }]))
       .map(part => ({ ...part, contentEligibility: contentEligibility === 'private' || isGenerated ? contentEligibility : part.contentEligibility ?? contentEligibility })),
     // Native message.usage covers this response, even when several responses share a turn.
     // Claude does not report one total_tokens value here; preserve that absence.
@@ -162,7 +178,11 @@ function mainRecord(record: Record<string, unknown>, start: number, nativeSessio
     throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
   }
   const item = convert(record, start)
-  const conversation = nativeConversationProvenance(item.contentParts, { providerId: 'claude', nativeSessionId })
+  const source = { providerId: 'claude', nativeSessionId }
+  const correlation = item.turnId === undefined && typeof record.uuid === 'string' && record.uuid ? queuedCorrelation(record) : undefined
+  const invocation = nativeConversationProvenance(item.contentParts, source)
+  const conversation = correlation ? { ...invocation, nativeInput: { source, semanticItemId: record.uuid as string,
+    queuedSubmissionId: correlation, clientCorrelation: correlation } } : invocation
   return { ...item, ...(conversation ? { conversation } : {}) }
 }
 

@@ -27,8 +27,9 @@ type Dependencies = {
 type TurnEndDecision = NonNullable<AgentNativeHookSpecification['turnEndDecision']>
 
 /** Which automatic path a recipient's Provider actually contributes; the one owner of this fact. */
-export function automaticNotification(provider: Pick<AgentProvider, 'prepareNativeInput' | 'hook'>): AgentMuxAutomaticNotification {
-  return provider.prepareNativeInput ? 'idle-queue' : provider.hook.turnEndDecision ? 'turn-end' : 'none'
+export function automaticNotification(provider: Pick<AgentProvider, 'prepareNativeInput' | 'hook' | 'catalog'>): AgentMuxAutomaticNotification {
+  return provider.prepareNativeInput && provider.catalog.capabilities.nativeConversationInput?.idleQueue !== false
+    ? 'idle-queue' : provider.hook.turnEndDecision ? 'turn-end' : 'none'
 }
 
 /** One authenticated native turn-end callback of an exact Run's main session. */
