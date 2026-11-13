@@ -21,5 +21,9 @@ it('the actual packaging dependency materializer copies a standalone usable neut
       "const m=await import('@agentmux/git'); console.log(JSON.stringify({repository:typeof m.GitRepository,reader:typeof m.readLocalWorktreeFile,history:typeof m.parseGitHistory,credential:m.scrubGitCredentials('https://secret@host/repo')}))"],
     { cwd: temporary, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' } })
     expect(JSON.parse(output)).toEqual({ repository: 'function', reader: 'function', history: 'function', credential: 'https://***@host/repo' })
+    // The workspace package ships its npm publication only: no sources, tests or development files.
+    const shipped = copies.map((item: { target: string }) => item.target.slice('node_modules/@agentmux/git/'.length))
+    expect(shipped).toContain('package.json')
+    expect(shipped.filter((path: string) => /^(src|test)\/|\.(d\.ts|js\.map)$|tsconfig|tsbuildinfo/u.test(path))).toEqual([])
   } finally { await rm(temporary, { recursive: true, force: true }) }
-})
+}, 30_000)
