@@ -54,7 +54,8 @@ async function save(alignment?: DemandAlignmentProposal, confirmed = false, grou
 function button(label: string) { const action = ['Clarify goal', 'Discuss changes'].includes(label) ? '[data-goal-grill]' : label === 'Ask agent to check work' ? '[data-goal-grounding]' : null; const node = (action ? container.querySelector<HTMLButtonElement>(action) : null) ?? [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
 async function click(label: string, waitForTransport = true) { await act(async () => { button(label).click(); if (waitForTransport) await host.settle() }) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
-function next() { return container.querySelector('.goals-row__next')?.textContent }
+// The Goals list groups rows by whose turn it is; read this Goal's own row, never whichever row is first.
+function next() { return container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent }
 function expectReloadOnly() {
   const recovery = container.querySelector('[data-goal-acknowledgement-failure]')
   expect(recovery).toBeTruthy()
