@@ -15,7 +15,7 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   DEFAULT_SCREENSHOT_FONT_SIZE, DEFAULT_SCREENSHOT_WIDTH, redoShape, SCREENSHOT_COLORS, SCREENSHOT_FONT_SIZES,
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
-  isScreenshotMask, screenshotTextLines, constrainedEndpoint,
+  isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
@@ -503,7 +503,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius / fit)
         : tool === 'spotlight' ? createSpotlightShape(id, '#ffffff', at, at, strengths.spotlightDim)
         : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom)
-        : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: Math.max(0, ...notes.map(note => note.number)) + 1, note: '', from: at, to: at }
+        : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: nextNoteNumber(documentState.shapes), note: '', from: at, to: at }
         : { id, kind: tool, color, width: stroke, from: at, to: at }
     }
     schedulePaint()
@@ -799,7 +799,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       </div>
       <AnnotationNotes notes={notes} selected={selectedNote} draft={noteDraft} busy={busy}
         onSelect={note => { commitNote(); setSelectedId(note.id) }} onDraft={value => { setNoteDraft(value); onEdited?.() }}
-        onCommit={commitNote} onTemplate={setTemplate} onLocate={locateNote} />
+        onCommit={commitNote} onTemplate={setTemplate} onLocate={locateNote}
+        onRenumber={() => { commitNote(); edit(doc => setShapes(doc, renumberNotes(doc.shapes))) }} />
     </div>
     <footer className="image-annotation-editor__footer">
       <span>{documentState.crop ? Math.round(documentState.crop.width) + ' × ' + Math.round(documentState.crop.height) + ' crop' : 'Original image'} · {documentState.shapes.length} annotations</span>
