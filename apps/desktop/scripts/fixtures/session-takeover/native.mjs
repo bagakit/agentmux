@@ -55,7 +55,7 @@ export async function runNative(requestedEvidence, options = {}) {
     receipt.coreSpatialModuleSha256 = hash(await readFile(spatialModule))
     const { build } = await import(require.resolve('vite'))
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
-      resolve: { dedupe: ['react', 'react-dom'], alias: workspace.aliases, conditions: ['browser', 'import', 'default'] },
+      resolve: { dedupe: ['react', 'react-dom'], alias: workspace.aliases },
       worker: { format: 'es' },
       plugins: [{ name: 'bind-current-takeover-renderer-inputs', enforce: 'pre', async transform(_source, id) {
         const file = id.split('?')[0]
