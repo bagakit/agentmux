@@ -14,6 +14,7 @@ import { parseStoredGeometry, type WindowGeometry } from './window-geometry.js'
  */
 export class WindowGeometryStore {
   private saveTail: Promise<void> = Promise.resolve()
+  private closed = false
 
   constructor(private readonly path = join(app.getPath('userData'), 'window-geometry.json')) {}
 
@@ -32,8 +33,23 @@ export class WindowGeometryStore {
   /**
    * Serialize writes through a tail so overlapping saves (a resize immediately followed by a close)
    * cannot interleave and leave a half-written file. Durable temp-then-rename mirrors ConfigStore.
+   * After closeWith() no further write starts: the process may exit at any moment after quit.
    */
   async save(geometry: WindowGeometry): Promise<void> {
+    if (this.closed) return
+    await this.enqueue(geometry)
+  }
+
+  /**
+   * Quit owns the last write. It waits for saves already started, writes the final geometry and
+   * accepts no later save, so process exit can never cut a write between its temp file and rename.
+   */
+  closeWith(geometry: WindowGeometry | null): Promise<void> {
+    this.closed = true
+    return geometry ? this.enqueue(geometry) : this.saveTail
+  }
+
+  private async enqueue(geometry: WindowGeometry): Promise<void> {
     const operation = this.saveTail.catch(() => {}).then(async () => {
       await mkdir(dirname(this.path), { recursive: true })
       await durableWriteFile(this.path, `${JSON.stringify(geometry, null, 2)}\n`)

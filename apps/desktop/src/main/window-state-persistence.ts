@@ -22,14 +22,9 @@ export function registerWindowStatePersistence(
 
   const captureGeometry = (): void => {
     if (disposed || window.isDestroyed()) return
-    const geometry = geometryFromWindowState({
-      bounds: window.getBounds(),
-      normalBounds: window.getNormalBounds(),
-      maximized: window.isMaximized()
-    })
     // Fire-and-forget: a failed geometry write is a nicety lost, never a reason to block teardown or
     // surface an error to the user.
-    void geometryStore.save(geometry).catch(() => {})
+    void geometryStore.save(currentGeometry(window)).catch(() => {})
   }
 
   const flushRendererStorage = (): void => {
@@ -68,6 +63,24 @@ export function registerWindowStatePersistence(
   window.once('closed', dispose)
 
   return dispose
+}
+
+function currentGeometry(window: BrowserWindow) {
+  return geometryFromWindowState({
+    bounds: window.getBounds(),
+    normalBounds: window.getNormalBounds(),
+    maximized: window.isMaximized()
+  })
+}
+
+/**
+ * Quit writes the window's final geometry and waits for every geometry write already started, including
+ * the 'close' capture of a window closed earlier. The window's own 'close' capture fires after this,
+ * while the process is exiting; the closed store ignores it, so no write is cut off between its temp
+ * file and rename. A failed write never blocks quitting.
+ */
+export async function persistWindowGeometryForQuit(window: BrowserWindow | null, geometryStore: WindowGeometryStore): Promise<void> {
+  await geometryStore.closeWith(window && !window.isDestroyed() ? currentGeometry(window) : null).catch(() => {})
 }
 
 /** One bounded checkpoint of this actual workbench; failure does not establish Renderer death. */

@@ -40,7 +40,7 @@ import { registerRendererCrashRecovery } from './renderer-crash-recovery.js'
 import { WindowGeometryStore } from './window-geometry-store.js'
 import { clampGeometryToVisibleArea, windowConstructorGeometry } from './window-geometry.js'
 import { liveVisibleAreas } from './window-visible-area.js'
-import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
+import { persistWindowGeometryForQuit, prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -546,6 +546,8 @@ function startPrimaryInstance(): void {
         pid: process.pid
       })
     }
+    // Quit is now certain. The process exits right after app.quit(), so the last geometry write ends here.
+    await persistWindowGeometryForQuit(window, windowGeometryStore)
     allowingQuit = true
     app.quit()
   })
