@@ -27,5 +27,8 @@
 .conversation-protocol[data-protocol-kind='a2a'] { border-inline-start-width: 2px; }
 .conversation-protocol[data-protocol-kind='a2a-reference'] { background: var(--surface-2); }
 .conversation-protocol[data-protocol-kind='continue'], .conversation-protocol[data-protocol-kind='reaction'] { padding-block: var(--sp-2); }
+.conversation-capsule-answer__question { margin: var(--sp-2) 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-capsule-answer__answer { margin: 0; color: var(--text); font-size: var(--fs-body); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-capsule-answer__page { margin-block-start: var(--sp-2); font-size: var(--fs-meta); }
 .log-turn__declared-context { padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
 .log-turn__declared-context > summary { min-height: 24px; }
