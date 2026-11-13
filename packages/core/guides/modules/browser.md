@@ -77,3 +77,11 @@ Tab. Read amux space --skill before placement for actual geometry, Focus discove
 the user's new-Tab/tool choice and crowded-layout exceptions, and separate navigation/input
 focus. An app link may await a
 person's system handoff while the original page stays unchanged.
+
+Profile native environment uses `browser profile update --profile ID --expected-revision N --environment JSON`.
+The bundle accepts userAgent, acceptLanguages, timeZone, locale, geolocation, userAgentMetadata, screen
+and hardwareConcurrency; null clears it. Read the original Profile for each Browser/field native application
+and explicit scope. Saving does not reload the page or grant geolocation permission. DevTools owns its native
+connection while open; actual detach is unknown and closing DevTools reapplies without replaying page actions.
+Subdocuments, Workers and initial scripts remain unknown; Canvas/WebGL/fonts/TLS and complete fingerprint
+emulation are unsupported. Screen edits compose with the original execution Viewport.
