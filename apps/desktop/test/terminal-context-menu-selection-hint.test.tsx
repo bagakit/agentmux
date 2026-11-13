@@ -248,7 +248,8 @@ describe('提示的样式落在共享 CSS 规则里，且那条规则真的带�
   // 取值。选择器必须整条相等——子串命中会被兄弟规则（例如某个 `.x .tab-context-menu__hint`）替被删的
   // 规则作保（这条坑在 surface-tool-dock.test.ts 的 ruleBody 注释里已记过一次）。
   const HINT = '.tab-context-menu__hint'
-  const rules = stripCssComments(readStyleSheet('./chrome.css'))
+  // The menu container is owned by context-menu.css and the hint by chrome.css; both load from the entry.
+  const rules = stripCssComments(readStyleSheet('./context-menu.css') + '\n' + readStyleSheet('./chrome.css'))
 
   it('the actual style entry imports the owning Chrome sheet', () => {
     const entry = readFileSync(fileURLToPath(new URL('../src/renderer/src/styles/index.css', import.meta.url)), 'utf8')
