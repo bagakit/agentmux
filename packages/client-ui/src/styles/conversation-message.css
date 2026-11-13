@@ -489,3 +489,5 @@
 
 .log-turn__system-body { display: contents; }
 .log-turn__system-body[hidden] { display: none; }
+/* A spoken record without readable text keeps its place but reads as an absence, not a lost reply. */
+.log-turn__body--empty { color: var(--text-2); font-size: var(--fs-meta); white-space: normal; }
