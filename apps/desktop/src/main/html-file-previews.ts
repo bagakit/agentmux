@@ -4,6 +4,7 @@ import { posix } from 'node:path'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
+import { previewRelativePath, previewRequestPath, previewUrlPath } from './preview-paths.js'
 
 type Preview = { workspace: WorkspaceRecord; path: string; content: Buffer; reads: Set<AbortController> }
 
@@ -23,13 +24,6 @@ const mimeTypes: Record<string, string> = {
 // External resources are useful in standalone HTML; none receives a host or parent capability.
 const previewCsp = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' http: https:; style-src 'unsafe-inline' http: https:; img-src http: https: data: blob:; font-src http: https: data:; media-src http: https: data: blob:; connect-src http: https:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
 
-function relativePath(path: string): string {
-  if (!path || path.includes('\\') || path.includes('\0') || posix.isAbsolute(path)) throw new Error('Preview requires a Workspace-relative file path.')
-  const normalized = posix.normalize(path)
-  if (normalized === '.' || normalized === '..' || normalized.startsWith('../') || normalized.endsWith('/')) throw new Error('Preview path escapes its Workspace or has no filename.')
-  return normalized
-}
-
 /** Visible editor-owned draft snapshots, with assets read only through the existing file owner. */
 export class HtmlFilePreviews {
   private readonly previews = new Map<string, Preview>()
@@ -45,7 +39,7 @@ export class HtmlFilePreviews {
   async open(workspace: WorkspaceRecord, path: string, content: string): Promise<{ id: string; url: string }> {
     if (this.disposed) throw new Error('HTML preview service is closed.')
     const generation = this.generation
-    const preview: Preview = { workspace: { ...workspace }, path: relativePath(path), content: Buffer.alloc(0), reads: new Set() }
+    const preview: Preview = { workspace: { ...workspace }, path: previewRelativePath(path), content: Buffer.alloc(0), reads: new Set() }
     if (!this.workspaceMatches(preview)) throw new Error('The preview Workspace resource changed. Reopen preview to retry.')
     if (Buffer.byteLength(content, 'utf8') > WORKSPACE_FILE_MAX_BYTES) throw new Error('HTML preview exceeds the 16 MiB document budget. The original source is still available.')
     preview.content = Buffer.from(content, 'utf8')
@@ -54,7 +48,7 @@ export class HtmlFilePreviews {
     if (!this.workspaceMatches(preview)) throw new Error('The preview Workspace resource changed. Reopen preview to retry.')
     const id = randomBytes(32).toString('base64url')
     this.previews.set(id, preview)
-    return { id, url: `${origin}/${id}/${preview.path.split('/').map(encodeURIComponent).join('/')}` }
+    return { id, url: `${origin}/${id}/${previewUrlPath(preview.path)}` }
   }
 
   release(id: string): void {
@@ -145,11 +139,7 @@ export class HtmlFilePreviews {
     }
     try {
       if (!this.current(id, preview)) { fail(410, 'The preview resource changed. Reopen preview to retry.'); return }
-      const path = relativePath(match[2]!.split('/').map(segment => {
-        const decoded = decodeURIComponent(segment)
-        if (decoded.includes('/')) throw new Error('Encoded path separator is unavailable.')
-        return decoded
-      }).join('/'))
+      const path = previewRequestPath(match[2]!)
       let bytes: Uint8Array = preview.content
       if (path !== preview.path) {
         const read = new AbortController(), cancel = () => read.abort()
