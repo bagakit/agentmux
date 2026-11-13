@@ -43,7 +43,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" data-session-state={row.session?.status.state} disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ThemeActionOpenExternalIcon size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
   const hasOriginalWork = Boolean(demand.delegations?.length || demand.dispatches?.some(start => start.execution === 'finite'))
   return <section className="goal-collaboration" aria-label="Goal collaboration">
-    <div className="goals-section-heading"><h2><ThemeObjectTeamIcon size={15} />Collaboration</h2><span className="goals-caption">Selection does not start execution</span></div>
+    <div className="goals-section-heading"><h2><ThemeObjectTeamIcon size={15} />Collaboration</h2></div>
     <GoalDelegationWork demand={demand} />
     <details className="goal-collaboration__relationships" open={!hasOriginalWork || !demand.supervisorSessionId}>
       <summary>People and related sessions <span className="goals-caption" title={supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}>Supervisor · {supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}</span></summary>
