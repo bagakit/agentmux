@@ -80,7 +80,7 @@ it('a cancelled or missing location releases only its candidate and leaves the a
   const create = vi.spyOn(ConversationReaderState.prototype, 'create')
   const missing = { ...f.ref, source: { kind: 'native' as const, providerId: 'claude', nativeSessionId: 'native-main', recordId: 'missing-original' } }
   await expect(f.read({ ...f.ref, record: missing })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RECORD_UNAVAILABLE' })
-  const candidate = create.mock.results[0]!.value!, state = create.mock.instances[0]!
+  const candidate = create.mock.results[0]!.value!, state = create.mock.instances[0]! as unknown as ConversationReaderState
   expect(() => state.get(candidate.id, f.ref, candidate.scope)).toThrow(/expired/)
   const controller = new AbortController(), reader = f.client as unknown as { readSessionHistoryPage: AgentMuxClient['sessionHistoryPage'] }
   const read = reader.readSessionHistoryPage.bind(f.client)

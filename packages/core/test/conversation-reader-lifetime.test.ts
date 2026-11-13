@@ -165,7 +165,7 @@ it('a failed new read releases its unreturned window while a failed continuation
   const create = vi.spyOn(ConversationReaderState.prototype, 'create')
   await expect(f.client.readAgentConversation({ ...f.ref, maxBytes: 4096 })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_BUDGET' })
   expect(create).toHaveBeenCalledOnce()
-  const view = create.mock.results[0]!.value!, state = create.mock.instances[0]!
+  const view = create.mock.results[0]!.value!, state = create.mock.instances[0]! as unknown as ConversationReaderState
   expect(() => state.get(view.id, f.ref, view.scope)).toThrow(/expired/)
   const accepted = await f.client.readAgentConversation(f.ref)
   await expect(f.client.readAgentConversation({ ...f.ref, view: accepted.window.view!, maxBytes: 4096 })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_BUDGET' })
