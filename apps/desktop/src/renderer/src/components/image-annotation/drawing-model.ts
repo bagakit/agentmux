@@ -15,17 +15,25 @@ export type EllipseShape = ShapeBase & { kind: 'ellipse'; from: ScreenshotPoint;
 export type TextShape = ShapeBase & { kind: 'text'; at: ScreenshotPoint; text: string; fontSize: number }
 export type NoteTemplate = 'observation' | 'expected' | 'request'
 export type NoteShape = ShapeBase & { kind: 'note'; from: ScreenshotPoint; to: ScreenshotPoint; width: number; radius: number; number: number; note: string; template?: NoteTemplate }
-export type PixelateShape = ShapeBase & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
+/** Closed rings in original image pixels, filled even-odd, that narrow a region mark to a magic wand selection.
+ * from/to stays their bounding rect, so bounds, hits and note filtering never cover less than the outline. */
+export type ScreenshotOutline = ScreenshotPoint[][]
+type Outlined = { outline?: ScreenshotOutline }
+export type PixelateShape = ShapeBase & Outlined & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
 export type PixelateBrushShape = ShapeBase & { kind: 'pixelate-brush'; points: ScreenshotPoint[]; width: number; blockSize: number }
-export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
+export type CoverShape = ShapeBase & Outlined & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
 /** `radius` is the Gaussian blur radius in original image pixels. */
-export type BlurShape = ShapeBase & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
+export type BlurShape = ShapeBase & Outlined & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
 /** Darkens everything outside from/to by `dim` (0..1 opacity). It points, it does not redact. */
-export type SpotlightShape = ShapeBase & { kind: 'spotlight'; from: ScreenshotPoint; to: ScreenshotPoint; dim: number }
+export type SpotlightShape = ShapeBase & Outlined & { kind: 'spotlight'; from: ScreenshotPoint; to: ScreenshotPoint; dim: number }
 /** from/to is the source region; the bubble's top-left is `at` and its size is the source size × zoom. */
 export type CalloutShape = ShapeBase & { kind: 'callout'; from: ScreenshotPoint; to: ScreenshotPoint; at: ScreenshotPoint; zoom: number }
+/** Brightness, contrast and saturation are factors (1 leaves the image unchanged); sharpen is an unsharp amount.
+ * from/to is the range (the whole image, or a wand selection's bounds with its outline). */
+export type AdjustShape = ShapeBase & Outlined & { kind: 'adjust'; from: ScreenshotPoint; to: ScreenshotPoint
+  brightness: number; contrast: number; saturation: number; sharpen: number }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape | CalloutShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape | CalloutShape | AdjustShape
 export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape | BlurShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
@@ -43,6 +51,12 @@ export const SPOTLIGHT_DIM_RANGE = { min: 0.3, max: 0.85 } as const
 export const DEFAULT_SPOTLIGHT_DIM = 0.6
 export const CALLOUT_ZOOM_RANGE = { min: 1.5, max: 6 } as const
 export const DEFAULT_CALLOUT_ZOOM = 2.5
+export const ADJUST_FACTOR_RANGE = { min: 0.5, max: 1.5 } as const
+export const ADJUST_SHARPEN_RANGE = { min: 0, max: 1 } as const
+export type AdjustParameters = Pick<AdjustShape, 'brightness' | 'contrast' | 'saturation' | 'sharpen'>
+export const NEUTRAL_ADJUSTMENT: Readonly<AdjustParameters> = { brightness: 1, contrast: 1, saturation: 1, sharpen: 0 }
+/** An outline larger than this is refused, never truncated: a cut ring would redact less than the selection. */
+export const OUTLINE_LIMITS = { rings: 10_000, points: 250_000 } as const
 
 const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, value))
 export function createBlurShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, radius = DEFAULT_BLUR_RADIUS): BlurShape {
@@ -51,6 +65,68 @@ export function createBlurShape(id: string, color: string, from: ScreenshotPoint
 export function createSpotlightShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, dim = DEFAULT_SPOTLIGHT_DIM): SpotlightShape {
   return { id, color, kind: 'spotlight', from, to, dim: clamp(dim, SPOTLIGHT_DIM_RANGE) }
 }
+export function createAdjustShape(id: string, from: ScreenshotPoint, to: ScreenshotPoint, parameters: Partial<AdjustParameters> = {}): AdjustShape {
+  const factor = (value: number) => clamp(value, ADJUST_FACTOR_RANGE)
+  const merged = { ...NEUTRAL_ADJUSTMENT, ...parameters }
+  return { id, color: '#ffffff', kind: 'adjust', from, to, brightness: factor(merged.brightness), contrast: factor(merged.contrast),
+    saturation: factor(merged.saturation), sharpen: clamp(merged.sharpen, ADJUST_SHARPEN_RANGE) }
+}
+
+/** The outline's extreme corners, kept as the exact coordinates so moving or scaling them with the rings keeps them equal. */
+export function outlineExtent(outline: readonly (readonly ScreenshotPoint[])[]): { from: ScreenshotPoint; to: ScreenshotPoint } | null {
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+  for (const ring of outline) for (const point of ring) {
+    left = Math.min(left, point.x); top = Math.min(top, point.y); right = Math.max(right, point.x); bottom = Math.max(bottom, point.y)
+  }
+  return right > left && bottom > top ? { from: { x: left, y: top }, to: { x: right, y: bottom } } : null
+}
+
+/** Whether every ring edge is horizontal or vertical, as a wand outline's always is, before and after a move or scale. */
+export function isAxisAlignedOutline(outline: readonly (readonly ScreenshotPoint[])[]): boolean {
+  return outline.every(ring => ring.every((point, index) => {
+    const next = ring[(index + 1) % ring.length]!
+    return point.x === next.x || point.y === next.y
+  }))
+}
+
+/** The even-odd fill of an axis-aligned outline as rects, one per row band between edge ends and per filled span of it.
+ * Their union is exactly the fill, so a renderer can snap each outward to whole canvas pixels. */
+export function outlineRects(outline: readonly (readonly ScreenshotPoint[])[]): NormalizedRect[] {
+  if (!isAxisAlignedOutline(outline)) throw new Error('A screenshot outline edge must be horizontal or vertical')
+  const edges: { x: number; top: number; bottom: number }[] = []
+  for (const ring of outline) ring.forEach((point, index) => {
+    const next = ring[(index + 1) % ring.length]!
+    if (point.x === next.x && point.y !== next.y) edges.push({ x: point.x, top: Math.min(point.y, next.y), bottom: Math.max(point.y, next.y) })
+  })
+  edges.sort((a, b) => a.top - b.top)
+  const rows = [...new Set(edges.flatMap(edge => [edge.top, edge.bottom]))].sort((a, b) => a - b)
+  const rects: NormalizedRect[] = []
+  let active: typeof edges = [], next = 0
+  for (let row = 0; row + 1 < rows.length; row++) {
+    const top = rows[row]!, height = rows[row + 1]! - top
+    while (next < edges.length && edges[next]!.top <= top) active.push(edges[next++]!)
+    // Every edge end is a row boundary, so an edge still active past this row's top spans the whole row.
+    active = active.filter(edge => edge.bottom > top)
+    const xs = active.map(edge => edge.x).sort((a, b) => a - b)
+    // Even-odd: a span between each odd crossing and the next is filled.
+    for (let index = 0; index + 1 < xs.length; index += 2) if (xs[index + 1]! > xs[index]!) rects.push({ x: xs[index]!, y: top, width: xs[index + 1]! - xs[index]!, height })
+  }
+  return rects
+}
+
+/** Whether an outline has more rings or points than a document keeps; such a selection is refused whole. */
+export function exceedsOutlineLimits(outline: readonly (readonly ScreenshotPoint[])[]): boolean {
+  return outline.length > OUTLINE_LIMITS.rings || outline.reduce((total, ring) => total + ring.length, 0) > OUTLINE_LIMITS.points
+}
+/** Narrows a region mark to an outline; from/to become the outline's extent, the only rect bounds and filters use. */
+export function withOutline<T extends ScreenshotShape & Outlined & { from: ScreenshotPoint; to: ScreenshotPoint }>(shape: T, outline: ScreenshotOutline): T {
+  const extent = outlineExtent(outline)
+  if (!extent) throw new Error('A screenshot outline needs an area')
+  if (exceedsOutlineLimits(outline)) throw new Error('The selected region is too detailed to keep as an exact outline')
+  if (!isAxisAlignedOutline(outline)) throw new Error('A screenshot outline edge must be horizontal or vertical')
+  return { ...shape, outline, ...extent }
+}
+
 /** Screen points between a source and its default bubble. The editor passes `CALLOUT_GAP / view scale` as the gap, so it
  * reads the same at every zoom and pixel ratio; without a gap the model takes one image pixel per point. */
 export const CALLOUT_GAP = 20
@@ -208,7 +284,10 @@ function scalePoint(point: ScreenshotPoint, scale: number): ScreenshotPoint {
   return { x: point.x * scale, y: point.y * scale }
 }
 
+const mapOutline = (shape: Outlined, map: (point: ScreenshotPoint) => ScreenshotPoint) => shape.outline ? { outline: shape.outline.map(ring => ring.map(map)) } : {}
+
 export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotShape {
+  const outline = (outlined: Outlined) => mapOutline(outlined, point => scalePoint(point, scale))
   switch (shape.kind) {
     case 'pixelate-brush':
       return { ...shape, width: shape.width * scale, blockSize: shape.blockSize * scale, points: shape.points.map(point => scalePoint(point, scale)) }
@@ -222,12 +301,13 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
     case 'note':
       return { ...shape, width: shape.width * scale, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'pixelate':
-      return { ...shape, blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
+      return { ...shape, ...outline(shape), blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'cover':
     case 'spotlight':
-      return { ...shape, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
+    case 'adjust':
+      return { ...shape, ...outline(shape), from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'blur':
-      return { ...shape, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
+      return { ...shape, ...outline(shape), radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'text':
       return { ...shape, fontSize: shape.fontSize * scale, at: scalePoint(shape.at, scale) }
     case 'callout':
@@ -250,11 +330,13 @@ export function moveShape(shape: ScreenshotShape, dx: number, dy: number): Scree
     case 'rect':
     case 'ellipse':
     case 'note':
+      return { ...shape, from: move(shape.from), to: move(shape.to) }
     case 'pixelate':
     case 'cover':
     case 'blur':
     case 'spotlight':
-      return { ...shape, from: move(shape.from), to: move(shape.to) }
+    case 'adjust':
+      return { ...shape, ...mapOutline(shape, move), from: move(shape.from), to: move(shape.to) }
   }
 }
 
@@ -413,9 +495,10 @@ export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedR
   return width > 0 && height > 0 ? { x, y, width, height } : null
 }
 
-/** Paint layers: marks, then masks, then pointing marks that only see processed
+/** Paint layers: adjustments of the image first, then marks, then masks, then pointing marks that only see processed
  * pixels. A spotlight paints last so it dims every other mark outside it. */
 export function screenshotOutputLayer(shape: ScreenshotShape): number {
+  if (shape.kind === 'adjust') return -1
   if (isScreenshotMask(shape)) return 1
   return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0
 }
@@ -503,6 +586,8 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
         (head && Math.min(distanceToSegment(point, head.left, head.tip), distanceToSegment(point, head.tip, head.right)) <= tolerance + shape.width / 2)) return shape
       continue
     }
+    // An adjustment often spans the whole image; it is chosen from its property entry so it never takes a canvas press.
+    if (shape.kind === 'adjust') continue
     if (shape.kind === 'spotlight') {
       // Its interior holds the marks it points at; only the frame selects it.
       if (nearRectEdge(point, normalizeRect(shape.from, shape.to), tolerance, tolerance + 1)) return shape

@@ -7,6 +7,7 @@ import {
   calloutLeader,
   highlightWidth,
   normalizeRect,
+  outlineRects,
   HIGHLIGHT_ALPHA,
   SCREENSHOT_TEXT_LINE_HEIGHT,
   screenshotTextLines,
@@ -23,6 +24,8 @@ import {
   type BlurShape,
   type SpotlightShape,
   type CalloutShape,
+  type AdjustShape,
+  type ScreenshotOutline,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -36,6 +39,7 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
   context.strokeStyle = shape.color
   context.fillStyle = shape.color
   try {
+    clipMarkArea(context, shape)
     switch (shape.kind) {
       case 'pen': drawStroke(context, shape); break
       case 'highlight': drawHighlight(context, shape); break
@@ -46,7 +50,6 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
       case 'note': drawNote(context, shape); break
       case 'pixelate': drawPixelate(context, shape); break
       case 'pixelate-brush': {
-        clipPixelateBrush(context, shape)
         const rect = shapeBounds(shape)
         drawPixelate(context, { ...shape, kind: 'pixelate', from: { x: rect.x, y: rect.y }, to: { x: rect.x + rect.width, y: rect.y + rect.height } })
         break
@@ -55,6 +58,7 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
       case 'blur': drawBlur(context, shape); break
       case 'spotlight': drawSpotlight(context, shape); break
       case 'callout': drawCallout(context, shape); break
+      case 'adjust': drawAdjust(context, shape); break
       default: { const unhandled: never = shape; throw new Error('Unsupported screenshot mark: ' + (unhandled as ScreenshotShape).kind) }
     }
   } finally { context.restore() }
@@ -149,8 +153,14 @@ function drawText(context: CanvasRenderingContext2D, shape: TextShape): void {
   })
 }
 
-/** The same corridor clips final pixels and restores committed preview masks. */
-export function clipPixelateBrush(context: CanvasRenderingContext2D, shape: PixelateBrushShape): void {
+/** Limits a mark to the pixels it changes inside its rect: a brush's corridor, or a wand outline's fill. The final paint
+ * and the preview's protection of committed masks share this one rule. A spotlight's outline is its lit hole instead. */
+export function clipMarkArea(context: CanvasRenderingContext2D, shape: ScreenshotShape): void {
+  if (shape.kind === 'pixelate-brush') clipPixelateBrush(context, shape)
+  else if ('outline' in shape && shape.outline && shape.kind !== 'spotlight') clipOutline(context, shape.outline)
+}
+
+function clipPixelateBrush(context: CanvasRenderingContext2D, shape: PixelateBrushShape): void {
   const radius = shape.width / 2
   context.beginPath()
   shape.points.forEach((point, index) => {
@@ -258,19 +268,110 @@ function drawBlur(context: CanvasRenderingContext2D, shape: BlurShape): void {
   context.drawImage(sample, left - pad, top - pad)
 }
 
-/** Dim the whole canvas except the region; the even-odd hole keeps it untouched. */
+/** The even-odd path of an outline's rings; points sit on image pixel corners. */
+function outlinePath(context: CanvasRenderingContext2D, outline: ScreenshotOutline): void {
+  for (const ring of outline) {
+    ring.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y))
+    context.closePath()
+  }
+}
+
+/** A selection's two-tone dashed boundary, readable on light and dark pixels. `unit` is one screen pixel in image
+ * pixels; `phase` shifts the dashes along the boundary in screen pixels, so stepping it marches them. */
+export function drawMarchingAnts(context: CanvasRenderingContext2D, outline: ScreenshotOutline, unit: number, phase: number): void {
+  context.save()
+  // Fine contours at fit scale can cover the text they surround. Keep the exact
+  // selection geometry for output while letting the underlying pixels read through.
+  context.globalAlpha = unit > 1 ? 0.35 : 0.7
+  context.beginPath(); outlinePath(context, outline)
+  context.lineWidth = unit; context.setLineDash([4 * unit, 4 * unit])
+  context.strokeStyle = '#000000'; context.lineDashOffset = -phase * unit; context.stroke()
+  context.strokeStyle = '#ffffff'; context.lineDashOffset = (4 - phase) * unit; context.stroke()
+  context.restore()
+}
+
+/** Clips to an outline's even-odd fill, holding every canvas pixel the fill touches whole. Like cover and pixelation the
+ * transform is an axis-aligned scale and offset; each rect of the fill is aligned outward to canvas pixels, because an
+ * antialiased path clip would leave a translucent rim of original pixels along the outline under a mask. */
+function clipOutline(context: CanvasRenderingContext2D, outline: ScreenshotOutline): void {
+  const transform = context.getTransform(), { a, d, e, f } = transform
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.beginPath()
+  for (const rect of outlineRects(outline)) {
+    const left = Math.floor(rect.x * a + e), top = Math.floor(rect.y * d + f)
+    context.rect(left, top, Math.ceil((rect.x + rect.width) * a + e) - left, Math.ceil((rect.y + rect.height) * d + f) - top)
+  }
+  context.clip()
+  context.setTransform(transform)
+}
+
+/** Dim the whole canvas except the region or its outline; the even-odd hole keeps it untouched. */
 function drawSpotlight(context: CanvasRenderingContext2D, shape: SpotlightShape): void {
   // Like cover and pixelation, the canvas transform is an axis-aligned scale and offset.
   const rect = normalizeRect(shape.from, shape.to), transform = context.getTransform()
   context.beginPath()
   context.rect(-transform.e / transform.a, -transform.f / transform.d, context.canvas.width / transform.a, context.canvas.height / transform.d)
-  context.rect(rect.x, rect.y, rect.width, rect.height)
+  if (shape.outline) outlinePath(context, shape.outline); else context.rect(rect.x, rect.y, rect.width, rect.height)
   context.fillStyle = `rgba(0,0,0,${shape.dim})`
   context.fill('evenodd')
   if (rect.width <= 0 || rect.height <= 0) return
   context.strokeStyle = 'rgba(255,255,255,0.6)'
   context.lineWidth = 1 / transform.a
-  context.strokeRect(rect.x, rect.y, rect.width, rect.height)
+  if (shape.outline) { context.beginPath(); outlinePath(context, shape.outline); context.stroke() }
+  else context.strokeRect(rect.x, rect.y, rect.width, rect.height)
+}
+
+/** The canvas filter for an adjustment's factors, or none when they leave the image unchanged. */
+function adjustFilter(shape: Pick<AdjustShape, 'brightness' | 'contrast' | 'saturation'>): string | null {
+  return shape.brightness === 1 && shape.contrast === 1 && shape.saturation === 1 ? null
+    : `brightness(${shape.brightness}) contrast(${shape.contrast}) saturate(${shape.saturation})`
+}
+
+/** Re-paint the already painted range through the factor filter, then sharpen it with one 3 × 3 unsharp step
+ * computed only inside the range. Like blur it replaces the range and fails closed without canvas filters. */
+function drawAdjust(context: CanvasRenderingContext2D, shape: AdjustShape): void {
+  const filter = adjustFilter(shape)
+  if (!filter && shape.sharpen <= 0) return
+  const rect = normalizeRect(shape.from, shape.to)
+  if (rect.width <= 0 || rect.height <= 0) return
+  const transform = context.getTransform(), canvas = context.canvas
+  const left = Math.max(0, Math.floor(rect.x * transform.a + transform.e))
+  const top = Math.max(0, Math.floor(rect.y * transform.d + transform.f))
+  const right = Math.min(canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
+  const bottom = Math.min(canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
+  if (right <= left || bottom <= top) return
+  // A one-pixel margin of real neighbours keeps the sharpened edge consistent with the pixels beside the range.
+  const sampleLeft = Math.max(0, left - 1), sampleTop = Math.max(0, top - 1)
+  const sampleRight = Math.min(canvas.width, right + 1), sampleBottom = Math.min(canvas.height, bottom + 1)
+  const sample = canvas.ownerDocument.createElement('canvas')
+  sample.width = sampleRight - sampleLeft; sample.height = sampleBottom - sampleTop
+  const target = sample.getContext('2d')
+  if (!target) throw new Error('Screenshot adjustment requires a 2D canvas')
+  if (filter) {
+    if (typeof target.filter !== 'string') throw new Error('Screenshot adjustment requires canvas filters')
+    target.filter = filter
+  }
+  target.drawImage(canvas, sampleLeft, sampleTop, sample.width, sample.height, 0, 0, sample.width, sample.height)
+  target.filter = 'none'
+  if (shape.sharpen > 0) {
+    const pixels = target.getImageData(0, 0, sample.width, sample.height), source = pixels.data.slice(), width = sample.width, height = sample.height
+    const amount = shape.sharpen
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const at = (y * width + x) * 4, up = (Math.max(0, y - 1) * width + x) * 4, down = (Math.min(height - 1, y + 1) * width + x) * 4
+      const before = (y * width + Math.max(0, x - 1)) * 4, after = (y * width + Math.min(width - 1, x + 1)) * 4
+      for (let channel = 0; channel < 3; channel++) {
+        const centre = source[at + channel]!
+        pixels.data[at + channel] = centre + amount * (4 * centre - source[up + channel]! - source[down + channel]! - source[before + channel]! - source[after + channel]!)
+      }
+    }
+    target.putImageData(pixels, 0, 0)
+  }
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.beginPath(); context.rect(left, top, right - left, bottom - top); context.clip()
+  context.clearRect(left, top, right - left, bottom - top)
+  context.globalAlpha = 1
+  context.globalCompositeOperation = 'source-over'
+  context.drawImage(sample, sampleLeft, sampleTop)
 }
 
 

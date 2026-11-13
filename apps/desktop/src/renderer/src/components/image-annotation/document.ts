@@ -1,4 +1,5 @@
-import { BLUR_RADIUS_RANGE, CALLOUT_ZOOM_RANGE, SPOTLIGHT_DIM_RANGE, shapeBounds, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE, BLUR_RADIUS_RANGE, CALLOUT_ZOOM_RANGE, OUTLINE_LIMITS, SPOTLIGHT_DIM_RANGE, isAxisAlignedOutline, normalizeRect, outlineExtent, shapeBounds,
+  type NormalizedRect, type ScreenshotOutline, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
 import type { AnnotationImage } from './types'
 
 export type AnnotationHistoricalSource = {
@@ -65,6 +66,26 @@ function point(value: unknown): ScreenshotPoint {
   const object = record(value, ['x', 'y'])
   return { x: finite(object.x), y: finite(object.y) }
 }
+/** A wand outline: closed rings of at least three points within the limits, lying inside from/to so bounds, hits and
+ * note filtering cover it. Over the limits it is refused, never truncated: a cut ring would redact less than the selection. */
+function outline(value: unknown, from: ScreenshotPoint, to: ScreenshotPoint): { outline?: ScreenshotOutline } {
+  if (value === undefined) return {}
+  if (!Array.isArray(value) || !value.length) invalid('A region outline must contain closed rings.')
+  if (value.length > OUTLINE_LIMITS.rings) invalid('The region outline has too many rings.')
+  let points = 0
+  const rings = value.map(ring => {
+    if (!Array.isArray(ring) || ring.length < 3) invalid('Each region outline ring must contain at least three points.')
+    points += ring.length
+    if (points > OUTLINE_LIMITS.points) invalid('The region outline has too many points.')
+    return ring.map(point)
+  })
+  const extent = outlineExtent(rings), region = normalizeRect(from, to)
+  if (!extent || extent.from.x < region.x || extent.from.y < region.y || extent.to.x > region.x + region.width || extent.to.y > region.y + region.height)
+    invalid('A region outline must have an area and lie inside its region.')
+  // The renderer covers every canvas pixel an outline touches only for horizontal and vertical edges, which a wand outline always has.
+  if (!isAxisAlignedOutline(rings)) invalid('Each region outline edge must be horizontal or vertical.')
+  return { outline: rings }
+}
 function checkLimits(limits: AnnotationDocumentLimits): void {
   if (![limits.maxDocumentBytes, limits.maxImageBytes, limits.maxImageDimension, limits.maxImagePixels]
     .every(value => Number.isSafeInteger(value) && value > 0)) invalid('The host must supply its original file and image limits.')
@@ -104,7 +125,8 @@ function image(value: unknown, limits: AnnotationDocumentLimits): AnnotationImag
 }
 
 function shape(value: unknown): ScreenshotShape {
-  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim', 'zoom', 'locked'])
+  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim', 'zoom', 'locked', 'outline',
+    'brightness', 'contrast', 'saturation', 'sharpen'])
   const kind = text(base.kind), id = text(base.id), color = text(base.color)
   if (!id || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) invalid('Annotation IDs must be nonempty and colors must be opaque hexadecimal colors.')
   if (base.locked !== undefined && base.locked !== true) invalid('A locked annotation must record locked as true.')
@@ -130,24 +152,34 @@ function shape(value: unknown): ScreenshotShape {
       ...(base.template === undefined ? {} : { template: base.template as 'observation' | 'expected' | 'request' }) }
   }
   if (kind === 'pixelate') {
-    record(value, [...fields, 'from', 'to', 'blockSize'], lockable)
-    return { ...common, kind, from: point(base.from), to: point(base.to), blockSize: positive(base.blockSize) }
+    record(value, [...fields, 'from', 'to', 'blockSize'], [...lockable, 'outline'])
+    const from = point(base.from), to = point(base.to)
+    return { ...common, kind, from, to, ...outline(base.outline, from, to), blockSize: positive(base.blockSize) }
   }
   if (kind === 'blur') {
-    record(value, [...fields, 'from', 'to', 'radius'], lockable)
-    return { ...common, kind, from: point(base.from), to: point(base.to), radius: inRange(base.radius, BLUR_RADIUS_RANGE, 'The blur strength is out of range.') }
+    record(value, [...fields, 'from', 'to', 'radius'], [...lockable, 'outline'])
+    const from = point(base.from), to = point(base.to)
+    return { ...common, kind, from, to, ...outline(base.outline, from, to), radius: inRange(base.radius, BLUR_RADIUS_RANGE, 'The blur strength is out of range.') }
   }
   if (kind === 'spotlight') {
-    record(value, [...fields, 'from', 'to', 'dim'], lockable)
-    return { ...common, kind, from: point(base.from), to: point(base.to), dim: inRange(base.dim, SPOTLIGHT_DIM_RANGE, 'The spotlight dimming is out of range.') }
+    record(value, [...fields, 'from', 'to', 'dim'], [...lockable, 'outline'])
+    const from = point(base.from), to = point(base.to)
+    return { ...common, kind, from, to, ...outline(base.outline, from, to), dim: inRange(base.dim, SPOTLIGHT_DIM_RANGE, 'The spotlight dimming is out of range.') }
   }
   if (kind === 'callout') {
     record(value, [...fields, 'from', 'to', 'at', 'zoom'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), at: point(base.at), zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.') }
   }
   if (kind === 'cover') {
-    record(value, [...fields, 'from', 'to'], lockable)
-    return { ...common, kind, from: point(base.from), to: point(base.to) }
+    record(value, [...fields, 'from', 'to'], [...lockable, 'outline'])
+    const from = point(base.from), to = point(base.to)
+    return { ...common, kind, from, to, ...outline(base.outline, from, to) }
+  }
+  if (kind === 'adjust') {
+    record(value, [...fields, 'from', 'to', 'brightness', 'contrast', 'saturation', 'sharpen'], [...lockable, 'outline'])
+    const from = point(base.from), to = point(base.to), factor = (field: unknown) => inRange(field, ADJUST_FACTOR_RANGE, 'The adjustment is out of range.')
+    return { ...common, kind, from, to, ...outline(base.outline, from, to), brightness: factor(base.brightness), contrast: factor(base.contrast),
+      saturation: factor(base.saturation), sharpen: inRange(base.sharpen, ADJUST_SHARPEN_RANGE, 'The adjustment is out of range.') }
   }
   if (kind === 'rect' || kind === 'ellipse' || kind === 'arrow') {
     record(value, [...fields, 'from', 'to', 'width'], lockable)

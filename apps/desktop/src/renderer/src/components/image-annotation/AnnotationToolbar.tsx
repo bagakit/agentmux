@@ -6,7 +6,7 @@ import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ScreenshotTool } from './drawing-model'
 
-export type AnnotationTool = ScreenshotTool | 'select' | 'pan' | 'erase' | 'crop' | 'pixelate' | 'cover' | 'blur' | 'note' | 'spotlight' | 'callout'
+export type AnnotationTool = ScreenshotTool | 'select' | 'pan' | 'erase' | 'crop' | 'pixelate' | 'cover' | 'blur' | 'note' | 'spotlight' | 'callout' | 'wand'
 const icon = semanticIconComponent
 export const ANNOTATION_TOOLS: Array<{ id: AnnotationTool; label: string; key: string; icon: ReturnType<typeof icon> }> = [
   { id: 'select', label: 'Select', key: 'V', icon: icon('drawing.select') },
@@ -21,6 +21,7 @@ export const ANNOTATION_TOOLS: Array<{ id: AnnotationTool; label: string; key: s
   { id: 'spotlight', label: 'Spotlight', key: 'L', icon: icon('drawing.spotlight') },
   { id: 'callout', label: 'Magnifier', key: 'Z', icon: icon('drawing.callout') },
   { id: 'crop', label: 'Crop', key: 'C', icon: icon('drawing.crop') },
+  { id: 'wand', label: 'Magic wand', key: 'W', icon: icon('drawing.magic-wand') },
   { id: 'pixelate', label: 'Pixelate', key: 'M', icon: icon('drawing.pixelate') },
   { id: 'cover', label: 'Cover', key: 'B', icon: icon('drawing.cover') },
   { id: 'blur', label: 'Blur', key: 'U', icon: icon('drawing.blur') },
@@ -32,7 +33,7 @@ const TOOL_GROUPS: ReadonlyArray<{ label: string; tools: readonly AnnotationTool
   { label: 'View and select', tools: ['select', 'pan'] },
   { label: 'Draw', tools: ['pen', 'highlight', 'arrow', 'rect', 'ellipse'] },
   { label: 'Annotate', tools: ['text', 'note', 'spotlight', 'callout'] },
-  { label: 'Process image', tools: ['crop', 'pixelate', 'cover', 'blur', 'erase'] }
+  { label: 'Process image', tools: ['crop', 'wand', 'pixelate', 'cover', 'blur', 'erase'] }
 ]
 
 export function AnnotationToolbar({ active = true, tool, busy, undoable, redoable, selected, clearable, onTool, onUndo, onRedo, onDelete, onClear }: {

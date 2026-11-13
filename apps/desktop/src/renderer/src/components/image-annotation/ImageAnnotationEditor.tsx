@@ -21,9 +21,11 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   setShapesLocked, type ShapeAlignment, type ShapeOrder,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
-  DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
+  DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM, ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE, createAdjustShape, exceedsOutlineLimits, withOutline, NEUTRAL_ADJUSTMENT,
+  type AdjustParameters, type AdjustShape, type BlurShape, type CoverShape, type PixelateShape, type ScreenshotOutline, type SpotlightShape,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
-import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
+import { drawMarchingAnts, SCREENSHOT_TEXT_FONT } from './drawing-renderer'
+import { DEFAULT_MAGIC_WAND_TOLERANCE, MAGIC_WAND_TOLERANCE_RANGE, magicWandOutline, magicWandRegion, unionMagicWandRegions, type MagicWandRegion } from './magic-wand'
 import { selectionHandles, hitSelectionHandle, lockedMarkAt, marqueeSelection, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
 import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE, type SnapFeatures, type SnapLines } from './snapping'
 import { fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport } from './view'
@@ -32,7 +34,7 @@ import './image-annotation.css'
 
 const icon = semanticIconComponent
 const CancelIcon = icon('action.cancel'), ClipboardIcon = icon('object.clipboard'), CheckIcon = icon('status.copied')
-const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
+const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out'), AdjustIcon = icon('action.adjust')
 const SaveIcon = icon('action.save'), PinIcon = icon('action.pin'), RetakeIcon = icon('action.capture')
 const LockIcon = icon('status.locked'), UnlockIcon = icon('drawing.unlock')
 // The window editor's arrange row; a capture reaches the same commands only through shortcuts.
@@ -72,9 +74,9 @@ const widthable = (shape: ScreenshotShape) => colorable(shape) && shape.kind !==
 type AnnotationOutput = (input: ImageAnnotationInput) => ImageAnnotationOutputResult
 // The last tool and style carry over to the next editor in this Renderer.
 let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number
-  blurRadius: number; spotlightDim: number; calloutZoom: number } = {
+  blurRadius: number; spotlightDim: number; calloutZoom: number; wandTolerance: number } = {
   tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32,
-  blurRadius: DEFAULT_BLUR_RADIUS, spotlightDim: DEFAULT_SPOTLIGHT_DIM, calloutZoom: DEFAULT_CALLOUT_ZOOM }
+  blurRadius: DEFAULT_BLUR_RADIUS, spotlightDim: DEFAULT_SPOTLIGHT_DIM, calloutZoom: DEFAULT_CALLOUT_ZOOM, wandTolerance: DEFAULT_MAGIC_WAND_TOLERANCE }
 // The strength each pointing mark offers, in the model's own unit and range: blur radius in image pixels, so it matches
 // the original and the export at any zoom, dimming opacity and zoom factor.
 const POINTING_STRENGTHS = {
@@ -83,6 +85,22 @@ const POINTING_STRENGTHS = {
   callout: { property: 'zoom', style: 'calloutZoom', label: 'Zoom', name: 'Magnifier zoom', range: CALLOUT_ZOOM_RANGE, step: 0.5, unit: (value: number) => value + '×' }
 } as const
 type PointingKind = keyof typeof POINTING_STRENGTHS
+// The marks a wand region turns into, in the order the property row offers them.
+const REGION_ACTIONS = [['cover', 'Cover'], ['pixelate', 'Pixelate'], ['blur', 'Blur'], ['spotlight', 'Spotlight']] as const
+type RegionAction = typeof REGION_ACTIONS[number][0]
+const signedPercent = (factor: number) => { const value = Math.round((factor - 1) * 100); return (value > 0 ? '+' : '') + value + '%' }
+const ADJUST_CONTROLS = [
+  { property: 'brightness', label: 'Brightness', range: ADJUST_FACTOR_RANGE, unit: signedPercent },
+  { property: 'contrast', label: 'Contrast', range: ADJUST_FACTOR_RANGE, unit: signedPercent },
+  { property: 'saturation', label: 'Saturation', range: ADJUST_FACTOR_RANGE, unit: signedPercent },
+  { property: 'sharpen', label: 'Sharpen', range: ADJUST_SHARPEN_RANGE, unit: (amount: number) => Math.round(amount * 100) + '%' }
+] as const satisfies ReadonlyArray<{ property: keyof AdjustParameters; label: string; range: { min: number; max: number }; unit(value: number): string }>
+// Marching ants step one image-independent screen pixel this often, along an eight-pixel dash cycle.
+const ANTS_STEP_MS = 100, ANTS_CYCLE = 8
+/** The current wand selection: its pixel mask and the outline marks and adjustments take from it. */
+type WandSelection = { region: MagicWandRegion; outline: ScreenshotOutline }
+/** The adjustment the property row edits: an existing adjust mark, or the one its first change commits. */
+type AdjustTarget = { id: string; from: ScreenshotPoint; to: ScreenshotPoint; outline?: ScreenshotOutline }
 const isPointingKind = (kind: string): kind is PointingKind => Object.hasOwn(POINTING_STRENGTHS, kind)
 // Inline text and note inputs keep Enter as a newline; modifier Enter finishes and Escape abandons the edit.
 function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish: (value: string) => void, abandon: () => void) {
@@ -189,6 +207,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null), samplerRef = useRef<HTMLCanvasElement | null>(null)
   // Capture only: the window a click would select with the paint time its fade began, and the snap lines engaged now.
   const litWindowRef = useRef<{ rect: NormalizedRect; since: number | null } | null>(null), guidesRef = useRef<SnapLines | null>(null)
+  // The original image's pixels, read once per editor for the wand; the marked result is never sampled.
+  const sourcePixelsRef = useRef<ImageData | null>(null), antsPhase = useRef(0)
   const barRef = useRef<HTMLDivElement>(null), chipRef = useRef<HTMLSpanElement>(null), loupeRef = useRef<HTMLCanvasElement>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') committedLayerRef.current = document.createElement('canvas')
   const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 })
@@ -208,6 +228,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const [pixelateMode, setPixelateMode] = useState(lastStyle.pixelateMode), [brushWidth, setBrushWidth] = useState(lastStyle.brushWidth)
   const [strengths, setStrengths] = useState({ blurRadius: lastStyle.blurRadius, spotlightDim: lastStyle.spotlightDim, calloutZoom: lastStyle.calloutZoom })
   const [textRows, setTextRows] = useState(2)
+  const [wandTolerance, setWandTolerance] = useState(lastStyle.wandTolerance), [wand, setWand] = useState<WandSelection | null>(null)
+  const [adjusting, setAdjusting] = useState<AdjustTarget | null>(null), [wandIssue, setWandIssue] = useState<string | null>(null)
   const [noteDraft, setNoteDraft] = useState(''), [noteEditor, setNoteEditor] = useState<string | null>(null), [panHeld, setPanHeld] = useState(false)
   const [view, setView] = useState<AnnotationView>({ scale: 1, x: 0, y: 0 }), [fitted, setFitted] = useState(true)
   // Capture only: the pointer in frame CSS pixels while the loupe can show, the moving gesture's kind, the canvas
@@ -236,8 +258,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const sizeText = capture && selection ? Math.round(selection.width) + ' × ' + Math.round(selection.height) + ' px' : null
   // The loupe shows the frozen pixel under the pointer while a selection is made or adjusted, never at rest or while drawing.
   const loupe = capture && hover?.sample && (gesture === 'selection' || (!documentState.crop && gesture === null)) ? { at: hover.at, sample: hover.sample } : null
-  const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe })
-  live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe }
+  // The region an open adjustment edits shows as still dashes once no wand selection marches around it.
+  const outlined = wand?.outline ?? adjusting?.outline ?? null
+  const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined })
+  live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined }
   const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean;
     excluded: string | undefined; hidden: ReadonlySet<string> | undefined; erased: number; masks: ScreenshotShape[] } | null>(null)
   const scale = view.scale
@@ -254,6 +278,30 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     return { x, y, hex: '#' + hexByte(red) + hexByte(green) + hexByte(blue), rgb: [red, green, blue] }
   }
 
+  /** The original pixels the wand reads: the window editor's source image, or a capture's frozen frame, never marks. */
+  function sourcePixels(): ImageData | null {
+    if (sourcePixelsRef.current) return sourcePixelsRef.current
+    const base = imageRef.current
+    if (!base || !loaded) return null
+    const reader = document.createElement('canvas'); reader.width = image.width; reader.height = image.height
+    const context = reader.getContext('2d', { willReadFrequently: true })
+    if (!context) return null
+    context.drawImage(base, 0, 0, image.width, image.height)
+    return sourcePixelsRef.current = context.getImageData(0, 0, image.width, image.height)
+  }
+  /** Selects the connected color region under the point; Shift adds it to the current selection. */
+  function pickWand(at: ScreenshotPoint, add: boolean) {
+    const pixels = sourcePixels()
+    if (!pixels) { setWandIssue('The image pixels could not be read for the magic wand.'); return }
+    const picked = magicWandRegion(pixels, at, wandTolerance)
+    if (!picked) return
+    const region = add && wand ? unionMagicWandRegions(wand.region, picked) : picked
+    const outline = magicWandOutline(region)
+    // An outline over the document limits could not be saved whole, so the selection stays as it was.
+    if (exceedsOutlineLimits(outline)) { setWandIssue('That region is too detailed to keep. Lower the tolerance or pick a smaller area.'); return }
+    // A new selection is a new adjustment range, so an open adjustment closes rather than follow it.
+    setWandIssue(null); selectOnly(null); setAdjusting(null); setWand({ region, outline })
+  }
   function measureText(shape: TextShape): number {
     const context = canvasRef.current?.getContext('2d')
     const lines = screenshotTextLines(shape.text)
@@ -296,6 +344,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           context.strokeStyle = '#ffffff'; context.lineWidth = 1 / fit; context.setLineDash([5 / fit, 4 / fit])
           context.strokeRect(crop.x, crop.y, crop.width, crop.height)
         }
+        if (state.outlined) drawMarchingAnts(context, state.outlined, 1 / fit, antsPhase.current)
         if (state.selected && !state.pendingText) {
           const shape = currentGestureRef.current ?? state.selected, box = shapeBounds(shape, measureText)
           context.strokeStyle = ACCENT; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
@@ -424,7 +473,20 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const fitView = () => capture ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(size.width, size.height, image.width, image.height)
   useEffect(() => { if (active && fitted && size.width && size.height) requestView(fitView()) },
     [active, fitted, size, image.width, image.height, capture, pixelRatio, requestView])
-  useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedIds, loaded, size, tool, pendingText, schedulePaint])
+  useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedIds, loaded, size, tool, pendingText, outlined, schedulePaint])
+  // The original pixels belong to this image; a wand selection to the wand tool, so another tool or a lock drops it.
+  useEffect(() => { sourcePixelsRef.current = null }, [image.dataUrl])
+  useEffect(() => { setWand(null); setWandIssue(null) }, [tool, locked, image.dataUrl])
+  // Marching ants step only while a selection shows in an active, visible editor; under reduced motion the dashes stay put.
+  useEffect(() => {
+    if (!active || !wand) return
+    const reduced = ownerWindow.matchMedia('(prefers-reduced-motion: reduce)')
+    let timer = 0
+    const step = () => { antsPhase.current = (antsPhase.current + 1) % ANTS_CYCLE; schedulePaint() }
+    const sync = () => { ownerWindow.clearInterval(timer); timer = reduced.matches || document.hidden ? 0 : ownerWindow.setInterval(step, ANTS_STEP_MS) }
+    sync(); reduced.addEventListener('change', sync); document.addEventListener('visibilitychange', sync)
+    return () => { ownerWindow.clearInterval(timer); reduced.removeEventListener('change', sync); document.removeEventListener('visibilitychange', sync) }
+  }, [active, wand, ownerWindow, schedulePaint])
   useEffect(() => { if (!active) { ownerWindow.cancelAnimationFrame(paintFrame.current); paintFrame.current = 0; resetGesture(); spaceHeld.current = false; setPanHeld(false) } }, [active, resetGesture, ownerWindow])
   useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
   useEffect(() => { if (active && pendingText) { const frame = ownerWindow.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => ownerWindow.cancelAnimationFrame(frame) } }, [active, pendingText, ownerWindow])
@@ -467,7 +529,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     target.strokeStyle = 'rgba(0, 0, 0, .6)'; target.strokeRect(centre - .5, centre - .5, LOUPE_CELL + 1, LOUPE_CELL + 1)
     target.strokeStyle = '#ffffff'; target.strokeRect(centre + .5, centre + .5, LOUPE_CELL - 1, LOUPE_CELL - 1)
   }, [loupeSample])
-  useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, ...strengths } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, strengths])
+  useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, ...strengths, wandTolerance } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth, strengths, wandTolerance])
 
   function fitImage() { resetGesture(); setFitted(true); requestView(fitView()) }
   function zoomTo(next: number, anchor = { x: size.width / 2, y: size.height / 2 }) {
@@ -544,6 +606,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         else if (confirmingDiscard === 'retake') setDiscarding(false)
         else if (confirmingDiscard) onCancel()
         else if (groupIds.size) selectOnly(null)
+        else if (adjusting) setAdjusting(null)
+        else if (wand) setWand(null)
         else if (tool !== openingTool) { resetGesture(); setTool(openingTool) }
         else requestClose()
         return
@@ -602,7 +666,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const onKeyUp = (event: KeyboardEvent) => { if (event.key === ' ') releaseSpace() }
     ownerWindow.addEventListener('keydown', onKeyDown); ownerWindow.addEventListener('keyup', onKeyUp); ownerWindow.addEventListener('blur', releaseSpace)
     return () => { ownerWindow.removeEventListener('keydown', onKeyDown); ownerWindow.removeEventListener('keyup', onKeyUp); ownerWindow.removeEventListener('blur', releaseSpace) }
-  }, [active, busy, selected, selectedIds, tool, pendingText, confirmingDiscard, unexported, documentState, loaded, noteDraft, onCancel, onComplete, onSavePng, onPin, onRetake, onExpand, onCopyColor, redo, undo, edit, resetGesture, requestView, size, fitted])
+  }, [active, busy, selected, selectedIds, tool, pendingText, confirmingDiscard, unexported, documentState, loaded, noteDraft, onCancel, onComplete, onSavePng, onPin, onRetake, onExpand, onCopyColor, redo, undo, edit, resetGesture, requestView, size, fitted, adjusting, wand])
 
   function localPoint(event: { clientX: number; clientY: number }): ScreenshotPoint {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -653,6 +717,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         schedulePaint(); return
       }
     }
+    // The wand reads the original pixels under the press, at its exact sub-pixel point; marks above them never count.
+    if (tool === 'wand') { event.preventDefault(); pickWand(imagePoint(viewRef.current, localPoint(event)), event.shiftKey); schedulePaint(); return }
     // Existing marks are selected and transformed before any tool creates a new one.
     if (tool !== 'erase' && tool !== 'crop') {
       const handle = selected ? hitSelectionHandle(selected, at, 9 / viewRef.current.scale) : null
@@ -918,9 +984,54 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const restyled = restyleShapes(documentState.shapes, groupIds, shape => shape.kind === strengthKind ? { ...shape, [strength.property]: value } as ScreenshotShape : shape)
     editShapes(restyled)
   }
+  /** Turns the wand selection into a mark narrowed to its outline, as one Undo step, and selects that mark. */
+  function convertWand(kind: RegionAction) {
+    if (!wand) return
+    const id = mintObjectId(), { x, y, width: across, height: down } = wand.region.bounds, from = { x, y }, to = { x: x + across, y: y + down }
+    const base: CoverShape | PixelateShape | BlurShape | SpotlightShape = kind === 'cover' ? { id, kind, color: '#111827', from, to }
+      : kind === 'pixelate' ? { id, kind, color, blockSize: blockSize / viewRef.current.scale, from, to }
+      : kind === 'blur' ? createBlurShape(id, '#111827', from, to, strengths.blurRadius)
+      : createSpotlightShape(id, '#ffffff', from, to, strengths.spotlightDim)
+    const shape = withOutline(base, wand.outline)
+    edit(doc => commitShape(doc, shape)); setWand(null); selectOnly(id)
+  }
+  // Capture keeps its own lighter mark set, so its wand offers only the masks its toolbar offers.
+  const regionActions = REGION_ACTIONS.filter(([kind]) => !capture || CAPTURE_TOOLS.some(item => item.id === kind))
+  // Adjust marks never take a canvas press, so the Adjust panel lists them: the whole image's and each region's.
+  const adjustMarks = documentState.shapes.filter((shape): shape is AdjustShape => shape.kind === 'adjust')
+  const regionAdjusts = adjustMarks.filter(shape => shape.outline)
+  const adjustTarget = (shape: AdjustShape): AdjustTarget => ({ id: shape.id, from: shape.from, to: shape.to, ...(shape.outline ? { outline: shape.outline } : {}) })
+  /** The whole image's adjustment, or the one its first change commits; `removed` no longer counts. */
+  function wholeImageTarget(removed?: string): AdjustTarget {
+    const existing = adjustMarks.filter(shape => !shape.outline && shape.id !== removed).at(-1)
+    return existing ? adjustTarget(existing) : { id: mintObjectId(), from: { x: 0, y: 0 }, to: { x: image.width, y: image.height } }
+  }
+  /** Opens the adjustment of the wand selection, else of the whole image, reopening the one already made for that
+   * range; pressing again closes it. */
+  function toggleAdjust() {
+    if (adjusting) { setAdjusting(null); return }
+    selectOnly(null)
+    if (!wand) { setAdjusting(wholeImageTarget()); return }
+    const { outline, region: { bounds } } = wand, existing = regionAdjusts.filter(shape => shape.outline === outline).at(-1)
+    setAdjusting(existing ? adjustTarget(existing) : { id: mintObjectId(), from: { x: bounds.x, y: bounds.y }, to: { x: bounds.x + bounds.width, y: bounds.y + bounds.height }, outline })
+  }
+  const adjustment = adjusting ? adjustMarks.find(shape => shape.id === adjusting.id) ?? null : null
+  /** Removes the adjustment being edited as one Undo step; the panel then edits the whole image's. */
+  function removeAdjust() {
+    if (!adjustment) return
+    edit(doc => removeShapes(doc, new Set([adjustment.id]))); setAdjusting(wholeImageTarget(adjustment.id))
+  }
+  /** Each change is one Undo step: the first commits the adjust mark, later ones replace it. */
+  function setAdjust(property: keyof AdjustParameters, value: number) {
+    if (!adjusting) return
+    if (adjustment) { edit(doc => replaceShape(doc, { ...adjustment, [property]: value })); return }
+    const created = createAdjustShape(adjusting.id, adjusting.from, adjusting.to, { [property]: value })
+    const shape = adjusting.outline ? withOutline(created, adjusting.outline) : created
+    edit(doc => commitShape(doc, shape))
+  }
   const propertyColor = colorShape?.color ?? color
   const customColor = propertyColor.length === 4 ? '#' + propertyColor.slice(1).split('').map(value => value + value).join('') : propertyColor
-  const showColor = properties ? colorShape !== undefined : !['select', 'crop', 'pixelate', 'cover', 'blur', 'spotlight', 'erase', 'pan'].includes(tool)
+  const showColor = properties ? colorShape !== undefined : !['select', 'crop', 'wand', 'pixelate', 'cover', 'blur', 'spotlight', 'erase', 'pan'].includes(tool)
   const showWidth = properties ? widthShape !== undefined : showColor && tool !== 'text' && tool !== 'note' && tool !== 'callout'
   const showFont = properties ? fontShape !== undefined : tool === 'text'
   const displayedWidth = Number((widthShape && 'width' in widthShape ? widthShape.width * scale : width).toFixed(2))
@@ -944,6 +1055,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       {showFont ? <label>Size<select aria-label="Text size" value={displayedFont} disabled={busy} onChange={event => setProperty('fontSize', Number(event.target.value))}>{fontOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {strength ? <label>{strength.label}<input type="range" aria-label={strength.name} min={strength.range.min} max={strength.range.max} step={strength.step}
         value={strengthValue} disabled={busy} onChange={event => setStrength(Number(event.target.value))} /><output>{strength.unit(strengthValue)}</output></label> : null}
+      {tool === 'wand' ? <label>Tolerance<input type="range" aria-label="Wand tolerance" min={MAGIC_WAND_TOLERANCE_RANGE.min} max={MAGIC_WAND_TOLERANCE_RANGE.max} step={1}
+        value={wandTolerance} disabled={busy} onChange={event => setWandTolerance(Number(event.target.value))} /><output>{wandTolerance}</output></label> : null}
+      {wand ? <div className="image-annotation-editor__mode" role="group" aria-label="Turn the region into">{regionActions.map(([kind, name]) =>
+        <button key={kind} type="button" disabled={busy} onClick={() => convertWand(kind)}>{name}</button>)}</div> : null}
+      {tool === 'wand' && wandIssue ? <span className="image-annotation-editor__hint" role="status">{wandIssue}</span> : null}
       {tool === 'pixelate' ? <>
         <div className="image-annotation-editor__mode" role="group" aria-label="Pixelation mode">
           <button type="button" aria-pressed={pixelateMode === 'region'} disabled={busy} onClick={() => setPixelateMode('region')}>Region</button>
@@ -1024,7 +1140,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const bar = barShown ? placement : null
     const chip = shown && placement ? captureSizeChipPlacement(shown, measured.chip, placement.side, frame) : null
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
-    const hasProperties = showColor || showWidth || showFont || tool === 'pixelate' || strength !== null
+    const hasProperties = showColor || showWidth || showFont || tool === 'pixelate' || tool === 'wand' || strength !== null
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
     const hint = locked ? 'Selecting on another display · Esc to cancel'
       : !documentState.crop && gesture === null ? `${windows.length ? 'Click a window or drag' : 'Drag'} to select · Arrows nudge · Enter to finish · Esc to cancel` : null
@@ -1066,6 +1182,20 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       {propertyControls}
       {arrangeControls}
       {hasLocked ? <button type="button" disabled={busy} onClick={() => unlockShapes(new Set(documentState.shapes.filter(shape => shape.locked).map(shape => shape.id)))}><UnlockIcon size={13} />Unlock all</button> : null}
+      <button type="button" className="image-annotation-editor__adjust" aria-pressed={adjusting !== null} disabled={busy || !loaded} onClick={toggleAdjust}
+        title={wand ? 'Adjust the selected region' : 'Adjust the whole image'}><AdjustIcon size={13} /><span>Adjust</span></button>
+      {adjusting ? <div className="image-annotation-editor__adjustments" role="group" aria-label={adjusting.outline ? 'Region adjustments' : 'Image adjustments'}>
+        {regionAdjusts.length ? <div className="image-annotation-editor__mode" role="group" aria-label="Adjustment">
+          <button type="button" aria-pressed={!adjusting.outline} disabled={busy} onClick={() => setAdjusting(wholeImageTarget())}>Whole image</button>
+          {regionAdjusts.map((shape, index) => <button key={shape.id} type="button" aria-pressed={shape.id === adjusting.id} disabled={busy}
+            onClick={() => setAdjusting(adjustTarget(shape))}>{'Region ' + (index + 1)}</button>)}
+        </div> : null}
+        {ADJUST_CONTROLS.map(control => { const value = (adjustment ?? NEUTRAL_ADJUSTMENT)[control.property]
+          return <label key={control.property}>{control.label}<input type="range" aria-label={control.label} min={control.range.min} max={control.range.max} step={0.05}
+            value={value} disabled={busy} onChange={event => setAdjust(control.property, Number(event.target.value))} /><output>{control.unit(value)}</output></label> })}
+        {adjustment ? <button type="button" disabled={busy} onClick={removeAdjust}>Remove</button> : null}
+      </div> : null}
+      {tool === 'wand' && !wand ? <span className="image-annotation-editor__hint">Click a color region · Shift-click to add</span> : null}
       {tool === 'cover' || selected?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
       {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
       {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : selectedShapes.length > 1 ? selectedShapes.length + ' selected · Drag one to move all' : 'Click an annotation · Drag to select several'}</span> : null}

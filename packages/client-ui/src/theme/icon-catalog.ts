@@ -187,6 +187,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'drawing.distribute-horizontal': { label: 'Distribute horizontally', glyph: 'align-horizontal-distribute-center' },
   'drawing.distribute-vertical': { label: 'Distribute vertically', glyph: 'align-vertical-distribute-center' },
   'drawing.unlock': { label: 'Unlock annotations', glyph: 'lock-keyhole-open' },
+  'drawing.magic-wand': { label: 'Select a color region', glyph: 'wand-sparkles' },
   'action.move-up': { label: 'Move earlier', glyph: 'arrow-up' },
   'action.move-down': { label: 'Move later', glyph: 'arrow-down' },
   'action.current': { label: 'Return to current', glyph: 'arrow-down' },

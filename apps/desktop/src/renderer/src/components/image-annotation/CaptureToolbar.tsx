@@ -6,7 +6,7 @@ import { ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 const icon = semanticIconComponent
 const PinIcon = icon('action.pin'), SaveIcon = icon('action.save'), ExpandIcon = icon('layout.expand'), CloseIcon = icon('action.close')
 /** The marks a capture selection offers, in toolbar order; labels, icons and keys are the shared editor's. */
-export const CAPTURE_TOOLS = (['rect', 'ellipse', 'arrow', 'pen', 'pixelate', 'blur', 'text', 'note', 'callout'] as const).map(id => ANNOTATION_TOOLS.find(item => item.id === id)!)
+export const CAPTURE_TOOLS = (['rect', 'ellipse', 'arrow', 'pen', 'wand', 'pixelate', 'blur', 'text', 'note', 'callout'] as const).map(id => ANNOTATION_TOOLS.find(item => item.id === id)!)
 
 export function CaptureToolbar({ tool, busy, loaded, label, discard, onTool, onPin, onSavePng, onExpand, onCancel, onComplete }: {
   tool: AnnotationTool; busy: boolean; loaded: boolean

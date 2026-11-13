@@ -12,6 +12,8 @@ export function selectionHandles(shape: ScreenshotShape): SelectionHandle[] {
   if (shape.kind === 'callout') return [...corners(normalizeRect(shape.from, shape.to)),
     ...corners(calloutBubble(shape)).map(handle => ({ ...handle, id: `zoom-${handle.id}` as const }))]
   if (shape.kind !== 'rect' && shape.kind !== 'ellipse' && shape.kind !== 'note' && shape.kind !== 'pixelate' && shape.kind !== 'cover' && shape.kind !== 'blur' && shape.kind !== 'spotlight') return []
+  // A wand outline follows the image's pixels; stretching it would no longer match them, so it only moves.
+  if ('outline' in shape && shape.outline) return []
   return corners(normalizeRect(shape.from, shape.to))
 }
 
@@ -61,7 +63,7 @@ export function resizeShapeFromHandle(original: ScreenshotShape, handle: Selecti
   }
   if (original.kind === 'callout' && handle.startsWith('zoom-')) return resizeCalloutBubble(original, handle.slice(5) as Corner, point)
   if (original.kind !== 'rect' && original.kind !== 'ellipse' && original.kind !== 'note' && original.kind !== 'pixelate' && original.kind !== 'cover' && original.kind !== 'blur' && original.kind !== 'spotlight' && original.kind !== 'callout') return original
-  if (handle === 'from' || handle === 'to' || handle.startsWith('zoom-')) return original
+  if (handle === 'from' || handle === 'to' || handle.startsWith('zoom-') || ('outline' in original && original.outline)) return original
   const from = { ...original.from }, to = { ...original.to }
   const left = handle === 'nw' || handle === 'sw'
   const top = handle === 'nw' || handle === 'ne'
