@@ -218,3 +218,36 @@ describe('Hosted independent public output observer', () => {
     }
   })
 })
+
+describe('Hosted replay that keeps arriving', () => {
+  it('completes a replay whose bytes keep arriving past thirty seconds, and still closes a replay that stops arriving', async () => {
+    vi.useFakeTimers()
+    try {
+      const f = fixture(4), client = await connectHostedAgentMux({ rpc: f.port })
+      const opening = client.observeAgentOutput(f.original.session.agentSessionId, 0, () => {})
+      let settled: 'ready' | 'failed' | undefined
+      void opening.then(() => { settled = 'ready' }, () => { settled = 'failed' })
+      await vi.waitFor(() => expect(f.readers).toHaveLength(1))
+      // One byte every eight seconds: each gap is short, the whole replay takes 32 seconds.
+      for (let byte = 0; byte < 4; byte++) {
+        await vi.advanceTimersByTimeAsync(8_000)
+        expect(settled, `byte ${byte}`).toBeUndefined()
+        f.output(0, byte, [65 + byte], true)
+      }
+      const observation = await opening
+      expect(settled).toBe('ready')
+      expect(observation.attachment.replay.map(event => event.data).join('')).toBe('ABCD')
+      expect(f.readers[0]!.dispose).not.toHaveBeenCalled()
+      await observation.close()
+
+      const stalled = fixture(4), other = await connectHostedAgentMux({ rpc: stalled.port })
+      const waiting = other.observeAgentOutput(stalled.original.session.agentSessionId, 0, () => {})
+      const outcome = waiting.then(() => 'ready', (error: { code?: string }) => error.code)
+      await vi.waitFor(() => expect(stalled.readers).toHaveLength(1))
+      stalled.output(0, 0, [65], true)
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(await outcome).toBe('CONTROL_TIMEOUT')
+      await client.dispose(); await other.dispose()
+    } finally { vi.useRealTimers() }
+  })
+})
