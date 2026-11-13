@@ -24,6 +24,32 @@ describe('the compact phone connection link', () => {
     expect(() => connectionOfferUrl('https://app.example.org/', offer('Ab3dEf6hJk9m', '10.0.0.5:8443', false))).toThrow(/same TLS/)
   })
 
+  it('reads every field its encoder can write, including a long Host identity and an international Relay name', () => {
+    const endpoint = ['a'.repeat(62), 'b'.repeat(62), 'c'.repeat(62), 'd'.repeat(62)].join('.')
+    for (const value of [offer('h'.repeat(160), endpoint, true), offer('Ab3dEf6hJk9m', '例子.测试', true)]) {
+      const url = connectionOfferUrl('https://app.example.org/', value)
+      let parsed: ConnectionOffer | null = null
+      expect(() => { parsed = parseConnectionOfferUrl(url) }).not.toThrow()
+      expect(parsed).toEqual(value)
+    }
+  })
+
+  it('recognises the format byte before validating the rest, so damage does not select a saved connection', () => {
+    for (const endpoint of ['10.0.0.2:8443', '10.0.0.3:8443']) {
+      const url = connectionOfferUrl('http://10.0.0.2:8443/', offer('Ab3dEf6hJk9m', endpoint))
+      const page = url.slice(0, url.indexOf('#') + 1), fragment = new URL(url).hash.slice(1)
+      for (const damaged of [fragment.slice(0, 2), fragment.slice(0, 20), fragment + '=', fragment.slice(0, 10) + '!' + fragment.slice(11)]) {
+        expect(hasConnectionOffer(page + damaged)).toBe(true)
+        expect(() => parseConnectionOfferUrl(page + damaged)).toThrow('Invalid connection link.')
+      }
+    }
+    // Every other first byte stays outside this format, even when its first character is A.
+    for (const format of Array.from({ length: 256 }, (_, value) => value).filter(value => value !== 2 && value !== 3)) {
+      const fragment = Buffer.from([format, ...new Uint8Array(50)]).toString('base64url')
+      expect(hasConnectionOffer('http://10.0.0.2:8443/#' + fragment), String(format)).toBe(false)
+    }
+  })
+
   it('leaves other fragments to the page and refuses a damaged or old-format link', () => {
     for (const other of ['http://10.0.0.2:8443/', 'http://10.0.0.2:8443/#amux-update', 'http://10.0.0.2:8443/#section']) {
       expect(hasConnectionOffer(other), other).toBe(false); expect(parseConnectionOfferUrl(other), other).toBeNull()

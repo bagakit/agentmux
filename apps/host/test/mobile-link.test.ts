@@ -204,5 +204,12 @@ describe('original mobile link discovery', () => {
     expect(help.stdout).toContain('pageUrl'); expect(help.stdout).toContain('does not enroll')
     expect(help.stdout).toContain('--address IPV4'); expect(help.stdout).toContain('never falling back'); expect(help.stdout).toContain('not a VPN tunnel')
     expect(skill.stdout).toContain('address remains readable while disconnected')
+    // The actual CLI parses this owner-issued compact URL as a Relay endpoint, performs the real
+    // encrypted handshake and reaches this Host's device owner, rather than treating it as HTTP.
+    const phone = await runCompiledObjectCli(['--endpoint', expected.url, 'device', 'hello', '--name', 'Private CLI phone'], objectCliEnvironment(h.root))
+    expect(phone.code, phone.stdout + phone.stderr).toBe(0)
+    expect(JSON.parse(phone.stdout)).toMatchObject({ ok: true, operation: 'device.hello', result: { hostId: expected.hostId, device: { name: 'Private CLI phone' } } })
+    if (process.env.AGENTMUX_TEST_MOBILE_LINK_HANDOFF) await writeFile(process.env.AGENTMUX_TEST_MOBILE_LINK_HANDOFF,
+      JSON.stringify({ url: expected.url, offer: parseConnectionOfferUrl(expected.url), hostId: expected.hostId }), { mode: 0o600 })
   }, 30000)
 })
