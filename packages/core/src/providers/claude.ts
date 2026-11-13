@@ -66,6 +66,15 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  // Return a decision on the original native PermissionRequest pipe. This does not
+  // grant an Agent authority to answer: the common interaction owner verifies its author.
+  permissionDecision: {
+    eventName: 'PermissionRequest',
+    outputs: {
+      'allow-once': { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } },
+      'reject-once': { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } }
+    }
+  },
   lifecycle: {
     SessionStart: 'session-start',
     UserPromptSubmit: 'user-prompt-submit',
@@ -139,10 +148,8 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
 const PERMISSION_ESC = '\u001b'
 const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
   { id: 'allow-once', label: 'Allow once', kind: 'allow-once', tier: 'safe', input: '1' },
-  {
-    id: 'allow-always', label: "Allow & don't ask again", description: 'This tool, this directory.',
-    kind: 'allow-always', tier: 'caution', input: '2'
-  },
+  // Persistent grants require the exact native permission update, not a guessed
+  // terminal choice or a generic tool-wide rule. Only the two native decisions are offered.
   { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
 ]
 
@@ -159,7 +166,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' || eventName === 'PostToolUseFailure'
       ? { matcher: '*' }
       : {}),
-    hooks: [{ type: 'command', command, ...hookCommandTimeout('claude') }]
+    hooks: [{ type: 'command', command, ...(eventName === 'PermissionRequest' ? {} : hookCommandTimeout('claude')) }]
   }]]))
   return {
     providerId: 'claude',

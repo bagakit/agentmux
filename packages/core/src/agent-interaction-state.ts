@@ -34,14 +34,20 @@ function hasNativeCompletion(pending: AgentMuxPendingInteraction): boolean {
 /** Current unanswered request; an ended request may still retain its earlier response receipt. */
 export function agentInteractionActiveRequest(pending: AgentMuxPendingInteraction | undefined): AgentMuxInteractionRequest | undefined {
   if (!pending) return undefined
-  const requests = [pending.request, ...(pending.additionalRequests ?? [])]
+  // The original callback owner confirms that this exact decision was returned.
+  // It no longer waits for a person, independently of unknown Native adoption or tool completion.
+  // Keep its request and response receipt in pending; only the active-answer projection changes.
+  const awaitingPerson = (request: AgentMuxInteractionRequest) => !(request.kind === 'permission' &&
+    request.permissionHook?.closed === 'decision-returned' && request.permissionHook.response?.delivery === 'connection-written')
+  const additional = pending.additionalRequests?.filter(awaitingPerson)
+  const requests = [pending.request, ...(additional ?? [])].filter(awaitingPerson)
   const openHook = requests.find(request => request.kind === 'permission' && request.permissionHook &&
     !request.permissionHook.closed && !request.permissionHook.response && !request.permissionHook.nativeTurnEnded && !request.responseUnavailableReason)
   if (openHook) return openHook
-  if (pending.request.kind === 'permission' && pending.request.permissionHook?.nativeTurnEnded) {
-    return pending.additionalRequests?.find(request => request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded)
+  if (!awaitingPerson(pending.request) || pending.request.kind === 'permission' && pending.request.permissionHook?.nativeTurnEnded) {
+    return additional?.find(request => request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded)
   }
-  return hasNativeCompletion(pending) ? pending.additionalRequests?.find(request =>
+  return hasNativeCompletion(pending) ? additional?.find(request =>
     request.kind !== 'permission' || !request.permissionHook?.nativeTurnEnded) : pending.request
 }
 

@@ -11023,7 +11023,10 @@ export class AgentMuxClient {
           ? unboundInteraction : normalized.interaction
         if (interaction.kind === 'permission' && envelope.permissionCallback && provider.hook.permissionDecision?.eventName === normalized.eventName) {
           const { nativeToolCallId: _notReportedByCallback, ...originalCallback } = interaction
-          interaction = { ...originalCallback, permissionHook: { receiptId: receipt.id,
+          // A callback's own invocation identity may be reported by its Provider (including
+          // its native module). Never borrow a preceding call's identity to settle this pipe.
+          const callbackToolCallId = nativeHookToolCallId(envelope.payload ?? {})
+          interaction = { ...originalCallback, ...(callbackToolCallId ? { nativeToolCallId: callbackToolCallId } : {}), permissionHook: { receiptId: receipt.id,
             ...(current.nativeHandle?.kind === 'provider' ? { nativeSessionId: current.nativeHandle.sessionId } : {}),
             ...(normalized.nativeTurnId ? { nativeTurnId: normalized.nativeTurnId } : {}),
             ...(!this.hookServer.hasPermissionCallback(current.agentSessionId, current.run.runId, receipt.id) ? { closed: 'abstained' as const } : {}) } }
