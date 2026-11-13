@@ -174,10 +174,11 @@ describe('a stalled or failing background save is visible while the user works',
     persistence.onRecovered = () => { recovered++ }
     await persistence.read()
     persistence.stage(derive(['a', 'b']))
-    await new Promise(resolve => setTimeout(resolve, 0))
+    // Wait for the first save to fail, not for a fixed tick, so a loaded runner cannot reorder them.
+    await expect.poll(() => persistence.saveObservation.lastFailureCode).toBe('EIO')
     expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a'])
     await clock.advance(SAVE_STALL_AFTER_MS)
-    expect(warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' }))
+    await expect.poll(() => warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' }))
     // Storage comes back. No user edit happens; the background retry saves the Tab.
     offline = false
     for (let step = 0; step < 4; step++) await clock.advance(SAVE_STALL_AFTER_MS * 8)
@@ -242,5 +243,27 @@ describe('a Launcher Agent position is recorded by Core at creation', () => {
     const before = (await store.read())!
     expect(await attachLauncherAgentPosition(launch, result(), { metadataIssue: 'owned elsewhere' }, config.workspaces, store)).toBeUndefined()
     expect((await store.read())!).toEqual(before)
+  })
+})
+
+describe('a replaced spatial owner stays quiet', () => {
+  it('never retries or reports after dispose, even when its in-flight save fails afterwards', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), warnings: unknown[] = []
+    let fail!: (error: Error) => void, commits = 0
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(),
+      commit: () => { commits++; return new Promise((_, reject) => { fail = reject }) }, onChange: listener => store.subscribe(listener) },
+    error => warnings.push(error), clock)
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await expect.poll(() => commits).toBe(1)
+    persistence.dispose()
+    fail(Object.assign(new Error('Disk unavailable'), { code: 'EIO' }))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await clock.advance(SAVE_STALL_AFTER_MS * 64)
+    expect(clock.pending()).toBe(0)
+    expect(commits).toBe(1)
+    expect(warnings.filter(warning => (warning as { code?: string }).code === 'SPATIAL_SAVE_STALLED')).toEqual([])
   })
 })
