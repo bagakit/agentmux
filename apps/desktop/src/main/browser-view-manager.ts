@@ -3558,6 +3558,7 @@ export class BrowserViewManager {
       session,
       beforeAction,
       beginNativeInput: () => this.beginAgentInput(entry, observingView),
+      ...(signal ? { signal } : {}),
       ...(interrupts ? { interrupts } : {}),
       inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
       ...(Number.isFinite(deadlineMillis) ? { remainingMillis: () => deadlineMillis - performance.now() } : {}),

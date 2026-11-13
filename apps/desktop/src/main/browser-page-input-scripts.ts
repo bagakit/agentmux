@@ -100,6 +100,20 @@ export const PREPARE_POINTER_WITNESS_DECLARATION = `function () {
   return { read: () => landed, dispose: () => root.removeEventListener('mousemove', moved, true) };
 }`
 
+/** Read back the original trusted touch starts, including both contacts of a pinch. */
+export const PREPARE_TOUCH_WITNESS_DECLARATION = `function (expected) {
+  const target = this, root = target.getRootNode(), owns = (${OWNS_HIT_DECLARATION});
+  let count = 0, landed = true;
+  const started = event => {
+    if (!event.isTrusted) return;
+    const path = event.composedPath();
+    count += event.changedTouches.length;
+    landed = landed && owns.call(target, path[0] || event.target);
+  };
+  root.addEventListener('touchstart', started, true);
+  return { read: () => landed && count === expected, dispose: () => root.removeEventListener('touchstart', started, true) };
+}`
+
 /**
  * Focus the target and place the caret for native text input; returns the text it held before.
  *

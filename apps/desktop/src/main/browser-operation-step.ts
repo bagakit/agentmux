@@ -34,7 +34,7 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
   const replay: BrowserReplayStep = {
     method,
     url: safeBrowserUrl(operation.url),
-    args: method === 'drag' ? [] : sensitive
+    args: method === 'drag' || method === 'swipe' ? [] : sensitive
       ? []
       : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
           .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),

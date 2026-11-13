@@ -134,7 +134,7 @@ export class ExternalBrowserOwner {
         navigationId: () => binding.navigationId, nextRevision: () => ++revision,
         isCurrent: () => this.active.get(id) === active && binding.status === 'ready' && binding.connection?.id === connectionId && !active.stopped, contents,
         warn: () => { operation.warning ??= 'Action feedback is unavailable. The shared page and Agent remain usable; inspect the operation history.' } })
-      const dispatch = createBrowserPageDispatch({ session: attached,
+      const dispatch = createBrowserPageDispatch({ session: attached, signal: active.controller.signal,
         beforeAction: requireCurrent,
         pageInfo: () => { requireCurrent(); return binding },
         gotoUrl: async (url: string) => { requireCurrent(); await this.navigate(binding, attached, url, active.controller.signal); requireCurrent() },

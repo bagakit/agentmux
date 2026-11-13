@@ -28,12 +28,16 @@ export type BrowserTaskAssertion =
 export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag'
+  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
-  /** Drag only: the independently resolved semantic drop target. */
+  /** Drag or swipe: the independently resolved semantic destination. */
   destination?: BrowserReplayTarget
+  /** Long press only: native contact duration; absent uses 600 ms. */
+  durationMs?: number
+  /** Pinch only: final contact separation divided by its initial separation. */
+  scale?: number
   parameterKey?: string
   label?: string
   branch?: BrowserTaskBranch

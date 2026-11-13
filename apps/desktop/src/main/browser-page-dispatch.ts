@@ -19,7 +19,7 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
 import {
-  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, PREPARE_POINTER_WITNESS_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, parseKeyChord, editingCommandFor, FOCUS_FOR_KEY_DECLARATION
+  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, PREPARE_POINTER_WITNESS_DECLARATION, PREPARE_TOUCH_WITNESS_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, parseKeyChord, editingCommandFor, FOCUS_FOR_KEY_DECLARATION
 } from './browser-page-input-scripts.js'
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
@@ -79,6 +79,8 @@ export type BrowserPageContext = {
    * Absent (a shared external tab) means the commands are sent without a Main receipt.
    */
   beginNativeInput?(): Promise<BrowserOwnDispatch>
+  /** Cancellation of this exact original program; a held touch must not send a late end. */
+  signal?: AbortSignal
   /** The run's page-dialog owner; absent (a shared external tab, a probe) means dialogs are not answered here. */
   interrupts?: BrowserPageInterrupts
   /** Page CSS pixels → `Input.*` coordinates under the execution Viewport Main actually applied. Absent means 1. */
@@ -99,7 +101,7 @@ const WAIT_RETURN_MARGIN_MS = 1_500
 const NETWORK_IDLE_QUIET_MS = 500
 
 /** Center of the first content quad with area. Inline boxes that wrap lines have several quads. */
-function quadCenter(quads: unknown): { x: number; y: number } | null {
+function quadCenter(quads: unknown, fraction = 0.5): { x: number; y: number } | null {
   if (!Array.isArray(quads)) return null
   for (const quad of quads) {
     if (!Array.isArray(quad) || quad.length !== 8 || !quad.every((value) => typeof value === 'number' && Number.isFinite(value))) continue
@@ -110,7 +112,8 @@ function quadCenter(quads: unknown): { x: number; y: number } | null {
       doubled += q[index * 2]! * q[next * 2 + 1]! - q[next * 2]! * q[index * 2 + 1]!
     }
     if (Math.abs(doubled) < 1e-6) continue
-    return { x: (q[0]! + q[2]! + q[4]! + q[6]!) / 4, y: (q[1]! + q[3]! + q[5]! + q[7]!) / 4 }
+    return { x: ((q[0]! + q[6]!) * (1 - fraction) + (q[2]! + q[4]!) * fraction) / 2,
+      y: ((q[1]! + q[7]!) * (1 - fraction) + (q[3]! + q[5]!) * fraction) / 2 }
   }
   return null
 }
@@ -394,9 +397,9 @@ export function createBrowserPageDispatch(
    * Nothing is sent to the page here. A target without a box, one covered by another element, or one
    * in a frame whose position in the top-level page cannot be established is refused before input.
    */
-  async function nativePoint(ref: string, send: BrowserCdpSender, objectId: string, node: BrowserPageNode, world: number) {
+  async function nativePoint(ref: string, send: BrowserCdpSender, objectId: string, node: BrowserPageNode, world: number, fraction = 0.5) {
     const quads = await read<{ quads?: unknown }>(send, 'DOM.getContentQuads', { objectId })
-    const local = quadCenter(quads.value?.quads)
+    const local = quadCenter(quads.value?.quads, fraction)
     if (!local) throw notDispatched(`${ref} has no visible box to click${quads.reason}. Nothing was pressed; inspect the page or take a new snapshot().`)
     const x = Math.round(local.x), y = Math.round(local.y)
     const located = await read<{ backendNodeId?: number; frameId?: string }>(send, 'DOM.getNodeForLocation',
@@ -538,6 +541,119 @@ export function createBrowserPageDispatch(
   // One page program may issue concurrent calls. The intercepted native payload belongs to
   // exactly one drag; a second drag must not consume it or disable its interception.
   let dragging = false
+
+  /** Native contacts, not device emulation. Every contact starts on a currently proved ref. */
+  async function nativeTouch(scope: BrowserPageActionScope | undefined, kind: 'tap' | 'longPress' | 'swipe' | 'pinch', args: unknown[]): Promise<undefined> {
+    const ref = requireString(args[0], 'ref')
+    const destinationRef = kind === 'swipe' ? requireString(args[1], 'destinationRef') : undefined
+    const raw = kind === 'pinch' || kind === 'longPress' ? args[1] : undefined
+    if (args.length > (kind === 'tap' ? 1 : 2) || raw !== undefined && (raw === null || typeof raw !== 'object' || Array.isArray(raw))) throw new TypeError(`${kind} takes current refs and its declared gesture options.`)
+    const options = (raw ?? {}) as Record<string, unknown>
+    const field = kind === 'pinch' ? 'scale' : 'durationMs'
+    if (Object.keys(options).some(key => key !== field)) throw new TypeError(`${kind} options only accept ${field}.`)
+    const amount = options[field] ?? (kind === 'pinch' ? 2 : 600)
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) throw new TypeError(`${field} must be a positive finite number.`)
+    const duration = kind === 'longPress' ? amount : 0
+    if (duration && context.remainingMillis && duration >= context.remainingMillis()) throw notDispatched('The requested hold exceeds this program’s remaining execution time. Start a program with enough time; no contact was sent.')
+    if (dragging) throw notDispatched('A native gesture is already in progress in this page program. Await it before starting another gesture.')
+    dragging = true
+    let navigationId: string | undefined
+    let witnessHandle: { send: BrowserCdpSender; objectId: string } | undefined
+    const handles: { send: BrowserCdpSender; objectId: string }[] = []
+    let native: BrowserOwnDispatch | undefined, sent = false, phase = 'contact preparation'
+    let guard = () => { context.signal?.throwIfAborted() }
+    try {
+      navigationId = context.pageInfo().navigationId
+      const source = await actionTarget(scope, ref)
+      const destination = destinationRef ? await actionTarget(scope, destinationRef, 'destination') : undefined
+      guard = () => { context.signal?.throwIfAborted(); source.guard(); destination?.guard() }
+      for (const target of [source, ...(destination ? [destination] : [])]) {
+        await target.send('Runtime.callFunctionOn', { objectId: target.objectId, functionDeclaration: SCROLL_INTO_VIEW, awaitPromise: true, returnByValue: true })
+        guard(); await target.actionFeedback?.(target.node, target.send); guard()
+      }
+      async function prepare(target: typeof source) {
+        if (!target.node.frameId) throw notDispatched('The original touch document has no frame identity. Take a new snapshot().')
+        const world = await target.send('Page.createIsolatedWorld', { frameId: target.node.frameId, worldName: BROWSER_NATIVE_INPUT_WORLD }) as { executionContextId: number }
+        const resolved = await target.send('DOM.resolveNode', { backendNodeId: target.node.backendNodeId, executionContextId: world.executionContextId }) as { object?: { objectId?: string } }
+        if (!resolved.object?.objectId) throw notDispatched('The original touch target is no longer inspectable. Take a new snapshot().')
+        const value = { ...target, objectId: resolved.object.objectId, world: world.executionContextId }
+        handles.push(value)
+        return value
+      }
+      const from = await prepare(source), to = destination ? await prepare(destination) : undefined
+      const point = (target: typeof from, at: string, fraction = 0.5) => nativePoint(at, target.send, target.objectId, target.node, target.world, fraction)
+      const scale = context.inputScale?.() ?? 1
+      const contact = (id: number, p: { x: number; y: number }) => ({ id, x: p.x * scale, y: p.y * scale, radiusX: 1, radiusY: 1, force: 1 })
+      let start: ReturnType<typeof contact>[], finish: ReturnType<typeof contact>[] | undefined, pinchFinal = 0.5
+      if (kind === 'pinch') {
+        // Both initial and final contact points are inside the target's own content quad,
+        // even for a transformed element. Hit-test each; a covered point sends no touch.
+        const initial = 0.25 / Math.max(1, amount), final = initial * amount
+        pinchFinal = final
+        start = [contact(1, await point(from, ref, 0.5 - initial)), contact(2, await point(from, ref, 0.5 + initial))]
+        finish = [contact(1, await point(from, ref, 0.5 - final)), contact(2, await point(from, ref, 0.5 + final))]
+      } else {
+        start = [contact(1, await point(from, ref))]
+        if (to) finish = [contact(1, await point(to, destinationRef!))]
+      }
+      if (start.length === 2 && start[0]!.x === start[1]!.x && start[0]!.y === start[1]!.y) throw notDispatched('The target has no two distinct native contact points. Inspect a larger target.')
+      const prepared = await from.send('Runtime.callFunctionOn', { objectId: from.objectId, functionDeclaration: PREPARE_TOUCH_WITNESS_DECLARATION,
+        arguments: [{ value: start.length }], returnByValue: false }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
+      const witness = prepared.result?.objectId
+      if (!witness || prepared.exceptionDetails) throw notDispatched('The original touch target could not be observed. No contact was sent.')
+      witnessHandle = { send: from.send, objectId: witness }
+      handles.push(witnessHandle)
+      native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+      const touch = async (type: string, touchPoints: ReturnType<typeof contact>[]) => {
+        guard()
+        if ((context.inputScale?.() ?? 1) !== scale) throw new Error('The original native input scale changed during the gesture.')
+        phase = `native ${type} acknowledgement`; sent = true
+        await native!.input(() => session.sendCommand('Input.dispatchTouchEvent', { type, touchPoints }))
+        // A final acknowledged end may itself navigate. There is no further input to fence.
+        if (type !== 'touchEnd') guard()
+      }
+      await touch('touchStart', start)
+      phase = 'original contact target observation'
+      if (await inWorld(from.send, witness, 'function () { return this.read() }') !== true) throw new Error('The trusted touch did not reach its original target.')
+      phase = 'original contact hold'
+      if (duration) await new Promise<void>((resolve, reject) => {
+        const abort = () => { clearTimeout(timer); context.signal?.removeEventListener('abort', abort); reject(context.signal?.reason ?? new Error('The original touch hold was cancelled.')) }
+        const timer = setTimeout(() => { context.signal?.removeEventListener('abort', abort); resolve() }, duration)
+        context.signal?.addEventListener('abort', abort, { once: true })
+        if (context.signal?.aborted) abort()
+      })
+      if (finish) {
+        phase = 'original destination validation'
+        const actual = to ? [contact(1, await point(to, destinationRef!))]
+          : [contact(1, await point(from, ref, 0.5 - pinchFinal)), contact(2, await point(from, ref, 0.5 + pinchFinal))]
+        guard()
+        if (actual.some((p, index) => p.x !== finish![index]!.x || p.y !== finish![index]!.y)) throw new Error('The original gesture destination moved after its contact started.')
+        await touch('touchMove', finish)
+      }
+      await touch('touchEnd', [])
+      try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
+      return undefined
+
+    } catch (cause) {
+      if (!sent) throw cause
+      // Cleanup is allowed only while the original action still owns this exact document.
+      // After navigation, Stop or Take control no late end/cancel is sent to the new owner.
+      try {
+        guard()
+        if (context.pageInfo().navigationId === navigationId) await native?.input(() => session.sendCommand('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }))
+      } catch { /* An unknown contact is retained for observation or a new explicit gesture. */ }
+      const detail = (cause instanceof Error ? cause.message : String(cause)).replace(/\p{White_Space}+/gu, ' ').trim().slice(0, 300)
+      const failure = new BrowserLocalRecoveryFailure(`The native ${kind} may have affected the original page; ${phase} failed (${detail}). Completion is unknown. Inspect the original page. After control is explicitly returned, cdp("Input.dispatchTouchEvent", {type: "touchCancel", touchPoints: []}) can end remaining contacts before a new gesture.` +
+        ' No interrupted gesture is automatically replayed.', 'locator-changed', 'unknown')
+      failure.cause = cause
+      throw failure
+    } finally {
+      if (witnessHandle) await inWorld(witnessHandle.send, witnessHandle.objectId, 'function () { this.dispose() }').catch(() => {})
+      native?.end()
+      for (const target of handles) await target.send('Runtime.releaseObject', { objectId: target.objectId }).catch(() => {})
+      dragging = false
+    }
+  }
   async function nativeDrag(scope: BrowserPageActionScope | undefined, sourceRef: string, destinationRef: string): Promise<undefined> {
     if (dragging) throw notDispatched('A native drag is already in progress in this page program. Await it before starting another drag.')
     dragging = true
@@ -1075,6 +1191,11 @@ export function createBrowserPageDispatch(
         // The key goes to the element's page focus, not the window: the window focus a person is using
         // is never taken (T-012). Page focus returns afterwards unless the key moved it.
         return await nativeKey(scope, requireString(args[0], 'ref'), requireString(args[1], 'key'))
+      case 'tap':
+      case 'longPress':
+      case 'swipe':
+      case 'pinch':
+        return await nativeTouch(scope, name, args)
       case 'drag':
         if (args.length !== 2 || args.some(ref => typeof ref !== 'string' || !ref.startsWith('@'))) throw new Error('drag requires sourceRef and destinationRef from snapshot().')
         return await nativeDrag(scope, args[0] as string, args[1] as string)

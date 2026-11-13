@@ -20,8 +20,11 @@ type OwnDispatch = { actions: number; throttled: boolean; inFlight: number; chan
 
 const dispatches = new WeakMap<WebContents, OwnDispatch>()
 
-/** Input families an Agent sends. Wheel, touch and gesture input never come from this path. */
-const OWN_INPUT_TYPES = new Set(['mouseMove', 'mouseEnter', 'mouseLeave', 'mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'keyUp', 'char'])
+/** Native event families observed from this engine’s original Input command acknowledgements. */
+const OWN_INPUT_TYPES = new Set(['mouseMove', 'mouseEnter', 'mouseLeave', 'mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'keyUp', 'char',
+  'touchStart', 'touchMove', 'touchEnd', 'touchCancel', 'gestureTapDown', 'gestureShowPress', 'gestureTap', 'gestureTapCancel',
+  'gestureScrollBegin', 'gestureScrollUpdate', 'gestureScrollEnd', 'gestureFlingStart', 'gestureFlingCancel',
+  'gesturePinchBegin', 'gesturePinchUpdate', 'gesturePinchEnd'])
 
 /** One Agent action's native input on one page. `end` must be called exactly once, in a finally. */
 export type BrowserOwnDispatch = {
