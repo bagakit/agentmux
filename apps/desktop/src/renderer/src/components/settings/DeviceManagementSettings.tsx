@@ -20,6 +20,8 @@ type DeviceList = AgentMuxRpcResult<'device.ls'>
 export function DeviceManagementSettings({ active }: { active: boolean }) {
   const [list, setList] = useState<DeviceList | null>(null), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [url, setUrl] = useState(''), [readIssue, setReadIssue] = useState('')
+  // The Mac's local-network addresses from the last link read; the chosen one stays until changed.
+  const [candidates, setCandidates] = useState<AgentMuxRpcResult<'device.link'>['candidates']>([]), [address, setAddress] = useState<string | null>(null)
   const [linkAction, setLinkAction] = useState<'scan' | 'copy' | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<{ deviceId: string; text: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false), [observedAt, setObservedAt] = useState<number | null>(null)
@@ -38,12 +40,18 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     const timer = setInterval(() => { void read(generation.current) }, 5000)
     return () => { generation.current++; clearInterval(timer) }
   }, [active])
-  const link = async (action: 'scan' | 'copy') => {
+  const link = async (action: 'scan' | 'copy', chosen = address) => {
     if (pending.current) return
     pending.current = true; setBusy(true); setLinkAction(action); setNotice('')
     const epoch = generation.current
     try {
-      const connectionUrl = action === 'copy' && url ? url : (await api.deviceManagement.link({})).url
+      let connectionUrl = url
+      if (action !== 'copy' || !url || chosen !== address) {
+        const result = await api.deviceManagement.link(chosen ? { address: chosen } : {})
+        if (epoch !== generation.current) return
+        connectionUrl = result.url; setCandidates(result.candidates)
+        setAddress(new URL(result.pageUrl).hostname)
+      }
       if (epoch !== generation.current) return
       setUrl(connectionUrl)
       if (action === 'scan') { setNotice('Scan this code with your phone camera to connect.'); return }
@@ -82,6 +90,14 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
         <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : url ? <ThemeActionRefreshIcon size={16} /> : <ThemeObjectConnectionCodeIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : url ? 'Refresh code' : 'Scan to connect'}</button>
         <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
       </div>
+      {candidates.length > 1 && address && <label className="settings-compact-field device-management__address">
+        <span>Network</span>
+        <select aria-label="Connection network" value={address} disabled={busy} onChange={event => { void link('scan', event.target.value) }}>
+          {candidates.map(candidate => <option key={candidate.address} value={candidate.address}>
+            {`${candidate.label ?? candidate.interface} · ${candidate.address}${candidate.preferred ? ' · default' : ''}`}</option>)}
+        </select>
+        <small>Pick the network your phone is on.</small>
+      </label>}
       {notice && <p className="device-management__feedback" role="status">{notice}</p>}
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
