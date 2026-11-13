@@ -1,7 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
@@ -99,5 +99,55 @@ it('retains already-materialized production node_modules for a stripped Core man
     expect(artifact.files).toContainEqual(expect.objectContaining({ path: productionPath, sha256: sha(runtime) }))
     expect(await readFile(join(root, 'artifact', 'core', productionPath), 'utf8')).toBe(runtime)
     expect((await exec('tar', ['-tzf', artifact.archivePath])).stdout).toContain('./' + productionPath)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('ships only the declared publication of a workspace dependency, without its sources or development files', async () => {
+  const root = await mkdtemp(fixturePath('tmp/amux-portable-workspace-'))
+  try {
+    const packageRoot = await coreFixture(root, { '@fixture/linked': 'workspace:*' })
+    // A workspace link resolves outside any node_modules directory: the pnpm shape of a checkout.
+    const linked = join(root, 'workspace', 'linked')
+    await put(join(linked, 'package.json'), JSON.stringify({ name: '@fixture/linked', version: '0.0.0', files: ['dist/'] }))
+    await put(join(linked, 'dist', 'index.js'), 'export const linked = "runtime"\n')
+    await put(join(linked, 'dist', 'index.js.map'), '{"version":3,"sources":["../src/index.ts"]}\n')
+    await put(join(linked, 'dist', 'index.d.ts'), 'export declare const linked: string\n')
+    await put(join(linked, 'src', 'index.ts'), 'workspace source must not ship\n')
+    await put(join(linked, 'test', 'linked.test.ts'), 'workspace test must not ship\n')
+    await put(join(linked, '.tmp', 'scratch.txt'), 'local scratch must not ship\n')
+    await put(join(linked, 'README.md'), 'readme ships like npm publishes it\n')
+    await mkdir(join(packageRoot, 'node_modules', '@fixture'), { recursive: true })
+    await symlink(linked, join(packageRoot, 'node_modules', '@fixture', 'linked'))
+    await put(join(packageRoot, 'dist', 'agentmux.js.map'), '{"version":3,"sources":["../src/agentmux.ts"]}\n')
+    await put(join(packageRoot, 'dist', 'agentmux.d.ts'), 'export declare const privateFixture: boolean\n')
+    await put(join(packageRoot, 'dist', 'native-socket-peer-darwin'), 'darwin helper\n')
+    await put(join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 'darwin native\n')
+
+    const artifact = await createPortableCoreArtifact(join(root, 'artifact'), packageRoot)
+    const files = artifact.files.map(file => file.path)
+    expect(files).toEqual(expect.arrayContaining(['node_modules/@fixture/linked/dist/index.js', 'node_modules/@fixture/linked/package.json',
+      'node_modules/@fixture/linked/README.md', 'dist/agentmux.js', 'vendor/ctxmux/linux-x64/bin/ctxmuxd']))
+    for (const absent of ['node_modules/@fixture/linked/src/index.ts', 'node_modules/@fixture/linked/test/linked.test.ts',
+      'node_modules/@fixture/linked/.tmp/scratch.txt', 'node_modules/@fixture/linked/dist/index.js.map', 'node_modules/@fixture/linked/dist/index.d.ts',
+      'dist/agentmux.js.map', 'dist/agentmux.d.ts', 'dist/native-socket-peer-darwin', 'vendor/ctxmux/darwin-arm64/bin/ctxmuxd']) {
+      expect(files, absent).not.toContain(absent)
+    }
+    const packed = (await exec('tar', ['-tzf', artifact.archivePath])).stdout
+    expect(packed).toContain('./node_modules/@fixture/linked/dist/index.js')
+    expect(packed).not.toContain('linked/src/')
+    expect(packed).not.toContain('darwin')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('refuses a workspace dependency whose published files cannot be selected exactly', async () => {
+  const root = await mkdtemp(fixturePath('tmp/amux-portable-workspace-glob-'))
+  try {
+    const packageRoot = await coreFixture(root, { '@fixture/globbed': 'workspace:*' })
+    const linked = join(root, 'workspace', 'globbed')
+    await put(join(linked, 'package.json'), JSON.stringify({ name: '@fixture/globbed', version: '0.0.0', files: ['dist/*.js'] }))
+    await put(join(linked, 'dist', 'index.js'), 'export const globbed = true\n')
+    await mkdir(join(packageRoot, 'node_modules', '@fixture'), { recursive: true })
+    await symlink(linked, join(packageRoot, 'node_modules', '@fixture', 'globbed'))
+    await expect(createPortableCoreArtifact(join(root, 'artifact'), packageRoot)).rejects.toMatchObject({ code: 'CORE_ARTIFACT_UNAVAILABLE' })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
