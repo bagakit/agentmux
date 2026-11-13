@@ -106,12 +106,49 @@ describe('the one-tap answer on a needs-you ticket', () => {
     const original = f.respond.mock.calls[0]![0]
     const nextRequest = { ...permission(), evidence: { ...evidence, run: { runId: 'run-next' } } }
     await act(async () => f.emit({ type: 'agent-session', session: { ...waiting(nextRequest), run: { runId: 'run-next' } } }))
+    expect(f.choice('允许本次').getAttribute('aria-pressed')).toBe('false')
     await click(f.choice('允许本次'))
     expect(f.respond).toHaveBeenCalledTimes(2)
     const next = f.respond.mock.calls[1]![0]
     expect(next.operationId).not.toBe(original.operationId)
     expect(next.expectedRun.runId).toBe('run-next')
     expect(next.expectedRequest.evidence?.run?.runId).toBe('run-next')
+  })
+
+  it('keeps focus but never carries a chosen option into a new request that reuses its choice id', async () => {
+    const f = await focus(permission()), pending = deferred<AgentMuxInteractionOperationReceipt>()
+    f.respond.mockRejectedValueOnce(Object.assign(new Error('The original request closed.'), { code: 'UNKNOWN_AGENT_INTERACTION' }))
+      .mockImplementationOnce(() => pending.promise)
+    await click(f.choice('允许本次'))
+    await vi.waitFor(() => expect(f.card.querySelector('.mobile-ticket-answer__issue')).not.toBeNull())
+    const original = f.respond.mock.calls[0]![0], choice = f.choice('允许本次')
+    expect(choice.disabled).toBe(false)
+    expect(choice.getAttribute('aria-pressed')).toBe('false')
+    choice.focus()
+    expect(document.activeElement).toBe(choice)
+
+    const nextRequest = { ...permission(), id: 'request-2', title: '读取第二项资料', permissionHook: { receiptId: 'hook-2' } }
+    await act(async () => f.emit({ type: 'agent-session', session: waiting(nextRequest) }))
+    const nextChoice = f.choice('允许本次')
+    expect(nextChoice).toBe(choice)
+    expect(document.activeElement).toBe(choice)
+    expect(nextChoice.disabled).toBe(false)
+    expect(nextChoice.getAttribute('aria-pressed')).toBe('false')
+    expect(f.card.querySelector('.mobile-ticket-answer')?.getAttribute('data-request-id')).toBe('request-2')
+    expect(f.respond).toHaveBeenCalledTimes(1)
+
+    await click(nextChoice)
+    expect(f.respond).toHaveBeenCalledTimes(2)
+    const next = f.respond.mock.calls[1]![0]
+    expect(next).toMatchObject({ agentSessionId: 'waiting', expectedRun: { runId: 'run-waiting' }, expectedRequest: nextRequest,
+      response: { kind: 'permission', requestId: 'request-2', decision: { outcome: 'selected', optionId: 'allow' } } })
+    expect(next.operationId).not.toBe(original.operationId)
+    expect(nextChoice.getAttribute('aria-pressed')).toBe('true')
+    expect(nextChoice.disabled).toBe(true)
+    await act(async () => pending.resolve(receipt(next, 'hook-written')))
+    await vi.waitFor(() => expect(f.card.querySelector('.mobile-ticket-answer')?.getAttribute('data-phase')).toBe('confirmed'))
+    expect(f.respond).toHaveBeenCalledTimes(2)
+    expect(f.open).not.toHaveBeenCalled()
   })
 
   it('never answers twice: a pending or unknown answer has no tappable choices and points to the conversation', async () => {
