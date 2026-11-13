@@ -12,6 +12,7 @@ function fixture() {
     history: ['captured', 'native'].map(source => ({ source, hostId: 'local', agentSessionId: recipient.agentSessionId, kind: 'user-message', userMessages: [], availability: 'empty', scan: { complete: true }, ...(source === 'native' ? { nativeSource: native } : {}) })),
     view: { busy: 'false', busyTransitions: ['false', 'true', 'false'], inputScope: JSON.stringify(['local', recipient.agentSessionId]), sourceCount: 2,
       coverage: ['Loaded inputs · Partial history Sources Journal: 0 loaded; earlier coverage unconfirmed. Available history checked for this read.'], errors: [] } }
+  reading.history = reading.history.map(value => ({ ok: true, value }))
   return { recipient, native, notification, reading }
 }
 const verify = f => assertA2aReferenceUserReading(f.reading, f.recipient, f.native, f.notification)
@@ -27,10 +28,12 @@ test('an unopened empty panel cannot stand in for an observed refresh read cycle
   assert.throws(() => verify(f), { name: 'AssertionError' })
 })
 
-test('unavailable or incomplete original history cannot sign user-message absence', () => {
-  const unavailable = fixture(); unavailable.reading.history[1].availability = 'unavailable'
+test('failed, unavailable or incomplete original history cannot sign user-message absence', () => {
+  const failed = fixture(); failed.reading.history[1] = { ok: false, error: { code: 'CONTROL_UNAVAILABLE', message: 'Original source unavailable' } }
+  assert.throws(() => verify(failed), /Original history IPC read must succeed/u)
+  const unavailable = fixture(); unavailable.reading.history[1].value.availability = 'unavailable'
   assert.throws(() => verify(unavailable), { name: 'AssertionError' })
-  const partial = fixture(); partial.reading.history[1].scan.complete = false
+  const partial = fixture(); partial.reading.history[1].value.scan.complete = false
   assert.throws(() => verify(partial), { name: 'AssertionError' })
 })
 
