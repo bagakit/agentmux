@@ -263,3 +263,24 @@ it.each(['View repository history', 'Locate commit in history'])('keeps an in-fl
   await vi.waitFor(() => expect(element.querySelector('[aria-label="History reference"]')?.getAttribute('data-value')).toBe(reference))
   expect(history).toHaveBeenCalledTimes(2)
 })
+
+it('mounts only the rows near the viewport for a large commit and filters every file by path', async () => {
+  const large = details()
+  large.entries = Array.from({ length: 5000 }, (_, index) => ({ path: `icons/glyph-${index}.svg`, origPath: null, change: 'added' as const }))
+  large.entries.push({ path: 'src/needle.ts', origPath: 'src/old-needle.ts', change: 'renamed' })
+  commitDetails.mockResolvedValue(large)
+  await mount()
+  await vi.waitFor(() => expect(element.querySelector('.git-workbench__files-title')?.textContent).toContain('5001 files'))
+  const mounted = element.querySelectorAll('.git-workbench__files button').length
+  expect(mounted).toBeGreaterThan(0)
+  expect(mounted).toBeLessThan(100)
+  const filter = element.querySelector<HTMLInputElement>('input[aria-label="Filter changed files"]')!
+  expect(filter).not.toBeNull()
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(filter, 'old-needle'); filter.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await vi.waitFor(() => expect(element.querySelectorAll('.git-workbench__files button')).toHaveLength(1))
+  expect(element.querySelector('[aria-label="Open diff for src/needle.ts"]')).not.toBeNull()
+  expect(element.querySelector('.changed-file-list__count')?.textContent).toBe('1 of 5001')
+})
