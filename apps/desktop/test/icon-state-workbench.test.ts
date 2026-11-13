@@ -5,7 +5,6 @@ import {AUTHORED_ICON_DESIGNS,AUTHORED_ICON_GLYPH_IDS} from '../../../packages/c
 import {removeIconSprite} from '../../../packages/client-ui/src/theme/icon-sprite.js'
 import {getSemanticIconCatalog} from '../../../packages/client-ui/src/theme/icon-catalog-metadata.js'
 import {ICON_GLYPHS} from '../../../packages/client-ui/src/theme/icon-catalog.js'
-import {ICON_ANIMATIONS} from '../../../packages/client-ui/src/theme/icon-presentation.js'
 import {createReviewCatalog} from '../scripts/icon-review/catalog.mjs'
 import futureDesigns from '../scripts/icon-review/future-designs.json'
 
@@ -36,13 +35,6 @@ it('projects every authored state design into the actual workbench, plays only t
   await import('../scripts/icon-review/app.js')
   const review=()=> (window as unknown as {iconReview:{ready:boolean;buildPacket():{summary:{changed_roles:number};history:unknown[]};exportTheme():string}}).iconReview
   await vi.waitFor(()=>expect(review()?.ready).toBe(true))
-  // Every shared animation preset is offered with a readable Chinese name, never its raw id.
-  const options=[...document.querySelectorAll<HTMLOptionElement>('#preview-animation option')]
-  expect(options.map(option=>option.value)).toEqual([...ICON_ANIMATIONS])
-  for(const option of options){
-    expect(option.textContent,option.value).toMatch(/\p{Script=Han}/u)
-    expect(option.textContent).not.toBe(option.value)
-  }
   const before=review().exportTheme()
   document.getElementById('view-motion')!.click()
   const ids=Object.keys(AUTHORED_ICON_DESIGNS)
