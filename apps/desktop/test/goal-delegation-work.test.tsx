@@ -24,6 +24,7 @@ import { moteGoalContext } from '../src/renderer/src/lib/mote-goals'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { moteAgent, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
+import { openHostGoalTransport } from './helpers/host-goal-transport'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
 function delegation(): DemandDelegation {
@@ -290,21 +291,27 @@ describe('mounted original Goal delegation consumer', () => {
     expect(name.textContent).toContain('original-worker'); expect(name.textContent).not.toContain('Renamed reviewer')
   })
   it('the actual full Goal list adapter preserves a newer original owner cut against a delayed older filesystem snapshot', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'amux-goal-read-cut-'))
+    // Only Electron IPC is substituted: demand.list reaches the original Host Goal owner through its public codec.
+    const host = await openHostGoalTransport({ config: useAppStore.getState().config ?? { version: 9, hosts: [], workspaces: [], executors: {}, appearance: { terminalTheme: 'graphite' } } as never })
     try {
-      const owner = openDemandStore({ root: directory })
-      const old = (await owner.create({ id: 'original-goal', title: 'Original Goal', status: 'backlog' })).demand
-      const latest = (await owner.update(old.id, { status: 'in_progress' })).demand
-      const record = { ...goal(), updatedAt: latest.updatedAt }
-      useAppStore.setState({ demands: { [record.id]: record } })
-      applyGoalDelegationResult({ goalId: latest.id, goalUpdatedAt: latest.updatedAt, diskDurability: 'confirmed', delegations: [], observations: [] })
-      const retained = useAppStore.getState().demands[record.id]!
-      vi.spyOn(api.demands, 'list').mockResolvedValue([old])
-      await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: 'original-list-request', operation: 'demand.list' })
-      expect(useAppStore.getState().demands[record.id]).toBe(retained)
-      expect(useAppStore.getState().demands[record.id]!.status).toBe('in_progress')
-    } finally { await rm(directory, { recursive: true, force: true }) }
+      const owner = host.demands, older = openDemandStore({ root: await mkdtemp(join(tmpdir(), 'amux-goal-read-cut-')) })
+      try {
+        // The delayed snapshot is the same Goal before its newer original write. The Host owner returns that older version.
+        const old = (await older.create({ id: 'original-goal', title: 'Original Goal', status: 'backlog' })).demand
+        await owner.create({ id: old.id, title: old.title, status: 'backlog' })
+        const latest = { ...old, status: 'in_progress' as const, updatedAt: old.updatedAt + 60_000 }
+        const record = { ...goal(), updatedAt: latest.updatedAt }
+        useAppStore.setState({ demands: { [record.id]: record } })
+        applyGoalDelegationResult({ goalId: latest.id, goalUpdatedAt: latest.updatedAt, diskDurability: 'confirmed', delegations: [], observations: [] })
+        const retained = useAppStore.getState().demands[record.id]!
+        const listed = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+          requestId: 'original-list-request', operation: 'demand.list' })
+        expect(host.executed('demand.list')).toHaveLength(1)
+        expect(listed.operation === 'demand.list' && listed.demands.map(item => [item.id, item.status])).toEqual([['original-goal', 'backlog']])
+        expect(useAppStore.getState().demands[record.id]).toBe(retained)
+        expect(useAppStore.getState().demands[record.id]!.status).toBe('in_progress')
+      } finally { await rm(older.root, { recursive: true, force: true }) }
+    } finally { await host.dispose() }
   })
   it('rejects late older Goal versions and earlier reads without guessing a merge of report responsibility', () => {
     const original = goal(), reportReady = { ...original, updatedAt: _reshape_fixtureEpoch(0, 0, 2), delegations: [{ ...delegation(), report: report() }] }
@@ -368,14 +375,17 @@ describe('mounted original Goal delegation consumer', () => {
       }
       return result(record)
     })
-    const accept = vi.spyOn(api.demands, 'acceptGrounding')
+    // Only Electron IPC is substituted for Goal writes; collection itself stays on its delegation transport.
+    const host = await openHostGoalTransport({ config: useAppStore.getState().config ?? { version: 9, hosts: [], workspaces: [], executors: {}, appearance: { terminalTheme: 'graphite' } } as never })
+    try {
     await mount(record); await click('Collect report')
     expect(collect.mock.calls.find(([method]) => method === 'goal.collect')).toEqual(['goal.collect', {
       goalId: 'original-goal', operationId: 'original-operation', collection: {
         operationId: 'goal-collect:original-goal:original-operation:original-reply', replyMessageId: 'original-reply' } }])
     expect(container.textContent).toContain('Collected · Awaiting your review')
-    expect(button('Review results').disabled).toBe(false); expect(accept).not.toHaveBeenCalled()
+    expect(button('Review results').disabled).toBe(false); expect(host.executed('demand.accept')).toEqual([])
     expect(useAppStore.getState().demands['original-goal']!.status).toBe('in_progress')
+    } finally { await host.dispose() }
   })
   it('keeps known report collection and original Agent navigation available through observation failure', async () => {
     const record = goal({ ...delegation(), report: report() })

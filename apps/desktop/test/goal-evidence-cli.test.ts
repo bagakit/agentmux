@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
+import { openHostGoalTransport } from './helpers/host-goal-transport'
 import { goalEvidenceSource } from './helpers/goal-evidence-source'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { api } from '../src/renderer/src/lib/api'
@@ -13,13 +14,13 @@ afterEach(async () => { useAppStore.setState(initial); vi.restoreAllMocks(); vi.
 it('takes an actual CLI Files receipt into goal update and restores the same typed evidence through goal inspect', async () => {
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/amux'))
   const source = await goalEvidenceSource(); cleanup.push(source.dispose)
-  const owner = openDemandStore({ root: join(source.root, 'goals') })
+  useAppStore.setState({ ...initial, config: { ...await api.config.get(), workspaces: source.workspaces }, sessions: [], demands: {} })
+  // Only Electron IPC is substituted: the renderer's Goal writes reach the original Host Goal owner through its public codec.
+  const host = await openHostGoalTransport({ config: () => useAppStore.getState().config }); cleanup.push(() => host.dispose())
+  const owner = host.demands, root = owner.root
   await owner.create({ id: 'original-goal', title: 'Original', status: 'in_progress', sessionIds: [] })
   await owner.proposeAlignment('original-goal', { summary: 'Original agreement', criteria: [{ id: 'c', text: 'Actual outcome' }], openQuestions: [] })
   await owner.proposeGrounding('original-goal', { alignmentRevision: 1, summary: 'Original report', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['Original citation'], note: '' }] })
-  useAppStore.setState({ ...initial, config: { ...await api.config.get(), workspaces: source.workspaces }, sessions: [], demands: {} })
-  vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
-  vi.spyOn(api.demands, 'update').mockImplementation((id, patch, operationId, expectedUpdatedAt) => owner.update(id, patch, { ...(operationId === undefined ? {} : { operationId }), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) }))
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   const server = new AgentMuxControlServer({ socketPath: join(source.root, 'control.sock'), coreClients: () => [], files: source.owner,
     execute: request => useAppStore.getState().executeControl(request) })
@@ -35,7 +36,8 @@ it('takes an actual CLI Files receipt into goal update and restores the same typ
   const saved = await run('goal', 'update', '--goal', 'original-goal', '--expected-updated-at', String(before.updatedAt), '--grounding', JSON.stringify(proposal))
   expect(saved.goal.grounding.checks[0].evidence).toEqual(['Original citation', evidence])
   expect((await run('goal', 'inspect', '--goal', 'original-goal')).goal.grounding).toEqual(saved.goal.grounding)
-  expect((await openDemandStore({ root: join(source.root, 'goals') }).get('original-goal'))!.grounding!.checks[0]!.evidence).toEqual(['Original citation', evidence])
+  expect((await openDemandStore({ root }).get('original-goal'))!.grounding!.checks[0]!.evidence).toEqual(['Original citation', evidence])
+  expect(host.bodies('demand.update').map(({ demandId, expectedUpdatedAt }) => [demandId, expectedUpdatedAt])).toEqual([['original-goal', before.updatedAt]])
   const rejected = await runCompiledObjectCli(['goal', 'update', '--goal', 'original-goal', '--grounding', JSON.stringify({ ...proposal, checks: [{ ...proposal.checks[0], evidence: [{ ...evidence, resource: { ...evidence.resource, path: '../other/result.log' } }] }] })], env)
   expect(rejected.code).toBe(1)
   expect((await owner.get('original-goal'))!.grounding).toEqual(saved.goal.grounding)

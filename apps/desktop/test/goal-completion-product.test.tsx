@@ -27,6 +27,13 @@ async function settled(assertion: () => unknown | Promise<unknown>) {
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() })
 }
 function row() { return container.querySelector('[data-demand-id="goal"]') }
+// The exact public demand.accept requests the actual preload sent to Main's goals:execute channel.
+function accepts() {
+  return bridge.invoke.mock.calls.flatMap(([channel, request]) => channel === 'goals:execute' && (request as { operation?: string }).operation === 'demand.accept'
+    ? [(({ schemaVersion: _schema, requestId: _id, ...body }) => body)(request as Record<string, unknown>)] : [])
+}
+const accepted = (submission: string, acceptGaps: boolean, finish?: boolean) => ({ operation: 'demand.accept', demandId: 'goal', expectedAlignmentRevision: 1,
+  expectedSubmissionId: submission, acceptGaps, ...(finish === undefined ? {} : { finish }) })
 function noLifecycleChange() {
   return [vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'restart'), vi.spyOn(api.sessions, 'interrupt')]
 }
@@ -41,11 +48,11 @@ it('mounted original acceptance leaves work open, then explicit Finish goal uses
   await settled(async () => expect((await demands.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
   const accepted = (await demands.get('goal'))!
   expect(accepted.status).toBe('todo')
-  expect(bridge.invoke).toHaveBeenCalledWith('demands:acceptGrounding', 'goal', 1, expected.grounding!.submissionId, false, undefined)
+  expect(accepts()).toEqual([accepted(expected.grounding!.submissionId, false)])
   expect(row()?.querySelector('.goals-row__next')?.textContent).toBe('Accepted')
   await click('Finish goal')
   await settled(async () => expect((await demands.get('goal'))!.status).toBe('done'))
-  expect(bridge.invoke).toHaveBeenCalledWith('demands:acceptGrounding', 'goal', 1, expected.grounding!.submissionId, false, true)
+  expect(accepts()).toEqual([accepted(expected.grounding!.submissionId, false), accepted(expected.grounding!.submissionId, false, true)])
   const restored = (await openDemandStore({ root: join(directory, 'goals') }).get('goal'))!
   expect(restored.grounding).toEqual(accepted.grounding)
   expect(restored.sessionIds).toEqual(expected.sessionIds)
@@ -66,7 +73,7 @@ it('the primary gap completion action preserves the reviewed gap through actual 
   expect(primary?.textContent).toMatch(/Accept/iu); expect(primary?.textContent).toMatch(/finish/iu); expect(primary?.textContent).toMatch(/gap/iu)
   await act(async () => primary.click())
   await settled(async () => expect((await demands.get('goal'))!.status).toBe('done'))
-  expect(bridge.invoke).toHaveBeenCalledWith('demands:acceptGrounding', 'goal', 1, submission, true, true)
+  expect(accepts()).toEqual([accepted(submission, true, true)])
   expect((await demands.get('goal'))!.grounding).toMatchObject({ submissionId: submission, acceptedAt: expect.any(Number), checks: report('gap').checks })
 })
 
@@ -98,16 +105,15 @@ it('a stale primary finish cannot close or accept a replacement report, and relo
   await demands.proposeGrounding('goal', report()); await publish(); await mount()
   const old = (await demands.get('goal'))!
   await openDemandStore({ root: join(directory, 'goals') }).proposeGrounding('goal', { ...report(), summary: 'New report requiring review.' })
-  const accept = vi.spyOn(api.demands, 'acceptGrounding')
   await click('Accept and finish')
   await settled(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')).not.toBeNull())
   const current = (await demands.get('goal'))!
   expect(current.status).toBe('todo'); expect(current.grounding!.acceptedAt).toBeNull()
-  expect(accept).toHaveBeenCalledExactlyOnceWith('goal', 1, old.grounding!.submissionId, false, true)
+  expect(accepts()).toEqual([accepted(old.grounding!.submissionId, false, true)])
   expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Reload current proposal'])
   await click('Reload current proposal')
   await settled(() => expect(container.textContent).toContain('New report requiring review.'))
-  expect(accept).toHaveBeenCalledTimes(1); expect((await demands.get('goal'))!.status).toBe('todo')
+  expect(accepts()).toHaveLength(1); expect((await demands.get('goal'))!.status).toBe('todo')
 })
 
 it('lost finish receipt reloads the original committed result without a duplicate acceptance or input', async () => {
@@ -116,17 +122,16 @@ it('lost finish receipt reloads the original committed result without a duplicat
   let lost = false
   bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const response = await real(channel, ...args)
-    if (channel === 'demands:acceptGrounding' && !lost) { lost = true; throw new Error('Original finish receipt unavailable') }
+    if (channel === 'goals:execute' && (args[0] as { operation?: string }).operation === 'demand.accept' && !lost) { lost = true; throw new Error('Original finish receipt unavailable') }
     return response
   })
-  const accept = vi.spyOn(api.demands, 'acceptGrounding')
   await click('Accept and finish')
   await settled(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')).not.toBeNull())
   const committed = (await openDemandStore({ root: join(directory, 'goals') }).get('goal'))!
   expect(committed.status).toBe('done'); expect(committed.grounding!.acceptedAt).toBeGreaterThan(0)
   await click('Reload current proposal')
   await settled(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull())
-  expect(accept).toHaveBeenCalledTimes(1)
+  expect(accepts()).toHaveLength(1)
   expect(useAppStore.getState().demands.goal!.grounding).toEqual(committed.grounding)
   expect((await demands.get('goal'))!.activities).toEqual(committed.activities)
   expect(writes).toEqual(originalInput)
