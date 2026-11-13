@@ -172,7 +172,7 @@ it('Mobile offers scanning independently of clipboard or device observation and 
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const revoke = vi.spyOn(api.deviceManagement, 'revoke')
   await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
-  expect(node('[data-device-action="scan"]').textContent).toBe('Scan to connect')
+  expect(node('[data-device-action="scan"]').textContent).toBe('Show connection code')
   expect(node('[data-device-action="copy"]').textContent).toBe('Copy connection link')
   expect(link).not.toHaveBeenCalled()
   await dom.click('[data-device-action="scan"]')
@@ -251,13 +251,13 @@ it('Mobile lets the person pick the network when this Mac has more than one, and
   await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
   expect(dom.container.querySelector('[aria-label="Connection network"]')).toBeNull()
   await dom.click('[data-device-action="scan"]')
-  const picker = node<HTMLSelectElement>('[aria-label="Connection network"]')
-  expect(picker.value).toBe(wired.address)
-  expect([...picker.options].map(option => option.textContent)).toEqual(['USB 10/100/1000 LAN · 10.69.47.238 · default', 'Wi-Fi · 10.69.58.222'])
-  await act(async () => { picker.value = wifi.address; picker.dispatchEvent(new Event('change', { bubbles: true })) })
+  const radios = () => [...dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Connection network"] [role="radio"]')]
+  expect(radios().map(radio => [radio.getAttribute('aria-label'), radio.getAttribute('aria-checked')])).toEqual([
+    ['USB 10/100/1000 LAN · 10.69.47.238 · recommended', 'true'], ['Wi-Fi · 10.69.58.222', 'false']])
+  await act(async () => radios()[1]!.click())
   expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
   expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(at(wifi.address))
-  expect(node<HTMLSelectElement>('[aria-label="Connection network"]').value).toBe(wifi.address)
+  expect(radios().map(radio => radio.getAttribute('aria-checked'))).toEqual(['false', 'true'])
   // Refresh and copy keep the chosen network instead of returning to the default one.
   await dom.click('[data-device-action="scan"]')
   expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
@@ -293,8 +293,7 @@ it('Mobile does not pin the default address, and drops a pick that a network cha
   // Refreshing without a pick keeps asking for the Host's preferred address.
   await dom.click('[data-device-action="scan"]')
   expect(link.mock.calls.map(call => call[0])).toEqual([{}, {}])
-  const picker = node<HTMLSelectElement>('[aria-label="Connection network"]')
-  await act(async () => { picker.value = wifi.address; picker.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Connection network"] [role="radio"]')[1]!.click())
   expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
   // The Mac moves to another network: the picked address is gone, so refresh asks for the default again.
   current = [home]

@@ -56,7 +56,9 @@ it('Mobile keeps the original device record and makes the full failed observatio
   expect(record.textContent).toContain('Connected')
   expect(dom.container.querySelector('.device-management__service')?.textContent).toContain('Connection service · last observed')
   expect(dom.container.querySelector('.device-management__service')?.textContent).toContain('Ready to connect')
-  expect(dom.container.querySelector('.device-management__count')?.textContent).toBe('Last observed: 1 connected · 1 authorized')
+  expect(dom.container.querySelector('.device-management__count')?.textContent).toBe('Last observed · 1 online · 1 authorized')
+  // The online count carries a live presence mark only when a device is confirmed online.
+  expect(dom.container.querySelector('.device-management__count .phone-device-presence')?.getAttribute('data-online')).toBe('true')
   expect(dom.container.querySelector<HTMLDetailsElement>('[data-device-records]')?.open).toBe(false)
   expect(link).not.toHaveBeenCalled()
   expect(revoke).not.toHaveBeenCalled()
