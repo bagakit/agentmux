@@ -60,6 +60,14 @@ async function compile(mode) {
         mutation = { path: 'packages/core/src/public-rpc-client.ts', sourceSHA256: sha(original), loadedSHA256: sha(loaded) }
         return { contents: loaded, loader: 'ts', resolveDir: dirname(args.path) }
       })
+      plugin.onLoad({ filter: /connection-offer\.ts$/ }, async args => {
+        if (mode !== 'legacy-intent-mutant') return null
+        const original = await readFile(args.path, 'utf8'), before = "fragment.startsWith('offer=') || "
+        assert.equal(original.split(before).length, 2, 'One actual legacy input classification')
+        const loaded = original.replace(before, '')
+        mutation = { path: 'packages/relay/src/connection-offer.ts', sourceSHA256: sha(original), loadedSHA256: sha(loaded) }
+        return { contents: loaded, loader: 'ts', resolveDir: dirname(args.path) }
+      })
     } }] })
   const inputs = {}
   for (const file of Object.keys(compiled.metafile.inputs)) {
@@ -71,18 +79,18 @@ async function compile(mode) {
     'packages/core/src/public-rpc-client.ts', 'packages/relay/src/connection-offer.ts']) {
     assert.ok(Object.keys(inputs).some(file => file.endsWith(required)), 'Actual compiled CLI source: ' + required)
   }
-  if (mode === 'endpoint-mutant') assert.ok(mutation && mutation.sourceSHA256 !== mutation.loadedSHA256)
+  if (mode !== 'candidate') assert.ok(mutation && mutation.sourceSHA256 !== mutation.loadedSHA256)
   await writeFile(join(directory, 'compiled.json'), JSON.stringify({ artifactSHA256: sha(await readFile(artifact)), inputs, mutation }, null, 2))
   return join(directory, 'bin/amux')
 }
 
-async function run(name, config, env, filter, expectedTests, red = false) {
+async function run(name, config, env, filter, expectedTests, red = false, sourceMutant = '') {
   const directory = join(output, name); await mkdir(directory, { recursive: true })
   const report = join(directory, 'tests.json'), loaded = join(directory, 'loaded.jsonl'); await writeFile(loaded, '')
   const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile=' + report]
   if (filter) args.push('-t', filter)
   const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env,
-    AGENTMUX_CONNECTION_LINK_MUTANT: '', AGENTMUX_CONNECTION_LINK_LOADED: loaded }, stdio: ['ignore', 'pipe', 'pipe'] })
+    AGENTMUX_CONNECTION_LINK_MUTANT: sourceMutant, AGENTMUX_CONNECTION_LINK_LOADED: loaded }, stdio: ['ignore', 'pipe', 'pipe'] })
   const timer = setTimeout(() => child.kill('SIGKILL'), 60_000)
   let log = ''; child.stdout.on('data', value => { log += value }); child.stderr.on('data', value => { log += value })
   const code = await new Promise((yes, no) => { child.once('error', no); child.once('close', yes) }).finally(() => clearTimeout(timer))
@@ -91,28 +99,40 @@ async function run(name, config, env, filter, expectedTests, red = false) {
   const sources = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   assert.ok(sources.length, 'Nonempty current production source loads')
   for (const source of sources) {
-    assert.equal(source.sourceSHA256, source.loadedSHA256, 'The test host remains unmutated; only the private CLI selects the wrong endpoint')
+    if (source.mutation) { assert.equal(source.mutation, sourceMutant); assert.notEqual(source.sourceSHA256, source.loadedSHA256) }
+    else assert.equal(source.sourceSHA256, source.loadedSHA256, 'Unchanged current source')
     if (sourceHashes.has(source.file)) assert.equal(sourceHashes.get(source.file), source.sourceSHA256)
     sourceHashes.set(source.file, source.sourceSHA256)
   }
+  assert.equal(sources.filter(source => source.mutation).length, sourceMutant ? 1 : 0, 'One actual source mutation, or normal sources')
   assert.equal(result.numPassedTests + result.numFailedTests, expectedTests, 'Exact nonempty behavioral case count')
   if (!filter) assert.equal(result.numPendingTests, 0, 'Required consumer evidence cannot skip')
   assert.equal(code, red ? 1 : 0, log)
   assert.equal(result.numFailedTests, red ? 1 : 0)
-  if (red) assert.ok(result.testResults.flatMap(suite => suite.assertionResults).some(test => test.status === 'failed' &&
-    test.failureMessages.some(message => message.includes('AssertionError') && message.includes('HTTP RPC endpoint must identify its root service'))), 'Mutation fails at the actual compact CLI endpoint, not preparation')
+  if (red) {
+    const failures = result.testResults.flatMap(suite => suite.assertionResults).filter(test => test.status === 'failed')
+    const expected = name === 'legacy-cli-selection' ? 'previous link format' : name === 'legacy-mobile-selection' ? 'legacy link' : 'same original Host facts'
+    assert.equal(failures.length, 1)
+    assert.ok(failures[0].fullName.includes(expected) && failures[0].failureMessages.some(message => message.includes('AssertionError')),
+      'Mutation fails at its actual consumer assertion, not preparation')
+  }
   runs.push({ name, exitCode: code, passed: result.numPassedTests, failed: result.numFailedTests })
   process.stdout.write(name + ': ' + (red ? 'expected assertion red' : 'green') + '\n')
 }
 
 const candidate = await compile('candidate'), handoff = join(output, 'host-link.json')
 const base = { AGENTMUX_TEST_OBJECT_CLI: candidate, AGENTMUX_TEST_MOBILE_LINK_HANDOFF: handoff }
-await run('host', 'apps/host/test/mobile-link-public.config.mts', base, null, 9)
-await run('mobile', 'apps/mobile/test/connection-link.config.mts', base, null, 10)
+await run('host', 'apps/host/test/mobile-link-public.config.mts', base, null, 10)
+await run('mobile', 'apps/mobile/test/connection-link.config.mts', base, null, 11)
 const mutant = await compile('endpoint-mutant')
 await run('endpoint-selection', 'apps/host/test/mobile-link-public.config.mts', { ...base, AGENTMUX_TEST_OBJECT_CLI: mutant }, 'same original Host facts', 1, true)
+const legacyMutant = await compile('legacy-intent-mutant')
+await run('legacy-cli-selection', 'apps/host/test/mobile-link-public.config.mts', { ...base, AGENTMUX_TEST_OBJECT_CLI: legacyMutant }, 'previous link format', 1, true)
+await run('legacy-mobile-selection', 'apps/mobile/test/connection-link.config.mts', base, 'legacy link', 1, true, 'legacy-as-absent')
 await run('restored-host', 'apps/host/test/mobile-link-public.config.mts', base, 'same original Host facts', 1)
 await run('restored-mobile', 'apps/mobile/test/connection-link.config.mts', base, 'same Host link', 1)
+await run('restored-legacy-cli', 'apps/host/test/mobile-link-public.config.mts', base, 'previous link format', 1)
+await run('restored-legacy-mobile', 'apps/mobile/test/connection-link.config.mts', base, 'legacy link', 1)
 for (const [file, hash] of sourceHashes) assert.equal(sha(await readFile(resolve(root, file))), hash, 'Source preserved: ' + file)
 const verificationInputs = Object.fromEntries(await Promise.all(['apps/host/scripts/verify-mobile-link.mjs', 'apps/host/test/mobile-link-public.config.mts',
   'apps/host/test/mobile-link.test.ts', 'apps/host/test/mobile-link-label-cache.test.ts', 'apps/mobile/test/connection-link-entry.test.tsx',

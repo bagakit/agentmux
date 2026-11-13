@@ -31,15 +31,20 @@ afterEach(async () => {
   ports.connect.mockReset(); ports.observation = null
 })
 
-it('the actual Web entry refuses a damaged new link without falling through to its saved Mac or altering the backup', async () => {
+it.each(['damaged compact', 'legacy'] as const)('the actual Web entry refuses a %s link without falling through to its saved Mac or altering the backup', async kind => {
   document.body.innerHTML = '<div id="root"></div><div id="mobile-overlays"></div>'
   const saved = { v: 2 as const, serverId: 'saved-host', daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint: '127.0.0.1:9999', useTls: false } }
   const incoming = { ...saved, serverId: 'incoming-host' }
   const originalBackup = JSON.stringify(saved)
   localStorage.setItem('agentmux.connection-offer.v2', originalBackup)
+  const { emptyDeviceWorkface } = await import('../src/recovery/device-workface')
+  localStorage.setItem('agentmux-mobile-workface-v1', JSON.stringify({ ...emptyDeviceWorkface(), host: { origin: location.origin, hostId: saved.serverId },
+    selectedSessionId: 'original-saved-session', conversation: { version: 1, drafts: [['original-saved-session', 'Keep this unsent draft']], attempts: [], responses: [] } }))
+  const originalWorkface = localStorage.getItem('agentmux-mobile-workface-v1')
   const intact = connectionOfferUrl(location.origin + '/', incoming)
-  const damaged = intact.slice(0, intact.indexOf('#') + 21)
-  history.replaceState(null, '', damaged)
+  const refused = kind === 'legacy' ? location.origin + '/#offer=' + Buffer.from(JSON.stringify(incoming)).toString('base64url')
+    : intact.slice(0, intact.indexOf('#') + 21)
+  history.replaceState(null, '', refused)
   // The Host connection port is controlled; startup parsing, state selection and rendering are real.
   ports.connect.mockImplementation(() => new Promise(() => {}))
   await act(async () => { await import('../src/main') })
@@ -47,7 +52,8 @@ it('the actual Web entry refuses a damaged new link without falling through to i
   expect(document.querySelector('main')?.textContent).toContain('连接链接无法读取')
   expect(ports.connect).not.toHaveBeenCalled()
   expect(localStorage.getItem('agentmux.connection-offer.v2')).toBe(originalBackup)
-  expect(location.hash).toBe(new URL(damaged).hash)
+  expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe(originalWorkface)
+  expect(location.hash).toBe(new URL(refused).hash)
 })
 
 it.runIf(Boolean(process.env.AGENTMUX_TEST_MOBILE_LINK_HANDOFF))('the actual Web entry consumes the same Host link proven through the actual CLI Relay endpoint', async () => {

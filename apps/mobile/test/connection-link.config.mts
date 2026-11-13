@@ -8,7 +8,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutant = process.env.AGENTMUX_CONNECTION_LINK_MUTANT, report = process.env.AGENTMUX_CONNECTION_LINK_LOADED
 const codec = 'packages/relay/src/connection-offer.ts', labels = 'apps/host/src/mobile-link-candidates.ts'
 const variants: Record<string, { file: string; before: string; after: string }> = {
-  'offer-damage-as-absent': { file: codec, before: 'return /^A[g-z0-9_-]/.test(fragment)', after: 'return /^A[A-Za-z0-9_-]{40,}$/.test(fragment)' },
+  'offer-damage-as-absent': { file: codec, before: '/^A[g-z0-9_-]/.test(fragment)', after: '/^A[A-Za-z0-9_-]{40,}$/.test(fragment)' },
+  'legacy-as-absent': { file: codec, before: "fragment.startsWith('offer=') || ", after: '' },
   'offer-frame-too-short': { file: codec, before: 'const MAX_FRAGMENT = Math.ceil((1 + KEY_BYTES + 1 + 160 + 1 + 255) / 3) * 4', after: 'const MAX_FRAGMENT = 512' },
   'offer-ascii-only': { file: codec, before: "const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)", after: "if (bytes.some(byte => byte > 0x7e)) throw new Error('Invalid connection link.'); const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)" },
   'query-absent-label-again': { file: labels, before: 'known!.has(name) || checked.has(name)', after: 'known!.has(name)' }

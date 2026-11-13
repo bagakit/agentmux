@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectionOfferUrl, parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
@@ -123,6 +124,25 @@ describe('choosing the address a phone connects to', () => {
 })
 
 describe('original mobile link discovery', () => {
+  it('refuses the previous link format before opening HTTP or Relay transport in the actual CLI', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-legacy-cli-'))
+    closes.push(() => rm(root, { recursive: true, force: true }))
+    let connections = 0, requests = 0
+    const server = createServer((_request, response) => { requests++; response.writeHead(503); response.end() })
+    server.on('connection', () => { connections++ })
+    server.on('upgrade', (_request, socket) => { requests++; socket.destroy() })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    closes.push(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())))
+    const address = server.address() as { port: number }
+    const original = await authority(), saved = { v: 2, serverId: original.hostId,
+      daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint: `127.0.0.1:${address.port}`, useTls: false } }
+    const legacy = `http://127.0.0.1:${address.port}/#offer=` + Buffer.from(JSON.stringify(saved)).toString('base64url')
+    const result = await runCompiledObjectCli(['--endpoint', legacy, 'device', 'hello', '--name', 'Legacy input'], objectCliEnvironment(root))
+    expect(result.code).not.toBe(0)
+    expect(result.stdout + result.stderr).toContain('INVALID_CLI_ARGUMENT')
+    expect(result.stdout + result.stderr).toContain('This connection link format is no longer supported.')
+    expect(connections).toBe(0); expect(requests).toBe(0); expect(original.devices()).toEqual([])
+  })
   it.each([['192.168.1.20:8443', false], ['relay.example.org', true]])('freezes one %s offer and exposes its existing endpoint even while disconnected', async (endpoint, tls) => {
     const original = await authority(), url = offer(original.hostId, endpoint, tls), link = vi.fn(linked(url))
     const state = vi.fn((_url?: string) => ({ state: 'disconnected' as const, message: 'Original connection observation' }))

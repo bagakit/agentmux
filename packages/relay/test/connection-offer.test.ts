@@ -56,8 +56,12 @@ describe('the compact phone connection link', () => {
     }
     const good = connectionOfferUrl('http://10.0.0.2:8443/', offer('Ab3dEf6hJk9m', '10.0.0.2:8443'))
     const fragment = new URL(good).hash.slice(1)
-    // The previous JSON format is no longer a connection link.
-    expect(parseConnectionOfferUrl('http://10.0.0.2:8443/#offer=' + Buffer.from(JSON.stringify(offer('Ab3dEf6hJk9m', '10.0.0.2:8443'))).toString('base64url'))).toBeNull()
+    // Known old input is refused, never treated as an absent link that selects a saved Mac.
+    for (const payload of ['', 'damaged', Buffer.from(JSON.stringify(offer('Ab3dEf6hJk9m', '10.0.0.2:8443'))).toString('base64url')]) {
+      const legacy = 'http://10.0.0.2:8443/#offer=' + payload
+      expect(hasConnectionOffer(legacy)).toBe(true)
+      expect(() => parseConnectionOfferUrl(legacy)).toThrow('This connection link format is no longer supported.')
+    }
     // Truncated, padded with trailing bytes, or with a wrong format byte.
     expect(() => parseConnectionOfferUrl('http://10.0.0.2:8443/#' + fragment.slice(0, -6))).toThrow()
     expect(() => parseConnectionOfferUrl('http://10.0.0.2:8443/#' + fragment + 'AAAA')).toThrow()
