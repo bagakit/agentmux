@@ -37,12 +37,14 @@ it('opens on the Brand view, shows every realm through the product resolver and 
     document.querySelector<HTMLElement>(`[data-brand-realm="${id}"]`)!.click()
     const panel = document.querySelector<HTMLElement>('.brand-realm')!
     expect(panel.dataset.realm).toBe(id)
-    for (const surface of ['launch', 'banner'] as const) {
-      const hero = resolveBrandHero(surface, id), figure = panel.querySelector(`.brand-hero--${surface}`)!
+    for (const [place, surface, colophon] of [['launch', 'launch', true], ['launcher', 'banner', false], ['overview', 'banner', true]] as const) {
+      const hero = resolveBrandHero(surface, id), figure = panel.querySelector(`.brand-hero--${place}`)!
+      expect(figure.getAttribute('data-surface')).toBe(surface)
       expect(figure.getAttribute('data-realm')).toBe(id)
       expect(figure.getAttribute('data-art-realm')).toBe(hero.artRealm)
       expect(figure.querySelector('img')?.getAttribute('src')).toBe(hero.art)
-      expect(figure.querySelector('.brand-colophon')?.textContent).toBe(hero.colophon)
+      // Like the product: launch and the Settings strip name the art's realm; the Launcher does not.
+      expect(figure.querySelector('.brand-colophon')?.textContent).toBe(colophon ? hero.colophon : undefined)
       expect(figure.getAttribute('data-borrowed')).toBe(String(hero.artRealm !== id))
       // Borrowed art says so; only a realm's own painting shows without the lineage note.
       expect(figure.querySelector('.brand-hero__lineage') !== null).toBe(hero.artRealm !== id)
