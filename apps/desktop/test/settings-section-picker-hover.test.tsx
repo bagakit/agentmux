@@ -85,11 +85,11 @@ it('actual Settings RadioItems preserve the authored numeric draft through every
   await pointer(picker(), 'pointerover')
   expect(menu()).not.toBeNull()
   const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
-  const expected = settingsNavGroups('').flatMap(group => group.items.map(item => item.title))
+  const expected = ['Overview', ...settingsNavGroups('').flatMap(group => group.items.map(item => item.title))]
   expect(expected.length).toBeGreaterThan(1)
   expect(items.map(item => item.textContent)).toEqual(expected)
   expect([...document.querySelectorAll('.settings-section-menu__label')].map(item => item.textContent)).toEqual(settingsNavGroups('').map(group => group.title))
-  await browse(font(), picker(), items.slice(0, 2), '18', null)
+  await browse(font(), picker(), items, '18', null)
   expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Appearance')
   expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-pane="appearance"] .primary-button')!.disabled).toBe(false)
   expect(JSON.stringify(useAppStore.getState().config)).toBe(configBefore)
@@ -114,7 +114,7 @@ it('actual ordinary Split Items preserve text caret across rows, and explicit se
   expect(menu()).toBeNull()
 })
 
-it('different category selection closes to the exact connected trigger and returning keeps dirty draft/scroll', async () => {
+it('different category selection keeps the action-established search focus and returning keeps dirty draft/scroll', async () => {
   await dom.render(<SettingsPanel initialSection="appearance" onClose={() => {}} />)
   await type(font(), '18')
   const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
@@ -125,7 +125,10 @@ it('different category selection closes to the exact connected trigger and retur
   expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('General')
   expect(picker().isConnected).toBe(true)
   expect(picker().closest('[hidden], [inert]')).toBeNull()
-  expect(document.activeElement).toBe(picker())
+  const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+  expect(search.isConnected).toBe(true)
+  expect(search.closest('[hidden], [inert]')).toBeNull()
+  expect(document.activeElement).toBe(search)
   await pointer(picker(), 'pointerover')
   await select([...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent === 'Appearance')!)
   expect(font().value).toBe('18')
@@ -193,12 +196,24 @@ it.each(['item', 'radio'] as const)('disabled %s hover/move/leave retains input/
   focused(input, 'draft', 2)
   await pointer(item, 'pointerout', menu())
   focused(input, 'draft', 2)
-  await pointer(item, 'pointerdown'); await act(async () => item.click())
-  expect(choose).not.toHaveBeenCalled()
   await pointer(item, 'pointerout', input)
   await pause()
   expect(menu()).toBeNull()
   focused(input, 'draft', 2)
+  // A deliberate click pins the disclosure; disabled actions still cannot select anything.
+  await pointer(trigger, 'pointerover')
+  const disabled = document.querySelector<HTMLElement>('[data-disabled]')!
+  await pointer(disabled, 'pointerdown'); await act(async () => disabled.click())
+  expect(choose).not.toHaveBeenCalled()
+  focused(input, 'draft', 2)
+  await pointer(disabled, 'pointerout', input); await pause()
+  expect(menu()).not.toBeNull()
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
+  await pause()
+  expect(menu()).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  expect(input.value).toBe('draft')
+  expect(choose).not.toHaveBeenCalled()
 })
 
 it('caller pointer handlers run once and defaultPrevented survives shared composition', async () => {
