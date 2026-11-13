@@ -124,7 +124,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           context.strokeStyle = '#ffffff'; context.lineWidth = 1 / fit; context.setLineDash([5 / fit, 4 / fit])
           context.strokeRect(crop.x, crop.y, crop.width, crop.height)
         }
-        if (state.selected && state.tool === 'select' && !state.pendingText) {
+        if (state.selected && !state.pendingText) {
           const shape = currentGestureRef.current ?? state.selected, box = shapeBounds(shape, measureText)
           context.strokeStyle = '#3b82f6'; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
           context.strokeRect(box.x - 4 / fit, box.y - 4 / fit, box.width + 8 / fit, box.height + 8 / fit)
@@ -260,19 +260,25 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     }
     if (busy) return
     const at = point(event)
+    // Existing marks are selected and transformed before any tool creates a new one.
+    if (tool !== 'erase' && tool !== 'crop') {
+      const handle = selected ? hitSelectionHandle(selected, at, 9 / viewRef.current.scale) : null
+      const shape = handle ? selected : hit(at)
+      setSelectedId(shape?.id ?? null)
+      if (shape || tool === 'select') {
+        event.currentTarget.setPointerCapture(event.pointerId)
+        if (shape) { transformRef.current = { original: shape, start: at, ...(handle ? { handle } : {}) }; currentGestureRef.current = shape }
+        schedulePaint(); return
+      }
+    }
     if (tool === 'text') {
-      if (!textDraftRef.current) {
+      if (!textDraftRef.current && !selected) {
         event.preventDefault(); beginText(undefined, at)
       }
       return
     }
     event.currentTarget.setPointerCapture(event.pointerId)
-    if (tool === 'select') {
-      const handle = selected ? hitSelectionHandle(selected, at, 9 / viewRef.current.scale) : null
-      const shape = handle ? selected : hit(at)
-      setSelectedId(shape?.id ?? null)
-      if (shape) { transformRef.current = { original: shape, start: at, ...(handle ? { handle } : {}) }; currentGestureRef.current = shape }
-    } else if (tool === 'erase') {
+    if (tool === 'erase') {
       eraseRef.current = new Set(); lastErasePoint.current = at; const shape = hit(at); if (shape) eraseRef.current.add(shape.id)
     } else if (tool === 'crop') cropRef.current = { from: at, to: at }
     else {
@@ -327,7 +333,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     else if (finished) {
       if (transform) { if (JSON.stringify(finished) !== JSON.stringify(transform.original)) edit(doc => replaceShape(doc, finished)) }
       else edit(doc => commitShape(doc, finished))
-      if (finished.kind === 'note') setSelectedId(finished.id)
+      setSelectedId(finished.id)
     }
     schedulePaint()
   }
@@ -373,14 +379,14 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   function setProperty(property: 'color' | 'width' | 'fontSize', value: string | number) {
     if (property === 'color') setColor(String(value)); else if (property === 'width') setWidth(Number(value)); else setFontSize(Number(value))
-    if (tool === 'select' && selected && property in selected) edit(doc => replaceShape(doc, { ...selected, [property]: property === 'color' ? value : Number(value) / viewRef.current.scale } as ScreenshotShape))
+    if (selected && property in selected) edit(doc => replaceShape(doc, { ...selected, [property]: property === 'color' ? value : Number(value) / viewRef.current.scale } as ScreenshotShape))
   }
-  const properties = tool === 'select' ? selected : null
+  const properties = selected
   const propertyColor = properties?.color ?? color
   const customColor = propertyColor.length === 4 ? '#' + propertyColor.slice(1).split('').map(value => value + value).join('') : propertyColor
-  const showColor = !['crop', 'pixelate', 'cover', 'erase', 'pan'].includes(tool) && (tool !== 'select' || Boolean(properties && !isScreenshotMask(properties)))
-  const showWidth = showColor && tool !== 'text' && tool !== 'note' && properties?.kind !== 'text'
-  const showFont = tool === 'text' || properties?.kind === 'text'
+  const showColor = properties ? !isScreenshotMask(properties) : !['select', 'crop', 'pixelate', 'cover', 'erase', 'pan'].includes(tool)
+  const showWidth = showColor && (properties ? properties.kind !== 'text' : tool !== 'text' && tool !== 'note')
+  const showFont = properties ? properties.kind === 'text' : tool === 'text'
   const displayedWidth = Number((properties && 'width' in properties ? properties.width * scale : width).toFixed(2))
   const displayedFont = Number((properties?.kind === 'text' ? properties.fontSize * scale : fontSize).toFixed(2))
   const widthOptions = [...new Set<number>([...SCREENSHOT_WIDTHS, displayedWidth])].sort((a, b) => a - b)
@@ -406,7 +412,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       </div>
     </header>
     <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={!!selected}
-      clearable={!!documentState.shapes.length || !!documentState.crop} onTool={next => { resetGesture(); setTool(next); if (next !== 'select' && next !== 'note') setSelectedId(null); schedulePaint() }}
+      clearable={!!documentState.shapes.length || !!documentState.crop} onTool={next => { resetGesture(); setTool(next); schedulePaint() }}
       onUndo={undo} onRedo={redo} onDelete={removeSelected} onClear={() => { resetGesture(); textDraftRef.current = null; setPendingText(null); setSelectedId(null); edit(clearShapes); schedulePaint() }} />
     <div className="image-annotation-editor__properties">
       <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
@@ -426,8 +432,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       </> : null}
       {tool === 'cover' || properties?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
       {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
-      {tool === 'select' ? <><span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span>
-        {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}</> : null}
+      {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span> : null}
+      {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}
       {tool === 'erase' ? <span className="image-annotation-editor__hint">Drag over annotations to remove them</span> : null}
       {tool === 'note' ? <span className="image-annotation-editor__hint">Click a point or drag a region</span> : null}
       {tool === 'pan' ? <span className="image-annotation-editor__hint">Drag to move the image · Fit to reset</span> : null}
@@ -442,7 +448,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? selected ? 'move' : 'default' : 'crosshair' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
             onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
-            onDoubleClick={event => { if (!busy && tool === 'select') { const shape = hit(point(event)); if (shape?.kind === 'text') beginText(shape) } }} />
+            onDoubleClick={event => { if (!busy) { const shape = hit(point(event)); if (shape?.kind === 'text') beginText(shape) } }} />
           {pendingText ? <Textarea key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} wrap="off"
             aria-description="Enter inserts a new line. Command or Control plus Enter finishes. Escape discards this text edit."
             style={{ left: Math.max(0, Math.min(size.width - textEditorWidth, view.x + pendingText.shape.at.x * scale)),
@@ -458,7 +464,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         </div>
       </div>
       <AnnotationNotes notes={notes} selected={selectedNote} draft={noteDraft} busy={busy}
-        onSelect={note => { commitNote(); setSelectedId(note.id); setTool('select') }} onDraft={value => { setNoteDraft(value); onEdited?.() }}
+        onSelect={note => { commitNote(); setSelectedId(note.id) }} onDraft={value => { setNoteDraft(value); onEdited?.() }}
         onCommit={commitNote} onTemplate={setTemplate} onLocate={locateNote} />
     </div>
     <footer className="image-annotation-editor__footer">
