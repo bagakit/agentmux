@@ -96,6 +96,8 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'waitForNetworkIdle', effect: 'wait', summary: 'wait until requests stop' },
   { name: 'wait', effect: 'wait', summary: 'wait a fixed duration' },
   { name: 'gotoUrl', effect: 'navigate', summary: 'go to another url in this Browser' },
+  { name: 'acceptDialog', effect: 'act', summary: 'answer the page’s open confirm or prompt dialog with OK; acceptDialog(text) only for a prompt' },
+  { name: 'dismissDialog', effect: 'act', summary: 'close the page’s open alert, confirm, prompt or leave-page dialog with Cancel' },
   { name: 'js', effect: 'act', summary: 'evaluate JavaScript in the page (escape hatch)' },
   { name: 'cdp', effect: 'act', summary: 'send a raw CDP command (escape hatch)' }
 ] as const
