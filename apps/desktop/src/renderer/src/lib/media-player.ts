@@ -108,7 +108,7 @@ export type MediaStreamFactState = 'active' | 'released' | 'deleted' | 'changed'
  * deleted file from an unsupported codec: the engine reports both as code 4. Its message is engine debug
  * text and is never read here.
  */
-export function describeMediaFailure(fact: MediaStreamFactState | 'unknown', code: number | null): MediaFailureView | null {
+export function describeMediaFailure(fact: MediaStreamFactState | 'unknown', code: number | null, decoded = false): MediaFailureView | null {
   switch (fact) {
     case 'released': return null
     case 'deleted': return { title: 'File was deleted', detail: 'This file no longer exists in the Workspace.', retry: true }
@@ -121,6 +121,9 @@ export function describeMediaFailure(fact: MediaStreamFactState | 'unknown', cod
   }
   if (code === 1) return null
   if (code === 3) return { title: 'Media could not be decoded', detail: 'Playback stopped on bytes this engine could not decode. Try opening it in a system application.', retry: true }
+  // Once this engine has decoded frames, a later source error cannot mean the format is unsupported:
+  // a live window that moved past the player, or a stall, also ends as code 4.
+  if (code === 4 && decoded) return { title: 'Playback stopped', detail: 'The media stopped arriving after it had started playing. Retry to continue.', retry: true }
   if (code === 4 && fact === 'active') return { title: 'Format not supported', detail: 'This engine cannot play this file’s format or codec. Try opening it in a system application.', retry: false }
   if (code === 2) return { title: 'Playback was interrupted', detail: 'Reading the media stopped before it finished. Retry to continue.', retry: true }
   return { title: 'Playback failed', detail: 'The cause is unknown. Retry, or open the file in a system application.', retry: true }

@@ -71,6 +71,8 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const waiting = useRef<ReturnType<typeof setTimeout> | null>(null)
   const released = useRef(false)
+  // The engine's own decoded fact, kept once seen: a later error never makes it unknown again.
+  const decodedOnce = useRef(false)
   const audioOnly = lease.kind === 'audio' || decode === 'no-picture'
   const stream = classifyStream(facts.duration, facts.window)
   const live = stream === 'live' || stream === 'live-window'
@@ -96,6 +98,7 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   useEffect(() => {
     const element = media.current
     if (!element || !(element.readyState >= HAVE_CURRENT_DATA)) return
+    decodedOnce.current = true
     setFacts(previous => readFacts(element, previous))
     setDecode(current => current !== 'loading' ? current
       : element instanceof HTMLVideoElement && (element.videoWidth === 0 || element.videoHeight === 0) ? 'no-picture' : 'ready')
@@ -127,7 +130,7 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
     // The lease owner records why it refused bytes before answering, so this read cannot race it.
     const fact = await api.files.mediaStreamStatus(lease.id).then(value => value.state, () => 'unknown' as const)
     if (released.current) return
-    const view = describeMediaFailure(fact, code)
+    const view = describeMediaFailure(fact, code, decodedOnce.current)
     if (!view) return
     setDecode('error'); setFailure(view); setBuffering(false)
   }, [lease.id])
@@ -206,6 +209,7 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
     onSeeked: update,
     onLoadedData: () => {
       update()
+      decodedOnce.current = true
       const element = media.current
       // Decoded data with no picture is its own honest state; it never flips back on a later event.
       setDecode(current => current !== 'loading' ? current
