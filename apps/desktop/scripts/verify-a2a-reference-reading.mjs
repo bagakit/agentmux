@@ -12,6 +12,7 @@ const config = 'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.ownin
 const sources = [
   'apps/desktop/scripts/verify-a2a-reference-reading.mjs', config, 'apps/desktop/scripts/fixtures/a2a-reference-reading/mutations.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/capture.mjs', 'apps/desktop/scripts/probe-process.mjs',
+  'apps/desktop/scripts/candidate-package-resolve.mjs',
   'apps/desktop/test/a2a-message-data-bridge.test.tsx', 'apps/desktop/test/vitest.a2a-message-data.config.mts',
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
   'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts', 'packages/core/src/session-history-content.ts',

@@ -1,17 +1,11 @@
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import { readingMutations } from './mutations.mjs'
+import { candidateAlias } from '../../candidate-package-resolve.mjs'
 
 const root = resolve(import.meta.dirname, '../../../../..')
-const pkg = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8'))
-const aliases = Object.entries(pkg.exports).flatMap(([name, value]) => {
-  const source = resolve(root, 'packages/core/src/' + (value as { import: string }).import.replace('./dist/', '').replace(/\.js$/u, '.ts'))
-  const spec = name === '.' ? '@agentmux/core' : '@agentmux/core' + name.slice(1)
-  return existsSync(source) ? [{ find: new RegExp('^' + spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: source }] : []
-})
-
 // This gate consumes the actual local source for all internal packages; it does
 // not use another worktree's Core dist or waive its freshness requirement.
 export default defineConfig({
@@ -20,8 +14,7 @@ export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } },
   esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
-  resolve: { conditions: ['browser', 'import', 'default'], alias: [...aliases,
-    { find: /^@agentmux\/identity$/u, replacement: resolve(root, 'packages/identity/src/index.ts') },
+  resolve: { conditions: ['browser', 'import', 'default'], alias: [candidateAlias(root, { source: true }),
     { find: /^react$/u, replacement: resolve(root, 'packages/client-ui/node_modules/react') },
     { find: /^react-dom(?:\/(.*))?$/u, replacement: resolve(root, 'packages/client-ui/node_modules/react-dom') + '/$1' }] },
   plugins: [{ name: 'a2a-reference-actual-compiler-input', enforce: 'pre', transform(code, id) {
