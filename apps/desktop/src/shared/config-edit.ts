@@ -1,19 +1,20 @@
-import { DEFAULT_COMPOSER_INPUT_CONFIG, resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
+import { resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
+import { DEFAULT_APP_ICON } from '@agentmux/client-ui/app-icon-catalog'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
-import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-preferences'
+import { resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
 import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
-import { resolveFocusMapPreferences, DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from './focus-map-preferences'
+import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveMarkdownPreferences, type MarkdownPreferences } from './markdown-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'
-import { resolveAutomationPreferences, type AutomationPreferences, type AutomationDefaults } from './automation-preferences'
+import { resolveAutomationPreferences, type AutomationPreferences } from './automation-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -26,65 +27,69 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
   return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && configValuesEqual(left[key], right[key]))
 }
 
+type PreferenceDomain = {
+  resolve(value: unknown): unknown
+  // Complete values have required fields; authored domains keep absent optional fields absent.
+  merge?: 'authored' | 'resolved'
+  fields?: Record<string, (value: unknown) => unknown>
+  field?: (key: string, value: unknown, fallback: unknown) => unknown
+}
+
+const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
+  a2a: { resolve: value => ({ notifications: resolveA2ANotifications({ a2a: value as AppConfig['a2a'] }) }), merge: 'authored' },
+  automation: { resolve: value => resolveAutomationPreferences(value as AutomationPreferences | undefined), merge: 'authored' },
+  'browser.agentControl': { resolve: value => resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined), merge: 'authored' },
+  'browser.startPage': { resolve: value => resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined), merge: 'authored' },
+  continuity: { resolve: value => normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined), merge: 'authored' },
+  profile: { resolve: value => resolveUserProfile(value as Partial<UserProfile> | undefined), merge: 'resolved' },
+  focus: { resolve: value => value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }, merge: 'resolved', fields: {
+    recentActivityHours: resolveFocusRecentActivityHours, topicPresentation: resolveFocusTopicPresentation,
+    linkDestination: resolveFocusLinkDestination, replyLines: resolveFocusReplyLines, previewTrigger: resolveFocusPreviewTrigger,
+    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion
+  } },
+  'focus.map': { resolve: value => resolveFocusMapPreferences(value as FocusMapPreferences | undefined), merge: 'resolved' },
+  notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },
+  markdown: { resolve: value => resolveMarkdownPreferences(value as MarkdownPreferences | undefined), merge: 'authored' },
+  goals: { resolve: value => resolveGoalsPreferences(value as GoalsPreferences | undefined), merge: 'authored' },
+  messageToolCompletion: { resolve: value => resolveComposerInputConfig(value as ComposerInputConfig | undefined), merge: 'resolved',
+    // null is an authored disabled prefix, not a missing preference.
+    field: (_key, value, fallback) => value === undefined ? fallback : value },
+  goalsCommonActions: { resolve: value => resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined), merge: 'resolved' },
+  agentDerivedActions: { resolve: value => value ?? {}, merge: 'authored' },
+  'agentDerivedActions.actions': { resolve: value => value ?? [], merge: 'resolved' },
+  'agentDerivedActions.hidden': { resolve: value => value ?? [] },
+  toolkit: { resolve: value => value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }, merge: 'resolved' },
+  'toolkit.performance': { resolve: value => value ?? DEFAULT_PERFORMANCE_PREFERENCES, merge: 'resolved' },
+  'toolkit.mobileConnection': { resolve: value => value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES, merge: 'resolved' },
+  'toolkit.tools': { resolve: value => value ?? [], merge: 'resolved' },
+  'appearance.channelHeaderVisibility': { resolve: value => value ?? {}, merge: 'authored', field: (_key, value) => value ?? true }
+} satisfies Record<string, PreferenceDomain>))
+
+// Derive defaults once, rather than resolving every unrelated domain for each edited field.
+const preferenceDefaults = new Map([...preferenceDomains].map(([path, domain]) => [path, domain.resolve(undefined)]))
+
 function effective(path: string, value: unknown): unknown {
-  if (path === 'a2a') return { notifications: resolveA2ANotifications({ a2a: value as AppConfig['a2a'] }) }
-  if (path === 'a2a.notifications') return value ?? DEFAULT_A2A_NOTIFICATION
-  if (path === 'automation') return resolveAutomationPreferences(value as AutomationPreferences | undefined)
-  if (path.startsWith('automation.')) return value ?? resolveAutomationPreferences()[path.slice('automation.'.length) as keyof AutomationDefaults]
+  const domain = preferenceDomains.get(path)
+  if (domain) return domain.resolve(value)
+  const separator = path.lastIndexOf('.'), parent = path.slice(0, separator), key = path.slice(separator + 1)
+  const parentDomain: PreferenceDomain | undefined = preferenceDomains.get(parent)
+  if (parentDomain) {
+    if (parentDomain.fields && Object.hasOwn(parentDomain.fields, key)) return parentDomain.fields[key]!(value)
+    const defaults = preferenceDefaults.get(parent) as Record<string, unknown>
+    const fallback = Object.hasOwn(defaults, key) ? defaults[key] : undefined
+    return parentDomain.field ? parentDomain.field(key, value, fallback) : value ?? fallback
+  }
   if (path === 'browser.automaticMemoryRelease') return value ?? true
-  if (path === 'browser.agentControl') return resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined)
-  if (path.startsWith('browser.agentControl.')) return value ?? resolveBrowserAgentControl()[path.slice('browser.agentControl.'.length) as keyof BrowserAgentControlPreferences]
-  if (path === 'continuity') return normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined)
-  if (path.startsWith('continuity.')) return value ?? normalizeAgentContinuityPolicy()[path.slice('continuity.'.length) as keyof AgentMuxContinuityPolicy]
-  if (path === 'browser.startPage') return resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined)
-  if (path.startsWith('browser.startPage.')) return value ?? resolveBrowserStartPage()[path.slice('browser.startPage.'.length) as keyof BrowserStartPageConfig]
-  if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
-  if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
-  if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
-  if (path === 'focus.topicPresentation') return resolveFocusTopicPresentation(value)
-  if (path === 'focus.linkDestination') return resolveFocusLinkDestination(value)
-  if (path === 'focus.replyLines') return resolveFocusReplyLines(value)
-  if (path === 'focus.previewTrigger') return resolveFocusPreviewTrigger(value)
-  if (path === 'focus.recentInputs') return resolveFocusRecentInputs(value)
-  if (path === 'focus.mapMotion') return resolveFocusMapMotion(value)
-  if (path === 'focus.map') return resolveFocusMapPreferences(value as FocusMapPreferences | undefined)
-  if (path === 'focus.map.boundary') return value ?? DEFAULT_FOCUS_MAP_PREFERENCES.boundary
-  if (path === 'focus.map.levels') return value ?? DEFAULT_FOCUS_MAP_PREFERENCES.levels
-  if (path === 'notes') return resolveNotesPreferences(value as NotesPreferences | undefined)
-  if (path === 'notes.fontSize') return value ?? resolveNotesPreferences(undefined).fontSize
-  if (path === 'notes.contentWidth') return value ?? resolveNotesPreferences(undefined).contentWidth
-  if (path === 'markdown') return resolveMarkdownPreferences(value as MarkdownPreferences | undefined)
-  if (path === 'markdown.readingWidth') return value ?? resolveMarkdownPreferences(undefined).readingWidth
-  if (path === 'markdown.readingTypeface') return value ?? resolveMarkdownPreferences(undefined).readingTypeface
-  if (path === 'markdown.readingFontSize') return value ?? resolveMarkdownPreferences(undefined).readingFontSize
-  if (path === 'goals') return resolveGoalsPreferences(value as GoalsPreferences | undefined)
-  if (path === 'goals.defaultView') return value ?? resolveGoalsPreferences(undefined).defaultView
-  if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
-  if (path === 'goals.requesterAsSupervisor') return value ?? resolveGoalsPreferences(undefined).requesterAsSupervisor
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
   if (path === 'gitHistoryShowTime') return value ?? true
-  if (path === 'messageToolCompletion') return resolveComposerInputConfig(value as ComposerInputConfig | undefined)
-  if (path.startsWith('messageToolCompletion.')) return value === undefined ? DEFAULT_COMPOSER_INPUT_CONFIG[path.slice('messageToolCompletion.'.length) as keyof ComposerInputConfig] : value
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
   if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
   if (path === 'topicDirectoryInitialView') return value ?? TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT
   if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT
-  if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
-  // No user actions and an absent list mean the same thing; official actions never live here.
-  if (path === 'agentDerivedActions.actions' || path === 'agentDerivedActions.hidden') return value ?? []
-  if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }
-  if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
-  if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
-  if (path === 'toolkit.performance.statusBar') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.statusBar
-  if (path === 'toolkit.mobileConnection') return value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES
-  if (path === 'toolkit.mobileConnection.enabled') return value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES.enabled
-  if (path === 'toolkit.mobileConnection.statusBar') return value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES.statusBar
-  if (path === 'toolkit.tools') return value ?? []
   if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
-  if (path === 'appearance.channelHeaderVisibility') return value ?? {}
-  if (path.startsWith('appearance.channelHeaderVisibility.')) return value ?? true
   if (path === 'appearance.customThemes') return value ?? {}
   if (path === 'appearance.themeId') return value ?? DEFAULT_THEME_ID
+  if (path === 'appearance.appIcon') return value ?? DEFAULT_APP_ICON
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
   if (path === 'appearance.terminalFontSize') return value ?? TERMINAL_FONT_SIZE_DEFAULT
   if (path === 'notifications.mode') return value ?? DEFAULT_NOTIFICATION_MODE_ID
@@ -104,15 +109,11 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
-    // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'a2a' || path === 'notes' || path === 'markdown' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
-      // Compare effective defaults without persisting fields the user did not edit.
-      actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
-    } else if (path === 'agentDerivedActions') {
-      // A first edit of actions and a concurrent first edit of hidden must both survive.
-      actual = actual ?? {}; expected = expected ?? {}; requested = requested ?? {}
-    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'focus.map' || path === 'goalsCommonActions' || path === 'agentDerivedActions.actions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
-      actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
+    const domain = preferenceDomains.get(path)
+    if (domain?.merge) {
+      // Compare defaults without persisting optional fields the user did not edit.
+      actual = domain.merge === 'authored' ? actual ?? {} : effective(path, actual)
+      expected = effective(path, expected); requested = effective(path, requested)
     }
     // A theme record is authored as one complete value; never synthesize variants or icon assets.
     if (path === 'appearance.customThemes') {
