@@ -1441,6 +1441,7 @@ export type AppState = GitReadingActions & {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
+  openHostHome(hostId: string): Promise<void>
   createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }, knowledge?: { categoryId?: string; title?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean, topicId?: string): Promise<void>
   invalidateScratchTopicPaths(workspaceId: string, paths: readonly string[], structural?: boolean): Promise<void>
@@ -5186,6 +5187,9 @@ function settleNativeBrowserProjectionNotice(state: AppState, browserId: string)
       ? { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false } : {}) }
 }
 
+// Only the latest device-home navigation may reveal its asynchronous result.
+let hostHomeNavigation: object | undefined
+
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   workbenchSpaceSelection: null,
@@ -5945,6 +5949,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return saveWorkbenchSelection(true)
   },
   async selectWorkspace(id) {
+    hostHomeNavigation = undefined
     set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
@@ -8706,6 +8711,38 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       delete next[key]
       return { documentRevealTargets: next }
     })
+  },
+  async openHostHome(hostId) {
+    const host = get().config?.hosts.find(item => item.id === hostId)
+    if (!host) throw new Error('This device is no longer configured. Choose its current entry before opening home.')
+    const target = JSON.stringify(host), navigation = {}, selection = fileNavigationSelection(get())
+    let navigationChanged = false
+    const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== selection) navigationChanged = true })
+    const canReveal = () => hostHomeNavigation === navigation && !navigationChanged && fileNavigationSelection(get()) === selection
+    hostHomeNavigation = navigation
+    let step = 'Reading device home'
+    try {
+      const result = await api.hosts.home(structuredClone(host))
+      if (result.routeHostId !== hostId) throw new Error('The home response belongs to another device.')
+      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw new Error('The device configuration changed. Retry its current entry.')
+      // A later explicit navigation owns the screen. This read never opens another workface.
+      if (!canReveal()) return
+      let workspace = get().config?.workspaces.find(item => item.hostId === hostId && item.path === result.homeDirectory)
+      if (!workspace) {
+        step = 'Registering device home'
+        workspace = await api.workspaces.add({ hostId, path: result.homeDirectory })
+        // Main's location owner may return an existing equivalent spelling (for example a trailing slash).
+        if (workspace.hostId !== hostId) throw new Error('The registered directory belongs to another device.')
+        set(current => current.config && current.config.hosts.some(item => item.id === hostId) && !current.config.workspaces.some(item => item.id === workspace!.id)
+          ? { config: { ...current.config, workspaces: [...current.config.workspaces, workspace!] } } : current)
+      }
+      if (!canReveal()) return
+      step = 'Opening device home'
+      if (JSON.stringify(get().config?.hosts.find(item => item.id === hostId)) !== target) throw new Error('The device configuration changed before opening home. Its registration and original work were retained; retry the current device entry.')
+      await get().selectWorkspace(workspace.id)
+    } catch (error) {
+      throw new Error(`${step}: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+    } finally { stopWatching(); if (hostHomeNavigation === navigation) hostHomeNavigation = undefined }
   },
   async openProjectFolder() {
     const workspace = await api.workspaces.chooseLocalFolder()

@@ -189,6 +189,12 @@ const api: AgentMuxPreloadApi = {
     }
   },
   hosts: {
+    home: async (host, context) => {
+      const token = mintObjectId()
+      const pending = ipcRenderer.invoke('hosts:home', token, host)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('hosts:cancelInspect', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    },
     network: async (host, context) => {
       const token = mintObjectId()
       const pending = ipcRenderer.invoke('hosts:network', token, host)

@@ -1,7 +1,7 @@
 import type { HostConfig, SessionInputOperationResult } from '../../../shared/contracts'
 import { unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
 
-/** Both Host read methods carry cancellation across contextBridge through the original envelope. */
+/** Host reads carry cancellation across contextBridge through the original envelope. */
 export function createRendererHostObservation<T>(read: (host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }) => Promise<SessionInputOperationResult<T>>) {
   return async (host: HostConfig, context?: { signal?: AbortSignal }): Promise<T> => {
     const signal = context?.signal

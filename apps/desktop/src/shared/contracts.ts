@@ -1627,6 +1627,7 @@ export type AgentMuxDesktopApi = {
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<import('@agentmux/core').ApplicationAccessResultMap[M]>
   }
   hosts: {
+    home(host: HostConfig, context?: { signal?: AbortSignal }): Promise<AgentMuxRpcResult<'settings.hosts.home'>>
     inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>
     network(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostNetworkObservation>
     check(host: HostConfig): Promise<HostCheckResult>
@@ -2131,7 +2132,8 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
   }
   conversation: import('./conversation-read').ConversationReadPreloadApi
-  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network'> & {
+  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network' | 'home'> & {
+    home(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<AgentMuxRpcResult<'settings.hosts.home'>>>
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
     network(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostNetworkObservation>>
   }

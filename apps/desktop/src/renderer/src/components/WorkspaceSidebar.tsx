@@ -63,6 +63,17 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
+  const openHostHome = useAppStore(state => state.openHostHome)
+  const [homeReads, setHomeReads] = useState<Record<string, { busy: boolean; error?: string }>>({})
+  const pendingHomes = useRef(new Set<string>())
+  async function openDeviceHome(hostId: string): Promise<void> {
+    if (pendingHomes.current.has(hostId)) return
+    pendingHomes.current.add(hostId)
+    setHomeReads(current => ({ ...current, [hostId]: { busy: true } }))
+    try { await openHostHome(hostId); setHomeReads(current => ({ ...current, [hostId]: { busy: false } })) }
+    catch (error) { setHomeReads(current => ({ ...current, [hostId]: { busy: false, error: error instanceof Error ? error.message : String(error) } })) }
+    finally { pendingHomes.current.delete(hostId) }
+  }
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const collapsedProjectGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
@@ -120,9 +131,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   }).filter((group) => group.nodes.length > 0), [groups, filtering, query, config?.hosts])
   const folderSections = useMemo(() => {
     const hostIds = [...new Set(['local', ...(config?.hosts.map(host => host.id) ?? []), ...projects.map(project => project.hostId)])]
-    const remote = hostIds.some(id => id !== 'local')
     return hostIds.map(hostId => ({ hostId, key: folderSectionKey(hostId),
-      label: hostId === 'local' && !remote ? 'Folders' : hostIdentityProjection(hostId, config?.hosts.find(host => host.id === hostId)).label,
+      label: hostIdentityProjection(hostId, config?.hosts.find(host => host.id === hostId)).label,
       projects: projects.filter(project => project.hostId === hostId),
       workspaces: projects.filter(project => project.hostId === hostId).flatMap(project => project.workspaces),
       groups: shownGroups.filter(group => group.hostId === hostId)
@@ -392,10 +402,12 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : folderSections.length > 1 ? <HostIcon kind="local" size={14} /> : <ThemeObjectFoldersIcon size={14} />}
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
+            onOpen={() => void openDeviceHome(section.hostId)} openLabel={`Open ${section.label} home`} opening={homeReads[section.hostId]?.busy === true}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
+          {homeReads[section.hostId]?.busy ? <p className="space-device-home-status" role="status">Reading {section.label} home…</p> : homeReads[section.hostId]?.error ? <div className="space-device-home-status" role="status"><span>{homeReads[section.hostId]!.error}</span><button type="button" className="small-button" onClick={() => void openDeviceHome(section.hostId)}>Retry</button></div> : null}
           {filtering && section.groups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)

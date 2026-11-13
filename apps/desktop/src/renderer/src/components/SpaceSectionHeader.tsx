@@ -19,10 +19,10 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
 }
 
 /** Categories share controls; member indentation expresses category ownership, not a directory. */
-export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen,
+export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen, openLabel, opening = false,
   createLabel, onCreate, createIcon, activity, actions, selected = false, navigationId, parentNavigationId, collapsible = true, iconTargetKey }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;
-  onToggle(): void; onOpen?: () => void; createLabel?: string; onCreate?: () => Promise<unknown>; createIcon?: ReactNode;
+  onToggle(): void; onOpen?: () => void; openLabel?: string; opening?: boolean; createLabel?: string; onCreate?: () => Promise<unknown>; createIcon?: ReactNode;
   activity?: ReactNode; actions?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean; iconTargetKey?: string
 }) {
   const [busy, setBusy] = useState(false)
@@ -36,10 +36,10 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
     {canCollapse ? <SpaceDisclosure icon={icon} expanded={expanded} label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}
       disabled={filtering} onToggle={onToggle} /> : <span className="project-rail-row__icon" aria-hidden="true">{icon}</span>}
     <button type="button" className={`space-section-label space-${label.toLowerCase()}-row`}
-      aria-label={onOpen ? `${label} overview` : label} aria-current={selected ? 'page' : undefined}
+      aria-label={openLabel ?? (onOpen ? `${label} overview` : label)} aria-busy={opening || undefined} aria-current={selected ? 'page' : undefined}
       data-space-nav={navigationId ?? `space:${label.toLowerCase()}`} data-space-expanded={canCollapse && !filtering ? expanded : undefined}
       data-space-parent={parentNavigationId} data-space-icon-target={iconTargetKey}
-      disabled={!canCollapse && !onOpen} onClick={onOpen ?? (() => { if (!filtering) onToggle() })}>
+      disabled={opening || (!canCollapse && !onOpen)} onClick={onOpen ?? (() => { if (!filtering) onToggle() })}>
       <strong>{label}</strong><small>{count}</small>
     </button>
     {activity}

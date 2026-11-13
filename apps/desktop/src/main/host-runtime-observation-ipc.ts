@@ -6,12 +6,12 @@ import { sessionInputOperationResult } from '../shared/session-input-result.js'
 
 type Ports = {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
-  call<M extends 'settings.hosts.inspect' | 'settings.hosts.network'>(method: M, params: AgentMuxRpcParams<M>, context: { signal: AbortSignal }): Promise<AgentMuxRpcResult<M>>
+  call<M extends 'settings.hosts.inspect' | 'settings.hosts.network' | 'settings.hosts.home'>(method: M, params: AgentMuxRpcParams<M>, context: { signal: AbortSignal }): Promise<AgentMuxRpcResult<M>>
 }
 /** Sender trust and cancellable read lifetimes only. Public Core owns all observed facts. */
 export function registerHostRuntimeObservationIpc(ports: Ports) {
   const reads = new SessionHistoryReadOwners()
-  const methods = { 'hosts:inspect': 'settings.hosts.inspect', 'hosts:network': 'settings.hosts.network' } as const
+  const methods = { 'hosts:home': 'settings.hosts.home', 'hosts:inspect': 'settings.hosts.inspect', 'hosts:network': 'settings.hosts.network' } as const
   for (const channel of Object.keys(methods) as Array<keyof typeof methods>) ports.handle(channel, (event, token: string, host: HostConfig) => {
     return sessionInputOperationResult(() => reads.read(event.sender, token, signal => ports.call(methods[channel], { hostId: host.id, expected: host }, { signal })))
   })
