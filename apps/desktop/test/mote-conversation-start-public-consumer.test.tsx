@@ -331,6 +331,12 @@ it('a real unconfirmed deferred input keeps its welcome draft and never opens th
   expect(f.opened).not.toHaveBeenCalled()
   expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
   expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+  // The in-place first message offers one check, and it inspects the creation request, never the message's own id.
+  const inspect = vi.mocked(api.moteDialogue.inspectSetup), inspected = inspect.mock.calls.length
+  const check = await vi.waitFor(() => { const node = view.element.querySelector<HTMLButtonElement>('.mote-first-message__status button'); expect(node?.disabled).toBe(false); return node! })
+  await act(async () => check.click())
+  await wait(() => expect(inspect.mock.calls.length).toBe(inspected + 1))
+  expect(inspect.mock.calls.at(-1)![0].creation.operationId).toBe(f.open.mock.calls[0]![0].operationId)
   const writes = f.h.inner.kernel.input.mock.calls.length
   await view.render(<MoteDialogueViewProvider scope={f.scope} active><MoteMainActions scope={f.scope} active presentation="menu" onConfigure={() => {}} /></MoteDialogueViewProvider>)
   const mainMenu = [...view.element.querySelectorAll('button')].find(button => button.textContent === '主 Agent')!
