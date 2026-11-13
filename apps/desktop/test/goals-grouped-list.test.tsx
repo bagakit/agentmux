@@ -182,3 +182,15 @@ describe('Goals header with no Goals', () => {
     expect(dom.container.querySelector('.goals-empty')!.textContent).toContain('No goals yet')
   })
 })
+
+describe('Goal definition heading', () => {
+  it('reads the same with or without a proposal: the Goal glyph and a section rule above', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'outline' }); await dom.render(<GlobalBoardSurface />)
+    const undefinedHeading = dom.container.querySelector('.goals-intent-body h2')!
+    expect(undefinedHeading.textContent?.trim()).toBe('Goal definition')
+    expect(undefinedHeading.querySelector('[data-semantic-icon="object.goal"]')).not.toBeNull()
+    await act(async () => { useAppStore.setState({ selectedDemandId: 'confirm' }) })
+    const proposalHeading = dom.container.querySelector('.goals-alignment h2')!
+    expect(proposalHeading.querySelector('[data-semantic-icon="object.goal"]')).not.toBeNull()
+  })
+})
