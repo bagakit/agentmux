@@ -1,6 +1,7 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { AgentMuxError } from '../src/errors.js'
 import { consumeConversationWindowPage, parseConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint } from '../src/conversation-changes.js'
 import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
 
@@ -218,6 +219,18 @@ it('validates rewrite anchors at the public input boundary', async () => {
     expect(() => parseConversationChangesInput({ ...base, rewrite: { anchors: [anchor] } })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     await expect(f.client.readConversationChanges({ ...base, rewrite: { anchors: [anchor] } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   }
+})
+
+it('rejects an invalid rewrite before an unavailable source can mask the caller error', async () => {
+  const f = await codex(), checkpoint = await f.checkpoint()
+  const unavailable = vi.spyOn(f.client as never, 'conversationReader' as never)
+    .mockRejectedValue(new AgentMuxError('The controlled original source is busy.', 'AGENT_SESSION_HISTORY_BUSY') as never)
+  try {
+    await expect(f.client.readConversationChanges({ ...f.ref, checkpoint, rewrite: { anchors: [{ recordId: '', digest: 'a'.repeat(64) }] } }))
+      .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(unavailable).not.toHaveBeenCalled()
+    expect(f.controls.every(control => control.mock.calls.length === 0)).toBe(true)
+  } finally { unavailable.mockRestore() }
 })
 
 it('reads a Claude message resent before any reply as appended history, never as a rewrite', async () => {
