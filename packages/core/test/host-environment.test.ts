@@ -1,0 +1,175 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import type { AgentMuxHostedRpcPort, AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
+
+// One exact source/compiled owner per run; the mutation harness copies the real built package.
+const entry = process.env.AGENTMUX_TEST_HOME_CORE_ENTRY
+const runtime: typeof import('../src/index.js') = entry ? await import(pathToFileURL(entry).href) : await import('../src/index.js')
+const internal = (name: string) => entry ? new URL('./' + name + '.js', pathToFileURL(entry)).href : new URL('../src/' + name + '.js', import.meta.url).href
+const { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentMuxHostedRuntimeService, connectHostedAgentMux,
+  AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } = runtime
+const { parseHostEnvironment } = await import(internal('host-environment')) as typeof import('../src/host-environment.js')
+const { AgentMuxRpcService } = await import(internal('public-rpc-service')) as typeof import('../src/public-rpc-service.js')
+const { parseHostSettingsParams, parseHostSettingsResult } = await import(internal('public-rpc-host-settings')) as typeof import('../src/public-rpc-host-settings.js')
+const { parseSettingsCommand } = await import(internal('settings-cli')) as typeof import('../src/settings-cli.js')
+const { agentMuxCommandHelp } = await import(internal('agentmux-cli-help')) as typeof import('../src/agentmux-cli-help.js')
+const { decodeHostedValue } = await import(internal('hosted-value')) as typeof import('../src/hosted-value.js')
+
+const user = { transport: 'unix' as const, principal: { kind: 'user' as const, id: 'original-user' } }
+const cleanups: Array<() => unknown | Promise<unknown>> = []
+afterEach(async () => {
+  const errors: unknown[] = []
+  for (const close of cleanups.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }
+  vi.restoreAllMocks(); vi.unstubAllEnvs()
+  if (errors.length) throw new AggregateError(errors, 'Host home fixture cleanup failed')
+})
+const owner: AgentMuxRuntimeOwnerIdentity = { protocolVersion: 2, runtimeId: 'original-host-core', ownerInstanceId: 'original-core-instance',
+  processId: process.pid, ctxmux: null, availability: 'connected' }
+const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+function core() {
+  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: [] })
+  cleanups.push(() => client.dispose())
+  const connect = vi.spyOn(client, 'connect').mockRejectedValue(Error('General Session observation must not prepare home reads'))
+  const native = vi.spyOn(client, 'connectRuntime').mockRejectedValue(Error('Native must not prepare home reads'))
+  const sessions = vi.spyOn(client, 'readAgentSessions').mockRejectedValue(Error('Session discovery must not prepare home reads'))
+  return { client, connect, native, sessions }
+}
+function blockedEventLease(): AgentMuxHostedRpcPort['subscribe'] {
+  // This unrelated general observation never becomes ready. Home uses only owner control.
+  return async (_method, _params, handlers) => {
+    const end = () => handlers.onEnd?.(new AgentMuxError('Unrelated fixture event lease was released.', 'CONTROL_CANCELLED'))
+    handlers.signal?.addEventListener('abort', end, { once: true })
+    return { dispose: async () => { handlers.signal?.removeEventListener('abort', end); end() } }
+  }
+}
+async function socketRoot() {
+  const path = await mkdtemp(join(tmpdir(), 'ahome-'))
+  cleanups.push(() => rm(path, { recursive: true, force: true }))
+  return path
+}
+
+it('reads the Core process OS home without Native, Session, catalog or filesystem preparation', async () => {
+  const f = core(), catalog = vi.spyOn(f.client, 'catalog').mockImplementation(() => { throw Error('No catalog prerequisite') })
+  vi.stubEnv('HOME', '/tmp/original-core-user home ')
+  expect(await f.client.hostEnvironment()).toEqual({ homeDirectory: '/tmp/original-core-user home ' })
+  expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.sessions).not.toHaveBeenCalled(); expect(catalog).not.toHaveBeenCalled()
+  vi.stubEnv('HOME', 'relative-unknown-home')
+  await expect(f.client.hostEnvironment()).rejects.toMatchObject({ code: 'HOST_ENVIRONMENT_UNAVAILABLE' })
+})
+
+it('delegates the same SDK method with only the original owner fence while Native and general observation are unavailable', async () => {
+  const f = core(), hosted = new AgentMuxHostedRuntimeService(f.client, null, () => owner)
+  cleanups.push(() => hosted.dispose())
+  vi.stubEnv('HOME', '/tmp/original-hosted-home')
+  const calls: Array<{ method: string; params: any }> = []
+  const port: AgentMuxHostedRpcPort = {
+    call: async (method, params) => { calls.push({ method, params }); return await hosted.call(method, params, user) as never },
+    subscribe: blockedEventLease()
+  }
+  const client = await connectHostedAgentMux({ rpc: port, waitForReady: false }); cleanups.push(() => client.dispose())
+  await expect(client.hostEnvironment()).resolves.toEqual({ homeDirectory: '/tmp/original-hosted-home' })
+  const invocation = calls.filter(call => call.method === 'runtime.invoke')
+  expect(invocation).toHaveLength(1)
+  expect(invocation[0]!.params.fence).toEqual(fence)
+  expect(decodeHostedValue(invocation[0]!.params.invocation)).toEqual({ method: 'hostEnvironment', args: [] })
+  expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.sessions).not.toHaveBeenCalled()
+  vi.spyOn(f.client, 'hostEnvironment').mockResolvedValueOnce({ homeDirectory: 'relative-unconfirmed-reply' })
+  await expect(client.hostEnvironment()).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  await expect(hosted.call('runtime.invoke', { consumerId: 'original-home-reader', fence: { ...fence, runtimeId: 'wrong-host' },
+    invocation: { method: 'hostEnvironment', args: [] } }, user)).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
+  await expect(hosted.call('runtime.invoke', { consumerId: 'original-home-reader', fence: { ...fence, ownerInstanceId: 'wrong-instance' },
+    invocation: { method: 'hostEnvironment', args: [] } }, user)).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  await expect(hosted.call('runtime.invoke', { consumerId: 'original-home-reader', fence,
+    invocation: { method: 'hostEnvironment', args: ['/guessed'] } }, user)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+})
+
+it('routes actual Unix RPC and compiled CLI to the selected Hosted Core home, preserving unrelated Hosts and healthy work', async () => {
+  const directory = await socketRoot(), target = core(), local = core()
+  const targetRead = vi.spyOn(target.client, 'hostEnvironment')
+  const unrelated = vi.spyOn(local.client, 'hostEnvironment').mockResolvedValue({ homeDirectory: '/tmp/unrelated-local-home' })
+  vi.stubEnv('HOME', '/tmp/selected-remote-home ')
+  const hosted = new AgentMuxHostedRuntimeService(target.client, null, () => owner); cleanups.push(() => hosted.dispose())
+  const targetServer = new AgentMuxControlServer({ socketPath: join(directory, 'target.sock'), hostedRuntime: () => hosted,
+    coreClients: () => [{ hostId: 'local', client: target.client }] })
+  await targetServer.start(); cleanups.push(() => targetServer.stop())
+  const targetRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: targetServer.path } }); cleanups.push(() => targetRpc.dispose())
+  const remote = await connectHostedAgentMux({ rpc: { call: targetRpc.call.bind(targetRpc), subscribe: blockedEventLease() }, waitForReady: false })
+  cleanups.push(() => remote.dispose())
+  const configuration = { id: 'selected', kind: 'ssh', label: 'Original remote', hostname: 'no-network.fixture', runtimeId: owner.runtimeId }
+  const server = new AgentMuxControlServer({ socketPath: join(directory, 'desktop.sock'),
+    coreClients: () => [{ hostId: 'local', client: local.client }, { hostId: 'selected', client: remote }],
+    hostConfiguration: id => id === 'selected' ? configuration : null })
+  await server.start(); cleanups.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
+  expect(await rpc.call('settings.hosts.home', { hostId: 'selected', expected: configuration })).toEqual({ routeHostId: 'selected', homeDirectory: '/tmp/selected-remote-home ' })
+  const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'settings', 'hosts', 'home', '--host', 'selected'],
+    objectCliEnvironment(directory, { HOME: '/tmp/cli-user-must-not-be-used' }))
+  expect(result.code, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result).toEqual({ routeHostId: 'selected', homeDirectory: '/tmp/selected-remote-home ' })
+  expect(targetRead).toHaveBeenCalledTimes(2); expect(unrelated).not.toHaveBeenCalled()
+  expect(target.connect).not.toHaveBeenCalled(); expect(target.native).not.toHaveBeenCalled(); expect(target.sessions).not.toHaveBeenCalled()
+})
+
+it('rejects unknown, ambiguous and changed Host routes without a local-home fallback or default Native connection', async () => {
+  const f = core(), read = vi.spyOn(f.client, 'hostEnvironment').mockResolvedValue({ homeDirectory: '/remote/confirmed' })
+  let configuration = { id: 'selected', kind: 'ssh', label: 'Original', hostname: 'original.fixture' }
+  let routes = [{ hostId: 'selected', client: f.client }]
+  const service = new AgentMuxRpcService({ coreClients: () => routes, hostConfiguration: () => configuration }); cleanups.push(() => service.dispose())
+  await expect(service.call('settings.hosts.home', { hostId: 'unknown' }, user)).rejects.toMatchObject({ code: 'UNKNOWN_HOST' })
+  routes = [...routes, ...routes]
+  await expect(service.call('settings.hosts.home', { hostId: 'selected' }, user)).rejects.toMatchObject({ code: 'AMBIGUOUS_AGENT_SESSION' })
+  routes = [routes[0]!]
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected: { ...configuration, hostname: 'wrong.fixture' } }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  expect(read).not.toHaveBeenCalled()
+  read.mockImplementationOnce(async () => { configuration = { ...configuration, hostname: 'changed.fixture' }; return { homeDirectory: '/original/result' } })
+  await expect(service.call('settings.hosts.home', { hostId: 'selected' }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  const empty = new AgentMuxRpcService({}); cleanups.push(() => empty.dispose())
+  await expect(empty.call('settings.hosts.home', { hostId: 'local' }, user)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled()
+})
+
+it('retains the original read failure and cancels only this reader, with no healthy Run or other Host effects', async () => {
+  const f = core(), read = vi.spyOn(f.client, 'hostEnvironment').mockRejectedValueOnce(new AgentMuxError('Original Host home is unavailable.', 'HOST_ENVIRONMENT_UNAVAILABLE'))
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'selected', client: f.client }] }); cleanups.push(() => service.dispose())
+  await expect(service.call('settings.hosts.home', { hostId: 'selected' }, user)).rejects.toMatchObject({ code: 'HOST_ENVIRONMENT_UNAVAILABLE' })
+  const controller = new AbortController()
+  let release!: (value: { homeDirectory: string }) => void
+  read.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  const pending = service.call('settings.hosts.home', { hostId: 'selected' }, { ...user, signal: controller.signal })
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+  const outcome = pending.catch(error => error); controller.abort(new AgentMuxError('Original read cancelled.', 'CONTROL_CANCELLED'))
+  expect(await outcome).toMatchObject({ code: 'CONTROL_CANCELLED' }); release({ homeDirectory: '/late/original-result' })
+  read.mockResolvedValueOnce({ homeDirectory: '/remote/recovered' })
+  expect(await service.call('settings.hosts.home', { hostId: 'selected' }, user)).toEqual({ routeHostId: 'selected', homeDirectory: '/remote/recovered' })
+  expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.sessions).not.toHaveBeenCalled()
+})
+
+it('strictly validates exact home results, params and the discoverable CLI while preserving target path spelling', async () => {
+  expect(parseHostSettingsParams('settings.hosts.home', { hostId: 'selected', expected: { id: 'selected' } })).toEqual({ hostId: 'selected', expected: { id: 'selected' } })
+  expect(parseHostSettingsResult('settings.hosts.home', { routeHostId: 'selected', homeDirectory: '/Volumes/Owner Home ' }, { hostId: 'selected' })).toEqual({ routeHostId: 'selected', homeDirectory: '/Volumes/Owner Home ' })
+  expect(parseHostEnvironment({ homeDirectory: 'C:\\Users\\Original Home' })).toEqual({ homeDirectory: 'C:\\Users\\Original Home' })
+  for (const homeDirectory of ['', 'relative', '~/guessed', '/home\0wrong', '/home\nwrong', 7, null]) {
+    expect(() => parseHostSettingsResult('settings.hosts.home', { routeHostId: 'selected', homeDirectory }, { hostId: 'selected' })).toThrow()
+  }
+  for (const value of [{ routeHostId: 'wrong', homeDirectory: '/wrong-host' }, { routeHostId: 'selected', homeDirectory: '/home', guessed: true }]) {
+    expect(() => parseHostSettingsResult('settings.hosts.home', value, { hostId: 'selected' })).toThrow()
+  }
+  expect(() => parseHostSettingsParams('settings.hosts.home', { hostId: 'selected', command: 'echo ~' })).toThrow()
+  expect(await parseSettingsCommand(['hosts', 'home', '--host', 'selected'])).toEqual({ method: 'settings.hosts.home', params: { hostId: 'selected' } })
+  await expect(parseSettingsCommand(['hosts', 'home'])).rejects.toBeDefined()
+  expect(agentMuxCommandHelp('settings.hosts.home')).toContain('settings hosts home --host <id>')
+})
+
+it('keeps the actual compiled Hosted home consumer browser-safe without importing local OS facts', async () => {
+  const path = entry ? new URL('./hosted.js', pathToFileURL(entry)).pathname : new URL('../dist/hosted.js', import.meta.url).pathname
+  const bundled = await build({ entryPoints: [path], bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent' })
+  const inputs = Object.values(bundled.metafile!.inputs)
+  expect(inputs.length).toBeGreaterThan(2)
+  expect(inputs.flatMap(input => input.imports).some(input => input.path.startsWith('node:'))).toBe(false)
+  expect(bundled.outputFiles[0]!.contents.byteLength).toBeGreaterThan(100)
+})
