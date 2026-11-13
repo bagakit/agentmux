@@ -114,11 +114,10 @@ try {
   const facts = () => evaluate('conversationCapsuleProbe.facts()')
   const assertCardLayout = (value: any) => {
     assert.equal(value.layout.headerDisplay, 'flex', 'The formal Renderer CSS entry must supply the Capsule header layout')
-    assert.ok(value.layout.headerGap > 0 && value.layout.actionsGap > 0, 'The original title, mode and actions must have visible spacing')
+    assert.ok(value.layout.headerGap > 0 && value.layout.actionsGap > 0, 'The original title and actions must have visible spacing')
     assert.ok(value.presentationHeight >= 180 && value.presentationHeight <= 320 && value.height > 0, 'The actual card uses a bounded positive native page stage')
     assert.equal(value.layout.overflow, false, 'Long original titles and controls must stay within the card')
-    const { title, mode } = value.layout
-    if (title && mode) assert.ok(title.right <= mode.x + 1 || mode.right <= title.x + 1 || title.bottom <= mode.y + 1 || mode.bottom <= title.y + 1, 'The original title and mode badge must not overlap')
+    assert.equal(value.layout.headerText.includes('Injected') || value.layout.headerText.includes('Isolated'), false, 'The header carries only the page title; its mode lives in the page details')
     for (const button of value.layout.buttons) assert.ok(button.width > 0 && button.height >= 24 && button.x >= value.layout.card.x - 1 && button.right <= value.layout.card.right + 1, 'Every original action must keep a readable hit target inside the card')
   }
   const assertFrame = (value: any) => {
@@ -198,8 +197,13 @@ try {
   report.referenceSyntax = { isolated: 'ordinary-bare', injected: 'ordinary-markdown-in-sentence', literalCreated: report.created.length }
   await focusReader()
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))})`)
+  // Sample the same card before and after its page connects: the first connection must not move the reading position.
+  await until('!!document.querySelector(".conversation-capsule__placeholder, .browser-stage")', 'The real Capsule card must mount its page area')
+  const connecting = await facts()
   await until('!!document.querySelector(".browser-stage")', 'The real Capsule consumer must mount its original Stage before capture')
   report.initialLayout = await facts(); assertCardLayout(report.initialLayout)
+  report.heightReceipt = { placeholder: connecting.placeholderHeight ?? null, page: report.initialLayout.presentationHeight }
+  if (report.heightReceipt.placeholder !== null) assert.ok(Math.abs(report.heightReceipt.placeholder - report.heightReceipt.page) <= 1, 'The connecting placeholder and the loaded page share one height')
   const verifyStyles = async (capsuleId: string) => { if (phase === 'green' && cssProofPath) {
     // The answer panel otherwise pushes the diagram below the real visible-work boundary.
     if (await evaluate(`Boolean(document.querySelector('[aria-label="Page questions"][aria-expanded="true"]'))`)) {
@@ -237,13 +241,13 @@ try {
   report.nativeKeyframe = { srcPrefix: (await facts()).cachedFrame.slice(0, 40), createdBefore: createdBeforeFrame, createdAfter: report.created.length }
   assert.equal(report.created.length, createdBeforeFrame, 'Caching a painted native page must not acquire another Browser')
   assertCardLayout(first)
-  await evaluate("conversationCapsuleProbe.click('Expand')")
+  await evaluate("conversationCapsuleProbe.click('Expand page')")
   await until('conversationCapsuleProbe.facts().height>320', 'Expand must give the original live page a larger bounded reading surface')
   report.expanded = await facts()
   assert.ok(report.expanded.height <= 700 && report.expanded.browserId === first.browserId)
   assert.equal(report.created.length, createdBeforeFrame, 'Expanding the original stage must not acquire another Browser')
   await writeFile(join(evidence!, `${phase}-expanded.png`), (await win.webContents.capturePage()).toPNG())
-  await evaluate("conversationCapsuleProbe.click('Compact')")
+  await evaluate("conversationCapsuleProbe.click('Compact page')")
   await until('conversationCapsuleProbe.facts().height<=320 && conversationCapsuleProbe.facts().ready', 'Compact restores the original bounded live stage')
   const nativePage = webContents.getAllWebContents().find(contents => contents.getURL() === (isolated.endpoint as any).url)!
   assert.ok(nativePage, 'The page comes from an actual native owner, not a screenshot fixture')
@@ -281,7 +285,7 @@ try {
   report.clipped = await facts()
   await writeFile(join(evidence!, `${phase}-clipped.png`), (await win.webContents.capturePage()).toPNG())
   await evaluate(`document.querySelector('.activity-feed').style.height='calc(100dvh - 48px)'`)
-  await evaluate(`conversationCapsuleProbe.click('Hide')`)
+  await evaluate(`conversationCapsuleProbe.click('Hide page')`)
   await until('!document.querySelector("video")', 'Hide removes this original live presentation')
   await delay(100)
   assert.equal(nativePage.isDestroyed(), false, 'A used native document survives automatic release')
@@ -307,7 +311,7 @@ try {
   await writeFile(join(evidence!, `${phase}-isolated.png`), (await win.webContents.capturePage()).toPNG())
   await focusReader()
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))})`)
-  await until('conversationCapsuleProbe.facts().ready && document.querySelector(".conversation-capsule__mode")?.textContent==="Injected"', 'Injected native page and trusted chrome must mount')
+  await until('conversationCapsuleProbe.facts().ready && document.querySelector(".conversation-capsule__mode")?.textContent==="Injected page"', 'Injected native page and trusted chrome must mount')
   const connected = webContents.getAllWebContents().find(contents => contents.getURL() === (injected.endpoint as any).url)!
   assert.ok(connected)
   report.injectedCapabilities = await connected.executeJavaScript('capsule.capabilities()')
@@ -317,7 +321,7 @@ try {
   await until(`document.body.textContent.includes(${JSON.stringify(question)})`, 'Trusted original question must be readable from the card')
   report.pending = await facts(); assertCardLayout(report.pending)
   assert.equal(report.pending.questions[0].answer, draft, 'The complete long Chinese draft must remain in the original trusted editor')
-  assert.ok(report.pending.layout.questionChip.includes('Questions'), 'Embedded questions must use the concise host chip')
+  assert.ok(report.pending.layout.questionChip.includes('Needs your answer'), 'A page that waits for the person marks its concise host chip')
   await evaluate("conversationCapsuleProbe.click('Open in Browser')")
   assert.equal(report.opened, `amux://capsule/${injected.record.capsuleId}`, 'The original explicit Browser action retains the exact Capsule link')
   assert.ok((await owner.call('capsule.interaction.ls', { capsuleId: injected.record.capsuleId })).interactions.length === 1)
@@ -327,7 +331,7 @@ try {
   await hostClick(trustedEditor)
   assert.equal(await evaluate('document.activeElement===window.originalTrustedEditor'), true, 'The trusted original host question must actually own keyboard focus')
   await evaluate('window.originalTrustedEditor.select()'); await hostText(editedDraft)
-  await evaluate("conversationCapsuleProbe.click('Hide')")
+  await evaluate("conversationCapsuleProbe.click('Hide page')")
   assert.equal(await evaluate('window.originalTrustedEditor.isConnected'), true, 'Hide keeps the original trusted host editor connected')
   await evaluate("conversationCapsuleProbe.click('Show page')")
   assert.equal(await evaluate('document.querySelector(".capsule-question textarea")===window.originalTrustedEditor'), true)

@@ -80,11 +80,11 @@ function Feed({ content, visible }: { content: string; visible: boolean }) {
       const context = canvas.getContext('2d')!; context.drawImage(video, 0, 0, 100, 100)
       pixels = [...context.getImageData(95, 95, 1, 1).data]
     }
-    return { unusedAvatarCalls: unusedAvatarCalls(), noticeReceipts: noticeReceiptsFacts(), pixels, text: document.body.innerText, count: document.querySelectorAll('.conversation-capsule').length, height: stage?.getBoundingClientRect().height, presentationHeight: page?.querySelector('.browser-presentation')?.getBoundingClientRect().height,
+    return { unusedAvatarCalls: unusedAvatarCalls(), noticeReceipts: noticeReceiptsFacts(), pixels, text: document.body.innerText, count: document.querySelectorAll('.conversation-capsule').length, height: stage?.getBoundingClientRect().height, presentationHeight: page?.querySelector('.browser-presentation')?.getBoundingClientRect().height, placeholderHeight: page?.querySelector('.conversation-capsule__placeholder')?.getBoundingClientRect().height,
       viewport: { width: innerWidth, height: innerHeight }, appearance: document.documentElement.dataset.appearance,
       layout: page && { card: rect(page), header: rect(header ?? null), headerDisplay: header && getComputedStyle(header).display,
         headerGap: header && parseFloat(getComputedStyle(header).columnGap), actions: rect(actions ?? null), actionsGap: actions && parseFloat(getComputedStyle(actions).columnGap),
-        title: rect(header?.querySelector('strong') ?? null), mode: rect(page.querySelector('.conversation-capsule__mode')),
+        title: rect(header?.querySelector('strong') ?? null), headerText: header?.textContent ?? '',
         buttons: [...(actions?.querySelectorAll('button') ?? [])].map(button => ({ text: button.textContent?.trim(), ...rect(button) })),
         overflow: page.scrollWidth > page.clientWidth + 1, questionChip: page.querySelector('[aria-label="Page questions"]')?.textContent },
       questions: [...document.querySelectorAll<HTMLElement>('.capsule-question')].map(question => ({ text: question.innerText, ...rect(question),
