@@ -29,7 +29,10 @@ fresh stdin JSON {parameters: {...}, items: [{id: "one", parameters: {...}}]} an
 its own original task run. Values are transient; retained item results have run identities
 and statuses. Group limits are 256 operations and 120 seconds of execution.
 Saved versions may also contain testing steps: `wait` (an element or URL within its
-timeout), `assert` (element present/absent, URL or text), `press`, `hover` and `scroll`.
+timeout), `assert` (element present/absent, URL or text), `press`, `hover`, `scroll` and `drag`. A drag step declares `target` (source) and `destination`,
+each with `role`, `name`, `ordinal: 1`, `count: 1`; both are resolved from one fresh complete
+snapshot of the reviewed `url`. The task editor can add and review these declarations. Changed
+or ambiguous endpoints send no drag, and unknown in-flight effects are never automatically retried.
 A page step may declare `retry` 0–3 and `onFail` stop, continue or goto a later step.
 Only a known `script-failed` attempt that sent no page action is retried, each with its
 own operation id. After continue or goto the run records `failedSteps` with the failed

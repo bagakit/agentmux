@@ -36,6 +36,12 @@ page or your own code; decide from them only after looking.
 `click(ref, {count: 2})` double-clicks and `click(ref, {button: "right"})` right-clicks (or
 `"middle"`), as trusted input at the same checked point. Unknown options are refused before anything
 is pressed.
+`drag(sourceRef, destinationRef)` performs one native left-button drag between two snapshot refs.
+HTML5 drag/drop uses Chromium’s original payload; pointer/mouse controls use native movement and release.
+Both endpoints must still belong to the original page and be hittable. It accepts no selector or coordinates.
+After a press, a changed page/target or lost acknowledgement is `effects: "unknown"`; inspect the original
+page and operation before another action. A dispatched drop/release does not certify the website’s business result.
+
 `pressKey(ref, key)` takes one key or a chord written with `+`, such as `Control+a`, `Shift+Tab` or
 `Meta+z`; modifiers are held around the key and always released. On macOS use `Meta` for the system
 shortcuts (select all, copy, undo). A shifted letter types its capital; for other shifted
