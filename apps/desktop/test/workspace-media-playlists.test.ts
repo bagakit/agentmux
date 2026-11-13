@@ -289,7 +289,10 @@ describe('live playlist pacing', () => {
     await f.put('hls/live.m3u8', live(0, 'live0.ts'))
     const opened = await ready(f, 'hls/live.m3u8')
     const first = await get(opened.url)
+    // While an unchanged reload is held, only a cheap stamp is checked; no full confined read happens.
+    const reads = vi.spyOn(f.files, 'readMediaPlaylist')
     const held = await get(opened.url)
+    expect(reads).toHaveBeenCalledTimes(1)
     expect(held.at - first.at).toBeGreaterThanOrEqual(900)
     expect(held.at - first.at).toBeLessThan(1600)
     expect(held.body.toString()).toBe(live(0, 'live0.ts'))
