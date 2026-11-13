@@ -77,6 +77,14 @@ afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); useAppStore.setState(baseline, true); window.localStorage.clear()
   expect(pending, 'every test settles its finite request').toBe(false)
 })
+// One actual Launch: the first argument is the exact launch input. These one-click requests do not belong to a Goal,
+// so the renderer passes no Goal PMO intent (the optional second argument stays undefined).
+function expectOneLaunch(input: Record<string, unknown>) {
+  const calls = vi.mocked(api.sessions.launchAgent).mock.calls
+  expect(calls).toHaveLength(1)
+  expect(calls[0]![0]).toMatchObject(input)
+  expect(calls[0]![1]).toBeUndefined()
+}
 async function mount() { await act(async () => root.render(<MountedSurface />)) }
 function action(id: string) { const node = container.querySelector<HTMLButtonElement>(`[data-goals-entry-action="${id}"]`); expect(node).not.toBeNull(); return node! }
 async function click(id: string) { await act(async () => action(id).click()) }
@@ -101,7 +109,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(action('ideas').textContent).toContain('主 Mote · My main bot')
     const createMote = vi.spyOn(useAppStore.getState(), 'createScratchTopic')
     await click('ideas')
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'codex-2', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我有一些点子，我们开始尝试一个项目' }))
+    expectOneLaunch({ executorId: 'codex-2', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我有一些点子，我们开始尝试一个项目' })
     expect(createMote).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()).toMatchObject({ targetTopicId: PMO_TEAMS_TOPIC_ID })
     const target = readPmoTeamsTopicFloatingState()!.targetTabId!
     expect(target).not.toBe(primaryTab.id); expect(target).not.toBe(custom.id)
@@ -112,7 +120,7 @@ describe('Goals one-click requests through the mounted product and original owne
     useAppStore.setState({ tabs: { [oldTab.id]: oldTab }, sessions: [session('original')], layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') } })
     await mount(); expect(action('understand').textContent).toContain('首次选择 · Configured Agent')
     await click('understand')
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'configured', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我还不知道能做什么，可以了解我并给我建议吗？' }))
+    expectOneLaunch({ executorId: 'configured', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我还不知道能做什么，可以了解我并给我建议吗？' })
     expect(useAppStore.getState().demands).toEqual({}); expect(useAppStore.getState().config?.workspaces).toEqual([scratch])
   })
 
@@ -148,7 +156,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(restricted).not.toBeNull(); expect(restricted.textContent).toContain('完整的原始请求'); expect(restricted.disabled).toBe(true)
     expect(restricted.textContent).toContain('不适用 claude')
     await act(async () => startGoalExploration('这个执行者是我明确选择的', undefined, 'explicit'))
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'explicit', prompt: '这个执行者是我明确选择的', scratchTopicId: PMO_TEAMS_TOPIC_ID }))
+    expectOneLaunch({ executorId: 'explicit', prompt: '这个执行者是我明确选择的', scratchTopicId: PMO_TEAMS_TOPIC_ID })
   })
 
   it('does not reopen or retarget the floating owner after the user closes it during preparation', async () => {
@@ -157,7 +165,7 @@ describe('Goals one-click requests through the mounted product and original owne
     await act(async () => requestPmoTeamsTopicFloatingClose({ restoreFocus: false }))
     expect(readPmoTeamsTopicFloatingState()?.open).toBe(false)
     await act(async () => preparation.resolve(topic(PMO_TEAMS_TOPIC_ID)))
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: PMO_TEAMS_TOPIC_ID }))
+    expectOneLaunch({ scratchTopicId: PMO_TEAMS_TOPIC_ID })
     expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: false, targetTabId: tab.id })
   })
   it.each([
@@ -167,18 +175,19 @@ describe('Goals one-click requests through the mounted product and original owne
     const focus = { execution: { sessionId: 'original', history: [{ sessionId: 'original', focusedAt: 1 }] }, pmo: { sessionId: null } }
     useAppStore.setState({ agentFocus: focus })
     const originalLayout = useAppStore.getState().layouts.project
-    const createGoal = vi.spyOn(api.demands, 'create')
+    // No Goal is created: the renderer never sends a public demand.create to the Goal owner.
+    const createGoal = vi.spyOn(api.goals, 'execute')
     await mount(); expect(action(id).querySelector('.goals-entry__request')?.textContent).toBe(text); expect(container.querySelector('[data-goals-entry-action="next"]')).toBeNull()
     await click(id)
     const tab = createdTab(), state = useAppStore.getState(), region = tab.regions[tab.layout.activeRegionId]!
     expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, tab.topicId)
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executorId: 'configured', scratchTopicId: tab.topicId, prompt: text, workspacePath: _hygiene_fixturePath("topics"), hostId: 'local' }))
+    expectOneLaunch({ executorId: 'configured', scratchTopicId: tab.topicId, prompt: text, workspacePath: _hygiene_fixturePath("topics"), hostId: 'local' })
     expect(region.kind).toBe('agent'); expect(state.mainSurface).toBe('board'); expect(container.querySelector('.goals-entry')).not.toBeNull()
     expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: tab.id })
     expect(state.agentComposerDrafts).toEqual({ original: 'original draft' }); expect(state.pendingAgentLaunches).toEqual({})
     expect(state.tabs[oldTab.id]).toBe(oldTab); expect(state.layouts.project).toBe(originalLayout); expect(state.agentFocus).toEqual(focus)
     expect(state.sessions.find(value => value.id === 'original')).toEqual(session('original')); expect(api.sessions.stop).not.toHaveBeenCalled()
-    expect(state.demands).toEqual({}); expect(createGoal).not.toHaveBeenCalled(); expect(state.config?.workspaces).toEqual([scratch])
+    expect(state.demands).toEqual({}); expect(createGoal.mock.calls.filter(([request]) => request.operation === 'demand.create')).toEqual([]); expect(state.config?.workspaces).toEqual([scratch])
   })
 
   it('synchronously owns the actual draft, deduplicates across unmount/return, and ignores navigation drift', async () => {
@@ -218,7 +227,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(start).toBeDefined(); expect(start.disabled).toBe(false)
     await act(async () => start.click())
     expect(vi.mocked(api.scratch.ensureMote).mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, tab.topicId], [SCRATCH_WORKSPACE_ID, tab.topicId]])
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: tab.topicId, prompt: '我有一些点子，我们开始尝试一个项目' }))
+    expectOneLaunch({ scratchTopicId: tab.topicId, prompt: '我有一些点子，我们开始尝试一个项目' })
     expect(useAppStore.getState().tabs[tab.id]?.topicPreparation).toBeUndefined(); expect(useAppStore.getState().tabs[tab.id]?.regions[regionId]?.kind).toBe('agent')
   })
 
@@ -287,7 +296,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(action('next').querySelector('small')?.textContent).toBe(`${source === 'recent' ? '最近项目' : '当前项目'} · Project Alpha`)
     await click('next'); const tab = createdTab()
     await act(async () => { useAppStore.setState({ config: { ...config, workspaces: [scratch, { ...project, name: 'Other name', path: _hygiene_fixturePath("other") }] }, activeWorkspaceId: SCRATCH_WORKSPACE_ID }); preparation.resolve(topic(tab.topicId!)) })
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: `${text}\n\n${projectContext}`, scratchTopicId: tab.topicId }))
+    expectOneLaunch({ prompt: `${text}\n\n${projectContext}`, scratchTopicId: tab.topicId })
   })
 
   it.each(['deleted', 'ambiguous', 'host-mismatch', 'path-mismatch', 'pmo-only'] as const)('does not invent a recent Project from %s facts', async mode => {
@@ -315,7 +324,7 @@ describe('Goals one-click requests through the mounted product and original owne
   it('resolves a current worktree to its same registered Project without claiming recency', async () => {
     useAppStore.setState({ config: { ...config, workspaces: [scratch, project, { id: 'branch', kind: 'worktree', hostId: 'local', name: 'feature', path: _hygiene_fixturePath("branch"), repoPath: _hygiene_fixturePath("alpha"), branch: 'feat/next' }] }, activeWorkspaceId: 'branch' })
     await mount(); expect(action('next').textContent).toContain('根据当前项目的情况'); expect(action('next').textContent).toContain('Project Alpha')
-    await click('next'); expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: ("根据当前项目的情况，建议我下一步应该做什么\n\nProject: Project Alpha\nProject ID: [\"local\",\"" + _hygiene_fixturePath("alpha") + "\"]\nHost: local\nRepository root: " + _hygiene_fixturePath("alpha") + ("\nWorkspace ID: branch\nWorkspace path: " + _hygiene_fixturePath("branch") + "\nBranch: feat/next\nThese are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.")) }))
+    await click('next'); expectOneLaunch({ prompt: ("根据当前项目的情况，建议我下一步应该做什么\n\nProject: Project Alpha\nProject ID: [\"local\",\"" + _hygiene_fixturePath("alpha") + "\"]\nHost: local\nRepository root: " + _hygiene_fixturePath("alpha") + ("\nWorkspace ID: branch\nWorkspace path: " + _hygiene_fixturePath("branch") + "\nBranch: feat/next\nThese are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.")) })
   })
 
   it('keeps the observed branch and host instead of a same-name project on another host', async () => {
