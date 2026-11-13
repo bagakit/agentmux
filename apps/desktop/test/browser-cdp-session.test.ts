@@ -210,3 +210,30 @@ describe('收摊要摘干净', () => {
     expect(seen).toEqual([['Page.fileChooserOpened', 'child-frame'], ['Page.javascriptDialogOpening', undefined], ['Page.loadEventFired', undefined]])
   })
 })
+
+describe('Profile environment and page programs share the original connection', () => {
+  it('releases only the exact consumer and its event subscriptions until the final lease ends', async () => {
+    const c = fakeContents(), environment = BrowserCdpSession.attach(c), page = BrowserCdpSession.attach(c)
+    const originalAttach = c.debugger.listeners.get('detach')
+    expect(originalAttach).toHaveLength(1)
+    const environmentEvent = vi.fn(), pageEvent = vi.fn()
+    environment.observe(environmentEvent); page.observe(pageEvent)
+    c.debugger.emit('message', 'Target.attachedToTarget', { sessionId: 'frame', targetInfo: { type: 'iframe' } })
+    const expiredFrame = page.frames.get('frame')!
+    page.detach(); page.detach()
+    expect(c.debugger.isAttached()).toBe(true)
+    c.debugger.emit('message', 'Runtime.consoleAPICalled', {})
+    expect(environmentEvent).toHaveBeenCalledTimes(2); expect(pageEvent).toHaveBeenCalledTimes(1)
+    await expect(environment.sendCommand('Runtime.evaluate')).resolves.toEqual({})
+    expect(() => page.sendCommand('Runtime.evaluate')).toThrow(/lease was released/)
+    expect(() => expiredFrame('Runtime.evaluate')).toThrow(/lease was released/)
+    environment.detach(); expect(c.debugger.isAttached()).toBe(false)
+  })
+  it('late release of a detached incarnation cannot detach a new original connection', () => {
+    const c = fakeContents(), old = BrowserCdpSession.attach(c)
+    c.debugger.attached = false; c.debugger.emit('detach', 'devtools opened')
+    const current = BrowserCdpSession.attach(c)
+    old.detach(); expect(c.debugger.isAttached()).toBe(true)
+    current.detach(); expect(c.debugger.isAttached()).toBe(false)
+  })
+})
