@@ -10,7 +10,7 @@ await mkdir(directory, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const config = 'apps/desktop/test/mote-conversation-start-public-consumer.config.mts'
 const test = 'apps/desktop/test/mote-conversation-start-public-consumer.test.tsx'
-const mutations = ['welcome-query-dropped', 'welcome-unaccepted-clears-draft', 'welcome-late-acceptance-steals-reading', 'menu-unconfirmed-hides-recovery',
+const mutations = ['welcome-query-dropped', 'welcome-unaccepted-clears-draft', 'welcome-reading-cancels-landing', 'menu-unconfirmed-hides-recovery',
   'rollover-ipc-decision-dropped', 'rollover-treated-as-send-error', 'rollover-unconfirmed-archives', 'rollover-foreign-start-archives',
   'rollover-not-discovered', 'rollover-multiple-auto-selects', 'rollover-target-unchecked', 'closed-history-needs-live-occurrence', 'discussion-merges-same-session-periods',
   'period-upper-dropped', 'period-wire-assembly-dropped', 'period-source-key-collapsed', 'hidden-period-reads']
@@ -18,7 +18,7 @@ const mutations = ['welcome-query-dropped', 'welcome-unaccepted-clears-draft', '
 const targets = {
   'welcome-query-dropped': 'actual Desktop welcome',
   'welcome-unaccepted-clears-draft': 'a real unconfirmed deferred input',
-  'welcome-late-acceptance-steals-reading': 'late canonical first-Query',
+  'welcome-reading-cancels-landing': 'reading, clicking or switching apps while the first message starts',
   'menu-unconfirmed-hides-recovery': 'a real unconfirmed deferred input',
   'rollover-ipc-decision-dropped': 'actual Desktop ordered queue',
   'rollover-treated-as-send-error': 'actual Desktop ordered queue',

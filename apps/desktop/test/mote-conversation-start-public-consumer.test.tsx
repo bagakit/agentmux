@@ -333,14 +333,15 @@ it('a real unconfirmed deferred input keeps its welcome draft and never opens th
   expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
   const writes = f.h.inner.kernel.input.mock.calls.length
   await view.render(<MoteDialogueViewProvider scope={f.scope} active><MoteMainActions scope={f.scope} active presentation="menu" onConfigure={() => {}} /></MoteDialogueViewProvider>)
-  await wait(() => expect(view.element.textContent).toContain('首条消息待核对'))
-  const mainMenu = [...view.element.querySelectorAll('summary')].find(summary => summary.textContent === 'Main')!
+  const mainMenu = [...view.element.querySelectorAll('button')].find(button => button.textContent === '主 Agent')!
   await act(async () => mainMenu.click())
-  const disclosure = [...view.element.querySelectorAll('summary')].find(summary => summary.textContent?.includes('首条消息待核对'))!
+  await wait(() => expect(document.querySelector('.mote-main-actions__menu')?.textContent).toContain('首条消息待核对'))
+  const menuPanel = document.querySelector<HTMLElement>('.mote-main-actions__menu')!
+  const disclosure = [...menuPanel.querySelectorAll('summary')].find(summary => summary.textContent?.includes('首条消息待核对'))!
   expect((disclosure.parentElement as HTMLDetailsElement).open).toBe(false)
   await act(async () => disclosure.click())
-  expect(view.element.textContent).toContain('首条消息尚未确认，不重复发送。')
-  await click(view.element, '继续原开始请求')
+  expect(menuPanel.textContent).toContain('首条消息尚未确认，不重复发送。')
+  await click(menuPanel, '继续原开始请求')
   await wait(() => expect(f.advance).toHaveBeenCalledTimes(2))
   await f.advance.mock.results[1]!.value
   expect(f.advance.mock.calls[1]?.[0].creation).toEqual(f.advance.mock.calls[0]?.[0].creation)
@@ -348,9 +349,10 @@ it('a real unconfirmed deferred input keeps its welcome draft and never opens th
   expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
 }, 45_000)
 
-it('late canonical first-Query acceptance clears only its original draft without stealing later reading activity', async () => {
+// Waiting is not leaving: reading, clicking elsewhere or switching apps during the start still lands in the new Main,
+// and the person's own message stays visible in place the whole time.
+it('reading, clicking or switching apps while the first message starts still lands in the new Main and shows it in place', async () => {
   const f = await originalWelcome(), query = 'Accepted after the reader moved to another control'
-  const reads = vi.spyOn(originalMainActions, 'readMoteMainAction')
   useLauncherState.getState().setDraft(f.key, 'prompt', query)
   let release!: () => void, entered!: () => void
   const held = new Promise<void>(resolve => { release = resolve }), ready = new Promise<void>(resolve => { entered = resolve })
@@ -359,14 +361,15 @@ it('late canonical first-Query acceptance clears only its original draft without
   const view = await mounted(f.node())
   await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
   await click(view.element, 'Send'); await ready
-  const beforeAcceptance = reads.mock.calls.length
-  await act(async () => document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  const first = view.element.querySelector('.mote-start__pending .mote-first-message')
+  expect(first?.textContent).toContain(query)
+  expect(view.element.querySelector('.mote-start__invitation')).toBeNull()
+  for (const event of [new PointerEvent('pointerdown', { bubbles: true }), new WheelEvent('wheel', { bubbles: true }), new KeyboardEvent('keydown', { bubbles: true, key: 'Meta' })])
+    await act(async () => document.dispatchEvent(event))
+  await act(async () => window.dispatchEvent(new Event('blur')))
   await act(async () => release())
   await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(''))
-  await wait(() => expect(reads.mock.calls.length).toBeGreaterThanOrEqual(beforeAcceptance + 2))
-  await Promise.all(reads.mock.results.map(result => result.value))
-  await act(async () => {})
-  expect(f.opened).not.toHaveBeenCalled()
+  await wait(() => expect(f.opened).toHaveBeenCalledOnce())
   expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
 }, 45_000)
 
