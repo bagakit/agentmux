@@ -1690,6 +1690,17 @@ type WorkbenchContentHostProps = {
 }
 
 /** One retained Tab owns its content and context values; unrelated Tabs keep the same tree. */
+export function WorkbenchSecondaryView({ target, children }: { target: WorkbenchViewTarget; children: ReactNode }) {
+  const presented = useRef(false)
+  if (target.visible !== false) presented.current = true
+  // A never-shown placeholder is not a committed reading View. Once shown,
+  // keep this exact host while hidden, including inactive recovery/preview UI.
+  if (!presented.current) return null
+  return <StableWorkbenchView homeId={`${target.hostId}:parked`} targetId={target.hostId}
+    active={target.active} visible={target.visible !== false} surface={target.surface} moteInputIntent={target.moteInputIntent} moteContextKey={target.moteContextKey}
+    retainedRegionId={target.reference!.regionId} reference={target.reference}>{children}</StableWorkbenchView>
+}
+
 const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, tab, targets, homeId, targetId,
   tabProjection, regionTarget, nativeRegionHostId, reference, retainedRegionId, groupId, tabVisible,
   nativeSurfacesVisible, interactiveResize, showBorrowedNotice, missingPlacement, onBrowserControlConfirmation
@@ -1697,10 +1708,9 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
   const primaryHostId = targetId ?? homeId
   return <WorkbenchBrowserTargetsContext.Provider value={targets}>
         {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionHostId && target.reference).map(target =>
-          <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
-            active={target.active} visible={target.visible !== false} surface={target.surface} moteInputIntent={target.moteInputIntent} moteContextKey={target.moteContextKey} retainedRegionId={target.reference!.regionId} reference={target.reference}>
+          <WorkbenchSecondaryView key={target.hostId} target={target}>
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
-          </StableWorkbenchView>)}
+          </WorkbenchSecondaryView>)}
         <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
           windowTarget={targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget}
           active={tabProjection?.active ?? true}

@@ -216,28 +216,33 @@ function InlineWorkThreads({ page, actor, visible, work }: { page: MoteDialogueP
 }
 
 /** Discussion retains Main sources and a compact disclosure of exactly linked work. */
-export function MoteConversationThreads({ page, issue, actor, name, visible, conversationClient, renderCurrent, onOlder, readingGeometry, describeSpeaker, mainAvatar, work }: {
-  page: MoteDialoguePage | null; issue: string | null; actor: ConversationRef; name: string; visible: boolean
+export function MoteConversationThreads({ page, issue, actor, name, visible, enabled = true, conversationClient, renderCurrent, onOlder, readingGeometry, describeSpeaker, mainAvatar, work }: {
+  page: MoteDialoguePage | null; issue: string | null; actor: ConversationRef | null; name: string; visible: boolean; enabled?: boolean
   conversationClient: ConversationViewClient | null
   mainAvatar?: ((size?: number) => ReactNode) | undefined
   work?: MoteInlineWork | undefined
   onOlder?(): void
   renderCurrent(insertions: readonly ConversationRecordInsertion[]): ReactNode; readingGeometry?: ConversationReadingGeometry; describeSpeaker?: DescribeSpeaker
 }) {
-  const main = page?.main.current
-  const current = Boolean(main && sameActor(actor, { hostId: main.hostId, agentSessionId: main.sessionId }))
+  const decorated = enabled && actor != null
+  const main = decorated ? page?.main.current : null
+  const current = Boolean(actor && main && sameActor(actor, { hostId: main.hostId, agentSessionId: main.sessionId }))
+  const sourceKey = JSON.stringify([page?.main.target, actor])
   const sources = useMemo(() => {
+    if (!decorated || !actor) return []
     const unique = new Map<string, Source>()
     for (const link of [...page?.links ?? []].reverse()) if (link.kind === 'main' && (link.period ? link.period.roleRevision !== page?.main.roleRevision : !sameActor(actor, { hostId: link.reference.hostId, agentSessionId: link.reference.sessionId }))) {
       const key = link.period?.id ?? JSON.stringify([link.roleRevision, link.operationId]); if (!unique.has(key)) unique.set(key, link)
     }
     return [...unique.values()]
-  }, [page?.links, actor.hostId, actor.agentSessionId])
-  return <div className="mote-conversation" data-mote-discussion={page?.main.identity?.moteId}>
-    {issue ? <p role="status" className="mote-conversation__issue">{issue} 原对话与输入仍可用。</p> : null}
-    {current ? sources.map(source => <EarlierSource key={source.period?.id ?? JSON.stringify([source.roleRevision, source.operationId])} source={source} client={conversationClient} visible={visible} name={name} geometry={readingGeometry} describeSpeaker={describeSpeaker} mainAvatar={mainAvatar} />) : null}
+  }, [decorated, page?.links, actor?.hostId, actor?.agentSessionId])
+  // The current body keeps one parent and child slot when Mote qualification
+  // temporarily disappears. Neutral presentation grants no Mote source reads.
+  return <div className={decorated ? 'mote-conversation' : undefined} data-mote-discussion={decorated ? page?.main.identity?.moteId : undefined}>
+    {decorated && issue ? <p role="status" className="mote-conversation__issue">{issue} 原对话与输入仍可用。</p> : null}
+    {current ? sources.map(source => <EarlierSource key={JSON.stringify([sourceKey, source.period?.id ?? [source.roleRevision, source.operationId]])} source={source} client={conversationClient} visible={visible && decorated} name={name} geometry={readingGeometry} describeSpeaker={describeSpeaker} mainAvatar={mainAvatar} />) : null}
     {renderCurrent([])}
-    {current && page && work ? <InlineWorkThreads page={page} actor={actor} visible={visible} work={work} /> : null}
+    {current && page && work && actor ? <InlineWorkThreads key={sourceKey} page={page} actor={actor} visible={visible && decorated} work={work} /> : null}
     {current && page?.next ? <button type="button" className="mote-conversation__link" onClick={onOlder}>更早的主对话来源</button> : null}
   </div>
 }

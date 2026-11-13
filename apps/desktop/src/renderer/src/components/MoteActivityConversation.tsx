@@ -14,6 +14,8 @@ import { moteMembers } from '../lib/mote-team'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingThreads } from '../lib/pmo-teams-topic-floating'
+import { moteConnectionTarget } from '../lib/mote-connection-default'
+import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 
 /** Discussion keeps original Main sources. Worker reading belongs to the Threads shell. */
 export function MoteActivityConversation({ sessionId, executionHostId, visible, enabled, sourceRevision, geometry, describeSpeaker, renderCurrent }: {
@@ -25,28 +27,31 @@ export function MoteActivityConversation({ sessionId, executionHostId, visible, 
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
     scratchTopicSnapshots: state.scratchTopicSnapshots })))
-  const members = useMemo(() => view?.target ? moteMembers(workbenchSelectionCatalog(useAppStore.getState()), view.target.spaceId) : [], [facts, view?.target?.spaceId])
+  const memberIntent = scope?.memberIntent || presentation.moteInputIntent === 'member'
+  const target = useMemo(() => scope ? moteConnectionTarget(scope, facts.spaceZoneBindings) : null, [scope, facts.spaceZoneBindings])
+  const context = enabled && scope && !memberIntent && view && executionHostId && target && view.target && sameMotePreferencesTarget(target, view.target) &&
+    (!view.page || sameMotePreferencesTarget(target, view.page.main.target))
+    ? { scope, view, actor: { hostId: executionHostId, agentSessionId: sessionId } } : null
+  const members = useMemo(() => context ? moteMembers(workbenchSelectionCatalog(useAppStore.getState()), context.view.target!.spaceId) : [], [facts, context?.view.target?.spaceId])
   const readWork = useCallback<MoteWorkReader>(async source => {
     const value = await api.sessions.dispatch({ hostId: source.origin.hostId, agentSessionId: source.main.agentSessionId }, source.origin.messageId)
     if (value.hostId !== source.origin.hostId) throw new Error('工作来源未能核对，原引用仍保留。')
     return value
   }, [])
-  const memberIntent = scope?.memberIntent || presentation.moteInputIntent === 'member'
-  const showThreads = presentation.surface === 'mote' && scope
-    ? () => { requestPmoTeamsTopicFloatingThreads(scope.topic.id) } : scope?.showThreads
-  useEffect(() => { if (visible && enabled && !memberIntent && view) view.refresh() }, [visible, enabled, sourceRevision, memberIntent])
-  if (!enabled || !scope || memberIntent || !view || !executionHostId) return renderCurrent([])
-  return <MoteConversationThreads page={view.page} issue={view.issue} actor={{ hostId: executionHostId, agentSessionId: sessionId }}
-    name={scope.topic.title} visible={visible} conversationClient={api.conversation}
-    work={{ readWork, memberName: source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? '执行者未确认',
+  const showThreads = context && (presentation.surface === 'mote'
+    ? () => { requestPmoTeamsTopicFloatingThreads(context.scope.topic.id) } : context.scope.showThreads)
+  useEffect(() => { if (visible && context) context.view.refresh() }, [visible, context?.view.key, context?.view.refresh, sourceRevision, memberIntent, executionHostId, sessionId])
+  return <MoteConversationThreads enabled={context !== null} page={context?.view.page ?? null} issue={context?.view.issue ?? null} actor={context?.actor ?? null}
+    name={context?.scope.topic.title ?? ''} visible={visible && context !== null} conversationClient={context ? api.conversation : null}
+    work={context ? { readWork, memberName: source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? '执行者未确认',
       ...(showThreads ? { onShowThreads: showThreads } : {}),
       onOpenWork: source => {
         const member = members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)
         if (member?.locations.length === 1) {
-          if (presentation.surface === 'mote') requestPmoTeamsTopicFloatingOpen({ targetTopicId: scope.topic.id, reference: member.locations[0]! })
-          else scope.showThread?.(member.locations[0]!)
+          if (presentation.surface === 'mote') requestPmoTeamsTopicFloatingOpen({ targetTopicId: context.scope.topic.id, reference: member.locations[0]! })
+          else context.scope.showThread?.(member.locations[0]!)
         } else showThreads?.()
-      } }}
-    onOlder={() => void view.older()} renderCurrent={renderCurrent}
+      } } : undefined}
+    {...(context ? { onOlder: () => void context.view.older() } : {})} renderCurrent={renderCurrent}
     {...(geometry ? { readingGeometry: geometry } : {})} {...(describeSpeaker ? { describeSpeaker } : {})} />
 }
