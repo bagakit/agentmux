@@ -17,6 +17,14 @@ same-Tab neighbor Regions and their typed Browser bindings; do not pick a global
 a new page is wanted. Preserve material ambiguity and the user's exact target/tool choice.
 
 Read only the matching local help:
+- amux browser profile --help: original Profile identities, routes and usage.
+  A person or device can set a proxy sign-in with browser profile proxy-sign-in set
+  --profile ID --input FILE|-; the JSON contains only username and password. Never put
+  a password in command arguments. Managed Agents cannot set or clear sign-ins. The
+  saved/cleared fact and reconnected result are separate; reconnected:false retains
+  the confirmed credential write, so do not repeat that write to reconnect a page.
+  browser profile network check --profile ID observes the configured HTTPS address
+  through that Profile's session. Unknown leaves the Profile and its pages available.
 - amux browser targets --help: discover available exact targets and their readiness.
   A target's optional objectLink is its stable original resource reference; url remains the
   actual document loading address, including its route. Neither grants input permission.
