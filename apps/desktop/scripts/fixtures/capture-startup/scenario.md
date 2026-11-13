@@ -26,10 +26,11 @@ The included exposure must see 65%; the excluded exposure must see 0. No clocks 
 
 `browser-window-created` records actual shell construction relative to the capture trigger.
 The baseline must build after the last Native return; every candidate shell must be built
-before the first Native return. Independent native window `show` events measure actual showing;
+before the first Native return. Independent `BrowserWindow.isVisible()` samples every 5 ms measure actual showing;
+the native `show` event offsets are retained separately because macOS inactive panels may omit that event.
 the logged phase is bounded by actual Native return/fresh-DOM observation and cannot
 fabricate the independently measured median gain. The older source logs just before showing;
-the candidate logs after showing, and the offset from actual show events is retained. Shown overlays must reference this capture's exact PNG in
+the candidate logs after showing, and the offset from first observed native visibility is retained. Shown overlays must reference this capture's exact PNG in
 the real DOM, have a decoded image and canvas, and report numeric `presentedMs` for every
 display. Real CDP Escape and exact preload cancellation separately restore opacity and
 release the current shells. The candidate writes its latest small timing JSON after showing;
