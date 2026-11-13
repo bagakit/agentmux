@@ -1592,7 +1592,7 @@ function BrowserPaneContent({
       </p> : null}
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
-      <BrowserOperationWarning activity={browserActivity} />
+      <BrowserOperationWarning key={tab.profileId ?? tab.browserId} activity={browserActivity} />
       {handoffNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Browser Agent handoff needs attention',
         mode: handoffNotice, restore: 'Inspect the same page and Agent before choosing again. No task was sent or replayed.' } }}
         actions={<button type="button" className="small-button" onClick={() => setHandoffNotice(null)}>Dismiss</button>} /> : null}

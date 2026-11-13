@@ -472,8 +472,8 @@ export async function registerIpc(args: {
     path: join(app.getPath('userData'), 'browser-profile-proxy-auth.json'),
     profileOfSession: target => browserProfiles.profileOfSession(target),
     proxyOf: profileId => browserProfiles.proxyOf(profileId),
-    // A refused or missing sign-in surfaces as the proxy's own 407 page; its reason goes to the Main log, never the password.
-    report: (profileId, reason) => { if (reason) console.warn(`browser_profile_proxy_sign_in profile=${profileId}: ${reason}`) }
+    // The original owner retains the issue; Browser snapshots publish it without changing page health.
+    report: profileId => browsers.refreshProfileProxySignIn(profileId)
   })
   const answerProfileProxy = (event: Electron.Event, contents: WebContents | null, details: { firstAuthAttempt?: boolean },
     authInfo: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): void => {
@@ -543,6 +543,7 @@ export async function registerIpc(args: {
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime))
+  browsers.profileProxySignInIssue = profileId => profileProxyAuth.issue(profileId)
   const releaseRetiredBrowserAgents = releaseBrowserAgentsOnRetirement(args.runtime, browsers)
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()

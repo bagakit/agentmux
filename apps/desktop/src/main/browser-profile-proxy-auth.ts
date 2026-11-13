@@ -46,16 +46,46 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
   let tail: Promise<unknown> = Promise.resolve()
   // Answered challenges per Profile and proxy; a second refusal in a row stops answering.
   const attempts = new Map<string, number>()
+  // Current authentication observations live here only, never in Profile metadata or operation history.
+  const issues = new Map<string, { proxy: { host: string; port: number }; source: 'storage' | 'authentication'; reason: string }>()
+  const sameProxy = (left: { host: string; port: number } | null, right: { host: string; port: number }) =>
+    left?.host === right.host && left.port === right.port
 
-  async function read(): Promise<Stored> {
-    if (stored) return stored
-    try {
-      stored = storedSchema.parse(JSON.parse(await readFile(ports.path, 'utf8')))
-    } catch (cause) {
-      // Only a missing file is an empty set. Unknown data stays on disk and is read again on Retry.
-      if ((cause as NodeJS.ErrnoException)?.code !== 'ENOENT') throw new BrowserProfileProxyAuthUnavailable(STORAGE_UNAVAILABLE)
-      stored = { version: 1, profiles: {} }
+  function notify(profileId: string, reason: string | null): void {
+    try { ports.report(profileId, reason) }
+    catch {
+      console.warn('The proxy sign-in notice delivery is unconfirmed. Read the original Profile owner for its current issue; confirmed credential saves remain valid.')
     }
+  }
+
+  function report(profileId: string, reason: string | null, originalProxy = ports.proxyOf(profileId), source: 'storage' | 'authentication' = 'authentication'): void {
+    if (reason === null) {
+      if (issues.delete(profileId)) notify(profileId, null)
+      return
+    }
+    // An old challenge cannot publish a problem for a replacement proxy.
+    if (!originalProxy || !sameProxy(ports.proxyOf(profileId), originalProxy)) return
+    const previous = issues.get(profileId)
+    if (previous?.reason === reason && previous.source === source && sameProxy(previous.proxy, originalProxy)) return
+    issues.set(profileId, { proxy: { ...originalProxy }, source, reason })
+    notify(profileId, reason)
+  }
+
+  async function read(profileId?: string): Promise<Stored> {
+    if (!stored) {
+      try {
+        stored = storedSchema.parse(JSON.parse(await readFile(ports.path, 'utf8')))
+      } catch (cause) {
+        // Only a missing file is an empty set. Unknown data stays on disk and is read again on Retry.
+        if ((cause as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (profileId) report(profileId, STORAGE_UNAVAILABLE, ports.proxyOf(profileId), 'storage')
+          throw new BrowserProfileProxyAuthUnavailable(STORAGE_UNAVAILABLE)
+        }
+        stored = { version: 1, profiles: {} }
+      }
+    }
+    // A successful read resolves only its storage observation, never a refused authentication.
+    if (profileId && issues.get(profileId)?.source === 'storage') report(profileId, null)
     return stored
   }
   async function write(next: Stored): Promise<void> {
@@ -70,6 +100,12 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
   }
 
   return {
+    /** The last recorded issue for this exact current proxy; absence is not proof of authentication. */
+    issue(profileId: string): string | null {
+      const issue = issues.get(profileId)
+      return issue && sameProxy(ports.proxyOf(profileId), issue.proxy) ? issue.reason : null
+    },
+
     /** Keep a sign-in for this Profile's proxy. The password is encrypted before it reaches disk. */
     set(profileId: string, credential: BrowserProfileProxyCredential): Promise<void> {
       return serial(async () => {
@@ -78,28 +114,35 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
         }
         const username = credential.username.trim()
         if (!username || username.length > 256 || credential.password.length > 1024) throw new BrowserProfileProxyAuthUnavailable('Enter a user name and a password for the proxy.')
-        const current = await read()
+        const current = await read(profileId)
         let password: string
         try { password = ports.crypto.encrypt(credential.password).toString('base64') }
         catch { throw new BrowserProfileProxyAuthUnavailable('The proxy password could not be encrypted by the system keychain. Nothing was saved; retry when the keychain is available.') }
         await write({ version: 1, profiles: { ...current.profiles, [profileId]: { username, password } } })
         for (const key of [...attempts.keys()]) if (key.startsWith(profileId + '\0')) attempts.delete(key)
-        ports.report(profileId, null)
+        report(profileId, null)
       })
     },
 
     /** Forget the sign-in, for example when the Profile is deleted or its route stops being a proxy. */
     clear(profileId: string): Promise<void> {
       return serial(async () => {
-        const current = await read()
-        if (!(profileId in current.profiles)) return
-        const { [profileId]: _removed, ...rest } = current.profiles
-        await write({ version: 1, profiles: rest })
+        const current = await read(profileId)
+        if (profileId in current.profiles) {
+          const { [profileId]: _removed, ...rest } = current.profiles
+          await write({ version: 1, profiles: rest })
+        }
+        report(profileId, null)
       })
     },
 
     /** Forget every sign-in whose Profile is not in this set, for example after a delete or a route change. */
     forgetExcept(profileIds: ReadonlySet<string>): Promise<void> {
+      // Route ownership changed even if credential cleanup itself cannot read the file yet.
+      for (const [profileId, issue] of issues) {
+        if (!profileIds.has(profileId) || !sameProxy(ports.proxyOf(profileId), issue.proxy)) report(profileId, null)
+        else notify(profileId, issue.reason) // The original Profile label may have changed with this committed list.
+      }
       return serial(async () => {
         const current = await read()
         const kept = Object.fromEntries(Object.entries(current.profiles).filter(([id]) => profileIds.has(id)))
@@ -110,7 +153,7 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
 
     /** The user name only, so the editor can show who signs in without ever reading the password. */
     async username(profileId: string): Promise<string | null> {
-      return (await read()).profiles[profileId]?.username ?? null
+      return (await read(profileId)).profiles[profileId]?.username ?? null
     },
 
     /**
@@ -126,18 +169,18 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
       // Only that Profile's own proxy; a challenge from any other host never sees the password.
       if (!proxy || proxy.host !== authInfo.host.toLowerCase() || proxy.port !== authInfo.port) return false
       let entry: Stored['profiles'][string] | undefined
-      try { entry = (await read()).profiles[profileId] }
-      catch { ports.report(profileId, STORAGE_UNAVAILABLE); return false }
-      if (!entry) { ports.report(profileId, 'The proxy asks for a sign-in. Add its user name and password to this Profile.'); return false }
+      try { entry = (await read(profileId)).profiles[profileId] }
+      catch { return false }
+      if (!entry) { report(profileId, 'The proxy asks for a sign-in. Add its user name and password to this Profile.', proxy); return false }
       const key = `${profileId}\0${proxy.host}:${proxy.port}`
       // Chromium marks the first challenge of a request; a fresh request after a working sign-in starts counting again.
       if (firstAttempt) attempts.delete(key)
       const tries = (attempts.get(key) ?? 0) + 1
-      if (tries > 2) { ports.report(profileId, 'The proxy refused this Profile’s user name or password. Update them and reload the page.'); return false }
+      if (tries > 2) { report(profileId, 'The proxy refused this Profile’s user name or password. Update them and reload the page.', proxy); return false }
       attempts.set(key, tries)
       let password: string
       try { password = ports.crypto.decrypt(Buffer.from(entry.password, 'base64')) }
-      catch { ports.report(profileId, 'The saved proxy password could not be read from the keychain. Enter it again.'); return false }
+      catch { report(profileId, 'The saved proxy password could not be read from the keychain. Enter it again.', proxy); return false }
       callback(entry.username, password)
       return true
     },

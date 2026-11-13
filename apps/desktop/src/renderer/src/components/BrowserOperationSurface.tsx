@@ -348,8 +348,8 @@ export function BrowserOperationStatus({
 
 /**
  * Persistent service notice, separate from the optional operation disclosure. The person can put it
- * away; that only hides this one notice on this page. The operation, its record and the timeline keep
- * it, and a different notice (a new run, or Main saying something else) shows again on its own.
+ * away; that only hides this one notice on this page. The original owner keeps its fact, and a
+ * different notice (a new run, or Main saying something else) shows again on its own.
  */
 export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
   const message = activity.warning
@@ -408,7 +408,7 @@ function BrowserOperationNotice({ message, className, onDismiss }: { message: st
       {hasDetails ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
         aria-label="Show browser warning details" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Details</button> : null}
       {onDismiss ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet browser-rsi-notice__dismiss"
-        aria-label="Dismiss this Browser notice" title="Dismiss. The operation record keeps it." onClick={onDismiss}><ThemeActionCloseIcon size={11} aria-hidden="true" /></button> : null}
+        aria-label="Dismiss this Browser notice" title="Dismiss this notice." onClick={onDismiss}><ThemeActionCloseIcon size={11} aria-hidden="true" /></button> : null}
     </span>
     {open && hasDetails ? <pre id={panelId}>{message}</pre> : null}
   </div>

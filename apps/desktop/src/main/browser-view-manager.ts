@@ -415,6 +415,24 @@ export class BrowserViewManager {
   private readonly inputScales = new WeakMap<WebContents, number>()
   /** Optional App appearance projection; the receiver rechecks the original native document. */
   capsuleDocumentReady: ((browserId: string) => void) | undefined
+  /** Current password-free issue from the sole Profile proxy-auth owner. */
+  profileProxySignInIssue: ((profileId: string) => string | null) | undefined
+
+  /** Re-publish only pages using the Profile whose authentication observation changed. */
+  refreshProfileProxySignIn(profileId: string): void {
+    for (const entry of this.entries.values()) {
+      if (entry.storage.mode === 'normal' && entry.storage.profileId === profileId) this.emit(entry)
+    }
+  }
+
+  private profileProxySignInWarning(storage: BrowserStorage): string | undefined {
+    if (storage.mode !== 'normal' || !storage.profileId || 'capsule' in storage) return undefined
+    const issue = this.profileProxySignInIssue?.(storage.profileId)
+    if (!issue) return undefined
+    const name = this.profileLabel(storage.profileId) ?? storage.profileId
+    return `Profile “${name}”: ${issue} Browser controls remain available. Open Settings → Browser Profiles → ${name} → Proxy sign-in.`
+  }
+
   /** Facts from real embedded page owners; external tabs never enter this registry. */
   targets(): AgentMuxBrowserTarget[] {
     return [...this.entries.values()].map(entry => this.projectTarget(entry))
@@ -470,6 +488,10 @@ export class BrowserViewManager {
     const url = available ? contents.getURL() : ''
     const objectLink = this.objectLink(entry, url)
     const profile = this.profileRef(entry.storage)
+    const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
+    const warnings = [entry.agentWarning, proxySignInWarning, !available
+      ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
+        ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join('\n')
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, ...(profile ? { profile } : {}), status: available ? 'ready' : 'unavailable',
       ...(entry.source ? { openedFrom: entry.source } : {}),
       control: this.controlState(entry),
@@ -478,9 +500,7 @@ export class BrowserViewManager {
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
         !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
-      ...(!available || !workspaceId || entry.agentWarning ? { warning: [entry.agentWarning, !available
-        ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
-          ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join(' ') } : {}) }
+      ...(warnings ? { warning: warnings } : {}) }
   }
   /** {id,label} for a normal page's Profile. Private pages and Capsules have none; an unread label stays unknown. */
   private profileRef(storage: BrowserStorage): { id: string; label: string } | undefined {
@@ -4800,7 +4820,8 @@ export class BrowserViewManager {
     const currentWarnings = entry.agentWarning
       ? appendWarning(entry.activity.warning ?? persistenceWarning, entry.agentWarning)
       : entry.activity.warning ?? persistenceWarning
-    const warning = this.closingWarning(entry.id, currentWarnings || undefined)
+    const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
+    const warning = this.closingWarning(entry.id, proxySignInWarning ? appendWarning(currentWarnings, proxySignInWarning) : currentWarnings || undefined)
     return {
       id: entry.id,
       ...(entry.source ? { source: entry.source } : {}),
