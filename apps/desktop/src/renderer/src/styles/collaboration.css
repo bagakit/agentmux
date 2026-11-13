@@ -204,7 +204,6 @@
 
 /* Overview retains original Agent endpoints. Labels and marks disclose the same world. */
 .collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
-/* Match XYFlow's Panel layer above its full-canvas renderer hit surface. */
 /* Inside the camera surface, above the viewport (z 2) and its portals, below the HUD. */
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
