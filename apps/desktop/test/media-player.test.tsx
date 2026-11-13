@@ -179,6 +179,22 @@ describe('mounted player', () => {
     expect(container.textContent).toContain('No video picture could be decoded')
   })
 
+  it('a first frame that arrived before the listeners still reads as decoded', async () => {
+    // The engine has the frame already: the fact lives on the element, and no loadeddata will follow.
+    const facts = { readyState: 4, videoWidth: 1920, videoHeight: 1080, duration: 12 }
+    const original = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'readyState')
+    Object.defineProperty(HTMLMediaElement.prototype, 'readyState', { configurable: true, get() { return facts.readyState } })
+    Object.defineProperty(HTMLMediaElement.prototype, 'videoWidth', { configurable: true, get() { return facts.videoWidth } })
+    Object.defineProperty(HTMLMediaElement.prototype, 'videoHeight', { configurable: true, get() { return facts.videoHeight } })
+    try {
+      await render(<MediaPlayer lease={lease()} name="cached.mp4" onRetry={() => {}} />)
+      expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+    } finally {
+      if (original) Object.defineProperty(HTMLMediaElement.prototype, 'readyState', original); else delete (HTMLMediaElement.prototype as { readyState?: number }).readyState
+      delete (HTMLMediaElement.prototype as { videoWidth?: number }).videoWidth; delete (HTMLMediaElement.prototype as { videoHeight?: number }).videoHeight
+    }
+  })
+
   it('an audio file uses the always-visible card with a primary play disc', async () => {
     await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
     expect(media().tagName).toBe('AUDIO')
