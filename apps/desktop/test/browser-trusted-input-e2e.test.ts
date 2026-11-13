@@ -67,6 +67,7 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <input id="qty" type="number" value="4" aria-label="Quantity" style="width:60px">
     <textarea id="memo" aria-label="Memo" rows="1" style="width:60px">old</textarea>
     <input id="chord" aria-label="Chord" value="select me" style="width:60px">
+    <button id="twice" aria-label="Twice" style="width:60px">Twice</button>
     <div id="rich" contenteditable="true" aria-label="Rich" role="textbox" style="width:60px;min-height:14px;border:1px solid #999">old</div>
   </div>
   <dialog id="modal"><button>Modal button</button></dialog>
@@ -75,7 +76,7 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
   <script>
     window.frames_ = 0; (function frame() { window.frames_ += 1; requestAnimationFrame(frame) })()
     window.events = []
-    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'beforeinput', 'input', 'change', 'keydown', 'keyup', 'submit', 'mouseover'])
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'auxclick', 'beforeinput', 'input', 'change', 'keydown', 'keyup', 'submit', 'mouseover'])
       document.addEventListener(type, (event) => {
         if (type === 'mouseover' && event.target.id !== 'menu') return
         events.push({ type, target: event.target.id || event.target.tagName, trusted: event.isTrusted,
@@ -192,6 +193,11 @@ app.whenReady().then(async () => {
     await act('selectAll', 'pressKey', [ref('Chord'), process.platform === 'darwin' ? 'Meta+a' : 'Control+a'], selection)
     await act('shiftLetter', 'pressKey', [ref('Chord'), 'Shift+a'], selection)
     await act('ctrlEnter', 'pressKey', [ref('Chord'), 'Control+Enter'], selection)
+    // The page suppresses its context menu, as an app with its own menu does, so no native menu opens.
+    await contents.executeJavaScript('document.getElementById("twice").addEventListener("contextmenu", (event) => event.preventDefault())')
+    await act('doubleClick', 'click', [ref('Twice'), { count: 2 }])
+    await act('rightClick', 'click', [ref('Twice'), { button: 'right' }])
+    await act('clickTypo', 'click', [ref('Twice'), { buton: 'right' }])
     // Every other refusal, each before anything reaches the field.
     const nothing = (id) => () => contents.executeJavaScript('document.getElementById(' + JSON.stringify(id) + ').value')
     await act('offText', 'fillInput', [ref('Off text'), 'x'], nothing('offtext'))
@@ -389,6 +395,19 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(actions.ctrlEnter, actions.ctrlEnter?.error).toMatchObject({ ok: true, value: { value: 'A' } })
     expect(actions.ctrlEnter!.events.find(event => event.type === 'keydown' && event.key === 'Enter')).toMatchObject({ ctrl: true, trusted: true })
     expect(actions.ctrlEnter!.events.filter(event => event.type === 'beforeinput'), 'a shortcut typed text').toEqual([])
+  }, 240_000)
+
+  it('click with {count: 2} fires dblclick and {button: "right"} fires contextmenu, as trusted input; an unknown option is refused unsent', async () => {
+    const { actions } = await probe()
+    expect(actions.doubleClick, actions.doubleClick?.error).toMatchObject({ ok: true })
+    expect(order(actions.doubleClick).filter(entry => entry.endsWith(':twice'))).toEqual(expect.arrayContaining(['click:twice', 'dblclick:twice']))
+    expect(order(actions.doubleClick).filter(entry => entry === 'click:twice'), 'a double click is two clicks').toHaveLength(2)
+    expect(trusted(actions.doubleClick)).toBe(true)
+    expect(actions.rightClick, actions.rightClick?.error).toMatchObject({ ok: true })
+    expect(order(actions.rightClick)).toContain('contextmenu:twice')
+    expect(order(actions.rightClick), 'a right click is not a primary click').not.toContain('click:twice')
+    expect(actions.clickTypo).toMatchObject({ ok: false, error: expect.stringContaining('click does not take "buton"') })
+    expect(actions.clickTypo!.events, 'a refused click touches nothing').toEqual([])
   }, 240_000)
 
   it('every field that cannot take this input is refused before it changes, and says what to do instead', async () => {
