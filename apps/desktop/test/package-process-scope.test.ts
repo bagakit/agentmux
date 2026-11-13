@@ -112,7 +112,7 @@ describe('candidate activation uses OS ownership rather than the first launch PI
     expect(observed).toMatchObject({ serving: [700, 701], crashReporter: [710], externalNode: [],
       processes: [main, renderer, { pid: 710, ppid: 1, birth: newBirth }] })
     expect(observed.admissions).toMatchObject([{ pid: 700, classification: 'unknown', source: 'mode-unconfirmed' },
-      { pid: 701, classification: 'gui', source: 'bundle-helper' }])
+      { pid: 701, classification: 'unknown', source: 'mode-unconfirmed' }])
     expect(() => snapshotApplicationProcesses('', bundle)).toThrow('empty')
     expect(() => snapshotApplicationProcesses(`700 1 unavailable ${EXECUTABLE}`, bundle)).toThrow('birth observation')
   })
@@ -401,6 +401,33 @@ describe('typed admissions retain original evidence without promoting unknown to
     expect(reparented.serving).toEqual([701]); expect(reparented.externalNode).toEqual([])
     expect(reparented.admissions.find(row => row.pid === 701)).toMatchObject({ classification: 'gui', source: 'retained-gui',
       initial: owner.initial, confirmedGui: owner.confirmedGui })
+  })
+
+  it('keeps renamed GUI workers and unreadable or mismatched images protected without granting argv a role', () => {
+    const first = snapshotApplicationProcesses(ps(main, row(701, 700), row(800, 90)), bundle, { nodeModes: [mainMode] })
+    const renamed = ps(main, row(701, 700, 'private-worker-title'), row(800, 90, bundle.helperRoot + 'private-title'))
+    const current = snapshotApplicationProcesses(renamed, bundle,
+      { nodeModes: [mainMode, mode(701, 700), mode(800, 90)], previousOwners: first.admissions })
+    expect(current.serving).toEqual([700, 701]); expect(current.externalNode).toEqual([800])
+    expect(current.admissions.find(admission => admission.pid === 701)).toMatchObject({ classification: 'gui', source: 'gui-ancestry' })
+    const reparented = snapshotApplicationProcesses(ps(row(701, 1, 'private-worker-title')), bundle,
+      { nodeModes: [mode(701, 1)], previousOwners: current.admissions })
+    expect(reparented.serving).toEqual([701])
+    expect(reparented.admissions.find(admission => admission.pid === 701)).toMatchObject({ classification: 'gui', source: 'retained-gui' })
+    for (const evidence of [[], [{ ...mode(800, 90), mode: 'unknown' }],
+      [{ ...mode(800, 90), executable: _hygiene_fixturePath('private/foreign-image') }],
+      [{ ...mode(800, 90), birth: anotherBirth }]]) {
+      const guarded = snapshotApplicationProcesses(ps(row(800, 90, bundle.helperRoot + 'private-title')), bundle,
+        { nodeModes: evidence, previousOwners: first.admissions })
+      expect(guarded.serving).toEqual([800]); expect(guarded.externalNode).toEqual([])
+      expect(guarded.admissions.find(admission => admission.pid === 800)).toMatchObject({ classification: 'unknown', source: 'mode-unconfirmed' })
+      expect(guarded.admissions.find(admission => admission.pid === 800)?.confirmedGui).toBeUndefined()
+    }
+    const realHelper = snapshotApplicationProcesses(ps(row(800, 90, 'private-helper-title')), bundle,
+      { nodeModes: [{ ...mode(800, 90, 'gui'), executable: bundle.helperRoot + 'private-helper' }], previousOwners: first.admissions })
+    expect(realHelper.serving).toEqual([800])
+    expect(realHelper.admissions.find(admission => admission.pid === 800)).toMatchObject({ classification: 'gui', source: 'bundle-helper',
+      confirmedGui: { source: 'bundle-helper' } })
   })
 
   it('retains a disappeared GUI admission without claiming it is alive, then recognizes the same original birth', () => {
