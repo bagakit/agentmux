@@ -50,6 +50,9 @@ for (const surface of ['mote', 'space'] as const) {
         regionId: surface === 'mote' ? f.main.regionId : f.reference.regionId })
       expect(after.agentFocus.execution).toEqual({ ...f.before.agentFocus.execution, reference: f.reference })
       expect(after.agentFocus.execution.history).toBe(f.before.agentFocus.execution.history)
+      // The terminal was already shown; the handoff also reveals its live output.
+      expect(after.viewModes[executionAgent.id]).toBe('terminal')
+      expect(after.regionCaretFocus).toMatchObject({ regionId: f.reference.regionId, target: 'terminal', reveal: 'latest' })
     } finally { await f.close() }
   })
   it(`actual SessionPane ${surface} close history consumes its presentation selection cause`, async () => {

@@ -1326,3 +1326,66 @@ it('keeps a replacement GPU alive when a retired context listener fires again', 
   expect(fixture.detach).not.toHaveBeenCalled()
   expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
 })
+
+it.each([
+  ['an explicit Open terminal handoff reveals the live output', { reveal: 'latest' as const }, true],
+  ['ordinary navigation keeps the reading position', {}, false]
+] as const)('%s', async (_label, reveal, expectedReveal) => {
+  await render(true)
+  const terminal = fixture.terminals[0]! as unknown as { scrollToBottom(): void; focus(): void }
+  const scroll = vi.spyOn(terminal, 'scrollToBottom'), focus = vi.spyOn(terminal, 'focus')
+  const store = (await import('../src/renderer/src/store')).useAppStore.getState() as unknown as { regionCaretFocus: unknown }
+  store.regionCaretFocus = { regionId: linkOrigin.regionId, nonce: 70, target: 'terminal', ...reveal }
+  try {
+    await render(true)
+    await act(async () => await vi.waitFor(() => expect(focus).toHaveBeenCalled()))
+    if (expectedReveal) expect(scroll).toHaveBeenCalled()
+    else expect(scroll).not.toHaveBeenCalled()
+    expect(fixture.attach).toHaveBeenCalledOnce()
+  } finally { store.regionCaretFocus = null }
+})
+
+it('Open terminal from the Activity view lands on the live output even after the visibility restore frame', async () => {
+  await render(true)
+  const terminal = fixture.terminals[0]!
+  const history = Array.from({ length: 300 }, (_, index) => `ROW_${String(index).padStart(3, '0')}\r\n`).join('')
+  await hiddenOutput(history, 7)
+  terminal.scrollToLine(40)
+  expect(terminal.buffer.active.baseY - terminal.buffer.active.viewportY).toBeGreaterThan(20)
+  // The reader leaves for Activity at line 40; the hidden Region remembers that position.
+  await render(false)
+  const queued = new Map<number, FrameRequestCallback>(); let frameId = 0
+  const schedule = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { const id = ++frameId; queued.set(id, callback); return id })
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { queued.delete(id) })
+  const store = (await import('../src/renderer/src/store')).useAppStore.getState() as unknown as { regionCaretFocus: unknown }
+  store.regionCaretFocus = { regionId: linkOrigin.regionId, nonce: 71, target: 'terminal', reveal: 'latest' }
+  try {
+    await act(async () => root!.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference, surface: 'space' }}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />
+    </WorkbenchPresentationContext.Provider>))
+    await act(async () => { const callbacks = [...queued.values()]; queued.clear(); for (const callback of callbacks) callback(0) })
+    await act(async () => { const callbacks = [...queued.values()]; queued.clear(); for (const callback of callbacks) callback(0) })
+    expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY)
+    expect(fixture.attach).toHaveBeenCalledOnce()
+  } finally { store.regionCaretFocus = null; schedule.mockRestore(); cancel.mockRestore() }
+})
+
+it('a retried caret handoff reveals once and then leaves the reader where they scrolled', async () => {
+  await render(true)
+  const terminal = fixture.terminals[0]! as unknown as FixtureTerminal & { scrollToBottom(): void }
+  const history = Array.from({ length: 300 }, (_, index) => `ROW_${String(index).padStart(3, '0')}\r\n`).join('')
+  await hiddenOutput(history, 7)
+  const scroll = vi.spyOn(terminal, 'scrollToBottom')
+  const store = (await import('../src/renderer/src/store')).useAppStore.getState() as unknown as { regionCaretFocus: unknown }
+  store.regionCaretFocus = { regionId: linkOrigin.regionId, nonce: 72, target: 'terminal', reveal: 'latest' }
+  try {
+    await render(true)
+    await act(async () => await vi.waitFor(() => expect(scroll).toHaveBeenCalledOnce()))
+    // The same pending request is retried (its focus was never confirmed by this fake terminal).
+    terminal.scrollToLine(40)
+    await render(true)
+    await act(async () => { rootContainer.setAttribute('inert', ''); rootContainer.removeAttribute('inert') })
+    expect(scroll).toHaveBeenCalledOnce()
+    expect(terminal.buffer.active.viewportY).toBe(40)
+  } finally { store.regionCaretFocus = null }
+})

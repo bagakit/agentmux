@@ -114,6 +114,10 @@ it('attention craft uses the header when native confirmation prevents card decis
   expect(useAppStore.getState().viewModes[session.id]).toBe('terminal')
   expect(select).toHaveBeenCalledExactlyOnceWith(session.id)
   expect(useAppStore.getState().sessions[0]).toMatchObject({ pendingInteraction: session.pendingInteraction })
+  // The panel lands on the same live terminal as the Session's own card, not only its view mode.
+  const landed = useAppStore.getState().workbenchSpaceSelection?.regionId
+  expect(landed).toBeTruthy()
+  expect(useAppStore.getState().regionCaretFocus).toMatchObject({ regionId: landed, target: 'terminal', reveal: 'latest' })
 })
 
 it('attention craft preserves existing panel focus when a replacement request arrives', async () => {
