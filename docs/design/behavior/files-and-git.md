@@ -31,7 +31,7 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 - Stale response 不能覆盖新 Workspace 或新目录 revision；刷新期间保留现有内容，直到新结果原子替换。
 - 远端目录浏览沿原 Workspace 的 ExecutionHost，以有界读取容纳连接与目录暂时变慢，避免按目录深度重复 SSH 握手；同一原 Host、根和目录的在途读取共享工作。失败保留已读内容，明确原资源、失败步骤与可执行的原目标重试，不把超时当空目录或远端 Agent 已结束。Launcher 文件引用与 Explorer 同样保持同资源刷新前的列表；换 Host、根或目录不能借旧结果。读取恢复不自动重放写入、不更换资源、不停止或重建健康 Session；路径、链接循环、权限和输出预算仍按原文件 owner 的真实边界拒绝。
 - **打不开的文件必须给出一个能落地的出口，而不是只说"打不开"**。Editor 的失败态除文案外提供一个 Reveal 动作，经**既有**的揭示通路落地，不新增第二条 IPC 或第二套路径解析。揭示目标对**已删除的文件回退到最近的存在的祖先目录**——文件已被删除正是"打不开"最常见的成因，揭示父目录仍然回答了用户的问题（它不在那儿了），而报一个二次错误没有回答任何问题；回退的每一步仍做根内约束校验，不得借符号链接逃出 Workspace 根。远端（非 local host）Workspace 下不提供该动作：那条通路对非 local host 必然失败，**以缺席表达而非画一个禁用的假按钮**。揭示失败经既有 reportError 浮现，不静默吞掉，也不把编辑器面板替换成第二个错误态。
-- Desktop Main 是 Workspace 文件与磁盘版本的唯一事实 Owner；`packages/core` 不承载文件服务，
+- Workspace 文件与磁盘版本由宿主文件 owner 唯一持有，当前分层见[系统归属](../../architecture/system-ownership.md#从哪一层接入)，Desktop Main 是 Renderer 的读写入口；`packages/core` 不承载文件服务，
   Renderer 不直接读写磁盘，也不维护第二份文件 revision 或 watcher truth。
 - 打开文件时由 Main 返回内容与不透明 revision；保存必须携带读取时的 revision，并由 Main 在
   Workspace Root 约束内原子替换。磁盘内容已经变化时保存必须明确冲突并保留编辑草稿，不能静默覆盖。
@@ -61,7 +61,7 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 
 - 一个 prompt 扇出 N 路：从当前 HEAD 起 N 个新分支、各自一个 worktree、各跑一个 Agent，比较哪一路更好后留一路、拆其余。整套编排归 **Desktop Main**：它只按顺序调用已有的公共命令（worktree 创建、单条 Agent 启动、worktree 拆除），不引入新的运行时事实。**发起与收尾复用既有的单一 IPC 与导航路径，不新增第二条**：发起一次扇出＝依次调用既有的 worktree 创建与单条 Agent 启动；「留一路、拆其余」＝保留所选那一路、其余经既有拆除原语移除；跳转任一路仍走既有 `selectSession`——没有专属于扇出的第二套 IPC、导航或错误状态机。这条竖切的完成标准是**端到端可达**：用户能发起、也能收敛。只做出编排原语与比稿展示面却没有发起入口，是一段测得很好却用不到的代码，不计为已交付。
 - **Core 不拥有 coordinator loop**。`packages/core` 只认识单条 Agent Session；"同时跑 N 条并收敛"不是 Core 的概念。把这个循环放进 Core 会让它凭空多出一个它并不持有的生命周期对象——批处理编排是 Desktop Main 顺序调度公共调用的结果，不是 Core 的第二种 Session 语义。lane 顺序创建（并发 `git worktree add` 会争抢同一 index 与 metadata，config 也逐路串行穿过每次注册），Agent 一旦启动即并发运行——用户要的并行发生在这里。
-- **默认 worktree 落在项目内，且只有一处出处**。为某个分支新建 worktree 时，默认位置是项目自身的隐藏子目录 `<项目>/.worktrees/<清洗后的分支名>`，而不是与项目同级的兄弟目录——它随项目目录一起被移动或删除、并出现在项目自身的文件树里，因为它本就属于这个项目；仓库卫生由后面的 clone-local `info/exclude` 约束。这条默认路径只由**一处**推导：Branches 面板取默认值、扇出取各 lane 的 worktree 根，都经同一个出处得出，任何调用点都不得再自行拼第二份默认位置。扇出把各 lane 建在其 worktree 根下，该根必须解析到同一个项目内 `.worktrees` 目录，不另立第二处真相。分支名先收敛为路径安全字符、空名回落为固定占位，使目录名不泄露分支里的路径分隔符。
+- **默认 worktree 落在项目内，且只有一处出处**。为某个分支新建 worktree 时，默认位置是项目自身的隐藏子目录 `<项目>/.worktrees/<清洗后的分支名>`，而不是与项目同级的兄弟目录——它随项目目录一起被移动或删除、并出现在项目自身的文件树里，因为它本就属于这个项目；仓库卫生由后面的 clone-local `info/exclude` 约束。这条默认路径只由**一处**推导：Branches 面板取默认值、扇出取各 lane 的 worktree 根，都经同一个出处得出，任何调用点都不得再自行拼第二份默认位置。扇出把各 lane 建在其 worktree 根下，该根必须解析到同一个项目内 `.worktrees` 目录，不另立第二处真相。分支名先收敛为路径安全字符、空名回落为固定占位，使目录名不泄露分支里的路径分隔符。当前实现尚未满足「只由一处推导」：Branches 面板经 [`defaultWorktreePath`](../../../apps/desktop/src/renderer/src/lib/workspace-projects.ts) 取默认值，扇出由 [`runFanOutRequest`](../../../apps/desktop/src/main/fanout-request.ts) 另行以仓库根拼接 `.worktrees` 作为 lane 根；两处目前解析到同一个项目内 `.worktrees` 目录，但仍是两份推导，待收敛到同一出处。
 - **项目内的 worktree 是工具产物，不能把用户仓库弄脏**。创建成功后，产品应把项目内 `.worktrees/` 根目录写入该 clone 的 Git `info/exclude`（幂等、可重复执行、已有内容和无换行文件都要保留），而不是修改用户跟踪的 `.gitignore`。这条卫生动作失败只提示降级，不得阻断已经成功的 worktree 创建；验收以真实 `git status --porcelain` 为准，而不是只检查是否发出了写入命令。
 - **移除 worktree 前要把留下来的分支事实说清楚**。普通确认框必须明确签出目录会被移除、分支仍保留；若 Git 能数出相对权威 base 的独有提交，显示数量和分支名；若 base 只是猜测或探针失败，明确说“无法核实”，不得把未知伪装成安全。这个提示只帮助用户决定，不得因为探针超时或失败阻断移除；未提交改动仍由既有脏树保护单独拦截。
 - **移除确认框的 retention note 必须到达最终正文**。生产者、IPC 和面板转发都不是完成标准，只有用户真正看到 note 才算闭环；未询问到时保持空白，探针明确给出“无法核实”时必须原样呈现。丢弃未提交改动的二次确认不得混入这条分支留存提示。
@@ -202,7 +202,7 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - 目录名作为默认 Project 名称，路径由当前 Workspace 根与目录相对路径派生。Renderer 的同路径快路径只用于减少一次请求；是否已注册由 Main 的归一化位置判定决定，尾斜杠、`.` 等等价写法不能产生重复 Workspace。
 - 添加失败必须落到现有错误面；不能静默关闭菜单或让用户误以为项目已经打开。成功后选中新建或已存在的 Project。
 
-### 书签文件（.webloc / .url，）
+### 书签文件（.webloc / .url）
 
 - 存书签「不要整页打包 就是保存个 link」：把当前页存成一个书签文件，不做整页归档。
 - 打开书签「应该是默认 browser」：双击 `.webloc` / `.url` 在 AgentMux 自己的 Browser 里打开那个地址，不跳去系统浏览器。
