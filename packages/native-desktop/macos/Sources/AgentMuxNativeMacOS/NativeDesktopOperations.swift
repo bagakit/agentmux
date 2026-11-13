@@ -15,11 +15,12 @@ enum NativeDesktopOperations {
             if let editing = params["allowEditing"], mode != "selection" || editing.bool == nil {
                 throw ProviderError.coded("invalid_argument", "allowEditing must be a boolean on a selection request")
             }
+            let initialRect = try selectionInitialRect(params, mode: mode)
             let rect: CGRect
             if mode == "selection" {
                 return try NativeSelectionCaptureLease.shared.withCapture { ownership in
                     let allowEditing = params["allowEditing"]?.bool == true
-                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing, copyColor: { hex in
+                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, copyColor: { hex in
                         _ = try clipboardWrite(["format": .string("text"), "data": .string(hex)])
                     }) { loading in
                         try frozenSelectionPixels(loading: loading, ownership: ownership)
@@ -60,6 +61,26 @@ enum NativeDesktopOperations {
         }
     }
 
+    /// A host may propose where the selection starts. It must be a finite,
+    /// positive Quartz rectangle touching an active display; the user can
+    /// still move, resize, redraw or cancel it.
+    private static func selectionInitialRect(_ params: [String: JSONValue], mode: String) throws -> CGRect? {
+        guard let value = params["initialRect"] else { return nil }
+        guard mode == "selection", case let .object(values) = value,
+              let x = values["x"]?.number, let y = values["y"]?.number,
+              let width = values["width"]?.number, let height = values["height"]?.number else {
+            throw ProviderError.coded("invalid_argument", "initialRect requires x, y, width and height in Quartz points on a selection request")
+        }
+        let rect = CGRect(x: x, y: y, width: width, height: height)
+        guard NativeCaptureGeometry.isValid(rect) else {
+            throw ProviderError.coded("invalid_argument", "initialRect must have finite coordinates and positive dimensions")
+        }
+        guard activeDisplayBounds().contains(where: { $0.intersects(rect) }) else {
+            throw ProviderError.coded("invalid_argument", "initialRect does not intersect an active display")
+        }
+        return rect
+    }
+
     private static func capturedRectangle(_ rect: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> [String: Any] {
         guard NativeCaptureGeometry.isValid(rect) else {
             throw ProviderError.coded("invalid_argument", "capture rectangle must have finite coordinates and positive dimensions")
@@ -82,6 +103,15 @@ enum NativeDesktopOperations {
             }
             return ["displays": displays]
         }
+    }
+
+    /// Global Quartz bounds of every active display.
+    static func activeDisplayBounds() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return [] }
+        return displays.prefix(Int(count)).map(CGDisplayBounds)
     }
 
     static func permissionStatus() -> [String: Any] {

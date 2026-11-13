@@ -98,6 +98,20 @@ public struct NativeSelectionState {
         if let rectangle, !NativeCaptureGeometry.isValid(rectangle) { self.rectangle = nil }
     }
 
+    /// Drops the selection and any gesture, returning to the empty chooser.
+    public mutating func clear() {
+        rectangle = nil
+        gesture = nil
+    }
+
+    /// Starts from a host-proposed rectangle, clipped to the selectable bounds.
+    /// A proposal with no selectable area leaves the chooser empty.
+    public mutating func seed(_ rect: CGRect) {
+        gesture = nil
+        let clipped = rect.standardized.intersection(bounds)
+        rectangle = !clipped.isNull && NativeCaptureGeometry.isValid(clipped) ? clipped : nil
+    }
+
     public mutating func nudge(dx: CGFloat, dy: CGFloat) {
         guard let rectangle, !isInteracting else { return }
         self.rectangle = translated(rectangle, dx: dx, dy: dy)

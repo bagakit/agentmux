@@ -38,7 +38,8 @@ export interface NativeOperation {
 export const CAPTURE_EDIT_TOOLS = ['rect', 'arrow', 'note', 'pixelate', 'text'] as const
 export type CaptureEditTool = typeof CAPTURE_EDIT_TOOLS[number]
 export type CaptureParams =
-  | { mode: 'selection'; allowEditing?: boolean }
+  /** `initialRect` seeds the selection in global Quartz points; it must touch an active display. */
+  | { mode: 'selection'; allowEditing?: boolean; initialRect?: { x: number; y: number; width: number; height: number } }
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }

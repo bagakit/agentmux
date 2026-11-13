@@ -41,7 +41,8 @@ final class NativeScreenSelection: NSView {
     }
     required init?(coder: NSCoder) { nil }
 
-    static func begin(allowEditing: Bool = false,
+    /// `initialRect` is a global Quartz rectangle proposed by the host.
+    static func begin(allowEditing: Bool = false, initialRect: CGRect? = nil,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels,
         completion: @escaping (Result<NativeSelectionChoice?, Error>) -> Void) throws {
@@ -53,6 +54,10 @@ final class NativeScreenSelection: NSView {
         let coordinator = NativeSelectionCoordinator(screenFrames: screens.map(\.frame), primaryTop: primary.frame.maxY,
             initialPoint: NSEvent.mouseLocation, allowEditing: allowEditing, previousApp: NSWorkspace.shared.frontmostApplication,
             copyColor: copyColor, completion: completion)
+        if let initialRect {
+            // Quartz and AppKit flip about the same primary top in both directions.
+            coordinator.seed(NativeCaptureGeometry.quartzRect(appKitRect: initialRect, primaryDisplayTop: primary.frame.maxY))
+        }
         var windows: [NSWindow] = []
         for screen in screens {
             let window = NativeSelectionWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -255,8 +260,14 @@ final class NativeScreenSelection: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        coordinator.pointerDown(globalPoint(event))
+        let point = globalPoint(event)
+        if event.clickCount == 2, selection.rectangle?.contains(point) == true {
+            coordinator.confirmFromGesture()
+            return
+        }
+        coordinator.pointerDown(point)
     }
+    override func rightMouseDown(with event: NSEvent) { coordinator.secondaryClick(globalPoint(event)) }
     override func mouseDragged(with event: NSEvent) { coordinator.pointerDragged(globalPoint(event)) }
     override func mouseUp(with event: NSEvent) { coordinator.pointerUp(globalPoint(event)) }
     override func keyDown(with event: NSEvent) {
@@ -380,6 +391,18 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         dimensions.isPassive = true
     }
     @objc private func confirm() { complete(action: .capture) }
+    /// A double click inside the resting selection; the first click of the
+    /// pair has already ended as a zero-distance move.
+    func confirmFromGesture() { confirm() }
+    /// Secondary click backs out one level: an outside click drops the
+    /// selection, a click with no selection cancels the request.
+    func secondaryClick(_ point: NSPoint) {
+        guard let rect = selection.rectangle else { cancel(); return }
+        guard !rect.contains(point) else { return }
+        selection.clear()
+        refresh()
+    }
+    func seed(_ appKitRect: NSRect) { selection.seed(appKitRect); refresh() }
     @objc private func edit() {
         guard allowEditing else { return }
         complete(action: .edit)
