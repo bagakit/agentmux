@@ -136,6 +136,20 @@ describe('mounted player', () => {
     outside.remove()
   })
 
+  it('an input indicator leaves when its own animation ends, not on a separate timer', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { paused: true, ended: false, duration: 60 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    const group = container.querySelector<HTMLElement>('[role="group"]')!
+    await act(async () => { group.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true })) })
+    const indicator = () => container.querySelector('.media-player__indicator')
+    expect(indicator()?.textContent).toBe('+10s')
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1_200)) })
+    expect(indicator()).not.toBeNull()
+    await act(async () => { indicator()!.dispatchEvent(new Event('animationend', { bubbles: true })) })
+    expect(indicator()).toBeNull()
+  })
+
   it('a live stream shows the live badge, never a duration, and goes back to live when behind', async () => {
     await render(<MediaPlayer lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
     const video = media()
