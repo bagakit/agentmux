@@ -47,6 +47,9 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
   <div style="position:absolute;left:40px;top:300px">
     <input id="under" aria-label="Under">
     <span id="host"></span>
+    <span id="closed"></span>
+    <x-switch id="sw" role="switch" aria-label="Wifi"></x-switch>
+    <input id="bounce" aria-label="Bounce"><input id="elsewhere" aria-label="Elsewhere">
   </div>
   <dialog id="modal"><button>Modal button</button></dialog>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
@@ -63,6 +66,16 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     // A web component: its fields live in an open shadow root, so document.activeElement is the host.
     const shadow = document.getElementById('host').attachShadow({ mode: 'open' })
     shadow.innerHTML = '<input id="sdate" type="date" aria-label="Shadow date"><input id="sname" aria-label="Shadow name">'
+    // A closed shadow root: the page cannot reach in, and neither can a walk down from document.
+    const closed = document.getElementById('closed').attachShadow({ mode: 'closed' })
+    closed.innerHTML = '<input type="date" aria-label="Closed date"><input aria-label="Closed name">'
+    window.closedValues = () => [...closed.querySelectorAll('input')].map((input) => input.value)
+    // A switch whose role sits on the host and which delegates focus to a button inside, as component libraries do.
+    customElements.define('x-switch', class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'open', delegatesFocus: true }).innerHTML = '<button>toggle</button>' }
+    })
+    // A field whose page handler sends focus elsewhere: typing would land in the other field.
+    document.getElementById('bounce').addEventListener('focus', () => document.getElementById('elsewhere').focus())
   </script>
 </body></html>`
 
@@ -138,6 +151,12 @@ app.whenReady().then(async () => {
     await contents.executeJavaScript('document.getElementById("under").focus()')
     await act('shadowDate', 'fillInput', [ref('Shadow date'), '2026-03-04'], shadowRead('sdate'))
     await act('shadowName', 'fillInput', [ref('Shadow name'), 'Ada'], shadowRead('sname'))
+    await contents.executeJavaScript('document.getElementById("under").focus()')
+    await act('closedDate', 'fillInput', [ref('Closed date'), '2026-03-04'], () => contents.executeJavaScript('({ value: window.closedValues()[0], focus: document.activeElement && document.activeElement.id })'))
+    await act('closedName', 'fillInput', [ref('Closed name'), 'Cy'], () => contents.executeJavaScript('({ value: window.closedValues()[1], focus: document.activeElement && document.activeElement.id })'))
+    await act('switchKey', 'pressKey', [ref('Wifi'), 'Enter'], () => contents.executeJavaScript('document.activeElement && document.activeElement.id'))
+    await contents.executeJavaScript('document.getElementById("under").focus()')
+    await act('bounce', 'fillInput', [ref('Bounce'), 'Dee'], () => contents.executeJavaScript('({ bounce: document.getElementById("bounce").value, elsewhere: document.getElementById("elsewhere").value, focus: document.activeElement && document.activeElement.id })'))
     // A modal dialog makes the rest of the page inert; a field there cannot take focus or a value.
     await contents.executeJavaScript('document.getElementById("modal").showModal()')
     await act('inertDate', 'fillInput', [ref('When'), '2026-05-06'], () => value('when'))
@@ -301,10 +320,19 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(actions.agree!.error).toContain('checkbox input, which takes a click')
   }, 240_000)
 
-  it('fields inside an open shadow root take their value and give focus back; a field behind a modal dialog is refused', async () => {
+  it('fields in open and closed shadow roots and a focus-delegating host take input and give focus back; a field behind a modal or one that sends focus away is refused', async () => {
     const { actions } = await probe()
     expect(actions.shadowDate, actions.shadowDate?.error).toMatchObject({ ok: true, value: { value: '2026-03-04', focus: 'under' } })
     expect(actions.shadowName, actions.shadowName?.error).toMatchObject({ ok: true, value: { value: 'Ada', focus: 'under' } })
+    // A closed shadow root cannot be walked into from document; its fields are judged from their own side.
+    expect(actions.closedDate, actions.closedDate?.error).toMatchObject({ ok: true, value: { value: '2026-03-04', focus: 'under' } })
+    expect(actions.closedName, actions.closedName?.error).toMatchObject({ ok: true, value: { value: 'Cy', focus: 'under' } })
+    // The host keeps focus while its inner button has it, so the key reaches the switch.
+    expect(actions.switchKey, actions.switchKey?.error).toMatchObject({ ok: true })
+    expect(order(actions.switchKey)).toContain('keydown:sw')
+    // The page sent focus to another field: refused before typing, and focus goes back to the person's field.
+    expect(actions.bounce, actions.bounce?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: { bounce: '', elsewhere: '', focus: 'under' } })
+    expect(actions.bounce!.error).toContain('the page moved focus elsewhere')
     for (const label of ['inertDate', 'inertName'] as const) {
       expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: false, effects: 'not-dispatched' })
       expect(actions[label]!.error).toContain('inert (behind a modal dialog)')
