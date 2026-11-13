@@ -368,6 +368,10 @@ try {
   report.metadataIssue = await evaluate(`(() => {const issue=document.querySelector('.capsule-chrome__issue'),question=document.querySelector('.capsule-question');return {present:!!issue,afterQuestion:!!(issue&&question&&(question.compareDocumentPosition(issue)&Node.DOCUMENT_POSITION_FOLLOWING)),retry:issue?.querySelector('button')?.textContent??null}})()`)
   assert.deepEqual(report.metadataIssue, { present: true, afterQuestion: true, retry: 'Retry' }, 'A failed page refresh is a quiet status after the question, with its own retry')
   await writeFile(join(evidence!, `${phase}-metadata-unavailable.png`), (await win.webContents.capturePage()).toPNG())
+  // The quiet refresh status sits after the answer actions; bring it into view for its own frame.
+  await evaluate(`document.querySelector('.capsule-chrome__issue').scrollIntoView({ block: 'end' })`)
+  await delay(150)
+  await writeFile(join(evidence!, `${phase}-metadata-issue.png`), (await win.webContents.capturePage()).toPNG())
   await until("Boolean([...document.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === 'Refresh' && !button.disabled))", 'The original failed metadata refresh must settle before recovery')
   metadataUnavailable = false
   await focusReader()
