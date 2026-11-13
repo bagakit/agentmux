@@ -52,6 +52,9 @@
 .collaboration-map__body { position: relative; display: flex; flex: 1; min-height: 0; }
 .collaboration-canvas { container-type: inline-size; position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
 .collaboration-canvas .react-flow__background { opacity: .15; }
+/* The canvas itself is the keyboard camera; it shows focus only for keyboard reach. */
+.collaboration-canvas:focus { outline: none; }
+.collaboration-canvas:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .collaboration-canvas .react-flow__viewport-portal { pointer-events: none; }
 .collaboration-canvas .react-flow__edgelabel-renderer { z-index: 1; }
 .collaboration-connections .react-flow__edge { cursor: pointer; }
@@ -177,6 +180,7 @@
 /* Overview retains original Agent endpoints. Labels and marks disclose the same world. */
 .collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
 /* Match XYFlow's Panel layer above its full-canvas renderer hit surface. */
+/* Inside the camera surface, above the viewport (z 2) and its portals, below the HUD. */
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .collaboration-agent__dot .collaboration-agent__avatar { grid-area: 1 / 1; }

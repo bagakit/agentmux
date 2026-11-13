@@ -1,4 +1,5 @@
 import { type CSSProperties, type RefObject, useContext, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore, useStoreApi } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -206,9 +207,12 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     follow(store.getState())
     return store.subscribe(follow)
   }, [store, camera, labels, geometry])
-  return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
+  // Names live inside the camera surface, so wheel, pinch and drag over them move the map.
+  const surface = useStore(state => state.domNode?.querySelector<HTMLElement>('.react-flow__renderer') ?? null)
+  const layer = <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
     <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + summaryBottom })} />
   </div>)}</div>
+  return surface ? createPortal(layer, surface) : layer
 })
 
 const PAN_SETTLE_MS = 120
@@ -241,7 +245,7 @@ function RegionIdentity({ data, hasChildren, onToggle }: { data: Region; hasChil
   })))
   const host = hostIdentityProjection(area.hostId, configuredHost)
   return <>
-    <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${area.name} · ${data.totalMembers} Agents${hasChildren ? ' including subspaces' : ''}`} onClick={data.onLocate} title={area.issue ?? `${COLLABORATION_AREA_KINDS[area.kind].label} · ${area.name}`}>
+    <button type="button" className="collaboration-area__summary nodrag" aria-label={`Locate ${area.name} · ${data.totalMembers} Agents${hasChildren ? ' including subspaces' : ''}`} onClick={data.onLocate} title={area.issue ?? `${COLLABORATION_AREA_KINDS[area.kind].label} · ${area.name}`}>
       <span className="collaboration-area__identity" aria-hidden="true">{target ? <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcon}
         {...(area.workspaceId ? { workspaceId: area.workspaceId } : {})} folderIdentityKey={target.kind === 'folder' ? target.key : undefined}
         avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.avatarTarget?.objectKey}
@@ -249,7 +253,7 @@ function RegionIdentity({ data, hasChildren, onToggle }: { data: Region; hasChil
       <span className="collaboration-area__name"><strong>{area.name}</strong><span className="collaboration-area__meta"><em>{COLLABORATION_AREA_KINDS[area.kind].label}</em><small>{data.totalMembers} {data.totalMembers === 1 ? 'Agent' : 'Agents'}{hasChildren ? ' incl. subspaces' : ''}</small>{host.kind !== 'local' ? <HostBadge host={host} context="Host" /> : null}</span></span>
       <i className="collaboration-area__activity" data-kind={data.activity?.pulse.kind} aria-hidden={!data.activity || undefined} aria-label={data.activity ? data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update' : undefined} />
     </button>
-    {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal connections<SemanticIcon name="navigation.next" size={11} /></button> : null}
-    {data.totalMembers || hasChildren ? <button type="button" className="collaboration-area__fold nodrag nopan" aria-label={`${data.folded ? 'Expand' : 'Collapse'} ${area.name}`} aria-expanded={!data.folded} onClick={onToggle}><SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /></button> : null}
+    {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag" aria-label={`${area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal connections<SemanticIcon name="navigation.next" size={11} /></button> : null}
+    {data.totalMembers || hasChildren ? <button type="button" className="collaboration-area__fold nodrag" aria-label={`${data.folded ? 'Expand' : 'Collapse'} ${area.name}`} aria-expanded={!data.folded} onClick={onToggle}><SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /></button> : null}
   </>
 }

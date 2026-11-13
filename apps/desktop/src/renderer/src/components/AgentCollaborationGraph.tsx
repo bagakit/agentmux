@@ -1,4 +1,4 @@
-import { createContext, useContext, type CSSProperties, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Background, BaseEdge, EdgeLabelRenderer, ReactFlow, ViewportPortal, useReactFlow, useStore, type Node, type NodeHandle, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
@@ -67,7 +67,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   const hull = collaborationVisibleHull(data.box, zoom, glyph.overviewRadius, glyph.pointRadius, preferences), markScale = collaborationOverviewScale(data.box, zoom, glyph.overviewRadius * 2)
   // Names align on the largest disc so a recency step never shifts the column.
   const identityInk = collaborationIdentityInk(hull.width, zoom, lod.identity, markScale, COLLABORATION_OVERVIEW_MARK_SIZE / 2)
-  return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag nopan`} data-collaboration-agent={agent.id} data-recency={data.step} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
+  return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag`} data-collaboration-agent={agent.id} data-recency={data.step} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
     style={{ ...collaborationMapTextBudget(zoom), '--collaboration-mark-scale': markScale, '--collaboration-identity': lod.identity, '--collaboration-detail': detail, '--collaboration-avatar-center': `${identityInk.avatarCenter}px` } as CSSProperties}
     onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={event => { data.onPreview(true); setFocusedLayer((event.target as HTMLElement).closest<HTMLElement>('[data-map-layer]')?.dataset.mapLayer as 'identity' | 'detail' ?? null) }}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) { setFocusedLayer(null); data.onPreview(false) } }}>
@@ -298,12 +298,29 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     if (!sameItems(heldPaths.current, paths)) heldPaths.current = paths
     return heldPaths.current
   }, [allConnections, layout.paths, geometry, pulses, selection, agents, steps, areaNames, peeked])
+  /** Arrow keys pan a share of the viewport, +/- zoom about its centre, Shift+1 shows the whole
+   * map. Only the canvas itself takes these keys; a focused control, search or Reader keeps them. */
+  const keyboardCamera = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const instance = flow.current
+    if (event.target !== event.currentTarget || !instance || event.metaKey || event.ctrlKey || event.altKey) return
+    const { x, y, zoom } = instance.getViewport(), bounds = event.currentTarget.getBoundingClientRect()
+    const share = event.shiftKey ? .5 : .15, step = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key]
+    let move: ((duration: number) => Promise<boolean> | undefined) | undefined
+    if (step) move = duration => instance.setViewport({ x: x + step[0]! * bounds.width * share, y: y + step[1]! * bounds.height * share, zoom }, { duration })
+    else if (event.key === '+' || event.key === '=') move = duration => instance.zoomIn({ duration })
+    else if (event.key === '-' || event.key === '_') move = duration => instance.zoomOut({ duration })
+    else if (event.key === '!' || event.shiftKey && event.code === 'Digit1') move = duration => instance.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })
+    if (!move) return
+    event.preventDefault(); layout.settle(); ++gestures.current; animateCamera(move)
+  }
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
   const areaNodes = useMemo(() => nodes.filter((node): node is AreaNode => node.type === 'area'), [nodes])
-  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph">
+  return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
+    tabIndex={0} aria-roledescription="map" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Shift+1" onKeyDown={keyboardCamera}>
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
-      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null } }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
+      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null } }}
+      panOnScroll panOnScrollSpeed={1} paneClickDistance={4} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
       <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} />
       <Background gap={22} size={1} />
     </ReactFlow>
@@ -359,7 +376,7 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   const horizontal = Math.abs(dx) >= Math.abs(dy)
   const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt, motion])
-  return <><g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
+  return <><g className={`react-flow__edge selectable collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
     style={{ pointerEvents: 'stroke' }} onMouseEnter={show} onMouseLeave={event => { if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear(); tooltip.hide() }
