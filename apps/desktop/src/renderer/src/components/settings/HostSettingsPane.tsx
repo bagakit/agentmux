@@ -348,7 +348,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
           {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your hosts'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add a remote host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
-      <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={dirty} resolution={resource} label="Save hosts" onSave={() => void save()} />
       <ConfirmationDialog
         open={active && removeRequest !== null}
         title="Remove remote host?"

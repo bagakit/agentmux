@@ -85,6 +85,6 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
       </aside></div>
     </section>
     {children}
-    <SettingsSaveBar save={save} dirty={draft.dirty} label="Save start page" onSave={() => void submit()} />
+    <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save start page" onSave={() => void submit()} />
   </div>
 }

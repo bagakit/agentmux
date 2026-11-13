@@ -42,6 +42,10 @@ export function useResourceDrafts<T extends object>(saved: Records<T>) {
   return {
     ...draft,
     dirty: !equal(draft.value, draft.expected),
+    /** After a conflict: drop every record draft and take the saved collection. */
+    useSaved: () => setDraft((current) => current.saving ? current : { ...current, value: saved, expected: saved }),
+    /** After a conflict: keep the record drafts and save them over the saved collection on the next Save. */
+    keepMine: () => setDraft((current) => current.saving ? current : { ...current, expected: saved }),
     setValue: (update: (current: Records<T>) => Records<T>) => setDraft((current) => ({ ...current, value: update(current.value) })),
     beginSave: (captured: Records<T> = draft.value) => {
       const expected = draft.expected

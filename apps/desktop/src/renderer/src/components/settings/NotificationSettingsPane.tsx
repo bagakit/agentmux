@@ -110,7 +110,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           />}
         </FormRow>
       </section>
-      <SettingsSaveBar save={saveState} dirty={modeDraft.dirty || soundDraft.dirty} label="Save notifications" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={modeDraft.dirty || soundDraft.dirty} resolution={{ useSaved: () => { modeDraft.useSaved(); soundDraft.useSaved() }, keepMine: () => { modeDraft.keepMine(); soundDraft.keepMine() } }} label="Save notifications" onSave={() => void save()} />
     </div>
   )
 }

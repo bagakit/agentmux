@@ -23,6 +23,6 @@ export function ChannelHeaderControl({ platform }: { platform: { adapterId: stri
   return <section className="channel-header-control" aria-label={`${platform.title} display`}>
     <label><span><strong>Show in Agent header</strong><small>This App only. Hiding the icon keeps messages running.</small></span>
       <input type="checkbox" aria-label={`Show ${platform.title} in Agent header`} checked={draft.value} onChange={event => draft.setValue(event.target.checked)} /></label>
-    {draft.dirty || save.state !== 'idle' ? <SettingsSaveBar save={save} dirty={draft.dirty} blocked={config ? undefined : 'app settings are still loading.'} label="Save display" onSave={() => void submit()} /> : null}
+    {draft.dirty || save.state !== 'idle' ? <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} blocked={config ? undefined : 'app settings are still loading.'} label="Save display" onSave={() => void submit()} /> : null}
   </section>
 }

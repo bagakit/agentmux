@@ -78,6 +78,6 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
         <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
       </div>}
     </section>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />
   </div>
 }

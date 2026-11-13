@@ -63,6 +63,6 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
         <button type="button" className="small-button" onClick={onOpen}>Open Mote Club<ThemeActionOpenExternalIcon size={14} aria-hidden="true" /></button>
       </div>
     </section>
-    <SettingsSaveBar save={save} dirty={draft.dirty} onSave={() => void commit()} />
+    <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} onSave={() => void commit()} />
   </div>
 }

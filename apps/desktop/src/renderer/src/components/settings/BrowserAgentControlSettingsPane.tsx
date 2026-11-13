@@ -74,6 +74,6 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
       </div>
       <BrowserAgentControlPreview preferences={value} active={active} dirty={draft.dirty} previewRef={preview.previewRef} returnAction={preview.returnAction} />
     </div>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save agent appearance" onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} label="Save agent appearance" onSave={() => void save()} />
   </div>
 }

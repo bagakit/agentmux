@@ -89,7 +89,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
         observedIds={directory.observedIds} />
       <RetainedBrowserUploads active={active} />
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
     </div>
   )
 }

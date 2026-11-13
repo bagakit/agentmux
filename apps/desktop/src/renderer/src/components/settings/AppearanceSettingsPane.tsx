@@ -226,7 +226,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
           })}
         </div>
       </section>
-      <SettingsSaveBar save={saveState} dirty={dirty} label="Save appearance" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={dirty} resolution={{ useSaved: () => { for (const field of [theme, app, appIcon, terminal, font, editorFont]) field.useSaved() }, keepMine: () => { for (const field of [theme, app, appIcon, terminal, font, editorFont]) field.keepMine() } }} label="Save appearance" onSave={() => void save()} />
     </div>
   )
 }

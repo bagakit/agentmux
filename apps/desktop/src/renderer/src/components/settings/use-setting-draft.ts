@@ -23,6 +23,10 @@ export function useSettingDraftRecord<T extends Record<keyof T, unknown>>(saved:
   return {
     ...draft,
     dirty: keys.some((key) => !equal(draft.value[key], draft.expected[key])),
+    /** After a conflict: drop this draft and take the saved value. */
+    useSaved: () => setDraft((current) => current.saving ? current : { ...current, value: saved, expected: saved }),
+    /** After a conflict: keep this draft and save it over the saved value on the next Save. */
+    keepMine: () => setDraft((current) => current.saving ? current : { ...current, expected: saved }),
     setField: <K extends keyof T>(key: K, value: T[K]) => setDraft((current) => ({
       ...current, value: { ...current.value, [key]: value }
     })),
@@ -47,6 +51,8 @@ export function useSettingDraft<T extends Scalar>(saved: T) {
     expected: draft.expected.value,
     dirty: draft.dirty,
     setValue: (value: T) => draft.setField('value', value),
+    useSaved: draft.useSaved,
+    keepMine: draft.keepMine,
     beginSave: () => {
       const submitted = draft.beginSave()
       return { value: submitted.value.value, expected: submitted.expected.value, finish: submitted.finish }

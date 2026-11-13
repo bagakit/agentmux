@@ -92,7 +92,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
           {pending ? 'Requesting…' : 'Show crash log'}
         </button>
       </div>
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save path preference" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} label="Save path preference" onSave={() => void save()} />
     </div>
   )
 }

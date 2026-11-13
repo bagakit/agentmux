@@ -70,7 +70,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
         </label>)}
       </fieldset>
       <p className="settings-workflows__note">Applies to newly opened inputs. Your current layout and drafts stay as you left them.</p>
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save layout" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} label="Save layout" onSave={() => void save()} />
     </section>
     <section className="settings-group" aria-label="Shortcut input" data-message-tool-completion>
       <header><span>Shortcut input</span></header>
@@ -87,7 +87,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
       <label className="message-tool-keywords" data-settings-field="completion-keywords"><input type="checkbox" checked={inputDraft.value.keywords}
         onChange={event => inputDraft.setField('keywords', event.target.checked)} />Suggest saved prompts by keyword</label>
       {inputError && <p id={errorId} className="settings-inline-error" role="alert">{inputError}</p>}
-      <SettingsSaveBar save={completionSave} dirty={inputDraft.dirty} blocked={inputError || undefined} label="Save shortcut input" onSave={() => void saveCompletion()} />
+      <SettingsSaveBar save={completionSave} dirty={inputDraft.dirty} resolution={inputDraft} blocked={inputError || undefined} label="Save shortcut input" onSave={() => void saveCompletion()} />
     </section>
     <details className="message-tool-shortcuts" data-settings-field="message-shortcuts">
       <summary>Message Tool keyboard shortcuts <span>Sending, steering and suggestions</span></summary>

@@ -441,7 +441,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           </div>
         </div>
       <div className="settings-agent-save" hidden={scope !== 'templates'}>
-        <SettingsSaveBar save={saveState} dirty={dirty} label="Save all executors" onSave={() => void saveDrafts(() => drafts)} />
+        <SettingsSaveBar save={saveState} dirty={dirty} resolution={resource} label="Save all executors" onSave={() => void saveDrafts(() => drafts)} />
       </div>
     </div>
   )

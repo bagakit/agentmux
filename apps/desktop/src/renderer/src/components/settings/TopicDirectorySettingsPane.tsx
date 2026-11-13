@@ -35,7 +35,7 @@ function TopicInitialViewSettings({ config }: Pick<SettingsPaneProps, 'config'>)
       </label>)}
     </fieldset>
     <p className="settings-workflows__note">Applies when a new Topic directory panel opens. Your current view, selection and reading position stay as you left them.</p>
-    <SettingsSaveBar save={save} dirty={draft.dirty} label="Save Topic default" onSave={() => void commit()} />
+    <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save Topic default" onSave={() => void commit()} />
   </section>
 }
 

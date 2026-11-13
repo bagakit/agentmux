@@ -30,6 +30,6 @@ export function ContinuationSettingsPane({ preferences, onSave }: {
       <p className="continuity-hint">The continuation may open one new model turn. Unknown earlier input is never replayed. Saving these preferences starts no recovery and sends nothing.</p>
     </details>
     <p className="automation-save-scope">Saves continuation and interruption detection only. Starts no recovery and sends no message.</p>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save continuation" onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} label="Save continuation" onSave={() => void save()} />
   </section>
 }

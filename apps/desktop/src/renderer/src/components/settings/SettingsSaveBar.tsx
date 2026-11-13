@@ -10,22 +10,28 @@ const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 export function useSettingsSave() {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [error, setError] = useState('')
+  const [conflict, setConflict] = useState(false)
 
   async function run(operation: () => Promise<void>): Promise<boolean> {
     setState('saving')
     setError('')
+    setConflict(false)
     try {
       await operation()
       setState('saved')
       return true
     } catch (cause) {
       setError(presentError(cause))
+      // Recovery is offered from the owner's code, never from the wording of its message.
+      setConflict((cause as { code?: unknown } | null)?.code === 'CONFIG_CONFLICT')
       setState('error')
       return false
     }
   }
+  /** The person chose how to resolve the conflict; the bar returns to the draft's own state. */
+  function resolve() { setConflict(false); setError(''); setState('idle') }
 
-  return { state, error, saving: state === 'saving', run }
+  return { state, error, conflict, saving: state === 'saving', run, resolve }
 }
 
 /**
@@ -33,20 +39,31 @@ export function useSettingsSave() {
  * yet. They are separate facts: an unsaved draft that cannot be saved is still unsaved, never
  * "All changes saved".
  */
-export function SettingsSaveBar({ save, dirty, label = 'Save changes', onSave, blocked }: {
-  save: ReturnType<typeof useSettingsSave>
+/** A draft that can resolve a same-field conflict in place. */
+export type SettingsConflictResolution = { useSaved(): void; keepMine(): void }
+
+export function SettingsSaveBar({ save, dirty, label = 'Save changes', onSave, blocked, resolution }: {
+  save: Pick<ReturnType<typeof useSettingsSave>, 'state' | 'error' | 'saving'> & Partial<Pick<ReturnType<typeof useSettingsSave>, 'conflict' | 'resolve'>>
   dirty: boolean
   label?: string
   onSave: () => void
   blocked?: string | undefined
+  /** Present when the draft can adopt the saved value or keep itself over it after a conflict. */
+  resolution?: SettingsConflictResolution | undefined
 }) {
   const reason = dirty ? blocked?.trim() : undefined
+  const resolvable = Boolean(save.conflict && resolution && !save.saving)
+  const choose = (pick: (resolution: SettingsConflictResolution) => void) => { pick(resolution!); save.resolve?.() }
   return (
-    <div className="settings-pane-actions" data-settings-save-bar data-settings-save-blocked={reason ? '' : undefined}>
+    <div className="settings-pane-actions" data-settings-save-bar data-settings-save-blocked={reason ? '' : undefined} data-settings-conflict={resolvable ? '' : undefined}>
       <span className={`settings-save-feedback ${save.error ? 'settings-inline-error' : ''}`} role={save.error ? 'alert' : 'status'}>
         {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> Saving changes…</> : reason ? `Can’t save yet — ${reason}` : dirty ? 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> Changes saved</> : 'All changes saved'}
       </span>
       <Button variant="primary" aria-busy={save.saving} disabled={save.saving || !dirty || Boolean(reason)} onClick={onSave}>{label}</Button>
+      {resolvable ? <span className="settings-conflict-actions">
+        <Button data-settings-conflict-action="use-saved" onClick={() => choose(item => item.useSaved())}>Use saved</Button>
+        <Button data-settings-conflict-action="keep-mine" onClick={() => choose(item => item.keepMine())}>Keep mine</Button>
+      </span> : null}
     </div>
   )
 }

@@ -62,6 +62,6 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       <button type="button" className="small-button" onClick={onOpenGoals}>Open Goals</button>
       </div>
     </section>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} resolution={{ useSaved: () => { for (const field of [draft, view, finished, supervisor]) field.useSaved() }, keepMine: () => { for (const field of [draft, view, finished, supervisor]) field.keepMine() } }} onSave={() => void save()} />
   </div>
 }

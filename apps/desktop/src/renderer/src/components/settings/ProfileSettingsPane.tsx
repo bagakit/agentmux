@@ -102,6 +102,6 @@ export function ProfileSettingsPane({ profile, onSave }: {
       </label>
       <p className="settings-profile__note">Saved on this Mac. Your photo stays in conversations; only text is shared. Authorized agents can also read your saved profile through the settings CLI.</p>
     </section>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />
   </div>
 }

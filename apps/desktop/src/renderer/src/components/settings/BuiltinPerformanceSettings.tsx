@@ -49,6 +49,6 @@ export function BuiltinPerformanceSettings({ performance, active, onSave }: {
       <p className="toolkit-settings__locked"><ThemeStatusLockedIcon size={13} /><span>Official, read-only script. Uses the same public CLI queries available to you.</span></p>
     </section>
     <p className="settings-hint">Turning this off hides the entry and prevents new Performance observations. It does not stop your agents.</p>
-    <SettingsSaveBar save={save} dirty={draft.dirty} label="Save toolkit" onSave={() => void submit()} />
+    <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save toolkit" onSave={() => void submit()} />
   </div>
 }

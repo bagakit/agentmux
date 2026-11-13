@@ -60,6 +60,6 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
           <Icon size={17} aria-hidden="true" /><span><strong>{label}</strong><small>{description}</small></span><ThemeActionOpenExternalIcon size={14} aria-hidden="true" />
         </button>)}</div>
     </section>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />
   </div>
 }
