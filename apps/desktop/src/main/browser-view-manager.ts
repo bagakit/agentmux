@@ -56,8 +56,8 @@ import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
-import { beginOwnDispatch, isOwnDispatch, ownDispatchMark, ownDispatchSince, type BrowserOwnDispatch } from './browser-own-dispatch.js'
-import { installBrowserPageInterrupts, describeBrowserPageDialog, BROWSER_PAGE_DIALOG_ANSWERS, type BrowserPageInterrupts } from './browser-page-interrupts.js'
+import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
+import { installBrowserPageInterrupts, describeBrowserPageDialog, BROWSER_PAGE_DIALOG_ANSWERS, BROWSER_PAGE_MAIN_READS, type BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from './browser-step-effects.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
@@ -269,7 +269,7 @@ type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: Brows
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
-  !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name) && !BROWSER_PAGE_DIALOG_ANSWERS.has(name)))
+  !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name) && !BROWSER_PAGE_DIALOG_ANSWERS.has(name) && !BROWSER_PAGE_MAIN_READS.has(name)))
 
 
 // Pure hover and motion do not establish active document use; other native input is retained.
@@ -3461,8 +3461,10 @@ export class BrowserViewManager {
           } else if (BROWSER_WAIT_PAGE_CALLS.has(name)) await feedback?.clear()
           else await feedback?.observe()
           if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) requireCurrentDocumentOperation()
-          // A dialog opening during the call ends it at once; whether Main's input went out decides its effect.
-          const inputMark = ownDispatchMark(observingView.webContents)
+          // A dialog opening during the call ends it at once. A call that can change the page (Core's act or
+          // navigate effect) may already have changed it, by input or by script, so its effect is unknown;
+          // only a read-only call can say nothing reached the page.
+          const changesPage = BROWSER_ACTION_PAGE_CALLS.has(name)
           const call = () => dispatch(name, args, { beforeAction: () => beforeAction(step),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
               dispatched: () => feedback.clickConfirmed(action)
@@ -3473,8 +3475,8 @@ export class BrowserViewManager {
               beforeAction(step)
             } } : {}) })
           // An answer is not raced: the page may open its next dialog before the answer's reply arrives.
-          value = interrupts && !BROWSER_PAGE_DIALOG_ANSWERS.has(name)
-            ? await interrupts.race(call, () => ownDispatchSince(observingView.webContents, inputMark)) : await call()
+          value = interrupts && !BROWSER_PAGE_DIALOG_ANSWERS.has(name) && !BROWSER_PAGE_MAIN_READS.has(name)
+            ? await interrupts.race(call, () => changesPage) : await call()
           if (action !== undefined) await feedback?.completeAction(action)
         }
         catch (error) {

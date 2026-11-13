@@ -748,8 +748,21 @@ function sanitizeScalar(value: unknown): unknown {
   if (value === null || typeof value === 'boolean') return value
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (typeof value === 'string') return clamp(value)
+  // click's {button, count} is a fixed, harmless shape that replay needs to press the same way.
+  const click = clickReplayOptions(value)
+  if (click) return click
   // Keep replay records inspectable without accidentally writing page objects, cookies, or blobs.
   return typeof value === 'undefined' ? null : `[${typeof value}]`
+}
+
+/** A click options object kept for replay: only a known button and a count of 1 or 2. Anything else is not kept. */
+function clickReplayOptions(value: unknown): { button?: 'left' | 'middle' | 'right'; count?: 1 | 2 } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const { button, count, ...rest } = value as { button?: unknown; count?: unknown }
+  if (Object.keys(rest).length) return null
+  if (button !== undefined && button !== 'left' && button !== 'middle' && button !== 'right') return null
+  if (count !== undefined && count !== 1 && count !== 2) return null
+  return { ...(button === undefined ? {} : { button }), ...(count === undefined ? {} : { count }) } as { button?: 'left' | 'middle' | 'right'; count?: 1 | 2 }
 }
 
 function historyWindow(operations: BrowserOperation[], maxOperations: number): BrowserOperation[] {

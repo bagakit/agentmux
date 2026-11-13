@@ -92,7 +92,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'hover', effect: 'act', summary: 'move the pointer over an element' },
   { name: 'scroll', effect: 'act', summary: 'scroll the page or an element' },
   { name: 'waitForElement', effect: 'wait', summary: 'wait until an element is there; {exact: true, role} matches one name exactly' },
-  { name: 'waitForUrl', effect: 'wait', summary: 'wait until this page is at a URL: a full URL, {contains} or {pattern}; returns {url, navigationId}' },
+  { name: 'waitForUrl', effect: 'wait', summary: 'wait until this page is at a URL: a full URL or {contains}; returns {url, navigationId}' },
   { name: 'waitForLoad', effect: 'wait', summary: 'wait for navigation to settle' },
   { name: 'waitForNetworkIdle', effect: 'wait', summary: 'wait until requests stop' },
   { name: 'wait', effect: 'wait', summary: 'wait a fixed duration' },

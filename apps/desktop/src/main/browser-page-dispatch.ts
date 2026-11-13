@@ -126,13 +126,21 @@ function clickOptions(raw: unknown): { button: 'left' | 'middle' | 'right'; coun
   return { button, count }
 }
 
-/** waitForUrl's condition: a whole URL, a part of one, or a regex source. Anything else is refused. */
+/**
+ * waitForUrl's condition: a whole URL or a part of one. A whole URL is compared as Chromium reports it,
+ * so `https://example.com` matches its normalized `https://example.com/`. No regex is accepted: it
+ * would run program-supplied code on Main, where one bad pattern freezes every window; a program that
+ * needs a pattern tests pageInfo().url in its own process.
+ */
 function urlCondition(wanted: unknown): (url: string) => boolean {
-  if (typeof wanted === 'string') return url => url === wanted
-  const condition = wanted !== null && typeof wanted === 'object' ? wanted as { contains?: unknown; pattern?: unknown } : {}
+  if (typeof wanted === 'string') {
+    let whole = wanted
+    try { whole = new URL(wanted).href } catch { /* Not a parseable URL; compared as written. */ }
+    return url => url === whole
+  }
+  const condition = wanted !== null && typeof wanted === 'object' ? wanted as { contains?: unknown } : {}
   if (typeof condition.contains === 'string') { const part = condition.contains; return url => url.includes(part) }
-  if (typeof condition.pattern === 'string') { const pattern = new RegExp(condition.pattern); return url => pattern.test(url) }
-  throw new TypeError('waitForUrl takes a URL string, {contains: text} or {pattern: regex source}')
+  throw new TypeError('waitForUrl takes a URL string or {contains: text}. For a pattern, test pageInfo().url in your program.')
 }
 
 function requireString(value: unknown, name: string): string {
@@ -992,7 +1000,7 @@ export function createBrowserPageDispatch(
       }
       case 'waitForUrl': {
         // The page Main reports, not the page's own location: a pushState that Main has not seen is
-        // not a navigation it can act on. A string matches the whole URL; {contains} or {pattern} match part of it.
+        // not a navigation it can act on. A string matches the whole URL; {contains} matches part of it.
         const wanted = args[0]
         const timeoutMs = typeof args[1] === 'number' ? args[1] : DEFAULT_WAIT_MS
         const test = urlCondition(wanted)

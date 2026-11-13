@@ -34,7 +34,7 @@ export function compileBrowserSteps(input: { url: string; steps: BrowserReplaySt
         const matches = page.nodes.filter((node) => node.role === expected.role && node.name === expected.name);
         const targetNode = matches[expected.ordinal - 1];
         if (!targetNode || matches.length !== expected.count) throw new Error('Replay target changed; inspect the page before retrying.');
-        await ${step.method}(targetNode.ref${step.method === 'click' || step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});
+        await ${step.method}(targetNode.ref${step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});
       }`
     }
     return `await ${step.method}(...${JSON.stringify(step.args)})`

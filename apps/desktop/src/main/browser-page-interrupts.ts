@@ -26,6 +26,13 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 /** The page functions that answer a dialog. They must reach the page while one is open, and are never raced by one. */
 export const BROWSER_PAGE_DIALOG_ANSWERS: ReadonlySet<string> = new Set(['acceptDialog', 'dismissDialog'])
 
+/**
+ * Page functions that read only what Main itself holds (the page's URL, title, navigation id and any
+ * held file chooser), never the document. They answer at once while a dialog is open, so they are
+ * neither refused nor raced; pageInfo is also how a program reads a held file chooser.
+ */
+export const BROWSER_PAGE_MAIN_READS: ReadonlySet<string> = new Set(['pageInfo', 'waitForUrl'])
+
 export type BrowserPageDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 export type BrowserPageDialog = { type: BrowserPageDialogType; message: string; url: string }
 export type BrowserPageDialogAnswer = { type: BrowserPageDialogType; accepted: boolean }
@@ -42,16 +49,33 @@ function pageMessage(message: string): string {
 
 /** What a program sees when a dialog stops its page call. */
 export function describeBrowserPageDialog(dialog: BrowserPageDialog): string {
+  // Navigation does not get past an open dialog (probed: gotoUrl stays pending), so only an answer is offered.
   const answer = dialog.type === 'alert' ? 'dismissDialog() closes it'
-    : dialog.type === 'beforeunload' ? 'only the person can decide to leave this page'
+    : dialog.type === 'beforeunload' ? 'dismissDialog() keeps the page; only the person can decide to leave it'
       : 'acceptDialog() or dismissDialog() answers it'
-  return `The page opened a ${dialog.type} dialog: ${pageMessage(dialog.message)}. While it is open the page cannot answer; ${answer}, or gotoUrl() leaves the page.`
+  return `The page opened a ${dialog.type} dialog: ${pageMessage(dialog.message)}. While it is open the page cannot answer; ${answer}.`
 }
 
 /** A chooser the page opened during the run, held so a program can fill it. */
 export type BrowserPageFileChooser = { handle: string; mode: 'single' | 'multiple'; backendNodeId: number; sessionId?: string }
 
 export type BrowserPageInterrupts = ReturnType<typeof installBrowserPageInterrupts>
+
+/**
+ * How long the owner waits on its own housekeeping commands. While a page dialog is open, Chromium
+ * holds the reply to Page.enable, Page.disable and Page.setInterceptFileChooserDialog until the dialog
+ * is answered (Electron 43, probed). Awaiting them unbounded would hang a run, and its Stop, behind a
+ * dialog. These replies are bookkeeping, not page actions, so a missing one is given up on.
+ */
+const HOUSEKEEPING_MS = 1_500
+
+/** Wait for a housekeeping reply, or give up after a bound; a late reply is ignored. */
+function bounded(command: Promise<unknown>): Promise<'ok' | 'timeout' | 'failed'> {
+  return Promise.race([
+    command.then(() => 'ok' as const, () => 'failed' as const),
+    new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), HOUSEKEEPING_MS))
+  ])
+}
 
 /**
  * Install the owner on one run's transport. Call `dispose()` before the session detaches; it removes
@@ -92,12 +116,15 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
   // File choosers are intercepted, so no native picker opens over the person's screen during a run.
   // A cross-site frame's chooser arrives on its own session, which needs its own interception.
   const intercept = (send: BrowserPageTransport['sendCommand']) =>
-    send('Page.enable', {}).then(() => send('Page.setInterceptFileChooserDialog', { enabled: true })).catch(() => {})
-  const ready = session.sendCommand('Page.enable', {}).then(async () => {
-    observing = true
-    await session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => {})
+    bounded(send('Page.enable', {}).then(() => send('Page.setInterceptFileChooserDialog', { enabled: true })))
+  // A dialog already open when the run starts holds Page.enable's reply; the run then goes on unobserved
+  // rather than waiting behind it, and its calls end on their own budget as before.
+  const ready = bounded(session.sendCommand('Page.enable', {})).then(async state => {
+    observing = state === 'ok'
+    if (!observing) return
+    await bounded(session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }))
     await Promise.all([...session.frames.values()].map(intercept))
-  }, () => { observing = false })
+  })
 
   // A person taking control ends Agent answers: the owner stops listening and never answers again.
   const onAbort = () => {
@@ -125,14 +152,16 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
 
     /**
      * Run one page call; if a dialog opens before it settles, it fails at once with a typed fact.
-     * `inputSent` says whether Main's own input went out during the call, which decides whether its
-     * effect is unknown (the gesture may have opened the dialog) or nothing was dispatched.
+     * `mayHaveActed` says whether the call can change the page; such a call's effect is unknown when it
+     * is cut short, and only a read-only one can say nothing was dispatched.
      */
-    async race<T>(call: () => Promise<T>, inputSent: () => boolean): Promise<T> {
+    async race<T>(call: () => Promise<T>, mayHaveActed: () => boolean): Promise<T> {
       if (disposed) return await call()
+      // The dialog may have opened between the caller's check and here; it would never announce again.
+      if (open) throw new BrowserLocalRecoveryFailure(describeBrowserPageDialog(open), 'page-dialog', 'not-dispatched')
       let reject!: (dialog: BrowserPageDialog) => void
       const interrupted = new Promise<never>((_resolve, fail) => {
-        reject = dialog => fail(new BrowserLocalRecoveryFailure(describeBrowserPageDialog(dialog), 'page-dialog', inputSent() ? 'unknown' : 'not-dispatched'))
+        reject = dialog => fail(new BrowserLocalRecoveryFailure(describeBrowserPageDialog(dialog), 'page-dialog', mayHaveActed() ? 'unknown' : 'not-dispatched'))
       })
       waiters.add(reject)
       const pending = call()
@@ -178,14 +207,15 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
       const dialog = open
       if (dialog && !options.signal.aborted) {
         leftOpen = dialog
-        await session.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
+        await bounded(session.sendCommand('Page.handleJavaScriptDialog', { accept: false }))
         open = null
       }
       if (observing) {
-        // Without this a person's later click on a file input would open nothing.
-        await session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})
-        await Promise.all([...session.frames.values()].map(send => send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})))
-        await session.sendCommand('Page.disable', {}).catch(() => {})
+        // Without this a person's later click on a file input would open nothing. Each reply is bounded:
+        // dismissing one dialog can open the next, which would hold these replies.
+        await bounded(session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }))
+        await Promise.all([...session.frames.values()].map(send => bounded(send('Page.setInterceptFileChooserDialog', { enabled: false }))))
+        await bounded(session.sendCommand('Page.disable', {}))
       }
     }
   }
