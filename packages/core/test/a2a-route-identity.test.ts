@@ -169,10 +169,10 @@ it('concurrent first bindings and two queue instances choose one original owner 
   expect((await f.queue.readJournal()).filter(item => item.kind === 'message-route')).toHaveLength(1)
 }, 20_000)
 
-it('retains the managed cross-owner refusal and the ordinary local public send', async () => {
+it('rejects managed remote immediate execution while retaining the ordinary local public send', async () => {
   const f = await fixture()
   const agent = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.path() }, credentials: f.source.credentials })
-  try { await expect(agent.call('agent.send', f.params)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' }) }
+  try { await expect(agent.call('agent.send', f.params)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' }) }
   finally { await agent.dispose() }
   expect(await f.queue.readMessageRoute(f.params.operationId, f.params.messageId)).toBeNull()
   f.setOccupant('source-agent')

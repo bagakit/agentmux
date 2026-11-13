@@ -92,3 +92,24 @@ it('keeps foreign outbox intents out of the native consumer and qualifies discov
   expect(events.events.flatMap(event => event.messages.map(message => message.messageId))).not.toContain('outsider-message')
   expect((await queue.listDispatches({ participantSessionId: 'same-session', limit: 1 }, async () => {}, f.a.runtimeId)).dispatches).toHaveLength(1)
 })
+
+it('persists only the exact target Core signed inbox proof without changing outbox or granting reverse source trust', async () => {
+  const f = await fixture(), path = join(f.root, 'a', 'receipts.ndjson'), queue = new DurableAgentMuxMessageQueue(path)
+  await queue.append({ ...f.packet.envelope, execution: 'default', sourceChannel: 'cli' }, { deliveryMode: 'outbox', provenance: f.packet.provenance })
+  const boundary = await queue.messageChanges()
+  await queue.listMessageEvents({ participantSessionId: 'same-session' }, async () => {}, f.a.runtimeId)
+  const receipt = await f.target.attestMessageInboxReceipt({ kind: 'recipient-inbox', messageId: f.packet.envelope.messageId,
+    operationId: f.packet.envelope.operationId, intentDigest: f.packet.provenance.intentDigest, sequence: 17, deliveryMode: 'reference', diskDurability: 'confirmed' })
+  await expect(queue.recordPeerInbox({ ...receipt, signature: 'A'.repeat(86) })).rejects.toMatchObject({ code: 'AGENT_MESSAGE_RECEIPT_INVALID' })
+  expect((await queue.readByMessageId(f.packet.envelope.messageId))?.peerInbox).toBeUndefined()
+  const wrongTarget = await f.source.attestMessageInboxReceipt({ kind: 'recipient-inbox', messageId: receipt.messageId, operationId: receipt.operationId,
+    intentDigest: receipt.intentDigest, sequence: 17, deliveryMode: 'reference', diskDurability: 'confirmed' })
+  await expect(queue.recordPeerInbox(wrongTarget)).rejects.toMatchObject({ code: 'AGENT_MESSAGE_AUTHORITY_INVALID' })
+  await queue.recordPeerInbox(receipt); await queue.recordPeerInbox(receipt)
+  const saved = await new DurableAgentMuxMessageQueue(path).readByMessageId(receipt.messageId)
+  expect(saved).toMatchObject({ peerInbox: receipt, deliveryMode: 'outbox', delivery: { state: 'queued' }, transport: { state: 'outbox' } })
+  expect((await queue.readJournal()).filter(record => record.kind === 'message-peer-inbox')).toHaveLength(1)
+  expect((await queue.messageChanges(boundary.cut)).changes.map(change => change.recordKind)).toContain('message-peer-inbox')
+  expect((await queue.listMessageEvents({ participantSessionId: 'same-session' }, async () => {}, f.a.runtimeId)).events.map(event => event.kind)).toContain('message-peer-inbox')
+  expect(await f.source.listTrustedMessageSources()).toEqual([])
+})

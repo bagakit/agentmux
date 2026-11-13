@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const mutations: Record<string, [string, string, string]> = {
   signature: ['agent-creation-authority.ts', "if (bytes.toString('base64url') !== signature || !verify(null, Buffer.from(JSON.stringify(payload)), publicKey(trust.publicKey).key, bytes)) failure('The original message source signature is invalid.'", "if (false) failure('The original message source signature is invalid.'"],
-  digest: ['agent-message-federation.ts', "messagePacketDigest({ envelope, execution: 'default', sourceChannel }) !== provenance.intentDigest", 'false']
+  digest: ['agent-message-federation.ts', "messagePacketDigest({ envelope, execution: 'default', sourceChannel }) !== provenance.intentDigest", 'false'],
+  'inbox-signature': ['agent-creation-authority.ts', "if (key.fingerprint !== receipt.keyFingerprint || bytes.toString('base64url') !== signature ||\n    !verify(null, Buffer.from(JSON.stringify(payload)), key.key, bytes))", 'if (false)']
 }
 export default defineConfig({
   root: resolve(import.meta.dirname, '../../..'),
@@ -15,5 +16,5 @@ export default defineConfig({
     if (source.split(mutation[1]).length !== 2) throw new Error('Message authority mutation anchor is not unique')
     return { code: source.replace(mutation[1], mutation[2]), map: null }
   } }],
-  test: { include: ['packages/core/test/agent-message-authority.test.ts', 'packages/core/test/agent-creation-authority.test.ts'], maxWorkers: 1, passWithNoTests: false }
+  test: { include: process.env.AGENTMUX_TEST_MESSAGE_ROUTE_ONLY === '1' ? ['packages/core/test/a2a-route-identity.test.ts'] : ['packages/core/test/agent-message-authority.test.ts', 'packages/core/test/agent-creation-authority.test.ts'], maxWorkers: 1, passWithNoTests: false }
 })
