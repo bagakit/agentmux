@@ -246,7 +246,7 @@ git log -L 3660,3710:packages/core/src/client.ts
     调用方能满足它的前提**。一条存在但无人能触发的恢复路径，在可达性上等于不存在。
     **而论证不可达时，别用「数调用方」——要用「有没有签名能传进去」**：前者少数一个就崩（本条初稿
     就漏了第三个调用方），后者是结构性的，一个新调用方也绕不过去。
-    （tracker `f-25q8fccdm` T-007 认领修复。）
+    （当时由本机 tracker `f-25q8fccdm` T-007 认领修复；该记录不随仓库分发。）
   - `composer-submit-mode.ts:60-62`（本文初稿未覆盖，见下）——**这一个是 permanent-when-idle**。
 
   **本条只覆盖 4 个根因里的 1 个**（epoch 那一个，连带解决共根的反例 3）。
@@ -388,7 +388,7 @@ git log -L 3660,3710:packages/core/src/client.ts
   **一个活着的 Agent 仍然可能永久失能。** 这是本文最重要的遗留。
   结构解法（实时准入查询 / 屏幕证据铸 epoch）见改进措施 2，未动工。
 - **改进措施 2 的两条路线尚未择一**：「让 epoch 可重铸」与「根本不持久化许可」
-  是两个不同量级的改动，后者更 root 也更大。tracker `f-25q8fccdm`（proposal）持有这项决策。
+  是两个不同量级的改动，后者更 root 也更大。当时由本机 tracker `f-25q8fccdm`（proposal）持有这项决策，该记录不随仓库分发；现行发送准入约束见[Steer 与 Provider 输入能力](../design/behavior/agent-capabilities-and-messaging.md#steer-与-provider-输入能力)。
 - **一条已知的假信心**：`readiness-consumed-recovery-invariant.test.ts` 只覆盖
   「回执到了但 `status()` 失败」。它**不覆盖**回执根本没到的那条路——
   而那正是线上走的路。测试变绿不等于 P0 闭合。
