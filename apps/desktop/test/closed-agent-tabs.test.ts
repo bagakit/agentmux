@@ -98,7 +98,7 @@ it('Stop & Close persists the deletion when run-removed arrives before the stop 
   vi.mocked(api.sessions.stop).mockImplementation(async () => { retire(); await Promise.resolve() })
   expect(await useAppStore.getState().closeTab('workspace', 'group', originalTab.id)).toBe(true)
   await expectClosed()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(closed.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(closed.control, expect.any(String))
 })
 
 it('buffered retirement during reconnect commits the same spatial deletion', async () => {

@@ -210,7 +210,7 @@ it.each(['more','context'] as const)('the %s Stop action confirms the named orig
   expect(stop).not.toHaveBeenCalled()
   const confirm=[...dialog!.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Stop Agent')
   expect(confirm).toBeDefined();await act(async()=>confirm!.click())
-  expect(stop).toHaveBeenCalledExactlyOnceWith(before[0]!.control)
+  expect(stop).toHaveBeenCalledExactlyOnceWith(before[0]!.control, expect.any(String))
   expect(useAppStore.getState().sessions).toEqual(before)
   expect(useAppStore.getState().agentComposerDrafts[sessionIds[1]!]).toBe('Keep this draft')
 })
@@ -224,7 +224,7 @@ it('an unconfirmed Region position keeps the explicit Stop of an exactly identif
   expect(dialog).not.toBeNull();expect(stop).not.toHaveBeenCalled()
   const confirm=[...dialog!.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Stop Agent')
   expect(confirm).toBeDefined();await act(async()=>confirm!.click())
-  expect(stop).toHaveBeenCalledExactlyOnceWith(before[0]!.control)
+  expect(stop).toHaveBeenCalledExactlyOnceWith(before[0]!.control, expect.any(String))
   expect(useAppStore.getState().sessions).toEqual(before)
 })
 

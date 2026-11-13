@@ -182,7 +182,9 @@ describe('Space Agent list management through the production Dock and shared Foc
     expect(dialog.textContent).toContain('run-alpha'); expect(dialog.textContent).toContain('run-gamma')
     expect(stop).not.toHaveBeenCalled()
     await click('Close Agents', dialog)
-    expect(stop.mock.calls).toEqual([[agents().find(session => session.id === 'alpha')!.control], [agents().find(session => session.id === 'gamma')!.control]])
+    expect(stop.mock.calls.map(call => call[0])).toEqual([agents().find(session => session.id === 'alpha')!.control, agents().find(session => session.id === 'gamma')!.control])
+    // One Stop intent per selected Agent.
+    expect(new Set(stop.mock.calls.map(call => call[1])).size).toBe(2)
     expect(useAppStore.getState().sessions).toBe(state.sessions)
     expect(useAppStore.getState().tabs).toBe(state.tabs)
     expect(useAppStore.getState().layouts).toBe(state.layouts)
@@ -190,14 +192,17 @@ describe('Space Agent list management through the production Dock and shared Foc
     expect(ids()).toEqual(['alpha', 'beta', 'gamma'])
   })
 
-  it.each(['run', 'host', 'session'] as const)('does not send a changed %s and preserves its selection and recovery explanation', async change => {
-    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  it.each(['run', 'host', 'session'] as const)('a changed %s still sends only the original frozen control; Core’s stale answer keeps its selection and explanation', async change => {
+    const original = agents().find(session => session.id === 'alpha')!
+    // Core checks the exact expected Run; the renderer does not precheck it.
+    const stop = vi.spyOn(api.sessions, 'stop').mockRejectedValue(Object.assign(new Error('Agent Session changed before its Run was stopped.'), { code: 'STALE_AGENT_SESSION' }))
     await render(); await click('Select Agents'); await select('alpha'); await click('Close Agents')
     await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'alpha' && session.kind === 'agent'
       ? { ...session, control: { ...session.control,
         ...(change === 'host' ? { hostId: 'changed-control-host' } : change === 'session' ? { agentSessionId: 'changed-canonical-session' } : { run: { runId: 'new-original-run' } }) } } : session) })))
+    vi.spyOn(api.sessions, 'refresh').mockImplementation(async () => useAppStore.getState().sessions.find(session => session.id === 'alpha')!)
     await click('Close Agents', document.querySelector('[role="alertdialog"], [role="dialog"]')!)
-    expect(stop).not.toHaveBeenCalled()
+    expect(stop).toHaveBeenCalledExactlyOnceWith(original.control, expect.any(String))
     if (change === 'run') expect(selected()).toContain(agentKey('alpha'))
     else {
       expect(selected()).toEqual([])
@@ -219,7 +224,7 @@ describe('Space Agent list management through the production Dock and shared Foc
     expect(copy.mock.calls).toEqual([['Alpha\namux://agent/alpha']])
     expect(ids()).toEqual(['presentation-alias'])
     await click('Close Agents'); await click('Close Agents', document.querySelector('[role="alertdialog"], [role="dialog"]')!)
-    expect(stop).toHaveBeenCalledExactlyOnceWith(original.control)
+    expect(stop).toHaveBeenCalledExactlyOnceWith(original.control, expect.any(String))
     expect(ids()).toEqual(['presentation-alias'])
   })
   it('keeps one stable card for multiple presentations of the same canonical Agent', async () => {

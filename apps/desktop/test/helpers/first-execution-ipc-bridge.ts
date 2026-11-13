@@ -67,7 +67,7 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => 
   list: async () => [...bridge.goals.values()],
   recordParticipation: async (id: string) => { const goal = bridge.goals.get(id); if (!goal) throw Error('Unknown original fixture Goal'); return goal }
 }) }))
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } profileOfSession() { return undefined } } }))
 vi.mock('../../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))

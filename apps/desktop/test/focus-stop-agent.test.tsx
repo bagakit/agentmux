@@ -104,7 +104,7 @@ it('sends one exact host/SID/Run from the card, holds pending and never invents 
   const before = useAppStore.getState()
   await open()
   await act(async () => { confirm().click(); confirm().click() })
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
   expect(confirm().disabled).toBe(true); expect(confirm().textContent).toBe('Working…'); retained(before)
   later.focus()
   await act(async () => release()); await settle()
@@ -116,19 +116,24 @@ it('the card stops its original semantic Agent rather than the active workspace 
   await open()
   await act(async () => useAppStore.setState({ activeWorkspaceId: 'other', agentFocus: { execution: { sessionId: first.id, history: [] }, pmo: { sessionId: null } } }))
   await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(first.id)
 })
 
-it.each(['run', 'host'] as const)('rejects a changed %s only for this old confirmation and retains the current Agent', async field => {
+it.each(['run', 'host'] as const)('a changed %s after confirmation opened still stops only the original frozen control; Core checks its Run', async field => {
   await open()
   const replacement = { ...target, control: { ...target.control, ...(field === 'run' ? { run: { runId: 'new-run' } } : { hostId: 'other-host' }) } }
   await act(async () => useAppStore.setState({ sessions: [first, replacement] }))
+  vi.mocked(api.sessions.stop).mockRejectedValueOnce(Object.assign(new Error('Agent Session changed before its Run was stopped.'), { code: 'STALE_AGENT_SESSION' }))
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValueOnce(replacement)
   const before = useAppStore.getState()
   await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
-  expect(useAppStore.getState().error).toContain('Run changed')
-  expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(target.control)
+  // The original exact identity is the only target; the replacement is never stopped by this intent.
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
+  expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+  // A new Run on the same Host is offered as a fresh intent; another Host's Session is never adopted.
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(field === 'run' ? 'The Run changed; stop the current Run' : 'The refreshed Session belongs to another Agent.')
+  expect(document.querySelector('[data-confirm-label="Continue Stop"]')).toBeNull()
 })
 
 it('a rejected or timed-out stop preserves state, reports its exact subject and permits explicit retry', async () => {
@@ -141,15 +146,16 @@ it('a rejected or timed-out stop preserves state, reports its exact subject and 
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop not confirmed')
   const continuation = document.querySelector<HTMLButtonElement>('[data-confirm-label="Continue Stop"]')!
   expect(continuation.disabled).toBe(false)
+  const operationId = vi.mocked(api.sessions.stop).mock.calls[0]![1]
   vi.mocked(api.sessions.stop).mockClear()
   await act(async () => continuation.click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control); retained(before)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, operationId); retained(before)
 })
 
 it('unknown observation still allows explicit Stop; disappearing identity never borrows another Agent', async () => {
   await act(async () => useAppStore.setState({ sessions: [first, { ...target, processState: 'running', status: { state: 'disconnected', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'Connection observation unavailable; current Run is unconfirmed' } }] }))
   await open(); await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
   vi.mocked(api.sessions.stop).mockClear()
   await open(); await act(async () => useAppStore.setState({ sessions: [first] }))
   await settle()
@@ -195,7 +201,7 @@ it('the original Agent target keeps a same-SID remote Host, even with a local ma
   await exactTarget(remote, [target])
   const before = useAppStore.getState()
   await open(); await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control, expect.any(String))
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
 })
 it('the original Agent target uses its canonical control while retaining a presentation alias', async () => {
@@ -204,7 +210,7 @@ it('the original Agent target uses its canonical control while retaining a prese
   await exactTarget(alias, [unrelated])
   const before = useAppStore.getState()
   await open(); await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(alias.control); retained(before)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(alias.control, expect.any(String)); retained(before)
 })
 it('copies the canonical Agent link from the original alias card', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
@@ -235,7 +241,7 @@ it('passes an exact original control to Core when the Run becomes unobserved dur
   await act(async () => useAppStore.setState({ sessions: [target, { ...remote, runUnobserved: true }] }))
   const before = useAppStore.getState()
   await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control); retained(before)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control, expect.any(String)); retained(before)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(remote.control)
   expect(useAppStore.getState().errorNoticeContext?.summary).toContain('unconfirmed')
@@ -321,7 +327,7 @@ it('admits the original card with an unobserved Run and retains the Core failure
   await exactTarget(original)
   vi.mocked(api.sessions.stop).mockRejectedValueOnce(new Error('Core could not confirm the original stop result'))
   const before = useAppStore.getState(); await open(); await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(original.control)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(original.control, expect.any(String))
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
   expect(useAppStore.getState().error).toContain('Core could not confirm')
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(original.control)

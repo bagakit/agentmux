@@ -118,7 +118,7 @@ it('a pending Stop has a five-second UI deadline; Keep Session & Close stays rea
   vi.mocked(api.sessions.stop).mockReturnValue(pending)
   try {
     await mount(); await closeX(); await click('Stop & Close')
-    expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(running.control)
+    expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(running.control, expect.any(String))
     await act(async () => { await vi.advanceTimersByTimeAsync(4_999) })
     expect(Object.keys(useAppStore.getState().closingWorkbenchViews)).toEqual([view.id])
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })

@@ -150,7 +150,7 @@ it('Stop targets one exact private Run, retains its retired history and leaves t
     '--session', stopped.agentSessionId, '--operation-id', 'private-focus-stop-cli'], scope.env)
   expect(cli.code, cli.stderr).toBe(0)
   expect(JSON.parse(cli.stdout).result).toMatchObject({ agentSessionId: stopped.agentSessionId })
-  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(stopControl)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(stopControl, 'private-focus-stop-cli')
   const retired = (await client.sessionHistorySources()).find(entry => entry.agentSessionId === stopped.agentSessionId)!
   expect(retired.state).toBe('retired')
   expect(retired.history?.nativeHandle).toEqual(stopped.nativeHandle)
