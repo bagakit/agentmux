@@ -141,7 +141,8 @@ class Host {
   }
   fail(error) { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error) }; this.pending.clear() }
   async ready() {
-    for (let i = 0; i < 100; i++) { const value = this.events.find(event => event.event === 'ready'); if (value) return value; await delay(50) }
+    // A shared machine may be compiling other mutants; launch gets the same 15s as any request.
+    for (let i = 0; i < 300; i++) { const value = this.events.find(event => event.event === 'ready'); if (value) return value; await delay(50) }
     throw new Error(`Actual AppKit host did not become ready: ${this.errors}`)
   }
   request(method, params = {}) {
@@ -191,9 +192,13 @@ async function exercise(directory, capture) {
       width: screen.width * 0.38, height: screen.height * 0.35 }
     const sameRect = (actual, expected) => actual && Object.keys(expected).every(key => Math.abs(actual[key] - expected[key]) < 0.01)
     const point = (x, y) => ({ x, y })
-    const drag = (from, to) => host.request('drag', { from, to, displayId: ready.displayId })
+    const drag = (from, to, hold = false) => host.request('drag', { from, to, displayId: ready.displayId, ...(hold ? { hold } : {}) })
+    const intersects = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+    const within = (inner, outer) => inner.x >= outer.x - 0.01 && inner.y >= outer.y - 0.01
+      && inner.x + inner.width <= outer.x + outer.width + 0.01 && inner.y + inner.height <= outer.y + outer.height + 0.01
+    const markIds = ['rect', 'arrow', 'note', 'pixelate', 'text'].map(tool => 'native-selection-mark-' + tool)
     const images = []
-    const image = async (name, viewport = {}) => {
+    const image = async (name, { marks, ...viewport } = {}) => {
       if (!capture && !viewport.width) return
       await delay(60)
       const path = join(directory, name + '-layout.png')
@@ -201,10 +206,14 @@ async function exercise(directory, capture) {
       assert.equal(value.source, 'AppKit-view-layout-only')
       assert.equal(value.windowServerFrame, false)
       if (viewport.width) {
-        const intersects = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
-        verify(!intersects(value.magnifier, value.toolbar) && !intersects(value.magnifier, value.dimensions), 'Narrow and short magnifiers preserve every color/coordinate row without intersecting the actual toolbar or dimensions')
-        verify(value.buttons.length === 3 && new Set(value.buttons.map(button => button.frame.y)).size === 1, 'The three named screenshot actions remain in one compact horizontal row')
-        verify(value.magnifier.x >= 0 && value.magnifier.y >= 0 && value.magnifier.x + value.magnifier.width <= value.width && value.magnifier.y + value.magnifier.height <= value.height, 'The entire magnifier remains inside its own constrained viewport')
+        const shown = value.buttons.map(button => button.identifier)
+        verify(value.magnifier === null, 'A resting constrained selection yields the loupe to its toolbar')
+        verify(value.toolbar && within(value.toolbar, { x: 0, y: 0, width: value.width, height: value.height }), 'The constrained toolbar stays inside its own viewport')
+        verify(value.buttons.length > 0 && new Set(value.buttons.map(button => button.frame.y)).size === 1, 'Constrained screenshot actions stay in one horizontal row')
+        verify(value.buttons.every(button => within(button.frame, value.toolbar)), 'Every visible constrained action lies inside the actual toolbar')
+        verify(!intersects(value.toolbar, value.dimensions), 'The constrained size chip never covers the toolbar')
+        if (marks === 'collapsed') verify(shown.includes('native-selection-marks') && !shown.some(id => markIds.includes(id)) && shown.includes('native-selection-edit'), 'A narrow viewport folds the quick marks into one Markup control')
+        else verify(markIds.every(id => shown.includes(id)) && !shown.includes('native-selection-marks') && shown.length === 8, 'A wide enough viewport shows every quick mark inline with Expand, Cancel and Done')
       }
 
       const bytes = readFileSync(path)
@@ -225,6 +234,25 @@ async function exercise(directory, capture) {
     verify(hovered.sample && hovered.sample.x === Math.floor(hoverPoint.x) && hovered.sample.y === Math.floor(screen.height - hoverPoint.y), 'The real chooser reports the original pixel under its actual pointer')
     await delay(40)
     verify(host.completions.length === 0, 'Mouse release must wait for explicit confirmation')
+    const resting = await host.request('inspect')
+    const restingLocal = { ...rectangle }
+    verify(resting.magnifier === null && resting.toolbar.width > 0, 'A resting selection shows its toolbar and yields the loupe')
+    verify(Math.abs(resting.toolbar.x + resting.toolbar.width - (restingLocal.x + restingLocal.width)) < 0.5
+      && Math.abs(resting.toolbar.y + resting.toolbar.height + 8 - restingLocal.y) < 0.5, 'The toolbar sits 8pt below the selection with right edges aligned')
+    verify(Math.abs(resting.dimensions.x - restingLocal.x) < 0.5 && Math.abs(resting.dimensions.y - (restingLocal.y + restingLocal.height + 8)) < 0.5
+      && resting.dimensions.height === 20, 'The size chip sits above the selection top-left')
+    const editing = resting.controls.filter(button => button.visible)
+    verify(markIds.every(id => editing.some(button => button.identifier === id && button.enabled && /\([A-Z]\)$/.test(button.toolTip)))
+      && editing.some(button => button.identifier === 'native-selection-edit' && button.toolTip === 'Open full editor (E)')
+      && editing.some(button => button.identifier === 'native-selection-cancel' && button.toolTip === 'Cancel (Esc)'), 'Opt-in shows every quick mark, Expand and Cancel as named icon controls')
+    const heldCenter = point(rectangle.x + rectangle.width / 2, rectangle.y + rectangle.height / 2)
+    const held = await drag(heldCenter, point(heldCenter.x + 5, heldCenter.y + 3), true)
+    const heldLocal = { ...rectangle, x: rectangle.x + 5, y: rectangle.y + 3 }
+    verify(held.isInteracting && Object.keys(held.toolbar).length === 0 && held.surfaces.every(surface => !surface.toolbarVisible), 'The toolbar disappears while the selection is moving')
+    verify(held.magnifier && !intersects(held.magnifier, heldLocal), 'The loupe returns during a gesture and avoids the moving selection')
+    await image('moving')
+    const releasedHeld = await host.request('release', { point: point(heldCenter.x, heldCenter.y) })
+    verify(!releasedHeld.isInteracting && releasedHeld.toolbar.width > 0 && releasedHeld.magnifier === null, 'Releasing the gesture restores the toolbar and hides the loupe')
     await image('selected')
     const center = point(rectangle.x + rectangle.width / 2, rectangle.y + rectangle.height / 2)
     await drag(center, point(center.x + 27, center.y + 19))
@@ -238,8 +266,8 @@ async function exercise(directory, capture) {
     await image('adjusted')
     const inspection = await host.request('inspect')
     const toolbar = inspection.toolbar
-    await drag(point(toolbar.x + 3, toolbar.y + 3), point(toolbar.x + 28, toolbar.y + 5))
-    await drag(point(toolbar.x + 95, toolbar.y + 21), point(toolbar.x + 95, toolbar.y + 22))
+    await drag(point(toolbar.x + 2, toolbar.y + 2), point(toolbar.x + 28, toolbar.y + 5))
+    await drag(point(toolbar.x + toolbar.width - 2, toolbar.y + toolbar.height - 2), point(toolbar.x + toolbar.width - 2, toolbar.y + toolbar.height - 1))
     const controls = (await host.request('inspect')).controls
     verify(controls.some(button => button.identifier === 'native-selection-confirm' && button.enabled), 'Real confirm button is enabled for a valid released selection')
     await host.request('button', { identifier: 'native-selection-confirm' })
@@ -250,19 +278,22 @@ async function exercise(directory, capture) {
     for (const key of Object.keys(expected)) verify(Math.abs(confirmed.rect[key] - expected[key]) < 0.01, `Actual moved/resized/nudged ${key} must preserve Quartz geometry`)
     await delay(40)
     verify(host.completions.length === 1, 'Completion must settle exactly once')
-    await host.request('begin')
+    // Editing widens the right-aligned toolbar across the size chip's
+    // default corner, so the chip must actually route around the toolbar.
+    await host.request('begin', { allowEditing: true })
     await drag(point(offset.x + 40, offset.y + 20), point(offset.x + Math.min(screen.width - 10, 350), offset.y + 150))
     const edge = await host.request('inspect')
     const dimensions = edge.dimensions, edgeToolbar = edge.toolbar
-    const intersects = dimensions.x < edgeToolbar.x + edgeToolbar.width && dimensions.x + dimensions.width > edgeToolbar.x
-      && dimensions.y < edgeToolbar.y + edgeToolbar.height && dimensions.y + dimensions.height > edgeToolbar.y
-    verify(dimensions.width > 0 && dimensions.height > 0 && !intersects, 'Real edge dimensions must remain visible without intersecting the actual toolbar')
+    verify(dimensions.width > 0 && dimensions.height > 0 && !intersects(dimensions, edgeToolbar), 'Real edge dimensions must remain visible without intersecting the actual toolbar')
     await image('edge')
     await host.request('key', { keyCode: 53 })
     verify((await host.completion(2)).state === 'cancelled', 'Escape must cancel an existing selection')
     await host.request('begin')
+    const empty = await host.request('inspect')
+    verify(empty.surfaces.every(surface => !surface.toolbarVisible) && empty.hint.width > 0 && empty.dimensions.width === undefined, 'An empty chooser shows only its hint, never an action toolbar or size chip')
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 280, offset.y + 340))
     await host.request('button', { identifier: 'native-selection-cancel' })
-    verify((await host.completion(3)).state === 'cancelled', 'Real Cancel button must cancel an empty selection')
+    verify((await host.completion(3)).state === 'cancelled', 'Real Cancel button must cancel an existing selection')
     await host.request('begin')
     await host.request('key', { keyCode: 36 })
     await delay(40)
@@ -291,15 +322,17 @@ async function exercise(directory, capture) {
     await host.request('failColorCopy')
     await host.request('key', { keyCode: 8 })
     let failedColor
-    for (let i = 0; i < 100; i++) { failedColor = await host.request('inspect'); if (failedColor.colorCopyFeedback.startsWith('复制未确认')) break; await delay(10) }
-    verify(failedColor.colorCopyFeedback.startsWith('复制未确认') && failedColor.completions === 4 && failedColor.copiedColors.length === 1, 'A rejected color copy reports uncertainty while selection and cancellation remain available')
+    for (let i = 0; i < 100; i++) { failedColor = await host.request('inspect'); if (failedColor.colorCopyFeedback.startsWith('Copy unconfirmed')) break; await delay(10) }
+    verify(failedColor.colorCopyFeedback.startsWith('Copy unconfirmed') && failedColor.completions === 4 && failedColor.copiedColors.length === 1, 'A rejected color copy reports uncertainty while selection and cancellation remain available')
     await host.request('key', { keyCode: 8 })
     let retriedColor
     for (let i = 0; i < 100; i++) { retriedColor = await host.request('inspect'); if (retriedColor.copiedColors.length === 2) break; await delay(10) }
     verify(retriedColor.copiedColors.length === 2 && retriedColor.copiedColors[1] === sampled.sample.hex, 'Explicit retry of a failed color copy reaches the same original sample')
+    const afterCopy = await host.request('hover', { point: point(offset.x + 240, offset.y + 260), displayId: ready.displayId })
+    verify(afterCopy.magnifier === null, 'Moving the pointer retires the colour receipt and its loupe from a resting selection')
     await image('editable-selected')
-    await image('narrow', { width: 280, height: 360 })
-    await image('short', { width: 640, height: 240 })
+    await image('narrow', { width: 280, height: 360, marks: 'collapsed' })
+    await image('short', { width: 640, height: 240, marks: 'inline' })
     await host.request('button', { identifier: 'native-selection-edit' })
     verify((await host.completion(5)).completionAction === 'edit', 'Real Edit button passes the typed editing intent with original geometry')
     await host.request('begin', { allowEditing: true })
@@ -335,7 +368,8 @@ async function exercise(directory, capture) {
       const from = point(frame.x + frame.width * 0.20, frame.y + frame.height * 0.26)
       const to = point(frame.x + frame.width * 0.57, frame.y + frame.height * 0.62)
       const empty = await globalDrag(display, from, from)
-      verify(empty.surfaces.filter(surface => surface.toolbarVisible).length === 1 && empty.surfaces.find(surface => surface.toolbarVisible).displayId === display.displayId, 'An empty click on another display moves the original toolbar to that event display')
+      verify(empty.surfaces.filter(surface => surface.hintVisible).length === 1 && empty.surfaces.find(surface => surface.hintVisible).displayId === display.displayId
+        && empty.surfaces.every(surface => !surface.toolbarVisible), 'An empty click on another display moves the original hint, without a toolbar, to that event display')
       const result = await globalDrag(display, from, to)
       const expected = { x: from.x, y: from.y, width: to.x - from.x, height: to.y - from.y }
       verify(result.surfaces.length > 0 && result.surfaces.every(surface => sameRect(surface.selection, expected)), 'Main and secondary views consume one identical global selection state')
@@ -368,11 +402,12 @@ async function exercise(directory, capture) {
     const loading = await host.request('begin', { allowEditing: true, holdPixels: true })
     verify(loading.surfaces.every(surface => !surface.frozenPixels), 'Pending pixel capture is explicit on every original display')
     const pending = await host.request('inspect')
-    verify(pending.loadingPixels && pending.controls.some(button => button.identifier === 'native-selection-cancel' && button.enabled)
-      && pending.controls.some(button => button.identifier === 'native-selection-confirm' && !button.enabled), 'Cancellation stays available while frozen pixels are loading')
+    verify(pending.loadingPixels && pending.hint.width > 0
+      && pending.controls.some(button => button.identifier === 'native-selection-confirm' && !button.enabled), 'Loading explains Esc cancellation and keeps capture disabled')
     await image('loading-cancellable')
     await host.request('key', { keyCode: 53 })
-    verify((await host.completion(++count)).state === 'cancelled', 'Escape cancels without waiting for the native pixel producer')
+    const loadingCancel = await host.completion(++count).catch(() => null)
+    verify(loadingCancel?.state === 'cancelled', 'Escape cancels without waiting for the native pixel producer')
     await host.request('releasePixels')
     await delay(40)
     verify((await host.request('inspect')).surfaces.length === 0 && host.completions.length === count, 'Late frozen pixels never reopen or complete the cancelled chooser again')
@@ -409,13 +444,15 @@ const mutations = [
   { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
   { name: 'edit-opt-in', path: view, before: 'guard allowEditing else { return }', after: '// Mutant: ignores the original host opt-in.' },
   { name: 'consumer-color-owner', path: operationsSource, before: 'clipboardWrite(["format": .string("text"), "data": .string(hex)])', after: 'clipboardWrite(["format": .string("png"), "data": .string(hex)])' },
-  { name: 'compact-toolbar', path: view, before: 'let stacked = width < (allowEditing ? 244 : 160)', after: 'let stacked = width < idealWidth' },
-  { name: 'short-toolbar', path: view, before: 'if screen.height < 320 { origin.y = screen.minY + 12 }', after: '// Mutant: leaves the short toolbar in the magnifier band.' },
+  { name: 'compact-toolbar', path: view, before: 'let collapsed = allowEditing && measure(full) > available', after: 'let collapsed = false' },
+  { name: 'toolbar-right-aligned', path: view, before: 'var origin = NSPoint(x: rect.maxX - size.width, y: rect.minY - 8 - size.height)', after: 'var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY - 8 - size.height)' },
+  { name: 'toolbar-while-interacting', path: view, before: 'let toolbarVisible = localRectangle != nil && !selection.isInteracting', after: 'let toolbarVisible = localRectangle != nil' },
+  { name: 'loupe-avoids-selection', path: view, before: 'if let selected { occupied.append(selected) }', after: '_ = selected' },
   { name: 'color-copy-worker', path: view, before: 'colorCopyQueue.async { [weak self] in', after: 'DispatchQueue.main.async { [weak self] in' },
-  { name: 'color-copy-receipt', path: view, before: 'failure == nil ? "已复制 \\(hex) · C" : "复制未确认 · C 重试"', after: '"已复制 \\(hex) · C"' },
+  { name: 'color-copy-receipt', path: view, before: 'failure == nil ? "Copied \\(hex)" : "Copy unconfirmed · press C to retry"', after: '"Copied \\(hex)"' },
   { name: 'color-copy-key', path: view, before: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: copyPointerColor()', after: 'case 8 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: break' },
   { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
-  { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
+  { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbarFrame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
   { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },
   { name: 'sample-vertical-source', path: picker[2], before: '(display.appKitFrame.maxY - point.y)', after: '(point.y - display.appKitFrame.minY)' },
   { name: 'composite-crop-origin', path: picker[2], before: '(frame.minX - rectangle.minX) * geometry.scale', after: 'frame.minX * geometry.scale' },

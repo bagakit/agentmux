@@ -12,6 +12,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     private var current: NativeScreenSelection?
     private var savedApplication: NSRunningApplication?
     private var heldPixels: DispatchSemaphore?
+    private var heldGesture: (recipient: NSView, window: NSWindow)?
     private let colorCopies = PreviewColorCopies()
     private let pixelProducers = PreviewPixelProducers()
 
@@ -149,8 +150,13 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             }
             if method == "drag" {
                 let from = try point(value["from"]), to = try point(value["to"])
+                // A held drag stops before mouse-up so the interacting state
+                // itself can be observed; "release" ends it on the same view.
+                let hold = value["hold"] as? Bool == true
                 guard let recipient = view.hitTest(view.convert(from, from: nil)) else { throw PreviewFailure("No actual AppKit hit-test recipient") }
-                for (type, point) in [(NSEvent.EventType.leftMouseDown, from), (.leftMouseDragged, to), (.leftMouseUp, to)] {
+                let steps: [(NSEvent.EventType, NSPoint)] = [(.leftMouseDown, from), (.leftMouseDragged, to)] + (hold ? [] : [(.leftMouseUp, to)])
+                heldGesture = hold ? (recipient, window) : nil
+                for (type, point) in steps {
                     guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                                        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw PreviewFailure("Could not create mouse event") }
                     // Deliberately direct AppKit responder dispatch. The bare
@@ -161,6 +167,13 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                     default: recipient.mouseUp(with: event)
                     }
                 }
+            } else if method == "release" {
+                guard let held = heldGesture else { throw PreviewFailure("No held gesture to release") }
+                heldGesture = nil
+                let location = try point(value["point"])
+                guard let event = NSEvent.mouseEvent(with: .leftMouseUp, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: held.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw PreviewFailure("Could not create mouse event") }
+                held.recipient.mouseUp(with: event)
             } else if method == "hover" {
                 let location = try point(value["point"])
                 guard let event = NSEvent.mouseEvent(with: .mouseMoved, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -177,6 +190,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             } else if method == "button" {
                 let identifier = value["identifier"] as? String ?? ""
                 guard let button = pickerViews().flatMap(descendants).compactMap({ $0 as? NSButton }).first(where: { $0.identifier?.rawValue == identifier }) else { throw PreviewFailure("Exact button is unavailable") }
+                guard !button.isHiddenOrHasHiddenAncestor else { throw PreviewFailure("Exact button is not visible") }
                 // AppKit's button action/enablement is real. This deliberately
                 // does not claim a physical WindowServer mouse click.
                 button.performClick(nil)
@@ -206,8 +220,9 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     private func surfaceObservation(_ view: NativeScreenSelection) -> [String: Any] {
         guard let window = view.window else { return [:] }
         let panels = descendants(view).filter { $0.identifier?.rawValue == "native-selection-toolbar" && !$0.isHidden }
+        let hints = descendants(view).filter { $0.identifier?.rawValue == "native-selection-hint" && !$0.isHidden }
         return ["displayId": screenID(window.screen), "windowId": window.windowNumber, "frame": rect(window.frame),
-                "selection": view.selection.rectangle.map(rect) as Any? ?? NSNull(), "toolbarVisible": !panels.isEmpty, "acceptsFirstMouse": view.acceptsFirstMouse(for: nil),
+                "selection": view.selection.rectangle.map(rect) as Any? ?? NSNull(), "toolbarVisible": !panels.isEmpty, "hintVisible": !hints.isEmpty, "acceptsFirstMouse": view.acceptsFirstMouse(for: nil),
                 "frozenPixels": !view.loadingPixels,
                 "viewGlobalOrigin": rect(window.convertToScreen(view.convert(view.bounds, to: nil))),
                 "windowServer": windowServerObservation(window)]
@@ -227,13 +242,15 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         pickerViews().flatMap { view in
             descendants(view).compactMap { child in
                 guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
-                return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
+                return ["identifier": identifier, "enabled": button.isEnabled, "visible": !button.isHiddenOrHasHiddenAncestor,
+                        "toolTip": button.toolTip ?? "", "frame": rect(button.convert(button.bounds, to: view))]
             }
         }
     }
     private func observation(id: Int) -> [String: Any] {
         var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(),
                                   "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions"),
+                                  "hint": panelFrame("native-selection-hint"), "marksTray": panelFrame("native-selection-marks-tray"),
                                   "surfaces": pickerViews().map(surfaceObservation), "copiedColors": colorCopies.values, "pixelProducers": pixelProducers.observation]
         if let view = current {
             value["colorCopyFeedback"] = view.colorCopyFeedback
@@ -241,6 +258,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             value["isInteracting"] = view.selection.isInteracting
             value["canConfirm"] = view.selection.canConfirm
             value["loadingPixels"] = view.loadingPixels
+            value["magnifier"] = view.magnifierRectangle.map(rect) as Any? ?? NSNull()
             if let pixels = view.frozenPixels, let display = pixels.display(in: view.viewport), let sample = pixels.sample(at: view.pointerLocation, in: display) {
                 value["sample"] = ["x": sample.x, "y": sample.y, "hex": sample.hex, "rgb": [sample.red, sample.green, sample.blue]]
             }
@@ -320,10 +338,10 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
                   "source": "AppKit-view-layout-only", "windowServerFrame": false,
                   "buttons": descendants(view).compactMap { child -> [String: Any]? in
-                      guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
+                      guard let button = child as? NSButton, !button.isHiddenOrHasHiddenAncestor, let identifier = button.identifier?.rawValue else { return nil }
                       return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
                   },
-                  "magnifier": rect(view.magnifierRectangle), "toolbar": toolbar.map { rect($0.frame) } as Any? ?? NSNull(),
+                  "magnifier": view.magnifierRectangle.map(rect) as Any? ?? NSNull(), "toolbar": toolbar.map { rect($0.frame) } as Any? ?? NSNull(),
                   "dimensions": dimensions.map { rect($0.frame) } as Any? ?? NSNull(),
                   "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1,
                   "constrainedViewport": constrainedSize != nil, "displayId": screenID(window.screen),
