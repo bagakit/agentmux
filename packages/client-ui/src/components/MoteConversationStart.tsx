@@ -13,8 +13,8 @@ export function MoteConversationStart({ name, portrait, brand, composer, history
   return <section className="mote-start" data-mode={mode} data-active={active} aria-label={`${name} · 开始对话`}>
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
-      <header className="mote-start__identity"><span className="mote-start__name">{name}</span>
-        <span className="mote-start__wordmark">{brand ? <span className="mote-start__brand-art">{brand}</span> : null}Mote</span>{actions}</header>
+      <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}
+        <span className="mote-start__name">{name}</span>{name.trim().toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions}</header>
       <div className="mote-start__invitation">
         <div className="mote-start__portrait"><span className="mote-start__halo" aria-hidden="true" />{portrait}</div>
         <div className="mote-start__greeting"><span className="mote-start__eyebrow">{mode === 'new' ? '同一个伙伴，新的一轮' : '你的想法，从这里开始'}</span>
@@ -79,10 +79,12 @@ export function MoteConversationHistory({ items, onOpen, onMore, reading = false
     <header><h2>之前的对话</h2>{onMore && <button type="button" onClick={onMore}>查看更早<SemanticIcon name="navigation.disclosure" size={12} /></button>}</header>
     <ol>{items.map(item => <li key={item.id} data-mote-period={item.id} data-current={item.current || undefined}>
       <button type="button" className="mote-start-history__open" onClick={() => onOpen(item)}>
-        <span className="mote-start-history__mark"><SemanticIcon name="object.conversation" size={17} /></span>
-        <span className="mote-start-history__copy"><strong>{item.title}</strong><span>{moteConversationPeriodLabel(item.period, item.current, locale)}</span>
-          {item.author && <small>{item.author}</small>}{(item.sourceIssue || !item.period || item.period.range.kind !== 'bounded') && <small className="mote-start-history__coverage">{item.sourceIssue ?? '原来源范围未完整记录'}</small>}</span>
-        <span className="mote-start-history__reason">{moteConversationTransitionLabel(item.period, item.current)}</span><SemanticIcon name="navigation.disclosure" size={13} />
+        <span className="mote-start-history__mark" aria-hidden="true" />
+        <span className="mote-start-history__copy"><strong>{item.title}{item.author ? <span className="mote-start-history__author"> · {item.author}</span> : null}</strong>
+          <span className="mote-start-history__time">{moteConversationPeriodLabel(item.period, item.current, locale)}</span>
+          {item.sourceIssue ? <small className="mote-start-history__coverage">{item.sourceIssue}</small> : null}</span>
+        <span className="mote-start-history__reason" data-reason={item.current ? 'current' : item.period?.end?.kind ?? 'unknown'}>{moteConversationTransitionLabel(item.period, item.current)}</span>
+        <SemanticIcon className="mote-start-history__chevron" name="navigation.disclosure" size={13} />
       </button>
     </li>)}</ol>
     {reading && <p role="status">正在读取原对话历史…</p>}{issue}

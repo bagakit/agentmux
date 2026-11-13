@@ -506,7 +506,7 @@ button:disabled { opacity: .5; cursor: default; }
 /* Mobile chrome around the shared welcome and the original bounded period reader. */
 .mobile-mote-start-details { color: var(--text-3); font-size: var(--fs-meta, 12px); overflow-wrap: anywhere; }
 .mobile-mote-start-details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-.mobile-mote-start-details button, .mobile-mote-period-view > button { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.mobile-mote-start-details button, .mobile-mote-period-view > button { min-height: 44px; padding: 8px 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text); font: inherit; cursor: pointer; }
 .mobile-mote-start-details > div { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 6px; }
 .mobile-mote-start-details pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mobile-mote-period-view { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px; }
