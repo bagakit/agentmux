@@ -1,3 +1,7 @@
+import { useEffect, useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ScreenshotTool } from './drawing-model'
@@ -19,6 +23,7 @@ export const ANNOTATION_TOOLS: Array<{ id: AnnotationTool; label: string; key: s
   { id: 'cover', label: 'Cover', key: 'B', icon: icon('drawing.cover') },
   { id: 'erase', label: 'Erase', key: 'X', icon: icon('action.erase') }
 ]
+const DownIcon = icon('navigation.down')
 const UndoIcon = icon('action.undo'), RedoIcon = icon('action.redo'), DeleteIcon = icon('action.remove')
 const TOOL_GROUPS: ReadonlyArray<{ label: string; tools: readonly AnnotationTool[] }> = [
   { label: 'View and select', tools: ['select', 'pan'] },
@@ -27,11 +32,25 @@ const TOOL_GROUPS: ReadonlyArray<{ label: string; tools: readonly AnnotationTool
   { label: 'Process image', tools: ['crop', 'pixelate', 'cover', 'erase'] }
 ]
 
-export function AnnotationToolbar({ tool, busy, undoable, redoable, selected, clearable, onTool, onUndo, onRedo, onDelete, onClear }: {
-  tool: AnnotationTool; busy: boolean; undoable: boolean; redoable: boolean; selected: boolean; clearable: boolean
+export function AnnotationToolbar({ active = true, tool, busy, undoable, redoable, selected, clearable, onTool, onUndo, onRedo, onDelete, onClear }: {
+  active?: boolean; tool: AnnotationTool; busy: boolean; undoable: boolean; redoable: boolean; selected: boolean; clearable: boolean
   onTool(tool: AnnotationTool): void; onUndo(): void; onRedo(): void; onDelete(): void; onClear(): void
 }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (!active) setOpen(false) }, [active])
+  const current = ANNOTATION_TOOLS.find(item => item.id === tool)
   return <RovingToolbar className="image-annotation-toolbar" aria-label="Screenshot markup tools">
+    <DropdownMenu.Root modal={false} open={active && open} onOpenChange={setOpen}>
+      <DropdownMenu.Trigger asChild><RovingToolbarButton type="button" className="image-annotation-toolbar__compact" aria-label="Markup tool" title="Choose a markup tool">
+        {current ? <current.icon size={16} /> : null}<span>{current?.label ?? 'Tools'}</span><DownIcon size={12} />
+      </RovingToolbarButton></DropdownMenu.Trigger>
+      <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content className="tab-context-menu image-annotation-tools-menu" align="start" sideOffset={4} collisionPadding={8}
+        onCloseAutoFocus={event => { if (!active) event.preventDefault() }}
+        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault(); else event.stopPropagation() }}>
+        <DropdownMenu.RadioGroup value={tool}>{ANNOTATION_TOOLS.map(item => <DropdownMenu.RadioItem className="tab-context-menu__item" key={item.id} value={item.id} aria-label={item.label} aria-keyshortcuts={item.key}
+          disabled={busy && item.id !== 'pan'} onSelect={() => onTool(item.id)}><item.icon size={16} /><span>{item.label}</span><kbd>{item.key}</kbd></DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup>
+      </DropdownMenu.Content></DocumentOverlayPortal>
+    </DropdownMenu.Root>
     <div className="image-annotation-toolbar__tools">{TOOL_GROUPS.map(group => <div key={group.label} className="image-annotation-toolbar__group" role="group" aria-label={group.label}>
       {ANNOTATION_TOOLS.filter(item => group.tools.includes(item.id)).map(item => <RovingToolbarButton key={item.id} type="button"
       aria-label={item.label} title={item.label + ' (' + item.key + ')'} aria-keyshortcuts={item.key}
