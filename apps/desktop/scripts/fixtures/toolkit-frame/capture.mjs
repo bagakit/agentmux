@@ -13,7 +13,9 @@ import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-export async function captureFrame({ root, evidence, mutation = null }) {
+export async function captureFrame({ root, evidence, mutation = null, scope = "all" }) {
+  assert.ok(scope === "all" || scope === "phone-only", "Bounded Toolkit capture scope");
+  assert.ok(scope === "all" || mutation === null, "Phone-only capture has no unrelated frame mutation");
   const fixture = resolve(root, "apps/desktop/scripts/fixtures/toolkit-frame"),
     desktop = resolve(root, "apps/desktop");
   const require = createRequire(resolve(desktop, "package.json")),
@@ -26,6 +28,9 @@ export async function captureFrame({ root, evidence, mutation = null }) {
   const receipt = {
     completed: false,
     mutation,
+    scope,
+    captureOnly: true,
+    aestheticReview: "not-performed",
     inputs: {},
     loadedCSS: [],
     frames: [],
@@ -55,7 +60,14 @@ export async function captureFrame({ root, evidence, mutation = null }) {
       "apps/desktop/scripts/probe-process.mjs",
     ])
       await bind(resolve(root, path));
-    const alias = [];
+    const { workspaceSourceExport } = await import(pathToFileURL(resolve(root, "packages/core/test/helpers/workspace-source-export.mjs")).href);
+    const { bundleIdentityRuntime } = await import(pathToFileURL(resolve(root, "packages/identity/scripts/runtime-bundle.mjs")).href);
+    const identitySource = (await bundleIdentityRuntime()).source;
+    const identityId = "\0toolkit-frame-identity-source";
+    const identityModule = `export const identityRuntimeSource = ${JSON.stringify(identitySource)};\n`;
+    receipt.identityRuntime = { sourceSHA256: sha(identitySource), moduleSHA256: sha(identityModule), loads: 0 };
+    for (const file of ["packages/core/test/helpers/workspace-source-export.mjs", "packages/identity/scripts/runtime-bundle.mjs", "packages/identity/src/runtime-entry.ts", "packages/identity/src/index.ts"]) await bind(resolve(root, file));
+    const alias = [{ find: "@agentmux/identity/runtime-source", replacement: identityId }];
     for (const name of ["core", "demand", "layout"]) {
       const dir = resolve(root, "packages", name),
         pkg = JSON.parse(await bind(resolve(dir, "package.json")));
@@ -85,22 +97,14 @@ export async function captureFrame({ root, evidence, mutation = null }) {
         find: new RegExp("^" + name + "$"),
         replacement: require.resolve(name),
       });
-    await build({
-      configFile: false,
-      root: fixture,
-      base: "./",
-      logLevel: "error",
-      resolve: { alias },
-      esbuild: { jsx: "automatic" },
-      worker: { format: "es" },
-      define: {
-        __AGENTMUX_WEB_PREVIEW__: "true",
-        "process.env.NODE_ENV": '"production"',
-      },
-      plugins: [
-        {
+    const sourcePlugin = () => ({
           name: "bind-toolkit-frame",
           enforce: "pre",
+          resolveId(id) {
+            if (id === identityId || id === "@agentmux/identity/runtime-source") return identityId;
+            return workspaceSourceExport(root, id);
+          },
+          load(id) { if (id === identityId) { receipt.identityRuntime.loads++; return identityModule; } },
           async transform(code, id) {
             const file = id.split("?")[0];
             if (!file.startsWith(root + "/") || file.includes("/node_modules/"))
@@ -128,8 +132,20 @@ export async function captureFrame({ root, evidence, mutation = null }) {
               return { code: loaded, map: null };
             }
           },
-        },
-      ],
+        });
+    await build({
+      configFile: false,
+      root: fixture,
+      base: "./",
+      logLevel: "error",
+      resolve: { alias },
+      esbuild: { jsx: "automatic" },
+      worker: { format: "es", plugins: () => [sourcePlugin()] },
+      define: {
+        __AGENTMUX_WEB_PREVIEW__: "true",
+        "process.env.NODE_ENV": '"production"',
+      },
+      plugins: [sourcePlugin()],
       css: {
         postcss: {
           plugins: [
@@ -235,7 +251,7 @@ export async function captureFrame({ root, evidence, mutation = null }) {
         resolve(compiled, "index.html"),
         privateRoot,
         evidence,
-        mutation ?? "baseline",
+        scope === "phone-only" ? scope : mutation ?? "baseline",
       ],
       {
         temporaryRoot: privateRoot,
@@ -263,7 +279,7 @@ export async function captureFrame({ root, evidence, mutation = null }) {
     } else {
       assert.equal(receipt.process.exitCode, 0);
       assert.equal(receipt.scene.completed, true);
-      assert.equal(receipt.frames.length, 8);
+      assert.equal(receipt.frames.length, scope === "phone-only" ? 4 : 8);
     }
     receipt.completed = true;
   } catch (error) {

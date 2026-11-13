@@ -119,6 +119,11 @@ api.toolkit = {
     };
   },
 };
+// This presentation fixture records the exact Survey intent without opening a user Browser.
+useAppStore.setState({ openUrlInSurvey: async (url: string) => {
+  effects.push({ method: "open-survey", url });
+  return { state: "unconfirmed" as const, browserId: null, reference: null, message: "The controlled capture records this request without opening another Browser." };
+} });
 api.ui.writeClipboardText = async (text) => {
   effects.push({ method: "clipboard", text });
 };
@@ -333,10 +338,9 @@ w.toolkitFrameProof = {
         ...phone.latestConfirmed!,
         document: {
           schema: "agentmux.toolkit.result.v1" as const,
-          summary: "Devices",
+          summary: "1 device online · 2 authorized",
           items: [
-            { label: "Connected", value: "1" },
-            { label: "Authorized", value: "2" },
+            { label: "Personal phone with a long descriptive device name", value: "192.168.1.24" },
           ],
           links: [
             {

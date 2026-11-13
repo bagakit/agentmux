@@ -183,6 +183,37 @@ app.whenReady().then(async () => {
     await until(
       'window.toolkitFrameProof?.ready && !!document.querySelector("[data-toolkit-id=frame]")',
     );
+    if (mode === "phone-only") {
+      receipt.phone = [];
+      for (const width of [320, 640]) for (const theme of ["dark", "light"]) {
+        await frame("phone", width, theme);
+        await until("document.querySelector('.phone-link-card')?.dataset.state==='current'");
+        await read("Promise.all([...document.querySelectorAll('.phone-link-card__frame')].flatMap(n=>n.getAnimations({subtree:true})).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
+        await settle();
+        await until("(()=>{const n=document.querySelector('.phone-link-card__frame');return !!n&&getComputedStyle(n).opacity==='1'&&n.getAnimations().every(a=>a.playState==='finished')})()");
+        await geometry();
+        const facts = await read(`(()=>{const body=document.querySelector('.phone-connection'),text=body.textContent,copy=[...body.querySelectorAll('button')].find(n=>n.textContent.trim()==='Copy link'),survey=[...body.querySelectorAll('button')].find(n=>n.textContent.trim()==='Open in Survey'),settings=document.querySelector('.phone-connection__footer [data-phone-settings]');copy.dataset.phoneCopy='';survey.dataset.phoneSurvey='';return {text,copy:copy.checkVisibility(),survey:survey.checkVisibility(),settings:settings.checkVisibility(),settingsText:settings.textContent,online:body.querySelectorAll('.phone-device-presence[data-online=true]').length,networkPicker:body.querySelectorAll('.phone-network-choice').length,codeOpacity:getComputedStyle(body.querySelector('.phone-link-card__frame')).opacity}})()`);
+        assert.ok(facts.copy && facts.survey && facts.settings, "Actual popover keeps Copy, Survey and named Phone settings discoverable");
+        assert.match(facts.settingsText, /Phone settings/);
+        assert.match(facts.text, /connects this Mac as another device/);
+        assert.equal(facts.online, 1, "Original controlled connected device has its online mark");
+        assert.equal(facts.networkPicker, 0, "Only the original device settings own network choice");
+        await capture(`phone-${width}-${theme}.png`, "Actual phone Toolkit popover, stable branded QR, original online device and named Settings/Survey actions");
+        const before = await read("toolkitFrameProof.effects.filter(x=>x.method==='evaluate').length");
+        await click("[data-phone-copy]");
+        assert.equal(await read("toolkitFrameProof.effects.filter(x=>x.method==='clipboard').at(-1).text===toolkitFrameProof.current().display.latestConfirmed.document.links[0].url"), true, "Copy consumes the exact same original display URL");
+        await click("[data-phone-survey]");
+        assert.equal(await read("toolkitFrameProof.effects.filter(x=>x.method==='open-survey').at(-1).url===toolkitFrameProof.current().display.latestConfirmed.document.links[0].url"), true, "Survey receives that same original URL without reevaluation");
+        assert.equal(await read("toolkitFrameProof.effects.filter(x=>x.method==='evaluate').length"), before, "Copy and Survey do not run the original tool again");
+        await click(".phone-connection__footer [data-phone-settings]");
+        assert.equal(await read("toolkitFrameProof.effects.filter(x=>x.method==='settings').at(-1).section"), "mobile", "Phone settings uses the original exact Settings navigation target");
+        await until("!document.querySelector('.performance-popover')");
+        receipt.phone.push({ width, theme, facts, originalCopy: true, originalSurvey: true, phoneSettingsTarget: "mobile" });
+      }
+      receipt.effects = await read("toolkitFrameProof.effects"); receipt.inputs = await read("toolkitFrameProof.inputs");
+      assert.deepEqual(receipt.errors, []); receipt.completed = true;
+      return;
+    }
     if (mode === "baseline") {
       await click('[aria-label="Original draft"]');
       await focus();

@@ -8,6 +8,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 import type { HostConfig, HostCreationTrustSnapshot } from '../../../src/shared/contracts'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
+import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import type { SettingsPageId } from '../../../src/renderer/src/components/settings/settings-modules'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -140,7 +141,17 @@ api.applications.call = (async (method: string, input: Record<string, unknown>) 
   }
   throw new Error('Unknown controlled application method')
 }) as typeof api.applications.call
-api.deviceManagement.ls = async input => { calls.push({ kind: 'device.ls', input }); return structuredClone(deviceList) }
+let onlineDeviceScenario = false
+api.deviceManagement.ls = async input => {
+  calls.push({ kind: 'device.ls', input })
+  const value = structuredClone(deviceList)
+  if (!onlineDeviceScenario) return value
+  const now = Date.now()
+  return { ...value, mobileAccess: { state: 'connected' as const, message: 'Controlled online device observation.', origin: 'http://192.168.1.20:8443' },
+    devices: value.devices.map(device => ({ ...device, online: true, keyFingerprint: 'sha256:' + 'a'.repeat(64),
+      connection: { connectedAt: now - 60_000, observedAt: now, address: '2001:db8:1234:5678:abcd:ef01:2345:6789',
+        userAgent: 'Controlled browser declaration with a deliberately long device and browser description; this is not a physical phone observation.' } })) }
+}
 api.deviceManagement.link = async input => { calls.push({ kind: 'device.link', input }); return structuredClone(deviceInvitation) }
 api.deviceManagement.revoke = async input => { calls.push({ kind: 'device.revoke-intent', input }); throw new Error('Controlled preview does not revoke OS authorization') }
 const config = await realSave(seeded, before)
@@ -151,6 +162,7 @@ let disposeAppearance = mountThemeRuntime(window, { appAppearance: 'dark' })
 const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
   select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark', _themeId: string = 'graphite') => {},
   current: () => api.config.get(),
+  onlineDevices: (value: boolean) => { onlineDeviceScenario = value },
   runtimeScenario: (phase: typeof runtimeCapture.phase) => { runtimeCapture.phase = phase },
   networkScenario: (phase: typeof networkCapture.phase) => { networkCapture.phase = phase },
   selection: () => useAppStore.getState().workbenchSpaceSelection,
@@ -194,7 +206,7 @@ const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
     calls.push({ kind: 'controlled-final-editable-seed', input: hosts.map(host => host.id) })
     await realSave({ ...current, hosts, workspaces: current.workspaces.filter(workspace => workspace.hostId === 'host-02') }, current)
   },
-  reset: async () => { const current = await api.config.get(); await realSave(seeded, current); useAppStore.setState({ hostChecks: {} }); calls.length = 0 }
+  reset: async () => { onlineDeviceScenario = false; const current = await api.config.get(); await realSave(seeded, current); useAppStore.setState({ hostChecks: {} }); calls.length = 0 }
 }
 Object.assign(window, { connectionsProof: probe })
 window.addEventListener('error', event => probe.errors.push(event.message))
@@ -209,8 +221,16 @@ function Fixture() {
     disposeAppearance(); disposeAppearance = mountThemeRuntime(window, { appAppearance: theme, themeId })
     useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance: theme } } }))
   }
-  return <DesktopClientUiProvider>{opened ? <SettingsPanel key={epoch} initialSection={section} navigationRequest={request}
-    onClose={() => { probe.closeCount++; setOpened(false) }} /> : null}</DesktopClientUiProvider>
+  return <DesktopClientUiProvider><SettingsNavigation.Provider value={{
+    open: id => { calls.push({ kind: 'settings-navigation-request', input: { section: id } }); probe.select(id); setOpened(true) },
+    openToolkit: toolId => { calls.push({ kind: 'settings-toolkit-navigation-request', input: { toolId } }); probe.select('toolkit') },
+    openHost: hostId => { calls.push({ kind: 'settings-host-navigation-request', input: { hostId } }); probe.select('hosts') },
+    openChannel: origin => { calls.push({ kind: 'settings-channel-navigation-request', input: origin }) },
+    openMoteLark: origin => { calls.push({ kind: 'settings-mote-navigation-request', input: origin }) },
+    chooseAgent: () => { calls.push({ kind: 'settings-choose-agent-request' }) },
+    channelEntries: [], channelPresentation: () => null
+  }}>{opened ? <SettingsPanel key={epoch} initialSection={section} navigationRequest={request}
+    onClose={() => { probe.closeCount++; setOpened(false) }} /> : null}</SettingsNavigation.Provider></DesktopClientUiProvider>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)
 probe.ready = true
