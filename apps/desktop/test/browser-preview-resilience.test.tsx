@@ -216,3 +216,31 @@ it('T045 confirmed real frame preserves the original trusted first-press route',
   expect(bridge.activatePresentation.mock.calls[1]).toEqual(['original-lease', { kind: 'prepare-first-press', navigationId: 'original-navigation',
     captureId: 'capture-1', down: { x: 20 / 640, y: 30 / 320 }, button: 'left', clickCount: 1, modifiers: [] }])
 })
+it('a cover-fit preview fills its stage from the top-left and maps a press through the same crop', async () => {
+  // Stage 640x320 at (10,40). Frame 1280x400 is wider than the stage: cover scales by 0.8 to 1024x320. A page reads
+  // from its top-left, so the crop removes 384px from the right only and keeps x and y anchored at the origin.
+  await render({ fit: 'cover' })
+  const video = container.querySelector<HTMLVideoElement>('video')!
+  expect(video.style.objectFit).toBe('cover')
+  expect(video.style.objectPosition).toBe('0% 0%')
+  Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', { configurable: true, value: 2 })
+  Object.defineProperties(video, { readyState: { configurable: true, value: 2 }, videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 400 } })
+  await act(async () => video.dispatchEvent(new Event('loadeddata')))
+  bridge.activatePresentation.mockResolvedValueOnce({ outcome: 'prepared', inputScopeId: 'actual-input-scope' })
+  await previewPress()
+  expect(bridge.activatePresentation.mock.calls[1]).toEqual(['original-lease', { kind: 'prepare-first-press', navigationId: 'original-navigation',
+    captureId: 'capture-1', down: { x: 20 / 1024, y: 30 / 320 }, button: 'left', clickCount: 1, modifiers: [] }])
+})
+it('a cover-fit preview taller than its stage keeps the page top and maps a press from it', async () => {
+  // Stage 640x320 at (10,40). Frame 640x640 is taller: cover keeps scale 1 and shows the top half, so a press
+  // 30px below the stage top lands 30px below the page top, not 30px below a centered middle.
+  await render({ fit: 'cover' })
+  const video = container.querySelector<HTMLVideoElement>('video')!
+  Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', { configurable: true, value: 2 })
+  Object.defineProperties(video, { readyState: { configurable: true, value: 2 }, videoWidth: { configurable: true, value: 640 }, videoHeight: { configurable: true, value: 640 } })
+  await act(async () => video.dispatchEvent(new Event('loadeddata')))
+  bridge.activatePresentation.mockResolvedValueOnce({ outcome: 'prepared', inputScopeId: 'actual-input-scope' })
+  await previewPress()
+  expect(bridge.activatePresentation.mock.calls[1]).toEqual(['original-lease', { kind: 'prepare-first-press', navigationId: 'original-navigation',
+    captureId: 'capture-1', down: { x: 20 / 640, y: 30 / 640 }, button: 'left', clickCount: 1, modifiers: [] }])
+})
