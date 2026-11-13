@@ -486,14 +486,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
     hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
     pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true },
-    grok: {
-      label: 'Grok',
-      providerId: 'grok',
-      command: 'grok',
-      args: ['--permission-mode', 'bypassPermissions'],
-      env: {},
-      injectAgentMuxGuide: true
-    },
+    grok: { label: 'Grok', providerId: 'grok', command: 'grok', args: [], env: {}, injectAgentMuxGuide: true },
     gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
     antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
     cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true },
@@ -501,7 +494,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     // agent-provider.ts 的 BUILT_IN_AGENT_PROVIDERS），但此前的默认表漏了它们，于是新建 Tab 界面（经
     // config.executors → configuredExecutors）根本不显示这三家。command/label 逐个取自各自 catalog 的
     // executable/label（SSOT，见 providers/{kimi,droid,copilot}.ts），三家都不需要特殊 args——它们的
-    // buildArgs 只原样透传 args（grok 那两个参数写在下面的默认 args 里，同样是透传，不是 buildArgs 注入）。
+    // buildArgs 只原样透传 args。
     //
     // 补这三家**必须连带 version 从 7 到 8**，否则修复只对全新安装生效：v7 的磁盘配置会走下面的
     // `configSchema.parse` 原样返回，而 `executors` 是无数量约束的 record，于是「只有 9 家」完全合法、
