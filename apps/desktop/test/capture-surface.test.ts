@@ -15,7 +15,7 @@ vi.mock('electron', async () => {
     webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn(), send: vi.fn() })
     show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.visible = true }); focus = vi.fn()
     setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
-    setOpacity = vi.fn((value: number) => { this.opacity = value })
+    setOpacity = vi.fn((value: number) => { this.opacity = value }); getOpacity = () => this.opacity
     loadFile = vi.fn(async () => { this.emit('ready-to-show') }); loadURL = this.loadFile
     constructor(readonly options: any) { super(); electron.windows.push(this) }
     static getFocusedWindow() { return electron.focused }
@@ -240,24 +240,32 @@ it('a crashed overlay renderer ends the capture', async () => {
 
 it('fades visible AgentMux windows out of the grab and restores them when the surface ends', async () => {
   const { EventEmitter } = await import('node:events')
-  const workbench = Object.assign(new EventEmitter(), { dead: false, opacity: 1, isDestroyed: () => false, isVisible: () => true, isMinimized: () => false,
-    focus: vi.fn(), setOpacity: vi.fn((value: number) => { workbench.opacity = value }) })
-  const hidden = Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => false, isMinimized: () => false, setOpacity: vi.fn() })
-  electron.workbench = [workbench, hidden]; electron.focused = workbench
-  let opacityAtGrab: number | null = null
-  const captureDisplays = vi.fn(async () => { opacityAtGrab = workbench.opacity; return frames() })
+  const shown = (opacity: number) => {
+    const window = Object.assign(new EventEmitter(), { dead: false, opacity, isDestroyed: () => false, isVisible: () => true, isMinimized: () => false,
+      focus: vi.fn(), getOpacity: () => window.opacity, setOpacity: vi.fn((value: number) => { window.opacity = value }) })
+    return window
+  }
+  // A pin the person set to 40%, and a window that is already fully transparent.
+  const workbench = shown(1), pin = shown(0.4), clear = shown(0)
+  const hidden = Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => false, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() })
+  electron.workbench = [workbench, pin, clear, hidden]; electron.focused = workbench
+  let opacityAtGrab: number[] = []
+  const captureDisplays = vi.fn(async () => { opacityAtGrab = [workbench.opacity, pin.opacity]; return frames() })
   ports.native.mockReturnValue({ captureDisplays })
   const outcome = surface.present(session())
   await vi.advanceTimersByTimeAsync(299)
   expect(captureDisplays, 'macOS settles the fade before the grab').not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(1)
   expect(captureDisplays).toHaveBeenCalledOnce()
-  expect(opacityAtGrab, 'faded before the grab').toBe(0)
+  expect(opacityAtGrab, 'faded before the grab').toEqual([0, 0])
   expect(hidden.setOpacity, 'a hidden window is not touched').not.toHaveBeenCalled()
+  expect(clear.setOpacity, 'a window already at opacity 0 is not touched').not.toHaveBeenCalled()
   await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: electron.windows[0]!.webContents, senderFrame: electron.windows[0]!.webContents.mainFrame }, 'cancel',
     { requestId: (await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: electron.windows[0]!.webContents, senderFrame: electron.windows[0]!.webContents.mainFrame }, 'load')).requestId })
   await outcome
   expect(workbench.opacity).toBe(1)
+  expect(pin.opacity, 'a pin comes back at its own opacity, not 100%').toBe(0.4)
+  expect(clear.opacity).toBe(0)
   expect(workbench.focus, 'the window that had focus gets it back').toHaveBeenCalledOnce()
 })
 
