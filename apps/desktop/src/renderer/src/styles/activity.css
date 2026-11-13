@@ -294,35 +294,48 @@
 .activity-feed__reading-caption strong { color: var(--text-2); font-weight: 560; }
 .activity-feed__reading-caption > span { color: var(--text-3); overflow-wrap: anywhere; }
 .activity-feed__empty-reading[data-loading-phase='loading'] .activity-feed__reading-caption { justify-items: center; text-align: center; padding: var(--sp-6); font-size: var(--fs-body); }
-/* A low Mint pool and a raised surface opposite it give the field static depth. Mint light
-   flows across it in one direction: each light rises at the lower left, travels toward the
-   upper right and fades before it restarts; the second runs half a cycle later, so the field
-   is never empty and never reverses. The field fades at the top and bottom so it never meets
-   the tools row or the input as an edge. Workbench parking pauses only the element itself,
-   so its layers inherit that state. In daylight the action green would darken the white
-   surface like a shadow, so the light is a pale tint of its hue, and nothing rises above white. */
-.activity-feed__empty-reading { --reading-tint: var(--green); --reading-light: 15%; --reading-pool: 10%; --reading-lift: 80%; }
+/* The field's one message reads in the primary text colour, so light passing behind it keeps AAA
+   contrast without a clearing shape, which would read as a cut-out in the light. */
+.activity-feed__empty-reading[data-loading-phase='loading'] .activity-feed__reading-caption strong { color: var(--text); }
+/* A read that answers quickly never flashes the field: the scene enters only after a short
+   hold, and in reduced motion it appears without a fade. Reading and content are never held. */
+.activity-feed__empty-reading[data-loading-phase='loading'] { animation: activity-reading-enter var(--dur-indicator) ease-out calc(var(--dur-fast) * 2) backwards; }
+@keyframes activity-reading-enter { from { opacity: 0; } }
+/* A low Mint pool and a raised surface opposite it give the field static depth. One Mint light
+   crosses it in one direction: it enters past the lower left, keeps travelling toward the upper
+   right while it is bright and leaves through the fade there; travel and brightness have their
+   own timing, so it never gathers into a pulse where it starts. A fainter light half a cycle
+   behind keeps the field from emptying without competing, so there is always one light to
+   follow. The field fades at the top and bottom so it never meets the tools row or the input as
+   an edge. Workbench parking pauses only the element itself, so its layers inherit that state.
+   In daylight the action green would darken the white surface like a shadow, so the light is a
+   pale tint of its hue, and nothing rises above white. */
+.activity-feed__empty-reading { --reading-tint: var(--green); --reading-light: 15%; --reading-pool: 10%; --reading-lift: 60%; --reading-cycle: calc(var(--dur-sweep) * 4); }
 :root[data-appearance='light'] .activity-feed__empty-reading { --reading-tint: oklch(from var(--green) .9 c h); --reading-light: 40%; --reading-pool: 28%; --reading-lift: 0%; }
 .activity-feed__empty-reading .activity-feed__reading-light { pointer-events: none; inset: 0; z-index: -1; overflow: hidden;
   background:
     radial-gradient(64% 74% at 14% 96%, color-mix(in oklab, var(--reading-tint) var(--reading-pool), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-pool) * .45), transparent) 42%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-pool) * .12), transparent) 72%, transparent),
-    radial-gradient(56% 62% at 92% 6%, color-mix(in oklab, var(--surface-2) var(--reading-lift), transparent), color-mix(in oklab, var(--surface-2) calc(var(--reading-lift) * .375), transparent) 50%, transparent);
+    radial-gradient(52% 58% at 82% 24%, color-mix(in oklab, var(--surface-3) var(--reading-lift), transparent), color-mix(in oklab, var(--surface-3) calc(var(--reading-lift) * .375), transparent) 50%, transparent);
   mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent); }
 .activity-feed__reading-light::before { left: -20%; top: 22%; width: 72%; height: 96%;
   background: radial-gradient(closest-side, color-mix(in oklab, var(--reading-tint) var(--reading-light), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .52), transparent) 36%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .2), transparent) 64%, transparent);
-  animation: activity-reading-flow calc(var(--dur-sweep) * 4) cubic-bezier(.45, 0, .55, 1) infinite; }
+  animation: activity-reading-travel var(--reading-cycle) linear infinite, activity-reading-glow var(--reading-cycle) ease-in-out infinite; }
 .activity-feed__reading-light::after { left: -14%; top: 32%; width: 62%; height: 84%;
-  background: radial-gradient(closest-side, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .8), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .4), transparent) 36%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .15), transparent) 64%, transparent);
-  animation: activity-reading-flow calc(var(--dur-sweep) * 4) cubic-bezier(.45, 0, .55, 1) calc(var(--dur-sweep) * -2) infinite; }
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .45), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .22), transparent) 36%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .08), transparent) 64%, transparent);
+  animation: activity-reading-travel var(--reading-cycle) linear calc(var(--reading-cycle) / -2) infinite, activity-reading-glow var(--reading-cycle) ease-in-out calc(var(--reading-cycle) / -2) infinite; }
 /* After the shorthands above, which would otherwise reset the play state to running. */
 .activity-feed__reading-light::before, .activity-feed__reading-light::after { content: ''; position: absolute; opacity: 0; animation-play-state: inherit; }
-@keyframes activity-reading-flow {
-  0% { opacity: 0; transform: translate3d(0, 6%, 0) scale(.9); }
-  26% { opacity: 1; }
-  68% { opacity: .85; }
-  100% { opacity: 0; transform: translate3d(90%, -46%, 0) scale(1.06); }
+@keyframes activity-reading-travel {
+  from { transform: translate3d(-12%, 16%, 0) scale(.9); }
+  to { transform: translate3d(112%, -58%, 0) scale(1.06); }
+}
+@keyframes activity-reading-glow {
+  0%, 100% { opacity: 0; }
+  34% { opacity: 1; }
+  72% { opacity: .9; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .activity-feed__empty-reading[data-loading-phase='loading'] { animation-duration: 0s; }
   .activity-feed__reading-light::before { animation: none; opacity: .9; transform: translate3d(42%, -20%, 0); }
   .activity-feed__reading-light::after { animation: none; }
 }
