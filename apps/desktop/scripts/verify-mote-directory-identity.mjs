@@ -13,6 +13,7 @@ const schema = 'apps/desktop/src/main/scratch-directory-identity.mjs'
 const scratch = 'apps/desktop/src/main/scratch-topics.ts'
 const addresses = 'apps/desktop/src/shared/space-addresses.ts'
 const observer = 'apps/host/src/snapshot-observation.ts'
+const contentIdentity = 'apps/host/src/topic-categories.ts'
 const ipc = 'apps/desktop/src/main/ipc.ts'
 const directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
 const config = 'apps/desktop/scripts/fixtures/mote-directory-identity/vitest.config.mts'
@@ -49,8 +50,8 @@ const variants = [
     to: 'needsUpgrade: Boolean(current?.needsUpgrade)', pattern: 'lost flush confirmation' },
   { id: 'readonly-discovery-writes', file: observer, from: 'const snapshots = await scratchTopics.list(workspace)',
     to: 'await scratchTopics.normalizeDirectoryIdentities(workspace)\n    const snapshots = await scratchTopics.list(workspace)', pattern: 'cold write-before ENOSPC' },
-  { id: 'physical-path-mints-identity', file: addresses, from: 'if (topic.readError && !topic.identityDirectoryPath)',
-    to: 'if (topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath)', pattern: 'invalid wrong-root' },
+  { id: 'physical-path-mints-identity', file: contentIdentity, from: 'return topic.readError && !topic.identityDirectoryPath ? null',
+    to: 'return topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath ? null', pattern: 'invalid wrong-root' },
   { id: 'cold-mote-classification-lost', file: observer,
     from: "kind: !isKnowledgeTopic(snapshot) ? 'mote' : snapshot.readError ? 'unknown' : 'topic'",
     to: "kind: snapshot.readError ? 'unknown' : !isKnowledgeTopic(snapshot) ? 'mote' : 'topic'", pattern: 'cold write-before ENOSPC' },
@@ -68,7 +69,7 @@ const checks = [
   { symbol: 'originalTopicAddress', definition: addresses, caller: 'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx', anchor: 'originalTopicAddress(' }
 ]
 const files = [...new Set([schema, 'apps/desktop/src/main/scratch-directory-identity.d.mts', scratch, directories, addresses,
-  observer, ipc, test, config, 'apps/host/native/workspace-move.c', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
+  observer, contentIdentity, ipc, test, config, 'apps/host/native/workspace-move.c', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
   'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/verify-topic-directory-migration-mutations.mjs',
   'apps/desktop/scripts/verify-mote-topic-directories-mutations.mjs', 'apps/desktop/scripts/verify-mote-directory-identity.mjs', ...checks.flatMap(check => [check.definition, check.caller])])]
 const originals = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(base, file))])))
