@@ -11,7 +11,7 @@ import { SshExecutionHost, type ExecutionHost } from './execution-host.js'
 import { assertAgentMuxRuntimeCompatibility } from './ctxmux-run-adapter.js'
 import type { AgentMuxRunState, AgentMuxRuntimeCompatibilityInput } from './types.js'
 import { createPortableCoreArtifact, type PortableCoreArtifact } from './portable-core-artifact.js'
-import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, SELECT_CORE_RELEASE, REPLACE_NATIVE } from './remote-core-upgrade-programs.js'
+import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, RELEASE_CORE_SERVICE_START, SELECT_CORE_RELEASE, REPLACE_NATIVE } from './remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeExpected, parseRemoteCoreMaintenanceObservation, parseRemoteCoreMaintenanceShutdown } from './remote-core-upgrade-codec.js'
 
 export type RemoteCoreUpgradeHost = { id: string; kind: 'local'; label: string; tailcat?: { enabled: boolean; keyFile: string; allowedClients: string[] } } | {
@@ -60,7 +60,7 @@ export type RemoteCoreUpgradeReceipt = {
   /** Main/config owner projection only; never rewrites the Core deployment outcome. */
   connectionAdoption?: { state: 'pending-confirmation' | 'connected' | 'unconfirmed'; readAt: number; code?: string; detail?: string }
 }
-type Launch = { node: string; cli: string; cwd: string; processId: number; startTicks: string; env: Record<string, string>
+type Launch = { service?: { unit: string; fragmentPath: string; controlGroup: string; runtimeDirectory: string } | null; node: string; cli: string; cwd: string; processId: number; startTicks: string; env: Record<string, string>
   stateDirectory: string; runtimeDirectory: string; storePath: string; nativeSha256: string; nativeProcessId: number; nativeStartTicks: string
   nativeArtifactDirectory: string; nativeManifestSha256: string; nativeInstanceId: string; nativeRuntimeId: string; nativeBuildId: string
   platform: string; deploymentDigest: string; version: string | null; sourceCommit: string | null }
@@ -359,6 +359,7 @@ export class RemoteCoreUpgradeManager {
         else this.verify(retained.observed, next, retained.receipt.expected.candidateDigest)
         // A confirmed original upgrade also names its release for the next restart.
         await this.select(retained.receipt.input, retained.observed.launch, retained.receipt.expected.candidateDigest, operationId)
+        await this.releaseServiceStart(retained.receipt.input, retained.observed.launch, next.owner.processId, operationId)
         retained.receipt.status = 'completed'; retained.receipt.stage = 'completed'
         retained.receipt.detail = replacing ? '已复查原操作：新 Core 与 Native Runtime 已运行，原 Runtime、Session 与历史保留。' : '已复查原操作：新 Core 已运行，原 Runtime 和 Session/Run 绑定保留。'
         await this.save(retained)
@@ -429,7 +430,8 @@ export class RemoteCoreUpgradeManager {
       value.receipt.stage = 'staged'; value.receipt.detail = '候选已核验，正在重新核对原服务。'; await this.save(value)
       const current = await this.observe(input, !replacing)
       this.admit(input, artifact, current, expected)
-      if (current.launch.nativeSha256 !== observed.launch.nativeSha256 || current.launch.deploymentDigest !== observed.launch.deploymentDigest) throw new AgentMuxError('The original owner or software changed while staging; no owner was stopped.', 'CONFIG_CONFLICT')
+      if (current.launch.nativeSha256 !== observed.launch.nativeSha256 || current.launch.deploymentDigest !== observed.launch.deploymentDigest ||
+          JSON.stringify(current.launch.service ?? null) !== JSON.stringify(observed.launch.service ?? null)) throw new AgentMuxError('The original owner or software changed while staging; no owner was stopped.', 'CONFIG_CONFLICT')
       if (replacing) {
         // Free space and the exact process are read once more before anything stops.
         await this.replacementPlan(input, current)
@@ -480,6 +482,7 @@ export class RemoteCoreUpgradeManager {
         value.receipt.nativeReplacement = { ...value.receipt.nativeReplacement!, endedRunIds: ended }
       } else this.verify(current, next, artifact.digest)
       await this.select(input, observed.launch, artifact.digest, operationId)
+      await this.releaseServiceStart(input, observed.launch, next.owner.processId, operationId)
       value.receipt.status = 'completed'; value.receipt.stage = 'completed'
       value.receipt.detail = replacing ? `Core 与 Native Runtime 已升级；原 Runtime、Session 与历史保留，${value.receipt.nativeReplacement!.endedRunIds.length} 个运行中的进程已结束，可沿原 Session 恢复。`
         : 'Core 已升级，原 Runtime、Session 和运行进程已保留。'
@@ -514,7 +517,10 @@ export class RemoteCoreUpgradeManager {
       for (let attempt = 0; attempt < 30; attempt++) {
         try {
           const back = await this.observe(input, false)
-          if (back.owner.runtimeId === original.owner.runtimeId && back.launch.deploymentDigest === original.launch.deploymentDigest) return '原 Core 已用原发行恢复服务。'
+          if (back.owner.runtimeId === original.owner.runtimeId && back.launch.deploymentDigest === original.launch.deploymentDigest) {
+            await this.releaseServiceStart(input, original.launch, back.owner.processId, operationId + '-restore')
+            return '原 Core 已用原发行恢复服务。'
+          }
         } catch { /* The original Core may still be starting. */ }
         await wait()
       }
@@ -542,6 +548,10 @@ export class RemoteCoreUpgradeManager {
     return previous.nativeRuns.filter(run => run.state === 'running').map(run => run.runId)
   }
   /** Points the remote restart entry at the confirmed release; a lost reply stays unknown. */
+  private async releaseServiceStart(input: RemoteCoreUpgradeHost, launch: Launch, processId: number, operationId: string): Promise<void> {
+    if (!launch.service) return
+    await this.program(input, launch.node, ['-e', RELEASE_CORE_SERVICE_START], { service: launch.service, stateDirectory: launch.stateDirectory, processId, operationId })
+  }
   private async select(input: RemoteCoreUpgradeHost, launch: Launch, digest: string, operationId: string): Promise<void> {
     const selected = await this.program<{ current?: unknown }>(input, launch.node, ['-e', SELECT_CORE_RELEASE], { stateDirectory: launch.stateDirectory, digest, operationId })
     if (selected.current !== digest) throw new AgentMuxError('The restart release receipt belongs to another release.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')

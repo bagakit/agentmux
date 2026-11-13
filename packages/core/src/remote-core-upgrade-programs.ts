@@ -2,7 +2,7 @@ import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 /** These programs are transported as single quoted argv by ExecutionHost. They
  * have no shell interpolation, provider branches, or access to Agent credentials. */
 export const INSPECT_CORE_OWNER = String.raw`
-import json,os,sys,hashlib,platform,stat
+import json,os,sys,hashlib,platform,stat,subprocess
 p=json.loads(sys.stdin.read())
 def text(path):
  with open(path) as f: return f.read()
@@ -117,7 +117,25 @@ if not os.path.isabs(native_executable) or os.path.realpath(native_executable)!=
 manifest_sha=sha(manifest_path)
 package_version=json.loads(text(os.path.join(root,'package.json'))).get('version')
 release_source=json.loads(text(os.path.join(root,'release.json'))).get('sourceCommit') if 'release.json' in seen else None
-result={'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':manifest_sha,'platform':'linux-x64','deploymentDigest':deployment['digest'],'version':package_version if isinstance(package_version,str) and package_version else None,'sourceCommit':release_source if isinstance(release_source,str) and release_source else None}
+# The cgroup path only locates a candidate. The user manager must confirm that this
+# exact Core is the unit MainPID; no display name or inherited SSH environment does.
+service=None
+uid=os.getuid(); user_runtime='/run/user/'+str(uid)
+for row in text(base+'/cgroup').splitlines():
+ hierarchy,controllers,group=row.split(':',2)
+ if hierarchy!='0' and controllers!='name=systemd': continue
+ if '/user@'+str(uid)+'.service/' not in group or not group.endswith('.service'): continue
+ unit=group.rsplit('/',1)[1]
+ manager_env={**os.environ,'XDG_RUNTIME_DIR':user_runtime,'DBUS_SESSION_BUS_ADDRESS':'unix:path='+user_runtime+'/bus'}
+ shown=subprocess.run(['systemctl','--user','show',unit,'--property=Id,MainPID,FragmentPath,ControlGroup,KillMode,ActiveState'],capture_output=True,text=True,env=manager_env,timeout=10)
+ if shown.returncode!=0: raise RuntimeError('The original user service could not be inspected; no owner was stopped.')
+ facts=dict(line.split('=',1) for line in shown.stdout.splitlines() if '=' in line)
+ if facts.get('Id')!=unit or facts.get('MainPID')!=str(pid) or facts.get('ControlGroup')!=group or facts.get('ActiveState')!='active' or not os.path.isabs(facts.get('FragmentPath','')):
+  raise RuntimeError('The user manager does not confirm this exact Core as its MainPID; no owner was stopped.')
+ if facts.get('KillMode')!='process': raise RuntimeError('This user service would stop the Native Runtime with its Core (KillMode must be process); no owner was stopped.')
+ service={'unit':unit,'fragmentPath':facts['FragmentPath'],'controlGroup':group,'runtimeDirectory':user_runtime}
+ break
+result={'service':service,'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':manifest_sha,'platform':'linux-x64','deploymentDigest':deployment['digest'],'version':package_version if isinstance(package_version,str) and package_version else None,'sourceCommit':release_source if isinstance(release_source,str) and release_source else None}
 # The caller derives this exact address only after public Core/Native identity agrees.
 # Receipt contents never select the current instance or override these OS facts.
 if 'receipt' in p:
@@ -238,15 +256,62 @@ const command=path.join(launcher,'amux');fs.writeFileSync(command,'#!/bin/sh\nex
 console.log(JSON.stringify({releaseDirectory:root,remoteCommand:command,digest:p.digest}));
 `
 
+/** A systemd unit stays its original execution owner. Only this operation's runtime
+ * drop-in selects the candidate until verification commits the persistent pointer. */
+const USER_SERVICE_CONTROL = String.raw`
+function serviceControl(service,args){
+ const env={...process.env,XDG_RUNTIME_DIR:service.runtimeDirectory,DBUS_SESSION_BUS_ADDRESS:'unix:path='+service.runtimeDirectory+'/bus'};
+ return cp.execFileSync('systemctl',['--user',...args],{env,encoding:'utf8',timeout:30000});
+}
+function serviceFacts(service){
+ const output=serviceControl(service,['show',service.unit,'--property=Id,MainPID,FragmentPath,ControlGroup,KillMode']);
+ return Object.fromEntries(output.trim().split('\n').filter(line=>line.includes('=')).map(line=>{const i=line.indexOf('=');return [line.slice(0,i),line.slice(i+1)];}));
+}
+function serviceDropin(service,operationId){
+ if(!/^[A-Za-z0-9_-]+$/.test(operationId)||!service.unit.endsWith('.service')||path.basename(service.unit)!==service.unit)throw Error('The original service identity is invalid');
+ return path.join(service.runtimeDirectory,'systemd','user',service.unit+'.d','50-agentmux-'+operationId+'.conf');
+}
+`
 export const START_CORE = String.raw`
 const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path');
 const p=JSON.parse(fs.readFileSync(0,'utf8'));
+` + USER_SERVICE_CONTROL + String.raw`
 const lease=path.join(p.stateDirectory,'core-releases',p.operationId+'.start.json');
 if(fs.existsSync(lease))throw Error('The original start admission already exists; inspect it without replaying');
 const fd=fs.openSync(lease,'wx',0o600);fs.writeSync(fd,JSON.stringify({operationId:p.operationId,state:'admitted'}));fs.fsyncSync(fd);fs.closeSync(fd);
-const log=fs.openSync(path.join(p.stateDirectory,'core-releases',p.operationId+'.log'),'a',0o600);
-const child=cp.spawn(p.node,[path.join(p.releaseDirectory,'dist','headless-runtime-cli.js'),'serve'],{cwd:p.cwd,env:p.env,detached:true,stdio:['ignore',log,log]});
-child.on('error',e=>{console.error(e.message);process.exitCode=1});child.on('spawn',()=>{fs.writeFileSync(lease,JSON.stringify({operationId:p.operationId,state:'started',processId:child.pid}));child.unref();console.log(JSON.stringify({processId:child.pid}));});
+if(p.service){
+ const service=p.service,facts=serviceFacts(service);
+ if(facts.Id!==service.unit||facts.FragmentPath!==service.fragmentPath||facts.MainPID!=='0'||facts.KillMode!=='process'||facts.ControlGroup&&facts.ControlGroup!==service.controlGroup)throw Error('The original user service changed or has another MainPID; no service was started');
+ const script=path.join(p.stateDirectory,'core-releases',p.operationId+'.service-start.sh'),quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
+ fs.writeFileSync(script,'#!/bin/sh\ncd '+quote(p.cwd)+'\nexec env -i '+Object.entries(p.env).map(([key,value])=>quote(key+'='+value)).join(' ')+' '+quote(p.node)+' '+quote(path.join(p.releaseDirectory,'dist','headless-runtime-cli.js'))+' serve\n',{mode:0o700,flag:'wx'});
+ const dropin=serviceDropin(service,p.operationId);fs.mkdirSync(path.dirname(dropin),{recursive:true,mode:0o700});
+ fs.writeFileSync(dropin,'[Service]\nExecStart=\nExecStart='+JSON.stringify(script.replaceAll('%','%%'))+'\n',{mode:0o600,flag:'wx'});
+ serviceControl(service,['daemon-reload']);serviceControl(service,['start',service.unit]);
+ const started=serviceFacts(service),pid=Number(started.MainPID);
+ if(started.Id!==service.unit||started.FragmentPath!==service.fragmentPath||started.ControlGroup!==service.controlGroup||!Number.isSafeInteger(pid)||pid<1)throw Error('The original user service did not confirm its new MainPID');
+ fs.writeFileSync(lease,JSON.stringify({operationId:p.operationId,state:'started',processId:pid,unit:service.unit}));
+ console.log(JSON.stringify({processId:pid}));
+}else{
+ const log=fs.openSync(path.join(p.stateDirectory,'core-releases',p.operationId+'.log'),'a',0o600);
+ const child=cp.spawn(p.node,[path.join(p.releaseDirectory,'dist','headless-runtime-cli.js'),'serve'],{cwd:p.cwd,env:p.env,detached:true,stdio:['ignore',log,log]});
+ child.on('error',e=>{console.error(e.message);process.exitCode=1});child.on('spawn',()=>{fs.writeFileSync(lease,JSON.stringify({operationId:p.operationId,state:'started',processId:child.pid}));child.unref();console.log(JSON.stringify({processId:child.pid}));});
+}
+`
+/** Releases only this operation's temporary service command after the original
+ * service was verified and the persistent current release was selected. */
+export const RELEASE_CORE_SERVICE_START = String.raw`
+const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path');
+const p=JSON.parse(fs.readFileSync(0,'utf8'));
+` + USER_SERVICE_CONTROL + String.raw`
+if(p.service){
+ const facts=serviceFacts(p.service);
+ if(facts.Id!==p.service.unit||facts.FragmentPath!==p.service.fragmentPath||facts.ControlGroup!==p.service.controlGroup||Number(facts.MainPID)!==p.processId)throw Error('The original user service changed; its temporary command was retained');
+ const dropin=serviceDropin(p.service,p.operationId);
+ if(fs.existsSync(dropin)){fs.unlinkSync(dropin);serviceControl(p.service,['daemon-reload']);}
+ const script=path.join(p.stateDirectory,'core-releases',p.operationId+'.service-start.sh');
+ if(fs.existsSync(script))fs.unlinkSync(script);
+}
+console.log(JSON.stringify({released:true}));
 `
 /** Names the release the serving Core runs, for an installed entry and its restart.
  * Written only after the new Core is confirmed; the rename is atomic. */
