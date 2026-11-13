@@ -37,8 +37,13 @@ export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
 type SourceRead = { observation: ConnectionDeliverySourceObservation; checkpoint: ConversationCheckpoint | null }
 type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined; rewrite?: ConversationChangesInput['rewrite'] } | undefined
-  /** Diagnostic key of the cut whose anchored rewrite read was already attempted; cleared by explicit recovery. */
+  /** Native cut whose anchored rewrite read reached a decided result; cleared by explicit recovery. */
   rewriteTried?: string | undefined }
+/** The anchored rewrite read compares only the native cut; other source cuts never make it new. */
+const rewriteCutKey = (checkpoint: ConversationCheckpoint) => {
+  const native = checkpoint.frontier.cuts.find(cut => cut.kind === 'native')
+  return native ? JSON.stringify(native.checkpoint.cursor) : undefined
+}
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -333,16 +338,19 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const unavailable = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') &&
         (value.current === 'unavailable' || value.current === 'unsupported' || value.gaps.length > 0))
       nativeFailure = unavailable ? { ...(unavailable.gaps[0]?.code ? { code: unavailable.gaps[0].code } : {}) } : undefined
-      // The original source was rewritten in place before this cut. Resume once per cut,
-      // after this Binding's newest consumed native record still byte-identical in the
-      // source; Core returns only later records. Nothing is accepted from this page.
-      // A failed anchored read is not repeated for the same cut until an explicit
-      // recovery, because appends after the cut cannot change what it compares.
-      const cutKey = connectionDiagnosisCheckpointKey(state.after)
-      if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' && !state.rewrite && !state.cursor && !state.pending && lane.rewriteTried !== cutKey) {
+      // The original source was rewritten in place before this cut. Resume after this
+      // Binding's newest consumed native record still byte-identical in the source; Core
+      // returns only later records. Nothing is accepted from this page. Only the native
+      // cut decides what the anchors compare, so captured progress is not a new cut. A
+      // decided anchored read (still rewritten, or a different source) is not repeated
+      // for the same native cut until an explicit recovery; a transient one is retried.
+      const nativeCut = rewriteCutKey(state.after)
+      if (state.rewrite) {
+        if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' || nativeFailure?.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') lane.rewriteTried = nativeCut
+      } else if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' && !state.cursor && !state.pending && lane.rewriteTried !== nativeCut) {
         const anchors = this.store.rewriteAnchors(binding)
-        lane.rewriteTried = cutKey
         if (anchors.length) { lane.view = undefined; lane.viewId = undefined; lane.read = { after: state.after, rewrite: { anchors } }; reads--; continue }
+        lane.rewriteTried = nativeCut
       }
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') {
