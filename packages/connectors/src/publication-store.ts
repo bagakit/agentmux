@@ -762,7 +762,7 @@ export class PublicationStore {
         if (action.action !== 'approve' || action.digest !== review.acceptedDigest) throw new AgentMuxError('This original range already has a retained authorization receipt.', 'PUBLICATION_SOURCE_CONFLICT')
         return review
       }
-      if (action.digest !== review.digest || action.action === 'approve' && !['ready', 'blocked'].includes(review.state)) throw new AgentMuxError('Inspect the same original completed offer and confirm its exact digest.', 'PUBLICATION_SOURCE_CONFLICT')
+      if ((action.action === 'approve' || action.digest !== undefined) && action.digest !== review.digest || action.action === 'approve' && !['ready', 'blocked'].includes(review.state)) throw new AgentMuxError('Inspect the same original completed offer and confirm its exact digest.', 'PUBLICATION_SOURCE_CONFLICT')
       if (action.action === 'cancel') {
         const result = { ...review, state: 'cancelled' as const }; this.saveNativeReview(boundary, result)
         this.saveNativeRecovery(boundary, { ...value, phase: 'blocked' }); return result
