@@ -19,13 +19,14 @@ function native(platform: NodeJS.Platform = 'darwin') {
 it('projects the default and every committed choice from the real configuration owner, then releases its reader', async () => {
   const f = await configOwnerFixture(), ports = native()
   const binding = bindAppBrandIcon(f.owner, ports)
-  expect(ports.loaded[0]!.path).toBe(appIconPath('qingzhuan'))
+  expect(ports.loaded[0]!.path).toBe(appIconPath('qingzhuan', 'darwin'))
+  expect(ports.loaded[0]!.path).toMatch(/\/app-icons\/macos\/qingzhuan\.png$/)
   expect(ports.dock.setIcon).toHaveBeenCalledWith(ports.loaded[0])
   expect(ports.window.setIcon).not.toHaveBeenCalled()
   for (const appIcon of APP_ICON_IDS) {
     await f.owner.update(current => ({ ...current, appearance: { ...current.appearance, appIcon } }))
     expect((await f.disk()).appearance.appIcon).toBe(appIcon)
-    expect(ports.loaded.at(-1)!.path).toBe(appIconPath(appIcon))
+    expect(ports.loaded.at(-1)!.path).toBe(appIconPath(appIcon, 'darwin'))
     expect(ports.dock.setIcon).toHaveBeenLastCalledWith(ports.loaded.at(-1))
   }
   expect(binding.issue).toBeNull()
@@ -39,7 +40,8 @@ it.each(['win32', 'linux'] as const)('uses the supported %s window API without t
   const f = await configOwnerFixture({ appearance: { terminalTheme: 'graphite', appIcon: 'classic' } }), ports = native(platform)
   const binding = bindAppBrandIcon(f.owner, ports)
   expect(ports.window.setIcon).toHaveBeenCalledWith(ports.loaded[0])
-  expect(ports.loaded[0]!.path).toBe(appIconPath('classic'))
+  expect(ports.loaded[0]!.path).toBe(appIconPath('classic', platform))
+  expect(ports.loaded[0]!.path).toMatch(/\/app-icons\/classic\.png$/)
   expect(ports.dock.setIcon).not.toHaveBeenCalled()
   binding.dispose()
 })

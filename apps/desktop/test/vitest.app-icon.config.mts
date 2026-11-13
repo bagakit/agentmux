@@ -9,6 +9,7 @@ const edits: Record<string, [string, string, string]> = {
   save: ['apps/desktop/src/renderer/src/components/settings/AppearanceSettingsPane.tsx', 'next.appIcon = submittedIcon.value', 'next.appIcon = DEFAULT_APP_ICON'],
   schema: ['src/main/config-store.ts', 'appIcon: z.enum(APP_ICON_IDS).optional(),', ''],
   native: ['src/main/app-brand-icon.ts', 'apply(saved.appearance.appIcon)', 'apply(undefined)'],
+  'macos-path': ['src/main/app-brand-icon.ts', "...(platform === 'darwin' ? ['macos'] : [])", "...[]"],
   'native-issue': ['src/main/app-brand-icon.ts', 'issue = `The system App icon could not be updated.', 'void `The system App icon could not be updated.']
 }
 const mutant = process.env.AGENTMUX_APP_ICON_MUTANT
