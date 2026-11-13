@@ -79,7 +79,7 @@ type WindowPresentation = {
   onSavePng?: AnnotationOutput
   onPin?: AnnotationOutput
   onCheckPin?(): void
-  pixelRatio?: never; origin?: never; onCopyColor?: never; onExpand?: never
+  pixelRatio?: never; origin?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
 }
 /**
  * One display's full frozen frame at a fixed one-to-one pixel scale, filling a transparent capture overlay. The
@@ -99,13 +99,17 @@ type CapturePresentation = {
   onPin: AnnotationOutput
   /** ⌘E or Expand: the host reopens these marks in a separate window editor as initialState and initialTool. */
   onExpand(handoff: CaptureAnnotationHandoff): void
+  /** A drag made a new selection on this display, once per new selection; the host claims the request's one selection for this display. Moving, resizing or a click claims nothing. */
+  onSelect(): void
+  /** Another display owns the request's selection: this frame keeps only its dimmed freeze and Cancel, and anything begun here is dropped. */
+  locked?: boolean
   initialTool?: never; onCopyContext?: never; onSaveOriginal?: never; onOpenOriginal?: never; onCheckPin?: never
 }
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 },
-  onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onEdited, onError }: ImageAnnotationEditorProps) {
+  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onSelect, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
   const ownerWindow = document.defaultView!
@@ -275,6 +279,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
   useEffect(() => { if (active && pendingText) { const frame = ownerWindow.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => ownerWindow.cancelAnimationFrame(frame) } }, [active, pendingText, ownerWindow])
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
+  // The lock reaches this display asynchronously, so a gesture or selection begun here before it arrived is dropped.
+  useEffect(() => {
+    if (!locked) return
+    resetGesture(); setSelectedId(null); setHover(null); setDocumentState(createScreenshotDocument()); schedulePaint()
+  }, [locked, resetGesture, schedulePaint])
   // The capture toolbar and size chip are placed from their laid-out widths before the frame paints, so they appear in place.
   useLayoutEffect(() => {
     if (!capture) return
@@ -420,7 +429,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (capture) { setGesture(cropRef.current ? 'selection' : currentGestureRef.current || eraseRef.current ? 'mark' : null); track(event) }
   }
   function beginGesture(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!active || (event.button !== 0 && event.button !== 1) || (capture && event.button !== 0)) return
+    if (!active || locked || (event.button !== 0 && event.button !== 1) || (capture && event.button !== 0)) return
     event.currentTarget.focus({ preventScroll: true }); setDiscarding(false)
     if (tool === 'pan' || (!capture && (spaceHeld.current || event.button === 1))) {
       event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId)
@@ -502,6 +511,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // The loupe follows the pointer before a selection exists and while one is made or adjusted. At rest a move reads no
   // frozen pixels, since each read is a canvas readback, and only sets the cursor for what a press would do.
   function track(event: { clientX: number; clientY: number }) {
+    if (locked) return
     const at = localPoint(event), crop = documentState.crop
     setHover(cropRef.current || !crop ? { at, sample: sampleLoupe(at) } : null)
     if (cropRef.current || currentGestureRef.current || eraseRef.current) return
@@ -532,7 +542,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     resetGesture()
     if (crop) {
       const box = cropGestureRect(crop, originalBounds)
-      if (box && !(crop.mode === 'create' && click) && JSON.stringify(box) !== JSON.stringify(crop.original)) edit(doc => setCrop(doc, box))
+      if (box && !(crop.mode === 'create' && click) && JSON.stringify(box) !== JSON.stringify(crop.original)) {
+        edit(doc => setCrop(doc, box)); if (crop.mode === 'create') onSelect?.()
+      }
     }
     else if (erased?.size) edit(doc => removeShapes(doc, erased))
     else if (transform && finished) { if (JSON.stringify(finished) !== JSON.stringify(transform.original)) edit(doc => replaceShape(doc, finished)) }
@@ -656,7 +668,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         <div className="image-annotation-editor__viewport" style={{ width: size.width, height: size.height }}>
           <img ref={imageRef} src={image.dataUrl} alt="Captured image" draggable={false} onLoad={() => { setLoaded(true); setImageError(false) }}
             onError={() => { setLoaded(false); setImageError(true); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
-          <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? selected ? 'move' : 'default' : 'crosshair' }}
+          <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? locked ? 'default' : cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? selected ? 'move' : 'default' : 'crosshair' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
             onPointerLeave={capture ? () => setHover(null) : undefined} onContextMenu={onContextMenu}
             onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
@@ -690,7 +702,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
-    const hint = !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
+    const hint = locked ? 'Selecting on another display · Esc to cancel'
+      : !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
       {chip && selection ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{Math.round(selection.width)} × {Math.round(selection.height)} px</span> : null}
