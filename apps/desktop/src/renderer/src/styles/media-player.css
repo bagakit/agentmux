@@ -152,14 +152,14 @@
 .media-player--audio .media-player__live { color: var(--text); }
 .media-player--audio .media-player__failure { position: static; max-width: none; padding: 0; background: transparent; box-shadow: none; }
 
-/* Narrow Regions keep play, mute, time and full screen; the volume slider and speed step aside. */
+/* Narrow Regions keep play, mute, the whole elapsed / total time and full screen; the volume slider and speed step aside. */
 @container (max-width: 511px) {
   .media-player--video .media-player__controls { inset: auto 0 0; gap: 0; }
   .media-player--video .media-player__bar { border-radius: 0; background: transparent; backdrop-filter: none; box-shadow: none; padding-inline: var(--sp-4); }
   .media-player--video .media-player__timeline { padding-inline: var(--sp-5); }
 }
 @container (max-width: 359px) {
-  .media-player__speed, .media-player--video .media-player__volume, .media-player__duration { display: none; }
+  .media-player__speed, .media-player--video .media-player__volume { display: none; }
   .media-player--audio .media-player__card { padding: var(--sp-5); }
   .media-player--audio .media-player__volume { display: none; }
 }
