@@ -439,10 +439,13 @@ export async function performAgentContinuity(
     : { kind: 'run-missing' as const, observedAt: now }
   const catalog = current ? ports.providers.providers.get(current.providerId).catalog : null
   let admission: ReturnType<typeof agentContinuityAdmission> | undefined
-  // Core's one answer to "was there ever a native conversation here". An ended Run with none is a
-  // final fact for this operation, decided before automatic admission could park it as idle-unknown.
+  // Core's one answer to "does Core hold a native conversation to continue here". An ended Run with
+  // none is a final fact for this operation; it replaces only automatic admission, never the
+  // authorization checks of a supervised or standing source.
   const nativeConversationAbsent = Boolean(current && run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
-    agentSessionHasNoNativeConversation(current, !ports.sessions.registry.isDurabilityUnconfirmed(current.agentSessionId)))
+    agentSessionHasNoNativeConversation(current, { durabilityConfirmed: !ports.sessions.registry.isDurabilityUnconfirmed(current.agentSessionId),
+      managedIdentityChannel: catalog.hookStrategy.kind === 'native' && catalog.hookStrategy.installation === 'explicit-managed',
+      acceptedInputBytes: run?.acceptedInputBytes }))
   if (current && run?.state !== 'running') {
     if (prior?.kind === 'reattachable' && prior.frontendReconnect?.frontendId) throw new AgentMuxError(
       'The original frontend reconnection completed. This ended Run needs a new explicit recovery operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
@@ -476,18 +479,17 @@ export async function performAgentContinuity(
       }
     }
     const lastActivityAt = agentContinuityLastActivityAt(current)
-    if (nativeConversationAbsent) admission = undefined
-    else if (receipt.intentOperationId) {
+    if (receipt.intentOperationId) {
       const root = current.continuityOperations?.[receipt.intentOperationId]
       if (!root?.supervision || root.supervision.activeAttemptOperationId !== receipt.operationId ||
         ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)) {
         throw new AgentMuxError('The original recovery intent no longer authorizes this attempt.', 'AGENT_CONTINUITY_SUPERSEDED')
       }
-      admission = { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
+      admission = nativeConversationAbsent ? undefined : { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
     } else if (standing) {
       assertStanding(await ports.sessions.store.readFuturePromptIntent(current.agentSessionId, standing.intentId), current)
-      admission = { kind: 'resume', reason: 'standing-intent', interruptedWorking: false }
-    } else admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
+      admission = nativeConversationAbsent ? undefined : { kind: 'resume', reason: 'standing-intent', interruptedWorking: false }
+    } else if (!nativeConversationAbsent) admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
       admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
       ...(lastActivityAt === undefined ? {} : { lastActivityAt }) })
     if (admission?.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)

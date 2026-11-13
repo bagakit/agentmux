@@ -47,20 +47,43 @@ function runEvidence(run: AgentMuxRun | null, observedAt: number): AgentMuxAgent
   return { kind: 'run-ended', state: run.state, observedAt: run.observedAt }
 }
 
+type NativeConversationEvidence = Pick<AgentMuxStoredAgentSession, 'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation' |
+  'retiredRuns' | 'forkedFrom' | 'nativeActor' | 'creation' | 'initialInput' | 'promptCompletionAdmission' | 'terminalPromptSubmission' |
+  'semanticStatus' | 'hookReceipt' | 'recoveryActivity' | 'activityCommit'>
+
 /**
- * The one owner of "this ended Session has no native conversation to continue".
+ * Whether the Session's own record holds any sign of a native conversation: an identity in any form
+ * (handle, observed handle, candidates), an earlier Run or fork parent, a protocol initialization
+ * that may have created a native object before its identity was bound, an authored or unknown first
+ * prompt, admitted or submitted input, or native status, Hook or activity evidence.
+ */
+export function agentSessionHoldsNativeEvidence(session: NativeConversationEvidence): boolean {
+  if (session.nativeHandle || session.observedNativeHandle || session.nativeSourceObservation) return true
+  if (session.retiredRuns.length > 0 || session.forkedFrom || session.nativeActor?.initializationControl) return true
+  if (session.creation?.initialPrompt !== 'not-requested') return true
+  return Boolean(session.initialInput || session.promptCompletionAdmission || session.terminalPromptSubmission ||
+    session.semanticStatus || session.hookReceipt || session.recoveryActivity || session.activityCommit)
+}
+
+/**
+ * The one owner of "Core holds no native conversation to continue for this ended Session".
  *
- * True only when nothing about a Provider identity was ever observed for this Session: no handle,
- * no observed handle, no candidates awaiting selection, and its stored identity is durably
- * confirmed. A confirmed ID without its locator, an unconfirmed save or several candidates are
- * different facts and keep the existing identity and recheck paths. The caller has already
- * established that the Run is not running; an unknown Runtime state never reaches here.
+ * It answers only what Core recorded, never what the Provider saved. True when Core installs its own
+ * identity channel for this Provider (managed native Hooks), the saved state is durably confirmed,
+ * the Session's record holds no native evidence, and ctxmux reports that the Run accepted no input
+ * beyond the terminal handshake reply. Any other fact, including an unknown input count, keeps the
+ * existing identity and recheck paths (native-handle-unavailable). The caller has already
+ * established that the Run is not running.
  */
 export function agentSessionHasNoNativeConversation(
-  session: Pick<AgentMuxStoredAgentSession, 'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation'>,
-  durabilityConfirmed: boolean
+  session: NativeConversationEvidence & Pick<AgentMuxStoredAgentSession, 'run' | 'terminalHandshake'>,
+  facts: { durabilityConfirmed: boolean; managedIdentityChannel: boolean; acceptedInputBytes: number | null | undefined }
 ): boolean {
-  return durabilityConfirmed && !session.nativeHandle && !session.observedNativeHandle && !session.nativeSourceObservation
+  if (!facts.durabilityConfirmed || !facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false
+  const handshake = session.terminalHandshake
+  const protocolBytes = handshake?.acknowledged && handshake.run.runId === session.run.runId && handshake.inputByteRange.startByte === 0
+    ? handshake.inputByteRange.endByte : 0
+  return facts.acceptedInputBytes === 0 || facts.acceptedInputBytes === protocolBytes
 }
 
 /**

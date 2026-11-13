@@ -666,7 +666,7 @@ export class AgentMuxRpcService {
       const restored = await selected.client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: prior?.previousRun ?? original.run,
         operationId: request.requestId, trigger: 'manual' })
       if (restored.kind === 'unavailable' && restored.reason === 'native-conversation-absent') throw new AgentMuxError(
-        'This Session has no native conversation to continue: its Run ended before the Provider held one. The original Session and its history are kept; start a new conversation instead.',
+        'Core holds no native conversation for this ended Session to continue. The original Session and its history are kept; start a new conversation instead.',
         'AGENT_RESUME_UNAVAILABLE', JSON.stringify(restored))
       if (restored.kind !== 'resumed' && restored.kind !== 'reattachable') throw new AgentMuxError(
         restored.continuity?.error ?? `The original Resume is ${restored.kind}. Inspect this Session and retry the same operation.`,

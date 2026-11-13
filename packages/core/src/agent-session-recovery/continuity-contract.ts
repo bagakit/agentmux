@@ -449,9 +449,10 @@ export type AgentMuxAgentContinuityUnavailableReason =
   | 'unknown-session'
   | 'native-handle-unavailable'
   /**
-   * The Run has ended and this Session never held any Provider identity, native candidate or
-   * unconfirmed identity save: there is no native conversation to continue. Some Providers do not
-   * save a conversation before its first turn. Core alone decides this; clients do not infer it.
+   * The Run has ended and Core holds no native conversation for this Session to continue: no
+   * identity in any form, no input or native activity on the Run, through a channel Core installs
+   * itself. It states what Core recorded, never what the Provider saved. Core alone decides this
+   * (agentSessionHasNoNativeConversation); clients do not infer it.
    */
   | 'native-conversation-absent'
   | 'provider-resume-unsupported'
@@ -541,7 +542,7 @@ export type AgentMuxAgentContinuityFacts = {
   capability: AgentCapabilitySnapshot | null
   /** The actual native resume plan's command, independently of installed capability projection. */
   launchExecutable?: string
-  /** Core's own judgement that this Session never held any Provider identity (agentSessionHasNoNativeConversation). */
+  /** Core's own judgement that it holds no native conversation to continue (agentSessionHasNoNativeConversation). */
   nativeConversationAbsent?: boolean
 }
 

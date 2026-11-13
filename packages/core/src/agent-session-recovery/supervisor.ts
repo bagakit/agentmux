@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
 import { AgentMuxError } from '../errors.js'
 import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, AgentMuxContinuityOperation, AgentMuxContinuitySupervision } from './continuity-contract.js'
-import { agentContinuityRetryBaseDelay } from './continuity-policy.js'
+import { agentContinuityRetryBaseDelay, agentSessionHoldsNativeEvidence } from './continuity-policy.js'
 import type { AgentMuxLifecycleReservation } from '../agent-session-store.js'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import type { CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
@@ -117,6 +117,12 @@ export class AgentSessionContinuitySupervisor {
       root.kind === 'pending' && root.reason === 'active-manual' && root.policy.activeRecovery === 'manual' &&
       supervision.phase === 'paused' && supervision.attemptCount === 0 && active.operationId === root.operationId &&
       !root.newRun && !root.frontendReconnect && !root.launchInput && !root.messageInput) return
+    // An earlier startup parked an identity-less Session as idle-unknown, before Core could answer
+    // that it holds no native conversation. A fresh startup re-decides it; nothing was admitted.
+    if (input.trigger === 'startup' && root.kind === 'pending' && root.reason === 'idle-unknown' &&
+      supervision.phase === 'paused' && supervision.attemptCount === 0 && active.operationId === root.operationId &&
+      !root.newRun && !root.frontendReconnect && !root.launchInput && !root.messageInput && !root.standingIntent &&
+      !agentSessionHoldsNativeEvidence(session)) return
     // A new application startup may retry a fully reconciled failed frontend.
     // It never resets this intent's durable counter or abandons an unknown action.
     if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&
