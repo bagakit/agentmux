@@ -11,6 +11,8 @@ import { app, BrowserWindow, ipcMain, nativeImage, type WebContentsView } from '
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
+import { ScreenshotPins } from '../../../src/main/screenshot-pins'
+import { exportScreenshotPng, writeScreenshotFile } from '../../../src/main/screenshot-files'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import type { WorkspaceRecord } from '../../../src/shared/contracts'
@@ -24,7 +26,7 @@ const originalId = 'private-screenshot-original', siblingId = 'private-screensho
 const receipt: any = {
   schema: 'agentmux.browser-screenshot-workface-native-process.v1', label, pid: process.pid,
   scope: 'actual-BrowserPane-Editor-Canvas-native-overlay-and-BrowserViewManager-private-IO',
-  passed: false, cases: [], images: [], warnings: [], calls: [], publications: [], clipboard: [], clipboardText: [], captures: [],
+  passed: false, cases: [], images: [], warnings: [], calls: [], publications: [], clipboard: [], clipboardText: [], captures: [], exports: [], pins: [], pinInspections: [], expectedErrors: [],
   counters: { rendererCapture: 0, rendererEncode: 0, originalCapture: 0 }
 }
 let window: BrowserWindow, manager: BrowserViewManager, overlays: NativeOverlaySurfaces, server: Server
@@ -34,8 +36,14 @@ let publicServer: AgentMuxControlServer
 let scriptCapture: any
 let files: WorkspaceFiles
 let workspace: WorkspaceRecord
+let pins: ScreenshotPins, loseNextPinReply = false
+const pinActor = { kind: 'user' as const, id: 'private-browser-renderer' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-const evaluate = (code: string) => window.webContents.executeJavaScript(code)
+async function evaluate(code: string) {
+  const result = await window.webContents.debugger.sendCommand('Runtime.evaluate', { expression: code, awaitPromise: true, returnByValue: true })
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text)
+  return result.result.value
+}
 async function stage(value: string) {
   const progress = { label, pid: process.pid, stage: value, at: Date.now() }
   receipt.stages ??= []; receipt.stages.push(progress)
@@ -55,7 +63,8 @@ function imagePointOnScreen(facts: any, x: number, y: number) {
 }
 async function mouse(type: string, x: number, y: number, button?: string) {
   await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y,
-    ...(button ? { button, clickCount: 1 } : {}), ...(type === 'mouseMoved' && button ? { buttons: 1 } : {}) })
+    button: type === 'mouseMoved' ? 'none' : button ?? 'left', buttons: type === 'mouseReleased' ? 0 : button ? 1 : 0,
+    clickCount: type === 'mouseMoved' ? 0 : 1 })
 }
 async function click(name: string, insideEditor: boolean | 'file' = false) {
   if (insideEditor === true && (name === 'Open original' || name === 'Save original')) {
@@ -66,12 +75,21 @@ async function click(name: string, insideEditor: boolean | 'file' = false) {
     await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
     return
   }
-  const point = await evaluate(`(()=>{const root=${insideEditor === 'file' ? "document.querySelector('.confirmation-dialog')" : insideEditor ? "document.querySelector('.image-annotation-editor')" : 'document'},button=[...root.querySelectorAll('button,[role="menuitem"]')].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button)return null;const r=button.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,disabled:button.disabled,hit:!!hit&&button.contains(hit),hitTag:hit?.tagName,bodyPointerEvents:document.body.style.pointerEvents}})()`)
+  if (insideEditor === true && await evaluate(`(()=>{const tool=[...document.querySelectorAll('.image-annotation-toolbar__tools button')].find(node=>node.getAttribute('aria-label')===${JSON.stringify(name)}),menu=document.querySelector('button[aria-label="Markup tool"]');return !!tool&&tool.getBoundingClientRect().width===0&&!!menu&&menu.getBoundingClientRect().width>0})()`)) {
+    await click('Markup tool', true)
+    const point = await until('actual compact markup menu item ' + name, async () => await evaluate(`(()=>{const item=[...document.querySelectorAll('[role="menuitemradio"]')].find(node=>node.querySelector('span')?.textContent.trim()===${JSON.stringify(name)});if(!item||item.getAttribute('aria-disabled')==='true')return null;const r=item.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return r.width>0?{x,y,hit:item.contains(document.elementFromPoint(x,y))}:null})()`))
+    assert.equal(point.hit, true, 'The actual compact tool owns its pointer hit: ' + name)
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await mouse(type, point.x, point.y, type === 'mouseMoved' ? undefined : 'left')
+    await settle()
+    return
+  }
+  const point = await until('actual enabled mounted button ' + name, async () => await evaluate(`(()=>{const root=${insideEditor === 'file' ? "document.querySelector('.confirmation-dialog')" : insideEditor ? "document.querySelector('.image-annotation-editor')" : 'document'},button=[...(root?.querySelectorAll('button,[role="menuitem"]')??[])].find(b=>(b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)})&&b.getBoundingClientRect().width>0);if(!button||button.disabled)return null;const r=button.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,disabled:button.disabled,hit:!!hit&&button.contains(hit),hitTag:hit?.tagName,bodyPointerEvents:document.body.style.pointerEvents}})()`))
   assert.ok(point, 'The actual mounted button exists: ' + name)
   receipt.clicks ??= []; receipt.clicks.push({ name, insideEditor, ...point })
   assert.equal(point.hit, true, 'The actual control owns its trusted pointer hit: ' + name + ' ' + JSON.stringify(point))
   await mouse('mouseMoved', point.x, point.y)
   await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
+  await settle()
 }
 async function escape() {
   for (const type of ['keyDown', 'keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
@@ -254,6 +272,124 @@ async function capabilityEdits(opened: any) {
   assert.deepEqual(restoredContext.annotations, croppedContext.annotations)
   assert.deepEqual(restoredContext.outputPng, croppedContext.outputPng)
   receipt.cases.push({ label: 'actual-crop-hidden-pixelate-masked-note-context-and-Undo', hiddenContext, maskedContext, restoredContext })
+  await processedOutputs(cropped)
+}
+async function measurePointerWork(opened: any) {
+  await evaluate('window.screenshotProbe.rememberPixels()')
+  const before = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
+  const box = opened.canvas, startPoint = imagePointOnScreen(opened, receipt.captures.at(-1).image.width * .08, receipt.captures.at(-1).image.height * .16)
+  const x = startPoint.x, y = startPoint.y, count = 300, start = Date.now()
+  await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 'left')
+  for (let i = 1; i <= count; i++) await mouse('mouseMoved', x + (i / count) * Math.min(300, box.width - 65), y + 40 * Math.sin(i / 25), 'left')
+  await mouse('mouseReleased', x + Math.min(300, box.width - 65), y + 40 * Math.sin(count / 25), 'left')
+  await settle()
+  const after = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
+  const trusted = after.facts.events.slice(before.facts.events.length).filter((event: any) => event.target === 'canvas' && event.trusted)
+  assert.ok(trusted.filter((event: any) => event.type === 'pointermove').length >= count, 'Actual continuous CDP pointer samples reach the real Canvas')
+  assert.equal(trusted.filter((event: any) => event.type === 'pointerdown').length, 1); assert.equal(trusted.filter((event: any) => event.type === 'pointerup').length, 1)
+  assert.ok(after.ink.count > before.ink.count + 100 && after.ink.changed > 100, 'Actual red drawing changes the captured base page; opaque source alpha is not ink')
+  assert.deepEqual(after.counters, before.counters, 'drawing-must-not-capture-or-encode-native-chrome')
+  assert.equal(after.publications, before.publications, 'drawing-must-not-publish-native-chrome')
+  const renderLatency = after.facts.canvasCost.scene.pointerToRenderMs.filter((value: number) => Number.isFinite(value) && value >= 0)
+  assert.ok(renderLatency.length > 0 && renderLatency.length <= count + 1, 'Trusted Canvas pointer receipts produce nonempty observed render latency samples')
+  const sortedLatency = renderLatency.slice().sort((a: number, b: number) => a - b)
+  receipt.cases.push({ label: 'continuous-pointer-ink-with-zero-native-chrome-work', samples: count, elapsedMs: Date.now() - start, before, after,
+    latency: { boundary: 'Trusted Renderer pointer receipt to observed scene Canvas render completion; excludes compositor presentation and unpainted intermediate samples.',
+      samples: renderLatency.length, medianMs: sortedLatency[Math.floor(sortedLatency.length / 2)], p95Ms: sortedLatency[Math.ceil(sortedLatency.length * .95) - 1], maxMs: sortedLatency.at(-1) } })
+  await shot('editor-ink'); await stage('actual-continuous-pointer-cost-oracle-complete')
+}
+async function processedOutputs(expected: any) {
+  const before = { counters: { ...receipt.counters }, captures: receipt.captures.length }
+  const captured = receipt.captures.at(-1).image
+  await click('Save PNG', true)
+  await until('the actual PNG save returns to the same editor', async () => receipt.exports.length === 1 && !(await facts()).copying)
+  const saved = receipt.exports.at(-1)
+  assert.equal(saved.result.status, 'saved')
+  const png = await readFile(saved.result.path), exported = nativeImage.createFromBuffer(png)
+  if (expected) {
+    assert.deepEqual(exported.getSize(), { width: expected.width, height: expected.height }, 'actual-Save-PNG-must-use-current-processed-pixels')
+    assert.equal(exported.toBitmap().equals(nativeImage.createFromPath(join(out, expected.png.path)).toBitmap()), true, 'actual-Save-PNG-must-use-current-processed-pixels')
+  } else {
+    const size = exported.getSize(), bytes = exported.toBitmap(), coverAt = (100 * size.width + 120) * 4
+    assert.ok(Math.abs(size.width - (captured.width - 80)) <= 2 && Math.abs(size.height - (captured.height - 80)) <= 2,
+      'actual-Save-PNG-must-use-current-processed-pixels')
+    assert.deepEqual([...bytes.subarray(coverAt, coverAt + 4)], [39, 24, 17, 255], 'actual-Save-PNG-must-use-current-processed-pixels')
+  }
+  const expectedSize = exported.getSize(), expectedPixels = exported.toBitmap()
+  await click('Pin image', true)
+  await until('the actual pin owner returns its original opened receipt', async () => receipt.pins.length === 1 && !(await facts()).copying)
+  const pinned = receipt.pins.at(-1)
+  assert.equal(pinned.result.recordedOperation?.effect, 'opened')
+  const reference = await until('the exact production pin window', async () => {
+    for (const candidate of BrowserWindow.getAllWindows()) {
+      if (candidate === window) continue
+      try {
+        const document = await candidate.webContents.executeJavaScript('window.screenshotPin?.load()')
+        if (document?.pinId === pinned.result.pinId) return { window: candidate, document }
+      } catch {}
+    }
+    return null
+  })
+  const fixed = nativeImage.createFromDataURL(reference.document.image.dataUrl)
+  assert.deepEqual(fixed.getSize(), expectedSize, 'actual-Pin-must-use-current-processed-pixels')
+  assert.equal(fixed.toBitmap().equals(expectedPixels), true, 'actual-Pin-must-use-current-processed-pixels')
+  assert.equal(reference.window.isAlwaysOnTop(), true)
+  assert.equal((await facts()).editor, true, 'Pin retains the original editable image')
+  assert.equal(original.getVisible(), false, 'Pin keeps the screenshot in its original Browser workface')
+  await shot('processed-output-actions')
+  await until('actual fixed reference image decodes', async () => await reference.window.webContents.executeJavaScript('document.querySelector("img")?.naturalWidth > 0'))
+  const referenceBytes = (await reference.window.webContents.capturePage()).toPNG(), referencePath = label + '-processed-reference.png'
+  await writeFile(join(out, referencePath), referenceBytes)
+  receipt.images.push({ path: referencePath, bytes: referenceBytes.length, sha256: createHash('sha256').update(referenceBytes).digest('hex'),
+    size: nativeImage.createFromBuffer(referenceBytes).getSize(), kind: 'actual-pinned-window', capture: 'WebContents.capturePage', pid: process.pid,
+    webContentsId: reference.window.webContents.id, windowId: reference.window.id })
+  const firstClose = await pins.call('image.close', { hostId: 'local', pinId: pinned.result.pinId, operationId: 'close-browser-processed-reference' }, { actor: pinActor })
+  assert.equal(firstClose.recordedOperation?.effect, 'closed'); assert.equal(reference.window.isDestroyed(), true)
+
+  loseNextPinReply = true
+  await click('Pin image', true)
+  await until('lost pin receipt exposes the original read-only recovery action', async () => receipt.pins.length === 2 && await evaluate('!![...document.querySelectorAll("button")].find(button=>button.textContent.trim()==="Check pin")') && !(await facts()).copying)
+  const originalCreation = receipt.pins.at(-1), errors = (await facts()).errors
+  assert.equal(errors.length, receipt.expectedErrors.length + 1)
+  assert.match(errors.at(-1), /Pin creation is unconfirmed \(operation /)
+  assert.ok(errors.at(-1).includes(originalCreation.operationId), 'The unconfirmed image retains the exact creation operation')
+  receipt.expectedErrors.push(errors.at(-1))
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Pin image"]')}).disabled`), false, 'An unconfirmed reference retains an independent explicit pin action')
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Save PNG"]')}).disabled`), false, 'An unconfirmed pin retains independent PNG output')
+  assert.deepEqual(receipt.counters, before.counters, 'PNG save and pin reuse the original frozen Browser pixels')
+  assert.equal(receipt.captures.length, before.captures, 'Independent image outputs never recapture the Browser')
+  await click('Cancel', true); await closed('unconfirmed-pin-keeps-original-Browser-after-cancel')
+  await openEditor()
+  const capturedAgain = { counters: { ...receipt.counters }, captures: receipt.captures.length }
+  await until('the new capture retains the earlier unconfirmed reference', async () => await evaluate('!![...document.querySelectorAll("button")].find(button=>button.textContent.trim()==="Check pin")'))
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Pin image"]')}).textContent.trim()`), 'Pin another')
+  await click('Save PNG', true)
+  await until('independent PNG save completes while the original pin remains unconfirmed', async () => receipt.exports.length === 2 && !(await facts()).copying)
+  await click('Pin image', true)
+  await until('another explicit pin completes without discarding the earlier original operation', async () => receipt.pins.length === 3 && !(await facts()).copying)
+  const independentCreation = receipt.pins.at(-1)
+  assert.equal(independentCreation.result.recordedOperation?.effect, 'opened')
+  assert.notEqual(independentCreation.operationId, originalCreation.operationId)
+  assert.equal(await evaluate('!![...document.querySelectorAll("button")].find(button=>button.textContent.trim()==="Check pin")'), true, 'A successful new reference keeps the earlier original inspection')
+  const beforeCheck = BrowserWindow.getAllWindows().length
+  await click('Check pin', true)
+  await until('read-only inspection restores the original creation receipt', async () => receipt.pinInspections.length === 1 && !await evaluate('!![...document.querySelectorAll("button")].find(button=>button.textContent.trim()==="Check pin")') && !(await facts()).copying)
+  assert.equal(receipt.pinInspections[0].operationId, originalCreation.operationId)
+  assert.equal(receipt.pinInspections[0].result.pinId, originalCreation.result.pinId)
+  assert.equal(BrowserWindow.getAllWindows().length, beforeCheck, 'Read-only pin inspection cannot create another window')
+  assert.equal(receipt.pins.length, 3, 'A lost creation receipt is never replayed by inspection or a new explicit pin')
+  await pins.call('image.close', { hostId: 'local', pinId: originalCreation.result.pinId, operationId: 'close-browser-reconciled-reference' }, { actor: pinActor })
+  const retained = await pins.call('image.inspect', { hostId: 'local', pinId: independentCreation.result.pinId }, { actor: pinActor })
+  assert.equal(retained.state, 'open', 'Closing the earlier reference retains the separately created healthy pin')
+  await pins.call('image.close', { hostId: 'local', pinId: independentCreation.result.pinId, operationId: 'close-browser-independent-reference' }, { actor: pinActor })
+  assert.deepEqual(receipt.counters, capturedAgain.counters, 'Further outputs reuse only the second explicitly captured image')
+  assert.equal(receipt.captures.length, capturedAgain.captures, 'Pin recovery does not recapture either document')
+  await settle()
+  const idleBefore = await facts(); await delay(100); const idleAfter = await facts()
+  assert.deepEqual(idleAfter.canvasCost, idleBefore.canvasCost, 'Idle image output windows do not continuously repaint the original editor')
+  receipt.cases.push({ label: 'actual-processed-PNG-pin-and-original-pin-receipt-recovery', exported: { width: exported.getSize().width, height: exported.getSize().height, bytes: png.length },
+    originalCreation: originalCreation.operationId, originalPinId: originalCreation.result.pinId, independentCreation: independentCreation.operationId,
+    inspection: receipt.pinInspections[0], before, capturedAgain, after: { counters: { ...receipt.counters }, captures: receipt.captures.length }, idle: { before: idleBefore.canvasCost, after: idleAfter.canvasCost } })
 }
 async function advancedAnnotationEdits() {
   let opened = await openEditor()
@@ -413,13 +549,44 @@ async function advancedAnnotationEdits() {
       originalImage: { width: document.image.width, height: document.image.height }, retainedHiddenNote: true }, reopened, publicContext, captureCount })
   await click('Cancel', true); await closed('reopened-original-cancel')
 }
+async function toolbarFocus() {
+  const compact = await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Markup tool"]')})?.getBoundingClientRect().width > 0`)
+  if (compact) { await click('Markup tool', true); await escape(); await settle() }
+  else await click('Pen', true)
+  await key('Tab', 'Tab', 9, 8); await key('Tab', 'Tab', 9); await settle()
+  const readFocus = () => evaluate(`(()=>{const node=document.activeElement,toolbar=node?.closest('[role="toolbar"]'),r=node?.getBoundingClientRect(),t=toolbar?.getBoundingClientRect();return {name:node?.getAttribute('aria-label')||node?.textContent.trim(),visible:!!toolbar&&node.checkVisibility({checkVisibilityCSS:true})&&r.width>0&&r.height>0&&r.left>=t.left&&r.right<=t.right&&r.top>=t.top&&r.bottom<=t.bottom}})()`)
+  const entry = await readFocus(), moves: any[] = []
+  assert.equal(entry.name, compact ? 'Markup tool' : 'Pen', 'Native toolbar entry focuses its actual visible current control')
+  assert.equal(entry.visible, true, 'Native toolbar entry cannot focus a CSS-hidden control')
+  for (const [value, code, number] of [['Home', 'Home', 36], ['ArrowRight', 'ArrowRight', 39], ['ArrowLeft', 'ArrowLeft', 37], ['End', 'End', 35]] as const) {
+    await key(value, code, number); await settle()
+    const focused = await readFocus()
+    assert.equal(focused.visible, true, 'Native ' + value + ' cannot focus a hidden or clipped toolbar control')
+    moves.push({ key: value, ...focused })
+  }
+  return { compact, entry, moves }
+}
+async function visualLayout(kind: string, withNoteInput: boolean) {
+  const layout = await evaluate(`(()=>{const rect=node=>{if(!node)return null;const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}},panel=document.querySelector('.image-annotation-editor__notes');return {editor:rect(document.querySelector('.image-annotation-editor')),canvas:rect(document.querySelector('.image-annotation-editor canvas')),panel:rect(panel),fields:[...panel.querySelectorAll('textarea,select,button')].map(node=>({name:node.getAttribute('aria-label')||node.textContent.trim(),...rect(node)})),history:[...document.querySelectorAll('.image-annotation-toolbar__history button')].map(node=>({name:node.getAttribute('aria-label')||node.textContent.trim(),...rect(node)}))}})()`)
+  const minimumCanvasHeight = kind.startsWith('short') ? 120 : kind.startsWith('narrow') ? 200 : 220
+  assert.ok(layout.canvas.height >= minimumCanvasHeight, kind + ': the real editing Canvas retains a readable height budget')
+  assert.ok(layout.panel && layout.fields.length >= (withNoteInput ? 4 : 1), kind + ': the real note controls exist')
+  assert.ok(layout.fields.every((field: any) => field.left >= layout.panel.left - 1 && field.right <= layout.panel.right + 1 && field.top >= layout.panel.top - 1 && field.bottom <= layout.panel.bottom + 1), kind + ': no note control is clipped by its actual panel')
+  const noteInput = layout.fields.find((field: any) => field.name === 'Note text')
+  if (withNoteInput) assert.ok(noteInput?.height >= 40, kind + ': the note input retains its own usable editing area')
+  assert.ok(layout.history.every((button: any) => button.left >= layout.editor.left && button.right <= layout.editor.right && button.top >= layout.editor.top && button.bottom <= layout.editor.bottom), kind + ': history remains visible beside the current tool controls')
+  return { ...layout, minimumCanvasHeight }
+}
 async function visualScene(kind: string, width: number, height: number, appearance: 'dark' | 'light') {
   window.setContentSize(width, height)
   assert.equal((await evaluate(`window.screenshotProbe.appearance(${JSON.stringify(appearance)})`)).applied, true)
   await settle(); const opened = await openEditor(), box = opened.canvas, source = receipt.captures.at(-1).image
+  const focus = await toolbarFocus()
   await click('Numbered note', true)
-  await drag(imagePointOnScreen(opened, source.width * .55, source.height * .4), imagePointOnScreen(opened, source.width * .82, source.height * .65))
+  const noteView = await facts()
+  await drag(imagePointOnScreen(noteView, source.width * .55, source.height * .4), imagePointOnScreen(noteView, source.width * .82, source.height * .65))
   await fillField('Note text', 'Review this captured control')
+  const noteLayout = await visualLayout(kind, true)
   await shot(kind + '-notes')
   await click('Pixelate', true)
   const property = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify('select[aria-label="Pixel size"]')}),r=e?.getBoundingClientRect();return r?{x:r.x+r.width/2,y:r.y+r.height/2}:null})()`)
@@ -434,8 +601,26 @@ async function visualScene(kind: string, width: number, height: number, appearan
   await shot(kind + '-parameter')
   const final = await facts()
   assert.equal(final.appearance, appearance)
-  receipt.cases.push({ label: 'visual-' + kind, appearance, width, height, facts: final })
+  const layout = await visualLayout(kind, false)
+  const exportsBefore = receipt.exports.length
+  let busyPan: any = null
+  if (kind.startsWith('narrow')) {
+    await evaluate('window.screenshotProbe.holdEncoding()'); await click('Save PNG', true)
+    await until('the actual narrow PNG encoder is held', async () => (await facts()).encodingHeld)
+    await click('Pan', true)
+    const before = await facts(), at = { x: before.canvas.x + before.canvas.width / 2, y: before.canvas.y + before.canvas.height / 2 }
+    await drag(at, { x: at.x + 18, y: at.y + 12 })
+    const after = await facts()
+    assert.equal(after.copying, true, 'Pan remains independent of the held PNG output')
+    assert.ok(Math.abs(after.imageView.x - before.imageView.x - 18) < 1 && Math.abs(after.imageView.y - before.imageView.y - 12) < 1, 'The actual busy narrow Pan remains usable through the tool selector')
+    busyPan = { before: before.imageView, after: after.imageView }
+  }
+  receipt.cases.push({ label: 'visual-' + kind, appearance, width, height, facts: final, layout, noteLayout, minimumCanvasHeight: layout.minimumCanvasHeight, focus, busyPan })
   await click('Cancel', true); await closed('visual-' + kind + '-cancel'); await stage('visual-' + kind + '-complete')
+  if (busyPan) {
+    await evaluate('window.screenshotProbe.releaseEncoding()'); await settle()
+    assert.equal(receipt.exports.length, exportsBefore, 'A cancelled narrow output never reaches the file owner after late encoding')
+  }
 }
 async function visualScenes() {
   for (const [kind, width, height, appearance] of [
@@ -536,10 +721,13 @@ async function publicEditOriginal(path: string, originalDocument: any) {
 async function run() {
   await stage('private-process-start')
   await app.whenReady(); await stage('electron-ready')
-  receipt.loadedCompiled = Object.fromEntries(await Promise.all(['app/out/main/main.mjs', 'app/resources/bin/agentmux-workspace-move', 'renderer.js', 'renderer.css', 'preload.cjs'].map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')])))
+  receipt.loadedCompiled = Object.fromEntries(await Promise.all(['app/out/main/main.mjs', 'app/resources/bin/agentmux-workspace-move', 'renderer.js', 'renderer.css', 'preload.cjs',
+    'app/out/preload/screenshot-pin.cjs', 'app/out/renderer/screenshot-pin/entry.js', 'app/out/renderer/screenshot-pin/entry.css', 'app/out/renderer/screenshot-pin/index.html']
+    .map(async path => [path, createHash('sha256').update(await readFile(join(root, path))).digest('hex')])))
   const workspacePath = join(root, 'workspace'); await mkdir(workspacePath)
   workspace = { id: workspaceId, name: 'Private annotation files', hostId: 'local', path: workspacePath, kind: 'folder' }
   files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local', label: 'Private local files', run: async () => { throw new Error('Remote execution is outside this file proof') }, dispose: async () => {} }))
+  pins = new ScreenshotPins({ hostId: 'local', appearance: () => ({ terminalTheme: 'graphite' }), copy: async () => { throw new Error('Pin clipboard is outside this Browser output proof') } })
   server = createServer((request, response) => {
     const sibling = request.url === '/sibling'
     response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end(`<!doctype html><title>${sibling ? 'Sibling source' : 'Original screenshot source'}</title><style>body{margin:0;background:${sibling ? '#1f3f38' : '#f5f6fa'};color:${sibling ? 'white' : '#233248'};font:16px system-ui;padding:25px}input{font:14px system-ui;padding:10px;border:1px solid #bbc6d2;border-radius:6px;width:75%}h1{font-size:24px}p{line-height:1.8}#pattern{position:absolute;left:25px;top:245px;width:320px;height:100px;background:repeating-linear-gradient(90deg,#24425f 0 2px,#ffffff 2px 4px)}</style><h1>${sibling ? 'Sibling page' : 'Browser screenshot canvas'}</h1><p>Original page identity and draft remain available.</p><input value="retained ${sibling ? 'sibling' : 'original'} draft"><p>Draw an arrow or highlight this content.</p><div id="pattern"></div>`)
@@ -591,9 +779,28 @@ async function run() {
       assert.ok(!decoded.isEmpty()); assert.equal(size.width, args[0].width); assert.equal(size.height, args[0].height)
       const path = label + '-clipboard-' + (receipt.clipboard.length + 1) + '.png'; await writeFile(join(out, path), png)
       receipt.clipboard.push({ byteLength: args[0].byteLength, width: size.width, height: size.height,
-        png: { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex') } }); return
+        png: { path, bytes: png.length, sha256: createHash('sha256').update(png).digest('hex') } })
+      return { status: 'copied', sequence: receipt.clipboard.length }
     }
-    if (method === 'privateClipboardText') { assert.equal(typeof args[0], 'string'); receipt.clipboardText.push(args[0]); return }
+    if (method === 'privateClipboardText') { assert.equal(typeof args[0], 'string'); receipt.clipboardText.push(args[0]); return { status: 'copied', sequence: receipt.clipboardText.length } }
+    if (method === 'exportScreenshot') {
+      const input = args[0]
+      const result = await exportScreenshotPng(input.image, { chooseFile: async () => join(out, label + '-processed-output-' + receipt.exports.length + '.png'), writeFile: writeScreenshotFile })
+      receipt.exports.push({ operationId: input.operationId, result }); return result
+    }
+    if (method === 'pinScreenshot') {
+      const input = args[0], image = input.image
+      const result = await pins.call('image.pin', { hostId: 'local', operationId: input.operationId,
+        image: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: 1 } }, { actor: pinActor })
+      const lost = loseNextPinReply; loseNextPinReply = false
+      receipt.pins.push({ operationId: input.operationId, result, replyLost: lost })
+      if (lost) throw new Error('The private pin IPC reader lost the original creation response.')
+      return result
+    }
+    if (method === 'inspectScreenshotPin') {
+      const result = await pins.call('image.inspect', { hostId: 'local', operationId: args[0] }, { actor: pinActor })
+      receipt.pinInspections.push({ operationId: args[0], result }); return result
+    }
     if (method === 'filesRead' || method === 'filesWrite') {
       assert.equal(args[0], workspaceId, 'The annotation file operation retains its exact private Workspace')
       receipt.fileCalls ??= []
@@ -616,9 +823,12 @@ async function run() {
     if (method === 'cancelElementSelection') return await manager.cancelElementSelection(args[0])
     throw new Error('Unexpected private IO: ' + method)
   })
-  await window.loadFile(join(root, 'index.html')); window.showInactive(); window.webContents.focus()
+  await window.loadFile(join(root, 'index.html')); window.show(); window.focus(); window.webContents.focus()
   receipt.rendererDocument = { url: window.webContents.getURL(), webContentsId: window.webContents.id, windowId: window.id }
   window.webContents.debugger.attach('1.3')
+  await until('the exact editor workface is actually foreground', async () => window.isVisible() && window.isFocused() && await evaluate('document.visibilityState === "visible" && document.hasFocus()'))
+  receipt.windowPresentation = { visible: window.isVisible(), focused: window.isFocused(), focusedWindowId: BrowserWindow.getFocusedWindow()?.id,
+    visibility: await evaluate('document.visibilityState'), documentFocused: await evaluate('document.hasFocus()') }
   await until('mounted production Pane and native frame', async () => await evaluate('!!document.querySelector("button[aria-label=Screenshot]")') && manager.nativeOwner(originalId))
   await settle(); await keepOwners('initial-original-and-sibling'); await stage('original-renderer-mounted')
   const program = 'const capture=await captureScreenshot(); return {browserId:capture.browserId,navigationId:capture.navigationId,source:capture.source,image:{mimeType:capture.image.mimeType,width:capture.image.width,height:capture.image.height,byteLength:capture.image.byteLength}}'
@@ -641,23 +851,24 @@ async function run() {
   }
   const opened = await openEditor()
   assert.equal(receipt.calls.filter((row: any) => row.method === 'captureScreenshot').length, 1)
-  await evaluate('window.screenshotProbe.rememberPixels()')
-  const before = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
-  const box = opened.canvas, startPoint = imagePointOnScreen(opened, receipt.captures.at(-1).image.width * .08, receipt.captures.at(-1).image.height * .16)
-  const x = startPoint.x, y = startPoint.y, count = 300, start = Date.now()
-  await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 'left')
-  for (let i = 1; i <= count; i++) await mouse('mouseMoved', x + (i / count) * Math.min(300, box.width - 65), y + 40 * Math.sin(i / 25), 'left')
-  await mouse('mouseReleased', x + Math.min(300, box.width - 65), y + 40 * Math.sin(count / 25), 'left')
-  await settle()
-  const after = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
-  const trusted = after.facts.events.slice(before.facts.events.length).filter((event: any) => event.target === 'canvas' && event.trusted)
-  assert.ok(trusted.filter((event: any) => event.type === 'pointermove').length >= count, 'Actual continuous CDP pointer samples reach the real Canvas')
-  assert.equal(trusted.filter((event: any) => event.type === 'pointerdown').length, 1); assert.equal(trusted.filter((event: any) => event.type === 'pointerup').length, 1)
-  assert.ok(after.ink.count > before.ink.count + 100 && after.ink.changed > 100, 'Actual red drawing changes the captured base page; opaque source alpha is not ink')
-  assert.deepEqual(after.counters, before.counters, 'drawing-must-not-capture-or-encode-native-chrome')
-  assert.equal(after.publications, before.publications, 'drawing-must-not-publish-native-chrome')
-  receipt.cases.push({ label: 'continuous-pointer-ink-with-zero-native-chrome-work', samples: count, elapsedMs: Date.now() - start, before, after })
-  await shot('editor-ink'); await stage('actual-continuous-pointer-cost-oracle-complete')
+  await measurePointerWork(opened)
+  if (process.env.AGENTMUX_SCREENSHOT_OUTPUTS_ONLY === '1') {
+    receipt.scope = 'actual-BrowserPane-processed-output-vertical-slice-not-full-editor-regression'
+    await click('Clear', true); await click('Cover', true)
+    await drag(imagePointOnScreen(await facts(), 80, 90), imagePointOnScreen(await facts(), 240, 190))
+    const source = receipt.captures.at(-1).image
+    await click('Crop', true)
+    const view = await facts()
+    await drag(imagePointOnScreen(view, 40, 40), imagePointOnScreen(view, source.width - 40, source.height - 40))
+    await processedOutputs(null)
+    await click('Cancel', true); await closed('processed-outputs-final-cancel')
+    assert.equal(receipt.captures.length, 2, 'Only the two explicit output-scenario captures acquire Browser pixels')
+    assert.equal(receipt.counters.originalCapture, 2)
+    if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await visualScenes()
+    assert.deepEqual((await facts()).errors, receipt.expectedErrors)
+    receipt.passed = true
+    return
+  }
   await click('Cancel', true); await closed('native-pointer-cancel')
   await openEditor(); await escape(); await closed('trusted-keyboard-escape')
   await openEditor(); await evaluate('window.screenshotProbe.holdEncoding()')
@@ -685,12 +896,13 @@ async function run() {
   receipt.cases.push({ label: 'normal-copy-keeps-editor-and-allows-explicit-recopy', clipboard: receipt.clipboard.slice(), after: await facts() })
   await click('Cancel', true); await closed('copy-followed-by-explicit-cancel')
   await stage('actual-edits-and-pending-copy-Cancel-complete')
-  assert.equal(receipt.counters.originalCapture, 8, 'Five Desktop entries plus direct runner, real SDK and CLI capture exactly once each')
+  assert.equal(receipt.captures.length, 6, 'The six explicit Desktop capture entries each produce one original image')
+  assert.equal(receipt.counters.originalCapture, receipt.captures.length, 'Each Desktop image uses the original native capture consumer once')
   await advancedAnnotationEdits(); await stage('actual-annotation-file-and-geometry-consumers-complete')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') {
     await visualScenes()
   }
-  assert.deepEqual((await facts()).errors, [])
+  assert.deepEqual((await facts()).errors, receipt.expectedErrors)
   receipt.passed = true
 }
 void run().catch(async error => {
@@ -704,6 +916,7 @@ void run().catch(async error => {
   await publicServer?.stop()
   process.stdout.write('cleanup-files-start\n')
   await files?.dispose()
+  pins?.dispose()
   process.stdout.write('cleanup-native-start\n')
   overlays?.dispose(); process.stdout.write('cleanup-overlays-complete\n')
   manager?.dispose(); process.stdout.write('cleanup-manager-complete\n')

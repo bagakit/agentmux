@@ -14,17 +14,21 @@ import './fixture.css'
 
 const errors: string[] = []; (window as any).screenshotErrors = errors
 const events: Array<{ type: string; trusted: boolean; target: string | null; x?: number; y?: number; key?: string }> = []
-for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'keydown', 'keyup']) {
+let pointerRevision = 0
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'click', 'keydown', 'keyup']) {
   document.addEventListener(type, event => {
     const target = event.target as Element
+    if (event.isTrusted && target?.tagName === 'CANVAS' && (type === 'pointerdown' || type === 'pointermove' && (event as PointerEvent).buttons === 1))
+      (window as any).__annotationLastTrustedPointer = { revision: ++pointerRevision, receivedAt: performance.now() }
     events.push({ type, trusted: event.isTrusted, target: target?.tagName === 'CANVAS' ? 'canvas' : target?.closest('button')?.textContent?.trim() ?? target?.getAttribute('aria-label'),
       x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY, key: (event as KeyboardEvent).key })
   }, true)
 }
-let holdNextEncoding = false, heldEncoding: (() => void) | undefined, encoded = 0
+let holdNextEncoding = false, heldEncoding: (() => void) | undefined, encoded = 0, encodingStarted = 0
 let referencePixels: Uint8ClampedArray | undefined
 const nativeToBlob = HTMLCanvasElement.prototype.toBlob
 HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+  encodingStarted++
   const held = holdNextEncoding; holdNextEncoding = false
   return nativeToBlob.call(this, blob => {
     encoded++
@@ -54,10 +58,12 @@ root.render(<Fixture />)
     return { editor: !!editor, bounds: box(editor), canvas: box(canvas ?? null), canvasPixels: canvas ? [canvas.width, canvas.height] : null,
       imageView: matrix ? { scale: matrix.a / dpr, x: matrix.e / dpr, y: matrix.f / dpr } : null,
       canvasCost: (window as any).__annotationCanvasCost ?? null,
+      outputReads: (window as any).screenshotOutputReads ?? [],
       withinStage: !!editor?.closest('[data-native-browser-stage]'), imageLoaded: !!editor?.querySelector<HTMLImageElement>('img')?.complete,
       copying: !![...document.querySelectorAll('button')].find(button => button.textContent?.includes('Copying')),
       cancelDisabled: [...(editor?.querySelectorAll('button') ?? [])].find(button => button.textContent?.includes('Cancel'))?.disabled,
-      events: events.slice(), errors: errors.slice(), warning, encoded, encodingHeld: !!heldEncoding,
+      events: events.slice(), errors: errors.slice(), warning, encoded, encodingStarted, encodingHeld: !!heldEncoding,
+      visibility: document.visibilityState, documentFocused: document.hasFocus(),
       appearance: document.documentElement.dataset.appearance,
       activeElement: document.activeElement?.getAttribute('aria-label'),
       bodyPointerEvents: document.body.style.pointerEvents,

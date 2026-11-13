@@ -23,8 +23,19 @@ export const api = {
     onNativeBrowserVisibility: (listener: unknown) => bridge.subscribe('visibility', listener),
     onNativeOverlayWarning: (listener: unknown) => bridge.subscribe('warning', listener),
     onNativeBrowserInput: (listener: unknown) => bridge.subscribe('input', listener),
-    writeClipboardImage: (image: unknown) => bridge.call('privateClipboard', image),
-    writeClipboardText: (text: string) => bridge.call('privateClipboardText', text), openExternal: async () => {}
+    writeClipboardImage: async (image: unknown) => {
+      const result = await bridge.call('privateClipboard', image)
+      ;((window as any).screenshotOutputReads ??= []).push('PNG IPC returned')
+      return result
+    },
+    exportScreenshot: (input: unknown) => bridge.call('exportScreenshot', input),
+    pinScreenshot: (input: unknown) => bridge.call('pinScreenshot', input),
+    inspectScreenshotPin: (operationId: string) => bridge.call('inspectScreenshotPin', operationId),
+    writeClipboardText: async (text: string) => {
+      const result = await bridge.call('privateClipboardText', text)
+      ;((window as any).screenshotOutputReads ??= []).push('Context IPC returned')
+      return result
+    }, openExternal: async () => {}
   }
 }
 const listeners = new Set<(state: any, previous: any) => void>()
@@ -34,7 +45,12 @@ export const state: any = {
     executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' },
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   },
-  toolsOpen: false, browserAnnotationsByBrowserId: {}, noticeReadReceipts: {},
+  toolsOpen: false, browserAnnotationsByBrowserId: {}, browserOpinionDrafts: {}, sessions: [], noticeReadReceipts: {},
+  saveBrowserOpinionDraft(browserId: string, draft: any) {
+    if (draft.original !== null || draft.text !== '' || draft.pending !== null) throw new Error('Browser opinion editing is outside this private screenshot fixture')
+    state.browserOpinionDrafts[browserId] = structuredClone(draft)
+    return Promise.resolve()
+  },
   applyBrowserEvent() {}, executeControl: async () => ({ operation: 'browser.history', operations: [] }),
   reportError(error: unknown) { (window as any).screenshotErrors.push(String(error)) },
   addBrowserAnnotation() {}, saveBrowserBookmark() {}, openFile() {}, clearRegionCaretFocus() {}
@@ -49,3 +65,8 @@ export const useAppStore = Object.assign((selector: (value: any) => unknown) => 
 export function agentSteerCanEdit() { throw new Error('Agent steering is outside this private screenshot fixture') }
 export function agentSteerExecution() { throw new Error('Agent execution is outside this private screenshot fixture') }
 export function fileNavigationSelection() { throw new Error('File navigation is outside this private screenshot fixture') }
+export function compareAndSwapCapsuleQuestionEditor() { throw new Error('Capsule question edits are outside this private screenshot fixture') }
+export function flushCapsuleQuestionEditors() { throw new Error('Capsule question persistence is outside this private screenshot fixture') }
+export function retainBrowserAgentIntent() { throw new Error('Browser Agent creation is outside this private screenshot fixture') }
+export function retainMailboxNotificationIntent() { throw new Error('Mailbox notification writes are outside this private screenshot fixture') }
+export function currentCoreSpatialGraph() { throw new Error('Core graph projection is outside this private screenshot fixture') }
