@@ -23,6 +23,19 @@ async function wait(code, timeout = 20000) {
 async function paint() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); await sleep(120) }
 async function frame(name) { await paint(); const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); report.frames.push({ name, file }) }
 const player = file => evaluate(`mediaPlaybackProbe.player(${JSON.stringify(file)})`)
+/** Relative luminance of a computed CSS colour in the forms the engine returns: rgb(), color(srgb …) or oklab(). */
+function relativeLuminance(css) {
+  const lin = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  const fromSrgb = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  const rgb = /^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(css)
+  if (rgb) return fromSrgb(...rgb.slice(1, 4).map(value => Number(value) / 255))
+  const srgb = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(css)
+  if (srgb) return fromSrgb(...srgb.slice(1, 4).map(Number))
+  // OKLab lightness is the cube root of luminance for a neutral colour; close enough to rank a fill against the scrim.
+  const lab = /^oklab\(([\d.]+)/.exec(css)
+  if (lab) return Number(lab[1]) ** 3
+  throw new Error('Unreadable computed colour: ' + css)
+}
 
 /** Count bytes the lease server actually sent, per path, by wrapping its listener once it starts. */
 function meter() {
@@ -71,7 +84,12 @@ async function capture() {
   report.checks.seekRanges = ranged.map(entry => entry.range)
   await evaluate(`mediaPlaybackProbe.showControls("promo.mp4")`); await evaluate(`mediaPlaybackProbe.hover("promo.mp4", 0.35)`)
   await frame('video-controls-dark')
+  const darkAccent = await evaluate(`mediaPlaybackProbe.accent("promo.mp4")`)
   await evaluate(`mediaPlaybackProbe.theme("light")`); await evaluate(`mediaPlaybackProbe.showControls("promo.mp4")`); await frame('video-controls-light')
+  // Over the dark scrim the played part of the timeline must stay brighter than the buffered white wash in both themes.
+  const lightAccent = await evaluate(`mediaPlaybackProbe.accent("promo.mp4")`)
+  report.checks.timelineAccent = { dark: darkAccent, light: lightAccent }
+  for (const [theme, color] of Object.entries(report.checks.timelineAccent)) assert.ok(relativeLuminance(color) > 0.4, `The ${theme} timeline fill reads on the scrim: ${color}`)
   await evaluate(`mediaPlaybackProbe.theme("dark")`)
   report.checks.totalBytes = sentFor('promo.mp4')
   assert.ok(report.checks.totalBytes < size, `Watching and seeking did not read the whole file: ${report.checks.totalBytes} of ${size}`)

@@ -74,6 +74,14 @@ const probe = {
   pause(path: string) { regionOf(path)?.querySelector<HTMLMediaElement>('video, audio')?.pause() },
   seekFraction(path: string, fraction: number) { const media = regionOf(path)!.querySelector<HTMLMediaElement>('video, audio')!; media.currentTime = media.duration * fraction },
   showControls(path: string) { regionOf(path)?.querySelector('.media-player')?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })) },
+  /** The played-progress colour the timeline actually paints, resolved by the engine for the current theme. */
+  accent(path: string) {
+    const slider = regionOf(path)?.querySelector<HTMLElement>('.media-player__slider')
+    if (!slider) return null
+    const probe = document.createElement('span'); probe.style.color = 'var(--media-accent)'; slider.append(probe)
+    const color = getComputedStyle(probe).color; probe.remove()
+    return color
+  },
   /** Put keyboard focus on the player itself, as tabbing to it does; the driver then sends real key input. */
   focusPlayer(path: string) { regionOf(path)?.querySelector<HTMLElement>('.media-player')?.focus() },
   indicator(path: string) {
