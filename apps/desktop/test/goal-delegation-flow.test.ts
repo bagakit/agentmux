@@ -35,7 +35,7 @@ async function record(scenario: string, proof: unknown) {
   if (!directory) return
   await fs.mkdir(directory, { recursive: true })
   await fs.writeFile(join(directory, `${scenario}.json`), JSON.stringify({ schema: 'agentmux.goal-delegation-main-flow.v1', scenario,
-    proofBoundary: 'Actual compiled CLI, Unix RPC, Main and persisted Core/Demand owners; Native input and Run observations are explicit isolated fixtures. Does not prove live independent Agent or Renderer recovery.', proof }, null, 2) + '\n')
+    proofBoundary: 'Actual compiled CLI, Unix RPC, Main and persisted Core/Demand owners; Run observations are isolated fixtures; optional lost Inbox intake acknowledgements are injected after the real Core save. Does not prove live independent Agent or Renderer recovery.', proof }, null, 2) + '\n')
 }
 
 async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMuxControlServer>[0]>['files']) {
@@ -59,13 +59,16 @@ async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMux
   cleanup.push(() => client.dispose())
   const stop = vi.fn(); inner.kernel.stop = stop
   const inputs: Array<{ operationId: string; messageId: string; recipientSessionId: string; body: string }> = []
-  const loseNativeReceipt = new Set<string>()
-  // The only substituted input boundary is Native transport. Core author admission,
-  // frozen message identity, delivery journal and dispatch facts stay real.
-  const native = vi.spyOn(client, 'submitAgentMessage').mockImplementation(async input => {
+  const loseIntakeReceipt = new Set<string>()
+  // Keep the real SDK reference intake and author admission. Only its acknowledgement
+  // may be lost after the original Inbox save; default reference delivery is not Native input.
+  const submit = client.submitAgentMessage.bind(client)
+  const intake = vi.spyOn(client, 'submitAgentMessage').mockImplementation(async (input, context) => {
     inputs.push({ operationId: input.envelope.operationId, messageId: input.envelope.messageId,
       recipientSessionId: input.agentSessionId, body: input.envelope.body })
-    if (loseNativeReceipt.delete(input.envelope.operationId)) throw new AgentMuxError('The isolated Native input receipt was lost after journal save.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+    const receipt = await submit(input, context)
+    if (loseIntakeReceipt.delete(input.envelope.operationId)) throw new AgentMuxError('The original Inbox intake acknowledgement was lost after journal save.', 'CONTROL_UNAVAILABLE', 'unknown')
+    return receipt
   })
   const demands = openDemandStore({ root: join(root, 'goals') })
   await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original human intent\nkept verbatim', status: 'in_progress',
@@ -96,7 +99,7 @@ async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMux
       return { runId, state }
     }
   }
-  const owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined, port)
+  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined, port)
   const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner, ...(files ? { files } : {}) })
   await server.start(); cleanup.push(() => server.stop())
   let sequence = 0
@@ -118,7 +121,7 @@ async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMux
   }
   async function read() { return await cli('owner', ['goal', 'delegations', '--goal', 'goal']) }
   async function proof() { return { goal: await demands.get('goal'), inputs, trace, cliReceipts, stopCalls: stop.mock.calls.length } }
-  return { root, demands, sessions, client, core, credentials, native, inputs, loseNativeReceipt, runStates, readUnavailable, runUnavailable, beforeCall, trace, stop, cli, goal, read, proof }
+  return { root, demands, sessions, client, core, credentials, intake, inputs, loseIntakeReceipt, runStates, readUnavailable, runUnavailable, beforeCall, trace, stop, cli, goal, read, proof }
 }
 
 describe('actual Goal delegation CLI, Main and original Core collaboration', () => {
@@ -265,9 +268,9 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     await record('plain-claim-worker-done-is-not-goal-report', await f.proof())
   }, 30_000)
 
-  it('reconciles a saved source after Native receipt loss without resending or blocking the other worker', async () => {
+  it('reconciles a saved source after Inbox intake acknowledgement loss without resending or blocking the other worker', async () => {
     const f = await fixture(), a = task(), b = task('worker-b', ['AC-02'])
-    f.loseNativeReceipt.add(a.operationId)
+    f.loseIntakeReceipt.add(a.operationId)
     await expect(f.goal('owner', 'delegate', { goalId: 'goal', intent: a })).rejects.toMatchObject({ code: 1 })
     expect(f.inputs.map(input => input.messageId)).toEqual([a.sourceMessageId])
     await f.read(); expect(f.inputs).toHaveLength(1)
@@ -282,7 +285,7 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     await f.goal('owner', 'delegate', { goalId: 'goal', intent: b })
     expect(f.inputs.map(input => input.messageId)).toEqual([a.sourceMessageId, b.sourceMessageId])
     expect(f.stop).not.toHaveBeenCalled()
-    await record('source-persisted-native-receipt-unknown', await f.proof())
+    await record('source-persisted-intake-ack-unknown', await f.proof())
   }, 30_000)
 
   it('refuses a worker Run change before first submission without delivering the frozen task to the new Run or closing its healthy input', async () => {
@@ -331,14 +334,14 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     await record('core-reply-event-before-domain-report', await f.proof())
   }, 30_000)
 
-  it('collects an authenticated structured report after its original Native receipt is lost before a worker_done event and the worker exits', async () => {
+  it('collects an authenticated structured report after its original Inbox intake acknowledgement is lost before a worker_done event and the worker exits', async () => {
     const f = await fixture(), a = task(), ra = result(a)
     await f.goal('owner', 'delegate', { goalId: 'goal', intent: a })
-    f.loseNativeReceipt.add(ra.operationId)
+    f.loseIntakeReceipt.add(ra.operationId)
     // The admitted business action can either return a confirmed saved report or
-    // its real Native receipt uncertainty. In both cases it retains the same reply.
+    // its real Inbox intake acknowledgement uncertainty. In both cases it retains the same reply.
     await f.goal('worker-a', 'report', { goalId: 'goal', operationId: a.operationId, report: ra }).catch(() => undefined)
-    expect(f.loseNativeReceipt.has(ra.operationId)).toBe(false)
+    expect(f.loseIntakeReceipt.has(ra.operationId)).toBe(false)
     const actual = await f.client.readDispatch({ sourceMessageId: a.sourceMessageId })
     expect(actual.dispatch.events.some(event => event.kind === 'worker_done')).toBe(false)
     expect(actual.dispatch.originAwaits).toBe(true)
@@ -348,28 +351,28 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
       senderSessionId: a.workerAgentSessionId, recipientSessionId: a.ownerAgentSessionId, replyTo: a.sourceMessageId, threadId: a.threadId })
     expect(JSON.parse(reply!.envelope.body)).toMatchObject({ schema: 'agentmux.goal-report.v1', goalId: 'goal', delegationOperationId: a.operationId, report: ra })
     expect(reply!.delivery.state).toBe('queued')
-    const nativeInputs = structuredClone(f.inputs)
+    const retainedInputs = structuredClone(f.inputs)
     f.runStates.set(a.workerRunId, 'exited')
     const ready = (await f.read()).result
     expect(ready.observations[0].recoverableReport).toEqual(ra)
     expect(ready.observations[0].communication.dispatch).toMatchObject({ originAwaits: true, events: [] })
     await expect(f.goal('owner', 'collect', { goalId: 'goal', operationId: a.operationId,
-      collection: { operationId: 'native-unknown-collect', replyMessageId: ra.replyMessageId } })).resolves.toMatchObject({ ok: true })
+      collection: { operationId: 'intake-unknown-collect', replyMessageId: ra.replyMessageId } })).resolves.toMatchObject({ ok: true })
     expect((await f.demands.inspectDelegation('goal', a.operationId))!).toMatchObject({ report: ra,
-      collection: { operationId: 'native-unknown-collect', collector: { kind: 'agent', id: 'owner' } } })
+      collection: { operationId: 'intake-unknown-collect', collector: { kind: 'agent', id: 'owner' } } })
     expect((await f.demands.get('goal'))!).toMatchObject({ status: 'in_progress', grounding: { acceptedAt: null }, alignment: { confirmedAt: null } })
-    expect(f.inputs).toEqual(nativeInputs)
+    expect(f.inputs).toEqual(retainedInputs)
     expect(f.stop).not.toHaveBeenCalled()
     const collected = await f.client.readDispatch({ sourceMessageId: a.sourceMessageId })
     expect(collected.dispatch.events).toEqual(actual.dispatch.events)
     expect(collected.dispatch.originAwaits).toBe(true)
-    await record('report-journal-saved-native-receipt-unknown-before-event', await f.proof())
+    await record('report-journal-saved-intake-ack-unknown-before-event', await f.proof())
   }, 30_000)
 
-  it('keeps an opaque original reply unknown and refuses collection after its Native receipt is lost without closing another healthy worker', async () => {
+  it('keeps an opaque original reply unknown and refuses collection after its Inbox intake acknowledgement is lost without closing another healthy worker', async () => {
     const f = await fixture(), a = task()
     await f.goal('owner', 'delegate', { goalId: 'goal', intent: a })
-    f.loseNativeReceipt.add('opaque-operation')
+    f.loseIntakeReceipt.add('opaque-operation')
     await expect(f.cli('worker-a', ['agent', 'send', '--to-session', 'owner', '--text', 'An opaque original result with no structured report.',
       '--message-id', 'opaque-reply', '--operation-id', 'opaque-operation', '--thread', a.threadId, '--reply-to', a.sourceMessageId])).rejects.toMatchObject({ code: 1 })
     const actual = await f.client.readMessage({ operationId: 'opaque-operation' })
@@ -396,7 +399,7 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     vi.spyOn(f.demands, 'submitDelegationReport').mockRejectedValueOnce(new AgentMuxError('Report receipt failed after original Core reply.', 'CONTROL_UNAVAILABLE'))
     await expect(f.goal('worker-a', 'report', { goalId: 'goal', operationId: a.operationId, report: ra })).rejects.toMatchObject({ code: 1 })
     expect((await f.demands.inspectDelegation('goal', a.operationId))!.report).toBeUndefined()
-    const nativeInputs = structuredClone(f.inputs)
+    const retainedInputs = structuredClone(f.inputs)
     await f.demands.update('goal', { assigneeSessionIds: ['owner', 'worker-a', 'worker-b', 'next-owner'], supervisorSessionId: 'next-owner' })
     const publicArgs = ['message', 'dispatch', 'read', '--source-message', a.sourceMessageId]
     await expect(f.cli('next-owner', publicArgs)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('DISPATCH_PARTICIPANT_MISMATCH') })
@@ -413,7 +416,7 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     expect(f.trace.filter(call => call.method === 'trustedSDK.readDispatch').length).toBeGreaterThan(0)
     await expect(f.cli('next-owner', publicArgs)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('DISPATCH_PARTICIPANT_MISMATCH') })
     expect((await f.demands.get('goal'))!).toMatchObject({ supervisorSessionId: 'next-owner', status: 'in_progress', grounding: { acceptedAt: null }, alignment: { confirmedAt: null } })
-    expect(f.inputs).toEqual(nativeInputs)
+    expect(f.inputs).toEqual(retainedInputs)
     expect(f.stop).not.toHaveBeenCalled()
     await record('new-supervisor-business-reader-keeps-public-participant-denial', await f.proof())
   }, 30_000)

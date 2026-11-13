@@ -29,7 +29,7 @@ async function fixture(readAvailable = true) {
   await demands.create({ id: 'original-goal', title: 'Original Goal', description: 'Preserved original user request', status: 'in_progress',
     assigneeSessionIds: ['original-owner', 'original-worker'], supervisorSessionId: 'original-owner' })
   await demands.proposeAlignment('original-goal', { summary: 'Original task scope', criteria: [{ id: 'AC-source', text: 'Retain original source input' }], openQuestions: [] })
-  const runtime = { agentCreation: vi.fn(async (_hostId: string, agentSessionId: string) => ({ agentSessionId,
+  const runtime = { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: vi.fn(async (_hostId: string, agentSessionId: string) => ({ agentSessionId,
     run: { runId: agentSessionId + '-run' } } as never)) }
   const owner = new GoalDelegationOwner(demands, runtime, readAvailable ? read : undefined)
   const target: FileReadParams = { zoneId: zone.zoneId, spaceId: 'original-space', path: 'source.md',

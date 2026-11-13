@@ -36,7 +36,7 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
   await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Recover the result' }], openQuestions: [] })
-  const owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => (await store.readMetadata(id))! })
+  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => (await store.readMetadata(id))! })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'),
     coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner })
   await server.start(); cleanup.push(() => server.stop())
@@ -61,7 +61,10 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
     goalId: 'goal', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
     ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', hostId: 'local', alignmentRevision: 1, criterionIds: ['AC'] })
   expect(metadata).not.toHaveProperty('roleGuidance')
-  expect(metadata.next).toBe('Use goal report --input FILE to return every delegated criterion with evidence, gap or unknown under this original dispatch. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.')
+  expect(metadata.next).toContain('Read the verified envelope.application for frozen criteria')
+  expect(metadata.next).toContain('sourceMessageId')
+  expect(metadata.next).toContain('report-submission distinct from owner collection')
+  expect(metadata.next).toContain('human acceptance')
   expect(coordination).toBe(JSON.stringify(metadata) + '\n\n' + goalRoleGuidance({ role: 'executor', goalId: 'goal',
     agentSessionId: 'worker', runId: 'worker-run', source: { kind: 'goal-delegation', operationId: intent.operationId,
       sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } }))
@@ -102,7 +105,7 @@ async function retirementFixture() {
     },
     observeRun: async () => { throw new Error('Retirement is read without connecting to a Run') }
   }
-  const owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => client.inspectAgentCreation(id) }, undefined, core)
+  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => client.inspectAgentCreation(id) }, undefined, core)
   const intent = { operationId: 'original-operation', sourceMessageId: 'original-message', hostId: 'local',
     ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', ownerRunId: 'owner-run', workerRunId: 'worker-run',
     threadId: 'original-thread', text: 'Original frozen input', alignmentRevision: 1, criterionIds: ['AC'] }

@@ -256,7 +256,7 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
     request: (...args) => patrol!.request(...args), continue: (...args) => patrol!.continue(...args),
     report: (...args) => patrol!.report(...args), observe: (...args) => patrol!.observe(...args)
   } : undefined
-  owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined,
+  owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined,
     port, undefined, (goal, start) => starts.observe(goal, start), responsibility, patrolPort)
   const server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner, goalControl: hostGoals.execute })
   await server.start(); cleanup.push(() => server.stop())
