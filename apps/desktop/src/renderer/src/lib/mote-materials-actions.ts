@@ -8,7 +8,7 @@ import { spatialCatalog } from './space-agent-control'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { MoteWorkfaceScope } from './mote-workface'
-import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
+import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, subscribePmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 

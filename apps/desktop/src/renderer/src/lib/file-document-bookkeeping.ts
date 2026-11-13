@@ -1,7 +1,7 @@
 import { hasFileDocumentConsumer } from './file-document-consumers'
 import { api } from './api'
 import { isScratchWorkspaceId, type AppConfig } from '../../../shared/contracts'
-import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
+import { scratchTopicIdFromDirectoryName } from '@agentmux/host/mote-model'
 import { isPathWithinSubtree } from './workspace-paths'
 import {
   documentKey,

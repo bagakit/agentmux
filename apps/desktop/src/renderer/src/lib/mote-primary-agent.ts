@@ -1,5 +1,5 @@
 import type { WorkspaceRecord } from '../../../shared/contracts'
-import { scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { moteConversationChoices } from './mote-quick-preferences'

@@ -1,5 +1,5 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
-import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics'
+import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { spatialCategorySeeds } from '../../../shared/space-addresses'
 import type { WorkbenchTab } from './workbench-tabs'

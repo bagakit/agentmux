@@ -1,7 +1,7 @@
 import { groundingAcceptanceIssue } from '@agentmux/demand/goals'
 import type { DemandContentReference } from '@agentmux/demand'
 import { directoryIdentity, homeZoneId, originalTopicAddress } from '../../../shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, scratchTopicIdentityPath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdentityPath, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import type { useAppStore } from '../store'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'

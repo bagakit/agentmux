@@ -1,7 +1,7 @@
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
 import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
-import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
+import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
 import { categoriesFromSpatial, categoryResource } from '@agentmux/host/topic-categories';
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';

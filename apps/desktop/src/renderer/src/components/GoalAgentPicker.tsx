@@ -13,7 +13,7 @@ import { goalAgentRows, goalCreationDraftKey, type GoalAgentCreationDraft, type 
 import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
 import { scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
-import { scratchTopicIdentityPath } from '../../../shared/scratch-topics'
+import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectionField } from './SelectionField'

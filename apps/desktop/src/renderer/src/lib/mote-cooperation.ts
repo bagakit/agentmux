@@ -1,7 +1,7 @@
 import { parseFileReadResult, type FileReadResult } from '@agentmux/core/files'
 import type { FileDocument } from '@agentmux/core'
 import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
-import { MOTE_SOUL_PATH, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
+import { MOTE_SOUL_PATH, scratchTopicIdentityPath, parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, moteSoulForBehaviorContext } from '@agentmux/host/mote-model'
 import { api } from './api'
 import { fileExplorerContains } from './file-explorer-scope'
 import type { MoteWorkfaceScope } from './mote-workface'
@@ -11,7 +11,6 @@ import { documentLifetime, fileInvalidationSequences } from './file-document-boo
 import { fileNavigationSelection, useAppStore } from '../store'
 import { confirmedMoteReference, emptyMoteDestination, openMoteDiscussionDraft } from './mote-materials-actions'
 import { MOTE_BEHAVIOR_PATH, parseMoteBehaviorDocument, serializeMoteBehaviorDocument, type MoteBehaviorDraft, type MoteBehaviorPreferences } from './mote-behavior'
-import { parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, moteSoulForBehaviorContext } from '../../../shared/mote-behavior-legacy'
 
 export type MoteCooperationSource = { path: string; observation: FileReadResult }
 export type MoteCooperationDraft = { selection: WorkbenchProjectionSelection; sources: MoteCooperationSource[] }

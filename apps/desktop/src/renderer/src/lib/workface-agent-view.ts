@@ -1,5 +1,5 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialSave } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
 import { agentSessionPresentationIndex, effectiveSessionViewMode, storedSessionViewMode } from './session-presentation'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'

@@ -1,6 +1,6 @@
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { attentionSortRank } from './attention-event'
 import { sessionBoardColumn } from './project-board'
 import { buildAgentRoster, type RosterRow } from './agent-roster'
@@ -67,7 +67,7 @@ export function buildAgentTree(input: {
   providerCatalog: readonly AgentCatalogEntry[]
   workspaces: readonly WorkspaceRecord[]
   filter: AgentTreeFilter
-  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
+  topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null
 }): AgentTreeProject[] {
   const rows = buildAgentRoster({ sessions: input.sessions, providerCatalog: input.providerCatalog })
   const sessionById = new Map(input.sessions.map((session) => [session.id, session]))

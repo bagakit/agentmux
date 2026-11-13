@@ -11,7 +11,7 @@ import {
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath,
   type ScratchTopicSnapshot
-} from '../../../shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 
 export const PROJECT_BOARD_COLUMNS = ['inbox', 'working', 'needs-you', 'done'] as const
 

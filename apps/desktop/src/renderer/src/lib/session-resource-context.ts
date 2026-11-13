@@ -1,5 +1,5 @@
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { workspaceOwnsSessionPath, type ScratchTopicSnapshot } from '../../../shared/scratch-topics'
+import { workspaceOwnsSessionPath, type ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 
 export type SessionResourceContext = {
   workspace?: WorkspaceRecord

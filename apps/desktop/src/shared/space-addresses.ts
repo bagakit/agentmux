@@ -1,12 +1,11 @@
 import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, AgentMuxSpatialIssue, TopicCategory } from '@agentmux/core/control'
 import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath } from './scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath, directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 import { categorySpaceFact, isKnowledgeTopic, knownTopicContentSpaceId, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
-import { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 export function workspaceZoneId(spaceId: string, workspaceId: string): string {
   return JSON.stringify([spaceId, 'workspace', workspaceId])
 }

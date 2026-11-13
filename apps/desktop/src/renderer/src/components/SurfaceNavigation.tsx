@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { semanticIconComponent, type SemanticIconComponent } from '@agentmux/client-ui/icons'
 import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
 import type { MainSurface } from '../store'
-import { MOTE_TYPE_NAME } from '../../../shared/scratch-topics'
+import { MOTE_TYPE_NAME } from '@agentmux/host/mote-model'
 
 const SpaceIcon = semanticIconComponent('navigation.space')
 const FocusIcon = semanticIconComponent('navigation.focus')

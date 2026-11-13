@@ -2,7 +2,7 @@ import { fixtureEpoch as _reshape_fixtureEpoch, fixturePath as _reshape_fixtureP
 import { useEffect, useState } from 'react'
 import type { AppConfig, ComposerShortcut, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import { DEFAULT_MOTE_FACE } from '../../../shared/mote-avatars'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import type { AgentSessionHistoryPage } from '@agentmux/core'

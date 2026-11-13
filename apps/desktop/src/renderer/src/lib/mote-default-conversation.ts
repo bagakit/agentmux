@@ -3,10 +3,10 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { sessionPresentationById } from './session-presentation'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { scratchTopicIdentityPath } from '../../../shared/scratch-topics'
+import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { sameWorkbenchProjectionSelection } from './workbench-projection'
-import type { MoteDefaultConversation } from '../../../shared/mote-quick-mode'
+import type { MoteDefaultConversation } from '@agentmux/host/mote-model'
 
 type State = SpatialWorkbench
 /** Preferences authorize one original occurrence only, never a synthesized address or new Run. */

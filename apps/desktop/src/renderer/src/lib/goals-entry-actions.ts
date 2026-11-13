@@ -1,5 +1,5 @@
 import { isFolderWorkspace, type AppConfig, type WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { executionFocusHistory, type AgentFocusContext } from './agent-focus'
 import { primaryMoteExecutorId } from './primary-mote-executor'
 import { goalProjectContext, goalProjectContextText, type GoalProjectContext } from '@agentmux/host/goal-project-context'

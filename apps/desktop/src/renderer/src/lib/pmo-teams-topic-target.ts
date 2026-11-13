@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, pmoTeamsTopicFloatingAgentIssue, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'

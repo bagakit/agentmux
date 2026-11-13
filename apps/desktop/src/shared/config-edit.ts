@@ -6,7 +6,7 @@ import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSIT
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
-import { resolveUserProfile, type UserProfile } from './user-profile'
+import { resolveUserProfile, type UserProfile } from '@agentmux/host/mote-model'
 import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
 import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'

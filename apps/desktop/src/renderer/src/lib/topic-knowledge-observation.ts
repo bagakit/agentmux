@@ -1,4 +1,4 @@
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 
 type ObservationKeys = { topics: Map<string, string>; all: string }

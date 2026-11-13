@@ -1,2 +1,2 @@
-export * from '../../../shared/mote-behavior'
-export { parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, type MoteBehaviorBlock } from '../../../shared/mote-behavior-legacy'
+export * from '@agentmux/host/mote-model'
+export { parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, type MoteBehaviorBlock } from '@agentmux/host/mote-model'

@@ -8,7 +8,7 @@ import {
   SCRATCH_WORKSPACE_ID,
   workspaceOwnsSessionPath,
   type ScratchTopicSnapshot
-} from '../../../shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 import { sessionPresentationChildPaths, sessionPresentationsAtPath } from './session-presentation'
 
 export const TOOL_DOCK_DEFAULT_WIDTH = 300

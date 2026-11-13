@@ -1,6 +1,6 @@
 import type { AgentSessionHistoryPage, ContinuousProgressTarget, FileDocument } from '@agentmux/core'
 import type { Demand } from '@agentmux/demand'
-import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
+import { MOTE_SOUL_PATH } from '@agentmux/host/mote-model'
 import { api } from './api'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { confirmedMoteReference, emptyMoteDestination, openMoteDiscussionDraft } from './mote-materials-actions'

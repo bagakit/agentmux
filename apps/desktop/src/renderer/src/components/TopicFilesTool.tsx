@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '@agentmux/host/mote-model'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
 import { useScratchTopics } from '../hooks/useScratchTopics'

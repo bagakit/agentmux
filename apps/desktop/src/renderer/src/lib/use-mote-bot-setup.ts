@@ -16,7 +16,7 @@ import type {
   ConnectionEnrollmentAction
 } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { topicPublicCopy } from '../../../shared/scratch-topics'
+import { topicPublicCopy } from '@agentmux/host/mote-model'
 import { api } from './api'
 import { useWorkbenchDocument } from './workbench-document'
 import { useWorkbenchDocumentVisibility, workbenchDocumentVisible } from './workbench-window-registry'

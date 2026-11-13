@@ -7,7 +7,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { useScratchTopics } from '../hooks/useScratchTopics'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, recoveryMoteTargets, startNewConversation,
   type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
 

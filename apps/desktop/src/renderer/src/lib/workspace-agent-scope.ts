@@ -1,6 +1,6 @@
 import type { AgentMuxSpaceCatalog, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord, ScratchTopicSnapshot } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath, workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import { workspaceProjectId } from './workspace-projects'
 import type { NavigationState } from './desktop-focus-navigation'

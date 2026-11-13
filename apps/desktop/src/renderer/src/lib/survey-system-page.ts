@@ -1,6 +1,6 @@
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { AppState } from '../store'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
 

@@ -1,5 +1,5 @@
 import { readGoalDiscussionBinding, resolveGoalDiscussionBinding, type GoalDiscussionHandoff, type GoalDiscussionBindingReceipt } from '@agentmux/host/goal-discussion-bindings'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { WorkbenchTab } from './workbench-tabs'
 import type { WorkspaceLayout } from '@agentmux/layout'

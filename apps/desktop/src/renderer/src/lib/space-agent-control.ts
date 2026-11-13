@@ -11,7 +11,7 @@ import type {
 import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, insertTabAfter, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { projectResourceWorkspace, spatialSources, topicSpatialAddress, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
   type SpaceZoneResourceInput, type SpaceZoneResourceResult } from '../../../shared/space-addresses'
 import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWorkbenchRegion,

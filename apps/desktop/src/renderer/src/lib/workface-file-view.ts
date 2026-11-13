@@ -1,6 +1,6 @@
 import { regionIds } from '@agentmux/layout'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialSave } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { EditorRegionDiffState } from '../store'
 import type { FileWorkbenchState } from './file-workbench-state'

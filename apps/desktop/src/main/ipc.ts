@@ -102,7 +102,7 @@ import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-s
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
 import type { AgentMuxNameContext } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/session-input-result.js'

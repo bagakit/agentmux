@@ -1,5 +1,5 @@
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
 
 /** Latest filesystem read; never persisted or copied into Tab/Session identity. */
 export type ScratchTopicsSnapshot = {

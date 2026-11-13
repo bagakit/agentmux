@@ -1,7 +1,7 @@
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
 import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MotePresenceReading } from '@agentmux/core/mote-preferences'
-import type { MoteQuickDefaults } from '../../../shared/mote-quick-mode'
+import type { MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { confirmedMoteReference, emptyMoteDestination, type FileDestination } from './mote-materials-actions'

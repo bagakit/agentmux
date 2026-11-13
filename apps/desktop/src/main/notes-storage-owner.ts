@@ -5,7 +5,7 @@ import type { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { WorkspaceRecord, WorkspaceFileWriteInput } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
 import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
-import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { workspaceLocationKey } from './workspace-location.js'
 import { dirname, join } from 'node:path'
 

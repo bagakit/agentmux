@@ -5,7 +5,7 @@ import { pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, p
 import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchTab } from './workbench-tabs'
 import { homeZoneId } from '../../../shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 export type MoteWorkbenchProjectionResult = {
   catalog: AgentMuxSpaceCatalog | null

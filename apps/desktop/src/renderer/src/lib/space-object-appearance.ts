@@ -2,7 +2,7 @@ import type { SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { type MoteAvatarTarget } from '../../../shared/mote-avatars'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import type { TopicCategory } from '@agentmux/core/control'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import type { WorkspaceProject } from './workspace-projects'
 import { directoryIdentity, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
 

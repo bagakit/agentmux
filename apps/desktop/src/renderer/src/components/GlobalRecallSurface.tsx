@@ -23,7 +23,7 @@ import type { WorkbenchProjection, WorkbenchProjectionSelection } from '../lib/w
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { SURVEY_SIDEBAR_DEFAULT_WIDTH, SURVEY_SIDEBAR_MIN_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'

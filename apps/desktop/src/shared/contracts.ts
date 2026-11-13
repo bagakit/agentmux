@@ -34,7 +34,7 @@ import {
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
   type ScratchTopicSnapshot
-} from './scratch-topics'
+} from '@agentmux/host/mote-model'
 import type {
   CreatePullRequestInput,
   CreatePullRequestResult,
@@ -65,7 +65,7 @@ export type SessionHistoryObservationReady =
   | { error: { code: string; message: string } }
 export type SessionHistoryObservationEvent = { token: string; observation: AgentSessionHistoryObservation }
 export type { RunUsage, UsageSnapshot } from './process-usage'
-export type { ScratchTopicSnapshot } from './scratch-topics'
+export type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 // Only the two names product code imports through the contracts path are re-exported here; the rest of
 // the notification vocabulary is imported straight from ./notification-presentation where it is used.
 export type { NotificationDelivery, NotificationModeId } from './notification-presentation'
@@ -459,7 +459,7 @@ export type AppConfig = {
   browser: BrowserConfig
   toolkit?: ToolkitPreferences
   /** Local human presentation and explicitly shared context for new Agent launches. */
-  profile?: import('./user-profile').UserProfile
+  profile?: import('@agentmux/host/mote-model').UserProfile
   focus?: import('./focus-preferences').FocusPreferences
   notes?: import('./notes-preferences').NotesPreferences
   markdown?: import('./markdown-preferences').MarkdownPreferences
@@ -1771,11 +1771,11 @@ export type AgentMuxDesktopApi = {
     readAvatar(target: SpaceObjectImageTarget, ref: ObjectAvatarRef): Promise<ObjectAvatarImage>
   }
   scratch: {
-    setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('./scratch-topics').MoteArchiveState & { state: 'active' | 'archived' }>
+    setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('@agentmux/host/mote-model').MoteArchiveState & { state: 'active' | 'archived' }>
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
     saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
     readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>
-    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicList>
+    listTopics(workspaceId: string): Promise<import('@agentmux/host/mote-model').ScratchTopicList>
     readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
     ensureMote(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
@@ -2213,7 +2213,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   }
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationPreloadApi
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
-    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
+    listTopics(workspaceId: string): Promise<import('@agentmux/host/mote-model').ScratchTopicListResponse>
   }
   sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'inspectRecord' | 'deleteRecord' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
     recover(...args: Parameters<AgentMuxDesktopApi['sessions']['recover']>): Promise<import('./session-recovery-result').SessionRecoveryOperationReply>

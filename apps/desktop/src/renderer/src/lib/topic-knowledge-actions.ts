@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
-import { scratchWorkspaceFilePath, scratchTopicLogicalPath, scratchTopicPhysicalPath, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { scratchWorkspaceFilePath, scratchTopicLogicalPath, scratchTopicPhysicalPath, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type TopicKnowledgeSource, type KnowledgeTopic } from '@agentmux/core/control'
 import { api } from './api'

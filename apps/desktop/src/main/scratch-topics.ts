@@ -8,7 +8,7 @@ import { readObjectAvatarFile, saveObjectAvatarFile } from '@agentmux/host/objec
 import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity, scratchDirectoryAddress } from './scratch-topic-directories.js'
-import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 function errorCode(error: unknown): string | undefined { return (error as NodeJS.ErrnoException | null)?.code }
 function requireScratchWorkspace(workspace: WorkspaceRecord): void {
   if (workspace.id !== SCRATCH_WORKSPACE_ID || workspace.hostId !== 'local') throw new Error('Scratch Topics are available only in the local Scratch workspace')

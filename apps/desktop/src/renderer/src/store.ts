@@ -239,7 +239,7 @@ import {
   scratchTopicLogicalPath,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
-} from '../../shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 import { CONNECTION_OBSERVATION_SOURCE_STEP, isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
@@ -9132,7 +9132,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         scratchTopicReads.get(workspaceId)?.promise === job)
     }
     const read = targetId ? api.scratch.readTopic(workspaceId, targetId).then(topic => topic ? [topic] : []) : api.scratch.listTopics(workspaceId)
-    const job = read.then((topics: import('../../shared/scratch-topics').ScratchTopicList) => {
+    const job = read.then((topics: import('@agentmux/host/mote-model').ScratchTopicList) => {
       if (!stillCurrent()) return
       const retained = get().scratchTopicSnapshots[workspaceId]?.topics
       let facts = topics.map(topic => {

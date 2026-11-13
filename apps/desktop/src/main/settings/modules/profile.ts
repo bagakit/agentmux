@@ -1,4 +1,4 @@
-import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '../../../shared/user-profile.js'
+import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '@agentmux/host/mote-model'
 import { booleanSetting, textSetting, type ScalarSetting } from '../scalar-setting.js'
 
 const write = <K extends keyof UserProfile>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: UserProfile[K]) =>

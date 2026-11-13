@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget, type SpaceIconChoice } from './space-object-appearance'

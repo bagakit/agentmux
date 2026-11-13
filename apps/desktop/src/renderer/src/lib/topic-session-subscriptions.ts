@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicStorageRoots } from '../../../shared/scratch-topics'
+import { scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
 import { agentSessionPresentationIndex, sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
 import { useRetainedSessionPresentation } from './workbench-session-subscriptions'

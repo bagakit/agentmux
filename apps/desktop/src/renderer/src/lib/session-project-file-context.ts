@@ -3,7 +3,7 @@ import { goalDiscussionGoalsForRecipient, readGoalDiscussionBinding, resolveGoal
 import { groupIds, regionIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { directoryIdentity, workspaceZoneId, type SpaceZoneBindings, type SpatialRequestBinding } from '../../../shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import type { DemandRecord } from './global-demand-board'
 import { goalProjectContext, type GoalProjectContext } from '@agentmux/host/goal-project-context'
 import type { FileOpenPlacement } from './file-workbench-state'

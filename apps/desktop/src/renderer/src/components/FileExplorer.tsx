@@ -22,7 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
-import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
+import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'

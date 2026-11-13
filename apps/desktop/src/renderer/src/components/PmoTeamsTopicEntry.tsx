@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type CSSProperties } from 'react'
-import { PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose,
   requestPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview,

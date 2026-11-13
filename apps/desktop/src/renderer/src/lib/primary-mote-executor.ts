@@ -1,5 +1,5 @@
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector } from './pmo-teams-topic-floating'
 import { sessionPresentationById } from './session-presentation'

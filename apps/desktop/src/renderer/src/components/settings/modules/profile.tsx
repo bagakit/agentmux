@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { resolveUserProfile, type UserProfile } from '../../../../../shared/user-profile'
+import { resolveUserProfile, type UserProfile } from '@agentmux/host/mote-model'
 import { ProfileSettingsPane } from '../ProfileSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'

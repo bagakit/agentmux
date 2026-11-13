@@ -34,8 +34,8 @@ export type NoteCreationReceipt = {
   issue?: string | undefined
 }
 
-import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, zoneContext } from './space-agent-control'
 import { zoneFileResource } from '../../../shared/zone-file-resource'

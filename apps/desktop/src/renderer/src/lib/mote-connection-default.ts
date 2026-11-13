@@ -1,7 +1,7 @@
 import type { MotePreferencesTarget, MoteConnectionRef } from '@agentmux/core/mote-preferences'
 import type { ConnectionRecord } from '@agentmux/core/connections'
 import { homeZoneId, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 import type { useAppStore } from '../store'

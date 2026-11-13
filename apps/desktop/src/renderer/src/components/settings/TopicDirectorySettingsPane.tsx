@@ -1,4 +1,4 @@
-import { SCRATCH_WORKSPACE_ID } from '../../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { openTopicDirectory } from '../../lib/topic-directory-navigation'
 import { useAppStore } from '../../store'
 import type { SettingsPaneProps } from './settings-catalog'

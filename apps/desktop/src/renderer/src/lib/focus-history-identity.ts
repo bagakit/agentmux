@@ -5,7 +5,7 @@ import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
 /** Called only when focus is recorded; later project/name edits never rewrite this observation. */
-export function observeFocusHistoryIdentity(session: SessionSnapshot, config: AppConfig | null, name?: string, timeline?: AgentTimelineSnapshot, topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null): AgentFocusHistoryIdentity {
+export function observeFocusHistoryIdentity(session: SessionSnapshot, config: AppConfig | null, name?: string, timeline?: AgentTimelineSnapshot, topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null): AgentFocusHistoryIdentity {
   const workspace = workspaceForSession(config, session, topics)
   const project = workspace?.repoPath
     ? config?.workspaces.find(item => item.hostId === session.hostId && item.path === workspace.repoPath)

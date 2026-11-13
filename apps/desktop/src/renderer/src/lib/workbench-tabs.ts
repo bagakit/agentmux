@@ -26,7 +26,7 @@ import {
 import {
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
-} from '../../../shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 import {
   resolveAgentName, firstPromptFromTimeline,
   resolveTabName,
@@ -397,7 +397,7 @@ export function documentKey(workspaceId: string, path: string): string {
   return `${workspaceId}\0${path}`
 }
 
-export function workspaceForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null) {
+export function workspaceForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null) {
   return config?.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, session, topics))
 }
 
@@ -431,7 +431,7 @@ export function workspaceRootForPath(config: AppConfig | null, session: SessionS
   return best
 }
 
-export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null): string | null {
+export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null): string | null {
   const workspace = workspaceForSession(config, session, topics)
   return workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) : null
 }

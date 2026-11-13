@@ -10,7 +10,7 @@ import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { bumpWorkspaceFileRevision } from '../lib/file-workbench-state'

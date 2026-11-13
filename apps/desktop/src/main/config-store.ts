@@ -42,7 +42,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/noti
 import { PERFORMANCE_STATUS_BAR_IDS, TOOLKIT_ICON_IDS } from '../shared/toolkit-preferences.js'
 import { INITIAL_TOOLKIT_PACKAGES } from '../../resources/toolkit/initial-packages.js'
 import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
-import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '../shared/user-profile.js'
+import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '@agentmux/host/mote-model'
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_TOPIC_PRESENTATIONS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS, FOCUS_RECENT_INPUTS, FOCUS_MAP_MOTION } from '../shared/focus-preferences.js'
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { MARKDOWN_READING_TYPEFACES, MARKDOWN_READING_WIDTHS, validMarkdownReadingFontSize } from '../shared/markdown-preferences.js'

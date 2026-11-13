@@ -2,7 +2,7 @@ import { launcherTimelineRecap, type LauncherRecap } from '@agentmux/client-ui/c
 import type { AgentNativeSessionCandidate, AgentTimelineSnapshot } from '@agentmux/core'
 import { projectConversationRecords } from '@agentmux/core/conversation'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { resolveAgentName, firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { workspaceProjectId } from './workspace-projects'
 
@@ -53,7 +53,7 @@ export function launcherNativeResumeRows(input: {
   managed: readonly AgentSessionRecoveryCandidate[]
   agentNames: Readonly<Record<string, string>>
   config: AppConfig | null
-  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
+  topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null
   workspace?: WorkspaceRecord | undefined
 }): LauncherResumeRow[] {
   const projectId = input.workspace ? workspaceProjectId(input.workspace) : null
@@ -89,7 +89,7 @@ export function launcherNativeResumeRows(input: {
 export function launcherResumeRows(input: {
   candidates: readonly AgentSessionRecoveryCandidate[]
   config: AppConfig | null
-  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
+  topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null
   workspace?: WorkspaceRecord | undefined
   timelines: Readonly<Record<string, AgentTimelineSnapshot>>
   agentNames: Readonly<Record<string, string>>

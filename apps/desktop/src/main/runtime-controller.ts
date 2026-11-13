@@ -4,7 +4,12 @@ import { parseCreationContinueParams, parseCreationContinueResult, type AgentMux
 import { executorEnvironmentRevision } from '../shared/executor-probe-context.js'
 import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
-import { profileAgentContext } from '../shared/user-profile.js'
+import {
+  profileAgentContext,
+  SCRATCH_WORKSPACE_ID,
+  scratchTopicIdFromWorkspacePath,
+  workspaceOwnsSessionPath
+} from '@agentmux/host/mote-model'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 
 import { isAbsolute } from 'node:path'
@@ -68,11 +73,6 @@ import { ScratchTopics, type PreparedScratchAgentTopic } from './scratch-topics.
 import { ProcessResourceSampler } from './process-resource-sampler.js'
 import type { RuntimeUsage } from '../shared/process-usage.js'
 import { humanizePromptDeliveryError } from './prompt-readiness-diagnostics.js'
-import {
-  SCRATCH_WORKSPACE_ID,
-  scratchTopicIdFromWorkspacePath,
-  workspaceOwnsSessionPath
-} from '../shared/scratch-topics.js'
 
 type RuntimeHost = {
   executionHost: ExecutionHost

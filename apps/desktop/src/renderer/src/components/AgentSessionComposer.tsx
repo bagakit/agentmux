@@ -14,7 +14,7 @@ import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-inser
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { sessionResourceContext } from '../lib/session-resource-context'
 import { api } from '../lib/api'
 import { useComposerAttachments } from '../lib/use-composer-attachments'

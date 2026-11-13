@@ -1,5 +1,5 @@
 import type { AgentMuxDesktopSpaceSelection } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { collaborationSubjectKey, type CollaborationArea } from './agent-collaboration'

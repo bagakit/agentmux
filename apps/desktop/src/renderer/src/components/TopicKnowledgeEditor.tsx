@@ -8,7 +8,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 export type KnowledgeEditTarget = { topicId: string; topicLabel?: string; entry?: TopicKnowledge; title?: string; sources?: TopicKnowledgeSource[] }
 /** Target and original revision are captured at opening; save never follows later navigation. */

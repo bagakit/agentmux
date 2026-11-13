@@ -1,7 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import { createMoteChatAgents as createHostMoteChatAgents } from '@agentmux/host/mote-chat-agents'
 import { createMoteChatResources } from '@agentmux/host/mote-resources'
-import { profileAgentContext } from '../shared/user-profile.js'
+import { profileAgentContext } from '@agentmux/host/mote-model'
 import type { AppConfig } from '../shared/contracts.js'
 import type { ScratchTopics } from './scratch-topics.js'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'

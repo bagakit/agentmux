@@ -5,7 +5,7 @@ import { parseMotePreferencesReadResult, type MoteConnectionPreferencesReadResul
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import type { ConnectionRecord } from '@agentmux/core/connections'
 import type { MoteChatConfiguration } from '@agentmux/core/mote-chat'
-import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { useScratchTopics } from '../../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../../lib/scratch-topic-snapshots'
 import { moteConnectionChoice, moteConnectionTarget } from '../../lib/mote-connection-default'

@@ -63,7 +63,7 @@ import {
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   scratchTopicDirectoryName,
   scratchTopicIdFromDirectoryName
-} from '../../../shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 import { bookmarkKindForPath, isBinaryContent, parseBookmarkUrl } from '../../../shared/bookmark-file'
 import { normalizeBrowserProfileNetwork } from '../../../shared/browser-profile-network'
 

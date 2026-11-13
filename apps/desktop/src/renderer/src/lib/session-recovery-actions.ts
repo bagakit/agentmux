@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { SessionHistoryReference } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from './api'
 import { scratchTopicsForWorkspace, scratchTopicKind } from './scratch-topic-snapshots'
 import { spatialCatalog } from './space-agent-control'
