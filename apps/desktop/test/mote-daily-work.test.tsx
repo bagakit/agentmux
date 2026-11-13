@@ -101,7 +101,9 @@ describe('original Mote Goal composition and current-work caller', () => {
   })
   it('opens original Goal/results navigation without selecting a foreign Topic or starting an Agent', async () => {
     const tabs = useAppStore.getState().tabs, panel = await profile()
-    await moteClick(panel.querySelector('[aria-label="Open goal and results: Goal ours"]')!)
+    const openGoal = panel.querySelector('[aria-label="Open goal and results: Goal ours"]')!
+    expect(openGoal.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.goals')
+    await moteClick(openGoal)
     expect(useAppStore.getState().selectedDemandId).toBe('ours'); expect(useAppStore.getState().mainSurface).toBe('board')
     expect(useAppStore.getState().tabs).toBe(tabs); expect(app.launch).not.toHaveBeenCalled()
   })

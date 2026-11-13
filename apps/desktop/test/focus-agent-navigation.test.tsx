@@ -82,7 +82,8 @@ it('routes View in Focus through the actual Map and App and preserves ordinary v
  await settleCollaborationCanvas(() => expect(document.querySelector('.collaboration-map .focus-context[data-session-id="target"]')).not.toBeNull())
  await act(async () => document.querySelector<HTMLButtonElement>('.collaboration-map .focus-context[data-session-id="target"]')!.click())
  const button = [...document.querySelectorAll<HTMLButtonElement>('.collaboration-map button')].find(button => button.textContent?.startsWith('View in Focus'))!
- expect(button).toBeTruthy(); await act(async () => button.click())
+ expect(button).toBeTruthy(); expect(button.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.focus')
+ await act(async () => button.click())
  expect(useAppStore.getState()).toMatchObject({ mainSurface: 'agents', focusView: 'list' })
  expect(card('target')?.getAttribute('aria-pressed')).toBe('true')
  const map = document.querySelector('.collaboration-map')

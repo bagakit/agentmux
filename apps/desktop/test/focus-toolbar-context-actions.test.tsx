@@ -52,6 +52,7 @@ it('promotes direct native buttons and views the exact second occurrence instead
   const focusRegion = vi.spyOn(before, 'focusRegion')
   expect(button('Chat about this tab with Mote').tagName).toBe('BUTTON')
   expect(button('View in Space').title).toContain('Same visible name')
+  expect(button('View in Space').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.space')
   await click('View in Space')
   expect(focusRegion).toHaveBeenCalledExactlyOnceWith('project', sourceId, sourceRegion, 'keyboard', reference.groupId)
   const current = useAppStore.getState()

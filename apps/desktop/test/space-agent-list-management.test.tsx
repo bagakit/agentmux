@@ -68,6 +68,7 @@ describe('Space Agent list management through the production Dock and shared Foc
     const actions = header.querySelector('[role="group"][aria-label="Agent list actions"]')!
     expect([...actions.querySelectorAll('button')].map(node => node.getAttribute('aria-label'))).toEqual(['Locate Space in Focus map', 'View in Focus', 'Select Agents'])
     expect(button('View in Focus', header).title).toBe('View in Focus')
+    expect(button('View in Focus', header).querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.focus')
     expect(button('Select Agents', header).title).toBe('Select Agents')
     expect(dom.container.querySelectorAll('.workspace-agents-tool__header')).toHaveLength(1)
     expect(header.parentElement?.querySelector('[aria-label="Filter Agents by state"]')).not.toBeNull()
