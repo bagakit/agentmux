@@ -181,6 +181,7 @@ it.each(readings)('Desktop Mailbox selects the original Inputs detail and reads 
   expect(row).not.toBeNull(); await click(row)
   const detail = panel.querySelector('.composer-mailbox__detail')!
   expect(detail.querySelectorAll('.composer-mailbox__reveal')).toHaveLength(1)
+  expect(detail.querySelector('.composer-mailbox__reveal [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('action.locate')
   await click(detail.querySelector('.log-turn__actions .composer-mailbox__reveal'))
   expect(reveal).toHaveBeenCalledExactlyOnceWith(messages[0], null)
   expect(reveal.mock.calls[0]![0]).toBe(messages[0])

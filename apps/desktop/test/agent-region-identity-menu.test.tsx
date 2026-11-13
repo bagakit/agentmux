@@ -152,6 +152,7 @@ it('the actual Split item targets its original left Region, and keeps the neighb
 })
 it('the actual Move to New Tab item promotes the original left Region while the right Region is active',async()=>{
   const promote=vi.spyOn(useAppStore.getState(),'promoteRegionToTab');await mount();const before=structuredClone(useAppStore.getState().sessions),menu=await menuWithRightActive()
+  expect(menuItem(menu,'Move to New Tab').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.tab')
   await select(menuItem(menu,'Move to New Tab'));expect(promote).toHaveBeenCalledExactlyOnceWith(workspaceId,tabId,leftId)
   expect(Object.keys(useAppStore.getState().tabs[tabId]!.regions)).toEqual([rightId]);expect(useAppStore.getState().sessions).toEqual(before);expect(useAppStore.getState().agentComposerDrafts[sessionIds[1]!]).toBe('Keep this draft')
 })
