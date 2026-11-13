@@ -88,6 +88,8 @@ async function click(text: string) { await act(async () => button(text).click())
 async function edit(label: string, text: string) { const node = container.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[aria-label="${label}"]`)!; expect(node).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, text); node.dispatchEvent(new Event('input', { bubbles: true })) }); return node }
 
 describe('Goals direct PMO creation and reading surface', () => {
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('one actual click saves a caller-owned undefined Goal and launches its dedicated PMO through the original owner', async () => {
     const originalLayout = useAppStore.getState().layouts.repo, originalFocus = useAppStore.getState().agentFocus
     await mount(); await click('New Goal')
@@ -113,6 +115,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect((await owner.list()).map(value => value.id)).toEqual([saved.id]); expect(creates()).toHaveLength(1)
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('owns one click across duplicate activation and a mounted board unload/return before the save receipt', async () => {
     const held = holdCreateReceipt()
     await mount(); const newGoal = button('New Goal')
@@ -125,6 +129,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect((await owner.list()).map(value => value.id)).toEqual([saved.demand.id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('recovers an actually saved but lost creation receipt only by reading the exact frozen ID', async () => {
     const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
     // The exact frozen-ID read (demand.show) fails once before reaching the original owner.
@@ -142,6 +148,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('saves again only after a complete owner read proves absence, using the same caller ID', async () => {
     host.once('demand.create', { kind: 'reject', error: new Error('Disk unavailable') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
@@ -171,6 +179,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('button')].filter(node => node.textContent === '保存这个目标')).toEqual([])
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('retains the real Goal and failed mapped launcher, then retries the same Goal and Tab', async () => {
     vi.mocked(api.sessions.launchAgent).mockRejectedValueOnce(Object.assign(new Error('PMO launch rejected before start'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
@@ -186,6 +196,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.agentMuxNote?.includes(`existing Goal ${id}`))).toEqual([true, true])
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('keeps the saved Goal and its real dedicated launcher when the saved new-chat configuration is unavailable', async () => {
     useAppStore.setState({ config: { ...config, executors: {} } })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
@@ -197,6 +209,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('preserves explicit Project and matching conditions while making the new shell visible', async () => {
     await mount(); await click('Goal filters')
     async function choose(label: string, value: string) { await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value) }
@@ -212,6 +226,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('clears only conditions that would hide the newly created Goal', async () => {
     await mount(); await click('Goal filters')
     for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value!)
@@ -222,6 +238,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
+  // KNOWN RED (follow-up): New Goal's dedicated PMO now opens through Host demand.discuss, which needs a Core spatial graph,
+  // a primary Mote and Core agent.open; this fixture provides none, so it ends at "The original Core spatial document is unavailable."
   it('attaches the created PMO without stealing a newer Goal selection, PMO focus or floating target', async () => {
     let finish!: () => void
     const launch = vi.mocked(api.sessions.launchAgent).getMockImplementation()!
@@ -253,13 +271,19 @@ describe('Goals direct PMO creation and reading surface', () => {
     const original = goal(); const open = vi.fn().mockRejectedValueOnce(new Error('Mote view unavailable')).mockResolvedValueOnce('mote-tab'); const request = vi.fn()
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, openDemandPmo: open, requestDemandPmoTask: request })
     await mount(); await click(`Open discussion for ${original.title}`)
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('discussion could not be opened')
+    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('discussion could not be opened')
     expect(request).not.toHaveBeenCalled(); await click('Retry opening discussion')
     expect(open.mock.calls).toEqual([[original.id], [original.id]]); expect(request).not.toHaveBeenCalled()
   })
 
   it('defaults to a nonempty list, filters honestly and keeps the same identity in the horizontal board', async () => {
-    useAppStore.setState({ demands: { 'goal:one': goal(), 'goal:done': { ...goal('goal:done'), title: 'Previously done', status: 'done' } } })
+    // Finished history holds a Done Goal whose current result was accepted; Done without acceptance stays visible
+    // and points at the missing verification (behavior SSOT goals-and-demand「状态、筛选与路由队列」).
+    const criteria = [{ id: 'ac', text: 'Original result exists' }]
+    useAppStore.setState({ demands: { 'goal:one': goal(), 'goal:done': { ...goal('goal:done'), title: 'Previously done', status: 'done',
+      alignment: { summary: 'Original result', criteria, openQuestions: [], revision: 1, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) },
+      grounding: { alignmentRevision: 1, summary: 'Checked', submissionId: 'accepted-report', submittedAt: _reshape_fixtureEpoch(0, 0, 4), acceptedAt: _reshape_fixtureEpoch(0, 0, 5),
+        checks: [{ criterionId: 'ac', outcome: 'met', evidence: ['result.log:1'], note: 'Observed.' }] } } } })
     await mount(); expect([...container.querySelectorAll('[data-demand-id]')].map((node) => node.getAttribute('data-demand-id'))).toEqual(['goal:one'])
     expect(container.querySelector('.goals-list')).toBeTruthy(); expect(container.querySelector('.goals-filters')).toBeNull()
     await act(async () => (container.querySelector('[data-demand-id]') as HTMLElement).click()); expect(useAppStore.getState().selectedDemandId).toBe('goal:one')
@@ -286,7 +310,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     await act(async () => title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
     expect(update).toHaveBeenCalledWith(original.id, { title: 'My clearer outcome' }, undefined, undefined)
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')?.value).toBe('My clearer outcome')
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('draft is kept')
+    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('draft is kept')
     await click('Retry save'); expect(update).toHaveBeenCalledTimes(2)
   })
 
@@ -308,7 +332,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     useAppStore.setState({ demands: { [original.id]: original, [second.id]: second }, selectedDemandId: original.id, updateDemand: update })
     await mount(); const title = await edit('Goal title', 'An unsaved but valuable title')
     await act(async () => title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('draft is kept')
+    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('draft is kept')
     await act(async () => (container.querySelector('[data-demand-id="goal:two"]') as HTMLElement).click())
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')?.value).toBe('Another goal')
     await act(async () => (container.querySelector('[data-demand-id="goal:one"]') as HTMLElement).click())
@@ -321,7 +345,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, updateDemand: update })
     await mount(); await chooseField(container.querySelector<HTMLElement>('[aria-label="Goal priority"]')!, 'high')
     expect(update).toHaveBeenCalledExactlyOnceWith(original.id, { priority: 'high' }, undefined, undefined)
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('Priority save unavailable')
+    expect(container.querySelector('.goals-detail [role="status"]')?.textContent).toContain('Priority save unavailable')
     await click('Retry save'); expect(update.mock.calls).toEqual([[original.id, { priority: 'high' }, undefined, undefined], [original.id, { priority: 'high' }, undefined, undefined]])
   })
 
