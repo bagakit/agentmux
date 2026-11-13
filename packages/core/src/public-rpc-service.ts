@@ -3679,9 +3679,14 @@ export class AgentMuxRpcService {
       throw new AgentMuxError('Snapshot inclusion is invalid.', 'INVALID_CONTROL_REQUEST')
     }
     const wanted = (name: string) => include === null || (include as string[]).includes(name)
+    // Config directories come from their registered owner, including a confirmed empty list.
+    let extra: Partial<AgentMuxRpcSnapshot> = {}, snapshotIssue: ReturnType<typeof unavailable> | undefined
+    if (this.ports.snapshot) try { extra = await this.ports.snapshot(filters) }
+    catch (error) { snapshotIssue = unavailable(error) }
     await Promise.all(sources.map(async ([source, operation]) => {
       if (!wanted(source) && !(source === 'spaces' && ['zones', 'workspaces'].some(wanted)) &&
         !(source === 'goals' && ['decisions', 'activity'].some(wanted))) return
+      if ((source === 'projects' || source === 'executors') && Object.hasOwn(extra, source)) return
       try {
         const result = await this.execute(this.request(operation, operation === 'space.ls' ? { target: {} } : {}))
         if (result.operation === 'list.projects') observation.projects = result.projects.filter(project => !p.projectId || project.projectId === p.projectId)
@@ -3724,10 +3729,9 @@ export class AgentMuxRpcService {
       } catch (error) { observation.unavailable.push({ source: 'sessions', ...unavailable(error) }) }
     }
     if (this.ports.snapshot) {
-      try { const extra = await this.ports.snapshot(filters)
-        for (const [key, value] of Object.entries(extra)) if (key === 'unavailable') observation.unavailable.push(...value as AgentMuxRpcSnapshot['unavailable'])
-          else if (Object.hasOwn(observation, key) && wanted(key)) (observation as unknown as Record<string, unknown>)[key] = value
-      } catch (error) { observation.unavailable.push({ source: 'filesystem', ...unavailable(error) }) }
+      for (const [key, value] of Object.entries(extra)) if (key === 'unavailable') observation.unavailable.push(...value as AgentMuxRpcSnapshot['unavailable'])
+        else if (Object.hasOwn(observation, key) && wanted(key)) (observation as unknown as Record<string, unknown>)[key] = value
+      if (snapshotIssue) observation.unavailable.push({ source: 'filesystem', ...snapshotIssue })
     } else for (const source of ['topics', 'motes', 'workspaces']) if (wanted(source)) observation.unavailable.push({ source,
       code: 'FILESYSTEM_SCOPE_UNAVAILABLE', message: 'The original filesystem/config discovery owner is unavailable.',
       recovery: 'Connect the client-owned filesystem/config observation port.' })

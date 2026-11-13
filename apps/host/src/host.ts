@@ -180,7 +180,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     ...content,
     ...(goals ? { goalControl: goals.execute, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
-    snapshot: createHostSnapshotObservation(configurationPath),
+    snapshot: createHostSnapshotObservation(configurationPath, () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])]),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
     fileUploads,

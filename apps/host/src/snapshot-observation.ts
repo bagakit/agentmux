@@ -1,10 +1,12 @@
-import type { AgentMuxRpcServiceOptions, AgentMuxRpcSnapshot, AgentMuxRpcSnapshotParams, AgentMuxRpcTopic } from '@agentmux/core'
+import type { AgentMuxClient, AgentMuxRpcServiceOptions, AgentMuxRpcSnapshot, AgentMuxRpcSnapshotParams, AgentMuxRpcTopic } from '@agentmux/core'
 import type { WorkspaceRecord } from './content-types.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
 import { directoryIdentity } from './mote-model.js'
 import { ScratchTopics } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from './mote-topic-model.js'
 import { isKnowledgeTopic, knownTopicContentSpaceId } from './topic-categories.js'
+import { projectWorkspaces } from './workspace-projects.js'
+import { workspaceOwnsSessionPath } from './mote-topic-model.js'
 
 /** Read the original config and filesystem owners; observation never ensures or writes a Topic. */
 export async function observeClientRpcSnapshot(configuration: { workspaces: readonly (WorkspaceRecord & { name: string })[] },
@@ -64,12 +66,45 @@ export async function observeClientRpcSnapshot(configuration: { workspaces: read
   return result
 }
 
-/** The Host serves the same projection from its own configuration file and Topic owner. */
-export function createHostSnapshotObservation(configurationPath: string | undefined): NonNullable<AgentMuxRpcServiceOptions['snapshot']> {
+/** The Host reads directories from its original configuration and Core Runtime owners. */
+export function createHostSnapshotObservation(configurationPath: string | undefined,
+  clients: () => readonly { hostId: string; client: Pick<AgentMuxClient, 'runtimeProjection'> }[]): NonNullable<AgentMuxRpcServiceOptions['snapshot']> {
   const topics = new ScratchTopics()
   return async params => {
-    if (params.include && !params.include.some(source => source === 'workspaces' || source === 'topics' || source === 'motes')) return { unavailable: [] }
+    const wanted = (source: NonNullable<AgentMuxRpcSnapshotParams['include']>[number]) => !params.include || params.include.includes(source)
+    if (params.include && !params.include.some(source => ['projects', 'executors', 'workspaces', 'topics', 'motes'].includes(source))) return { unavailable: [] }
     if (!configurationPath) throw new Error('The original configuration metadata is unavailable. Original spatial positions and Agent input remain available.')
-    return observeClientRpcSnapshot(await readPresentationConfiguration(configurationPath), topics, params)
+    const configuration = await readPresentationConfiguration(configurationPath)
+    const result = await observeClientRpcSnapshot(configuration, topics, params)
+    if (wanted('executors')) result.executors = Object.entries(configuration.executors)
+      .filter(([executorId]) => !params.executorId || executorId === params.executorId)
+      .map(([executorId, executor]) => ({ executorId, label: executor.label, providerId: executor.providerId, availability: 'unknown' }))
+    if (wanted('projects')) {
+      const projects = projectWorkspaces(configuration.workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID))
+        .filter(project => !params.projectId || project.id === params.projectId)
+      const routes = clients()
+      const observations = await Promise.all([...new Set(projects.map(project => project.hostId))].map(async hostId => {
+        try {
+          const matching = routes.filter(route => route.hostId === hostId)
+          if (matching.length !== 1) throw new Error('The original Project Runtime owner is unavailable or ambiguous.')
+          return { hostId, subjects: (await matching[0]!.client.runtimeProjection()).subjects }
+        } catch (error) {
+          result.unavailable!.push({ source: 'projects', code: 'CONTROL_UNAVAILABLE',
+            message: `${hostId}: ${error instanceof Error ? error.message : String(error)}`,
+            recovery: 'Reconnect this original Project Host to confirm its active Agents. Saved Projects remain readable.' })
+          return { hostId, subjects: [] }
+        }
+      }))
+      result.projects = projects.map(project => {
+        const workspace = project.workspaces.find(workspace => workspace.id === project.preferredWorkspaceId)!
+        const subjects = observations.find(value => value.hostId === project.hostId)!.subjects
+        return { projectId: project.id, name: project.name, hostId: project.hostId,
+          path: project.repoPath, kind: workspace.kind ?? 'folder', repoPath: workspace.repoPath ?? null, branch: workspace.branch ?? null,
+          activeAgentSessionIds: subjects.flatMap(subject => subject.kind === 'agent' && subject.run.state === 'running' &&
+            project.workspaces.some(resource => workspaceOwnsSessionPath(resource, { hostId: project.hostId, workspacePath: subject.workspacePath }))
+            ? [subject.agentSession.agentSessionId] : []) }
+      })
+    }
+    return result
   }
 }
