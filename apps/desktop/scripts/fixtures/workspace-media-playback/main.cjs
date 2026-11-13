@@ -62,8 +62,10 @@ async function capture() {
   await wait(`typeof window.mediaPlaybackProbe === 'object'`)
   await wait(`Boolean(document.querySelector('.workbench-region'))`)
   // 1. The 55 MB file from the report plays. Before play, only the index is read.
+  const openedAt = performance.now()
   await evaluate(`mediaPlaybackProbe.open("promo.mp4")`)
   await wait(`mediaPlaybackProbe.player("promo.mp4")?.decode === 'ready'`)
+  report.checks.firstFrameMs = Math.round(performance.now() - openedAt)
   const ready = await player('promo.mp4')
   assert.equal(ready.kind, 'video'); assert.ok(ready.width > 0, 'A real decoded picture'); assert.match(ready.src, /^http:\/\/127\.0\.0\.1:\d+\//)
   // Chromium sizes its own read-ahead (6–32 MiB observed across runs for this file). What the lease owns:
@@ -79,8 +81,10 @@ async function capture() {
   await evaluate(`mediaPlaybackProbe.play("promo.mp4")`)
   await wait(`mediaPlaybackProbe.player("promo.mp4")?.currentTime > 1`)
   await evaluate(`mediaPlaybackProbe.pause("promo.mp4")`)
+  const seekAt = performance.now()
   await evaluate(`mediaPlaybackProbe.seekFraction("promo.mp4", 0.8)`)
   await wait(`(()=>{const p=mediaPlaybackProbe.player("promo.mp4");return p&&p.currentTime>p.duration*0.79&&p.readyState>=2})()`)
+  report.checks.seekReadyMs = Math.round(performance.now() - seekAt)
   const ranged = requestsFor('promo.mp4').filter(entry => entry.status === 206 && entry.range && Number(/bytes=(\d+)-/.exec(entry.range)?.[1]) > 0)
   assert.ok(ranged.length > 0, 'Seeking far reads by Range, not from the start')
   report.checks.seekRanges = ranged.map(entry => entry.range)
