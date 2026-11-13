@@ -41,6 +41,8 @@ app.whenReady().then(async () => {
     win.showInactive()
     await pointAt(1, 1)
     await ready('Boolean(document.querySelector(\'input[aria-label="Filter changed files"]\') && document.querySelectorAll(".git-workbench__files > li").length > 0)')
+    // A first paint of the scroller can leave one row's hover tint drawn; let a frame pass with the pointer away.
+    await pointAt(1, 1)
     await capture('large-commit-top-dark', 760, 900)
     await hoverRow('glyph-0005.svg')
     await capture('large-commit-selected-and-hover-dark', 760, 900)
