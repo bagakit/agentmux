@@ -1,20 +1,15 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
-import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlSettingEntry } from '../src/control.js'
 import { AgentMuxError } from '../src/errors.js'
 
-const exec = promisify(execFile)
-const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const initial: AgentMuxControlSettingEntry[] = [
   { key: 'client.mode', kind: 'string', value: 'quiet', default: 'quiet', enum: ['quiet', 'bright'] },
   { key: 'client.copy', kind: 'boolean', value: true, default: false },
@@ -63,14 +58,9 @@ describe('settings CLI over the public Control socket', () => {
   })
 
   async function run(args: readonly string[]) {
-    const options = { timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
-      AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
-    try {
-      const output = await exec(process.execPath, [cli, ...args], options)
-      return { code: 0, ...output }
-    } catch (error) {
-      return error as { code: number; stdout: string; stderr: string }
-    }
+    return runCompiledObjectCli(args, { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root,
+      AGENTMUX_STATE_DIRECTORY: join(root, 'durable'), AGENTMUX_ENV: undefined,
+      AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }, '', 5_000)
   }
 
   it('gets real host scalar facts without a managed caller or View and forwards an exact target', async () => {
@@ -147,22 +137,37 @@ describe('settings CLI over the public Control socket', () => {
     expect(entries).toEqual(initial)
   })
 
-  it.each([['settings', '--help'], ['--help', 'settings', 'inspect'], ['settings', 'set', '-h']])(
-    'provides offline help at syntax positions %j', async (...args) => {
-      await server.stop()
-      const output = await run(args)
-      expect(output.code).toBe(0)
-      expect(output.stdout).toContain('amux settings')
-      expect(output.stdout).toContain('CONTROL_UNAVAILABLE')
-      expect(output.stdout).not.toContain('client.mode')
-      expect(output.stdout).not.toContain('bright')
-      expect(seen).toEqual([])
-    })
-
-  it('fails accurately when the owner is offline and never substitutes local writes', async () => {
+  it.each([
+    { args: ['settings', '--help'], usage: 'amux settings inspect [target]', module: true },
+    { args: ['--help', 'settings', 'inspect'], usage: 'Usage: amux settings inspect [target]', module: false },
+    { args: ['settings', 'set', '-h'], usage: 'Usage: amux settings set <key> <value>', module: false }
+  ])('provides offline help at syntax positions $args', async ({ args, usage, module }) => {
+    const privateValue = 'private-owner-label-outside-offline-help'
+    entries[3] = { key: 'client.label', kind: 'string', value: privateValue, default: '' }
     await server.stop()
-    const failed = await run(['settings', 'set', 'client.mode', 'bright'])
+    const output = await run(args)
+    expect(output.code).toBe(0)
+    expect(output.stderr).toBe('')
+    expect(output.stdout).toContain(usage)
+    if (module) {
+      expect(output.stdout).toContain('CONTROL_UNAVAILABLE')
+      expect(output.stdout).toContain('partial')
+    } else {
+      expect(output.stdout).toContain('Read amux settings --help')
+    }
+    expect(output.stdout).not.toContain('client.mode')
+    expect(output.stdout).not.toContain(privateValue)
+    expect(seen).toEqual([])
+  })
+
+  it.each([
+    ['client.mode', 'bright'],
+    ['appearance.themeId', '--help']
+  ])('fails accurately for offline set %s %s and never substitutes local writes', async (key, value) => {
+    await server.stop()
+    const failed = await run(['settings', 'set', key, value])
     expect(failed.code).toBe(1)
+    expect(failed.stdout).toBe('')
     expect(JSON.parse(failed.stderr)).toMatchObject({ ok: false, operation: 'settings.set',
       error: { code: 'CONTROL_UNAVAILABLE' } })
     expect(entries).toEqual(initial)
@@ -170,14 +175,24 @@ describe('settings CLI over the public Control socket', () => {
   })
 
   it('exposes settings in both top-level discovery and Agent instructions', async () => {
+    await server.stop()
     const help = await run(['--help'])
-    const skill = await run(['settings', '--help'])
+    const module = await run(['settings', '--help'])
+    const directory = await run(['--skill'])
+    const skill = await run(['settings', '--skill'])
     expect(help.code).toBe(0)
+    expect(module.code).toBe(0)
+    expect(directory.code).toBe(0)
     expect(skill.code).toBe(0)
-    expect(help.stdout).toContain('amux settings inspect')
-    expect(skill.stdout).toContain('amux settings inspect')
-    expect(skill.stdout).toContain('amux settings set <key> <value>')
-    expect(skill.stdout).toContain('partial')
+    for (const output of [help, module, directory, skill]) expect(output.stderr).toBe('')
+    expect(help.stdout).toMatch(/^  amux settings$/m)
+    expect(module.stdout).toContain('amux settings inspect [target]')
+    expect(module.stdout).toContain('amux settings set <key> <value>')
+    expect(module.stdout).toContain('partial')
+    expect(directory.stdout).toContain('amux settings --skill')
+    expect(skill.stdout).toMatch(/^---\nname: amux-settings\n/)
+    expect(skill.stdout).toContain('Read amux settings --help')
+    expect(skill.stdout).toContain('The original configuration owner')
     expect(seen).toEqual([])
   })
 
