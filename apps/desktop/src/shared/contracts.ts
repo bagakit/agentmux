@@ -1324,7 +1324,9 @@ export type BrowserProfileSummary = {
   hue?: number
   notes?: string
   /** How this Profile's pages reach the network; absent follows the system settings. Never holds a password. */
-  network?: import('./browser-profile-network.js').BrowserProfileNetwork
+  network?: import('./browser-profile-network.js').BrowserProfileStoredNetwork
+  /** False when the person turned Agents off for this Profile; absent means Agents may use it. */
+  agentAccess?: false
 }
 
 export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[] }
@@ -1332,7 +1334,9 @@ export type BrowserProfileList = { revision: number; profiles: BrowserProfileSum
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string
   /** A new route, or null to follow the system settings again. */
-  network?: import('./browser-profile-network.js').BrowserProfileNetwork | null }
+  network?: import('./browser-profile-network.js').BrowserProfileNetwork | null
+  /** Whether Agents may drive Browsers in this Profile; only narrows the global switch. */
+  agentAccess?: boolean }
 
 export type BrowserProfileDeleteApproval = {
   kind: 'user-confirmed'

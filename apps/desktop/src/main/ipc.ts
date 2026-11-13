@@ -120,6 +120,7 @@ import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
 import { executeBrowserTaskControl } from './browser-task-control.js'
+import { createBrowserAutomationGate } from './browser-automation-gate.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
@@ -548,6 +549,26 @@ export async function registerIpc(args: {
       ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
       : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
   }
+  // One automation gate: decided by who asks (an Agent caller or a person), not by which handler runs.
+  const browserAutomation = createBrowserAutomationGate({
+    automation: () => config.browser.agentAutomation === true,
+    profileOf: async id => {
+      // An external tab and a private page have no saved Profile; a Capsule has its own container.
+      if (externalBrowsers.has(id)) return null
+      const live = browsers.recoveryPreviewScope(id)
+      if (live) return live.mode === 'normal' ? live.profileId : null
+      const saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+      if (saved.mode === 'private' || saved.capsuleId) return null
+      // A saved normal page without a Profile id restores into the default Profile, so that is the one to ask.
+      if (saved.profileId) return saved.profileId
+      await browserProfiles.initialize()
+      return browserProfiles.defaultProfileId()
+    },
+    agentAccess: profileId => {
+      const profile = browserProfiles.listProfiles().find(candidate => candidate.id === profileId)
+      return profile === undefined ? undefined : profile.agentAccess !== false
+    }
+  })
   browsers.setPresentationWindowOwner((document, occurrence) => 'kind' in occurrence
     ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
@@ -2004,16 +2025,9 @@ export async function registerIpc(args: {
     caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>
   ) => {
     return browserRunResult(async () => {
-      if (config.browser.agentAutomation !== true) {
-        // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
-        // 取不到就折成 `CONTROL_FAILED`——于是 `BROWSER_AUTOMATION_DISABLED` 进了码表、进了收据解析
-        // 的测试，却在生产路径上一次都发不出来（零调用者）。差别对 Agent 是实的：`CONTROL_FAILED`
-        // 读作"这次失败了，重试吧"，而这件事重试一万次也不通，要人去改设置。
-        throw Object.assign(
-          new Error('Agent browser automation is off. Turn it on in Settings › Browser.'),
-          { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
-        )
-      }
+      // The refusal carries its code (BROWSER_AUTOMATION_DISABLED, or a Profile's Agent switch): control-host
+      // reads error.code, and CONTROL_FAILED would read as "retry", which never helps here.
+      await browserAutomation(id, caller)
       // 第四个位置是 `replayOf`，这条路上永远没有（回放走 `browser:runReplay`）。这个 undefined 洞
       // 必须显式留着：少写一个位置就是把 operationId 喂进 replayOf，于是这次操作被记成"某个操作的
       // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
@@ -2032,7 +2046,7 @@ export async function registerIpc(args: {
     return await browsers.setOperatorAvatar(input)
   })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
-    if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')
+    await browserAutomation(id, undefined)
     await ensureBrowser(id)
     return await browsers.checkOutcomeFields(id, input, 'human')
   })
@@ -2070,9 +2084,7 @@ export async function registerIpc(args: {
     return input === undefined ? browsers.returnControl(id) : await browsers.returnControl(id, input)
   })
   handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
-    if (config.browser.agentAutomation !== true) {
-      throw Object.assign(new Error('Agent browser automation is off. Turn it on in Settings › Browser.'), { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode })
-    }
+    await browserAutomation(id, caller)
     await ensureBrowser(id)
     return await browsers.runReplay(id, plan, operator, caller)
   })
@@ -2103,7 +2115,7 @@ export async function registerIpc(args: {
       runControlledTaskAsset: async input => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskAsset(input) },
       stopTaskBatch: (id, batchId) => browsers.stopTaskBatch(id, batchId),
       stopTaskAsset: (id, runId) => browsers.stopTaskAsset(id, runId)
-    }, config.browser.agentAutomation === true)
+    }, browserAutomation)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
     await ensureBrowser(id)
@@ -2122,7 +2134,7 @@ export async function registerIpc(args: {
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
-    if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    await browserAutomation(input.browserId, undefined)
     await ensureBrowser(input.browserId)
     return await browsers.runTaskBatch(input)
   })
@@ -2130,7 +2142,7 @@ export async function registerIpc(args: {
     return await browsers.stopTaskBatch(id, batchId)
   })
   handleWithEvent('browser:runTaskAsset', async (event, input: BrowserTaskAssetRunInput) => {
-    if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    await browserAutomation(input.browserId, undefined)
     await ensureBrowser(input.browserId)
     return await browsers.runTaskAsset(input)
   })

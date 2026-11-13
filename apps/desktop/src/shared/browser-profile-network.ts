@@ -20,6 +20,9 @@ export type BrowserProfileNetwork =
 
 export type BrowserProfileProxyServer = { scheme: BrowserProfileProxyScheme; host: string; port: number }
 
+/** A route as stored on a Profile. System is never stored: it is what an absent route means. */
+export type BrowserProfileStoredNetwork = Exclude<BrowserProfileNetwork, { mode: 'system' }>
+
 const DEFAULT_PORTS: Readonly<Record<BrowserProfileProxyScheme, number>> = { http: 80, https: 443, socks4: 1080, socks5: 1080 }
 const BYPASS_MAX = 64
 const BYPASS_RULE = /^(<local>|<-loopback>|[A-Za-z0-9*.:[\]/_-]{1,253})$/

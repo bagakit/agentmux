@@ -6,7 +6,7 @@ import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS } from '../shared/browser-profile-import-skip.js'
-import { normalizeBrowserProfileNetwork, type BrowserProfileNetwork } from '../shared/browser-profile-network.js'
+import { normalizeBrowserProfileNetwork, type BrowserProfileStoredNetwork } from '../shared/browser-profile-network.js'
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
@@ -33,8 +33,8 @@ const nonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE
 const profileHueSchema = z.number().int().min(0).max(359).refine(clearsSemanticHues, 'Browser Profile hue must stay clear of status colors')
 const profileNotesSchema = z.string().max(BROWSER_PROFILE_NOTES_MAX_LENGTH)
 // A stored route must be one the parser would produce, so a hand-edited file cannot hide a malformed proxy.
-const profileNetworkSchema = z.custom<BrowserProfileNetwork>((value) => {
-  try { return JSON.stringify(normalizeBrowserProfileNetwork(value)) === JSON.stringify(value) } catch { return false }
+const profileNetworkSchema = z.custom<BrowserProfileStoredNetwork>((value) => {
+  try { const route = normalizeBrowserProfileNetwork(value); return route.mode !== 'system' && JSON.stringify(route) === JSON.stringify(value) } catch { return false }
 }, 'Browser Profile network route is not a valid route')
 
 const importedSourceSchema = z
@@ -59,7 +59,9 @@ const profileRecordSchema = z
     source: importedSourceSchema.nullable(),
     hue: profileHueSchema.optional(),
     notes: profileNotesSchema.optional(),
-    network: profileNetworkSchema.optional()
+    network: profileNetworkSchema.optional(),
+    // Stored only when Agents are turned off, so an untouched Profile keeps the global switch's answer.
+    agentAccess: z.literal(false).optional()
   })
   .strict()
 
@@ -157,7 +159,8 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     source: cloneImportedSource(profile.source),
     ...(profile.hue === undefined ? {} : { hue: profile.hue }),
     ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes }),
-    ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) })
+    ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) }),
+    ...(profile.agentAccess === false ? { agentAccess: false as const } : {})
   }
 }
 
@@ -212,6 +215,9 @@ export class BrowserProfileStore {
         if (notes === '') delete updated.notes
         else updated.notes = notes
       }
+      if (edit.agentAccess === true) delete updated.agentAccess
+      else if (edit.agentAccess === false) updated.agentAccess = false
+      else if (edit.agentAccess !== undefined) throw new Error('Browser Profile Agent access must be on or off')
       if (edit.network === null) delete updated.network
       else if (edit.network !== undefined) {
         const network = normalizeBrowserProfileNetwork(edit.network)
