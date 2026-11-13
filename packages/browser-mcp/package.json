@@ -1,0 +1,14 @@
+{
+  "name": "@agentmux/browser-mcp",
+  "version": "0.1.0",
+  "description": "MCP adapter for the original AgentMux Browser RPC client",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bin": { "agentmux-browser-mcp": "./dist/stdio.js" },
+  "files": ["dist"],
+  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "dependencies": { "@agentmux/core": "workspace:*", "@modelcontextprotocol/server": "2.4.0", "zod": "^4.2.0" },
+  "devDependencies": { "@modelcontextprotocol/client": "2.4.0", "typescript": "^5.9.0", "@types/node": "^24.0.0" }
+}
