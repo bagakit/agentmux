@@ -10,6 +10,7 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/
 import { desktopSpatialGraph, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state';
 import { api } from '../src/renderer/src/lib/api';
 import { useAppStore } from '../src/renderer/src/store';
+import { clientIncidentDispatcher } from '../src/renderer/src/lib/client-incident-recorder';
 import type { AppConfig, SessionSnapshot, RuntimeSnapshot, AgentTimelineSnapshot } from '../src/shared/contracts';
 import { agent } from './helpers/workface-control-fixture';
 const config: AppConfig = { version: 9, hosts: [{ id: 'host', kind: 'local', label: 'Local' }], executors: {}, workspaces: [{ id: 'resource', name: 'Project', hostId: 'host', path: _hygiene_fixturePath("project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } };
@@ -338,14 +339,17 @@ describe('a stalled workface save in the actual Store', () => {
       vi.mocked(api.spatial.commit).mockImplementation(input => offline ? Promise.reject(new Error('Disk unavailable')) : store.commit(input))
       const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'file', workspaceId: 'resource', path: 'second.md' })
       useAppStore.setState(state => ({ tabs: { ...state.tabs, second }, layouts: { resource: createWorkspaceLayout('group', ['file', 'second']) } }))
+      const incidents = vi.spyOn(clientIncidentDispatcher(), 'send')
       await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS)
       expect(useAppStore.getState().workbenchSaveWarning).toContain('have not reached storage')
+      expect(incidents.mock.calls.map(([report]) => report.kind)).toEqual(['workface-save-failed'])
       offline = false
       // Fire the backoff retry, then let the real file write and its acknowledgement settle.
       await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 8)
       vi.useRealTimers()
       await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toContain('second'))
       await vi.waitFor(() => expect(useAppStore.getState().workbenchSaveWarning).toBeNull())
+      expect(incidents.mock.calls.map(([report]) => report.kind)).toEqual(['workface-save-failed', 'workface-save-recovered'])
     } finally { vi.useRealTimers() }
   })
 })

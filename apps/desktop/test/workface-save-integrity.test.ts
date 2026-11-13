@@ -7,6 +7,8 @@ import { addTabOccurrence, createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
 import { attachLauncherAgentPosition } from '../src/main/goal-discussion-handoff'
+import { workfaceSaveRecorder } from '../src/renderer/src/lib/workface-save-diagnostics'
+import type { AgentMuxClientIncidentReport } from '@agentmux/core/client-incident'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { AppConfig } from '../src/shared/contracts'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
@@ -243,6 +245,35 @@ describe('a Launcher Agent position is recorded by Core at creation', () => {
     const before = (await store.read())!
     expect(await attachLauncherAgentPosition(launch, result(), { metadataIssue: 'owned elsewhere' }, config.workspaces, store)).toBeUndefined()
     expect((await store.read())!).toEqual(before)
+  })
+})
+
+describe('a stalled workface save leaves a bounded record that survives restart', () => {
+  it('files one record per stall and one recovery, readable by a fresh archive owner, with no workface text', async () => {
+    const { ClientIncidentArchive } = await import('../../host/src/client-incident-archive')
+    const directory = await mkdtemp(join(tmpdir(), 'amux-save-incidents-')); directories.push(directory)
+    const archive = new ClientIncidentArchive(directory)
+    await archive.flush()
+    const producer = { kind: 'renderer' as const, appInstanceId: 'application', producerInstanceId: 'window-document', windowId: '1', documentGeneration: '1', buildId: null }
+    const sent: unknown[] = []
+    const recorder = workfaceSaveRecorder('local', report => { sent.push(report); expect(archive.enqueue(report, producer).accepted).toBe(true) })
+    const stalled = { pendingSince: 1_000, lastConfirmedAt: null, stalled: true, lastFailureCode: 'SPATIAL_STATE_BUSY', conflicts: 2 }
+    recorder.stalled(stalled, 41, 31_000)
+    recorder.stalled(stalled, 41, 61_000)
+    recorder.recovered({ ...stalled, pendingSince: null, stalled: false, lastFailureCode: null }, 42, 90_000)
+    expect(sent).toHaveLength(2)
+    await archive.flush()
+    // A second process reads the same durable namespace after restart.
+    const reopened = new ClientIncidentArchive(directory)
+    await reopened.flush()
+    const page = (await reopened.read({ domain: 'client.incident', hostId: 'local', recent: {} }, { signal: new AbortController().signal, maxBytes: 256 * 1024 })).data as { items: { kind: string; code: string | null; logId?: string; recordRef: { logId: string } }[] }
+    expect(page.items.map(item => [item.kind, item.code])).toEqual(expect.arrayContaining([['workface-save-failed', 'SPATIAL_STATE_BUSY'], ['workface-save-recovered', null]]))
+    const failed = page.items.find(item => item.kind === 'workface-save-failed')!
+    const record = (await reopened.read({ domain: 'client.incident', hostId: 'local', logId: failed.recordRef.logId }, { signal: new AbortController().signal, maxBytes: 256 * 1024 })).data as { report: AgentMuxClientIncidentReport }
+    expect(record.report).toMatchObject({ stage: 'save-stalled', metadata: { spatialRevision: 41, unsavedForMs: 30_000, spatialConflicts: 2 } })
+    // Only bounded facts: no Region, Agent or Run identity and no free text travels with the record.
+    expect(record.report).toMatchObject({ regionId: null, agentSessionId: null, runId: null, references: [] })
+    expect(Object.keys(record.report.metadata).sort()).toEqual(['spatialConflicts', 'spatialRevision', 'unsavedForMs'])
   })
 })
 
