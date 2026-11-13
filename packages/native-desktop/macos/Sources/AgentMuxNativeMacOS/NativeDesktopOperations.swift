@@ -217,8 +217,11 @@ enum NativeDesktopOperations {
 
     /// Every display's frozen pixels from one physical grab each, so a host can
     /// show and crop exactly what was on screen. A display that cannot be
-    /// captured carries its `issue`; the other displays remain usable.
-    static func captureDisplays() throws -> [String: Any] {
+    /// captured carries its `issue`; the other displays remain usable. Each
+    /// display also lists the normal windows over it, front to back, read once
+    /// beside the grabs; windows of AgentMux itself (this helper and `hostPID`)
+    /// are not content the user is capturing.
+    static func captureDisplays(hostPID: pid_t) throws -> [String: Any] {
         do {
             return try NativeDisplayCaptureLease.shared.withCapture { ownership in
                 let capturedAt = Date().timeIntervalSince1970 * 1000
@@ -236,12 +239,14 @@ enum NativeDesktopOperations {
                 } else {
                     pixels = { _, frame, scale in try coreGraphicsDisplayPixels(frame, scale: scale) }
                 }
+                let windows = visibleWindows(excludingOwners: [getpid(), hostPID])
                 // Every display's pixels share one response frame. The identity envelope and
                 // all displays' metadata stay far below the reserve.
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
                 let displays = screens.map { screen -> [String: Any] in
                     let frame = CGDisplayBounds(screen.id)
-                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale]
+                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale,
+                        "windows": windows.filter { $0.frame.intersects(frame) }.map(\.entry)]
                     do {
                         let capture = try pixels(screen.id, frame, screen.scale)
                         let png = try pngData(capture.image)
@@ -267,6 +272,26 @@ enum NativeDesktopOperations {
             }
         } catch is NativeDisplayCaptureLease.Failure {
             throw ProviderError.coded("capture_busy", "an earlier display capture is still producing its pixels")
+        }
+    }
+
+    /// On-screen normal-layer windows in the window server's front-to-back
+    /// order, with global Quartz frames. Fully transparent windows and windows
+    /// excluded from sharing are absent from the frozen pixels, so they are not listed.
+    private static func visibleWindows(excludingOwners owners: Set<pid_t>) -> [(frame: CGRect, entry: [String: Any])] {
+        guard let infos = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return [] }
+        return infos.compactMap { info in
+            guard let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, !owners.contains(pid),
+                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  ((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
+                  (info[kCGWindowSharingState as String] as? NSNumber)?.intValue != 0,
+                  let number = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds), frame.width > 0, frame.height > 0
+            else { return nil }
+            var entry: [String: Any] = ["windowId": number, "frame": renderRect(frame)]
+            if let owner = info[kCGWindowOwnerName as String] as? String { entry["owner"] = owner }
+            return (frame, entry)
         }
     }
 

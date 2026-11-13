@@ -177,10 +177,14 @@ private struct CachedSnapshotEntry {
 
 final class Provider: @unchecked Sendable {
     let operationLock = NSLock()
+    /// The AgentMux process this helper serves; its windows are never capture content.
+    let hostPID: pid_t
     let instanceId = UUID().uuidString
     var completedOperations: [String: NativeOperationReceipt] = [:]
     private var snapshots: [String: Snapshot] = [:]
     private var snapshotEntries: [CachedSnapshotEntry] = []
+
+    init(hostPID: pid_t) { self.hostPID = hostPID }
 
     func handle(method: String, params: [String: JSONValue]) throws -> Any {
         switch method {
@@ -191,7 +195,7 @@ final class Provider: @unchecked Sendable {
         case "captureScreenshot":
             return NativeDesktopOperations.capture(params)
         case "captureDisplays":
-            return try NativeDesktopOperations.captureDisplays()
+            return try NativeDesktopOperations.captureDisplays(hostPID: hostPID)
         case "clipboardRead":
             return try NativeDesktopOperations.clipboardRead(params)
         case "clipboardWrite":
@@ -3610,7 +3614,7 @@ private final class SocketListener: @unchecked Sendable {
     private var boundSocketIdentity: (dev_t, ino_t)?
     private let onSessionClaimed: () -> Void
     private let onSessionClosed: () -> Void
-    private let provider = Provider()
+    private let provider: Provider
     private let providerLock = NSLock()
     private let sessionLock = NSLock()
     private var sessionOwnership = NativeConnectionOwnership()
@@ -3628,6 +3632,7 @@ private final class SocketListener: @unchecked Sendable {
         self.socketPath = socketPath
         self.token = token
         self.parentPID = parentPID
+        provider = Provider(hostPID: parentPID)
         self.onSessionClaimed = onSessionClaimed
         self.onSessionClosed = onSessionClosed
         do { try bindSocket() } catch { stop(); throw error }
