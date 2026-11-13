@@ -115,14 +115,31 @@ describe('real format preview pane', () => {
     vi.mocked(api.files.readPreview).mockResolvedValue({ status: 'too-large', maxBytes: 16777216, message: 'Preview is limited to 16 MB.' })
     await click('Reload file preview'); expect(container.textContent).toContain('File exceeds the preview budget'); expect(container.textContent).toContain('16 MB'); expect(container.querySelector('img')).toBeNull()
   })
-  it.each(['audio', 'video'] as const)('%s uses native controls, no autoplay, and pauses/releases when hidden', async kind => {
-    vi.mocked(api.files.readPreview).mockResolvedValue(ready('media', kind))
+  it.each(['audio', 'video'] as const)('%s plays through one playback lease per visible view, never a bytes snapshot, and releases it when hidden', async kind => {
+    const open = vi.spyOn(api.files, 'openMediaStream').mockImplementation(async () => ({ status: 'ready', id: `lease-${kind}`, url: `http://127.0.0.1:1/lease-${kind}/clip`, kind, mimeType: kind === 'audio' ? 'audio/mpeg' : 'video/mp4', byteLength: 55_314_157 }))
+    const release = vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
     const { file } = seed(`clip.${kind === 'audio' ? 'mp3' : 'mp4'}`)
+    await render(<FilePreviewPane surface={file} visible={false} />)
+    expect(open).not.toHaveBeenCalled()
     await render(<FilePreviewPane surface={file} />)
+    expect(open).toHaveBeenCalledExactlyOnceWith('workspace', file.path)
+    expect(api.files.readPreview).not.toHaveBeenCalled(); expect(createUrl).not.toHaveBeenCalled()
     const player = container.querySelector(kind)!
-    expect(player).not.toBeNull(); expect(player.hasAttribute('controls')).toBe(true); expect(player.hasAttribute('autoplay')).toBe(false)
-    await act(async () => player.dispatchEvent(new Event('error'))); expect(container.textContent).toContain('Media could not be decoded')
-    await render(<FilePreviewPane surface={file} visible={false} />); expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1); expect(player.hasAttribute('src')).toBe(false); expect(revokeUrl).toHaveBeenCalledTimes(1)
+    expect(player).not.toBeNull(); expect(player.getAttribute('src')).toBe(`http://127.0.0.1:1/lease-${kind}/clip`)
+    expect(player.hasAttribute('controls')).toBe(false); expect(player.hasAttribute('autoplay')).toBe(false)
+    expect(container.querySelector(`[role="group"][aria-label="${kind === 'audio' ? 'Audio' : 'Video'} player: ${file.path}"]`)).not.toBeNull()
+    await render(<FilePreviewPane surface={file} visible={false} />)
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1); expect(player.hasAttribute('src')).toBe(false)
+    expect(release).toHaveBeenCalledExactlyOnceWith(`lease-${kind}`)
+    await render(<FilePreviewPane surface={file} />)
+    expect(open).toHaveBeenCalledTimes(2)
+  })
+  it('a media file the lease owner cannot open states that reason with Retry, and Retry opens a new lease', async () => {
+    const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'deleted', message: 'This file no longer exists.' })
+    const { file } = seed('gone.mp4')
+    await render(<FilePreviewPane surface={file} />)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('File was deleted')
+    await click('Retry'); expect(open).toHaveBeenCalledTimes(2)
   })
   it('unknown binary has metadata and external actions but no media read or editable model', async () => {
     const { file, id, key } = seed('opaque.bin')
@@ -454,9 +471,9 @@ it('reads Markdown images only near the viewport, releases them offscreen, and r
   expect(api.files.readPreview).toHaveBeenCalledTimes(2)
 })
 
-it('keeps media metadata readiness when a cached native load arrives before passive effects', async () => {
+it('keeps media readiness when a cached native load arrives before passive effects', async () => {
   const { file } = seed('tone.wav')
-  vi.mocked(api.files.readPreview).mockResolvedValue(ready('audio-current', 'audio'))
+  vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-tone', url: 'http://127.0.0.1:1/lease-tone/tone.wav', kind: 'audio', mimeType: 'audio/wav', byteLength: 3 })
   let delivered = false
   await render(<Profiler id="cached-media" onRender={() => {
     const player = container.querySelector('audio')
@@ -464,6 +481,7 @@ it('keeps media metadata readiness when a cached native load arrives before pass
     delivered = true
     Object.defineProperty(player, 'duration', { value: 2 })
     player.dispatchEvent(new Event('loadedmetadata'))
+    player.dispatchEvent(new Event('loadeddata'))
   }}><FilePreviewPane surface={file} /></Profiler>)
   expect(delivered).toBe(true)
   expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')

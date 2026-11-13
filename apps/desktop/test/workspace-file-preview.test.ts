@@ -52,8 +52,14 @@ describe('workspace preview through the existing byte owner', () => {
       expect(workspaceFilePreviewFormat(path)).toEqual({ kind, mimeType, sourceEditable })
       await writeFile(join(f.root, path), PNG)
       const result = await f.files.readPreview(f.workspace, path)
-      expect(result).toMatchObject({ status: 'ready', kind, mimeType, byteLength: PNG.length })
-      expect(result).toHaveProperty('bytes', PNG)
+      if (kind === 'image') {
+        expect(result).toMatchObject({ status: 'ready', kind, mimeType, byteLength: PNG.length })
+        expect(result).toHaveProperty('bytes', PNG)
+      } else {
+        // Audio and video stream by range through their playback lease; no whole-file snapshot is read.
+        expect(result).toMatchObject({ status: 'unsupported' })
+        expect(result).not.toHaveProperty('bytes')
+      }
     }
     expect(workspaceFilePreviewFormat('.png')).toBeNull()
     expect(workspaceFilePreviewFormat('fake.unknown')).toBeNull()

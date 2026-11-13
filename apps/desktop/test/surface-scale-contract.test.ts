@@ -172,7 +172,11 @@ const RUNTIME_INJECTED_VARS = new Set([
   // GlobalFocusSurface.tsx: workspace 分屏比例,由 pointer/keyboard 手柄拖出来,inline 注入到
   // `.global-focus-layout` 元素上,焦点面板与工作区通过 `var(--focus-workspace-width, ...)` 读它。
   // 缺省值写在 fallback 里,所以缺席时也不炸。
-  '--focus-workspace-width'
+  '--focus-workspace-width',
+  // MediaPlayer.tsx: the played, hovered and buffered fractions of the native range slider, set as
+  // inline `style` on `.media-player__slider` / `.media-player__volume` from the element's own events.
+  // Every read gives a `0%` fallback, so a slider without them paints an empty track.
+  '--media-fill', '--media-hover', '--media-buffered'
 ])
 
 describe('surface scale contract', () => {
