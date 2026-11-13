@@ -1126,6 +1126,35 @@ it('keeps ordinary manual browsers quiet and retains live Agent and unknown cont
   healthy()
 })
 
+it('lists a released or cold page as a quiet parked item and keeps an unavailable owner unknown', async () => {
+  const live = { ...browser, id: 'parked-browser', navigationId: 'parked-navigation', activity: { control: 'human' as const, operation: null } }
+  const parked = { ...createWorkbenchTab('parked-tab', { ...live, kind: 'browser' as const, browserId: live.id, workspaceId: workspace.id, regionId: 'parked-region' }), space: { ...mixed.space!, zoneId: 'parked-zone' } }
+  const cold = { ...createWorkbenchTab('cold-tab', { ...browser, id: 'cold-browser', navigationId: '', nativeOwnerDeferred: true as const, kind: 'browser' as const, browserId: 'cold-browser', workspaceId: workspace.id, regionId: 'cold-region' }), space: { ...mixed.space!, zoneId: 'cold-zone' } }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [parked.id]: parked, [cold.id]: cold }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, parked.id, cold.id]) } }))
+  await renderApp(); await enterSurvey(); await choose()
+  for (const zoneId of ['parked-zone', 'cold-zone']) await act(async () => { expect(useAppStore.getState().setSurveyZoneCollected(zoneId, true)).toBe(true) })
+  const badge = (zoneId: string) => dom.container.querySelector<HTMLElement>(`[data-survey-zone-id="${zoneId}"] .survey-item-activity`)!
+  const details = async (zoneId: string) => {
+    const trigger = dom.container.querySelector<HTMLElement>(`[data-survey-zone-id="${zoneId}"] .survey-item-options[data-row-action]`)!
+    await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+    const item = document.querySelector<HTMLElement>('[aria-label="Item details"]')!
+    await act(async () => { item.focus(); item.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+    const text = document.querySelector('.survey-item-details-content')!.textContent
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    return text
+  }
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'released', id: live.id, navigationId: live.navigationId }))
+  for (const zoneId of ['parked-zone', 'cold-zone']) {
+    expect(badge(zoneId).childElementCount).toBe(0)
+    const text = await details(zoneId)
+    expect(text).toContain('Page parked · loads when shown'); expect(text).not.toContain('Control unknown')
+  }
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'unavailable', id: live.id, error: 'Native owner unavailable' }))
+  expect(badge('parked-zone').firstElementChild!.getAttribute('title')).toContain('Control unknown')
+  expect(badge('cold-zone').childElementCount).toBe(0)
+  healthy()
+})
+
 it('uses the shared avatar roster for actual operators, deduplicates Sessions and preserves overflow and unknown facts', async () => {
   const extra = Array.from({ length: 4 }, (_, index) => ({ ...session, id: `operator-${index}`, executorId: `executor-${index}`, label: `Operator ${index}` }))
   const actors = [session, ...extra]
