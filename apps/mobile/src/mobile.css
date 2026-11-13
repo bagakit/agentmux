@@ -391,6 +391,8 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-conversation .mote-conversation__navigation button, .mobile-conversation .mote-conversation__link, .mobile-conversation .mote-work-event button { min-width: 44px; min-height: 44px; }
 .mobile-conversation .mote-work-event summary, .mobile-conversation .mote-conversation__handoff summary, .mobile-conversation .mote-conversation__reading-tools > summary { box-sizing: border-box; min-width: 44px; min-height: 44px; padding-block: 12px; }
 .mobile-conversation .mote-conversation__handoff > span { min-width: 0; overflow-wrap: anywhere; }
+/* Earlier Main tenures share the conversation's 12px reading gutter instead of touching the screen edge. */
+.mobile-conversation .mote-conversation__source { margin-inline: 12px; }
 /* Short Mote chat uses the reader's remaining space; long history keeps its natural scroll height. */
 .mobile-conversation__reading:has(> .mote-conversation) { display: flex; flex-direction: column; }
 .mobile-conversation__reading > .mote-conversation { flex: 1 0 auto; display: flex; flex-direction: column; }
@@ -511,9 +513,22 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-period-view > button { margin-block-end: 12px; }
 
 .mobile-mote-navigation button { white-space: nowrap; }
-.mobile-mote-source-status { flex: none; margin-block: 2px 6px; padding-inline: 8px; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
-.mobile-mote-source-status > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
-.mobile-mote-source-status dl { margin: 6px 0; }
+.mobile-mote-source-status { flex: none; align-self: flex-start; margin-block: 2px 6px; margin-inline: 12px; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.mobile-mote-source-status > summary { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding-inline: 0 10px; cursor: pointer; list-style: none; color: var(--text-2); border-radius: 999px; }
+.mobile-mote-source-status > summary::-webkit-details-marker { display: none; }
+.mobile-mote-source-status > summary:active { background: var(--surface-2); }
+.mobile-mote-source-status > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.mobile-mote-source-status__dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 16%, transparent); }
+.mobile-mote-source-status__count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.mobile-mote-source-status[open] { align-self: stretch; }
+.mobile-mote-source-status__chevron { color: var(--text-3); transition: transform var(--dur-enter) var(--ease-enter); }
+.mobile-mote-source-status[open] .mobile-mote-source-status__chevron { transform: rotate(90deg); }
+.mobile-mote-source-status__panel { margin: 2px 0 6px; padding: 12px 12px 8px; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.mobile-mote-source-status[open] .mobile-mote-source-status__panel { animation: mobile-mote-source-reveal var(--dur-enter) var(--ease-enter); }
+@keyframes mobile-mote-source-reveal { from { opacity: 0; transform: translateY(-4px); } }
+.mobile-mote-source-status dl { margin: 0 0 6px; }
 .mobile-mote-source-status dt { color: var(--text-2); font-weight: 550; }
-.mobile-mote-source-status dd { margin: 3px 0 10px; white-space: pre-wrap; line-height: 1.6; }
-.mobile-mote-source-status button { min-height: 44px; padding: 8px 10px; margin: 2px 6px 4px 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.mobile-mote-source-status dd { margin: 3px 0 10px; color: var(--text-2); font-size: var(--fs-body); white-space: pre-wrap; line-height: 1.6; }
+.mobile-mote-source-status__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mobile-mote-source-status button { min-height: 44px; padding: 8px 14px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text); font: inherit; font-size: var(--fs-body); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .mobile-mote-source-status[open] .mobile-mote-source-status__panel { animation: none; } .mobile-mote-source-status__chevron { transition: none; } }
