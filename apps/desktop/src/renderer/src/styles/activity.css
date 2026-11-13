@@ -266,15 +266,21 @@
 .activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__reading { grid-column: 1; min-width: 0; }
 .activity-feed__reading-header:not([data-has-ruler]) > .reading-find__floating-trigger { position: static; grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-1); }
 
-/* The original read owns the shared Region surface. Its caption is stationary;
-   a single soft light gathers, travels and rests without implying progress. */
+/* The original read owns the shared Region surface. While it is pending the scene is a
+   transparent field over the whole reading area; the original tools stay above it in
+   their own places and its caption is stationary. */
 .activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { display: flex; flex-direction: column; }
+.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) { position: relative; }
+.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) > :not(:has(> .activity-feed__empty-reading)),
+.activity-feed__empty-reading[data-loading-phase='loading'] ~ * { z-index: 1; }
 .activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
 .activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .reading-find__floating-trigger { grid-row: 1; }
 .activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .activity-feed__reading { grid-row: 1; }
 .activity-feed__empty-reading.full-page-loading--region { color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
 .activity-feed__empty-reading.full-page-loading--region:not(.activity-feed__reading-failure-surface) .full-page-loading__stage { display: contents; }
 .activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface) { grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading[data-loading-phase='loading'] { position: absolute; inset: 0; z-index: 0; background: none; pointer-events: none; }
+.activity-feed__empty-reading[data-loading-phase='loading']::before { content: none; }
 .activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface) { height: auto; background: none; justify-items: start; }
 .activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface)::before { content: none; }
 .activity-feed__reading-service { padding: var(--sp-2) var(--sp-4); }
@@ -288,13 +294,35 @@
 .activity-feed__reading-caption strong { color: var(--text-2); font-weight: 560; }
 .activity-feed__reading-caption > span { color: var(--text-3); overflow-wrap: anywhere; }
 .activity-feed__empty-reading[data-loading-phase='loading'] .activity-feed__reading-caption { justify-items: center; text-align: center; padding: var(--sp-6); font-size: var(--fs-body); }
-.activity-feed__empty-reading .activity-feed__reading-light { pointer-events: none; inset: -35%; z-index: -1; --startup-focus-x: 38%; --startup-focus-y: 62%; opacity: .6; animation: activity-reading-light calc(var(--dur-sweep) * 2) linear infinite; }
-.activity-feed__reading-light::after { content: ''; position: absolute; inset: 10% 12%; border-radius: 50%; background: linear-gradient(145deg, transparent 30%, color-mix(in srgb, var(--text) 4%, transparent) 47%, color-mix(in srgb, var(--green) 7%, transparent) 51%, transparent 66%); mask-image: radial-gradient(ellipse, currentColor, transparent 66%); }
-@keyframes activity-reading-light {
-  0%, 100% { opacity: 0; transform: translate3d(-16%, 12%, 0) scale(.94); }
-  18% { opacity: .65; transform: translate3d(-10%, 8%, 0) scale(1); }
-  34% { opacity: .7; transform: translate3d(-7%, 6%, 0) scale(1); }
-  78% { opacity: .55; transform: translate3d(18%, -12%, 0) scale(1.08); }
-  92% { opacity: 0; transform: translate3d(24%, -16%, 0) scale(1.1); }
+/* A low Mint pool and a raised surface opposite it give the field static depth. Mint light
+   flows across it in one direction: each light rises at the lower left, travels toward the
+   upper right and fades before it restarts; the second runs half a cycle later, so the field
+   is never empty and never reverses. The field fades at the top and bottom so it never meets
+   the tools row or the input as an edge. Workbench parking pauses only the element itself,
+   so its layers inherit that state. In daylight the action green would darken the white
+   surface like a shadow, so the light is a pale tint of its hue, and nothing rises above white. */
+.activity-feed__empty-reading { --reading-tint: var(--green); --reading-light: 15%; --reading-pool: 10%; --reading-lift: 80%; }
+:root[data-appearance='light'] .activity-feed__empty-reading { --reading-tint: oklch(from var(--green) .9 c h); --reading-light: 40%; --reading-pool: 28%; --reading-lift: 0%; }
+.activity-feed__empty-reading .activity-feed__reading-light { pointer-events: none; inset: 0; z-index: -1; overflow: hidden;
+  background:
+    radial-gradient(64% 74% at 14% 96%, color-mix(in oklab, var(--reading-tint) var(--reading-pool), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-pool) * .45), transparent) 42%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-pool) * .12), transparent) 72%, transparent),
+    radial-gradient(56% 62% at 92% 6%, color-mix(in oklab, var(--surface-2) var(--reading-lift), transparent), color-mix(in oklab, var(--surface-2) calc(var(--reading-lift) * .375), transparent) 50%, transparent);
+  mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent); }
+.activity-feed__reading-light::before { left: -20%; top: 22%; width: 72%; height: 96%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--reading-tint) var(--reading-light), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .52), transparent) 36%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .2), transparent) 64%, transparent);
+  animation: activity-reading-flow calc(var(--dur-sweep) * 4) cubic-bezier(.45, 0, .55, 1) infinite; }
+.activity-feed__reading-light::after { left: -14%; top: 32%; width: 62%; height: 84%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .8), transparent), color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .4), transparent) 36%, color-mix(in oklab, var(--reading-tint) calc(var(--reading-light) * .15), transparent) 64%, transparent);
+  animation: activity-reading-flow calc(var(--dur-sweep) * 4) cubic-bezier(.45, 0, .55, 1) calc(var(--dur-sweep) * -2) infinite; }
+/* After the shorthands above, which would otherwise reset the play state to running. */
+.activity-feed__reading-light::before, .activity-feed__reading-light::after { content: ''; position: absolute; opacity: 0; animation-play-state: inherit; }
+@keyframes activity-reading-flow {
+  0% { opacity: 0; transform: translate3d(0, 6%, 0) scale(.9); }
+  26% { opacity: 1; }
+  68% { opacity: .85; }
+  100% { opacity: 0; transform: translate3d(90%, -46%, 0) scale(1.06); }
 }
-@media (prefers-reduced-motion: reduce) { .activity-feed__empty-reading .activity-feed__reading-light { animation: none; transform: none; opacity: .5; } }
+@media (prefers-reduced-motion: reduce) {
+  .activity-feed__reading-light::before { animation: none; opacity: .9; transform: translate3d(42%, -20%, 0); }
+  .activity-feed__reading-light::after { animation: none; }
+}
