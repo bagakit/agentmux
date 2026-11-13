@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
-import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, SYSTEM_SCREENSHOT_EDITOR_NOTICE, type ScreenshotEditContext, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput } from '../shared/system-screenshot-editor'
+import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, SYSTEM_SCREENSHOT_EDITOR_NOTICE, type ScreenshotEditContext, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput,
+  type SystemScreenshotEditorRetake } from '../shared/system-screenshot-editor'
 import { themeBootstrap } from './theme-bootstrap'
 import { saveScreenshotPng } from './screenshot-files'
 import type { ScreenshotOriginalApi, ScreenshotOriginalReadResult, ScreenshotOriginalSaveInput, ScreenshotOriginalSaveResult } from '../shared/screenshot-original'
@@ -13,6 +14,7 @@ type EditRequest = {
   window: BrowserWindow
   input: SystemScreenshotEditorInput
   complete(image: BrowserPng): Promise<void>
+  retake: ScreenshotEditContext['retake']
   settle(): void
   pending: boolean
   attempts: Map<string, Promise<SystemScreenshotEditorFinish>>
@@ -38,7 +40,7 @@ export class SystemScreenshotEditor {
     ipcMain.handle(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
 
-  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { source, returnFocus, initialState, initialTool }: ScreenshotEditContext = {}): Promise<void> {
+  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { source, returnFocus, initialState, initialTool, retake }: ScreenshotEditContext = {}): Promise<void> {
     if (this.disposed) throw new Error('The screenshot editor is closed. Start a new capture to edit another image.')
     pngBytes(image)
     let theme: SystemScreenshotEditorInput['theme']
@@ -53,7 +55,8 @@ export class SystemScreenshotEditor {
     })
     let settle!: () => void
     const closed = new Promise<void>(resolve => { settle = resolve })
-    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(source ? { source } : {}), ...(initialState ? { initialState, initialTool } : {}) }, complete, settle,
+    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(source ? { source } : {}), ...(retake ? { retakable: true } : {}),
+      ...(initialState ? { initialState, initialTool } : {}) }, complete, retake, settle,
       pending: false, attempts: new Map(), attemptFingerprints: new Map(), originals: this.outputs?.originalFiles?.(window), originalReads: new Map(), originalSaves: new Map(), contexts: new Map() }
     const contents = window.webContents
     this.requests.set(contents, request)
@@ -94,6 +97,18 @@ export class SystemScreenshotEditor {
     const params = input as { requestId?: unknown; operationId?: unknown; image?: BrowserPng; text?: unknown; grantId?: unknown; document?: ScreenshotOriginalSaveInput; logicalSize?: unknown } | undefined
     if (params?.requestId !== request.input.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'cancel') { request.window.close(); return }
+    if (action === 'retake') {
+      if (!request.retake) throw new Error('This image did not come from a region capture, so it cannot be retaken here. Your image and editing remain available.')
+      // The capture surface steps this window out of its grab with every visible AgentMux window and brings it back when it
+      // ends; this editor's renderer, marks and bridge stay as they are. present() refuses a second capture while one is open.
+      let state: Awaited<ReturnType<NonNullable<EditRequest['retake']>>>
+      try { state = await request.retake() }
+      catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorRetake }
+      if (state === 'cancelled') return { status: 'cancelled' } satisfies SystemScreenshotEditorRetake
+      // The new capture took over (delivered, or moved into its own editor), so this one closes in the same turn it came back.
+      if (!request.window.isDestroyed()) request.window.close()
+      return { status: 'completed' } satisfies SystemScreenshotEditorRetake
+    }
     if (['open-original', 'save-original', 'inspect-original', 'original-operation'].includes(String(action))) {
       if (!request.originals) throw new Error('Original files are unavailable in this host. Your image and editing remain available.')
       if (action === 'inspect-original') {

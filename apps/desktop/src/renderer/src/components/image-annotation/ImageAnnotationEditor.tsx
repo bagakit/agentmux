@@ -29,7 +29,7 @@ import './image-annotation.css'
 const icon = semanticIconComponent
 const CancelIcon = icon('action.cancel'), ClipboardIcon = icon('object.clipboard'), CheckIcon = icon('status.copied')
 const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
-const SaveIcon = icon('action.save'), PinIcon = icon('action.pin')
+const SaveIcon = icon('action.save'), PinIcon = icon('action.pin'), RetakeIcon = icon('action.capture')
 type Size = { width: number; height: number; dpr: number }
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 // `bubble` drags only a magnifier's bubble; its source region and leader origin stay in place.
@@ -97,6 +97,8 @@ type WindowPresentation = {
   onSavePng?: AnnotationOutput
   onPin?: AnnotationOutput
   onCheckPin?(): void
+  /** Retake (⇧⌘R): the host captures again for the same consumer; unkept marks are confirmed in place first. */
+  onRetake?(): void
   pixelRatio?: never; origin?: never; windows?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
 }
 /**
@@ -124,13 +126,13 @@ type CapturePresentation = {
   onSelect(): void
   /** Another display owns the request's selection: this frame keeps only its dimmed freeze and Cancel, and anything begun here is dropped. */
   locked?: boolean
-  initialTool?: never; onCopyContext?: never; onSaveOriginal?: never; onOpenOriginal?: never; onCheckPin?: never
+  initialTool?: never; onCopyContext?: never; onSaveOriginal?: never; onOpenOriginal?: never; onCheckPin?: never; onRetake?: never
 }
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS,
-  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
+  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
   const ownerWindow = document.defaultView!
@@ -154,7 +156,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // A capture opens on adjusting its selection; a window on the requested or remembered tool.
   const openingTool = useRef<AnnotationTool>(capture ? 'select' : initialTool ?? lastStyle.tool).current
   // The opening document is already kept by its owner; only later edits need a discard confirmation.
-  const [exported, setExported] = useState(documentState), [discarding, setDiscarding] = useState(false)
+  // What the in-place discard confirmation would do: close the editor, or retake the capture.
+  const [exported, setExported] = useState(documentState), [discarding, setDiscarding] = useState<false | 'close' | 'retake'>(false)
   const [tool, setTool] = useState<AnnotationTool>(openingTool), [selectedId, setSelectedId] = useState<string | null>(null)
   const [color, setColor] = useState(lastStyle.color), [width, setWidth] = useState(lastStyle.width)
   const [fontSize, setFontSize] = useState(lastStyle.fontSize), [blockSize, setBlockSize] = useState(lastStyle.blockSize)
@@ -173,7 +176,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const notes = documentState.shapes.filter(shape => shape.kind === 'note')
   // A capture selection alone is not an edit to lose; its marks are.
   const unexported = (documentState.shapes.length > 0 || (!capture && Boolean(documentState.crop))) && documentState !== exported
-  const confirmingDiscard = discarding && unexported
+  const confirmingDiscard = unexported ? discarding : false
   const originalBounds = { x: 0, y: 0, width: image.width, height: image.height }
   // The selection a capture shows now: the moving gesture's, else the document crop.
   const selection = shownSelection(cropRef.current, documentState.crop, originalBounds)
@@ -401,7 +404,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (panRef.current) { requestView(panRef.current.view); setFitted(panRef.current.fitted) }
     resetGesture(); schedulePaint()
   }
-  function requestClose() { if (unexported) setDiscarding(true); else onCancel() }
+  function requestClose() { if (unexported) setDiscarding('close'); else onCancel() }
+  function requestRetake() { if (!onRetake || busy) return; if (unexported) setDiscarding('retake'); else onRetake() }
+  // The confirmed discard: the marks go only once the person confirms, and a retake keeps this editor until the new capture completes.
+  function discard() { if (confirmingDiscard === 'retake') { setDiscarding(false); onRetake?.() } else onCancel() }
   function removeSelected() { if (selectedId) { edit(doc => removeShapes(doc, new Set([selectedId]))); setSelectedId(null) } }
   useEffect(() => {
     if (!active) return
@@ -414,6 +420,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         if (textDraftRef.current) finishText('', true)
         else if (noteEditorRef.current) closeNoteEditor(false)
         else if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture()
+        else if (confirmingDiscard === 'retake') setDiscarding(false)
         else if (confirmingDiscard) onCancel()
         else if (selectedId) setSelectedId(null)
         else if (tool !== openingTool) { resetGesture(); setTool(openingTool) }
@@ -422,7 +429,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       }
       if (event.target && 'tagName' in event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(String(event.target.tagName))) return
       // A focused button activates itself on Enter, so only the canvas or editor surface confirms.
-      if (confirmingDiscard && event.key === 'Enter' && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); onCancel(); return }
+      if (confirmingDiscard && event.key === 'Enter' && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); discard(); return }
       if (event.key === ' ' && target === canvasRef.current && !capture) { event.preventDefault(); spaceHeld.current = true; setPanHeld(true); return }
       if (capture && ['0', '1', '+', '=', '-'].includes(event.key)) return
       if (event.key === '0') { event.preventDefault(); fitImage(); return }
@@ -437,6 +444,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         if (command && key === 's' && onSavePng) { event.preventDefault(); complete('save-png'); return }
         if (capture && command && key === 'p') { event.preventDefault(); complete('pin'); return }
         if (capture && command && key === 'e') { event.preventDefault(); expand(); return }
+        if (onRetake && command && event.shiftKey && key === 'r') { event.preventDefault(); requestRetake(); return }
       }
       if (command && key === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); return }
@@ -471,7 +479,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const onKeyUp = (event: KeyboardEvent) => { if (event.key === ' ') releaseSpace() }
     ownerWindow.addEventListener('keydown', onKeyDown); ownerWindow.addEventListener('keyup', onKeyUp); ownerWindow.addEventListener('blur', releaseSpace)
     return () => { ownerWindow.removeEventListener('keydown', onKeyDown); ownerWindow.removeEventListener('keyup', onKeyUp); ownerWindow.removeEventListener('blur', releaseSpace) }
-  }, [active, busy, selected, selectedId, tool, pendingText, confirmingDiscard, unexported, documentState, loaded, noteDraft, onCancel, onComplete, onSavePng, onPin, onExpand, onCopyColor, redo, undo, edit, resetGesture, requestView, size, fitted])
+  }, [active, busy, selected, selectedId, tool, pendingText, confirmingDiscard, unexported, documentState, loaded, noteDraft, onCancel, onComplete, onSavePng, onPin, onRetake, onExpand, onCopyColor, redo, undo, edit, resetGesture, requestView, size, fitted])
 
   function localPoint(event: { clientX: number; clientY: number }): ScreenshotPoint {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -789,9 +797,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   </>
   // The in-place discard confirmation; both presentations show it in place of Cancel.
   const discardControl = confirmingDiscard ? <span className="image-annotation-editor__discard" role="alert">
-          <span>{documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') + '?' : 'Discard the crop?'}</span>
+          <span>{(documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') : 'Discard the crop') + (confirmingDiscard === 'retake' ? ' and retake?' : '?')}</span>
           <button type="button" onClick={() => setDiscarding(false)}>Keep editing</button>
-          <button type="button" className="danger-button" onClick={onCancel}>Discard</button>
+          <button type="button" className="danger-button" onClick={discard}>{confirmingDiscard === 'retake' ? 'Discard & retake' : 'Discard'}</button>
         </span> : null
   const outputControls = <>
         <span className="image-annotation-toolbar__output" role="group" aria-label="Screenshot output">
@@ -873,6 +881,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       </span>
       <div className="image-annotation-toolbar__actions">
         {discardControl ?? <button type="button" className="image-annotation-editor__cancel" onClick={requestClose}><CancelIcon size={13} /> Cancel</button>}
+        {onRetake && !discardControl ? <button type="button" aria-label="Retake" title="Capture a new region for the same destination (⇧⌘R)" aria-keyshortcuts="Shift+Meta+R"
+          disabled={busy} onClick={requestRetake}><RetakeIcon size={13} /><span>Retake</span></button> : null}
         {outputControls}
       </div>
     </header>

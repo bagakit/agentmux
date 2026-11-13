@@ -76,9 +76,22 @@ export class ScreenCapture {
       }
       if (mode === 'selection') {
         // A failed delivery keeps the surface, its selection and marks; Done retries only the unconfirmed destination.
-        const outcome = await this.ports.present({ attachToDraft, expandable: true, returnFocus, complete })
-        if (outcome.state === 'expanded') await this.ports.edit(outcome.image, attachToDraft, complete,
-          { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool, ...(returnFocus ? { returnFocus } : {}) })
+        // Retake in the window editor presents the surface again for this same consumer. Its surface gives focus back to
+        // that editor, which a cancel returns to and a completion closes, so the editor's own close returns focus as before.
+        const held: { editor: Promise<void> | null } = { editor: null }
+        const surface = async (retaking: boolean): Promise<CaptureSurfaceOutcome['state']> => {
+          const outcome = await this.ports.present({ attachToDraft, expandable: true, returnFocus: returnFocus && !retaking, complete })
+          if (outcome.state !== 'expanded') return outcome.state
+          const editing = this.ports.edit(outcome.image, attachToDraft, complete,
+            { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool,
+              ...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })
+          // After the editor's first Copy this capture has returned and nobody awaits a retaken editor, so its failure is reported here.
+          held.editor = retaking ? editing.catch(error => this.ports.reportIssue(error)) : editing
+          return outcome.state
+        }
+        await surface(false)
+        // A retake that expands opens the next editor before the previous one closes; the capture lasts until the current one ends.
+        for (let current = held.editor; current; current = held.editor === current ? null : held.editor) await current
       } else {
         if (!this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
         const target = await this.ports.chooseSource(mode)

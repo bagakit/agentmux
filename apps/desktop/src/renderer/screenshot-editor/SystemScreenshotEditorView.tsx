@@ -30,6 +30,16 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
     try { await api.cancel(input.requestId) }
     catch (cause) { active.current = true; setBusy(pending.current); setError(presentError(cause)) }
   }
+  // A cancelled retake brings this editor back with its marks; a completed one closes it from Main.
+  async function retake() {
+    if (pending.current) return
+    pending.current = true; setBusy(true); setError(null)
+    try {
+      const result = await api.retake(input.requestId)
+      if (active.current && result.status === 'failed') setError(result.message)
+    } catch (cause) { if (active.current) setError(presentError(cause)) }
+    finally { pending.current = false; if (active.current) setBusy(false) }
+  }
   // Each output resolves true only when its owner confirms that exact output.
   async function complete(edit: ImageAnnotationInput): Promise<boolean> {
     if (pending.current) return false
@@ -88,7 +98,7 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
       {...(original.initialState ? { initialState: original.initialState } : input.initialState ? { initialState: input.initialState, initialTool: input.initialTool } : {})} title="Screenshot"
       completeLabel={input.attachToDraft && !delivered ? 'Copy & attach' : 'Copy'} busyLabel="Copying…"
       documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
-      {...(pin.uncertain ? { onCheckPin: () => void checkPin() } : {})}
+      {...(pin.uncertain ? { onCheckPin: () => void checkPin() } : {})} {...(input.retakable ? { onRetake: () => void retake() } : {})}
       onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')} onCopyContext={edit => output(edit, 'context')}
       onOpenOriginal={() => void original.openOriginal()} onSaveOriginal={edit => void original.saveOriginal(edit)} onEdited={original.edited}
       onComplete={complete} onCancel={() => void cancel()} onError={cause => setError(presentError(cause))} />
