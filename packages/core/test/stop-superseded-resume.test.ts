@@ -37,7 +37,7 @@ it('seals a never-started prepared resume and retires the Session with that witn
   const f = await fixture()
   const held = await heldByUnknownStart(f, false)
   const receipt = await f.client.stopAgent(f.previous.agentSessionId, f.previous.run, { operationId: 'stop-sealed' })
-  expect(receipt).toMatchObject({ admission: 'superseded-resume', operationId: 'stop-sealed',
+  expect(receipt).toMatchObject({ admission: 'new', operationId: 'stop-sealed',
     supersededResume: { lifecycleOperationId: held.operationId, resumeOperationId: f.request.operationId, fence: 'retired' } })
   expect(receipt.supersededResume?.retainedRun).toBeUndefined()
   // The key is sealed: the original resume can never start a Run afterwards.
@@ -54,10 +54,15 @@ it('stops the one Run a prepared resume left under its key, then retires both Ru
   const [orphan] = (await f.nativeList()).filter((run: any) => run.lifecycleOperationId === held.operationId)
   expect(orphan?.state.type).toBe('running')
   const receipt = await f.client.stopAgent(f.previous.agentSessionId, f.previous.run)
-  expect(receipt).toMatchObject({ admission: 'superseded-resume',
+  expect(receipt).toMatchObject({ admission: 'new',
     supersededResume: { fence: 'retained', retainedRun: { runId: orphan.runId }, retainedStop: expect.stringMatching(/^(graceful|forced)$/) } })
+  expect(receipt.stages.map(stage => [stage.stage, stage.outcome])).toEqual([
+    ['admission', 'ok'], ['runtime-observe', 'ok'], ['runtime-stop', 'skipped'], ['retained-run-stop', 'ok'], ['retire-commit', 'ok']])
   await vi.waitFor(async () => expect((await f.inner.kernel.status(orphan.runId)).state.type).not.toBe('running'))
   expect((await f.store.loadRetiredRuns()).map(run => run.runId)).toEqual(expect.arrayContaining([f.previous.run.runId, orphan.runId]))
+  // This client knows the retained Run retired at once, without reloading: it is neither listed nor removable as a terminal.
+  expect((await f.client.listRuns()).map(run => run.runId)).not.toContain(orphan.runId)
+  await expect(f.client.removeTerminal({ runId: orphan.runId })).rejects.toMatchObject({ code: 'RUN_KIND_MISMATCH' })
   expect(f.start).toHaveBeenCalledTimes(1)
   expect(f.inputCount()).toBe(0)
 }, REAL_RUNTIME_MS)
@@ -86,8 +91,43 @@ it('refuses, names the original resume and changes nothing when no witness can e
   expect(f.stop).not.toHaveBeenCalled()
   expect(await f.client.inspectAgentStop({ agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run }))
     .toMatchObject({ phase: 'unconfirmed', canRetry: false, holder: { kind: 'resume', operationId: held.operationId } })
-  // The refusal is not sticky: the same Stop still works once the original resume is settled.
   expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run)
+}, REAL_RUNTIME_MS)
+
+it('a takeover Stop interrupted before retirement finishes on the next start with its witness', async () => {
+  const f = await fixture()
+  const held = await heldByUnknownStart(f, true)
+  const [orphan] = (await f.nativeList()).filter((run: any) => run.lifecycleOperationId === held.operationId)
+  // The retained Run's stop fails once, so the takeover Stop stays open with its witness on the reservation.
+  const stop = f.inner.kernel.stop.bind(f.inner.kernel)
+  vi.spyOn(f.inner.kernel, 'stop').mockImplementationOnce(async () => { throw new core.AgentMuxError('Runtime stop unconfirmed', 'CONTROL_UNAVAILABLE') })
+    .mockImplementation(stop)
+  await expect(f.client.stopAgent(f.previous.agentSessionId, f.previous.run, { operationId: 'interrupted-takeover' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  const open = await f.store.readLifecycleReservation(f.previous.agentSessionId)
+  expect(open).toMatchObject({ kind: 'stop', supersededResume: { fence: 'retained', retainedRun: { runId: orphan.runId } },
+    progress: { failure: { stage: 'retained-run-stop', code: 'CONTROL_UNAVAILABLE' } } })
+  await f.client.dispose()
+  // Model the app restart: the process that owned the open Stop is gone.
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_set(json, '$.ownerPid', 999999999) WHERE id=?").run(f.previous.agentSessionId) } finally { db.close() }
+  const next = await f.reader()
+  expect(await next.store.readLifecycleReservation(f.previous.agentSessionId)).toBeNull()
+  await vi.waitFor(async () => expect((await next.inner.kernel.status(orphan.runId)).state.type).not.toBe('running'))
+  expect((await next.store.readRetiredAgentSession(f.previous.agentSessionId))?.stop?.supersededResume)
+    .toMatchObject({ lifecycleOperationId: held.operationId, fence: 'retained', retainedRun: { runId: orphan.runId } })
+}, REAL_RUNTIME_MS)
+
+it('a resume still owned by another live process is neither fenced nor taken over', async () => {
+  const f = await fixture()
+  const held = await heldByUnknownStart(f, false)
+  // Another Core process, alive and holding this resume between its preparation and its Start.
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_set(json, '$.ownerId', 'another-live-owner', '$.ownerPid', ?) WHERE id=?").run(process.ppid, f.previous.agentSessionId) } finally { db.close() }
+  const before = rows(f)
+  await expect(f.client.stopAgent(f.previous.agentSessionId, f.previous.run)).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
+  // The creation key was not sealed, so that owner can still start its Run; nothing in the Store moved.
+  await expect(f.inner.kernel.observePreparedStartRetirement(held.operationId, held.preparedDispatch!.runtime)).resolves.toMatchObject({ outcome: 'not_retired' })
+  expect(rows(f)).toEqual(before)
 }, REAL_RUNTIME_MS)
 
 it('a Stop of another Run never takes over the prepared resume', async () => {

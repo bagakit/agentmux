@@ -14,6 +14,7 @@ import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { AgentMuxError } from '../src/errors.js'
+import { parseAgentStopInspection } from '../src/agent-stop-receipt.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -132,6 +133,46 @@ describe('a failed Stop keeps its progress on its own reservation', () => {
       expect(first.admission).toBe('new')
       expect(second).toEqual({ ...first, admission: 'joined' })
     } finally { release() }
+  })
+})
+
+describe('a Stop is identified and finished by one rule', () => {
+  it('a caller operation id is checked at entry by the same rule inspect uses', async () => {
+    const f = await fixture('memory')
+    for (const operationId of ['', 'stop.1', 'stop 1']) {
+      await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run, { operationId })).rejects.toMatchObject({ code: 'INVALID_SESSION_ID' })
+    }
+    expect(f.internal.kernel.prepareStop).not.toHaveBeenCalled()
+    expect(await f.store.readLifecycleReservation(f.original.agentSessionId)).toBeNull()
+  })
+
+  it.each(['memory', 'file'] as const)('a retirement that does not commit is recorded as that stage in %s', async kind => {
+    const f = await fixture(kind)
+    vi.spyOn(f.store, 'commitLifecycle').mockRejectedValueOnce(new AgentMuxError('commit refused', 'AGENT_SESSION_STORE_UNAVAILABLE'))
+    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run, { operationId: 'uncommitted' })).rejects.toThrow()
+    expect(await f.client.inspectAgentStop({ agentSessionId: f.original.agentSessionId, expectedRun: f.original.run })).toMatchObject({
+      phase: 'stopping', canRetry: true, failure: { stage: 'retire-commit', code: 'AGENT_SESSION_STORE_UNAVAILABLE' },
+      stages: [{ stage: 'admission' }, { stage: 'runtime-observe' }, { stage: 'runtime-stop', outcome: 'ok' }, { stage: 'retire-commit', outcome: 'failed' }] })
+    // The retry finishes the same Stop and keeps the admission it was first given.
+    const admitted = (await f.store.readLifecycleReservation(f.original.agentSessionId) as any).progress.stages[0]
+    const receipt = await f.client.stopAgent(f.original.agentSessionId, f.original.run)
+    expect(receipt).toMatchObject({ operationId: 'uncommitted', admission: 'retained' })
+    expect(receipt.stages[0]).toEqual(admitted)
+  })
+
+  it('an inspection crossing a boundary is read strictly against the asked Stop', () => {
+    const asked = { agentSessionId: 'receipt-agent', expectedRun: { runId: 'receipt-run' } }
+    const valid = { ...asked, phase: 'stopping', canRetry: true, observedAt: 1,
+      failure: { stage: 'runtime-stop', code: 'CONTROL_UNAVAILABLE', message: 'lost', observedAt: 1 } }
+    expect(parseAgentStopInspection(valid, asked)).toEqual(valid)
+    for (const bad of [
+      { ...valid, failure: { ...valid.failure, stage: 'bogus' } },
+      { ...valid, agentSessionId: 'other-agent' },
+      { ...valid, phase: 'not-requested' },
+      { ...valid, holder: { kind: 'resume', operationId: 'r' } },
+      { ...valid, operationIdMatched: true },
+      { ...valid, extra: true }
+    ]) expect(() => parseAgentStopInspection(bad, asked)).toThrow()
   })
 })
 
