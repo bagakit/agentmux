@@ -114,7 +114,11 @@ export function parseClientNotificationsEvidence(value: unknown, target: AgentMu
   const p = object(value, ['kind', 'client', 'items', 'total', 'nextCursor', 'snapshot', 'coverage', 'omissions', 'activityNotRetained'],
     ['kind', 'client', 'items', 'total', 'nextCursor', 'snapshot', 'coverage', 'omissions'])
   member(p.kind, ['client-notifications']); id(object(p.client, ['instanceId']).instanceId); count(p.total); digest(p.snapshot)
-  if (p.activityNotRetained !== undefined) { count(p.activityNotRetained); if ((p.activityNotRetained as number) < 1) bad() }
+  if (p.activityNotRetained !== undefined) {
+    count(p.activityNotRetained); if ((p.activityNotRetained as number) < 1) bad()
+    // Only an Activity list (or an all-section list, which includes Activity) reports Activity retention.
+    if ('notificationId' in target || target.list.section === 'current') bad()
+  }
   const seen = new Set<string>()
   list(p.items, 'list' in target ? target.list.limit ?? CLIENT_NOTIFICATIONS_MAX_PAGE : 1, value => {
     const r = object(value, ['notificationId', 'version', 'source', 'section', 'category', 'level', 'unread', 'subject', 'observedAt', 'occurrences', 'original'])

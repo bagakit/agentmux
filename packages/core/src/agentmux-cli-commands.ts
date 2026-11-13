@@ -34,7 +34,7 @@ import { parseNotebookResolveParams, scanNoteWikiLinks } from './note-links.js'
 import { parseMoteAvatarWriteParams } from './mote-avatar-write.js'
 import { parseMoteAvatarSeriesParams } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
-import { CLIENT_NOTIFICATIONS_MAX_PAGE } from './client-notifications.js'
+import { CLIENT_NOTIFICATION_CATEGORIES, CLIENT_NOTIFICATIONS_MAX_PAGE, parseClientNotificationsTarget } from './client-notifications.js'
 import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from './mote-preferences.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
@@ -1034,11 +1034,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
           if (f.booleans.has('--unread') || ['--section', '--category', '--limit', '--cursor'].some(key => f.values.has(key))) invalid('An exact notification ID does not accept list filters or a cursor.')
           return finish({ domain, hostId, notificationId: id(f, '--notification-id') })
         }
-        const limit = numbers(f, { '--limit': 'limit' })
-        if (limit.limit !== undefined && (!Number.isSafeInteger(limit.limit) || (limit.limit as number) < 1 || (limit.limit as number) > CLIENT_NOTIFICATIONS_MAX_PAGE))
-          invalid(`--limit must be an integer from 1 to ${CLIENT_NOTIFICATIONS_MAX_PAGE} for client notifications.`)
-        return finish({ domain, hostId, list: { ...fields(f, { '--section': 'section', '--category': 'category', '--cursor': 'cursor' }),
-          ...limit, ...(f.booleans.has('--unread') ? { unreadOnly: true } : {}) } })
+        const target = { domain, hostId, list: { ...fields(f, { '--section': 'section', '--category': 'category', '--cursor': 'cursor' }),
+          ...numbers(f, { '--limit': 'limit' }), ...(f.booleans.has('--unread') ? { unreadOnly: true } : {}) } }
+        // The one target parser decides validity; a refusal names the documented values, not a wire contract.
+        try { parseClientNotificationsTarget(target) } catch {
+          invalid(`Client notification list options are invalid: --section current|activity, --category ${CLIENT_NOTIFICATION_CATEGORIES.join('|')}, ` +
+            `--limit 1-${CLIENT_NOTIFICATIONS_MAX_PAGE}, and --cursor only as returned by the previous page.`)
+        }
+        return finish(target)
       }
       if (f.booleans.has('--unread') || ['--notification-id', '--section', '--category'].some(key => f.values.has(key))) invalid('Notification selectors belong to client.notifications.')
       const recent = f.booleans.has('--recent')
