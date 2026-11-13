@@ -53,7 +53,7 @@ function bindWindowOverlayTopLayer(host: HTMLElement): void {
       if (eligible(node) && !active.has(node)) {
         active.add(node)
         // A focused menu button can disclose its tooltip between pointerdown
-        // and pointerup. Reopening that same host interrupts the native click.
+        // and pointerup. Keep its shown host stable through that pointer sequence.
         if (node.getAttribute('role') !== 'tooltip') opened = true
       }
     }
