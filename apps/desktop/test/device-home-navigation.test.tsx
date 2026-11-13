@@ -29,6 +29,10 @@ const title = (id: string) => {
   expect(node).not.toBeNull(); return node!
 }
 const click = (id: string) => act(async () => { title(id).click() })
+async function failureDetail(id: string) {
+  await act(async () => dom.container.querySelector<HTMLElement>(`[data-folder-host="${id}"] .space-device-home-reason`)!.focus())
+  return document.querySelector('[role="tooltip"]')!.textContent
+}
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 it('device-title opens an empty remote Host home on demand without Git, scanning or automatically creating an Agent', async () => {
@@ -99,7 +103,8 @@ it('a failed home read stays beside its device, leaves original work available a
   const add = vi.spyOn(api.workspaces, 'add').mockResolvedValue(home)
   await mount(); await click(R)
   const section = dom.container.querySelector(`[data-folder-host="${R}"]`)!
-  expect(section.querySelector('[role="status"]')!.textContent).toContain('Reading device home: Original Host is unavailable')
+  expect(section.querySelector('[role="status"]')!.textContent).toBe('Home unavailableRetry')
+  expect(section.textContent).not.toContain('Original Host is unavailable')
   expect(useAppStore.getState().activeWorkspaceId).toBe('workspace')
   expect(useAppStore.getState().sessions).toHaveLength(1)
   expect(title('local').disabled).toBe(false); expect(add).not.toHaveBeenCalled()
@@ -153,11 +158,11 @@ it('a changed Host or foreign home response is refused on that exact operation w
   await mount(); await click(R)
   await act(async () => useAppStore.setState({ config: { ...config, hosts: config.hosts.map(host => host.id === R ? { ...remote, hostname: 'changed.invalid' } : host) } }))
   await act(async () => pending.resolve({ routeHostId: R, homeDirectory: directory }))
-  expect(dom.container.querySelector(`[data-folder-host="${R}"] [role="status"]`)!.textContent).toContain('configuration changed')
+  expect(await failureDetail(R)).toContain('configuration changed')
   expect(add).not.toHaveBeenCalled(); expect(useAppStore.getState().activeWorkspaceId).toBe('workspace')
   vi.mocked(api.hosts.home).mockResolvedValue({ routeHostId: 'other-device', homeDirectory: '/home/foreign' })
   await click(R)
-  expect(dom.container.querySelector(`[data-folder-host="${R}"] [role="status"]`)!.textContent).toContain('another device')
+  expect(await failureDetail(R)).toContain('did not identify this device')
   expect(add).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions).toHaveLength(1)
 })
 
@@ -171,7 +176,7 @@ it('a Host change while folder registration is pending retains the registration 
   await act(async () => pending.resolve(home))
   expect(useAppStore.getState().activeWorkspaceId).toBe('workspace')
   expect(useAppStore.getState().config!.workspaces).toContainEqual(home)
-  expect(dom.container.querySelector(`[data-folder-host="${R}"] [role="status"]`)!.textContent).toContain('configuration changed before opening')
+  expect(await failureDetail(R)).toContain('Opening the home workface'); expect(await failureDetail(R)).toContain('configuration changed')
   expect(add).toHaveBeenCalledTimes(1)
 })
 
