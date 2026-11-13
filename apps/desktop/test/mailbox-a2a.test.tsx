@@ -145,7 +145,8 @@ it('keeps the selected original node and Range through metadata updates and fail
 })
 
 it('rejects a different participant and prevents a late body from filling another Agent draft', async () => {
-  const p = props(), selectedKey = a2aMessageKey(p.items[0]!)
+  const filled = vi.fn()
+  const p = { ...props(), onFill: vi.fn(async (source: string | (() => Promise<string>)) => { filled(typeof source === 'function' ? await source() : source) }) }, selectedKey = a2aMessageKey(p.items[0]!)
   await dom.render(<MailboxA2A {...p} selectedKey={selectedKey} readMessage={async () => ({ ...original, envelope: { ...original.envelope, recipientSessionId: 'someone-else' } })} />)
   expect(dom.container.textContent).toContain('does not belong to this exact Agent')
   expect(dom.container.textContent).not.toContain('Original line 80')
@@ -156,7 +157,8 @@ it('rejects a different participant and prevents a late body from filling anothe
   expect(pending).toHaveBeenCalledExactlyOnceWith('message-one')
   await dom.render(<MailboxA2A {...p} reference={{ hostId: 'local', agentSessionId: 'new-subject' }} items={[]} />)
   await act(async () => resolve(original))
-  expect(p.onFill).not.toHaveBeenCalled(); expect(p.onCopy).not.toHaveBeenCalled()
+  expect(p.onFill).toHaveBeenCalledExactlyOnceWith(expect.any(Function))
+  expect(filled).not.toHaveBeenCalled(); expect(p.onCopy).not.toHaveBeenCalled()
 })
 
 it('retains a selected original while a new bounded page no longer contains its metadata', async () => {

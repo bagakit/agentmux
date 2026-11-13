@@ -88,8 +88,10 @@ it('excludes typed Agent and platform inputs from Inputs while retaining human a
   expect(dom.container.textContent).not.toContain('OBSERVATION-controlled-agent')
 })
 
-it('retains platform notices in the shared inventory with typed reference reading and exact Copy', async () => {
+it('retains platform notification provenance and exact Copy without inventing a conversation source', async () => {
   const item = notification('platform-notice', 1, true), copy = vi.fn(async () => true), refresh = vi.fn(async () => {})
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const readOriginal = vi.spyOn(api.sessions, 'readMessage')
   const page = parseAgentInputMailboxPage({ agentSessionId: session.id, queueId: 'original-input-journal', cut: { incarnation: 'original-cut', throughSequence: 1 },
     budgetBytes: 128 * 1024, items: [{ kind: 'item', item }], nextCursor: null, coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } },
     { agentSessionId: session.id, maxBytes: 128 * 1024 })
@@ -98,15 +100,23 @@ it('retains platform notices in the shared inventory with typed reference readin
   expect(dom.container.querySelector('[data-mailbox-author]')?.textContent).toBe('AgentMux')
   const details = dom.container.querySelector<HTMLDetailsElement>('[data-input-mailbox-key] > details')!
   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
-  const turn = dom.container.querySelector('.log-turn')!
+  const turn = dom.container.querySelector('.conversation-a2a-notice')!
+  expect(turn).not.toBeNull()
   expect(turn.getAttribute('data-speaker-role')).toBe('system')
   expect(turn.getAttribute('data-a2a-notification-id')).toBe('platform-notice')
-  expect(turn.querySelector('.log-turn__system-summary')?.textContent).toBe('1 A2A Inbox reference')
-  await dom.click('.log-turn__system-toggle')
   expect(turn.textContent).toContain('unopened-original')
-  expect(turn.textContent).toContain('message --skill')
-  await dom.click('[aria-label="Copy message"]')
+  expect(turn.textContent).toContain('The original message Host is unknown')
+  expect(turn.querySelector('.log-turn__system-toggle')).toBeNull()
+  expect(readOriginal).not.toHaveBeenCalled()
+  const notificationDetails = turn.querySelector<HTMLDetailsElement>('.conversation-a2a-notice__details')!
+  expect(notificationDetails.open).toBe(false)
+  await act(async () => { notificationDetails.open = true; notificationDetails.dispatchEvent(new Event('toggle')) })
+  expect(notificationDetails.textContent).toContain(noticeWire)
+  await dom.click('[aria-label="Copy notification protocol"]')
+  expect(clipboard).toHaveBeenCalledExactlyOnceWith(noticeWire)
+  await dom.click('.conversation-a2a-notice__details [aria-label="Copy message"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(noticeWire)
+  expect(readOriginal).not.toHaveBeenCalled()
   expect(refresh).not.toHaveBeenCalled(); expect(mailbox.loadEarlier).not.toHaveBeenCalled()
 })
 
