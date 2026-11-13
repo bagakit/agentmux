@@ -92,8 +92,14 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   const isToolResultTurn = Boolean(record.toolUseResult) || (
     blocks.length > 0 && blocks.every((b) => object(b)?.type === 'tool_result')
   )
+  // Claude records the producer of a user-role turn. A background task notification is
+  // written by Claude itself (origin task-notification, promptSource system), not typed
+  // by a person, so it is a system record of the conversation, not the user's speech.
+  const originKind = object(record.origin)?.kind
+  const systemOriginInput = record.type === 'user' && !queuedInput && !isToolResultTurn && !isGenerated &&
+    (record.promptSource === 'system' || typeof originKind === 'string' && originKind !== 'human')
   let kind: AgentSessionHistoryItem['kind']
-  if (record.type === 'system' && message && content !== undefined && !isGenerated) {
+  if ((record.type === 'system' || systemOriginInput) && message && content !== undefined && !isGenerated) {
     kind = 'system-message'
   } else if (isNeutralActivity) {
     kind = 'activity'
@@ -140,7 +146,8 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
         cachedInputTokens: object(message.usage)?.cache_read_input_tokens
       } }
     }) : {}),
-    ...(kind === 'system-message' ? { title: 'System instructions' } : queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
+    ...(kind === 'system-message' ? { title: systemOriginInput ? originKind === 'task-notification' ? 'Task notification' : 'Claude system input' : 'System instructions' }
+      : queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
       kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
     ...(turnId !== undefined ? { turnId } : {}),
     ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})
