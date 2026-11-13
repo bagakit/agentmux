@@ -89,9 +89,13 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
 function NodeExecutor({ item }: { item: GoalPlanNodeProjection }) {
   const executor = item.delegation ? { hostId: delegationWorkerHostId(item.delegation), agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
+  const hosts = useAppStore(state => state.config?.hosts)
   if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
-  const place = presentation.toolExecution ? `Tools · ${presentation.toolExecution.resourceHostId}`
-    : presentation.hostId ? `Agent · ${presentation.hostId}` : `Agent · ${executor.hostId} · position unknown`
+  const host = hosts?.find(host => host.id === executor.hostId)
+  const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.toolExecution!.resourceHostId)
+  const place = presentation.toolExecution ? `Tools · ${toolsHost?.label ?? presentation.toolExecution.resourceHostId}`
+    : presentation.hostId ? `${host?.kind === 'ssh' ? 'Remote' : 'Agent'} · ${host?.label ?? presentation.hostId}`
+      : `Agent · ${host?.label ?? executor.hostId} · position unknown`
   return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}${presentation.toolExecution ? ` · ${presentation.toolExecution.workspacePath}` : ''}`}>
     <ThemeObjectAgentIcon size={11} aria-hidden="true" /><span className="goal-plan-node__name">{presentation.name ?? executor.agentSessionId}</span><span className="goal-plan-node__place">{place}</span>
   </span>
@@ -166,14 +170,16 @@ export function GoalPlanGraph({ demand, onOpenDiscussion }: { demand: Pick<Deman
           <ol className="goal-plan__nodes">
             {column.map(item => {
               const Icon = STATE_ICONS[item.state], expanded = open === item.node.id
-              const waitsOn = item.node.dependsOn.filter(id => byId.get(id)?.state !== 'done')
               return <li key={item.node.id} className={`goal-plan-node${item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
                 data-goal-plan-node={item.node.id} data-goal-plan-state={item.state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
                 <button type="button" className="goal-plan-node__head" aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={() => setOpen(expanded ? null : item.node.id)}>
                   <span className="goal-plan-node__mark" data-goal-plan-state={item.state} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation="none" /></span>
                   <span className="goal-plan-node__title">{item.node.title}</span>
                 </button>
-                <span className="goal-plan-node__state">{item.staleCriteria.length ? 'Criteria need review' : GOAL_PLAN_STATE_LABELS[item.state]}{item.state === 'waiting' && waitsOn.length ? ` · ${waitsOn.map(id => byId.get(id)!.node.title).join(', ')}` : ''}</span>
+                <span className="goal-plan-node__state">{item.staleCriteria.length ? 'Criteria need review' : GOAL_PLAN_STATE_LABELS[item.state]}</span>
+                {item.node.dependsOn.length ? <span className={`goal-plan-node__depends${item.state === 'waiting' ? ' goal-plan-node__depends--waiting' : ''}`}>
+                  Depends on · {item.node.dependsOn.map(id => byId.get(id)!.node.title).join(', ')}
+                </span> : null}
                 <NodeExecutor item={item} />
               </li>
             })}

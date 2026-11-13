@@ -27,6 +27,8 @@
 .goal-plan-node__name { min-width: 0; }
 .goal-plan-node__who--open { font-style: italic; }
 .goal-plan-node__place { flex-basis: 100%; padding-inline-start: calc(11px + var(--sp-1)); color: var(--text-3); }
+.goal-plan-node__depends { display: none; padding-inline-start: calc(18px + var(--sp-3)); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
+.goal-plan-node__depends--waiting { display: block; }
 
 .goal-plan-node__mark { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: var(--radius-sm); color: var(--text-3); background: color-mix(in srgb, currentColor 12%, transparent); transition: color .24s ease, background-color .24s ease; }
 .goal-plan-node__mark[data-goal-plan-state='ready'], .goal-plan-node__mark[data-goal-plan-state='changes'] { color: var(--green); }
@@ -63,6 +65,7 @@
 
 /* Narrow: columns become stacked groups; dependencies are written, no crossing lines. */
 @container goal-plan (max-width: 640px) {
+  .goal-plan-node__depends { display: block; }
   .goal-plan__canvas { overflow: visible; }
   .goal-plan__columns { grid-auto-flow: row; grid-auto-columns: auto; }
   .goal-plan__edges { display: none; }
