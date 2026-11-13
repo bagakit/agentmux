@@ -96,7 +96,7 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
     record.original.kind === 'captured' && record.original.item.a2aNotificationId === key.submissionId)).item.records
   const originalRecords = []
   for (const record of noticeContributions) {
-    const disclosure = `${details}.querySelector('[data-original-contribution="${record.id}"]')`
+    const disclosure = `[...${details}.querySelectorAll('[data-original-contribution]')].find(node=>node.dataset.originalContribution===${JSON.stringify(record.id)})`
     await first.cdp.evaluate(`${disclosure}.querySelector('summary').scrollIntoView({block:'center'})`)
     await activate(first.cdp, `${disclosure}.querySelector('summary')`)
     const originalRecord = await waitFor('complete original contribution JSON', () => first.cdp.evaluate(`${disclosure}.querySelector('pre')?.textContent`))
@@ -155,18 +155,30 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   await activate(first.cdp, `${base}.querySelector('[data-record-key="a2a:${messageId}"]')`)
   await waitFor('original body remains literal in Inbox', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__detail .log-turn__body')?.textContent.includes('authored-example-message')`))
   const inbox = await first.cdp.evaluate(`(()=>{const p=${base}.querySelector('.composer-mailbox__detail');return{text:p.textContent,decodedReferenceLists:p.querySelectorAll('.log-turn__references').length}})()`)
-  assert.equal(inbox.decodedReferenceLists, 0); assert.ok(inbox.text.includes('Notification submitted'))
+  assert.equal(inbox.decodedReferenceLists, 0); assert.ok(inbox.text.includes('authored-example-message'))
   await activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Copy message"]')`)
   const copiedBody = await waitFor('original authored body Copy', async () => {
     const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === body ? value : null
   })
   const bodyCopyFeedback = await waitFor('original body Copy feedback', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__detail .log-turn__actions')?.dataset.copyState==='copied'`))
+  await activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Message details"]')`)
+  inbox.facts = await waitFor('original Inbox notification provenance', () => first.cdp.evaluate(`${base}.querySelector('.composer-mailbox__record-facts')?.textContent`))
+  assert.ok(inbox.facts.includes('Notification submitted')); assert.ok(inbox.facts.includes(messageId))
+  await activate(first.cdp, `${base}.querySelector('.composer-mailbox__detail [aria-label="Message details"]')`)
   await screenshot(first, 'reference-inbox-original', 750, 980)
   await cli(['space', 'focus', '--region', authorPlace.to.regionId, '--input', 'target', '--expect-session', author.agentSessionId])
   await openMailbox(first.cdp, authorPlace.to.regionId, 'outbox')
   await waitFor('original outgoing journal row', () => first.cdp.evaluate(`Boolean(${region(authorPlace.to.regionId)}.querySelector('[data-record-key="a2a:${messageId}"]'))`))
-  const outbox = await first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-outbox"]').textContent`)
-  assert.ok(outbox.includes('Notification submitted')); await screenshot(first, 'reference-outbox', 750, 980)
+  const authorBase = region(authorPlace.to.regionId)
+  const outbox = { text: await first.cdp.evaluate(`${authorBase}.querySelector('[role="tabpanel"][id$="-outbox"]').textContent`) }
+  assert.ok(outbox.text.includes('authored-example-message'))
+  await activate(first.cdp, `${authorBase}.querySelector('[data-record-key="a2a:${messageId}"]')`)
+  await waitFor('original outgoing body', () => first.cdp.evaluate(`Boolean(${authorBase}.querySelector('.composer-mailbox__detail [aria-label="Message details"]'))`))
+  await activate(first.cdp, `${authorBase}.querySelector('.composer-mailbox__detail [aria-label="Message details"]')`)
+  outbox.facts = await waitFor('original Outbox notification provenance', () => first.cdp.evaluate(`${authorBase}.querySelector('.composer-mailbox__record-facts')?.textContent`))
+  assert.ok(outbox.facts.includes('Notification submitted')); assert.ok(outbox.facts.includes(messageId))
+  await activate(first.cdp, `${authorBase}.querySelector('[aria-label="Back to Sent"]')`)
+  await screenshot(first, 'reference-outbox', 750, 980)
   const afterBatch = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result
   assert.deepEqual(afterBatch, batch, 'Human rendering and Copy must not acknowledge the Agent inbox')
   const afterEffects = await inputEffects(); assert.deepEqual(afterEffects, effects, 'Reading, themes, Copy and public check must not enqueue or steer input')

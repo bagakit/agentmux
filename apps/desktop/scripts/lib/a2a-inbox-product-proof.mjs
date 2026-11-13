@@ -465,7 +465,9 @@ export async function verifyA2aReferenceReadingProductProof(product, { root, tes
     assert.equal(copy.text, text); assert.equal(copy.port, 'electron.clipboard.writeText')
   }
   assert.equal(r.wireCopyFeedback, true); assert.equal(r.bodyCopyFeedback, true); assert.equal(r.conversationBodyCopyFeedback, true)
-  assert.equal(r.inbox.decodedReferenceLists, 0); assert.ok(r.inbox.text.includes('Notification submitted')); assert.ok(r.outbox.includes('Notification submitted'))
+  assert.equal(r.inbox.decodedReferenceLists, 0); assert.ok(r.inbox.facts.includes('Notification submitted')); assert.ok(r.outbox.facts.includes('Notification submitted'))
+  assert.ok(r.inbox.facts.includes(r.messageId)); assert.ok(r.outbox.facts.includes(r.messageId))
+  assert.ok(r.inbox.text.includes('authored-example-message')); assert.ok(r.outbox.text.includes('authored-example-message'))
   for (const text of [r.messageId, r.key.submissionId, envelope.body]) assert.ok(!r.userPage.includes(text))
   const nativeSource = noticeUnits[0].item.records.find(record => record.original.kind === 'native').reference.source
   assertA2aReferenceUserReading(r.userReading, r.recipient, { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId }, { key: r.key, wire: r.wire })
