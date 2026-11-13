@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 
-export async function standaloneScenario({ repo, bundle, work, executablePath, receipt, persist, holdOnly = false, endpointRecovery = false, markerBundle, failureBundle }) {
+export async function standaloneScenario({ repo, bundle, work, executablePath, receipt, persist, holdOnly = false, endpointRecovery = false, markerBundle, failureBundle, exercise }) {
   const require = createRequire(join(repo, 'apps/desktop/package.json'))
   const { connectAgentMuxRpc } = await import('@agentmux/core')
   const { WebSocketServer } = require('ws')
@@ -108,6 +108,7 @@ export async function standaloneScenario({ repo, bundle, work, executablePath, r
       return result.target
     })
     engineEndpoint = JSON.parse(await readFile(join(directory, 'browser-targets.json'), 'utf8')).engine.endpoint
+    if (exercise) { await exercise({one, run, cli, client, base, observe, posts: () => posts}); receipt.passed=true;return }
     if(holdOnly) {
       await observe('original-runner-budget-refuses-overflow-hold-before-native-contact',async()=>{
         const held=await run(one.id,`const page=await snapshot();try{await longPress(page.nodes.find(n=>n.ref&&n.name==='Draft').ref,{durationMs:2147483648});return 'completed'}catch(error){return error.message}`)
@@ -194,6 +195,7 @@ export async function standaloneScenario({ repo, bundle, work, executablePath, r
     await persist()
     await client?.dispose?.().catch(()=>{})
     if(child && child.exitCode===null){child.kill('SIGTERM');await Promise.race([once(child,'exit'),delay(5000)]);if(child.exitCode===null){child.kill('SIGKILL');await once(child,'exit')}}
+    receipt.hostProcess = child ? { originalPid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode, exitConfirmed: child.exitCode !== null || child.signalCode !== null } : null
     // Only this proof's exact owned engine endpoint is closed. User App and all other engines are outside scope.
     if(!engineEndpoint)try{engineEndpoint=JSON.parse(await readFile(join(directory,'browser-targets.json'),'utf8')).engine?.endpoint}catch{}
     if(!engineEndpoint)try{const[port,path]=(await readFile(join(directory,'engine-profile','DevToolsActivePort'),'utf8')).trim().split('\n');if(/^\d+$/.test(port)&&path?.startsWith('/devtools/browser/'))engineEndpoint=`ws://127.0.0.1:${port}${path}`}catch{}
