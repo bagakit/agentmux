@@ -13,7 +13,8 @@ const variants = {
  'background-wake':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','const key = active && scope && target && entryToken ?','const key = scope && target ?'],
  'repeat-unknown':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','if (!inspect && !result.operation) {','if (!inspect) {'],
  'random-original-key':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts',"const operationId = 'mote-entry-' + Array.from(new Uint8Array(hash),byte => byte.toString(16).padStart(2,'0')).join('')","const operationId = crypto.randomUUID()"],
- 'ignore-late-input':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','original.cancelled = true','original.cancelled = false']
+ 'ignore-late-input':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','original.cancelled = true','original.cancelled = false'],
+ 'observe-after-cancel':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','original.cancelled = true; detach()','original.cancelled = true']
 } as const
 const name=process.env.MOTE_ENTRY_MUTATION as keyof typeof variants|undefined
 if(name&&!variants[name])throw Error('Unknown exact Mote entry mutation')

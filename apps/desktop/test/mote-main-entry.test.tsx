@@ -96,6 +96,25 @@ it.each(['pointerdown','keydown','input','close'] as const)('entry hook cancels 
  expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
 })
 
+// A real keystroke flushes a render scheduled by this capture listener before React reads the field,
+// so a listener that keeps rendering would write a controlled input's old value over each new character.
+it('entry hook stops observing input after the first interaction cancels admission',async()=>{
+ const read=setup();let release!:(value:MoteDialoguePage)=>void;let target!:MoteDialoguePage['main']['target']
+ read.mockImplementation(({target:t})=>{target=t;return new Promise(resolve=>{release=resolve})})
+ const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockResolvedValue({operation:null}),ensure=vi.spyOn(api.moteDialogue,'ensureRecovery')
+ let renders=0
+ function Counted(){const state=useMoteMainEntry({scope,entryToken:'typing',active:true});renders++;return <output data-entry-status={state.status}/>}
+ const {root:r,container}=await root();await act(async()=>r.render(<MoteDialogueViewProvider scope={scope} active><Counted/></MoteDialogueViewProvider>))
+ await vi.waitFor(()=>expect(read).toHaveBeenCalled())
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'4'})))
+ expect(container.querySelector('output')?.getAttribute('data-entry-status')).toBe('settled')
+ const settled=renders
+ for(const event of ['input','keydown','input','pointerdown'] as const)await act(async()=>document.dispatchEvent(new Event(event,{bubbles:true})))
+ expect(renders).toBe(settled)
+ await act(async()=>release(page(target)));await new Promise<void>(resolve=>queueMicrotask(resolve))
+ expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
+})
+
 it.each(['pointerdown','close'] as const)('entry hook cannot turn a late absent inspect into first ensure after %s',async event=>{
  setup();let release!:(value:{operation:null})=>void
  const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(()=>new Promise(resolve=>{release=resolve})),ensure=vi.spyOn(api.moteDialogue,'ensureRecovery')
