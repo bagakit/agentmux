@@ -530,7 +530,7 @@ async function scene(scene) {
   result.checkpoints.push({ scene, name: 'interaction-only', facts: interaction });
   await evaluate("pendingNative.phase='interaction-with-pending';pendingDelivery.queue()"); const waiting = await settled();
   result.checkpoints.push({ scene, name: 'interaction-with-pending', facts: waiting });
-  pendingGeometry(interaction, waiting, '等待回答', false, true); visibleCursor(waiting);
+  pendingGeometry(interaction, waiting, '请求结束后发送', false, true); visibleCursor(waiting);
   const pending = waiting.facts.queues[sid][0];
   assert.equal(waiting.facts.attempts.length, 1); assert.equal(waiting.facts.inFlight[sid], undefined);
   await frame(scene, 'waiting');
