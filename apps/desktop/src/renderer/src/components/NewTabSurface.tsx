@@ -86,7 +86,6 @@ export function NewTabSurface({
     let references: ReturnType<typeof useAppStore.getState>['agentOperations'] | undefined
     let hosts: string[] = []
     return (state: ReturnType<typeof useAppStore.getState>) => {
-      if (!visible || !presentationActive) return hosts
       if (state.agentOperations !== references) {
         references = state.agentOperations
         hosts = regionId ? [...new Set(Object.values(references).filter(operation => operation.subject.regionId === regionId)
@@ -94,7 +93,7 @@ export function NewTabSurface({
       }
       return hosts
     }
-  }, [regionId, visible, presentationActive])))
+  }, [regionId])))
   const [regionHeight, setRegionHeight] = useState<number | null>(null)
   const restoreAgentsFocus = useRef<LauncherSectionMode | null>(null)
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
