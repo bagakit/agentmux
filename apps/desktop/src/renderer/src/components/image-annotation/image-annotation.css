@@ -27,6 +27,9 @@
 .image-annotation-toolbar__actions button { border-color: var(--line); background: var(--surface-2); }
 .image-annotation-toolbar__actions .primary-button { color: var(--bg); background: var(--green); border-color: transparent; font-weight: 600; }
 .image-annotation-toolbar__actions .primary-button:hover:not(:disabled) { color: var(--bg); background: var(--green-text); }
+.image-annotation-editor__discard { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-weight: 600; }
+.image-annotation-toolbar__actions .danger-button { color: var(--bg); background: var(--red); border-color: transparent; font-weight: 600; }
+.image-annotation-toolbar__actions .danger-button:hover:not(:disabled) { color: var(--bg); background: var(--red-text); }
 .image-annotation-editor__properties { flex: none; display: flex; align-items: center; flex-wrap: wrap; min-height: 33px; gap: 9px; padding: 3px 10px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); }
 .image-annotation-editor__tool-name { min-width: 64px; font-size: 11px; font-weight: 500; color: var(--text); }
 .image-annotation-toolbar__colors { flex: none; max-width: 100%; flex-wrap: wrap; gap: 6px; }
@@ -76,7 +79,7 @@
   .image-annotation-editor__title { grid-column: 1; grid-row: 1; width: 100%; }
   .image-annotation-editor__title small { display: none; }
   .image-annotation-toolbar__actions { display: contents; }
-  .image-annotation-editor__cancel { grid-column: 2; grid-row: 1; }
+  .image-annotation-editor__cancel, .image-annotation-editor__discard { grid-column: 2; grid-row: 1; }
   .image-annotation-toolbar__actions > .primary-button { grid-column: 3; grid-row: 1; }
   .image-annotation-toolbar__output { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; border-left: 0; padding-left: 0; }
   .image-annotation-toolbar__output > button:not(.image-annotation-editor__pin--uncertain) > span { display: none; }
