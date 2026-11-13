@@ -42,9 +42,9 @@ function button(scope: ParentNode, name: string): HTMLButtonElement {
   const found = buttons.find(button => button.getAttribute('aria-label') === name) ?? buttons.find(button => button.textContent?.trim() === name)
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
-type Options = { frame?: InlineAnnotationFrame; initialTool?: AnnotationTool; onExpand?: ReturnType<typeof vi.fn> | null }
+type Options = { frame?: InlineAnnotationFrame | null; initialTool?: AnnotationTool; onExpand?: ReturnType<typeof vi.fn> | null }
 async function mount({ frame: inlineFrame = selection, initialTool = 'rect', onExpand = vi.fn() }: Options = {}) {
-  const props = { image, busy: false, presentation: 'inline' as const, pixelRatio: 2, inlineFrame, initialTool, onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(),
+  const props = { image, busy: false, presentation: 'inline' as const, pixelRatio: 2, ...(inlineFrame ? { inlineFrame } : {}), initialTool, onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(),
     ...(onExpand ? { onExpand } : {}) }
   await act(async () => root.render(<ImageAnnotationEditor key={Math.random()} {...props} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
@@ -109,6 +109,13 @@ describe('inline image annotation', () => {
     expect(inside.bar().style.top).toBe('178px')
   })
 
+  it('fills the host viewport when the host gives no selection frame', async () => {
+    hostHeight = 300
+    const { editor, bar } = await mount({ frame: null })
+    const area = editor.querySelector<HTMLElement>('.image-annotation-editor__canvas-area')!
+    expect([area.style.left, area.style.top, area.style.width, area.style.height], 'the selection is the whole viewport').toEqual(['0px', '0px', '800px', '300px'])
+    expect(bar().dataset.side, 'a full-viewport selection keeps its bar inside').toBe('inside')
+  })
   it('hands the current marks and tool to the host on Expand', async () => {
     const { bar, gesture, props } = await mount()
     await gesture([20, 10], [60, 40])
