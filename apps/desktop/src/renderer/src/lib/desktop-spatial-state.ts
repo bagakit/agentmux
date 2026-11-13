@@ -1,6 +1,5 @@
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
 import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
-export { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
@@ -272,8 +271,12 @@ export class DesktopSpatialPersistence {
   private apply: ((state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void) | null = null;
   private acknowledgeName: ((state: AgentMuxSpatialState) => void) | undefined;
   private unsubscribe: (() => void) | null = null;
-  constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void,
-    private readonly clock: SpatialSaveClock = defaultSaveClock) { }
+  private readonly warn: (error: unknown) => void;
+  constructor(private readonly port: DesktopSpatialPort, warn: (error: unknown) => void,
+    private readonly clock: SpatialSaveClock = defaultSaveClock) {
+    // A replaced owner's late save outcome belongs to nobody; the next owner re-captures the workbench.
+    this.warn = error => { if (!this.disposed) warn(error); };
+  }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
   /** Read-only observation: equal graphs cannot settle an in-flight or unknown write. */
   get pendingChanges(): boolean { return !!(this.startup || this.pending || this.saving || this.unconfirmed); }
@@ -333,7 +336,7 @@ export class DesktopSpatialPersistence {
     if (this.pendingChanges) return;
     this.pendingSince = null;
     if (this.watchdog !== null) { this.clock.clearTimeout(this.watchdog); this.watchdog = null; }
-    if (this.stalled) { this.stalled = false; this.onRecovered?.(); }
+    if (this.stalled) { this.stalled = false; if (!this.disposed) this.onRecovered?.(); }
   }
   private failed(error: unknown): void {
     this.failures++;
@@ -457,6 +460,39 @@ export class DesktopSpatialPersistence {
     // An overdue reply is the stall this owner has already announced, not a second failure.
     queueMicrotask(() => { void this.flush().catch(error => { if (!(error instanceof SpatialReplyOverdueError)) this.warn(error); }); });
   }
+  /**
+   * Merge `local` onto the current document and commit it. Another writer may commit between the read and
+   * the commit; a refused stale revision is merged again against the newer document, a bounded number of
+   * times, before the failure is reported. The attempted graph is recorded as the unconfirmed intermediate,
+   * so the next pass is exact both when another writer won the race (Core applied nothing) and when our
+   * write landed and only its reply was lost: a value already present on the remote side counts as agreement.
+   */
+  private async commitMerged(local: AgentMuxSpatialGraph, baseline: AgentMuxSpatialState, removals: ReadonlySet<string>,
+    groupRemovals: ReadonlySet<string>): Promise<{ next: AgentMuxSpatialState; merged: SpatialMerge }> {
+    let remote = await this.awaitReply(this.port.read());
+    for (let attempt = 1; ; attempt++) {
+      if (!remote) throw new Error('The durable spatial document is unavailable. Pending work is retained.');
+      const uncertain = this.unconfirmed;
+      // A lost ACK may have saved the attempted graph. Carry the later input delta onto it, keeping unrelated
+      // observed data; equal values permit a merge but never prove who applied the write. A later local edit
+      // the attempted graph had already changed elsewhere is a conflict like any other.
+      const carried = uncertain && reconcileSpatialGraphs(uncertain.input, local, uncertain.graph);
+      const merged = uncertain && carried ? withConflicts(reconcileSpatialGraphs(uncertain.baseline.graph, carried.graph, remote.graph, uncertain.graph), carried.conflicts)
+        : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
+      try {
+        const next = await this.awaitReply(this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
+          ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) }));
+        return { next, merged };
+      } catch (error) {
+        this.unconfirmed = { baseline: remote, input: local, graph: merged.graph };
+        // Only a document that has moved on is worth merging again right away; anything else is reported, and
+        // the next successful read supplies the baseline. An unconfirmed projection is never applied.
+        const newer = attempt < STALE_REVISION_ATTEMPTS ? await this.awaitReply(this.port.read()).catch(() => null) : null;
+        if (!newer || newer.revision <= remote.revision) throw error;
+        remote = newer;
+      }
+    }
+  }
   async flush(): Promise<void> {
     if (this.saving) {
       await this.saving;
@@ -470,45 +506,7 @@ export class DesktopSpatialPersistence {
       const pending = this.pending, local = pending.graph, baseline = pending.baseline;
       const removals = new Set(this.removed);
       const groupRemovals = new Set(this.removedProjectGroups);
-      // Another writer may commit between this read and the commit; a refused stale revision is
-      // merged again against the newer document a bounded number of times before it is reported.
-      let remote: AgentMuxSpatialState | null = null, merged: ReturnType<typeof reconcileSpatialGraphs> | null = null, next: AgentMuxSpatialState | null = null;
-      let observed: AgentMuxSpatialState | null = null;
-      for (let attempt = 0; attempt < STALE_REVISION_ATTEMPTS && !next; attempt++) {
-        remote = observed ?? await this.awaitReply(this.port.read());
-        observed = null;
-        if (!remote)
-          throw new Error('The durable spatial document is unavailable. Pending work is retained.');
-        const uncertain = this.unconfirmed;
-        // A lost ACK may have saved the intermediate edit. Carry the subsequent
-        // input delta onto that attempted graph, retaining unrelated observed data.
-        // Equal values permit a merge; they never prove who applied the write.
-        // Each key merges on its own: a conflict keeps the committed remote value for that
-        // key and is retained by name, while every other change is still committed.
-        // A later local edit that the attempted graph had already changed elsewhere is a conflict like any other.
-        const carried = uncertain && reconcileSpatialGraphs(uncertain.input, local, uncertain.graph);
-        merged = uncertain && carried ? withConflicts(reconcileSpatialGraphs(uncertain.baseline.graph, carried.graph, remote.graph, uncertain.graph), carried.conflicts)
-          : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
-        try {
-          next = await this.awaitReply(this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
-            ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) }));
-        } catch (error) {
-          // When the document has moved on, merge again against that newer revision right away. The
-          // attempted graph is recorded as the unconfirmed intermediate, so the next pass is exact both
-          // when another writer won the race (Core applied nothing) and when our write landed and only
-          // its reply was lost: a value already present on the remote side counts as agreement.
-          this.unconfirmed = { baseline: remote, input: local, graph: merged.graph };
-          if (attempt + 1 < STALE_REVISION_ATTEMPTS) {
-            observed = await this.awaitReply(this.port.read()).catch(() => null);
-            if (observed && observed.revision > remote.revision) continue;
-            observed = null;
-          }
-          // Each successful read supplies the next baseline, including after
-          // repeated lost replies. Do not apply an unconfirmed projection.
-          throw error;
-        }
-      }
-      if (!next || !merged) throw new Error('The durable spatial document kept changing during this save. Pending work is retained.');
+      const { next, merged } = await this.commitMerged(local, baseline, removals, groupRemovals);
       this.unconfirmed = null;
       this.state = next;
       // Later local edits were made against our in-flight graph. Preserve the remote changes accepted by

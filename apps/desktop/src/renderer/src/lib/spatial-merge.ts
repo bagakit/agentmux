@@ -13,7 +13,7 @@ export function sameSpatialValue(a: unknown, b: unknown): boolean {
 }
 
 /** One key that two writers changed to different values. The committed graph keeps the remote value. */
-export type SpatialConflict = { key: string; local: unknown; remote: unknown };
+export type SpatialConflict = { key: string };
 export type SpatialMerge = { graph: AgentMuxSpatialGraph; conflicts: SpatialConflict[] };
 
 type Layout = WorkspaceLayout;
@@ -31,7 +31,7 @@ function choose<T>(key: string, before: T | undefined, middle: T | undefined, af
   conflicts: SpatialConflict[]): { take: 'remote' | 'local' } {
   if (sameSpatialValue(before, after) && sameSpatialValue(middle, after)) return { take: 'remote' };
   if (sameSpatialValue(remote, before) || sameSpatialValue(remote, middle) || sameSpatialValue(remote, after)) return { take: 'local' };
-  conflicts.push({ key, local: structuredClone(after), remote: structuredClone(remote) });
+  conflicts.push({ key });
   return { take: 'remote' };
 }
 
@@ -48,7 +48,7 @@ function mergeOrder(key: string, before: readonly string[] | undefined, middle: 
   const existing = (side: readonly string[]) => side.filter(id => base.includes(id) && !closed.has(id));
   const unmoved = existing(base), localMoved = !sameSpatialValue(existing(local), unmoved), remoteMoved = !sameSpatialValue(existing(remote), unmoved);
   if (localMoved && remoteMoved && !sameSpatialValue(existing(local), existing(remote)))
-    conflicts.push({ key: key + ':order', local: [...local], remote: [...remote] });
+    conflicts.push({ key: key + ':order' });
   const [first, second] = localMoved && !remoteMoved ? [local, remote] : [remote, local];
   const merged = first.filter(id => !closed.has(id));
   return [...merged, ...second.filter(id => !closed.has(id) && !merged.includes(id))];
