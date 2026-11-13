@@ -10,6 +10,7 @@ import { useAppStore } from '../store'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { showMoteConversation } from '../lib/mote-conversation-mode'
 import { MoteCooperation } from './MoteCooperation'
+import { MoteConversationIdentity } from './MoteConversationIdentity'
 
 const ThreadsIcon = semanticIconComponent('object.conversations')
 
@@ -60,7 +61,7 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
       {scope && presentation ? <header className="mote-space-frame__header" hidden={!visible}>
         <div className="mote-space-frame__navigation">
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
-        <span className="mote-space-frame__name" title={scope.topic.title}>{scope.topic.title}</span>
+        <MoteConversationIdentity scope={scope} visible={visible} />
         <SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" onChange={select}
           options={[{ value: 'profile', label: 'Profile' }, { value: 'discussion', label: 'Discussion' }, { value: 'threads', label: <><ThreadsIcon size={13} aria-hidden="true" />Threads</> }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} />
         </div>

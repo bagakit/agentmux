@@ -20,6 +20,7 @@ import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { MoteConversationStart } from './MoteConversationStart'
 import { MoteEntryReading } from './MoteEntryReading'
+import { MoteConversationIdentity } from './MoteConversationIdentity'
 import { moteEntryDraftKey, useMoteHeldEntryInput } from '../lib/mote-entry-hold'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
@@ -184,7 +185,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null
   return <MoteWorkfaceContext.Provider value={context}>
     <div className={floating ? 'mote-workface' : 'workbench-context-frame'} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
-      {floating && scope ? <header className="mote-workface__navigation"><SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" options={[{ value: 'discussion', label: 'Discussion' }, { value: 'threads', label: <><ThreadsIcon size={13} aria-hidden="true" />Threads</> }]} onChange={next => next === 'discussion' ? showDiscussion() : showThreads()} /><span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
+      {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} /><SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" options={[{ value: 'discussion', label: 'Discussion' }, { value: 'threads', label: <><ThreadsIcon size={13} aria-hidden="true" />Threads</> }]} onChange={next => next === 'discussion' ? showDiscussion() : showThreads()} /><span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
       {notice}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
       {entryRecovery.issue ? <p role="status" className="mote-conversation__issue">{entryRecovery.issue}{entryRecovery.status === 'unavailable'
