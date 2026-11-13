@@ -186,6 +186,44 @@ const RESTORE_TEXT_FOCUS_DECLARATION = `function () {${RESTORE_FOCUS_SNIPPET}
   restoreFocus(this, previous);
 }`
 
+/**
+ * Named keys with their DOM `code` and Windows virtual key code. Chromium needs all three to run a
+ * key's default action (Enter submits, Tab moves focus, Space activates a button). One printable
+ * character carries `text` so it types as it does for a person. Any other string is sent as the
+ * key name alone: it is never parsed into a chord and never types text, as before.
+ */
+const NAMED_KEYS: Readonly<Record<string, { code: string; keyCode: number; text?: string }>> = {
+  Enter: { code: 'Enter', keyCode: 13, text: '\r' }, Tab: { code: 'Tab', keyCode: 9 }, Escape: { code: 'Escape', keyCode: 27 },
+  Backspace: { code: 'Backspace', keyCode: 8 }, Delete: { code: 'Delete', keyCode: 46 }, ' ': { code: 'Space', keyCode: 32, text: ' ' },
+  Space: { code: 'Space', keyCode: 32, text: ' ' },
+  ArrowUp: { code: 'ArrowUp', keyCode: 38 }, ArrowDown: { code: 'ArrowDown', keyCode: 40 },
+  ArrowLeft: { code: 'ArrowLeft', keyCode: 37 }, ArrowRight: { code: 'ArrowRight', keyCode: 39 },
+  Home: { code: 'Home', keyCode: 36 }, End: { code: 'End', keyCode: 35 }, PageUp: { code: 'PageUp', keyCode: 33 }, PageDown: { code: 'PageDown', keyCode: 34 }
+}
+
+/** The native key event fields for one `pressKey` key. */
+export function nativeKeyFor(key: string): { key: string; code: string; keyCode: number; text?: string } {
+  const named = Object.hasOwn(NAMED_KEYS, key) ? NAMED_KEYS[key]! : undefined
+  if (named) return { key: key === 'Space' ? ' ' : key, ...named }
+  if ([...key].length !== 1 || /[\p{Cc}\p{Cf}]/u.test(key)) return { key, code: '', keyCode: 0 }
+  const upper = key.toUpperCase()
+  if (/^[A-Z]$/.test(upper)) return { key, code: `Key${upper}`, keyCode: upper.charCodeAt(0), text: key }
+  if (/^[0-9]$/.test(key)) return { key, code: `Digit${key}`, keyCode: key.charCodeAt(0), text: key }
+  // Other characters have no layout-independent code; they still type their text.
+  return { key, code: '', keyCode: 0, text: key }
+}
+
+/** Focus the target for a native key press and remember who had focus; refused when it cannot take focus. */
+const FOCUS_FOR_KEY_DECLARATION = `function () {
+  const self = this instanceof HTMLElement || this instanceof SVGElement ? this : null;
+  if (!self) return { ok: false, reason: 'is not an element that can take keyboard input' };
+  const previous = document.activeElement;
+  self.focus();
+  if (document.activeElement !== self && !self.contains(document.activeElement)) return { ok: false, reason: 'did not take focus' };
+  globalThis.__agentMuxTextFocus = previous;
+  return { ok: true };
+}`
+
 /** Center of the first content quad with area. Inline boxes that wrap lines have several quads. */
 function quadCenter(quads: unknown): { x: number; y: number } | null {
   if (!Array.isArray(quads)) return null
@@ -521,7 +559,7 @@ export function createBrowserPageDispatch(
    * only when the pointer is confirmed on the target. The page answers clicks itself, so there is no
    * exceptionDetails to read; the receipt is the acknowledged release.
    */
-  async function nativeClick(scope: BrowserPageActionScope | undefined, ref: string): Promise<undefined> {
+  async function nativeClick(scope: BrowserPageActionScope | undefined, ref: string, press = true): Promise<undefined> {
     const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
     const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: SCROLL_INTO_VIEW,
       awaitPromise: true, returnByValue: true }) as { exceptionDetails?: { text?: string } }
@@ -552,8 +590,11 @@ export function createBrowserPageDispatch(
         guard()
         await mouse({ type: 'mouseMoved', x, y, button: 'none', buttons: 0 })
         if (await inWorld(send, target, POINTER_ON_DECLARATION) !== true) {
+          if (!press) throw new Error(`The pointer was moved but did not land on ${ref}. Inspect the page before relying on its hover state.`)
           throw notDispatched(`The pointer did not land on ${ref}, so it was not pressed. Inspect the page or take a new snapshot().`)
         }
+        // Hover is the confirmed move itself; it leaves the pointer there, as a person's hover does.
+        if (!press) return undefined
         guard()
         await mouse({ type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
         try {
@@ -566,7 +607,57 @@ export function createBrowserPageDispatch(
     } finally { await send('Runtime.releaseObject', { objectId: target }).catch(() => {}) }
     // This is an observation of the original acknowledged dispatch, including a
     // download trigger. Its animation cannot delay or replace the action result.
-    try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
+    if (press) try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
+    return undefined
+  }
+
+  /**
+   * One trusted native key press on the target: rawKeyDown, char (only for a key that types text),
+   * keyUp, with key, code and windowsVirtualKeyCode, while the target holds page focus. This is the
+   * sequence a hardware keyboard produces, so Chromium runs the key's default action (Enter submits a
+   * form the way HTML implicit submission allows, Tab moves focus, Space activates a button). Focus
+   * goes back to where it was afterwards (T-012), unless the key itself moved it (Tab, Enter on a
+   * form), in which case the page's new focus is kept.
+   */
+  async function nativeKey(scope: BrowserPageActionScope | undefined, ref: string, rawKey: string): Promise<undefined> {
+    const key = nativeKeyFor(rawKey)
+    const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
+    guard()
+    if (actionFeedback) {
+      await actionFeedback(node, send)
+      guard()
+    }
+    if (!node.frameId) throw notDispatched(`The document holding ${ref} has no frame identity, so it cannot take a key safely. Nothing was pressed; take a new snapshot().`)
+    const world = await send('Page.createIsolatedWorld', { frameId: node.frameId, worldName: BROWSER_NATIVE_INPUT_WORLD })
+      .catch(() => null) as { executionContextId?: number } | null
+    if (!Number.isInteger(world?.executionContextId)) throw notDispatched(`The document holding ${ref} could not be inspected for a key press. Nothing was pressed; retry after a new snapshot().`)
+    const isolated = await send('DOM.resolveNode', { backendNodeId: node.backendNodeId, executionContextId: world!.executionContextId })
+      .catch(() => null) as { object?: { objectId?: string } } | null
+    const target = isolated?.object?.objectId ?? objectId
+    let focused = false
+    try {
+      const ready = await inWorld(send, target, FOCUS_FOR_KEY_DECLARATION) as { ok?: boolean; reason?: string } | undefined
+      if (ready?.ok !== true) throw notDispatched(`${ref} ${ready?.reason ?? 'could not take focus'}. Nothing was pressed; choose the element that should receive the key.`)
+      focused = true
+      guard()
+      const native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+      const keyEvent = (params: Record<string, unknown>) => native.input(() => send('Input.dispatchKeyEvent', {
+        key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, nativeVirtualKeyCode: key.keyCode, ...params }))
+      try {
+        guard()
+        await keyEvent({ type: 'rawKeyDown' })
+        try {
+          if (key.text !== undefined) await keyEvent({ type: 'char', text: key.text, unmodifiedText: key.text })
+          await keyEvent({ type: 'keyUp' })
+        } catch (error) {
+          throw new Error(`${ref} received ${key.key === ' ' ? 'Space' : key.key} down but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
+            'The key may or may not have acted; inspect the page before pressing again.')
+        }
+      } finally { native.end() }
+    } finally {
+      if (focused) await inWorld(send, target, RESTORE_TEXT_FOCUS_DECLARATION)
+      if (target !== objectId) await send('Runtime.releaseObject', { objectId: target }).catch(() => {})
+    }
     return undefined
   }
 
@@ -854,33 +945,12 @@ export function createBrowserPageDispatch(
         // Append at the end of what the field holds. One insert, not per-character key simulation.
         return await nativeText(scope, requireString(args[0], 'ref'), requireString(args[1], 'text'), false)
       case 'pressKey':
-        // 键事件派到元素上，不是派到窗口上。派到窗口会打断用户当下的输入焦点——这是 T-012 划下的
-        // 那条线：Agent 驱动页面时不抢人的操作位。
-        return await callOn(
-          scope,
-          requireString(args[0], 'ref'),
-          `function (key) {${RESTORE_FOCUS_SNIPPET}
-            const previous = document.activeElement
-            this.focus()
-            for (const type of ['keydown', 'keyup']) {
-              this.dispatchEvent(new KeyboardEvent(type, {key, bubbles: true, cancelable: true}))
-            }
-            restoreFocus(this, previous)
-          }`,
-          [requireString(args[1], 'key')]
-        )
+        // The key goes to the element's page focus, not the window: the window focus a person is using
+        // is never taken (T-012). Page focus returns afterwards unless the key moved it.
+        return await nativeKey(scope, requireString(args[0], 'ref'), requireString(args[1], 'key'))
       case 'hover':
-        return await callOn(
-          scope,
-          requireString(args[0], 'ref'),
-          `function () {
-            this.scrollIntoView({block: "center"})
-            for (const type of ['pointerover', 'mouseover', 'mousemove']) {
-              this.dispatchEvent(new MouseEvent(type, {bubbles: true}))
-            }
-          }`, [], { scroll: 'function () { this.scrollIntoView({block: "center"}) }',
-            action: `function () { for (const type of ['pointerover', 'mouseover', 'mousemove']) this.dispatchEvent(new MouseEvent(type, {bubbles:true})) }` }
-        )
+        // A native pointer move to the proven box, confirmed by Chromium's own :hover; no press.
+        return await nativeClick(scope, requireString(args[0], 'ref'), false)
       case 'scroll':
         return await callOn(
           scope,
