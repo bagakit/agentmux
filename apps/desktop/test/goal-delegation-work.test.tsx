@@ -90,7 +90,10 @@ describe('original delegation reading facts', () => {
   it('requires the original observed Run and never interprets Goal status or another Run as completion', () => {
     const record = goal()
     expect(goalNextStep(record)).toBe('Delegation observation unknown')
-    expect(goalNextStep({ ...record, status: 'done' })).toBe('Delegation observation unknown')
+    // A Goal marked Done without an accepted report points at the missing verification (behavior SSOT goals-and-demand
+    // 「状态、筛选与路由队列」). Status never reads as completion, and the original delegation stays unknown.
+    expect(goalNextStep({ ...record, status: 'done' })).toBe('Results not verified')
+    expect(goalDelegationRows({ ...record, status: 'done' })[0]!.state).toBe('unknown')
     expect(goalDelegationRows({ ...record, delegationObservations: [{ ...observation('exited'), workerRun: { runId: 'replacement-run', state: 'exited' } }] })[0]!.state).toBe('unknown')
     expect(goalNextStep({ ...record, delegationObservations: [observation('exited')] })).toBe('No report · Continue the original Agent')
     const { communication: _communication, ...exitOnly } = observation('exited')

@@ -14,7 +14,9 @@ function makeSession(id = 'session-1'): SessionSnapshot { return { id, hostId: '
 let root: Root, container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); useAppStore.setState({ config, sessions: [makeSession()], demands: { 'demand:one': { id: 'demand:one', title: 'Build auth flow', description: 'Keep the original intent.', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' }) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
-async function openExecution() { const details = container.querySelector<HTMLDetailsElement>('.goals-execution')!; expect(details.open).toBe(false); await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) }) }
+// Linked Sessions are read in Collaboration under "People and related sessions".
+function relationships() { const details = container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!; expect(details).not.toBeNull(); return details }
+function relatedLine() { const line = [...relationships().querySelectorAll<HTMLElement>('.goal-collaboration__line')].find(node => node.querySelector('strong')?.textContent === 'Related discussions'); expect(line).toBeDefined(); return line! }
 
 describe('Goal reading workspace', () => {
   it('keeps the default list beside the readable goal without mounting extra terminal views', async () => {
@@ -29,7 +31,11 @@ describe('Goal reading workspace', () => {
   })
   it('preserves a missing Session identity and shows recovery when execution is requested', async () => {
     useAppStore.setState({ sessions: [], selectedDemandId: 'demand:one' }); await act(async () => root.render(createElement(GlobalBoardSurface)))
-    await openExecution(); expect(container.querySelector('.goals-execution')?.textContent).toContain('Linked Sessions are not yet available')
+    // With no original work yet the relationships disclosure is open; the missing Session stays readable by its identity, with recovery.
+    expect(relationships().open).toBe(true)
+    const missing = relatedLine().querySelector<HTMLButtonElement>('.goal-collaboration__member')!
+    expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('Identity unavailable · reference retained'); expect(missing.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Choose related Goal sessions"]')?.disabled).toBe(false)
     expect(useAppStore.getState().demands['demand:one'].sessionIds).toEqual(['session-1'])
   })
   it('edits the title and body through the persisted owner instead of making a second entry', async () => {
@@ -53,17 +59,29 @@ describe('Goal reading workspace', () => {
   })
   it('keeps all properties reachable in one closed disclosure and avoids zero-Session filler', async () => {
     useAppStore.setState({ selectedDemandId: 'demand:one', sessions: [], demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: [], tags: ['design'], phaseIndex: 1 } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
+    // Status, priority and Project are the always-visible common row; everything else stays in one closed disclosure.
+    const common = container.querySelector<HTMLElement>('[aria-label="Common Goal properties"]')!
+    expect([...common.querySelectorAll<HTMLElement>('.selection-field')].map(node => node.getAttribute('aria-label'))).toEqual(['Goal work status', 'Goal priority', 'Goal project'])
     const properties = container.querySelector<HTMLDetailsElement>('.goals-properties')!; expect(properties.open).toBe(false); expect(properties.querySelector('summary')?.textContent).toBe('More properties')
-    expect(properties.querySelectorAll('select')).toHaveLength(5)
-    for (const label of ['Goal work status', 'Goal priority', 'Goal project', 'Goal assignee', 'Parent goal']) expect(properties.querySelector(`[aria-label="${label}"]`)).toBeTruthy()
+    expect(container.querySelectorAll('.goals-properties')).toHaveLength(1)
+    await act(async () => { properties.open = true; properties.dispatchEvent(new Event('toggle')) })
+    expect([...properties.querySelectorAll<HTMLElement>('.selection-field')].map(node => node.getAttribute('aria-label'))).toEqual(['Parent goal'])
     expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2); expect(properties.querySelector('input[type="number"]')).toBeTruthy()
-    expect(container.querySelector('.agent-topology-summary')).toBeNull(); expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.textContent).not.toContain('0 Sessions')
+    // Assignment is chosen in Collaboration, not as a property select.
+    expect(properties.querySelector('[aria-label="Goal assignee"]')).toBeNull(); expect(container.querySelector('[aria-label="Choose Goal assignees"]')).toBeTruthy()
+    // No zero-Session filler: with no linked Session there is no arrangement disclosure or topology.
+    expect(container.querySelector('.goals-topology')).toBeNull(); expect(container.querySelector('.agent-topology-summary')).toBeNull(); expect(container.textContent).not.toContain('0 Sessions')
   })
   it('opens each linked Session through the original Space navigation and discloses topology on demand', async () => {
-    const selectSession = vi.fn(); const sessions = [makeSession(), makeSession('session-2')]
-    useAppStore.setState({ selectedDemandId: 'demand:one', selectSession, sessions, demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: ['session-1', 'session-2'] } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
-    await openExecution(); const rows = [...container.querySelectorAll('.goals-execution__row')]; expect(rows).toHaveLength(2)
-    for (const row of rows) await act(async () => (row.querySelector('button') as HTMLButtonElement).click())
+    // Goal collaboration links Agent Sessions; these linked discussions are original Agents with exact Core identities.
+    const agent = (id: string) => ({ ...makeSession(id), kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: 2,
+      capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+      control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id + '-run' } } }) as SessionSnapshot
+    const selectSession = vi.fn(); const sessions = [agent('session-1'), agent('session-2')]
+    useAppStore.setState({ config: { ...config, executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } }, appearance: { terminalTheme: 'graphite' } } as AppConfig, selectedDemandId: 'demand:one', selectSession, sessions, demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: ['session-1', 'session-2'] } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
+    const rows = [...relatedLine().querySelectorAll<HTMLButtonElement>('.goal-collaboration__member')]; expect(rows).toHaveLength(2)
+    expect(rows.every(row => !row.disabled)).toBe(true)
+    for (const row of rows) await act(async () => row.click())
     expect(selectSession.mock.calls).toEqual([['session-1'], ['session-2']]); expect(useAppStore.getState().sessions).toEqual(sessions)
     const topology = container.querySelector<HTMLDetailsElement>('.goals-topology')!; expect(topology.open).toBe(false); expect(container.querySelector('.agent-topology-summary')).toBeNull()
     await act(async () => { topology.open = true; topology.dispatchEvent(new Event('toggle')) }); expect(container.querySelector('.agent-topology-summary')).toBeTruthy()

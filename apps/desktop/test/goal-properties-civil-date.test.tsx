@@ -22,9 +22,13 @@ it('keeps both local civil dates through the actual Goal properties transaction 
   useAppStore.setState({ demands: { [id]: record }, selectedDemandId: id, mainSurface: 'board', sessions: [] })
   const updates = () => host.bodies('demand.update').map(({ demandId, patch }) => [demandId, patch])
   await dom.render(<GlobalBoardSurface />)
+  // Planning dates live in the closed "More properties" disclosure, which mounts its fields only while open.
+  const properties = dom.container.querySelector<HTMLDetailsElement>('.goals-properties')!
+  expect(properties.open).toBe(false); expect(properties.querySelector('[aria-label="Goal planned start"]')).toBeNull()
+  await act(async () => { properties.open = true; properties.dispatchEvent(new Event('toggle')) })
   const edit = async (label: string, value: string) => {
     const field = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
-    expect(field.type).toBe('date')
+    expect(field).not.toBeNull(); expect(field.type).toBe('date')
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value)
       field.dispatchEvent(new Event('input', { bubbles: true }))
