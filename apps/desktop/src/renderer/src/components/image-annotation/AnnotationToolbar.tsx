@@ -20,17 +20,24 @@ export const ANNOTATION_TOOLS: Array<{ id: AnnotationTool; label: string; key: s
   { id: 'erase', label: 'Erase', key: 'X', icon: icon('action.erase') }
 ]
 const UndoIcon = icon('action.undo'), RedoIcon = icon('action.redo'), DeleteIcon = icon('action.remove')
+const TOOL_GROUPS: ReadonlyArray<{ label: string; tools: readonly AnnotationTool[] }> = [
+  { label: 'View and select', tools: ['select', 'pan'] },
+  { label: 'Draw', tools: ['pen', 'highlight', 'arrow', 'rect', 'ellipse'] },
+  { label: 'Annotate', tools: ['text', 'note'] },
+  { label: 'Process image', tools: ['crop', 'pixelate', 'cover', 'erase'] }
+]
 
 export function AnnotationToolbar({ tool, busy, undoable, redoable, selected, clearable, onTool, onUndo, onRedo, onDelete, onClear }: {
   tool: AnnotationTool; busy: boolean; undoable: boolean; redoable: boolean; selected: boolean; clearable: boolean
   onTool(tool: AnnotationTool): void; onUndo(): void; onRedo(): void; onDelete(): void; onClear(): void
 }) {
   return <RovingToolbar className="image-annotation-toolbar" aria-label="Screenshot markup tools">
-    <div className="image-annotation-toolbar__tools">{ANNOTATION_TOOLS.map(item => <RovingToolbarButton key={item.id} type="button"
+    <div className="image-annotation-toolbar__tools">{TOOL_GROUPS.map(group => <div key={group.label} className="image-annotation-toolbar__group" role="group" aria-label={group.label}>
+      {ANNOTATION_TOOLS.filter(item => group.tools.includes(item.id)).map(item => <RovingToolbarButton key={item.id} type="button"
       aria-label={item.label} title={item.label + ' (' + item.key + ')'} aria-keyshortcuts={item.key}
       aria-pressed={tool === item.id} className={tool === item.id ? 'selected' : ''} disabled={busy && item.id !== 'pan'} onClick={() => onTool(item.id)}>
       <item.icon size={16} />
-    </RovingToolbarButton>)}</div>
+    </RovingToolbarButton>)}</div>)}</div>
     <div className="image-annotation-toolbar__history">
       <RovingToolbarButton type="button" aria-label="Undo" title="Undo" disabled={busy || !undoable} onClick={onUndo}><UndoIcon size={15} /></RovingToolbarButton>
       <RovingToolbarButton type="button" aria-label="Redo" title="Redo" disabled={busy || !redoable} onClick={onRedo}><RedoIcon size={15} /></RovingToolbarButton>
