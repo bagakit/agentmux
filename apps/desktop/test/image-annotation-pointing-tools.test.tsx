@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
 import { CAPTURE_TOOLS } from '../src/renderer/src/components/image-annotation/CaptureToolbar'
-import { calloutBubble, type CalloutShape, type NoteShape, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import { BLUR_RADIUS_RANGE, calloutBubble, type CalloutShape, type NoteShape, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import { createEditableAnnotationDocument, encodeEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, tools, gestures and outputs are production code; only raster drawing is replaced.
@@ -31,8 +32,8 @@ function control<T extends HTMLElement>(scope: ParentNode, selector: string, nam
   const found = [...scope.querySelectorAll<T>(selector)].find(item => item.getAttribute('aria-label') === name || item.textContent?.trim() === name)
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
-async function mount(shapes: ScreenshotShape[] = []) {
-  const props = { image, busy: false, initialTool: 'pen' as const, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn() }
+async function mount(shapes: ScreenshotShape[] = [], source = image) {
+  const props = { image: source, busy: false, initialTool: 'pen' as const, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn() }
   await act(async () => root.render(<ImageAnnotationEditor key={Math.random()} {...props} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
   canvas.setPointerCapture = vi.fn()
@@ -136,6 +137,27 @@ describe('pointing-mark entry points in the mounted editor', () => {
     expect(range('Blur strength').value, 'the unselected control keeps the last chosen strength').toBe('30')
     await drag([200, 100], [260, 140])
     expect((await shapes()).at(-1), 'the next blur uses it').toMatchObject({ kind: 'blur', radius: 30 })
+  })
+
+  it('keeps a selected blur strength in image pixels within the model range when the fitted view is not one to one', async () => {
+    // An 800 × 600 image fitted into the 400 × 300 canvas: one screen pixel is two image pixels.
+    const large = { ...image, width: 800, height: 600 }
+    const blur: ScreenshotShape = { id: 'blur', kind: 'blur', color: '#111827', radius: 12, from: { x: 40, y: 40 }, to: { x: 160, y: 120 } }
+    const { pointer, click, shapes, range } = await mount([blur], large)
+    await click('Select')
+    await act(async () => { pointer('pointerdown', 50, 40); pointer('pointerup', 50, 40) }); await frame()
+    expect(range('Blur strength').value, 'the control shows the image-pixel radius at any zoom').toBe('12')
+    await act(async () => slide(range('Blur strength'), BLUR_RADIUS_RANGE.max)); await frame()
+    const edited = await shapes()
+    expect(edited[0], 'the strongest blur stays at the model maximum').toMatchObject({ kind: 'blur', radius: BLUR_RADIUS_RANGE.max })
+    await act(async () => slide(range('Blur strength'), BLUR_RADIUS_RANGE.min)); await frame()
+    const weakest = await shapes()
+    expect(weakest[0], 'the weakest blur stays at the model minimum').toMatchObject({ kind: 'blur', radius: BLUR_RADIUS_RANGE.min })
+    const limits = { maxDocumentBytes: 1024 * 1024, maxImageBytes: 1024, maxImageDimension: 1000, maxImagePixels: 1000000 }
+    const png = { width: 1, height: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }
+    for (const marks of [edited, weakest])
+      expect(() => encodeEditableAnnotationDocument(createEditableAnnotationDocument({ image: png, shapes: marks, crop: null, source: null }, limits), limits),
+        'the edited blur saves as an editable original').not.toThrow()
   })
 
   it('renumbers a gapped original to 1..n with one action and restores it with one Undo', async () => {
