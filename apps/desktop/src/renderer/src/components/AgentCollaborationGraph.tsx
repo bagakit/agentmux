@@ -105,7 +105,7 @@ function AgentMark({ data, label, tier, glyph, overview = false, identityProgres
   // preview. An open or keyboard reading stays; the face still under the pointer previews on rest.
   const swept = useRef(false), pointerEnter = preview.triggerEvents.onPointerEnter
   const triggerEvents = moving ? { ...preview.triggerEvents, onPointerEnter: () => { swept.current = true }, onPointerLeave: () => { swept.current = false; preview.triggerEvents.onPointerLeave() } } : preview.triggerEvents
-  useEffect(() => { if (!moving && swept.current) { swept.current = false; if (preview.anchor.current?.matches(':hover')) pointerEnter() } }, [moving])
+  useEffect(() => { if (!moving && swept.current) { swept.current = false; if (preview.anchor.current?.matches(':hover')) { data.onPreview(true); pointerEnter() } } }, [moving])
   const diameter = glyph.overviewRadius * 2
   return <button type="button" ref={preview.anchor} {...triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: diameter, height: diameter } : undefined}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${TIER_LABELS[tier as keyof typeof TIER_LABELS] ?? tier} · ${collaborationRecencyLabel(data.agent)}`}>
