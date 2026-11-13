@@ -6282,7 +6282,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const { operationId, ...report } = await api.spatial.openAgent({ ...input, operationId: requestId })
         return { operation: 'agent.open', requestId: operationId, ...report }
       }
-      return await executeSpatialControl({
+      // A local UI action keeps its original presentation. Public focus still
+      // navigates Work; creation, execution and placement share the same owner.
+      const localFocus = options?.localFocus
+      const localZoneId = localFocus ? get().surveyZoneSelection?.zoneId : undefined
+      let expectedNavigation = localFocus ? fileNavigationSelection(get()) : '', navigationChanged = false, selecting = false
+      const stopObserving = localFocus ? useAppStore.subscribe(state => {
+        if (!selecting && fileNavigationSelection(state) !== expectedNavigation) navigationChanged = true
+      }) : () => {}
+      const ownsLocalTarget = (address: AgentMuxSpaceAddress): boolean => Boolean(localFocus && !navigationChanged &&
+        get().mainSurface === localFocus.surface && get().surveyZoneSelection?.zoneId === localZoneId &&
+        address.zoneId === localZoneId && address.tabId === localFocus.reference.tabId &&
+        address.displayWorkspaceId === localFocus.reference.displayWorkspaceId && address.groupId === localFocus.reference.groupId)
+      try { return await executeSpatialControl({
         get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
         agentPresentation: () => readAgentPresentation(get()),
         motePresentation: (catalog, topics) => readMotePresentation(get(), catalog, topics),
@@ -6342,12 +6354,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const tab = get().tabs[address.tabId], layout = get().layouts[address.displayWorkspaceId]
           const group = layout?.groups.find(group => group.id === address.groupId && group.tabOrder.includes(address.tabId))
           if (!tab || !group) return
+          if (localFocus) {
+            if (!ownsLocalTarget(address)) return
+            selecting = true
+            try { get().setSurveyZoneSelection(surveySelectReference(get().surveyZoneSelection!, address)) }
+            finally { expectedNavigation = fileNavigationSelection(get()); selecting = false }
+            return
+          }
           void get().selectWorkspace(address.displayWorkspaceId)
           get().activateTab(address.displayWorkspaceId, address.groupId, address.tabId)
           get().focusRegion(address.displayWorkspaceId, address.tabId, address.regionId, 'keyboard', address.groupId)
         },
         isFocused: address => {
           const state = get(), tab = state.tabs[address.tabId], layout = state.layouts[address.displayWorkspaceId]
+          if (localFocus) return ownsLocalTarget(address) && state.surveyZoneSelection?.active?.tabId === address.tabId &&
+            state.surveyZoneSelection.active.regionId === address.regionId
           const group = layout?.groups.find(group => group.id === address.groupId)
           return Boolean(tab && state.mainSurface === 'workbench' && state.retainedSpatialFocus === null &&
             state.activeWorkspaceId === address.displayWorkspaceId && layout?.activeGroupId === address.groupId &&
@@ -6355,7 +6376,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         },
         notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)),
         closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId)
-      }, request, signal, options)
+      }, request, signal, options) } finally { stopObserving() }
     }
     const input = () => {
       const state = get()

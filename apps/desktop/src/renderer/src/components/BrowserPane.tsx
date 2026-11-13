@@ -334,12 +334,12 @@ function BrowserPaneContent({
   useEffect(() => {
     if (initialInputConfirmed) setAgentCreationNotice(current => current === agentCreationNotice ? null : current)
   }, [agentCreationNotice, initialInputConfirmed])
-  async function startBrowserAgent(target: { reference?: WorkbenchProjectionSelection | undefined } = primaryPresentation): Promise<void> {
+  async function startBrowserAgent(target: Pick<WorkbenchViewTarget, 'reference' | 'surface'> & { survey?: boolean | undefined } = primaryPresentation): Promise<void> {
     const reference = target.reference && { ...target.reference, regionId: tab.regionId }
     if (!reference) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: 'The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.' }); return }
     setCreatingAgent(true)
     setAgentCreationNotice(null)
-    try { const result = await createBrowserAgent(tab.browserId, reference); setAgentCreationNotice(result.kind === 'confirmed' ? null : result) }
+    try { const result = await createBrowserAgent(tab.browserId, reference, target.surface === 'survey' || target.survey ? 'survey' : undefined); setAgentCreationNotice(result.kind === 'confirmed' ? null : result) }
     catch (error) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: presentError(error) }) }
     finally { setCreatingAgent(false) }
   }

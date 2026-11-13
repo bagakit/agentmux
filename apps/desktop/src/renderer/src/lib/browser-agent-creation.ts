@@ -99,7 +99,7 @@ async function continueOriginal(requestId: string, report: AgentMuxSpaceMutation
     message: `The Agent has this Browser. Initial input is unconfirmed; inspect message ${intent.messageOperationId} in its queue. No input is repeated.` }
 }
 
-async function createOrInspect(browserId: string, source: WorkbenchProjectionSelection): Promise<BrowserAgentCreationResult> {
+async function createOrInspect(browserId: string, source: WorkbenchProjectionSelection, surface?: 'survey'): Promise<BrowserAgentCreationResult> {
   const state = useAppStore.getState(), tab = state.tabs[source.tabId], browser = tab?.regions[source.regionId]
   if (browser?.kind !== 'browser' || browser.browserId !== browserId) throw new Error('The exact Browser source is unavailable. Its page is kept.')
   if (browser.agentCreationRequestId) {
@@ -129,17 +129,18 @@ async function createOrInspect(browserId: string, source: WorkbenchProjectionSel
   const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'agent.open',
     content: { kind: 'new-agent', executorId: executor.id, executionWorkspaceId: workspace.id },
     destination: { ...source, split: 'right' }, focus: true }, undefined,
-  { purpose: 'browser-agent', browserAgent: intent, authorize: () => beforeHandoff(intent) })
+  { purpose: 'browser-agent', browserAgent: intent, authorize: () => beforeHandoff(intent),
+    ...(surface ? { localFocus: { surface, reference: source } } : {}) })
   if (result.operation !== 'agent.open') throw new Error(`Unexpected creation receipt. Inspect original request ${requestId}.`)
   if (!useAppStore.getState().spatialRequests[requestId]?.browserAgent) throw new Error(result.issues.map(issue => issue.message).join('\n') || `Creation was not admitted. Original request: ${requestId}.`)
   return continueOriginal(requestId, result)
 }
 
 /** A repeated activation joins the same call, even through another Browser presentation. */
-export function createBrowserAgent(browserId: string, source: WorkbenchProjectionSelection): Promise<BrowserAgentCreationResult> {
+export function createBrowserAgent(browserId: string, source: WorkbenchProjectionSelection, surface?: 'survey'): Promise<BrowserAgentCreationResult> {
   const pending = active.get(browserId)
   if (pending) return pending
-  const promise = createOrInspect(browserId, source).finally(() => { if (active.get(browserId) === promise) active.delete(browserId) })
+  const promise = createOrInspect(browserId, source, surface).finally(() => { if (active.get(browserId) === promise) active.delete(browserId) })
   active.set(browserId, promise)
   return promise
 }

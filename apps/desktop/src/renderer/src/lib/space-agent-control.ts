@@ -22,6 +22,7 @@ import { topicContentZoneId } from '@agentmux/host/topic-categories'
 import { agentSessionPresentationIndex } from './session-presentation'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
+import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 export type SpatialWorkbench = {
   /** Original Core owner input for public discovery, never a client fact store. */
@@ -57,7 +58,10 @@ export type SpatialControlPorts = {
   recordRemovedTab?(tabId: string): void
 }
 /** Local UI context, separate from the public spatial request and user prompt. */
-export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; browserAgent?: SpatialRequestBinding['browserAgent']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
+export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; browserAgent?: SpatialRequestBinding['browserAgent']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target';
+  /** Local UI activation, independent of public cross-context spatial focus. */
+  localFocus?: { surface: 'survey'; reference: WorkbenchProjectionSelection }
+}
 
 function failure(code: string, message: string, candidates?: AgentMuxSpaceSelector[]): never {
   throw new SpatialFailure({ step: 'target', code, message,
