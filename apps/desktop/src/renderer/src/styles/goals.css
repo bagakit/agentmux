@@ -236,17 +236,12 @@
 .goals-muted { margin: 0 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-prose); line-height: 1.6; }
 .goals-service { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); padding: var(--sp-5) 0; margin: 0; color: var(--amber); font-size: var(--fs-body); line-height: 1.6; }
 .goals-service > span { color: var(--text-3); overflow-wrap: anywhere; }
-.goals-properties, .goals-execution, .goals-activity { border-top: 1px solid var(--line-soft); padding: var(--sp-5) 0; }
+.goals-properties, .goals-activity { border-top: 1px solid var(--line-soft); padding: var(--sp-5) 0; }
 .goals-document details > summary { display: flex; align-items: center; gap: var(--sp-4); color: var(--text-3); font-size: var(--fs-body); cursor: pointer; list-style: none; }
 .goals-document details > summary::before { content: ''; width: 12px; height: 12px; flex: none; background: currentColor; mask: var(--native-disclosure-mask) center / contain no-repeat; }
 .goals-document details[open] > summary::before { transform: rotate(90deg); }
 .goals-document details > summary > span { margin-left: auto; font-size: var(--fs-meta); }
 .goals-properties__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-6); margin-top: var(--sp-5); }
-.goals-properties__id { grid-column: 1 / -1; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.goals-execution__row { display: flex; align-items: center; gap: var(--sp-4); padding-top: var(--sp-4); font-size: var(--fs-body); }
-.goals-execution__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.goals-execution__link { display: flex; align-items: center; gap: var(--sp-4); margin-top: var(--sp-4); }
-.goals-execution__link select { flex: 1; max-width: none; }
 .goals-topology { margin-top: var(--sp-5); }
 .goals-activity__row { display: flex; gap: var(--sp-5); margin-top: var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
 .goals-activity__row time { flex: none; color: var(--text-3); }
@@ -269,7 +264,6 @@
 @container (width < 480px) {
   .goals-toolbar { flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); }
   .goals-toolbar .goals-search { flex-basis: 100%; }
-  .goals-toolbar .goals-create { margin-left: auto; }
   .goals-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: var(--sp-4); }
   .goals-row__facts { flex-wrap: wrap; }
 }
