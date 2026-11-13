@@ -8,7 +8,7 @@ palette 与 TUI 自身表现层的边界。
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 Core 持有的持久空间实体，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
+本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 Core 持有的持久空间实体，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留见[对象操作指南](../guides/agentmux-cli-object-control.md)。
 
 ctxmux 独立 Runtime 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。当前随包身份唯一取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)；不能从该身份推断正在服务的 daemon 已被更新。
 
@@ -236,9 +236,9 @@ Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建
 ### 4.1 palette 结构
 
 终端外观由一份完整的 `ITheme` 决定，SSOT 在 `packages/client-ui/src/theme/terminal-palettes.ts`。
-`TerminalPalette` 类型要求 22 个键：`background`、`foreground`、
-`cursor`、`cursorAccent`、`selection*`，以及 16 个 ANSI 角色（`black`…`brightWhite`）。
-`apps/desktop/test/terminal-theme.test.ts` 断言每个 catalog palette 恰好 22 个键，杜绝残缺 palette。
+`TerminalPalette` 类型要求 23 个键：`background`、`foreground`、
+`cursor`、`cursorAccent`、`selection*`、16 个 ANSI 角色（`black`…`brightWhite`），以及 240 色 `extendedAnsi`（索引 16–255）。
+`apps/desktop/test/terminal-theme.test.ts` 断言每个 catalog palette 恰好 23 个键且 `extendedAnsi` 恰好 240 项，杜绝残缺 palette。
 
 当前 Graphite 默认值：
 
@@ -295,11 +295,11 @@ Core publishes the ready Agent Session」——先发一个**跨两个 chunk**�
 
 对 `session.kind === 'terminal'`，由 Renderer 的 xterm parser handler 应答
 （`TerminalView.tsx`，`respondFromRenderer: session.kind === 'terminal'`）。
-`installTerminalColorQueryReplyHandlers`（`terminal-capability-replies.ts`）为 slot 10/11
+`installTerminalOscHandlers`（`terminal-capability-replies.ts`）为 slot 10/11
 注册 OSC handler：
 
 - 仅当 `respondFromRenderer && !isReplaying()` 才回复；`isReplaying` 绑定到
-  `() => !readyForLiveOutput`（`TerminalView.tsx`）。
+  `() => replayingContinuation || historicalOutputDepth > 0`（`TerminalView.tsx`）。
 - **无论是否回复都 `return true`**，即 xterm **消费**该 OSC 但在回放期不作答。
 
 意义（`terminal-capability-replies.ts` 注释）：Main 已在无 Renderer 时应答 live 查询；
@@ -310,8 +310,8 @@ xterm 消费 replay 里的旧查询但不再次作答，避免重开 Tab 后把*
 `TerminalView` 用 `canControlRun = session.processState === 'running'`
 （`TerminalView.tsx`）作为总闸：
 
-- 键盘输入仅在 `canControlRun && readyForLiveOutput` 时写回。
-- OSC 回复的 `sendInput` 同样受 `canControlRun && readyForLiveOutput` 约束。
+- 键盘输入仅在 `canControlRun` 时写回。
+- OSC 回复的 `sendInput` 同样受 `canControlRun` 约束。
 - 仅 `canControlRun` 时才启动 viewport 的 live 尺寸同步。
 
 因此已退出的历史 Run 在 UI 上是只读回放，不会向已死进程写入按键、尺寸或 OSC 回复。
@@ -374,7 +374,7 @@ PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间
 | 故障/风险 | 防回归测试 | 断言要点 |
 | --- | --- | --- |
 | Graphite 工作面或 cursor accent 偏离稳定纯黑 | `apps/desktop/test/terminal-theme.test.ts` | Graphite `background === cursorAccent === '#000000'`；`black === '#1d1f21'` 且与工作面不同 |
-| palette 残缺导致 TUI 无法分层 | `apps/desktop/test/terminal-theme.test.ts` | 每个 catalog palette 恰好 22 键 |
+| palette 残缺导致 TUI 无法分层 | `apps/desktop/test/terminal-theme.test.ts` | 每个 catalog palette 恰好 23 键且 `extendedAnsi` 恰好 240 项 |
 | OSC 抢答争用 Input cursor / Session 未就绪即回复 | `apps/desktop/test/runtime-controller.test.ts` | ready 前 `writeAgent` 未调用；ready 后写回 shared Graphite 前景/背景 |
 | 跨 chunk 的 OSC 查询被漏答或重复答 | `apps/desktop/test/terminal-osc-color-query.test.ts` | 分片查询保留 `remainder`，合并后只答一次 |
 | replay 旧查询被再次注入当前进程 | `terminal-capability-replies.ts`（`!isReplaying()` 门控）；`terminal-osc-color-query.test.ts` | 回放期不作答；malformed/颜色变更查询被忽略 |
