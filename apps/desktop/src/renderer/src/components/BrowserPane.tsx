@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserProfileChip } from './BrowserProfileChip'
+import { BrowserAgentCreationOptionsDialog } from './BrowserAgentCreationOptions'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import { BrowserSourceNavigation } from './BrowserSourceNavigation'
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
@@ -15,6 +16,7 @@ import {
   type BrowserScreenshotCapture,
   type BrowserElementSelection,
   type BrowserSnapshot,
+  type AgentSessionControl,
   type BrowserReplayPlan,
   type BrowserScriptRunReport
 } from '../../../shared/contracts'
@@ -33,7 +35,7 @@ import {
 import { composeScreenshot } from './image-annotation/compose'
 import { formatScreenshotContext } from './browser-screenshot/context'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview, type BrowserAgentLocationChoice } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
 import { BrowserRecoverySurface } from './BrowserRecoverySurface'
 import { BrowserCertificateSurface } from './BrowserCertificateSurface'
@@ -73,12 +75,19 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
+import { browserAgentHandoffInput, browserAgentReturnInput, browserAgentLocations, browserTabAgentSessions, sameBrowserAgent, type BrowserAgentIdentity } from '../lib/browser-agent-handoff'
+import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
 import { createBrowserAgent, type BrowserAgentCreationResult } from '../lib/browser-agent-creation'
+import { browserAgentCreationContext, browserAgentCreationDraftKey, type BrowserAgentCreationOptions } from '../lib/browser-agent-creation'
+import { useLauncherState } from '../lib/launcher-state'
+import { useShallow } from 'zustand/react/shallow'
+import { browserProfiles, useBrowserProfiles } from '../lib/browser-profiles'
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -283,7 +292,30 @@ function BrowserPaneContent({
   const windowPresentation = presentations.find(presentation => presentation.target === windowTarget && presentation.visible && presentation.active)
   const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
-  const discussion = useBrowserContextualComposer(tab.browserId, tab.control?.agent, tab.activity?.operation ?? null, visible, tab.navigationId)
+  const discussionOrigin = useRef<string | null>(null)
+  const [controlMenuRequest, requestControlMenu] = useState<{ key: string; count: number } | null>(null)
+  const discussion = useBrowserContextualComposer(tab.browserId, tab.control?.agent, tab.activity?.operation ?? null, visible, tab.navigationId,
+    () => requestControlMenu(value => ({ key: discussionOrigin.current ?? tab.browserId, count: (value?.count ?? 0) + 1 })))
+  const preferredExecutor = useLauncherState(state => state.executors[tab.workspaceId])
+  const creationState = useAppStore(useShallow(state => ({ config: state.config, executorDetections: state.executorDetections, hostExecutorInventories: state.hostExecutorInventories })))
+  const creationContext = useMemo(() => browserAgentCreationContext(creationState, tab.workspaceId, preferredExecutor), [creationState, tab.workspaceId, preferredExecutor])
+  const creationHost = creationState.config?.hosts.find(host => host.id === creationContext.workspace?.hostId)
+  const creationDescription = [creationContext.executors.find(executor => executor.id === creationContext.defaultExecutorId)?.label ?? 'Choose an Executor',
+    creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed', 'Right'].join(' · ')
+  const profileFacts = useBrowserProfiles()
+  const profile = profileFacts.profiles?.find(item => item.id === tab.profileId)
+  function openBrowserSettings(sectionId: 'browser' | 'browser-profiles') {
+    void executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus',
+      target: { kind: 'settings', sectionId }, inputPolicy: 'preserve' }).catch(reportError)
+  }
+  const automationNotice = creationState.config?.browser.agentAutomation !== true ? {
+    message: creationState.config ? 'Agent Browser automation is off in Settings. Giving control does not turn it on.' : 'Browser automation settings are unconfirmed. Existing control is kept.',
+    actionLabel: 'Browser settings', action: () => openBrowserSettings('browser')
+  } : tab.profileId !== null && tab.mode === 'normal' && (profile?.agentAccess === false || !profile || profileFacts.error) ? {
+    message: profile?.agentAccess === false ? 'This Profile does not allow Agent access. Giving control does not change its permission.' : 'This Profile’s Agent access is unconfirmed. Check its saved access settings.',
+    actionLabel: 'Profile access settings', action: () => openBrowserSettings('browser-profiles'),
+    ...(!profile || profileFacts.error ? { retry: () => void browserProfiles.refresh() } : {})
+  } : undefined
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const agentAppearance = useAppStore(state => state.config?.browser.agentControl)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
@@ -323,7 +355,11 @@ function BrowserPaneContent({
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [creatingAgent, setCreatingAgent] = useState(false)
+  const [handingOffAgent, setHandingOffAgent] = useState(false)
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null)
   const [agentCreationNotice, setAgentCreationNotice] = useState<Exclude<BrowserAgentCreationResult, { kind: 'confirmed' }> | null>(null)
+  const [creationOptions, setCreationOptions] = useState<{ target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'>;
+    context: ReturnType<typeof browserAgentCreationContext>; hostLabel: string; document: Document; expectedPage: NonNullable<BrowserAgentCreationOptions['expectedPage']> } | null>(null)
   const browserAgentIntent = useAppStore(state => tab.agentCreationRequestId ? state.spatialRequests[tab.agentCreationRequestId]?.browserAgent : undefined)
   const initialInputQueue = useAppStore(state => agentCreationNotice?.kind === 'input-unconfirmed' ? state.agentSteerQueues[agentCreationNotice.agentSessionId] : undefined)
   const initialInputConfirmed = useMemo(() => {
@@ -336,14 +372,106 @@ function BrowserPaneContent({
   useEffect(() => {
     if (initialInputConfirmed) setAgentCreationNotice(current => current === agentCreationNotice ? null : current)
   }, [agentCreationNotice, initialInputConfirmed])
-  async function startBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'> = primaryPresentation): Promise<void> {
+  function configureBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'>, ownerDocument: Document) {
+    setCreationOptions({ target: { ...target, ...(target.reference ? { reference: { ...target.reference } } : {}) }, context: creationContext,
+      hostLabel: creationHost?.label ?? creationContext.workspace?.hostId ?? 'Host unconfirmed', document: ownerDocument,
+      expectedPage: { navigationId: tab.navigationId, controlRevision: tab.control?.revision ?? -1 } })
+  }
+  async function startBrowserAgent(target: Pick<WorkbenchPresentation, 'reference' | 'surface' | 'survey'> = primaryPresentation, options?: BrowserAgentCreationOptions): Promise<string | null> {
     const reference = target.reference && { ...target.reference, regionId: tab.regionId }
-    if (!reference) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: 'The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.' }); return }
+    if (!reference) { const message = 'The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.'; setAgentCreationNotice({ kind: 'setup-unconfirmed', message }); return message }
     setCreatingAgent(true)
     setAgentCreationNotice(null)
-    try { const result = await createBrowserAgent(tab.browserId, reference, target.surface === 'survey' || target.survey ? 'survey' : undefined); setAgentCreationNotice(result.kind === 'confirmed' ? null : result) }
-    catch (error) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: presentError(error) }) }
+    const hadOriginalRequest = useAppStore.getState().tabs[reference.tabId]?.regions[reference.regionId]
+    const inspectingOriginalRequest = hadOriginalRequest?.kind === 'browser' && Boolean(hadOriginalRequest.agentCreationRequestId)
+    try { const result = await createBrowserAgent(tab.browserId, reference, target.surface === 'survey' || target.survey ? 'survey' : undefined, options); setAgentCreationNotice(result.kind === 'confirmed' ? null : result)
+      if (!inspectingOriginalRequest && options?.task && result.kind !== 'setup-unconfirmed') useLauncherState.getState().clearAgentInputsIfUnchanged(browserAgentCreationDraftKey(tab.browserId), { prompt: options.task })
+      return null
+    }
+    catch (error) { const message = presentError(error); setAgentCreationNotice({ kind: 'setup-unconfirmed', message }); return message }
     finally { setCreatingAgent(false) }
+  }
+  function originalHandoffBrowser(target: Pick<WorkbenchPresentation, 'reference'>) {
+    const reference = target.reference
+    const surface = reference ? useAppStore.getState().tabs[reference.tabId]?.regions[tab.regionId] : undefined
+    if (surface?.kind !== 'browser' || surface.browserId !== tab.browserId) {
+      throw new Error('The original Browser display is unconfirmed. Its page and Agents are kept; select this same display and choose again.')
+    }
+    return surface
+  }
+  async function handoffBrowser(target: Pick<WorkbenchPresentation, 'reference'>, recipient?: AgentSessionControl): Promise<void> {
+    if (handingOffAgent) return
+    setHandingOffAgent(true); setHandoffNotice(null)
+    try {
+      const current = originalHandoffBrowser(target)
+      const input = recipient ? browserAgentHandoffInput(tab, current, recipient) : browserAgentReturnInput(tab, current)
+      if (recipient) {
+        const candidates = browserTabAgentSessions(useAppStore.getState().tabs[target.reference!.tabId], useAppStore.getState().sessions)
+        if (!candidates.some(candidate => sameBrowserAgent(candidate.control, recipient) && candidate.control.run.runId === recipient.run.runId)) {
+          throw new Error('The selected Agent or its Run changed. The original page and Agents are kept; choose its current identity again.')
+        }
+      }
+      const snapshot = await api.browser.returnControl(tab.browserId, input)
+      if (snapshot.id !== tab.browserId || snapshot.navigationId !== tab.navigationId || snapshot.control?.owner !== 'agent' ||
+        !sameBrowserAgent(snapshot.control.agent, recipient ?? tab.control?.agent)) {
+        throw new Error('Browser handoff is unconfirmed. Keep the original page and inspect its current control before another handoff.')
+      }
+      applyBrowserEvent({ type: 'updated', browser: snapshot }, tab.navigationId)
+    } catch (error) { setHandoffNotice(presentError(error)) }
+    finally { setHandingOffAgent(false) }
+  }
+  function currentAgentLocations(agent: BrowserAgentIdentity) {
+    const state = useAppStore.getState()
+    return browserAgentLocations(spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), agent)
+  }
+  function openLinkedAgentWorkface(source: Pick<WorkbenchPresentation, 'reference'>): readonly BrowserAgentLocationChoice[] {
+    const agent = tab.control?.agent
+    if (!agent) return []
+    const locations = currentAgentLocations(agent), near = locations.filter(location => location.tabId === source.reference?.tabId)
+    const choices = near.length === 1 ? near : locations
+    const open = (location: WorkbenchProjectionSelection) => {
+      if (!currentAgentLocations(agent).some(current => sameWorkbenchProjectionSelection(current, location))) {
+        setHandoffNotice('The Agent workface moved. Its original identity is kept; open the Agent menu and choose its current display.'); return
+      }
+      void executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus',
+        target: { kind: 'space', regionId: location.regionId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId },
+        expectedAgentSessionId: agent.agentSessionId, inputPolicy: 'preserve' }).then(result => {
+        if (result.operation === 'focus' && result.navigation.state === 'rejected') setHandoffNotice(result.issues.map(issue => issue.message).join(' '))
+      }).catch(error => setHandoffNotice(presentError(error)))
+    }
+    if (choices.length === 1) { open(choices[0]!); return [] }
+    if (!choices.length) {
+      setHandoffNotice('No current workface location is confirmed for this linked Agent. The Session and page are kept; use View Agent details to inspect its original Host and Session.'); return []
+    }
+    const state = useAppStore.getState()
+    return choices.map(location => {
+      const workface = state.tabs[location.tabId]
+      const label = workface ? workbenchTabDisplayName(workface, state.sessions, state.agentNames, state.timelines, state.sessionNameMetadata) : location.tabId
+      const workspace = state.config?.workspaces.find(item => item.id === location.displayWorkspaceId)
+      const groupIndex = state.layouts[location.displayWorkspaceId]?.groups.findIndex(group => group.id === location.groupId) ?? -1
+      return { key: JSON.stringify(location), label: `${label} · ${workspace?.name ?? location.displayWorkspaceId} · ${groupIndex >= 0 ? `Group ${groupIndex + 1}` : location.groupId}`, open: () => open(location) }
+    })
+  }
+  function viewLinkedAgent() {
+    const agent = tab.control?.agent
+    if (!agent) return
+    void executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus',
+      target: { kind: 'focus-agent', ...agent }, inputPolicy: 'preserve' }).then(result => {
+      if (result.operation === 'focus' && result.navigation.state === 'rejected') setHandoffNotice(result.issues.map(issue => issue.message).join(' '))
+    }).catch(error => setHandoffNotice(presentError(error)))
+  }
+  async function refreshAgentAssociation(target: Pick<WorkbenchPresentation, 'reference'>) {
+    try {
+      const observed = originalHandoffBrowser(target), result = await api.browser.listTargets(tab.workspaceId)
+      const fact = result.targets.find(candidate => candidate.id === tab.browserId), current = originalHandoffBrowser(target)
+      if (!fact?.control || fact.navigationId !== observed.navigationId || current.navigationId !== observed.navigationId ||
+        fact.control.revision < (current.control?.revision ?? 0)) {
+        setHandoffNotice('The original Browser association is still unconfirmed. The page, drafts and healthy Agents are kept; check its original connection again.'); return
+      }
+      applyBrowserEvent({ type: 'updated', browser: { ...current, id: current.browserId, control: fact.control } }, observed.navigationId)
+      setHandoffNotice(fact.control.agent === undefined
+        ? 'The Browser owner still cannot confirm its Agent association. The original relationship, page and drafts are kept; check its original Core connection.' : null)
+    } catch (error) { setHandoffNotice(`Agent association check failed. The original page and relationship are kept. ${presentError(error)}`) }
   }
   const [menuOpen, setMenuOpen] = useState(false)
   const [capsuleToolbarHost, setCapsuleToolbarHost] = useState<HTMLSpanElement | null>(null)
@@ -1276,18 +1404,28 @@ function BrowserPaneContent({
           activity={browserActivity}
           control={tab.control}
           browserId={tab.browserId}
+          tabId={(presentation?.target ?? primaryPresentation).reference?.tabId}
           {...(tab.taskAssets ? { taskAssets: tab.taskAssets } : {})}
           onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline(key) }}
           onTakeControl={() => void takeBrowserControl()}
           onStop={() => void stopBrowserOperation()}
-          onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
+          onReturnControl={() => void handoffBrowser(presentation?.target ?? primaryPresentation)}
+          onGiveControl={recipient => void handoffBrowser(presentation?.target ?? primaryPresentation, recipient)}
+          handingOffAgent={handingOffAgent}
+          onOpenAgent={() => openLinkedAgentWorkface(presentation?.target ?? primaryPresentation)}
+          onViewAgent={viewLinkedAgent}
+          onRefreshControl={() => void refreshAgentAssociation(presentation?.target ?? primaryPresentation)}
           onCreateAgent={() => void startBrowserAgent(presentation?.target ?? primaryPresentation)}
+          onConfigureAgent={() => configureBrowserAgent(presentation?.target ?? primaryPresentation, traceAnchors.current.get(key)?.ownerDocument ?? stageRef.current?.ownerDocument ?? document)}
+          creationDescription={creationDescription}
+          controlMenuRequest={controlMenuRequest?.key === key ? controlMenuRequest.count : 0}
+          automationNotice={automationNotice}
           creatingAgent={creatingAgent}
           onOpenTimeline={() => openOperationTimeline(key)}
           onOpenChange={setMenuOpen}
         />
         <button type="button" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
-          title="Send an opinion to the original Agent" onClick={event => discussion.open(event.currentTarget, undefined, traceAnchors.current.get(key))}>{discussion.button}</button>
+          title="Send an opinion to the original Agent" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget, undefined, traceAnchors.current.get(key)) }}>{discussion.button}</button>
         {toolbar?.selectElement ? (
           <button
             type="button"
@@ -1455,6 +1593,9 @@ function BrowserPaneContent({
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
+      {handoffNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Browser Agent handoff needs attention',
+        mode: handoffNotice, restore: 'Inspect the same page and Agent before choosing again. No task was sent or replayed.' } }}
+        actions={<button type="button" className="small-button" onClick={() => setHandoffNotice(null)}>Dismiss</button>} /> : null}
       {(agentCreationNotice || browserAgentIntent && !browserAgentIntent.inputStarted && !creatingAgent) ? <ServiceWindowNotice notice={{
         kind: 'indeterminate', notice: {
           step: 'Browser Agent setup needs attention',
@@ -1608,7 +1749,7 @@ function BrowserPaneContent({
               }).catch(reportError)
             }}
           /> : null}
-          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key))}>Comment on step {timelineSelectedStep.sequence}</button> : null}
+          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment on step {timelineSelectedStep.sequence}</button> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
           {replayPlan ? (
@@ -1634,6 +1775,10 @@ function BrowserPaneContent({
   return <>
     {renderPane(primary)}
     {discussion.dialog}
+    {creationOptions ? <BrowserAgentCreationOptionsDialog browserId={tab.browserId} context={creationOptions.context} hostLabel={creationOptions.hostLabel}
+      ownerDocument={creationOptions.document} onClose={() => setCreationOptions(null)} onCreate={options => startBrowserAgent(creationOptions.target,
+        { ...options, expectedPage: creationOptions.expectedPage, ...(creationOptions.context.workspace ? { expectedExecution: {
+          hostId: creationOptions.context.workspace.hostId, path: creationOptions.context.workspace.path } } : {}) })} /> : null}
     {renderPresentationFrame ? presentations.filter(presentation => presentation !== primary).map(presentation =>
       <StableWorkbenchView key={presentation.occurrence.presentationId} kind="region"
         homeId={`${presentation.stageHostId}:parked`} targetId={presentation.stageHostId}

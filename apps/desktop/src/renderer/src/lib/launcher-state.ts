@@ -6,6 +6,7 @@ import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherProviderOpti
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { desktopUserFragments } from './desktop-user-state'
+import type { SplitDirection } from '@agentmux/layout'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
@@ -18,6 +19,8 @@ export type LauncherDraft = { browser: string; note: string; noteCreation?: Note
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
+  /** Browser-owned unsent creation options share this existing utility-draft persistence owner. */
+  browserAgent?: { executorId?: string; split?: SplitDirection; hostId?: string }
   /** A Mote message sent while its Main was read. It stays on this device until delivered; a reopened view returns it to the prompt. */
   heldPrompt?: { operationId: string; prompt: string; holder: string } | undefined }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
@@ -30,6 +33,7 @@ type LauncherState = {
   moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
+  setBrowserAgentDraft(launcherId: string, patch: { prompt?: string; executorId?: string; split?: SplitDirection; hostId?: string }): boolean
   /** Move the prompt into a held Mote message in one saved write. */
   holdPrompt(launcherId: string, operationId: string, holder: string): boolean
   /** End this exact held message: a delivered one is dropped; an undelivered one returns before any newer typing. */
@@ -89,6 +93,14 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   },
   setDraft(launcherId, field, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
+    catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  setBrowserAgentDraft(launcherId, { prompt, ...options }) {
+    try { set(state => {
+      const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, ...(prompt === undefined ? {} : { prompt }),
+        browserAgent: { ...draft.browserAgent, ...options } } } }
+    }); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
   holdPrompt(launcherId, operationId, holder) {

@@ -30,7 +30,7 @@ export function browserOpinionRecipient(agent: AgentMuxBrowserControl['agent'], 
 }
 
 /** This draft stays with the Browser owner across page updates and presentation moves. */
-export function useBrowserContextualComposer(browserId: string, agent: AgentMuxBrowserControl['agent'], operation: BrowserOperation | null, visible: boolean, navigationId?: string) {
+export function useBrowserContextualComposer(browserId: string, agent: AgentMuxBrowserControl['agent'], operation: BrowserOperation | null, visible: boolean, navigationId?: string, onInspectControl?: () => void) {
   const recipient = useAppStore(state => browserOpinionRecipient(agent, state.sessions))
   const preferences = useAppStore(state => state.config?.browser.agentControl)
   const saved = useRef(useAppStore.getState().browserOpinionDrafts[browserId])
@@ -176,6 +176,8 @@ export function useBrowserContextualComposer(browserId: string, agent: AgentMuxB
         <details><summary>Page context</summary><p>{source.page.url}</p><p>{source.activity ? `Observed at step ${source.activity.stepSequence ?? 'unknown'} · ${source.activity.phase}` : 'No operation step was observed.'}</p><p>This page information is attached as context.</p></details>
       </div> : original ? <p className="browser-contextual-composer__notice" role="status">{original.sceneError ? `Page context unavailable: ${original.sceneError}. You can send text only.` : 'Reading page context… Text-only sending remains available.'}</p> : null}
       {changed ? <p className="browser-contextual-composer__notice">The Browser has moved on. This draft still addresses the original Agent and captured page.</p> : null}
+      {!original && !recipient ? <p className="browser-contextual-composer__notice">{agent === null ? 'Choose or create a collaborator before sending. Your message stays here.' : 'The linked Agent is not confirmed. Check the original association; your message stays here.'}
+        {onInspectControl ? <button type="button" className="small-button" onClick={() => { close(); onInspectControl() }}>View Agent controls</button> : null}</p> : null}
       <ComposerTextarea ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void send() } }} />
       {selection.controls}

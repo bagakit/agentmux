@@ -8,6 +8,17 @@
 .browser-operation-status__trigger--presence { width: auto; gap: 7px; padding: 0 6px; background: var(--surface-2); }
 .browser-operation-status__trigger:disabled { opacity: .45; cursor: default; }
 .browser-operation-status__cue { max-width: 9ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 500; }
+.browser-operation-status__agent { max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: 600; }
+.browser-agent-choice > span { min-width: 0; display: grid; gap: 2px; }
+.browser-agent-choice strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.browser-agent-choice small { color: var(--text-3); font-size: 10px; }
+@container browser-pane (max-width: 620px) { .browser-operation-status__agent { display: none; } }
+.browser-agent-create-options { --dialog-width: 460px; }
+.browser-agent-create-options select { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
+.browser-agent-create-options__execution { display: grid; gap: var(--sp-2); margin: var(--sp-4) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+.browser-agent-create-options__execution strong { color: var(--text-2); }
+.browser-agent-create-options__execution code { overflow-wrap: anywhere; font: var(--fs-micro) var(--font-mono); }
+.browser-agent-create-options__optional { color: var(--text-3); font-size: var(--fs-micro); }
 .browser-operation-status[data-phase="running"], .browser-operation-status[data-phase="preparing"] { color: var(--green-2); }
 .browser-operation-status[data-phase="completed"] { color: var(--success); }
 .browser-operation-status[data-phase="human"] { color: var(--text-2); }
@@ -15,6 +26,7 @@
 .browser-operation-status[data-phase="failed"] { color: var(--red-text); }
 .browser-operation-status:not([data-phase="idle"]) .browser-operation-status__trigger { color: inherit; }
 .browser-operation-menu { max-width: min(280px, calc(100vw - 16px)); }
+.browser-operation-menu .browser-menu__label { font-weight: 400; letter-spacing: normal; text-transform: none; line-height: 1.45; overflow-wrap: anywhere; }
 .browser-operation-menu__identity { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
 .browser-operation-menu__identity strong { color: var(--text-2); font-weight: 650; }
 .browser-operation-menu__identity small { font-size: inherit; overflow-wrap: anywhere; }
