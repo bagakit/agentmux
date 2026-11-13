@@ -1,4 +1,5 @@
 .conversation-capsule {
+  --capsule-page-height: clamp(180px, 40vh, 320px);
   container: capsule-card / inline-size;
   min-width: 0;
   margin: var(--sp-3) 0;
@@ -21,8 +22,7 @@
 .conversation-capsule__identity > svg { flex: none; color: var(--text-2); }
 .conversation-capsule__identity > strong { min-width: 0; font-size: var(--fs-body); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .conversation-capsule__mode { display: block; margin-top: var(--sp-2); color: var(--text-3); }
-.conversation-capsule__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; }
-.conversation-capsule__actions { gap: 2px; }
+.conversation-capsule__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-left: auto; }
 .conversation-capsule__waiting { height: 28px; display: inline-flex; align-items: center; gap: 4px; margin-right: var(--sp-1); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm);
   background: var(--green-bg); color: var(--green-text); font: 600 var(--fs-micro) var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms ease; }
 .conversation-capsule__waiting:hover { background: var(--green-bg-hover); }
@@ -34,15 +34,14 @@
 .conversation-capsule__tool[aria-pressed='true'] { background: var(--surface-2); color: var(--text); }
 .conversation-capsule__tool:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .conversation-capsule__tool { transition: none; } }
-.conversation-capsule { --capsule-page-height: clamp(180px, 40vh, 320px); }
 .conversation-capsule--expanded { --capsule-page-height: clamp(300px, 65vh, 700px); }
 .conversation-capsule .browser-presentation { height: var(--capsule-page-height); min-height: 0; display: flex; flex-direction: column; position: relative; }
 .conversation-capsule .browser-stage { min-height: 0; flex: 1; position: relative; overflow: hidden; }
 /* The page lays out to the whole page area, so the preview notice floats on it instead of taking a row. */
-.conversation-capsule .browser-presentation[data-notice='overlay'] > .browser-presentation-notice { position: absolute; z-index: 1; inset: var(--sp-2) var(--sp-2) auto; width: fit-content; max-width: calc(100% - 2 * var(--sp-2));
+.conversation-capsule .browser-presentation > .browser-presentation-notice { position: absolute; z-index: 1; inset: var(--sp-2) var(--sp-2) auto; width: fit-content; max-width: calc(100% - 2 * var(--sp-2));
   margin-left: auto; padding: 0 var(--sp-1) 0 var(--sp-2); border-radius: var(--radius-sm); border: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--surface-1) 88%, transparent); backdrop-filter: blur(8px); box-shadow: 0 2px 6px rgb(0 0 0 / 14%); }
-.conversation-capsule .browser-presentation[data-notice='overlay'] > .browser-presentation-notice:empty { display: none; }
+.conversation-capsule .browser-presentation > .browser-presentation-notice:empty { display: none; }
 .conversation-capsule__notice { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); flex-wrap: wrap; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-2); }
 .conversation-capsule__notice > span { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
 .conversation-capsule__notice > .small-button { padding: var(--sp-1) var(--sp-2); background: transparent; box-shadow: none; }

@@ -195,13 +195,11 @@ export function useBrowserPresentationCapture(browserId: string) {
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
 /** A presentation owns geometry/lease/gesture only; page and Browser UI state stay in BrowserPane. */
-/** notice: 'row' gives the preview notice its own row above the page; 'overlay' floats it on the page area so a
- * page that lays out to that area (a layout host) gets the whole area from its first geometry. */
-export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, notice: noticePlacement = 'row', children }: {
+export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, children }: {
   browserId: string; navigationId: string; presentation: BrowserStagePresentation; inputSelected: boolean; blocked: boolean
   control?: AgentMuxBrowserControl | undefined; preferences?: BrowserAgentControlPreferences | undefined
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
-  onPresentationRemoved?: (() => void) | undefined; notice?: 'row' | 'overlay'
+  onPresentationRemoved?: (() => void) | undefined
 }) {
   const removed = useRef(onPresentationRemoved)
   removed.current = onPresentationRemoved
@@ -459,7 +457,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const playbackError = playbackCurrent?.phase === 'failed' ? playbackCurrent.message : null
   const presentationNotice = notice?.message ?? media.notice ?? playbackError ?? waiting
   const retryPending = retrying || registrationPending || capturePending || playbackCurrent?.phase === 'starting'
-  return <div className="browser-presentation" data-notice={noticePlacement}>
+  return <div className="browser-presentation">
     <div className="browser-presentation-notice">
       <ServiceWindowNotice notice={presentationNotice ? { kind: 'indeterminate', notice: {
         step: notice || media.notice || playbackError ? notice?.source === 'registration' ? 'Page connection needs attention' : 'Page preview needs attention' : waiting!,
