@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useState, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentTimelineItemStatus } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
 export type WorkflowObservationStatus = AgentTimelineItemStatus | 'running' | 'interrupted'
@@ -42,6 +42,8 @@ type ObservedToolProps = {
   controls?: string
   /** The native step owns a readable missing-status explanation in its original details. */
   missingStatusInDetails?: boolean
+  /** A shared invocation keeps the original row mounted while another row owns disclosure. */
+  hidden?: boolean
 }
 
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'interrupted' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
@@ -94,7 +96,17 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
   </article>
 }
 
-export function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls, missingStatusInDetails = false }: ObservedToolProps) {
+export function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls, missingStatusInDetails = false, hidden = false }: ObservedToolProps) {
+  const row = useRef<HTMLElement | null>(null)
+  const document = row.current?.ownerDocument, selection = document?.defaultView?.getSelection()
+  const focused = Boolean(document?.activeElement && row.current?.contains(document.activeElement))
+  let selected = false
+  if (hidden && selection && !selection.isCollapsed && selection.rangeCount && row.current) {
+    try { selected = selection.getRangeAt(0).intersectsNode(row.current) } catch { selected = true }
+  }
+  // The conversation's existing selection owner rechecks focus/selection before
+  // presentation and when they change; sharing a header needs no second listener.
+  const concealed = hidden && !focused && !selected
   const { recordedTime, status } = observation
   const content = <>
     <span className="log-row__node">{icon}</span>
@@ -113,9 +125,9 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
     </span>
   </>
   const rowClass = `${className} wf-tool-row wf-tool-row--observation`
-  return onToggle ? <button type="button" className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id}
+  return onToggle ? <button ref={node => { row.current = node }} type="button" hidden={concealed} inert={concealed} className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id}
     data-status={status} data-open={expanded ? '' : undefined} data-expandable="" aria-expanded={expanded} aria-controls={controls} aria-description={recordedTime?.offset} onClick={onToggle}>{content}</button>
-    : <div className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id} data-status={status}>{content}</div>
+    : <div ref={node => { row.current = node }} hidden={concealed} inert={concealed} className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id} data-status={status}>{content}</div>
 }
 
 export function RecordedAgentRow({ observation }: {

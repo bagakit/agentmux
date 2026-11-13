@@ -19,7 +19,7 @@ export function CapturedProcessRecord({ record, disclosure, bodyOnly = false, lo
   record: ConversationRecord; bodyOnly?: boolean; disclosure?: ConversationProcessProps['disclosure']; located?: boolean; workspaceRoot?: string; origin?: number
 }) {
   const [localOpen, setOpen] = useState(false), [presented, setPresented] = useState(false)
-  const bodyId = useId()
+  const localBodyId = useId(), bodyId = disclosure?.stepGroup?.bodyId ?? localBodyId
   const item = record.original.kind === 'captured' ? record.original.item : null
   const title = useMemo(() => item ? stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot) : '', [item, workspaceRoot])
   const expanded = bodyOnly || located || ((item ? disclosure?.steps.get(item.id) : undefined) ?? localOpen)
@@ -44,7 +44,7 @@ export function CapturedProcessRecord({ record, disclosure, bodyOnly = false, lo
   return <div className="wf-native-process" data-message-source-key={conversationMessageSourceKey(record.agentSessionId, record.source)} data-captured-process-id={item.id} data-conversation-role={record.role}>
     <RecordedToolRow className={`log-row log-row--${item.kind}`} observation={{ id: item.id, title, source: <ConversationSourceLabels sources={record.sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? record.sources?.main} />, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, origin) }} icon={<SemanticIcon name={item.kind === 'tool_call' ? 'conversation.tool-call' : item.kind === 'permission' ? 'status.permission' : 'object.activity'} size={12} />}
-      expanded={expanded} controls={bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
+      hidden={disclosure?.stepGroup?.headerHidden ?? false} expanded={expanded} controls={disclosure?.stepGroup?.controls ?? bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{body}</div>
   </div>
 }

@@ -15,6 +15,7 @@
 .wf-card--observation > .wf-head .wf-observation__recorded { color: var(--text-2); font-size: var(--fs-meta); }
 .wf-card--observation > .wf-head[aria-expanded='true'] .log-fold__chevron { transform: rotate(90deg); }
 .wf-tool-row--observation .log-row__chevron { opacity: .7; }
+.wf-tool-row--observation[hidden] { display: none; }
 .native-process-observation__issue { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-1) var(--sp-4) var(--sp-3) calc(var(--conversation-disclosure-padding, var(--sp-4)) + 20px + var(--sp-3)); color: var(--red-text); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .native-process-observation__issue > .semantic-icon { flex: none; align-self: flex-start; margin-top: var(--sp-1); }
 /* Observations keep their top-level origin; only actual process steps indent. */

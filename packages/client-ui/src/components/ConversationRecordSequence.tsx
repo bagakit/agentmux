@@ -30,6 +30,8 @@ export type ConversationProcessProps = {
     steps: ReadonlyMap<string, boolean>
     onStepExpandedChange: (recordId: string, expanded: boolean) => void
     onStepsPresented?: (recordIds: readonly string[]) => void
+    /** Presentation of adjacent originals belonging to one confirmed invocation. */
+    stepGroup?: { headerHidden: boolean; bodyId: string; controls: string }
   }
 }
 export type ConversationProcessRenderer = (props: ConversationProcessProps) => ReactNode
@@ -112,7 +114,7 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
         const observed = row.records.flatMap(record => !conversationProcessPeer(record) && record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
         const summary = observed.length === 1 && row.records.every(record => record.source.kind === 'native') ? observed[0] : undefined
         return renderProcess({ id: row.id, records: row.records,
-          renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, conversationProcessPeer(record), !summary || conversationProcessPeer(record)),
+          renderRecord: (record, wrapBody, stepDisclosure) => renderOne(record, wrapBody, stepDisclosure ?? disclosure, conversationProcessPeer(record), !summary || conversationProcessPeer(record)),
           entries: row.entries.map(entry => entry.kind === 'record' ? entry : { kind: 'anchor', key: entry.insertion.key, content: renderAnchor(entry.insertion.key) }),
           disclosure, ...(summary ? { metrics: summary } : {}) })
       })()}

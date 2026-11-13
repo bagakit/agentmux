@@ -19,6 +19,17 @@ export function describeCapturedConversationSource(source: AgentMuxEvidenceSourc
 }
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
 export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; submissions?: readonly ConversationSourceRecord[]; unreadSubmissionTarget?: ConversationItemRef }
+/** One already accepted invocation, never an association inferred from a tool label or bare ID. */
+export function conversationInvocationReadingKey(record: { role?: ConversationEvent['role']; event?: ConversationEvent;
+  records?: readonly Pick<ConversationSourceRecord, 'id' | 'revision'>[];
+  deferred?: { records: readonly Pick<ConversationSourceRecord, 'id' | 'revision'>[] } }): string | undefined {
+  if (record.role !== 'process') return
+  const originals = new Map((record.deferred?.records ?? record.records ?? []).map(source => [source.id, source.revision]))
+  const invocations = new Set(record.event?.relations.flatMap(relation => relation.kind === 'invocation-member' &&
+    originals.get(conversationRecordId(relation.part.record)) === relation.part.recordRevision
+    ? [conversationInvocationId(relation.invocation)] : []) ?? [])
+  return invocations.size === 1 ? invocations.values().next().value : undefined
+}
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])

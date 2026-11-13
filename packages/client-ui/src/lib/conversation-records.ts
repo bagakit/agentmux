@@ -2,11 +2,11 @@ import type { AgentConversationRecord } from '@agentmux/core'
 import type { ConversationProjectionInput } from '@agentmux/core/conversation'
 import { projectConversationReading as projectCoreReading, projectConversationWindow as projectCoreWindow, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { speakerOfUserMessage, type ConversationSpeaker } from './conversation-speaker.js'
-import { conversationSourcePresenter, type ConversationSources } from './conversation-sources.js'
+import { conversationInvocationReadingKey, conversationSourcePresenter, type ConversationSources } from './conversation-sources.js'
 import { describeConversationInputSource } from './conversation-input-source.js'
 
 export type ConversationRecordSource = AgentConversationRecord['source']
-export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; sources?: ConversationSources; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
+export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; invocationKey?: string; sources?: ConversationSources; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
 
 /** Reading the accepted outcome never interprets recorded prose or current Session state. */
 export function conversationRecordTurnOutcome(record: ConversationRecord) {
@@ -31,13 +31,14 @@ export function describeConversationWindow(reading: ReturnType<typeof projectCor
 function describeReading(reading: ReturnType<typeof projectCoreReading>) {
   const presentSources = conversationSourcePresenter(reading.timeline)
   const describe = (record: AgentConversationRecord): ConversationRecord => {
+    const invocationKey = conversationInvocationReadingKey(record)
     const collaboration = record.original.kind === 'native' && record.original.item.collaboration?.kind === 'message'
       ? record.original.item.collaboration : undefined
     const speaker = collaboration ? { role: 'unknown' as const,
       id: JSON.stringify(['native-collaboration', collaboration.source.providerId, collaboration.source.nativeSessionId, collaboration.sender ?? null]), nativeCollaboration: collaboration }
       : record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
-    return { ...record, ...(record.original.kind === 'deferred' ? {} : { sources: presentSources(record) }), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
+    return { ...record, ...(invocationKey ? { invocationKey } : {}), ...(record.original.kind === 'deferred' ? {} : { sources: presentSources(record) }), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
   }
   return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe), inputs: reading.inputs }
 }

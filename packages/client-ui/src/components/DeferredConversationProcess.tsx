@@ -18,7 +18,7 @@ export function DeferredConversationProcess({ record, readDetail, renderDetail, 
   const [open, setOpen] = useState(false), [attempt, retry] = useState(0)
   const [loaded, setLoaded] = useState<readonly ConversationWindowSnapshot[] | null>(null)
   const [error, setError] = useState<string | null>(null), [loading, setLoading] = useState(false)
-  const bodyId = useId(), key = record.presentationKey ?? record.id
+  const localBodyId = useId(), bodyId = disclosure?.stepGroup?.bodyId ?? localBodyId, key = record.presentationKey ?? record.id
   const expanded = located || (disclosure?.steps.get(key) ?? open)
   const [deferred] = useState(() => record.deferred!)
   const header = record.original.kind === 'deferred' ? record.original.item : null
@@ -49,7 +49,7 @@ export function DeferredConversationProcess({ record, readDetail, renderDetail, 
     data-deferred-process-id={record.rawId}>
     <RecordedToolRow className="log-row" observation={{ id: record.rawId, title, source: header.kind === 'native' ? NATIVE_CONVERSATION_SOURCE : 'Captured record', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
-      missingStatusInDetails icon={<SemanticIcon name="conversation.tool-call" size={12} />} expanded={expanded} controls={bodyId}
+      hidden={disclosure?.stepGroup?.headerHidden ?? false} missingStatusInDetails icon={<SemanticIcon name="conversation.tool-call" size={12} />} expanded={expanded} controls={disclosure?.stepGroup?.controls ?? bodyId}
       onToggle={() => { setOpen(!expanded); disclosure?.onStepExpandedChange(key, !expanded) }} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {loading ? <p role="status">Reading original process details…</p> : null}

@@ -66,11 +66,35 @@ function groupRecordTime(records: ConversationProcessProps['records']): Workflow
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
 export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+  const processId = useId()
   const [localExpanded, setExpanded] = useState(!compact)
   const expanded = disclosure?.expanded ?? localExpanded
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const layout = entries
+  // Only adjacent originals share a disclosure. Interleaved calls, anchors and
+  // unknown memberships retain their original order and independent controls.
+  const grouped = new Map<string, readonly string[]>()
+  let adjacent: { invocation: string; keys: string[] } | undefined
+  const flush = () => {
+    if (adjacent && adjacent.keys.length > 1) for (const key of adjacent.keys) grouped.set(key, adjacent.keys)
+    adjacent = undefined
+  }
+  for (const entry of layout) {
+    if (entry.kind !== 'record' || conversationProcessPeer(entry.record)) { flush(); continue }
+    const invocation = entry.record.invocationKey
+    if (!invocation) { flush(); continue }
+    if (adjacent?.invocation !== invocation) { flush(); adjacent = { invocation, keys: [] } }
+    adjacent!.keys.push(conversationPresentationKey(entry.record))
+  }
+  flush()
+  const shared = new Map<readonly string[], { disclosure: NonNullable<ConversationProcessProps['disclosure']>; controls: string }>()
+  if (disclosure) for (const keys of new Set(grouped.values())) {
+    const open = keys.some(key => disclosure.steps.get(key) === true)
+    shared.set(keys, { controls: keys.map(key => `${processId}-${encodeURIComponent(key)}`).join(' '),
+      disclosure: { ...disclosure, steps: new Map(keys.map(key => [key, open])),
+        onStepExpandedChange: (_key, expanded) => { for (const key of keys) disclosure.onStepExpandedChange(key, expanded) } } })
+  }
   const records = sourceRecords.filter(record => !conversationProcessPeer(record))
   const failureCount = records.filter(record => (record.deferred?.records ?? record.records ?? [record]).some(recordedFailure)).length
   const items = records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
@@ -102,17 +126,24 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
       const record = entry.record, key = conversationPresentationKey(record)
       if (conversationProcessPeer(record)) return <div key={key}>{renderRecord(record)}</div>
       const item = record.original.kind === 'native' ? record.original.item : undefined
+      const members = grouped.get(key), common = members && shared.get(members)
+      const bodyId = `${processId}-${encodeURIComponent(key)}`
+      const stepDisclosure = common && members ? { ...common.disclosure, stepGroup: {
+        headerHidden: members[0] !== key, bodyId,
+        controls: members[0] === key ? common.controls : bodyId
+      } } : disclosure
       return <div key={key} className="native-process-observation__step" hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
         <NativeProcessStep item={item} source={record.source.kind === 'native' ? record.source : undefined} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
-          {...(disclosure?.steps.get(key) === undefined ? {} : { expanded: disclosure.steps.get(key)! })}
-          {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(key, open) } : {})}>{body}</NativeProcessStep>)
-        : renderRecord(record, undefined, disclosure) : null}</div>
+          {...(stepDisclosure?.steps.get(key) === undefined ? {} : { expanded: stepDisclosure.steps.get(key)! })}
+          {...(stepDisclosure ? { onExpandedChange: (open: boolean) => stepDisclosure.onStepExpandedChange(key, open) } : {})}
+          {...(stepDisclosure?.stepGroup ? { stepGroup: stepDisclosure.stepGroup } : {})}>{body}</NativeProcessStep>)
+        : renderRecord(record, undefined, stepDisclosure) : null}</div>
     })}
   </WorkflowCard>{items.flatMap(item => [item.metricsDiagnostic, item.turnOutcomeDiagnostic].flatMap((diagnostic, index) => diagnostic
     ? [<p key={JSON.stringify([item.id, index])} className="conversation-metrics__notice" role="status">{diagnostic.message}</p>] : []))}</div>
 }
 
-export function NativeProcessStep({ item, source, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange }: {
+export function NativeProcessStep({ item, source, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange, stepGroup }: {
   item: AgentSessionHistoryItem
   source?: AgentSessionHistorySource | undefined
   bodyOnly?: boolean
@@ -120,12 +151,13 @@ export function NativeProcessStep({ item, source, origin, children, bodyOnly = f
   children: ReactNode
   expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
+  stepGroup?: NonNullable<ConversationProcessProps['disclosure']>['stepGroup']
 }) {
   const [localExpanded, setExpanded] = useState(false)
   const expanded = bodyOnly || (controlledExpanded ?? localExpanded)
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
-  const bodyId = useId()
+  const localBodyId = useId(), bodyId = stepGroup?.bodyId ?? localBodyId
   const collaboration = item.collaboration
   const receiverOccurrences = new Map<string, number>()
   const stateOccurrences = new Map<string, number>()
@@ -148,7 +180,7 @@ export function NativeProcessStep({ item, source, origin, children, bodyOnly = f
     {!bodyOnly ? <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name={call ? 'conversation.tool-call' : item.contentParts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'} size={12} />}
-      missingStatusInDetails expanded={expanded} controls={bodyId} onToggle={toggle} /> : null}
+      hidden={stepGroup?.headerHidden ?? false} missingStatusInDetails expanded={expanded} controls={stepGroup?.controls ?? bodyId} onToggle={toggle} /> : null}
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>
         {collaboration?.kind === 'operation' ? <>
