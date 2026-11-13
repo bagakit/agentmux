@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 // The confirmed mature shell: five-tab bar, header menu, needs-you Focus home and 64px rows,
 // exercised through the actual MobileApp with controlled original catalog facts.
-module.exports = async ({ read, until, resize, tap, button, capture, result }) => {
+module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
   await read('mobileProductScene.prepareFocusState()')
   await button('Focus', '.mobile-navigation')
   await until('document.querySelectorAll(".mobile-focus-project .mobile-agent-row").length >= 3')
@@ -46,7 +46,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   result.matureTicketAnswer = { card }
   assert.equal(card.title, '请确认本次资料读取')
   assert.deepEqual(card.choices.map(choice => [choice.label, choice.primary]), [['允许本次读取', true], ['拒绝本次读取', false]])
-  for (const choice of card.choices) assert.ok(choice.rect.height >= 40 && choice.rect.right <= card.card.right, 'Choices are thumb-sized and inside the card')
+  for (const choice of card.choices) assert.ok(choice.rect.height >= 44 && choice.rect.right <= card.card.right, 'Choices are thumb-sized and inside the card')
   await capture('mature-ticket-answer-390-dark')
   await tap('.mobile-needs-you-card .mobile-ticket-answer__choices button.is-primary', 'Allow on the ticket')
   await until('document.querySelector(".mobile-ticket-answer")?.dataset.phase==="confirmed"')
@@ -60,7 +60,9 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await until('!document.querySelector(".mobile-needs-you")')
   assert.equal(await read('document.querySelector(".mobile-navigation .mobile-tab-badge")'), null, 'The count clears once Core settles the request')
   await read('mobileProductScene.restoreWaitingRequest()')
-  await button('Space', '.mobile-navigation'); await button('Focus', '.mobile-navigation')
+  // The shared root catalog deliberately has one reader across directory tabs. Request its original
+  // read explicitly instead of relying on the removed duplicate attention poll during Space/Focus.
+  await button('刷新空间目录', '.mobile-spatial-panel')
   await until('!!document.querySelector(".mobile-needs-you-ticket")')
   // One tap from the needs-you strip opens the exact waiting request.
   await button('Focus', '.mobile-navigation')
@@ -70,6 +72,19 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-waiting', 'The ticket opens the exact waiting Agent')
   // The push motion is navigation-declared; measure the settled layer, not a frame mid-slide.
   assert.equal(await read('document.querySelector(".mobile-main")?.dataset.motion'), 'push', 'Opening the request pushed the conversation layer')
+  const firstPush = await read(`(()=>{const main=document.querySelector('.mobile-main');return {kind:main.dataset.motion,phase:main.dataset.motionPhase,animation:getComputedStyle(main).animationName}})()`)
+  await tap('.mobile-conversation__goal', 'Goals from the original conversation')
+  await until('!!document.querySelector(".mobile-goal-panel:not([hidden])")')
+  const secondPush = await read(`(()=>{const main=document.querySelector('.mobile-main');return {kind:main.dataset.motion,phase:main.dataset.motionPhase,animation:getComputedStyle(main).animationName}})()`)
+  assert.equal(secondPush.kind, 'push', 'Conversation Goal callback declares its push')
+  assert.notEqual(secondPush.phase, firstPush.phase, 'Consecutive pushes advance the original motion phase')
+  assert.notEqual(secondPush.animation, firstPush.animation, 'The actual loaded stylesheet consumes the phase to restart its animation')
+  assert.match(firstPush.animation, /^mobile-screen-push/)
+  assert.match(secondPush.animation, /^mobile-screen-push/)
+  result.matureConsecutiveMotion = { firstPush, secondPush }
+  await button('返回对话', '.mobile-header')
+  await until('!document.querySelector(".mobile-goal-panel:not([hidden])")')
+  assert.equal(await read('document.querySelector(".mobile-main")?.dataset.motion'), 'pop', 'Goal returns through the same Back owner')
   await until('!document.querySelector(".mobile-main[data-motion]")')
   const reading = await read(`(()=>{const r=n=>n?n.getBoundingClientRect().toJSON():null
     const turns=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"]')]
@@ -112,5 +127,56 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
     }
     await capture(`mature-${label.toLowerCase()}-390-dark`)
   }
+  // A lost attention observation changes the count's presentation, preserving the current workface.
+  await resize(390, 844); await read('mobileProductScene.setAppearance("dark")')
+  await button('Focus', '.mobile-navigation')
+  await until('!!document.querySelector(".mobile-needs-you-ticket")')
+  await tap('.mobile-needs-you-ticket', 'Open the original waiting Agent for attention recovery')
+  await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
+  await until('!document.querySelector(".mobile-main[data-motion]")')
+  await read(`window.matureAttentionEditor=document.querySelector('.mobile-conversation-panel:not([hidden]) [contenteditable=true]');matureAttentionEditor.focus()`)
+  await win.webContents.insertText('保留这段未发送的讨论，核对需要你列表。')
+  await until('mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text.includes("保留这段未发送的讨论"))')
+  const originalAttention = await read(`(()=>{const f=mobileProductScene.facts();return {sid:f.record.selectedSessionId,
+    run:f.sessionIds.find(value=>value.sessionId===f.record.selectedSessionId),conversation:f.record.conversation,
+    effects:f.calls.filter(call=>['sdk.submitAgentPrompt','sdk.respondAgentInteraction','agent.open','file.upload'].includes(call.method)).length}})()`)
+  await read('mobileProductScene.setDirectoryReadFailure(true);document.dispatchEvent(new Event("visibilitychange"))')
+  await until('!!document.querySelector("[data-workface=focus] .mobile-tab-badge[data-unconfirmed]")&&!!document.querySelector(".mobile-attention-notice")')
+  const attentionCollapsed = await read(`(()=>{const focus=document.querySelector('[data-workface=focus]'),notice=document.querySelector('.mobile-attention-notice');return {
+    focus:focus.querySelector('.mobile-tab-badge')?.textContent,description:focus.getAttribute('aria-description'),back:document.querySelector('.mobile-back-badge')?.textContent,
+    summary:notice.querySelector('.mobile-text-button')?.textContent,technicalVisible:notice.innerText.includes('DIRECTORY_READ_FAILED')}})()`)
+  assert.equal(attentionCollapsed.focus, '?'); assert.equal(attentionCollapsed.back, '?')
+  assert.ok(attentionCollapsed.description.includes('尚未确认')); assert.equal(attentionCollapsed.technicalVisible, false)
+  await capture('mature-attention-unconfirmed-390-dark')
+  await resize(320, 480); await read('mobileProductScene.setAppearance("light")')
+  const attentionWorkface = await read(`(()=>{const stack=document.querySelector('.mobile-notice-stack'),main=document.querySelector('.mobile-main'),editor=matureAttentionEditor,send=document.querySelector('.mobile-conversation-panel:not([hidden]) .composer-send');
+    const r=n=>n.getBoundingClientRect().toJSON(),hit=n=>{const q=n.getBoundingClientRect(),target=document.elementFromPoint(q.x+q.width/2,q.y+q.height/2);return target===n||n.contains(target)};return {stack:r(stack),main:r(main),editor:r(editor),send:r(send),editorHit:hit(editor),sendHit:hit(send)}})()`)
+  assert.ok(attentionWorkface.editor.height >= 24 && attentionWorkface.send.height >= 44, 'The original editor and Send remain usable')
+  assert.ok(attentionWorkface.editor.bottom <= attentionWorkface.main.bottom + .5 && attentionWorkface.send.bottom <= attentionWorkface.main.bottom + .5, 'The full editor and Send stay above every reminder')
+  assert.equal(attentionWorkface.editorHit, true, 'The retained editor is the actual hit target')
+  assert.equal(attentionWorkface.sendHit, true, 'The original Send control is the actual hit target')
+  assert.ok(attentionWorkface.stack.height <= 480 * .12 + 1, 'All reminders share one bounded short-phone scroller')
+  await tap('.mobile-attention-notice .mobile-text-button', 'Open the original attention read explanation')
+  await until('!!document.querySelector(".mobile-attention-details")')
+  await read('Promise.all(document.querySelector(".mobile-attention-details").getAnimations().map(animation=>animation.finished))')
+  await tap('.mobile-attention-details .mobile-directory-technical > summary', 'Read the original attention failure')
+  const attentionExpanded = await read(`(()=>{const sheet=document.querySelector('.mobile-attention-details'),retry=sheet.querySelector('.mobile-text-button'),close=sheet.querySelector('[aria-label="关闭需要你列表信息"]'),r=n=>n.getBoundingClientRect().toJSON();return {sheet:r(sheet),retry:r(retry),close:r(close),text:sheet.innerText,overflow:document.querySelector('.mobile-app').scrollWidth>innerWidth}})()`)
+  assert.ok(attentionExpanded.text.includes('DIRECTORY_READ_FAILED'), 'Complete original failure is readable in its named technical details')
+  assert.ok(attentionExpanded.sheet.top >= 0 && attentionExpanded.sheet.bottom <= 481, 'The original detail sheet fits the short phone')
+  assert.ok(attentionExpanded.retry.height >= 44 && attentionExpanded.close.width >= 44 && attentionExpanded.close.height >= 44, 'Named retry and close keep their complete touch targets')
+  assert.equal(attentionExpanded.overflow, false)
+  await capture('mature-attention-details-320-short-light')
+  await read('mobileProductScene.setDirectoryReadFailure(false)')
+  await button('重新读取需要你列表', '.mobile-attention-details')
+  await until('!document.querySelector(".mobile-attention-details")&&!document.querySelector(".mobile-attention-notice")&&!document.querySelector("[data-workface=focus] .mobile-tab-badge[data-unconfirmed]")')
+  const recoveredAttention = await read(`(()=>{const f=mobileProductScene.facts();return {sid:f.record.selectedSessionId,
+    run:f.sessionIds.find(value=>value.sessionId===f.record.selectedSessionId),conversation:f.record.conversation,
+    sameEditor:document.querySelector('.mobile-conversation-panel:not([hidden]) [contenteditable=true]')===matureAttentionEditor,
+    effects:f.calls.filter(call=>['sdk.submitAgentPrompt','sdk.respondAgentInteraction','agent.open','file.upload'].includes(call.method)).length}})()`)
+  assert.equal(recoveredAttention.sameEditor, true)
+  assert.equal(recoveredAttention.sid, originalAttention.sid); assert.deepEqual(recoveredAttention.run, originalAttention.run)
+  assert.deepEqual(recoveredAttention.conversation, originalAttention.conversation)
+  assert.equal(recoveredAttention.effects, originalAttention.effects, 'Read recovery sends no input, answer, upload or creation')
+  result.matureAttentionRecovery = { original: originalAttention, collapsed: attentionCollapsed, workface: attentionWorkface, expanded: attentionExpanded, recovered: recoveredAttention }
   result.matureShellBoundary = 'Actual MobileApp shell with controlled original catalog facts in private Chromium; physical phone, OS keyboard and live Host are not observed.'
 }

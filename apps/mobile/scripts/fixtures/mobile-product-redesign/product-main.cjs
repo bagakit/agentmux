@@ -229,7 +229,11 @@ app.whenReady().then(async () => {
     await until('document.querySelector("[contenteditable=true]")?.textContent.includes("原草稿在重启后保留")')
     await capture('spatial-recovery-draft-phone')
     await button('Mote', '.mobile-navigation')
-    await button('Space', '.mobile-navigation'); await button('资料工作区', '.mobile-spatial-panel')
+    await button('Space', '.mobile-navigation')
+    await until('!!document.querySelector(\'[data-space-id="space-resources"] .mobile-space-row\')')
+    // The restored spatial selection can already be expanded; do not collapse it with a second tap.
+    if (await read('document.querySelector(\'[data-space-id="space-resources"] .mobile-space-row\').getAttribute("aria-expanded")!=="true"')) await button('资料工作区', '.mobile-spatial-panel')
+    await until('document.querySelectorAll(".mobile-spatial-tab").length===5')
     await button('在此启动位新建 Agent', '.mobile-spatial-panel')
     await until('document.querySelectorAll(".mobile-create-receipt").length===2')
     await capture('spatial-recovery-intents-phone')
@@ -250,7 +254,7 @@ app.whenReady().then(async () => {
   if (!baseline) {
     assert.equal(result.palette['--surface-1'], '#171b21', 'Original MobileApp consumes the shared Graphite palette')
     assert.equal(result.palette['--green'], '#8de3ae', 'Original MobileApp consumes the shared Mint action color')
-    assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
+    assert.equal(result.palette['--fs-body'], '14px', 'Mobile typography follows the confirmed compact-mature scale')
   }
   if (mode === 'conversation-attachments') {
     await require('./conversation-attachments.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
@@ -459,7 +463,10 @@ app.whenReady().then(async () => {
     await capture('spatial-launcher-phone'); await resize(320,760); await capture('spatial-launcher-narrow')
     await button('关闭新建 Agent', '[role=dialog]')
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="agent.open").length'),0)
-    await resize(390,844); await openMote()
+    // The Mote tab now opens its retained main conversation directly.
+    await resize(390,844); await button('Mote', '.mobile-navigation')
+    await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
+    assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
     await tap('.mobile-conversation-panel [contenteditable=true]', 'Original draft before private process restart')
     win.webContents.insertText('原草稿在重启后保留')
     await until('mobileProductScene.facts().record.conversation?.drafts.some(([,text])=>text.includes("原草稿在重启后保留"))')

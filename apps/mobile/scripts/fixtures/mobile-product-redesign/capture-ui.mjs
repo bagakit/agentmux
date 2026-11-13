@@ -34,8 +34,9 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'notice-stack-unbounded': { file: 'apps/mobile/src/mobile.css', before: '.mobile-notice-stack { grid-row: 4; min-width: 0; max-height: min(12dvh, 96px); overflow-y: auto; overscroll-behavior: contain; }', after: '.mobile-notice-stack { grid-row: 4; min-width: 0; }' },
     'directory-notice-touch': { file: 'apps/mobile/src/mobile.css', before: 'gap: var(--sp-1); flex: none; min-width: 44px; min-height: 44px;', after: 'gap: var(--sp-1); flex: none; min-width: 28px; min-height: 28px;' },
-    'mote-short-top': { file: 'apps/mobile/src/mobile.css', before: '.mobile-conversation__reading > .mote-conversation > .mote-conversation__messages { margin-block-start: auto; }', after: '.mobile-conversation__reading > .mote-conversation > .mote-conversation__messages { margin-block-start: 0; }' },
+    'mote-short-top': { file: 'apps/mobile/src/conversation/chrome.css', before: '.mobile-app .mobile-conversation__reading > .mote-conversation > :first-child { margin-top: auto; }', after: '.mobile-app .mobile-conversation__reading > .mote-conversation > :first-child { margin-top: 0; }' },
     'mote-sheet-gap': { file: 'apps/mobile/src/mobile.css', before: 'inset: -6px -12px 0; z-index: -1; border-radius: var(--radius-lg)', after: 'inset: 0; z-index: -1; border-radius: var(--radius-lg)' },
     'floating-background': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__floating-tools { display: flex;', after: '.mobile-conversation__floating-tools { background: var(--surface-1); display: flex;' },
     'floating-reading-overlap': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__floating-tools { display: flex;', after: '.mobile-conversation__floating-tools { transform: translateY(44px); display: flex;' },
