@@ -5,6 +5,13 @@ import { resolveCoreBinPath } from '../runtime-paths.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../types.js'
 
+/**
+ * A main tool call that Claude asked the person about has ended. Claude emits no classic Hook
+ * when such a call is declined; this observation carries that exact call's own tool_use_id.
+ * It ends the request only and never states an answer, an approval or tool success.
+ */
+export const CLAUDE_ASKED_TOOL_END_EVENT = 'AgentMuxAskedToolEnded'
+
 function observationIdentity(payload: Readonly<Record<string, unknown>>) {
   if (typeof payload.session_id !== 'string' || !payload.session_id.trim() ||
       typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
@@ -58,10 +65,11 @@ export function claudeNativeActivityDirectory(workspacePath: string): string {
 /**
  * Claude mods run without Node globals. The public process API launches the existing passive Hook
  * runner, which owns authenticated delivery, its bounded retries, and the original receipt ID.
- * Callbacks never wait for ingress and always return the unchanged native middleware result.
+ * Callbacks never wait for ingress and return the native middleware result unchanged. The one
+ * payload addition is the asked call's own tool_use_id on Claude's classic ask, which omits it.
  */
 export function claudeNativeActivitySource(): string {
-  return `// AgentMux managed native activity observer. Generated; no input or completion decisions.
+  return `// AgentMux managed native activity observer. Generated; makes no input, answer or approval decision.
 const { mintObjectId } = ${identityRuntimeSource}
 const sourceId = mintObjectId()
 let sequence = 0
@@ -114,6 +122,32 @@ async function deliver($, eventName, event, sourceSequence) {
   }
 }
 
+// Calls Claude asked the person about in this session, keyed by the native tool_use_id.
+// Each entry: { tool, input, identified }; identified once its classic ask carries the id.
+const askedCalls = new Map()
+
+// A stable rendering of tool arguments, independent of property insertion order.
+function canonical(value) {
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'
+  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}'
+  return JSON.stringify(value ?? null)
+}
+
+async function reportAskedEnd($, toolUseId, toolName) {
+  try {
+    const result = await $.process.run(
+      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+      { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}, session_id: initialSessionId,
+          tool_use_id: toolUseId, ...(toolName ? { tool_name: toolName } : {}) }),
+        env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
+        timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
+    )
+    if (result.exitCode !== 0 || result.stderr) await $.ui.log('AgentMux could not report a finished request; its card stays until confirmed.', { to: 'debug' })
+  } catch {
+    try { await $.ui.log('AgentMux could not report a finished request; its card stays until confirmed.', { to: 'debug' }) } catch {}
+  }
+}
+
 function observe($, eventName, event) {
   const sourceSequence = ++sequence
   // An unavailable ingress cannot retain an unbounded promise chain. A dropped observation
@@ -159,6 +193,38 @@ export function register(on) {
   on('turn.complete', ($, event, next) => {
     observe($, 'turn.complete', event)
     return next(event)
+  })
+  // Classic Hooks report no end for a declined asked call. Only calls this session asked about
+  // send one exact end, after the native call settles; other tools add no work.
+  on('tool.check', async ($, event, next) => {
+    const result = await next(event)
+    // A child Agent's call belongs to its own subject; only main-session asks are reported.
+    if (initialSessionId && !sourceChanged && event?.agentId === undefined && result?.decision === 'ask' &&
+        typeof event?.tool_use_id === 'string' && event.tool_use_id.trim() && typeof event?.tool === 'string') {
+      askedCalls.set(event.tool_use_id, { tool: event.tool, input: canonical(event.input), identified: false })
+    }
+    return result
+  })
+  // Claude asks after tool.check, in its classic PermissionRequest, without the call identity.
+  // Attach the one exact main call this ask belongs to. Each recorded ask is used once; two
+  // equal candidates stay unidentified. Nothing else in the payload changes.
+  on('classic.PermissionRequest', ($, event, next) => {
+    if (!initialSessionId || sourceChanged || event?.agent_id !== undefined || event?.tool_use_id !== undefined) return next(event)
+    const input = canonical(event?.tool_input)
+    const matches = [...askedCalls].filter(([, call]) => !call.identified && call.tool === event?.tool_name && call.input === input)
+    if (matches.length !== 1) return next(event)
+    matches[0][1].identified = true
+    return next({ ...event, tool_use_id: matches[0][0] })
+  }).catch(($, event, next) => next(event))
+  on('tool.call', async ($, event, next) => {
+    const id = event?.tool_use_id, call = typeof id === 'string' ? askedCalls.get(id) : undefined
+    try { return await next(event) }
+    finally {
+      if (call && askedCalls.delete(id) && initialSessionId && !sourceChanged) {
+        // Delivery uses the authenticated runner; the native result is never inspected or altered.
+        void reportAskedEnd($, id, call.tool)
+      }
+    }
   })
 }
 `

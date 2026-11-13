@@ -6,6 +6,7 @@ import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './clau
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import {
+  CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivity,
   claudeNativeActivityMutations,
   claudeNativeObservationFailure,
@@ -67,6 +68,8 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     PreToolUse: 'tool-use-start',
     PostToolUse: 'tool-use-end',
     PostToolUseFailure: 'tool-use-end',
+    // The exact end of an asked call: a late one cannot reopen an ended turn.
+    [CLAUDE_ASKED_TOOL_END_EVENT]: 'tool-use-end',
     SubagentStart: 'subagent-start',
     StopFailure: 'turn-end',
   },
@@ -97,6 +100,9 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     { events: ['Stop', 'SubagentStop'], state: 'unknown', lifecycleEvent: null },
     // StopFailure 是真失败终态（报错收尾），归入 turn-end，语义状态为 error（真实失败，非 done）。
     { events: ['StopFailure'], state: 'error' },
+    // The asked call ended, so the person is no longer awaited; the call's own turn continues,
+    // exactly as PostToolUse would report (a terminal decline sends no classic Hook at all).
+    { events: [CLAUDE_ASKED_TOOL_END_EVENT], state: 'working' },
     { events: ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PreCompact'], state: 'working' }
   ],
   subagentTracking: {
@@ -190,10 +196,14 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       submit: '\r'
     }),
     interaction: createNumberedTerminalInteractionProtocol({
-      questionEvents: ['PermissionRequest', 'PreToolUse'],
+      // Claude asks once per question call: PreToolUse carries its tool_use_id. The same call's
+      // PermissionRequest is its ask stage, not a second request.
+      questionEvents: ['PreToolUse'],
       questionTools: ['askuserquestion'],
-      questionCompletionEvents: ['PostToolUse', 'PostToolUseFailure'],
-      permissionCompletionEvents: ['PostToolUse', 'PostToolUseFailure'],
+      // A declined or answered asked call ends without any classic Hook; the native activity
+      // observer reports that exact end (see CLAUDE_ASKED_TOOL_END_EVENT).
+      questionCompletionEvents: ['PostToolUse', 'PostToolUseFailure', CLAUDE_ASKED_TOOL_END_EVENT],
+      permissionCompletionEvents: ['PostToolUse', 'PostToolUseFailure', CLAUDE_ASKED_TOOL_END_EVENT],
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,
@@ -210,6 +220,12 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     ...provider,
     normalizeHook(envelope, context) {
       const normalized = provider.normalizeHook(envelope, context)
+      // Only the interaction end belongs to this observation; it is not a tool row or activity.
+      if (normalized.eventName === CLAUDE_ASKED_TOOL_END_EVENT) return { ...normalized, timeline: [] }
+      // An identified ask is a stage of the call PreToolUse already recorded; its tool row is that one.
+      if (normalized.eventName === 'PermissionRequest' && normalized.interaction?.nativeToolCallId) {
+        return { ...normalized, timeline: normalized.timeline.filter(mutation => mutation.type === 'update' || mutation.item.kind !== 'tool_call') }
+      }
       if (normalized.eventName === 'StopFailure') {
         // Classic StopFailure exposes error text but no native turn identity. Keep its local
         // diagnostic without borrowing the most recent turn or publishing its last answer.
