@@ -171,7 +171,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     if (!active || !element) return
     const update = () => {
       const canvas = element.parentElement!.getBoundingClientRect()
-      const surfaces = [...element.children].filter(child => child.classList.contains('collaboration-canvas__controls') || child.classList.contains('collaboration-canvas__legend'))
+      const surfaces = [...element.children].filter(child => child.classList.contains('collaboration-canvas__controls') || child.classList.contains('collaboration-canvas__legend') || child.classList.contains('collaboration-canvas__issue'))
       if (contextControl?.current) surfaces.push(contextControl.current)
       surfaces.push(...readingProxies)
       const next = surfaces.map(child => {

@@ -86,6 +86,23 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
     {data.activity ? <ActivityMark activity={data.activity} /> : null}
   </div>
 })
+/** The local route or layout failure, as a compact corner service window. It collapses to a
+ * count that stays visible; it cannot be closed while lines are missing, and a successful
+ * retry removes it because its issues clear. */
+function CollaborationLayoutNotice({ issues, onRetry }: { issues: ReadonlyMap<string, string>; onRetry(): void }) {
+  const [collapsed, setCollapsed] = useState(false), layout = issues.has('layout')
+  const summary = layout ? 'Layout needs attention. Original Agents and records are retained.'
+    : `${issues.size} ${issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`
+  const count = layout ? 'Layout issue' : `${issues.size} not drawn`
+  return <div className="collaboration-canvas__issue" role="status" data-collapsed={collapsed || undefined}>
+    {collapsed ? <button type="button" className="collaboration-canvas__issue-chip" aria-expanded={false} aria-label={summary} title={summary} onClick={() => setCollapsed(false)}><SemanticIcon name="status.warning" size={12} /><span>{count}</span></button> : <>
+      <span>{summary}</span>
+      <span className="collaboration-canvas__issue-actions"><button type="button" onClick={onRetry}>Retry layout</button>
+        <button type="button" className="icon-button" aria-label="Collapse layout notice" aria-expanded title="Collapse" onClick={() => setCollapsed(true)}><SemanticIcon name="action.collapse" size={12} /></button></span>
+      <details><summary>Details</summary>{[...issues].map(([id, message]) => <p key={id}>{message}</p>)}</details>
+    </>}
+  </div>
+}
 function ActivityMark({ activity }: { activity: NodeActivity }) {
   const { pulse, direction } = activity, motion = useContext(MapMotionContext)
   const label = pulse.kind === 'communication' ? `Message ${direction}` : 'Dispatch updated'
@@ -350,7 +367,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} gesturing={gesturing} />
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
-    <div ref={hud} className="collaboration-canvas__hud"><div className="collaboration-canvas__controls" aria-label="Graph viewport">
+    <div ref={hud} className="collaboration-canvas__hud">{layout.issues.size ? <CollaborationLayoutNotice issues={layout.issues} onRetry={layout.retry} /> : null}<div className="collaboration-canvas__controls" aria-label="Graph viewport">
       {settings ? <button type="button" className="icon-button" aria-label="Map settings" title="Boundary and zoom levels" onClick={() => settings.open('focus', undefined, 'map')}><SemanticIcon name="object.settings" size={14} /></button> : null}
       <button type="button" className="collaboration-canvas__motion" aria-label="Map animations" aria-pressed={motion.enabled} aria-busy={motion.saving || undefined} disabled={motion.saving} title={`Map animations: ${motion.enabled ? 'on' : 'off'}${motion.preference === 'system' ? ' · Following system' : ''}. Messages continue updating.`} onClick={() => void motion.setEnabled(!motion.enabled)}><span className="collaboration-canvas__motion-switch" aria-hidden="true" /><span>Motion</span><strong>{motion.enabled ? 'On' : 'Off'}</strong></button>
       <span className="collaboration-canvas__divider" aria-hidden="true" />
@@ -362,7 +379,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     {motion.issue ? <p className="collaboration-canvas__motion-issue" role="status">{motion.issue}</p> : null}
     <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true"><ResolvedAgentAvatar label="" size={11} tintMark={false} /></i>{TIER_LABELS[tier]}</span>)}</div><div aria-label="Recency"><span><i className="collaboration-recency-key" aria-hidden="true">{([14, 11, 9] as const).map(size => <ResolvedAgentAvatar key={size} label="" size={size} tintMark={false} />)}</i>Recent → older</span></div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><CollaborationRelationKey kind={kind as CollaborationRelation['kind']} />{label}</span>)}</div></div></div>
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
-    {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
+    {!layout.issues.size && layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
   </div></MapCameraMoving.Provider></CollaborationFocusRegions.Provider></MapMotionContext.Provider></MapReadingProxyContext.Provider></CollaborationMapPreferences.Provider>
 }

@@ -137,6 +137,15 @@
 @media (max-width: 850px) { .collaboration-inspector { flex-basis: 230px; width: 230px; padding: 12px; } }
 
 .collaboration-canvas__issue { position: absolute; left: 14px; right: 14px; top: 44px; padding: 8px; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-micro); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+/* The layout notice is a compact corner service window in the HUD, never over the map centre. */
+.collaboration-canvas__hud > .collaboration-canvas__issue { position: relative; inset: auto; order: -2; flex: 0 1 auto; max-width: min(420px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px 10px; padding: 8px 8px 8px 11px; border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); border-radius: 9px; background: var(--surface-1); box-shadow: var(--elev-1); line-height: 1.45; pointer-events: auto; }
+.collaboration-canvas__hud > .collaboration-canvas__issue[data-collapsed] { display: block; padding: 0; border-radius: 999px; }
+.collaboration-canvas__issue-actions { display: inline-flex; align-items: center; gap: 2px; }
+.collaboration-canvas__issue-actions .icon-button { width: 22px; height: 22px; color: var(--text-2); }
+.collaboration-canvas__hud > .collaboration-canvas__issue details { grid-column: 1 / -1; margin: 0; }
+.collaboration-canvas__issue-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border: 0; border-radius: inherit; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.collaboration-canvas__issue-chip > svg { color: var(--amber); }
+.collaboration-canvas__issue-chip:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .collaboration-canvas__issue button { color: var(--green); background: transparent; border: 0; cursor: pointer; }
 .collaboration-canvas__issue details { display: inline; margin-left: 8px; }
 .collaboration-canvas__issue summary { display: inline; cursor: pointer; }
