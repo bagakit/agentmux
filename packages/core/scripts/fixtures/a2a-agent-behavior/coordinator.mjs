@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { bounded, terminate } from './process.mjs'
+import { bounded, registerChild, terminate } from './process.mjs'
 import { readPrivateNativeRecords, nativeSession, assertNativeCollaboration, nativeEvidenceGuards } from './native-evidence.mjs'
 import { scenarios, assertBehavior, behaviorEvidenceGuard, assertProgressiveDiscovery, progressiveDiscoveryEvidenceGuard } from './scenarios.mjs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -12,14 +12,14 @@ import { pathToFileURL } from 'node:url'
 // This process is started with the private environment before any Core import.
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const { repository, privateRoot, evidence, executable: codexExecutable, model, minimumOnly } = config
-const coreRoot = join(repository, 'packages/core'), fixture = import.meta.dirname
+const coreRoot = config.coreRoot, fixture = import.meta.dirname
 const exec = promisify(execFile), hash = value => createHash('sha256').update(value).digest('hex')
 const sourceHashes = async () => Object.fromEntries(await Promise.all(config.sourceInputs.map(async path => [path, hash(await readFile(join(repository, path)))])))
 const environment = { ...process.env }, workspace = join(privateRoot, 'workspace'), authHome = join(privateRoot, 'auth')
 assert.equal(environment.HOME, join(privateRoot, 'home'))
 assert.equal(environment.CODEX_HOME, authHome)
 assert.equal(process.cwd(), workspace)
-const ownership = { daemonPid: null, runPids: [], modelReceipts: [], peerReceipts: ['peer-process.json'], credentialReceipts: ['peer-private-auth.json'] }
+const ownership = { daemonProcess: null, modelReceipts: [], peerReceipts: ['peer-process.json'], credentialReceipts: ['peer-private-auth.json'] }
 const recordOwnership = () => writeFile(join(privateRoot, 'owned-processes.json'), JSON.stringify(ownership), { mode: 0o600 })
 let interrupted = false
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { interrupted = true })
@@ -38,6 +38,7 @@ try {
   const { staleDistComplaint } = await import(pathToFileURL(join(repository, 'vitest.dist-freshness.ts')).href)
   assert.equal(await staleDistComplaint(coreRoot), null, 'Build this candidate Core before running real models')
   const core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
+  const { nativeProcessBirth } = await import(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)
   const { composeAgentLaunchPrompt } = await import(pathToFileURL(join(coreRoot, 'dist/agent-outbound-message.js')).href)
   const { agentMuxModuleSkill } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-module-skills.js')).href)
   const { agentMuxCommandHelp } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-help.js')).href)
@@ -54,7 +55,9 @@ try {
   const daemonPath = join(coreRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd')
   daemon = spawn(daemonPath, ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'],
     { env: environment, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  ownership.daemonPid = daemon.pid; await recordOwnership()
+  const daemonIdentity = registerChild(daemon, nativeProcessBirth)
+  ownership.daemonProcess = { pid: daemon.pid }; await recordOwnership()
+  ownership.daemonProcess = await daemonIdentity; await recordOwnership()
   let daemonError = ''; daemon.stderr.on('data', bytes => { daemonError += bytes })
   await bounded(new Promise((yes, no) => {
     daemon.stdio[3].once('data', yes)
@@ -96,8 +99,7 @@ try {
   const prefix = randomUUID(), token = 'audit-' + prefix, peerBytes = join(privateRoot, 'peer.bytes')
   peerSession = await client.createAgent({ agentSessionId: 'peer-' + prefix, createOperationId: 'peer-create-' + prefix,
     providerId: provider.id, executorId: 'private-peer', workspacePath: workspace, commandOverride: process.execPath,
-    args: [join(fixture, 'peer.mjs'), peerBytes, join(privateRoot, 'peer-process.json'), join(privateRoot, 'peer-private-auth.json')], env: environment, injectAgentMuxGuide: false })
-  ownership.runPids.push((await client.listRuns()).find(run => run.runId === peerSession.run.runId)?.pid); await recordOwnership()
+    args: [join(fixture, 'peer.mjs'), peerBytes, join(privateRoot, 'peer-process.json'), join(privateRoot, 'peer-private-auth.json'), coreRoot], env: environment, injectAgentMuxGuide: false })
   const peerDeadline = Date.now() + 5000
   let peerAuth
   do { peerAuth = await readFile(join(privateRoot, 'peer-private-auth.json'), 'utf8').then(JSON.parse, () => null); if (!peerAuth) await new Promise(done => setTimeout(done, 25)) } while (!peerAuth && Date.now() < peerDeadline)
@@ -109,7 +111,7 @@ try {
   receipt.boundary = 'Real Codex exec through an explicit private verification Provider, actual Core lifecycle/journal and public HTTP RPC/CLI. Native TUI startup is not claimed; finite samples do not guarantee universal model behavior.'
   for (const [index, scenario] of selected.entries()) {
     const caseName = String(index + 1) + '-' + scenario.name
-    const plan = { authHome, home: environment.HOME, workspace, cli: config.cli, userContext: scenario.userContext,
+    const plan = { coreRoot, authHome, home: environment.HOME, workspace, cli: config.cli, userContext: scenario.userContext,
       credentials: join(privateRoot, caseName + '-private-auth.json'), events: join(privateRoot, caseName + '.jsonl'), stderr: join(privateRoot, caseName + '.stderr'),
       processReceipt: join(privateRoot, caseName + '-process.json'), args: ['--no-daemon', '-a', 'never', ...sandboxArgs, '--enable', 'multi_agent',
         '-c', 'shell_environment_policy.inherit="all"', '--model', model, 'exec', '--ignore-user-config', '--ignore-rules',
@@ -121,7 +123,6 @@ try {
       args: [join(fixture, 'codex-exec.mjs'), codexExecutable, planPath], env: environment, prompt: scenario.task, injectAgentMuxGuide: scenario.guide,
       ...(scenario.userContext ? { initialMessage: { callerAgentSessionId: peerSession.agentSessionId, capability: peerAuth.capability } } : {}) })
     models.push({ session: modelSession, plan, caseName })
-    ownership.runPids.push((await client.listRuns()).find(run => run.runId === modelSession.run.runId)?.pid); await recordOwnership()
     const outcome = { name: scenario.name, passed: false, originalSession: modelSession, expectation: scenario }
     receipt.scenarios.push(outcome)
     const deadline = Date.now() + 120_000

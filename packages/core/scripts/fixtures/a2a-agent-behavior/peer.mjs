@@ -1,6 +1,11 @@
 import { appendFile, writeFile } from 'node:fs/promises'
-const [path, receipt, credentials] = process.argv.slice(2)
-await writeFile(receipt, JSON.stringify({ processId: process.pid, agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID }) + '\n', { mode: 0o600 })
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { selfProcessIdentity } from './process.mjs'
+const [path, receipt, credentials, coreRoot] = process.argv.slice(2)
+const { nativeProcessBirth } = await import(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)
+await writeFile(receipt, JSON.stringify({ processId: process.pid, processIdentity: { pid: process.pid } }) + '\n', { mode: 0o600 })
+await writeFile(receipt, JSON.stringify({ processId: process.pid, processIdentity: await selfProcessIdentity(nativeProcessBirth), agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID }) + '\n', { mode: 0o600 })
 if (credentials) await writeFile(credentials, JSON.stringify({ capability: process.env.AGENTMUX_AGENT_CAPABILITY, agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID }), { mode: 0o600 })
 process.stdin.setRawMode?.(true)
 let writes = Promise.resolve()

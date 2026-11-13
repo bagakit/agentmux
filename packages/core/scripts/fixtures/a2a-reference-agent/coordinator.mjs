@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
-import { bounded, terminate } from '../a2a-agent-behavior/process.mjs'
+import { bounded, registerChild, terminate } from '../a2a-agent-behavior/process.mjs'
 import { readPrivateNativeRecords } from '../a2a-agent-behavior/native-evidence.mjs'
 
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'))
@@ -13,7 +13,7 @@ const { repository, privateRoot, evidence, executable, model } = config
 const workspace = join(privateRoot, 'workspace'), authHome = join(privateRoot, 'auth'), environment = { ...process.env }
 assert.equal(environment.HOME, join(privateRoot, 'home')); assert.equal(environment.CODEX_HOME, authHome); assert.equal(process.cwd(), workspace)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), exec = promisify(execFile)
-const ownership = { daemonPid: null, runPids: [], modelReceipts: ['model-server-process.json', 'model-frontend-process.json'],
+const ownership = { daemonProcess: null, modelReceipts: ['model-embedded-process.json'],
   peerReceipts: ['peer-process.json'], credentialReceipts: ['peer-private-auth.json', 'model-private-auth.json'] }
 const recordOwnership = () => writeFile(join(privateRoot, 'owned-processes.json'), JSON.stringify(ownership), { mode: 0o600 })
 const secrets = new Set([config.httpToken]), sessions = [], receipt = { schema: 'agentmux.a2a-reference-agent-proof.v1', passed: false,
@@ -62,35 +62,57 @@ function assertDiscovery({ records, nativeId, wire, messageId, originalBody, mes
 try {
   await mkdir(evidence, { recursive: true, mode: 0o700 }); await recordOwnership()
   const coreRoot = config.coreRoot ?? join(repository, 'packages/core'), core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
+  const { nativeProcessBirth } = await import(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)
   const { agentMuxModuleSkill } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-module-skills.js')).href)
   const messageModule = agentMuxModuleSkill('message'); assert.ok(messageModule)
-  assert.equal((await exec(executable, ['--version'])).stdout.trim(), 'codex-cli 0.163.0', 'The actual native actor version is not qualified')
+  const executablePath = await realpath(executable), executableInfo = await stat(executablePath)
+  const version = await exec(executablePath, ['--version'])
+  receipt.nativeExecutable = { path: executablePath, sha256: hash(await readFile(executablePath)),
+    dev: executableInfo.dev, ino: executableInfo.ino, bytes: executableInfo.size, version: version.stdout.trim(),
+    selectedMode: 'embedded-tui-durable-queue', qualification: 'pending-original-native-records' }
+  assert.equal(version.stderr, '')
+  // This is the explicitly selected finite sample, not a new Provider version claim.
+  assert.equal(receipt.nativeExecutable.version, 'codex-cli 0.166.0', 'The actual native executable differs from the selected qualification sample')
   const runtime = environment.AGENTMUX_RUNTIME_DIRECTORY, state = environment.AGENTMUX_STATE_DIRECTORY
   daemon = spawn(join(coreRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { env: environment, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  ownership.daemonPid = daemon.pid; await recordOwnership(); daemon.stderr.resume()
+  const daemonIdentity = registerChild(daemon, nativeProcessBirth)
+  ownership.daemonProcess = { pid: daemon.pid }; await recordOwnership()
+  ownership.daemonProcess = await daemonIdentity; await recordOwnership(); daemon.stderr.resume()
   await bounded(new Promise((yes, no) => { daemon.stdio[3].once('data', yes); daemon.once('error', no); daemon.once('exit', code => no(Error('Private daemon exited ' + code))) }), 15_000, 'Private daemon readiness')
   const peerProvider = core.defineAgentProvider({ catalog: { id: 'proof-reference-peer', label: 'Private independent peer', executable: process.execPath,
     expectedProcess: 'node', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
     hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false, replyCorrelation: 'none' } }, buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])], hook: { rules: [] } })
-  client = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(environment.AGENTMUX_AGENT_SESSION_STORE), providers: [...core.BUILT_IN_AGENT_PROVIDERS, peerProvider] }); client.onEvent(event => { if (event.type === 'agent-error') observedErrors.push(event) }); await client.connect()
+  const store = new core.AgentMuxFileAgentSessionStore(environment.AGENTMUX_AGENT_SESSION_STORE)
+  client = new core.AgentMuxClient({ store, providers: [...core.BUILT_IN_AGENT_PROVIDERS, peerProvider] }); client.onEvent(event => { if (event.type === 'agent-error') observedErrors.push(event) }); await client.connect()
   server = new core.AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), http: { host: '127.0.0.1', port: 0, token: config.httpToken }, coreClients: () => [{ hostId: 'local', client }] }); await server.start()
   assert.ok(server.httpAddress)
   Object.assign(environment, { AGENTMUX_RPC_ENDPOINT: `http://127.0.0.1:${server.httpAddress.port}/`, AGENTMUX_RPC_HTTP_TOKEN: config.httpToken })
   await exec('git', ['init', '--quiet', workspace])
   await writeFile(join(authHome, 'config.toml'), `model = ${JSON.stringify(model)}\nshell_environment_policy.inherit = "all"\nsandbox_workspace_write.network_access = true\n[projects.${JSON.stringify(workspace)}]\ntrust_level = "trusted"\n`, { mode: 0o600 })
   const wrapper = join(privateRoot, 'private-codex.mjs')
-  await writeFile(wrapper, `#!${process.execPath}\nimport {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';
+  await writeFile(wrapper, `#!${process.execPath}
+import {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';
+import {selfProcessIdentity,registerChild,signalChild} from ${JSON.stringify(pathToFileURL(join(config.fixturesRoot, 'a2a-agent-behavior/process.mjs')).href)};
+import {nativeProcessBirth} from ${JSON.stringify(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)};
 const args=process.argv.slice(2), root=${JSON.stringify(privateRoot)}, executable=${JSON.stringify(executable)};
 if(process.env.AGENTMUX_AGENT_CAPABILITY)writeFileSync(root+'/model-private-auth.json',JSON.stringify({agentSessionId:process.env.AGENTMUX_AGENT_SESSION_ID,capability:process.env.AGENTMUX_AGENT_CAPABILITY}),{mode:0o600});
-const nativeArgs=args.includes('--remote')?args:['--no-daemon',...args], child=spawn(executable,nativeArgs,{env:process.env,stdio:'inherit'}), name=args.includes('app-server')?'model-server-process.json':args.includes('--remote')?'model-frontend-process.json':null;
-if(name)writeFileSync(root+'/'+name,JSON.stringify({wrapperPid:process.pid,modelPid:child.pid,modelOwnProcessGroup:false,args:nativeArgs}),{mode:0o600});
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));child.on('error',()=>{process.exitCode=1});child.on('exit',(code,signal)=>{process.exitCode=code??(signal?1:0)});\n`, { mode: 0o700 })
+if(args.includes('app-server')||args.includes('--remote'))throw Error('This sample requires the original embedded TUI launch');
+const wrapperProcess=await selfProcessIdentity(nativeProcessBirth), nativeArgs=['--no-daemon',...args];
+const receipt={wrapperPid:process.pid,wrapperProcess,modelProcess:null,modelOwnProcessGroup:false,args:nativeArgs};
+const save=()=>writeFileSync(root+'/model-embedded-process.json',JSON.stringify(receipt),{mode:0o600});save();
+const child=spawn(executable,nativeArgs,{env:process.env,stdio:'inherit'}), original=registerChild(child,nativeProcessBirth);
+const failed=error=>{process.stderr.write(error.message+'\\n');process.exitCode=1};
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{void signalChild(child,signal).catch(failed)});
+child.on('error',failed);child.on('exit',(code,signal)=>{process.exitCode ||= code??(signal?1:0)});
+try{receipt.modelPid=child.pid;receipt.modelProcess={pid:child.pid};save();receipt.modelProcess=await original;save()}
+catch(error){failed(error);receipt.identityError=error.message;try{save()}catch(saveError){failed(saveError)}}
+`, { mode: 0o700 })
   const suffix = randomUUID(), marker = 'reference-proof-' + suffix
   const peer = await client.createAgent({ agentSessionId: 'peer-' + suffix, createOperationId: 'peer-create-' + suffix, providerId: peerProvider.id,
     executorId: 'private-peer', workspacePath: workspace, commandOverride: process.execPath,
-    args: [join(config.fixturesRoot, 'a2a-agent-behavior/peer.mjs'), join(privateRoot, 'peer.bytes'), join(privateRoot, 'peer-process.json'), join(privateRoot, 'peer-private-auth.json')], env: environment, injectAgentMuxGuide: false })
+    args: [join(config.fixturesRoot, 'a2a-agent-behavior/peer.mjs'), join(privateRoot, 'peer.bytes'), join(privateRoot, 'peer-process.json'), join(privateRoot, 'peer-private-auth.json'), coreRoot], env: environment, injectAgentMuxGuide: false })
   sessions.push(peer)
   const peerAuth = await until(() => readFile(join(privateRoot, 'peer-private-auth.json'), 'utf8').then(JSON.parse, () => null), Boolean, 'Core-issued peer credential', 10_000); secrets.add(peerAuth.capability)
   const task = `You have accepted a bounded arithmetic delegation from independent AgentMux Session ${peer.agentSessionId}. Your user authorizes computing its upcoming request and reporting one result to that same Session. No other work is authorized. The request has not arrived yet; do not invent or guess it. Reply Ready and finish this turn. When an AgentMux message notification later arrives, handle it within this accepted responsibility and report the result to the user as well.`
@@ -98,8 +120,13 @@ for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal
     providerId: 'codex', executorId: 'private-real-model', workspacePath: workspace, commandOverride: wrapper,
     args: ['--model', model, '--sandbox', 'workspace-write', '--ask-for-approval', 'never', '--no-alt-screen'], env: environment, prompt: task, injectAgentMuxGuide: true })
   sessions.push(modelSession)
-  ownership.runPids = (await client.listRuns()).filter(run => sessions.some(session => session.run.runId === run.runId)).map(run => run.pid); await recordOwnership()
   const initialIdle = await until(async () => { await client.refreshAgentSession(modelSession.agentSessionId, modelSession.run); const status = await client.statusAgent(modelSession.agentSessionId); receipt.lastModelStatus = status; return status }, value => value.observation.semantic === 'idle' && value.session.nativeHandle?.sessionId, 'Actual model startup completion')
+  assert.equal((await store.readMetadata(modelSession.agentSessionId)).nativeActor, undefined, 'The selected sample unexpectedly used a managed actor')
+  receipt.nativeProcess = JSON.parse(await readFile(join(privateRoot, 'model-embedded-process.json'), 'utf8'))
+  assert.equal(receipt.nativeProcess.wrapperPid, initialIdle.run.pid)
+  assert.ok(receipt.nativeProcess.modelPid > 0)
+  assert.equal(receipt.nativeProcess.args[0], '--no-daemon')
+  assert.ok(!receipt.nativeProcess.args.some(argument => ['app-server', '--remote'].includes(argument)))
   receipt.original = { session: initialIdle.session, process: initialIdle.run, startupTaskSha256: hash(task), messageModuleSha256: hash(messageModule), model }
   const originalBody = `Accepted arithmetic delegation: compute 17 + 25 and send me one combined result. Include audit marker ${marker}. Explain the calculation briefly.`
   const cli = await exec(config.cli, ['agent', 'send', '--to-session', modelSession.agentSessionId, '--text', originalBody], { env: { ...environment, AGENTMUX_AGENT_SESSION_ID: peer.agentSessionId, AGENTMUX_AGENT_CAPABILITY: peerAuth.capability }, cwd: workspace, timeout: 15_000 })
@@ -115,11 +142,18 @@ for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal
   const input = await client.inspectAgentPromptSubmission(original.notification.key), wire = input?.admission?.intent?.prompt
   assert.ok(wire); assert.equal(original.notification.state, 'submitted'); assert.equal(original.delivery.state, 'queued')
   assert.notEqual(original.notification.key.submissionId, messageId); assert.equal(input.admission.intent.message.systemContext, wire)
+  assert.equal(input.admission.transport, 'native')
+  assert.equal(input.admission.native.outcome, 'admitted')
+  assert.ok(input.admission.native.queuedSubmissionId)
+  assert.equal(input.admission.native.plan.operation, 'queue-idle')
+  assert.equal(input.admission.native.plan.protocolId, 'codex-durable-queue-0.163')
+  assert.equal(input.admission.native.plan.threadId, initialIdle.session.nativeHandle.sessionId)
   assert.equal(input.admission.intent.message.a2aNotificationId, original.notification.notificationId); assert.equal(input.admission.intent.message.userContent, undefined); assert.equal(input.admission.intent.message.authorHuman, undefined); assert.equal(input.admission.intent.message.authorAgentSessionId, undefined)
   assert.ok(wire.includes(`msg-id="${messageId}"`) && wire.includes('read-via="message --skill"')); assert.ok(!wire.includes(originalBody))
   const records = await readPrivateNativeRecords(authHome); await save('native-records.json', records)
   const facts = { records, nativeId: initialIdle.session.nativeHandle.sessionId, wire, messageId, originalBody, messageModule, marker, model }
   const discovery = assertDiscovery(facts)
+  receipt.nativeExecutable.qualification = 'original-native-records-and-admission-confirmed'
   const guardFacts = { ...facts, originalBody: originalBody + 'missing-original' }
   assert.throws(() => assertDiscovery(guardFacts), undefined, 'The original-body oracle accepted a foreign body')
   assert.throws(() => assertDiscovery({ ...facts, model: 'unrelated-model' }), undefined, 'The model oracle accepted another native model')
@@ -137,7 +171,6 @@ finally {
   const errors = [], attempt = async action => { try { return await action() } catch (error) { errors.push(error.message) } }
   for (const name of ownership.credentialReceipts) { const credential = await readFile(join(privateRoot, name), 'utf8').then(JSON.parse, () => null); if (credential?.capability) secrets.add(credential.capability) }
   const ownedSessions = client ? client.agentSessions() : sessions
-  if (client) await attempt(async () => { ownership.runPids = (await client.listRuns()).filter(run => ownedSessions.some(session => session.run.runId === run.runId)).map(run => run.pid); await recordOwnership() })
   for (const session of ownedSessions.toReversed()) {
     if (client) await attempt(async () => { await save(session.agentSessionId.startsWith('model-') ? 'model-replay.json' : 'peer-replay.json', await client.readRunReplay(session.run)) })
     if (client) await attempt(async () => { const status = await client.statusAgent(session.agentSessionId); if (status.run.state === 'running') await bounded(client.stopAgent(session.agentSessionId, session.run), 10_000, 'Private original Run stop') })

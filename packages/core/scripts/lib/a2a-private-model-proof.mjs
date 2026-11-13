@@ -6,14 +6,44 @@ import { constants } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
-import { exited, terminate, settleExactPid } from '../fixtures/a2a-agent-behavior/process.mjs'
+import { pathToFileURL } from 'node:url'
+import { exited, selfProcessIdentity, registerChild, terminate, settleExactProcess } from '../fixtures/a2a-agent-behavior/process.mjs'
 
-/** Shared private model-process scope. This never imports Core or selects a user Runtime. */
+// Only the original spawn/self receipts may authorize cleanup. Missing or stale
+// identities preserve the namespace and the caller's original errors.
+export async function cleanupPrivateProofScope({ privateRoot, evidence, ownership, nativeProcessBirth, errors, redact = value => value }) {
+  const exactProcesses = [], attempt = async action => { try { return await action() } catch (error) { errors.push(error.message) } }
+  if (ownership) {
+    await attempt(async () => {
+      assert.ok(Object.hasOwn(ownership, 'daemonProcess') && Array.isArray(ownership.modelReceipts) && Array.isArray(ownership.peerReceipts), 'Original private process ownership is incomplete')
+      await writeFile(join(evidence, 'owned-processes.json'), redact(JSON.stringify(ownership, null, 2) + '\n'))
+    })
+    for (const [names, model] of [[ownership.peerReceipts, false], [ownership.modelReceipts, true]]) {
+      for (const name of names ?? []) await attempt(async () => {
+        const bytes = await readFile(join(privateRoot, name), 'utf8'), receipt = JSON.parse(bytes)
+        await writeFile(join(evidence, name), redact(bytes))
+        if (model) {
+          assert.equal(receipt.modelProcess?.pid, receipt.modelPid, 'Original model PID and birth receipt disagree')
+          assert.equal(receipt.wrapperProcess?.pid, receipt.wrapperPid, 'Original wrapper PID and birth receipt disagree')
+          assert.equal(typeof receipt.modelOwnProcessGroup, 'boolean', 'Original model process-group ownership is unconfirmed')
+          exactProcesses.push(await settleExactProcess(receipt.modelProcess, nativeProcessBirth, receipt.modelOwnProcessGroup))
+        } else assert.equal(receipt.processIdentity?.pid, receipt.processId, 'Original peer PID and birth receipt disagree')
+        exactProcesses.push(await settleExactProcess(model ? receipt.wrapperProcess : receipt.processIdentity, nativeProcessBirth))
+      })
+    }
+    if (ownership.daemonProcess !== null) exactProcesses.push(await attempt(() => settleExactProcess(ownership.daemonProcess, nativeProcessBirth)))
+  }
+  if (!errors.length) await attempt(() => rm(privateRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }))
+  const privateRootRemoved = await stat(privateRoot).then(() => false, error => { if (error.code === 'ENOENT') return true; throw error })
+  return { exactProcesses, errors, privateRootRemoved, noHostProcessScan: true }
+}
+
+/** Shared private model-process scope. This never selects a user Runtime. */
 export async function launchPrivateA2aProof({ repository, sourceInputs,
   coordinatorEntry, name = 'a2a-agent-behavior', schema = 'agentmux.a2a-agent-behavior-launcher.v1',
   scenario = 'independent-session-channel', model = 'gpt-6.1-sol', minimumOnly = false, prepareOnly = false,
   executableName = process.env.AGENTMUX_A2A_BEHAVIOR_CODEX || 'codex',
-  requiredFlags = ['--no-daemon', '--ignore-user-config', '--ignore-rules', '--json'], privatePrefix = 'amux-real-a2a-', freezeCandidate = false }) {
+  requiredFlags = ['--no-daemon', '--ignore-user-config', '--ignore-rules', '--json'], privatePrefix = 'amux-real-a2a-', freezeCandidate = false, preparedArtifact }) {
   const authSource = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json')
   let executionCoreRoot = join(repository, 'packages/core'), executionCoordinator = coordinatorEntry
   const hash = value => createHash('sha256').update(value).digest('hex')
@@ -39,19 +69,32 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
   const parentSecrets = new Set()
   let stdout = '', stderr = ''
   const redact = value => [...parentSecrets].reduce((text, secret) => text.replaceAll(secret, '[redacted-private-credential]'), value)
-  let privateRoot, coordinator, interrupted = false
+  let privateRoot, coordinator, preparation, preparedOwner, nativeProcessBirth, interrupted = false
   const signalCleanup = []
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
     interrupted = true
     if (coordinator) signalCleanup.push(terminate(coordinator).catch(error => { launcher.signalCleanupError = error.message }))
   })
   try {
-    launcher.compiledBefore = await compiledHashes()
     const executable = await executablePath(executableName)
-    const { staleDistComplaint } = await import(new URL('../../../../vitest.dist-freshness.ts', import.meta.url))
-    assert.equal(await staleDistComplaint(join(repository, 'packages/core')), null, 'Build this candidate Core before running real models')
     privateRoot = await realpath(await mkdtemp(join(tmpdir(), privatePrefix))); await chmod(privateRoot, 0o700)
     for (const name of ['home', 'auth', 'workspace', 'runtime', 'state/ctxmux', 'tmp']) await mkdir(join(privateRoot, name), { recursive: true, mode: 0o700 })
+    if (preparedArtifact) {
+      assert.equal(freezeCandidate, true, 'Prepared model proofs freeze their exact harness and executable')
+      preparedOwner = await import(new URL('../../../../apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', import.meta.url))
+      const production = sourceInputs.filter(path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path))
+      preparation = await preparedOwner.prepareA2aArtifact({ root: repository, input: preparedArtifact, privateRoot, sourcePaths: production })
+      for (const path of production) assert.equal(launcher.sourceBefore[path], preparation.sourceSnapshot.files[path], 'Model prepared production source: ' + path)
+      executionCoreRoot = preparation.execution.coreRoot
+      const path = join(evidence, 'prepared-artifact.json')
+      await writeFile(path, JSON.stringify(preparation, null, 2) + '\n')
+      launcher.preparation = { path, sha256: hash(await readFile(path)) }
+    } else {
+      const { staleDistComplaint } = await import(new URL('../../../../vitest.dist-freshness.ts', import.meta.url))
+      assert.equal(await staleDistComplaint(executionCoreRoot), null, 'Build this candidate Core before running real models')
+    }
+    launcher.compiledBefore = await compiledHashes()
+    if (preparation) assert.deepEqual(Object.fromEntries(Object.entries(launcher.compiledBefore).map(([path, digest]) => [path.slice('packages/core/'.length), digest])), preparation.coreGraph)
     if (freezeCandidate) {
       const candidate = join(privateRoot, 'candidate'), core = join(candidate, 'packages/core')
       for (const path of sourceInputs) {
@@ -60,10 +103,12 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
         await cp(join(repository, path), target)
         assert.equal(hash(await readFile(target)), launcher.sourceBefore[path], `Source changed while freezing ${path}`)
       }
-      await cp(join(repository, 'packages/core/dist'), join(core, 'dist'), { recursive: true, filter: path => !/\.(?:map|ts)$/u.test(path) })
-      await cp(join(repository, 'packages/core/package.json'), join(core, 'package.json'))
-      for (const name of ['vendor', 'node_modules']) await symlink(join(repository, 'packages/core', name), join(core, name))
-      executionCoreRoot = core
+      if (!preparation) {
+        await cp(join(repository, 'packages/core/dist'), join(core, 'dist'), { recursive: true, filter: path => !/\.(?:map|ts)$/u.test(path) })
+        await cp(join(repository, 'packages/core/package.json'), join(core, 'package.json'))
+        for (const name of ['vendor', 'node_modules']) await symlink(join(repository, 'packages/core', name), join(core, name))
+        executionCoreRoot = core
+      }
       executionCoordinator = join(candidate, relative(repository, coordinatorEntry))
       assert.deepEqual(await compiledHashes(), launcher.compiledBefore, 'Compiled candidate changed while freezing')
       launcher.frozenCandidate = { sourceSnapshot: true, compiledSnapshot: true, liveWorkingTreeUsedByModel: false }
@@ -81,9 +126,13 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     await writeFile(planPath, JSON.stringify({ httpToken, repository, privateRoot, evidence, executable, model, minimumOnly, sourceBefore: launcher.sourceBefore,
       cli: join(executionCoreRoot, 'bin/amux'), coreRoot: executionCoreRoot, fixturesRoot: freezeCandidate ? join(privateRoot, 'candidate/packages/core/scripts/fixtures') : join(repository, 'packages/core/scripts/fixtures'), sourceInputs }), { mode: 0o600 })
     assert.equal(interrupted, false, 'Private proof was cancelled before any model coordinator launch')
+    ;({ nativeProcessBirth } = await import(pathToFileURL(join(executionCoreRoot, 'dist/agent-native-process.js')).href))
+    await selfProcessIdentity(nativeProcessBirth)
     coordinator = spawn(process.execPath, [executionCoordinator, planPath], { cwd: join(privateRoot, 'workspace'), env: environment, stdio: ['ignore', 'pipe', 'pipe'] })
+    const coordinatorIdentity = registerChild(coordinator, nativeProcessBirth)
     coordinator.stdout.on('data', bytes => { stdout += bytes }); coordinator.stderr.on('data', bytes => { stderr += bytes })
     launcher.coordinatorPid = coordinator.pid
+    launcher.coordinatorProcess = await coordinatorIdentity
     assert.equal(await exited(coordinator, minimumOnly ? 180_000 : 780_000), true, 'Bounded private coordinator did not complete')
     launcher.coordinatorExit = { code: coordinator.exitCode, signal: coordinator.signalCode }
     const receipt = JSON.parse(await readFile(join(evidence, 'receipt.json'), 'utf8'))
@@ -94,7 +143,7 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
   } catch (error) { launcher.failure = { message: error.message, stack: error.stack } }
   finally {
     await Promise.all(signalCleanup)
-    const errors = [], exactProcesses = []
+    const errors = []
     const attempt = async action => { try { return await action() } catch (error) { errors.push(error.message) } }
     if (interrupted) { launcher.passed = false; launcher.interrupted = true }
     if (launcher.signalCleanupError) errors.push(launcher.signalCleanupError)
@@ -102,38 +151,26 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     if (privateRoot) {
       // Only identities written by this exact private coordinator and wrappers are
       // eligible. Never enumerate or signal host/user processes.
-      const ownership = await readFile(join(privateRoot, 'owned-processes.json'), 'utf8').then(JSON.parse, () => ({}))
-      for (const name of ownership.credentialReceipts ?? []) {
+      const ownership = coordinator ? await attempt(async () => JSON.parse(await readFile(join(privateRoot, 'owned-processes.json'), 'utf8'))) : null
+      for (const name of ownership?.credentialReceipts ?? []) {
         const auth = await readFile(join(privateRoot, name), 'utf8').then(JSON.parse, () => null)
         if (auth?.capability) parentSecrets.add(auth.capability)
       }
-      const exactPids = new Set((ownership.runPids ?? []).filter(Boolean))
-      if (ownership.daemonPid) exactPids.add(ownership.daemonPid)
-      for (const name of ownership.peerReceipts ?? []) {
-        const peerReceipt = await readFile(join(privateRoot, name), 'utf8').then(JSON.parse, () => null)
-        if (peerReceipt?.processId) exactPids.add(peerReceipt.processId)
-      }
-      for (const name of ownership.modelReceipts ?? []) {
-        const processReceipt = await readFile(join(privateRoot, name), 'utf8').then(JSON.parse, () => null)
-        if (processReceipt) {
-          if (processReceipt.wrapperPid) exactPids.add(processReceipt.wrapperPid)
-          exactProcesses.push(await attempt(() => settleExactPid(processReceipt.modelPid, processReceipt.modelOwnProcessGroup !== false)))
-        }
-      }
-      for (const pid of exactPids) exactProcesses.push(await attempt(() => settleExactPid(pid)))
-      // Preserve failed evidence before removing authentication and scoped data.
-      const owned = await readFile(join(privateRoot, 'owned-processes.json'), 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error })
-      if (owned) await attempt(() => writeFile(join(evidence, 'owned-processes.json'), redact(owned)))
+      const coordinatorReceipt = coordinator ? await attempt(async () => JSON.parse(await readFile(join(evidence, 'receipt.json'), 'utf8'))) : null
+      if (coordinatorReceipt) await attempt(async () => {
+        assert.ok(Array.isArray(coordinatorReceipt.cleanup?.errors), 'Original coordinator cleanup remains unconfirmed')
+        errors.push(...coordinatorReceipt.cleanup.errors)
+      })
       if (freezeCandidate && launcher.frozenCandidate) {
         await attempt(async () => {
           launcher.compiledAfter = await compiledHashes()
+          if (preparation) await preparedOwner.verifyA2aPreparedArtifact(preparation, { root: repository })
           for (const path of sourceInputs) assert.equal(hash(await readFile(join(privateRoot, 'candidate', path))), launcher.sourceBefore[path], `Frozen source changed: ${path}`)
         })
       }
-      if (!errors.length) await attempt(() => rm(privateRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }))
-      launcher.cleanup.privateRootRemoved = await stat(privateRoot).then(() => false, () => true)
+      Object.assign(launcher.cleanup, await cleanupPrivateProofScope({ privateRoot, evidence, ownership, nativeProcessBirth, errors, redact }))
     }
-    launcher.cleanup.exactProcesses = exactProcesses; launcher.cleanup.errors = errors; launcher.cleanup.noHostProcessScan = true
+    launcher.cleanup.errors = errors; launcher.cleanup.noHostProcessScan = true
     if (errors.length) launcher.passed = false
     launcher.sourceAfter = await sourceHashes()
     if (!freezeCandidate) launcher.compiledAfter = await compiledHashes()
