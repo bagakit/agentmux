@@ -153,6 +153,7 @@ describe('one original Profile environment across native target scopes', () => {
     })
     const profile = {
       id: 'profile',
+      revision: 'original-profile-token',
       label: 'Native profile',
       createdAt: 1,
       isDefault: true,
