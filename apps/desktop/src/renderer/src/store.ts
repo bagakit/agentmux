@@ -6662,7 +6662,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (isGoalBusinessRequest(request)) {
       const result = await api.goals.execute(request)
       const records = result.operation === 'demand.list' ? result.demands : 'demand' in result && result.demand ? [result.demand] : []
-      if (records.length) set(state => ({ demands: { ...state.demands, ...Object.fromEntries(records.map(goal => [goal.id, demandRecordFromFilesystem(hostGoalRecord(goal), state.demands[goal.id])])) } }))
+      // A read admitted before a later write may return after that write's receipt was published.
+      // The Renderer keeps the newer owner record, as refreshDemand does.
+      if (records.length) set(state => ({ demands: { ...state.demands, ...Object.fromEntries(records.flatMap(goal => {
+        const current = state.demands[goal.id], next = hostGoalRecord(goal)
+        return current && current.updatedAt > next.updatedAt ? [] : [[goal.id, demandRecordFromFilesystem(next, current)]]
+      })) } }))
       if (result.operation === 'demand.delete') set(state => { const { [result.demand.id]: _removed, ...demands } = state.demands; return { demands } })
       refreshKnownGoalResponsibilities(records.map(goal => goal.id))
       return result
