@@ -77,6 +77,7 @@ const mutations = [
   { name: 'unknown-mode-falls-back-to-main-display', part: 'dispatch', before: 'throw ProviderError.coded("invalid_argument", "mode must be display, rect or window")', after: 'rect = CGDisplayBounds(CGMainDisplayID())', kills: 'selection is an unknown native mode and starts no capture' },
   { name: 'drop-issue', part: 'frames', before: 'entry["issue"] = ', after: '_ = ', kills: 'a display that cannot be captured carries its issue and no pixels' },
   { name: 'empty-success', part: 'frames', before: 'guard displays.contains(where: { $0["png"] != nil }) else {', after: 'guard true else {', kills: 'no captured display is a typed failure, not an empty success' },
+  { name: 'drop-safe-top', part: 'frames', before: '$0.uint32Value, screen.backingScaleFactor, screen.safeAreaInsets.top', after: '$0.uint32Value, screen.backingScaleFactor, 0', kills: 'each display reports the band its camera housing covers at the top, zero without one' },
   { name: 'ignore-scale', part: 'frames', before: 'let width = ceil(frame.width * scale), height = ceil(frame.height * scale)', after: 'let width = ceil(frame.width), height = ceil(frame.height)', kills: "pixels follow each display's own scale" },
   { name: 'show-cursor', part: 'frames', before: 'configuration.showsCursor = false', after: '', kills: 'grabs never include the cursor' },
   { name: 'producer-drops-ownership', part: 'frames', before: 'defer { withExtendedLifetime(ownership) {} }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },

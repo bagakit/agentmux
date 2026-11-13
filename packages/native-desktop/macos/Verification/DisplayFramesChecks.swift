@@ -69,9 +69,11 @@ private func windowList() -> [[String: Any]] { [
 private let kCGNullWindowID = 0
 private extension Int { static let optionOnScreenOnly = 0, bestResolution = 0 }
 private struct NSDeviceDescriptionKey: Hashable { let rawValue: String; init(_ value: String) { rawValue = value } }
+private struct NSEdgeInsets { var top: CGFloat, left: CGFloat, bottom: CGFloat, right: CGFloat }
 private struct NSScreen {
     let id: CGDirectDisplayID?
     let backingScaleFactor: CGFloat
+    var safeAreaInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     var deviceDescription: [NSDeviceDescriptionKey: Any] { id.map { [NSDeviceDescriptionKey("NSScreenNumber"): NSNumber(value: $0)] } ?? [:] }
     static var screens: [NSScreen] { Controlled.shared.screens }
 }
@@ -165,8 +167,9 @@ private struct DisplayFramesChecks {
             do { return (try NativeDesktopOperations.captureDisplays(hostPID: hostPID), nil) } catch { return (nil, error) }
         }
         let io = Controlled.shared
-        let all = [NSScreen(id: 1, backingScaleFactor: 2), NSScreen(id: 2, backingScaleFactor: 1), NSScreen(id: 3, backingScaleFactor: 1),
-            NSScreen(id: 4, backingScaleFactor: 1)]
+        // Display 1 has a camera housing 32 points tall at its top.
+        let all = [NSScreen(id: 1, backingScaleFactor: 2, safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0)), NSScreen(id: 2, backingScaleFactor: 1),
+            NSScreen(id: 3, backingScaleFactor: 1), NSScreen(id: 4, backingScaleFactor: 1)]
 
         io.reset(screens: all)
         let before = Date().timeIntervalSince1970 * 1000
@@ -183,6 +186,8 @@ private struct DisplayFramesChecks {
         check("frames are global Quartz points including negative origins", entry(2)["frame"] as? [String: Double] == ["x": -200, "y": -50, "width": 200, "height": 100])
         check("pixels follow each display's own scale", entry(1)["width"] as? Int == 800 && entry(1)["height"] as? Int == 600
             && entry(2)["width"] as? Int == 200 && entry(2)["height"] as? Int == 100 && entry(1)["scale"] as? CGFloat == 2)
+        check("each display reports the band its camera housing covers at the top, zero without one",
+            entry(1)["safeTop"] as? CGFloat == 32 && entry(2)["safeTop"] as? CGFloat == 0 && entry(3)["safeTop"] as? CGFloat == 0)
         check("captured displays carry PNG and engine and no issue", entry(1)["png"] is String && entry(1)["engine"] as? String == "screenCaptureKit" && entry(1)["issue"] == nil)
         check("a display that cannot be captured carries its issue and no pixels", (entry(3)["issue"] as? String)?.hasPrefix("display_not_found:") == true
             && entry(3)["png"] == nil && entry(3)["width"] == nil && entry(3)["engine"] == nil)
