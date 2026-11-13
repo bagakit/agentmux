@@ -14,33 +14,45 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'inline'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|inline')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
-const inline = 'apps/desktop/test/image-annotation-inline.test.tsx'
+const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
 const specifications = {
-  inline: {
-    tests: [inline, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
-    mutations: [{ label: 'inline-view-fitted', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'const fitView = () => inline ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(', replace: 'const fitView = () => fitImageView(', test: inline,
-      consumer: 'draws on the selection at a fixed one-to-one pixel scale without zoom or pan', failure: /keeps one image pixel per screen pixel/ },
-    { label: 'inline-toolbar-never-flips', source: component + 'ImageAnnotationEditor.tsx',
-      find: "if (above >= 0) return { side: 'above', top: above }", replace: 'void above', test: inline,
-      consumer: 'right-aligns the floating bar below the selection, flips above, and moves inside when neither fits', failure: /flips the bar above/ },
-    { label: 'inline-toolbar-never-inside', source: component + 'ImageAnnotationEditor.tsx',
-      find: "return { side: 'inside', top: frame.y + frame.height - INLINE_BAR_GAP - INLINE_BAR_HEIGHT }", replace: "return { side: 'above', top: above }", test: inline,
-      consumer: 'right-aligns the floating bar below the selection, flips above, and moves inside when neither fits', failure: /moves the bar inside/ },
-    { label: 'inline-window-chrome-kept', source: component + 'ImageAnnotationEditor.tsx',
-      find: '  if (inline) {\n    const frame = inlineFrame', replace: '  if (false) {\n    const frame = inlineFrame', test: inline,
-      consumer: 'shows only the floating bar and property popover, without the window chrome or Pan', failure: /omits the window header/ },
-    { label: 'inline-expand-unwired', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'onClick={() => onExpand({ shapes: currentShapes(), crop: documentState.crop, tool })}', replace: 'onClick={() => {}}', test: inline,
-      consumer: 'hands the current marks and tool to the host on Expand', failure: /hands the edit to the host/ },
-    { label: 'inline-initial-tool-ignored', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'const requestedTool = initialTool ?? lastStyle.tool', replace: 'const requestedTool = lastStyle.tool', test: inline,
-      consumer: 'opens with initialTool and never opens on Pan', failure: /initialTool opens the inline editor/ }]
+  capture: {
+    tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    mutations: [{ label: 'capture-no-crop-delivery-allowed', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (capture && !documentState.crop) return\n', replace: '', test: capture,
+      consumer: 'delivers only a selection: Enter and Command C do nothing before one exists', failure: /no selection means no delivery/ },
+    { label: 'capture-toolbar-visible-while-dragging', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'documentState.crop && gesture === null ? captureToolbarPlacement(', replace: 'documentState.crop ? captureToolbarPlacement(', test: capture,
+      consumer: 'hides the toolbar while the selection is dragged and shows it at rest', failure: /toolbar is hidden while the selection moves/ },
+    { label: 'capture-mark-button-expands', source: component + 'CaptureToolbar.tsx',
+      find: "onClick={() => onTool(tool === item.id ? 'select' : item.id)}", replace: "onClick={() => { onTool(tool === item.id ? 'select' : item.id); onExpand() }}", test: capture,
+      consumer: 'a mark button only changes the current tool, and pressing it again returns to the selection tool', failure: /mark button opens no other editor/ },
+    { label: 'capture-toolbar-gap-wrong', source: component + 'capture-geometry.ts',
+      find: 'CAPTURE_BAR_GAP = 8', replace: 'CAPTURE_BAR_GAP = 6', test: capture,
+      consumer: 'places the toolbar below the selection, else above, else inside, clamped to the frame', failure: /keeps the bar 8 below/ },
+    { label: 'capture-right-click-with-marks-clears', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'else if (!documentState.shapes.length && !rectContains(crop, point(event)))', replace: 'else if (!rectContains(crop, point(event)))', test: capture,
+      consumer: 'right-click outside the selection clears it without marks, keeps it with marks, and cancels without a selection', failure: /keeps a selection that has marks/ },
+    { label: 'capture-view-fitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const fitView = () => capture ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(', replace: 'const fitView = () => fitImageView(', test: capture,
+      consumer: 'shows the whole frozen display at a fixed one-to-one pixel scale without zoom, pan or window chrome', failure: /keeps one image pixel per screen pixel/ },
+    { label: 'capture-dim-inside-selection', source: component + 'ImageAnnotationEditor.tsx',
+      find: "    if (!crop) { context.fillRect(0, 0, image.width, image.height); return }\n", replace: '    context.fillRect(0, 0, image.width, image.height)\n    if (!crop) return\n', test: capture,
+      consumer: 'drags a selection that becomes the crop and dims the frozen frame outside it', failure: /covers exactly the four bands outside the selection/ },
+    { label: 'capture-expand-without-marks', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'onExpand?.({ shapes: currentShapes(), crop: documentState.crop, tool })', replace: 'onExpand?.({ shapes: [], crop: documentState.crop, tool })', test: capture,
+      consumer: 'Command S, Command P and Command E act directly on the processed selection', failure: /hands marks, selection and tool to the window editor/ },
+    { label: 'capture-loupe-at-rest', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'setHover(cropRef.current || !crop ? { at, sample: sampleLoupe(at) } : null)', replace: 'setHover({ at, sample: sampleLoupe(at) })', test: capture,
+      consumer: 'shows the loupe before a selection and while adjusting it, hides it at rest, and copies the sampled color on C', failure: /moves at rest read no frozen pixels/ },
+    { label: 'capture-double-click-delivery-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: "else if (capture && !shape && tool === 'select' && crop && rectContains(crop, at)) complete()", replace: 'else void crop', test: capture,
+      consumer: 'double-click inside the selection with the selection tool is the primary delivery', failure: /double-click inside delivers the selection/ }]
   },
   modeless: {
     tests: [modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
