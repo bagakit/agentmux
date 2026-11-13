@@ -31,8 +31,6 @@ const ThemeObjectListIcon = semanticIconComponent('object.list')
 const ThemeLayoutColumns3Icon = semanticIconComponent('layout.columns-3')
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-
 
 
 export function GlobalBoardSurface() {
@@ -167,7 +165,7 @@ export function GlobalBoardSurface() {
       {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}</div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
         {creation.pending ? creation.phase === 'save' ? '正在保存目标…' : '目标已保存，正在准备专属讨论…' : creation.phase === 'save' ? creation.notSaved ? '已确认目标尚未保存。可以用同一个 ID 保存此目标。' : '目标保存结果尚未确认。重新读取同一个目标后再继续，不会重复创建。' : '目标已保存，专属讨论尚未确认。目标和已有工作面保留。'}
-        {creation.error ? <><span>{creation.error}</span><button type="button" className="primary-button" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}<ThemeActionOpenExternalIcon size={13} /></button></> : null}
+        {creation.error ? <><span>{creation.error}</span><button type="button" className="primary-button" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}</button></> : null}
       </div> : null}
       <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
         <GoalsCollectionBody view={view} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={filteredDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
