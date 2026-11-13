@@ -134,6 +134,11 @@ async function conversationScenes({ input, initial }) {
     const dom = await read(`(()=>{const root=${selector},id=${identity(selector)},r=id?.getBoundingClientRect();return{body:root?.innerText,viewport:{width:innerWidth,height:innerHeight},identity:{name:id?.textContent,title:id?.querySelector('[title]')?.title,visible:id?.checkVisibility(),bounds:r?.toJSON()},composers:[...root.querySelectorAll(${JSON.stringify(editor)})].filter(n=>n.checkVisibility()).map(n=>({value:n.textContent,bounds:n.getBoundingClientRect().toJSON()})),states:[...root.querySelectorAll('[role=status]')].filter(n=>n.checkVisibility()).map(n=>({text:n.textContent,status:n.dataset.inputStatus})),details:[...root.querySelectorAll('.conversation-input-details__body')].filter(n=>n.checkVisibility()).map(n=>n.textContent)}})()`)
     assert.ok(dom.identity.visible && dom.identity.bounds.width > 0, 'Accurate identity is actually visible outside the Reader')
     assert.equal(dom.composers.length, 1, 'Exactly one original visible maintained Composer')
+    if (name === '01-floating-conversation-wide-dark') {
+      const titles = await read(`[...${selector}.querySelectorAll('.log-turn__system-title')].filter(n=>n.checkVisibility()).map(n=>({text:n.textContent,width:n.clientWidth,completeWidth:n.scrollWidth}))`)
+      assert.ok(titles.length > 0 && titles.every(title => title.completeWidth <= title.width + 1), 'Named system records use available width instead of clipping a title beside an absent preview')
+      result.systemTitles = titles
+    }
     const file = name + '.png'
     await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG())
     result.images.push(file); result[name] = { facts, dom }
