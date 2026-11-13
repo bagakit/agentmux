@@ -19,6 +19,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { sessionStopReceipt } from './helpers/session-stop-receipt'
 
 const initial = useAppStore.getState()
 let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
@@ -39,7 +40,8 @@ beforeEach(() => {
     agentNames: { [lonely.id]: 'Lonely Reviewer' },
     closingWorkbenchViews: {}, closeTabRequest: null, closeRegionRequest: null, error: null, dirtyDocuments: {}, prewarmTerminal: vi.fn() })
   useAppStore.getState().activateTab('workspace', 'group', split.id)
-  vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) =>
+    control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
   vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
 })
 afterEach(async () => {

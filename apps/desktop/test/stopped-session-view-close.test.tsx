@@ -23,6 +23,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { dispatchWorkbenchCommand } from '../src/renderer/src/lib/workbench-shortcuts'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const initial = useAppStore.getState()
 let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
@@ -76,6 +77,10 @@ it('actual Tab X closes a typed exited Agent projection without Stop, and preser
   expect(useAppStore.getState().layouts.workspace?.groups[0]?.tabOrder).toEqual([sibling.id])
   expect(api.sessions.stop).not.toHaveBeenCalled(); retained()
   expect(useAppStore.getState().workbenchSaveWarning).toContain('database missing')
+  await toggleNotificationCenter(element, 'open')
+  const saveNotice = currentNotificationRows(element).find(row => row.textContent?.includes('Saving the workbench'))
+  expect(saveNotice).toBeDefined()
+  await toggleNotificationDetails(saveNotice!)
   expect(element.textContent).toContain('Saving the workbench is unconfirmed')
 })
 
