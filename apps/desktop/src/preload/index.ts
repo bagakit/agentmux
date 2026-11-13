@@ -54,7 +54,7 @@ import type {
   BrowserStepEvidenceRead,
   BrowserReplayPlan,
   BrowserPng,
-  BrowserProfileDeleteApproval, BrowserProfileEdit,
+  BrowserProfileClearSiteApproval, BrowserProfileDeleteApproval, BrowserProfileEdit,
   BrowserInputHistoryTarget,
   BrowserInputHistoryScope,
   BrowserViewport,
@@ -755,6 +755,8 @@ const api: AgentMuxPreloadApi = {
     setDefaultProfile: (profileId: string) => ipcRenderer.invoke('browser:setDefaultProfile', profileId),
     createProfile: (label: string) => ipcRenderer.invoke('browser:createProfile', label),
     deleteProfile: (profileId: string, approval: BrowserProfileDeleteApproval) => ipcRenderer.invoke('browser:deleteProfile', profileId, approval),
+    listProfileSites: (profileId: string) => ipcRenderer.invoke('browser:listProfileSites', profileId),
+    clearProfileSite: (profileId: string, site: string, approval: BrowserProfileClearSiteApproval) => ipcRenderer.invoke('browser:clearProfileSite', profileId, site, approval),
     detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),
     importProfile: (sourceToken: string, label: string) =>
       ipcRenderer.invoke('browser:importProfile', sourceToken, label),

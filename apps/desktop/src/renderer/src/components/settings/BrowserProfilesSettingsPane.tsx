@@ -3,7 +3,7 @@ import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import type { BrowserProfileSummary } from '../../../../shared/contracts'
+import type { BrowserProfileSite, BrowserProfileSummary } from '../../../../shared/contracts'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
@@ -306,6 +306,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
         </ul> : <p className="browser-profile-editor__quiet">No Browser uses this Profile.</p>}
       </section>
 
+      <ProfileSites profile={profile} />
+
       {profile.source ? <section className="browser-profile-editor__section" aria-label="Imported">
         <h4>Imported</h4>
         <p className="browser-profile-editor__quiet">{profile.source.browserLabel} · {profile.source.profileLabel}: {profile.source.importedCookies} cookies, {profile.source.skippedCookies} skipped</p>
@@ -330,6 +332,58 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
         </div>
       </div> : null}
     </article>
+  )
+}
+
+/**
+ * Sites holding sign-ins in this Profile, read only when asked: the list is private metadata and
+ * reading it touches the Profile's session. Clearing one site is confirmed in place and names its result.
+ */
+function ProfileSites({ profile }: { profile: BrowserProfileSummary }) {
+  const [sites, setSites] = useState<BrowserProfileSite[] | null>(null)
+  const [state, setState] = useState<'idle' | 'reading' | 'clearing'>('idle')
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const [result, setResult] = useState<{ kind: 'cleared' | 'failed'; text: string } | null>(null)
+  const cancel = useRef<HTMLButtonElement>(null)
+  useEffect(() => { if (confirm) cancel.current?.focus() }, [confirm])
+  const read = async () => {
+    setState('reading'); setResult(null)
+    try { setSites(await api.browser.listProfileSites(profile.id)) }
+    catch (cause) { setResult({ kind: 'failed', text: `Couldn’t read this Profile’s sites. ${presentError(cause)}` }) }
+    finally { setState('idle') }
+  }
+  const clear = async (site: string) => {
+    setState('clearing')
+    try {
+      await api.browser.clearProfileSite(profile.id, site, { kind: 'user-confirmed', operation: 'clear-site-data', scope: 'profile-site', profileId: profile.id, site })
+      setSites(current => current?.filter(entry => entry.site !== site) ?? null)
+      setResult({ kind: 'cleared', text: `Signed out of ${site} in ${profile.label}. Reload its open pages to see it.` })
+    } catch (cause) { setResult({ kind: 'failed', text: `${site} was not cleared. ${presentError(cause)}` }) }
+    finally { setState('idle'); setConfirm(null) }
+  }
+  return (
+    <section className="browser-profile-editor__section" aria-label="Sites with sign-ins">
+      <h4>Sites with sign-ins</h4>
+      {sites === null ? <p className="browser-profile-editor__quiet">
+        <button type="button" className="browser-profile-editor__link" disabled={state !== 'idle'} onClick={() => void read()}>
+          {state === 'reading' ? 'Reading…' : 'Show sites'}</button></p>
+        : sites.length === 0 ? <p className="browser-profile-editor__quiet">No site has sign-ins in this Profile.</p>
+        : <ul className="browser-profile-editor__sites">
+          {sites.map(entry => <li key={entry.site}>
+            {confirm === entry.site ? <div className="browser-profile-editor__site-confirm" role="alertdialog" aria-label={`Clear ${entry.site}`}
+              onKeyDown={event => { if (event.key === 'Escape' && state !== 'clearing') { event.preventDefault(); event.stopPropagation(); setConfirm(null) } }}>
+              <span>Sign out of <strong>{entry.site}</strong> and remove its site data in this Profile?</span>
+              <button ref={cancel} type="button" className="small-button" onClick={() => setConfirm(null)}>Cancel</button>
+              <button type="button" className="danger-button" disabled={state === 'clearing'} onClick={() => void clear(entry.site)}>
+                {state === 'clearing' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}Clear {entry.site}</button>
+            </div> : <>
+              <span>{entry.site}</span><small>{entry.cookies} cookie{entry.cookies === 1 ? '' : 's'}</small>
+              <button type="button" className="small-button" disabled={state !== 'idle'} aria-label={`Clear ${entry.site}`} onClick={() => setConfirm(entry.site)}>Clear…</button>
+            </>}
+          </li>)}
+        </ul>}
+      {result ? <p className={result.kind === 'cleared' ? 'browser-profile-editor__quiet' : 'browser-profile-editor__error'} role={result.kind === 'cleared' ? 'status' : 'alert'}>{result.text}</p> : null}
+    </section>
   )
 }
 

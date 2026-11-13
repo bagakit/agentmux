@@ -1337,6 +1337,19 @@ export type BrowserProfileDeleteApproval = {
   profileId: string
 }
 
+/** The person's confirmation to clear one site's sign-ins and site data in one Profile. */
+export type BrowserProfileClearSiteApproval = {
+  kind: 'user-confirmed'
+  operation: 'clear-site-data'
+  scope: 'profile-site'
+  profileId: string
+  /** Registrable domain, as listed by listProfileSites. */
+  site: string
+}
+
+/** A site that holds cookies in a Profile; names and counts only, never cookie names or values. */
+export type BrowserProfileSite = { site: string; cookies: number }
+
 export type BrowserProfileImportSourceSummary = {
   token: string
   browserLabel: string
@@ -2047,6 +2060,9 @@ export type AgentMuxDesktopApi = {
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
+    /** Sites holding cookies in this Profile, for the person to pick one to clear. */
+    listProfileSites(profileId: string): Promise<BrowserProfileSite[]>
+    clearProfileSite(profileId: string, site: string, approval: BrowserProfileClearSiteApproval): Promise<void>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     /** Explicit human address/search submissions only; page navigation never records here. */

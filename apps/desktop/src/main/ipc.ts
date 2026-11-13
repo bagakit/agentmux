@@ -147,6 +147,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  session,
   shell,
   BrowserWindow,
   type IpcMainEvent,
@@ -178,7 +179,7 @@ import type {
   BrowserPresentationOccurrence,
   BrowserPresentationCaptureAck,
   BrowserPresentationActivation,
-  BrowserProfileDeleteApproval, BrowserProfileEdit,
+  BrowserProfileClearSiteApproval, BrowserProfileDeleteApproval, BrowserProfileEdit,
   BrowserViewport,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
@@ -216,6 +217,7 @@ import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
 import { createBrowserProfileUsage } from './browser-profile-usage.js'
+import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
@@ -1940,6 +1942,16 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:deleteProfile', (event, profileId: string, approval: BrowserProfileDeleteApproval) =>
     ipcResult(() => profileUsage.deleteProfile(profileId, approval)))
+  // Site data is cleared inside the Profile's own session, which only a confirmed Profile resolves to.
+  const profileSites = createBrowserProfileSiteData({ session: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)) })
+  handleWithEvent('browser:listProfileSites', (event, profileId: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return await profileSites.list(profileId)
+  }))
+  handleWithEvent('browser:clearProfileSite', (event, profileId: string, site: string, approval: BrowserProfileClearSiteApproval) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    await profileSites.clear(profileId, site, approval)
+  }))
   handleWithEvent('browser:detectProfileImportSources', (event) => ipcResult(() => browserProfiles.detectImportSources()))
   handleWithEvent('browser:importProfile', (event, sourceToken: string, label: string) =>
     ipcResult(() => browserProfiles.importProfile(sourceToken, label)))

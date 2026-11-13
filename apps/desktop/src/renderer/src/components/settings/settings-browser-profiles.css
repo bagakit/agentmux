@@ -56,6 +56,17 @@
 .browser-profile-editor__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
 .browser-profile-editor__quiet { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-profile-editor__skips { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.browser-profile-editor__link { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
+.browser-profile-editor__link:hover:not(:disabled) { color: var(--text); }
+.browser-profile-editor__link:disabled { color: var(--text-3); cursor: default; }
+.browser-profile-editor__link:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+.browser-profile-editor__sites { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.browser-profile-editor__sites li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); min-height: 30px; color: var(--text-2); font-size: var(--fs-body); }
+.browser-profile-editor__sites li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-profile-editor__sites li > small { color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.browser-profile-editor__site-confirm { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--red-bg); font-size: var(--fs-meta); }
+.browser-profile-editor__site-confirm strong { color: var(--text); font-weight: 600; }
 .browser-profile-editor__skips li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-profile-editor__skips small { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .browser-profile-editor__uses { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }

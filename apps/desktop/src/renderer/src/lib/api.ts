@@ -18,7 +18,9 @@ import type {
   AppConfig,
   BrowserEvent,
   BrowserProfileImportSourceSummary,
+  BrowserProfileClearSiteApproval,
   BrowserProfileDeleteApproval,
+  BrowserProfileSite,
   BrowserProfileSummary,
   BrowserSnapshot,
   BrowserViewport,
@@ -347,6 +349,9 @@ const mockDefaultBrowserProfile: BrowserProfileSummary = {
   source: null
 }
 let mockBrowserProfiles: BrowserProfileSummary[] = [mockDefaultBrowserProfile]
+// Preview-only sites with sign-ins per Profile, so the clear flow can be seen without a real session.
+const mockBrowserProfileSites = new Map<string, BrowserProfileSite[]>([[mockDefaultBrowserProfile.id, [
+  { site: 'github.com', cookies: 14 }, { site: 'figma.com', cookies: 9 }, { site: 'example.com', cookies: 2 }]]])
 let mockBrowserProfileRevision = 0
 const mockBrowserProfileListeners = new Set<(list: { revision: number; profiles: BrowserProfileSummary[] }) => void>()
 function publishMockBrowserProfiles(): void {
@@ -1451,6 +1456,13 @@ const mockApi: AgentMuxDesktopApi = {
       }
       mockBrowserProfiles = mockBrowserProfiles.filter((profile) => profile.id !== profileId)
       publishMockBrowserProfiles()
+    },
+    listProfileSites: async (profileId) => structuredClone(mockBrowserProfileSites.get(profileId) ?? []),
+    clearProfileSite: async (profileId, site, approval: BrowserProfileClearSiteApproval) => {
+      if (approval.kind !== 'user-confirmed' || approval.operation !== 'clear-site-data' || approval.scope !== 'profile-site' || approval.profileId !== profileId || approval.site !== site) {
+        throw Object.assign(new Error('Clearing a site’s data requires your confirmation for this Profile and site.'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
+      }
+      mockBrowserProfileSites.set(profileId, (mockBrowserProfileSites.get(profileId) ?? []).filter((entry) => entry.site !== site))
     },
     detectProfileImportSources: async () => structuredClone(mockBrowserImportSources),
     importProfile: async (sourceToken, label) => {
