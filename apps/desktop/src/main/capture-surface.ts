@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, screen, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { ImageOrigin, ImageResult } from '@agentmux/core'
-import type { CaptureResult, NativeDesktop, NativeDisplayFrame } from '@agentmux/native-desktop'
+import type { ImageOrigin, ImageResult, NativeDesktopPayloadMap } from '@agentmux/core'
+import type { NativeDesktop, NativeDisplayFrame } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT, type CaptureSurfaceEvent, type CaptureSurfaceHandoff, type CaptureSurfaceInput,
@@ -217,9 +217,9 @@ export class CaptureSurface {
     return { rect: { x: frame.x + selection.x / scale, y: frame.y + selection.y / scale, width: selection.width / scale, height: selection.height / scale }, scale, capturedAt: active.capturedAt }
   }
 
-  /** The public selection capture: the same surface without ⌘E, returning the processed selection as a native capture result. */
-  async captureSelection(returnFocus: boolean): Promise<CaptureResult> {
-    let result: CaptureResult | null = null
+  /** The public selection capture: the same surface without ⌘E, returning the processed selection as Core's public capture result. */
+  async captureSelection(returnFocus: boolean): Promise<NativeDesktopPayloadMap['native.capture']> {
+    let result: NativeDesktopPayloadMap['native.capture'] | null = null
     try {
       const outcome = await this.present({ attachToDraft: false, expandable: false, returnFocus, complete: async (image, source, engine) => {
         result = { state: 'captured', engine, selectionRect: source.rect,

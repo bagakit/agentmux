@@ -1,11 +1,11 @@
 import { AgentMuxError, parseNativeDesktopParams, parseNativeDesktopResult, NATIVE_DESKTOP_WRITES,
   type AgentMuxRpcNativeDesktopOwner, type AgentMuxRpcCallContext, type NativeDesktopMethod,
-  type NativeDesktopParamsMap, type NativeDesktopReply, type NativeDesktopJson } from '@agentmux/core'
-import { NativeRequestError, type CaptureResult, type NativeDesktop, type NativeMethod, type JsonObject } from '@agentmux/native-desktop'
+  type NativeDesktopParamsMap, type NativeDesktopPayloadMap, type NativeDesktopReply, type NativeDesktopJson } from '@agentmux/core'
+import { NativeRequestError, type NativeDesktop, type NativeMethod, type JsonObject } from '@agentmux/native-desktop'
 
 type NativePort = Pick<NativeDesktop, 'request' | 'inspectOperation'>
 /** Region selection is a Desktop surface over native frozen frames, not a native picker. */
-type SelectionPort = { captureSelection(): Promise<CaptureResult> }
+type SelectionPort = { captureSelection(): Promise<NativeDesktopPayloadMap['native.capture']> }
 function actor(context?: AgentMuxRpcCallContext): string {
   if (context?.caller) return `agent:${context.caller.agentSessionId}`
   if (context?.principal && ['user', 'device'].includes(context.principal.kind)) return `${context.principal.kind}:${context.principal.id}`

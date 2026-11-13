@@ -85,7 +85,6 @@ export class ScreenCapture {
         if (!target) return null
         if (target.mode !== mode) throw new Error('The selected capture source does not match the original request. Your draft is kept.')
         const capturedAt = Date.now(), result = await native.captureScreenshot(target)
-        if (result.state === 'cancelled') return null
         if (result.state === 'failed') throw new Error(`Screen capture failed (${result.error?.code ?? 'unknown'}): ${result.error?.message ?? 'No failure details were returned'}. Your work remains available.`)
         if (result.state !== 'captured' || !result.screenshot) throw new Error('The original screen capture result is unconfirmed. Check that operation before taking another screenshot.')
         const shot = result.screenshot
