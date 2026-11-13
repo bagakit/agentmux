@@ -12,6 +12,14 @@ import { FocusTopicLabel } from './FocusTopicLabel'
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 
+function showsActivity(context: FocusContext, presentation: 'row' | 'card'): boolean {
+  return context.detailKind === 'service' && !context.detailIsRecap || presentation === 'card' && context.detailKind === 'observation'
+}
+
+/** Shared visibility rule for status and service facts, independent of the surface. */
+export function mandatoryAgentContextDetails(context: FocusContext, presentation: 'row' | 'card'): boolean {
+  return context.bucket === 'attention' || showsActivity(context, presentation) || context.detailKind === 'observation' || context.activitySemantic === 'unknown' || context.state === 'disconnected'
+}
 
 /** Pure held-fact content. Each surface keeps its own button, navigation and disclosures. */
 export function AgentContextContent({ context, metadata, identity, headingAccessory, presentation = 'row', disclosure, topic }: {
@@ -24,8 +32,8 @@ export function AgentContextContent({ context, metadata, identity, headingAccess
   // was interrupted. The adjacent state and service reason keep that distinct
   // from a current reply or a working Agent.
   const recap = context.bucket !== 'attention' && context.state !== 'disconnected' && (context.processState === 'running' || context.processState === 'exited' || presentation === 'card' && context.processState === 'interrupted') && !context.runUnobserved ? context.recap : null
-  const showActivity = context.detailKind === 'service' && !context.detailIsRecap || presentation === 'card' && context.detailKind === 'observation'
-  const mandatory = context.bucket === 'attention' || showActivity || context.detailKind === 'observation' || context.activitySemantic === 'unknown' || context.state === 'disconnected'
+  const showActivity = showsActivity(context, presentation)
+  const mandatory = mandatoryAgentContextDetails(context, presentation)
   const status = mandatory ? 1 : disclosure?.status ?? 1, summary = mandatory ? 1 : disclosure?.summary ?? 1
   const avatar = identity ?? <span className="focus-context__avatar focus-context__avatar--compact-content" inert aria-hidden="true">{context.kind === 'agent' ? <AgentAvatar sessionId={active ? context.id : undefined} executorId={context.executorId} label={context.name} state={context.state} providerId={context.providerId ?? undefined} size={18} visible={false} /> : <ThemeObjectTerminalIcon size={16} />}</span>
   return <>
