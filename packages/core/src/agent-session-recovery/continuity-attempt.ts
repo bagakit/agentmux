@@ -302,6 +302,7 @@ export async function performAgentContinuity(
   }
   const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
     let absenceChanged = false
+    let reusedObservation: AgentMuxContinuityOperation | undefined
     receipt.kind = result.kind
     receipt.reason = reason ?? ('reason' in result ? result.reason : result.kind)
     receipt.evidence = result.evidence.kind === 'provider-native' ? result.evidence.previousRun : result.evidence
@@ -341,6 +342,8 @@ export async function performAgentContinuity(
     if (current) {
       try {
         current = await ports.sessions.updateExactAgentSession(current.agentSessionId, current.run, value => {
+          absenceChanged = false
+          reusedObservation = undefined
           const latest = value.continuityOperations?.[receipt.operationId]
           if (latest?.action === 'restart' && receipt.action !== 'restart') throw new AgentMuxError(
             'The original operation is an explicit restart. Its receipt and original request are kept.', 'AGENT_CONTINUITY_SUPERSEDED')
@@ -361,6 +364,22 @@ export async function performAgentContinuity(
               absenceChanged = true
               return value
             }
+            // A pure startup re-observes facts; it does not author another recovery action.
+            // Select only after the current absence guard, inside the original Store fence.
+            if (!prior && !latest && input.trigger === 'startup' && !receipt.standingIntent &&
+                !receipt.intentOperationId && !receipt.launchInput && !receipt.messageInput && authoredExecutor) {
+              const sameObservation = (saved: AgentMuxContinuityOperation) => saved.agentSessionId === value.agentSessionId &&
+                saved.trigger === 'startup' && saved.kind === 'unavailable' && saved.reason === 'native-conversation-absent' &&
+                sameRun(saved.previousRun, value.run) && !saved.action && !saved.intentOperationId && !saved.supervision &&
+                !saved.standingIntent && !saved.launchInput && !saved.messageInput && !saved.newRun && !saved.frontendReconnect &&
+                !saved.initializationRecovery && !saved.resolution && !saved.moteMainEntry &&
+                saved.timingOverride === receipt.timingOverride && isDeepStrictEqual(saved.policy, receipt.policy) &&
+                isDeepStrictEqual(continuityExecutorEntries(value.continuityExecutors)?.[saved.operationId], authoredExecutor)
+              const pointed = value.continuity && value.continuityOperations?.[value.continuity.operationId]
+              reusedObservation = pointed && sameObservation(pointed) ? pointed
+                : Object.values(value.continuityOperations ?? {}).find(sameObservation)
+              if (reusedObservation) return value
+            }
           }
           const supervision = frontendObservation && latest?.supervision?.attemptCount === 0 &&
             !['cancelled', 'settled'].includes(latest.supervision.phase)
@@ -379,8 +398,9 @@ export async function performAgentContinuity(
             ...(originalMessage(value) ? { messageInput: originalMessage(value)! } : {}),
             ...(supervision ? { supervision } : {}) } } }
         })
-        if (!absenceChanged) ports.events.publishSession(current)
+        if (!absenceChanged && !reusedObservation) ports.events.publishSession(current)
       } catch (error) {
+        reusedObservation = undefined
         if (error instanceof AgentMuxError && ['AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT', 'AGENT_CONTINUITY_SUPERSEDED'].includes(error.code)) throw error
         if (result.kind === 'unavailable' && result.reason === 'native-conversation-absent' && error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
           // A rejected Store fence cannot certify absence from this old Session snapshot.
@@ -392,6 +412,7 @@ export async function performAgentContinuity(
       }
     }
     if (absenceChanged) return await performAgentContinuity(context, input, intentOperationId, inputContextSource, captured)
+    if (reusedObservation) return { ...result, continuity: structuredClone(reusedObservation) }
     const cancelledWaiting = current?.continuityOperations?.[receipt.operationId]
     if (cancelledWaiting?.supervision?.phase === 'cancelled' && cancelledWaiting.supervision.attemptCount === 0) {
       return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason: 'intent-cancelled',
