@@ -8,6 +8,8 @@ import AgentMuxNativeMacOSCore
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
     static func activeDisplayBounds() -> [CGRect] { [CGRect(x: 0, y: 0, width: 1000, height: 800), CGRect(x: 1000, y: -200, width: 800, height: 600)] }
+
+
     static func clipboardWrite(_ params: [String: JSONValue]) throws -> [String: Any] {
         ControlledIO.shared.copied(format: params["format"]?.string, value: params["data"]?.string)
         return ["state": "written"]
@@ -29,6 +31,13 @@ private enum NativeDesktopOperations {
     static func captureWindow(_ params: [String: JSONValue]) throws -> [String: Any] { throw ProviderError.coded("fixture_scope", "window IO not selected") }
     static func displayIDArgument(_ value: JSONValue?) throws -> CGDirectDisplayID { throw ProviderError.coded("fixture_scope", "display IO not selected") }
 }
+/// Records ownership exactly as production hands it over; windows are not part of this harness.
+private enum NativeSelectionBackdrops {
+    nonisolated(unsafe) static var adopted: [(String, UInt64?)] = []
+    nonisolated(unsafe) static var released: [String] = []
+    static func adopt(_ id: String, owner: UInt64?) { adopted.append((id, owner)) }
+    @discardableResult static func release(_ id: String?) -> Bool { if let id { released.append(id) }; return id != nil }
+}
 private enum JSONValue {
     case string(String), number(Double), bool(Bool), object([String: JSONValue])
     var string: String? { if case let .string(value) = self { return value }; return nil }
@@ -47,18 +56,21 @@ private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Owners
     try NativeSelectionCaptureLease().withCapture(operation)
 }
 private enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil,
+    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil, inlineEditing: Bool = false,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledIO.shared.selectorCall(initialRect: initialRect)
         try copyColor("#1A2B3C")
         let pixels = try load(NativeSelectionLoading())
         let forced = ControlledIO.shared.takeChoice()
-        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: forced?.action ?? (allowEditing ? .edit : .capture), editTool: forced?.tool, pixels: pixels)
+        let action = forced?.action ?? (allowEditing ? .edit : .capture)
+        // The production picker keeps a backdrop only for an inline edit.
+        let backdrop = inlineEditing && action == .edit ? ControlledIO.shared.keepBackdrop() : nil
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: action, editTool: forced?.tool, backdrop: backdrop, pixels: pixels)
     }
 }
 private enum NativeSelectionCompletionAction: String { case capture, edit }
-private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; let pixels: NativeSelectionPixels }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; var backdrop: String? = nil; let pixels: NativeSelectionPixels }
 private final class NativeSelectionLoading: @unchecked Sendable {}
 private final class NativeSelectionPixels: @unchecked Sendable {
     func compose(_ rect: CGRect) throws -> (image: String, scale: Double, engine: String) {
@@ -81,6 +93,8 @@ private final class ControlledIO: @unchecked Sendable {
     func takeChoice() -> (action: NativeSelectionCompletionAction, tool: String?)? { lock.lock(); defer { choice = nil; lock.unlock() }; return choice }
     private var seeds: [CGRect?] = []
     func selectorCall(initialRect: CGRect? = nil) { lock.lock(); selectors += 1; seeds.append(initialRect); lock.unlock() }
+    private var kept = 0
+    func keepBackdrop() -> String { lock.lock(); defer { lock.unlock() }; kept += 1; return "backdrop-\(kept)" }
     func lastSeed() -> CGRect? { lock.lock(); defer { lock.unlock() }; return seeds.last ?? nil }
     func selectorCount() -> Int { lock.lock(); defer { lock.unlock() }; return selectors }
     func pixelCall() -> Int { lock.lock(); defer { lock.unlock() }; pixels += 1; return pixels }
@@ -145,6 +159,26 @@ private struct SelectionCaptureConsumerChecks {
                 && (rejected["error"] as? [String: String])?["code"] == "invalid_argument")
         }
         check("production invalid initialRect never opens a selector", io.selectorCount() == calls + 1)
+        let inline = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true), "inlineEditing": .bool(true)], owner: 7)
+        let inlineBackdrop = (inline["backdrop"] as? [String: String])?["id"]
+        check("production inline edit returns the kept backdrop id", inline["state"] as? String == "captured" && inline["completionAction"] as? String == "edit" && inlineBackdrop == "backdrop-1")
+        check("production inline backdrop is owned by its requesting connection", NativeSelectionBackdrops.adopted.last.map { $0.0 == "backdrop-1" && $0.1 == 7 } == true)
+        io.force(.capture, tool: nil)
+        let inlineCapture = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true), "inlineEditing": .bool(true)], owner: 7)
+        check("production inline direct capture keeps no backdrop", inlineCapture["state"] as? String == "captured" && inlineCapture["backdrop"] == nil)
+        let notInline = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)], owner: 7)
+        check("production edit without inlineEditing keeps no backdrop", notInline["completionAction"] as? String == "edit" && notInline["backdrop"] == nil)
+        let selectorsBeforeInlineRejects = io.selectorCount()
+        for (name, params) in [
+            ("inlineEditing without allowEditing", ["mode": .string("selection"), "inlineEditing": .bool(true)]),
+            ("inlineEditing with allowEditing false", ["mode": .string("selection"), "allowEditing": .bool(false), "inlineEditing": .bool(true)]),
+            ("non-boolean inlineEditing", ["mode": .string("selection"), "allowEditing": .bool(true), "inlineEditing": .string("true")]),
+            ("inlineEditing outside selection mode", ["mode": .string("display"), "displayId": .number(1), "inlineEditing": .bool(false)]),
+        ] as [(String, [String: JSONValue])] {
+            let rejected = NativeDesktopOperations.capture(params)
+            check("production rejects \(name)", rejected["state"] as? String == "failed" && (rejected["error"] as? [String: String])?["code"] == "invalid_argument")
+        }
+        check("production invalid inlineEditing never opens a selector", io.selectorCount() == selectorsBeforeInlineRejects)
         check("production color-copy callback reaches the existing text clipboard owner with the exact sampled HEX", io.validColorCopies())
         let report: [String: Any] = ["tests": cases.count, "cases": cases, "failures": failures, "boundary": "Exact production capture methods; controlled selector and pixel IO"]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])

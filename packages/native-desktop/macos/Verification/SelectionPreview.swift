@@ -53,7 +53,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--interactive") { begin(id: 0) }
     }
 
-    private func begin(id: Int, allowEditing: Bool = false, holdPixels: Bool = false, initialRect: CGRect? = nil) {
+    private func begin(id: Int, allowEditing: Bool = false, holdPixels: Bool = false, initialRect: CGRect? = nil, inlineEditing: Bool = false) {
         let pixels: NativeSelectionPixels
         do { pixels = try previewPixels() }
         catch { emit(["id": id, "ok": false, "message": String(describing: error)]); return }
@@ -61,7 +61,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         heldPixels = release
         let copies = colorCopies, producers = pixelProducers
         DispatchQueue.global().async { [weak self] in
-            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, copyColor: { try copies.write($0) }) { _ in
+            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, inlineEditing: inlineEditing, copyColor: { try copies.write($0) }) { _ in
                 producers.begin()
                 defer { producers.end() }
                 release?.wait()
@@ -79,6 +79,11 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                     if allowEditing, let choice { receipt["completionAction"] = choice.completionAction.rawValue }
                     // Reported without the opt-in gate so a leaked tool is visible.
                     if let tool = choice?.editTool { receipt["editTool"] = tool }
+                    if let backdrop = choice?.backdrop {
+                        receipt["backdrop"] = backdrop
+                        receipt["backdropWindows"] = self.backdropObservation()
+                    }
+                    receipt["frontmostIsSelf"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid()
                     self.emit(receipt)
                 case let .failure(error):
                     var receipt: [String: Any] = ["event": "completion", "state": "failed", "message": String(describing: error),
@@ -117,13 +122,21 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 if let raw = value["initialRect"] as? [String: Double], let x = raw["x"], let y = raw["y"], let width = raw["width"], let height = raw["height"] {
                     seed = CGRect(x: x, y: y, width: width, height: height)
                 }
-                begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true, initialRect: seed)
+                begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true,
+                      initialRect: seed, inlineEditing: value["inlineEditing"] as? Bool == true)
                 return
             }
             if method == "releasePixels" { heldPixels?.signal(); heldPixels = nil; emit(observation(id: id)); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
             if method == "failColorCopy" { colorCopies.failNext(); emit(observation(id: id)); return }
             if method == "inspect" { emit(observation(id: id)); return }
+            if method == "releaseBackdrop" {
+                let released = NativeScreenSelection.releaseBackdrop(value["backdrop"] as? String ?? "")
+                var receipt = observation(id: id)
+                receipt["released"] = released
+                emit(receipt)
+                return
+            }
             if method == "displayChange" {
                 NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: NSApp)
                 emit(observation(id: id))
@@ -237,8 +250,17 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
+    /// Live choosers only. A kept backdrop is a separate, passive window.
     private func pickerViews() -> [NativeScreenSelection] {
-        NSApp.windows.filter { $0.isVisible }.compactMap { $0.contentView as? NativeScreenSelection }
+        NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }.compactMap { $0.contentView as? NativeScreenSelection }
+    }
+    private func backdropObservation() -> [[String: Any]] {
+        NSApp.windows.filter { $0.isVisible && $0.ignoresMouseEvents }.compactMap { window -> [String: Any]? in
+            guard let view = window.contentView as? NativeScreenSelection else { return nil }
+            return ["displayId": screenID(window.screen), "frame": rect(window.frame), "isKey": window.isKeyWindow,
+                    "visibleControls": descendants(view).filter { !$0.isHiddenOrHasHiddenAncestor }.count,
+                    "acceptsMouse": !window.ignoresMouseEvents]
+        }
     }
     private func screenID(_ screen: NSScreen?) -> UInt32 {
         (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
@@ -277,7 +299,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         }
     }
     private func observation(id: Int) -> [String: Any] {
-        var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(),
+        var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(), "backdrops": backdropObservation(),
+                                  "backdropCount": NativeScreenSelection.backdropCount,
                                   "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions"),
                                   "hint": panelFrame("native-selection-hint"), "marksTray": panelFrame("native-selection-marks-tray"),
                                   "surfaces": pickerViews().map(surfaceObservation), "copiedColors": colorCopies.values, "pixelProducers": pixelProducers.observation]

@@ -19,7 +19,11 @@ const mutations = [
   { file: 'client.js', before: "params.mode === 'selection' && params.allowEditing === true", after: 'true', test: 'editable selection requires' },
   { file: 'client.js', before: "result.completionAction !== 'capture' && result.completionAction !== 'edit'", after: 'false', test: 'editable selection requires' },
   { file: 'client.js', before: "!allowsEditing || result.completionAction !== 'edit'", after: 'false', test: 'editable selection requires' },
-  { file: 'client.js', before: '|| !CAPTURE_EDIT_TOOLS.includes(result.editTool)', after: '', test: 'editable selection requires' }
+  { file: 'client.js', before: '|| !CAPTURE_EDIT_TOOLS.includes(result.editTool)', after: '', test: 'editable selection requires' },
+  { file: 'client.js', before: "if (!shaped || result.state !== 'captured' || !inlineEditing || result.completionAction !== 'edit') {", after: 'if (!shaped) {', test: 'editable selection requires' },
+  { file: 'client.js', before: 'Object.keys(backdrop).length === 1', after: 'true', test: 'editable selection requires' },
+  { file: 'client.js', before: "(result.state !== 'released' && result.state !== 'missing')", after: 'false', test: 'releases it by id' },
+  { file: 'client.js', before: "this.request('releaseSelectionBackdrop', { id })", after: "this.request('releaseSelectionBackdrop', {})", test: 'releases it by id' }
 ]
 for (const mutation of mutations) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-native-mutation-'))

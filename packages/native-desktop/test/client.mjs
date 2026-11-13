@@ -330,7 +330,13 @@ test('editable selection requires the original opt-in and exact completion inten
     [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'capture', editTool: 'arrow' }],
     [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: 'ellipse' }],
     [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', editTool: ['rect'] }],
-    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', editTool: 'rect' }]
+    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', editTool: 'rect' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1' } }],
+    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'capture', backdrop: { id: 'b-1' } }],
+    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: '' } }],
+    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: 'b-1' }],
+    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1', window: 3 } }],
+    [{ mode: 'selection', allowEditing: true, inlineEditing: true }, { state: 'cancelled', backdrop: { id: 'b-1' } }]
   ]) {
     await fixture(async ({ connection }) => {
       const desktop = new NativeDesktop({})
@@ -339,6 +345,39 @@ test('editable selection requires the original opt-in and exact completion inten
       await desktop.dispose()
     }, () => result)
   }
+})
+
+test('inline editing returns its backdrop and releases it by id', async () => {
+  const image = { format: 'png', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 }
+  await fixture(async ({ connection, calls }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true, inlineEditing: true })
+    assert.deepEqual(result.backdrop, { id: 'b-1' })
+    assert.deepEqual(calls.at(-1).params, { mode: 'selection', allowEditing: true, inlineEditing: true })
+    await desktop.dispose()
+  }, () => ({ state: 'captured', screenshot: image, completionAction: 'edit', backdrop: { id: 'b-1' } }))
+  for (const state of ['released', 'missing']) {
+    await fixture(async ({ connection, calls }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      assert.deepEqual(await desktop.releaseSelectionBackdrop('b-1'), { state })
+      assert.equal(calls.at(-1).method, 'releaseSelectionBackdrop')
+      assert.deepEqual(calls.at(-1).params, { id: 'b-1' })
+      await desktop.dispose()
+    }, () => ({ state }))
+  }
+  for (const reply of [{ state: 'closed' }, { state: ['released'] }, null]) {
+    await fixture(async ({ connection }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      await assert.rejects(desktop.releaseSelectionBackdrop('b-1'), error => error.code === 'invalid_backdrop_result')
+      await desktop.dispose()
+    }, () => reply)
+  }
+  const desktop = new NativeDesktop({})
+  await assert.rejects(desktop.releaseSelectionBackdrop(''), error => error.code === 'invalid_argument')
+  await desktop.dispose()
 })
 
 test('fragmented UTF8 frames and coalesced responses preserve request boundaries', async () => {

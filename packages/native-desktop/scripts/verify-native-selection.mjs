@@ -417,6 +417,40 @@ async function exercise(directory, capture) {
         await confirmGlobal(expected)
       }
     }
+    // Inline editing keeps exactly the selected display frozen behind the editor.
+    for (const display of ready.screens) {
+      await host.request('begin', { allowEditing: true, inlineEditing: true })
+      const frame = display.frame
+      await globalDrag(display, point(frame.x + frame.width * 0.3, frame.y + frame.height * 0.3), point(frame.x + frame.width * 0.6, frame.y + frame.height * 0.6))
+      await host.request('key', { keyCode: 14 })
+      const inline = await host.completion(++count)
+      const kept = inline.backdropWindows ?? []
+      verify(inline.completionAction === 'edit' && typeof inline.backdrop === 'string' && inline.visiblePickerWindows === 0, 'An inline edit returns a backdrop id and no live chooser')
+      verify(kept.length === 1 && kept[0].displayId === display.displayId && JSON.stringify(kept[0].frame) === JSON.stringify(display.frame), 'Only the selected display stays as the frozen backdrop')
+      verify(kept[0] && kept[0].visibleControls === 0 && !kept[0].acceptsMouse && !kept[0].isKey, 'The backdrop shows no controls, ignores the mouse and gives up key focus')
+      const released = await host.request('releaseBackdrop', { backdrop: inline.backdrop })
+      verify(released.released === true && released.backdrops.length === 0 && released.backdropCount === 0, 'Releasing the backdrop closes its window')
+      const again = await host.request('releaseBackdrop', { backdrop: inline.backdrop })
+      verify(again.released === false, 'A released backdrop id is missing on the second release')
+    }
+    if (ready.screens.length > 1) {
+      const [a, b] = ready.screens
+      await host.request('begin', { allowEditing: true, inlineEditing: true })
+      await globalDrag(a, point(a.frame.x + a.frame.width * 0.5, a.frame.y + a.frame.height * 0.5), point(b.frame.x + b.frame.width * 0.4, b.frame.y + b.frame.height * 0.4))
+      await host.request('key', { keyCode: 14 })
+      const spanning = await host.completion(++count)
+      verify(spanning.completionAction === 'edit' && spanning.backdrop === undefined && (spanning.backdropWindows ?? []).length === 0, 'A selection across displays keeps no backdrop')
+    }
+    await host.request('begin', { allowEditing: true, inlineEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('key', { keyCode: 36 })
+    const inlineDirect = await host.completion(++count)
+    verify(inlineDirect.completionAction === 'capture' && inlineDirect.backdrop === undefined && (await host.request('inspect')).backdropCount === 0, 'An inline request that captures directly keeps no backdrop')
+    await host.request('begin', { allowEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('key', { keyCode: 14 })
+    const plainEdit = await host.completion(++count)
+    verify(plainEdit.completionAction === 'edit' && plainEdit.backdrop === undefined, 'An edit without inlineEditing keeps no backdrop')
     const seedQuartz = { x: screen.x + 120, y: 140, width: 260, height: 150 }
     await host.request('begin', { initialRect: seedQuartz })
     const seededView = await host.request('inspect')
@@ -497,9 +531,18 @@ const mutations = [
   { name: 'seed-clamps', path: state, before: 'let clipped = rect.standardized.intersection(bounds)', after: 'let clipped = rect.standardized' },
   { name: 'consumer-seed-forwarded', path: operationsSource, before: 'NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect,', after: 'NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: nil,' },
   { name: 'consumer-seed-on-display', path: operationsSource, before: 'guard activeDisplayBounds().contains(where: { $0.intersects(rect) }) else {', after: 'guard true else {' },
+  { name: 'backdrop-kept', path: view, before: 'let display = holding.count == 1 ? holding[0] : nil', after: 'let display: NSRect? = nil' },
+  { name: 'backdrop-spanning', path: view, before: 'let display = holding.count == 1 ? holding[0] : nil', after: 'let display = holding.first ?? (action == .edit && inlineEditing ? screenFrames.first : nil)' },
+  { name: 'backdrop-closes-others', path: view, before: '            window.orderOut(nil)\n            window.close()\n        }\n        return kept', after: '        }\n        return kept' },
+  { name: 'backdrop-passive', path: view, before: 'window.ignoresMouseEvents = true', after: 'window.ignoresMouseEvents = false' },
+  { name: 'backdrop-quiet', path: view, before: 'for subview in subviews { subview.isHidden = true }', after: '_ = subviews' },
+  { name: 'backdrop-release', path: view, before: 'guard let window = backdrops.removeValue(forKey: id) else { return false }\n        window.orderOut(nil)', after: 'guard let window = backdrops[id] else { return false }\n        window.orderOut(nil)' },
+  { name: 'backdrop-direct-capture', path: view, before: 'let holding = action == .edit && inlineEditing ?', after: 'let holding = inlineEditing ?' },
+  { name: 'consumer-backdrop-owner', path: operationsSource, before: 'NativeSelectionBackdrops.adopt(backdrop, owner: owner)', after: 'NativeSelectionBackdrops.adopt(backdrop, owner: nil)' },
+  { name: 'consumer-inline-opt-in', path: operationsSource, before: '(inline.bool == true && params["allowEditing"]?.bool != true)', after: 'false' },
   { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
   { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbarFrame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
-  { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },
+  { name: 'frozen-completion-source', path: operationsSource, before: 'do { return try selection.pixels.compose(selection.rectangle) }', after: 'do { return try captureRect(selection.rectangle, ownership: ownership) }' },
   { name: 'sample-vertical-source', path: picker[2], before: '(display.appKitFrame.maxY - point.y)', after: '(point.y - display.appKitFrame.minY)' },
   { name: 'composite-crop-origin', path: picker[2], before: '(frame.minX - rectangle.minX) * geometry.scale', after: 'frame.minX * geometry.scale' },
   { name: 'loading-cancel', path: view, before: '@objc fileprivate func cancel() { finish(.success(nil)) }', after: '@objc fileprivate func cancel() { if pixels != nil { finish(.success(nil)) } }' },

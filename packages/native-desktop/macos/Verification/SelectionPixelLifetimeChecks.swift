@@ -20,6 +20,10 @@ private enum NativeDesktopOperations {
     static func captureWindow(_ params: [String: JSONValue]) throws -> [String: Any] { throw ProviderError.coded("fixture_scope", "window IO is not selected") }
     static func displayIDArgument(_ value: JSONValue?) throws -> CGDirectDisplayID { throw ProviderError.coded("fixture_scope", "display IO is not selected") }
 }
+private enum NativeSelectionBackdrops {
+    static func adopt(_ id: String, owner: UInt64?) {}
+    @discardableResult static func release(_ id: String?) -> Bool { id != nil }
+}
 
 /* PRODUCTION_BLOCKING_ASYNC */
 
@@ -37,9 +41,9 @@ private func nativeErrorPayload(_ error: Error) -> [String: String] {
     return ["code": "fixture_unexpected", "message": String(describing: error)]
 }
 private enum NativeSelectionCompletionAction: String { case capture, edit }
-private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; let pixels: NativeSelectionPixels }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let editTool: String?; var backdrop: String? = nil; let pixels: NativeSelectionPixels }
 private enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil,
+    static func run(allowEditing: Bool = false, initialRect: CGRect? = nil, inlineEditing: Bool = false,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledPixels.shared.selected()
