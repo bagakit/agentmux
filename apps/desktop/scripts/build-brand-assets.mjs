@@ -1,10 +1,11 @@
 // Build the default package icon and every selectable runtime bitmap from the shared brand sources.
-import { mkdir, rm, cp, access } from 'node:fs/promises'
+import { mkdir, rm, cp, access, readFile, writeFile } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
 import { APP_ICON_IDS, DEFAULT_APP_ICON } from '../../../packages/client-ui/src/lib/app-icon-catalog.ts'
+import { renderMacOSAppIcon } from './lib/macos-app-icon.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(scriptDir, '..')
@@ -64,7 +65,7 @@ async function buildIcns() {
     ['icon_512x512@2x.png', 1024]
   ]
   for (const [filename, size] of pairs) {
-    await resizeTo(size, join(iconsetDir, filename))
+    await resizeTo(size, join(iconsetDir, filename), outDockIcon)
   }
   await run('iconutil', ['-c', 'icns', '-o', outShellIcon, iconsetDir])
   await rm(iconsetDir, { recursive: true, force: true })
@@ -75,13 +76,16 @@ async function main() {
   await mkdir(resourcesDir, { recursive: true })
   await mkdir(sharedAssets, { recursive: true })
   await mkdir(join(resourcesDir, 'app-icons'), { recursive: true })
+  await mkdir(join(resourcesDir, 'app-icons/macos'), { recursive: true })
   for (const id of APP_ICON_IDS) {
     const target = join(sharedAssets, id + '.png')
     await resizeTo(512, target, join(sourceDirectory, id + '.png'))
     await cp(target, join(resourcesDir, 'app-icons', id + '.png'))
+    const source = await readFile(join(sourceDirectory, id + '.png'))
+    await writeFile(join(resourcesDir, 'app-icons/macos', id + '.png'), renderMacOSAppIcon(source, 512))
   }
   // The signed bundle has one static default. Runtime selections never rewrite it.
-  await cp(sourceIcon, outDockIcon)
+  await writeFile(outDockIcon, renderMacOSAppIcon(await readFile(sourceIcon)))
   await resizeTo(128, outRendererIcon)
   await resizeTo(512, outBotIcon)
   await buildIcns()

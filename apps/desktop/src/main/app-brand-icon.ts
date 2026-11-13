@@ -4,8 +4,8 @@ import { resolveAppIcon, type AppIconId } from '@agentmux/client-ui/app-icon-cat
 import type { ConfigOwner } from './config-owner.js'
 
 /** Packaged resources are derived from the shared source catalog, never from a user path. */
-export function appIconPath(choice?: AppIconId): string {
-  return join(import.meta.dirname, '../../resources/app-icons', `${resolveAppIcon(choice)}.png`)
+export function appIconPath(choice?: AppIconId, platform: NodeJS.Platform = process.platform): string {
+  return join(import.meta.dirname, '../../resources/app-icons', ...(platform === 'darwin' ? ['macos'] : []), `${resolveAppIcon(choice)}.png`)
 }
 
 type NativeIconPorts = {
@@ -22,7 +22,7 @@ export function bindAppBrandIcon(owner: Pick<ConfigOwner, 'current' | 'subscribe
   const apply = (choice?: AppIconId) => {
     issue = null
     try {
-      const image = ports.images.createFromPath(appIconPath(choice))
+      const image = ports.images.createFromPath(appIconPath(choice, ports.platform))
       if (image.isEmpty()) throw new Error('The selected App icon image could not be read.')
       if (ports.platform === 'darwin') {
         if (!ports.dock) throw new Error('The macOS Dock is unavailable.')
