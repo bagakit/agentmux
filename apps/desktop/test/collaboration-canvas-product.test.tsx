@@ -905,14 +905,21 @@ it('keeps explicit Zoom and Fit intent when original Worker placement arrives af
     expect(captured.nodes).toHaveLength(0)
     const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.collaboration-canvas__controls button')].find(button => button.getAttribute('aria-label') === control)
     expect(button).toBeDefined()
+    // The explicit move animates. Read the camera once it rests: part-way through, HappyDOM's
+    // D3 transition reads NaN, and NaN equals NaN, so a mid-move read would prove nothing.
+    // Overview waits for node measurement, so it rests only after placement arrives.
+    const resting = () => expect(dom.container.querySelector('.collaboration-canvas')!.hasAttribute('data-camera-moving')).toBe(false)
     await act(async () => { button!.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+    if (control !== 'Overview') await settleCollaborationCanvas(resting)
     const camera = [...captured.store!.getState().transform]
+    if (control !== 'Overview') expect(camera.every(Number.isFinite), control).toBe(true)
     await act(async () => { holdResponses = false; const pending = heldResponses; heldResponses = []; for (const item of pending) item.deliver() })
     await settleCollaborationCanvas(() => {
       expect(captured.nodes).toHaveLength(28)
       expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
     })
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+    await settleCollaborationCanvas(resting)
     const current = captured.store!.getState().transform
     if (control === 'Overview') {
       // The original fitView intentionally waits for node measurement; verify its deferred full-world intent.
@@ -1721,10 +1728,145 @@ it('starts no preview or reading for faces swept past during a camera gesture, a
   expect(schedule).not.toHaveBeenCalled(); expect(agentInformationPreview.getAll()).toHaveLength(0)
   // The camera rests with the pointer still over the face and no new pointer event arrives (the
   // pointer never moved): the ordinary hover reading follows from the rest alone.
-  const held = mark(), matches = held.matches.bind(held)
-  vi.spyOn(held, 'matches').mockImplementation(selector => selector === ':hover' || matches(selector))
+  pointerRestsOn(mark())
   await act(async () => captured.moveEnd!(new WheelEvent('wheel'), { x, y, zoom }))
   await settleCollaborationCanvas(() => { expect(schedule).toHaveBeenCalledTimes(1); expect(peek).toHaveBeenCalledWith(a.id) })
+})
+
+/** Fakes the browser's :hover for one element under a still pointer and every ancestor of it. */
+function pointerRestsOn(element: Element) {
+  const matches = Element.prototype.matches
+  return vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) { return selector === ':hover' ? this.contains(element) : matches.call(this, selector) })
+}
+const cameraMoving = () => dom.container.querySelector('.collaboration-canvas')!.hasAttribute('data-camera-moving')
+
+it('keeps a new gesture moving when the deferred end of the previous gesture arrives', async () => {
+  const scene = scenario(3), [a] = [...scene.agents.values()] as [CollaborationAgent]
+  const peek = vi.fn()
+  await loaded(scene); await revealWorld()
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { onPreviewAgent: peek }))
+  const [x, y, zoom] = captured.store!.getState().transform
+  // A wheel pan ends; xyflow reports that end 150ms later. A drag starts in between.
+  const first = new WheelEvent('wheel'), second = new MouseEvent('mousedown')
+  Object.defineProperty(first, 'timeStamp', { value: 1000 }); Object.defineProperty(second, 'timeStamp', { value: 1100 })
+  await act(async () => captured.moveStart!(first, { x, y, zoom }))
+  await act(async () => captured.moveStart!(second, { x, y, zoom }))
+  await act(async () => captured.moveEnd!(first, { x, y, zoom }))
+  expect(cameraMoving()).toBe(true)
+  // The drag sweeps a face: it still waits for rest.
+  const mark = nodeElement(collaborationAgentNode('area-0', a.id))!.querySelector<HTMLButtonElement>('.collaboration-agent__dot, .collaboration-agent__mark')!
+  peek.mockClear()
+  await act(async () => { mark.closest('.collaboration-agent')!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })) })
+  expect(peek.mock.calls.filter(([id]) => id !== null)).toEqual([])
+  // The drag's own end releases it.
+  const end = new MouseEvent('mouseup'); Object.defineProperty(end, 'timeStamp', { value: 1400 })
+  await act(async () => captured.moveEnd!(end, { x, y, zoom }))
+  expect(cameraMoving()).toBe(false)
+})
+
+it('starts no card reading or route tooltip for content swept past during a camera move, and reads at rest', async () => {
+  const scene = scenario(2), [a, b] = [...scene.agents.values()] as [CollaborationAgent, CollaborationAgent]
+  scene.agents = new Map([[a.id, { ...a, tier: 'active' as const }], [b.id, { ...b, tier: 'active' as const }]])
+  scene.areas = [{ id: 'pair', name: 'Pair', kind: 'project', members: [a.id, b.id] }]
+  scene.relations = [{ id: 'pair-link', kind: 'communication', source: a.id, target: b.id, evidence: [] }]
+  await loaded(scene)
+  const box = renderedBox(collaborationAgentNode('pair', a.id))
+  // Card scale: the operable layer is the shared reading card, not the identity mark.
+  await viewport(-box.x + 40, -box.y + 40, 4000, 4000, 1)
+  const card = () => nodeElement(collaborationAgentNode('pair', a.id))!.querySelector<HTMLButtonElement>('.collaboration-agent__detail-layer:not([inert]) .focus-context--card')!
+  expect(card()).not.toBeNull()
+  const schedule = vi.spyOn(agentInformationPreview, 'schedule')
+  const [x, y, zoom] = captured.store!.getState().transform
+  const start = new WheelEvent('wheel'); Object.defineProperty(start, 'timeStamp', { value: 2000 })
+  await act(async () => captured.moveStart!(start, { x, y, zoom }))
+  schedule.mockClear()
+  await act(async () => { card().dispatchEvent(new PointerEvent('pointerover', { bubbles: true })) })
+  const route = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
+  expect(route).not.toBeNull()
+  await act(async () => { route.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+  await act(async () => new Promise(resolve => setTimeout(resolve, 700)))
+  expect(schedule).not.toHaveBeenCalled(); expect(agentInformationPreview.getAll()).toHaveLength(0)
+  expect(route.getAttribute('aria-describedby')).toBeNull()
+  // At rest only the content still under the pointer reads: here, the card.
+  const hover = pointerRestsOn(card())
+  const end = new WheelEvent('wheel'); Object.defineProperty(end, 'timeStamp', { value: 2150 })
+  await act(async () => captured.moveEnd!(end, { x, y, zoom }))
+  await settleCollaborationCanvas(() => expect(schedule).toHaveBeenCalledTimes(1))
+  expect(route.getAttribute('aria-describedby')).toBeNull()
+  hover.mockRestore()
+})
+
+it('keeps a name pinned to the edge on screen and off the controls while the camera carries it', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const { label, camera: [x, y, zoom] } = await readDistantRegion(scene)
+  const start = new MouseEvent('mousedown'); Object.defineProperty(start, 'timeStamp', { value: 3000 })
+  await act(async () => captured.moveStart!(start, { x, y, zoom }))
+  // Pan far right and then far up: the off-screen heading travels away, the pinned name stays.
+  for (const [dx, dy] of [[300, 0], [900, 0], [0, -900], [-900, 400]] as const) {
+    await act(async () => captured.store!.setState({ transform: [x + dx, y + dy, zoom] }))
+    const [tx = 0, ty = 0] = (label.element.style.translate || '0px 0px').split(' ').map(Number.parseFloat)
+    const left = label.x + tx, top = label.y + ty
+    expect(left).toBeGreaterThanOrEqual(12 - 1e-6); expect(left + label.width).toBeLessThanOrEqual(600 - 12 + 1e-6)
+    expect(top).toBeGreaterThanOrEqual(8 - 1e-6); expect(top + label.height).toBeLessThanOrEqual(400 - 8 + 1e-6)
+    for (const control of dom.container.querySelectorAll('.collaboration-canvas__controls, .collaboration-canvas__legend')) {
+      const r = control.getBoundingClientRect(), canvas = dom.container.querySelector('.collaboration-canvas')!.getBoundingClientRect()
+      const rx = r.x - canvas.x, ry = r.y - canvas.y
+      if (!r.width || !r.height) continue
+      expect(left + label.width <= rx || left >= rx + r.width || top + label.height <= ry || top >= ry + r.height, 'pinned name clear of ' + control.className).toBe(true)
+    }
+  }
+})
+
+it('places names again at once when a gesture zooms across the overview level', async () => {
+  const scene = scenario(0); scene.areas = [scene.areas[0]!]; scene.relations = []
+  await loaded(scene)
+  const box = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const anchorX = box.x + box.heading.x, anchorY = box.y + box.heading.y + box.heading.height
+  const at = (zoom: number) => [100 - anchorX * zoom, 120 - anchorY * zoom, zoom] as const
+  await viewport(at(.6)[0], at(.6)[1], 600, 400, .6)
+  const start = new MouseEvent('mousedown'); Object.defineProperty(start, 'timeStamp', { value: 5000 })
+  await act(async () => captured.moveStart!(start, { x: at(.6)[0], y: at(.6)[1], zoom: .6 }))
+  // Within the reading level the name is carried, not re-placed.
+  await act(async () => captured.store!.setState({ transform: [at(.5)[0] + 40, at(.5)[1] + 30, .5] }))
+  { const [dx = 0, dy = 0] = regionLabelBounds('area-0').element.style.translate.split(' ').map(Number.parseFloat); expect(dx).toBeCloseTo(40, 6); expect(dy).toBeCloseTo(30, 6) }
+  // Crossing into the overview level changes which names exist: place once, mid-gesture.
+  // The heading lands 60px right and 30px down of where the name was placed: a held name would
+  // keep its old slot and carry there, a re-placed one takes the new slot itself.
+  await act(async () => captured.store!.setState({ transform: [at(.3)[0] + 60, at(.3)[1] + 30, .3] }))
+  await settleCollaborationCanvas(() => {
+    const label = regionLabelBounds('area-0')
+    expect(label.x).toBeCloseTo(160, 6); expect(label.y + label.height).toBeCloseTo(150, 6)
+    expect(label.element.style.translate).toBe('')
+  })
+})
+
+it('holds name placement through an animated keyboard move and places once it rests', async () => {
+  const scene = scenario(0); scene.areas = [scene.areas[0]!]; scene.relations = []
+  await loaded(scene)
+  const box = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const zoom = .25, x = 100 - (box.x + box.heading.x) * zoom, y = 100 - (box.y + box.heading.y) * zoom
+  await viewport(x, y, 600, 400, zoom)
+  const placed = regionLabelBounds('area-0')
+  const config = useAppStore.getState().config!
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, mapMotion: 'on' } } }))
+  const panZoom = captured.store!.getState().panZoom!
+  let finish: ((value: boolean) => void) | undefined
+  vi.spyOn(panZoom, 'setViewport').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const canvas = dom.container.querySelector<HTMLElement>('.collaboration-canvas')!
+  await act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })) })
+  expect(finish).toBeDefined(); expect(cameraMoving()).toBe(true)
+  // The animation's own frames move the camera; the name keeps its slot and is carried.
+  for (const step of [40, 80, 90]) {
+    await act(async () => captured.store!.setState({ transform: [x + step, y, zoom] }))
+    const label = regionLabelBounds('area-0'), [dx = 0] = (label.element.style.translate || '0px 0px').split(' ').map(Number.parseFloat)
+    expect(label.x).toBe(placed.x); expect(label.x + dx).toBeCloseTo(placed.x + step, 6)
+  }
+  await act(async () => finish!(true))
+  expect(cameraMoving()).toBe(false)
+  await settleCollaborationCanvas(() => {
+    const label = regionLabelBounds('area-0')
+    expect(label.x).toBeCloseTo(placed.x + 90, 6); expect(label.element.style.translate).toBe('')
+  })
 })
 
 it('re-clips a route only when a painted endpoint body changes, not on every zoom frame', async () => {

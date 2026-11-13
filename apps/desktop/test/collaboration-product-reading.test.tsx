@@ -317,7 +317,11 @@ it('keeps a confirmed exited Agent a closed map point while preserving its origi
   expect(collaborationAgentPresentation(runningError).tier).toBe('active')
   expect(collaborationAgentPresentation(unobserved).tier).toBe('unknown')
   const control = exited.control
-  for (let index = 0; index < 4; ++index) await act(async () => graph().querySelector<HTMLButtonElement>('[aria-label="Zoom out"]')!.click())
+  // Each explicit zoom animates; the next step starts from where the camera rests.
+  for (let index = 0; index < 4; ++index) {
+    await act(async () => graph().querySelector<HTMLButtonElement>('[aria-label="Zoom out"]')!.click())
+    await settleCollaborationCanvas(() => expect(graph().querySelector('.collaboration-canvas')!.hasAttribute('data-camera-moving')).toBe(false))
+  }
   await settleCollaborationCanvas(() => expect(closedPoint()?.closest('.collaboration-agent')?.classList.contains('collaboration-agent--overview')).toBe(true))
   expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).toBeNull()
   await act(async () => closedPoint()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
