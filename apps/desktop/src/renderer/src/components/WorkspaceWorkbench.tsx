@@ -93,13 +93,19 @@ import { useNoteFileName } from '../lib/note-source-name'
 import {
   activeWorkbenchSurface,
   documentKey,
-  sessionIdsWithoutViewsAfterClosingTabs,
   titleWorkbenchSurface,
   workbenchSurfaces,
   type WorkbenchSurface,
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-surface-kinds'
+import { closingWorkbenchRegion, closingWorkbenchTabs } from '../lib/workbench-view-close'
+import {
+  lastViewCloseConfirmation,
+  lastViewCloseCopy,
+  lastViewCloseStops,
+  type LastViewCloseConfirmation
+} from '../lib/last-view-close-confirmation'
 import { tabMarkAgentFactsFor, tabRegionSummary, workbenchTabMarks } from '../lib/workbench-tab-marks'
 import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/session-metadata'
 import { addressableAgentSessionId, copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
@@ -266,8 +272,7 @@ function SortableWorkbenchTab({
   }, [visible, group.activeTabId, tab.id, switchTarget])
   const [pendingClose, setPendingClose] = useState<{
     tabIds: string[]
-    dirtyCount: number
-    agentSessionCount: number
+    confirmation: LastViewCloseConfirmation
   } | null>(null)
   const [closing, setClosing] = useState(false)
   const [displayTargets, setDisplayTargets] = useState<{
@@ -351,13 +356,17 @@ function SortableWorkbenchTab({
           : []
       ))
     })).size
-    const agentSessionCount = sessionIdsWithoutViewsAfterClosingTabs(
-      tabsById,
-      currentTabIds,
-      'agent'
-    ).filter((id) => useAppStore.getState().sessions.find((item) => item.id === id)?.processState !== 'exited').length
-    if (dirtyCount > 0 || agentSessionCount > 0) {
-      setPendingClose({ tabIds: currentTabIds, dirtyCount, agentSessionCount })
+    const { sessions: currentSessions, timelines: currentTimelines, agentNames: currentAgentNames } = useAppStore.getState()
+    const confirmation = lastViewCloseConfirmation({
+      tabs: tabsById,
+      sessions: currentSessions,
+      timelines: currentTimelines,
+      agentNames: currentAgentNames,
+      isClosing: closingWorkbenchTabs(currentTabIds),
+      dirtyCount
+    })
+    if (confirmation) {
+      setPendingClose({ tabIds: currentTabIds, confirmation })
       return
     }
     setClosing(true)
@@ -389,6 +398,10 @@ function SortableWorkbenchTab({
     // requestTabsClose 是每次渲染新建的闭包，不进依赖；只由意图对象驱动。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeTabRequest, tab.id, workspaceId, group.id, clearCloseTabRequest])
+
+  const pendingCloseCopy = pendingClose
+    ? lastViewCloseCopy(pendingClose.confirmation, pendingClose.tabIds.length > 1 ? 'tabs' : 'tab')
+    : null
 
   async function confirmClose(keepAgentSessions = false): Promise<void> {
     if (closing || !pendingClose) return
@@ -519,31 +532,18 @@ function SortableWorkbenchTab({
       </WorkbenchTabRenameFeedback>
       <ConfirmationDialog
         open={pendingClose !== null}
-        title={pendingClose?.agentSessionCount
-          ? pendingClose.agentSessionCount > 1
-            ? `Stop ${pendingClose.agentSessionCount} Agent Sessions?`
-            : 'Stop Agent Session?'
-          : 'Discard unsaved changes?'}
-        description={pendingClose?.agentSessionCount
-          ? `Closing the last View stops ${pendingClose.agentSessionCount > 1 ? 'these Agent Runs' : 'this Agent Run'} by default. Keeping ${pendingClose.agentSessionCount > 1 ? 'the Sessions' : 'the Session'} leaves ${pendingClose.agentSessionCount > 1 ? 'them' : 'it'} running in the background.${pendingClose.dirtyCount ? ' Unsaved editor changes will be discarded.' : ''}`
-          : pendingClose && pendingClose.tabIds.length > 1
-            ? 'Closing these tabs will discard changes that have not been saved.'
-            : 'Closing this editor tab will discard changes that have not been saved.'}
+        title={pendingCloseCopy?.title ?? ''}
+        description={pendingCloseCopy?.description ?? ''}
         subject={pendingClose && pendingClose.tabIds.length > 1
           ? [
               `${pendingClose.tabIds.length} tabs`,
-              pendingClose.agentSessionCount ? `${pendingClose.agentSessionCount} Agent Sessions` : null,
-              pendingClose.dirtyCount ? `${pendingClose.dirtyCount} unsaved` : null
+              pendingClose.confirmation.agents.length ? `${pendingClose.confirmation.agents.length} Agent Sessions` : null,
+              pendingClose.confirmation.dirtyCount ? `${pendingClose.confirmation.dirtyCount} unsaved` : null
             ].filter(Boolean).join(' · ')
           : displayName}
-        confirmLabel={pendingClose?.agentSessionCount ? 'Stop & Close' : 'Discard & Close'}
-        {...(pendingClose?.agentSessionCount
-          ? {
-              secondaryLabel: pendingClose.agentSessionCount > 1
-                ? 'Keep Sessions & Close'
-                : 'Keep Session & Close',
-              onSecondary: () => void confirmClose(true)
-            }
+        confirmLabel={pendingCloseCopy?.confirmLabel ?? 'Close'}
+        {...(pendingCloseCopy?.secondaryLabel
+          ? { secondaryLabel: pendingCloseCopy.secondaryLabel, onSecondary: () => void confirmClose(true) }
           : {})}
         busy={closing}
         onCancel={() => !closing && setPendingClose(null)}
@@ -825,7 +825,8 @@ function WorkbenchRegionContent({
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore.getState().clearCloseRegionRequest
   const reportError = useAppStore.getState().reportError
-  const [confirmingClose, setConfirmingClose] = useState(false)
+  const [confirmingClose, setConfirmingClose] = useState<LastViewCloseConfirmation | null>(null)
+  const [closingRegion, setClosingRegion] = useState(false)
   const surface = tab.regions[node.regionId]
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
   const regionCount = Object.keys(tab.regions).length
@@ -839,17 +840,40 @@ function WorkbenchRegionContent({
     dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
   )
 
-  // 关这一格的唯一决定出口：脏就先弹「未保存确认」，否则直接关。鼠标点 X 与键盘 Cmd+W（经 requestCloseRegion
-  // 意图落到这里）都走它——「关这一格要不要确认」只此一处判定，键盘不会再像从前那样绕开脏检查静默丢改动。
+  // 关这一格的唯一决定出口：脏文件或「这一格是某个在跑 Agent 的最后一个 View」（含 Browser 绑定的 Agent）
+  // 就先弹与关 Tab 同一族的确认，否则直接关。鼠标点 X、键盘 Cmd+W（经 requestCloseRegion 意图落到这里）与
+  // Browser 自己的关闭都走它——「关这一格要不要确认」只此一处判定。
   function requestRegionClose(): void {
     const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
     if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
       motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
       reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
     }
-    if (dirty) setConfirmingClose(true)
+    if (closingRegion) return
+    const state = useAppStore.getState()
+    const confirmation = lastViewCloseConfirmation({
+      tabs: state.tabs,
+      sessions: state.sessions,
+      timelines: state.timelines,
+      agentNames: state.agentNames,
+      isClosing: closingWorkbenchRegion(tab.id, node.regionId),
+      dirtyCount: dirty ? 1 : 0
+    })
+    if (confirmation) setConfirmingClose(confirmation)
     else void closeRegion(tab.workspaceId, tab.id, node.regionId)
   }
+
+  async function confirmRegionClose(keepAgentSessions: boolean): Promise<void> {
+    if (closingRegion || !confirmingClose) return
+    setClosingRegion(true)
+    try {
+      await closeRegion(tab.workspaceId, tab.id, node.regionId, { keepAgentSessions })
+    } finally {
+      setClosingRegion(false)
+      setConfirmingClose(null)
+    }
+  }
+  const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose, 'split') : null
 
   // 消费键盘关格意图：只有意图点名的这张 Tab 的这一格才响应，跑与 X 相同的决定，然后清掉意图。本仓库
   // renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图投出/清除）与判定层
@@ -1007,16 +1031,17 @@ function WorkbenchRegionContent({
       </SessionRegionHost>
   )}
       <ConfirmationDialog
-        open={confirmingClose}
-        title="Discard unsaved changes?"
-        description="Closing this split will discard changes that have not been saved."
+        open={confirmingClose !== null}
+        title={regionCloseCopy?.title ?? ''}
+        description={regionCloseCopy?.description ?? ''}
         subject={surface.kind === 'file' ? surface.path : 'Split'}
-        confirmLabel="Discard & Close"
-        onCancel={() => setConfirmingClose(false)}
-        onConfirm={() => {
-          setConfirmingClose(false)
-          void closeRegion(tab.workspaceId, tab.id, node.regionId)
-        }}
+        confirmLabel={regionCloseCopy?.confirmLabel ?? 'Close'}
+        {...(regionCloseCopy?.secondaryLabel
+          ? { secondaryLabel: regionCloseCopy.secondaryLabel, onSecondary: () => void confirmRegionClose(true) }
+          : {})}
+        busy={closingRegion}
+        onCancel={() => !closingRegion && setConfirmingClose(null)}
+        onConfirm={() => void confirmRegionClose(!lastViewCloseStops(confirmingClose))}
       />
   </>
 }
