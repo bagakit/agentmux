@@ -31,6 +31,7 @@ import * as core from '@agentmux/core'
 import { createDeviceAdministration } from '../src/device-administration.js'
 import { DeviceAuthority } from '../src/device-authority.js'
 import { startAgentMuxHost } from '../src/host.js'
+import { createInterfacePortLabels, mobileLinkCandidates, parsePortLabels } from '../src/mobile-link-candidates.js'
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { native.client = null; native.observeRelay = null; for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -46,15 +47,69 @@ async function authority() {
 const offer = (hostId: string, endpoint: string, useTls = false) => connectionOfferUrl(
   `${useTls ? 'https' : 'http'}://${endpoint}/`, { v: 2, serverId: hostId,
     daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint, useTls } })
+/** A link owner with no local-network candidates, as for a TLS Relay endpoint. */
+const linked = (url: string) => async () => ({ url, candidates: [] })
+
+const nic = (address: string, internal = false) => ({ address, netmask: '255.255.252.0', family: 'IPv4' as const, mac: '00:00:00:00:00:00', internal, cidr: `${address}/22` })
+describe('choosing the address a phone connects to', () => {
+  it('prefers the default-route adapter, then wired and wireless ones, and keeps link-local and odd adapters last', () => {
+    const interfaces = { lo0: [nic('127.0.0.1', true)], en0: [nic('10.69.58.222')], en9: [nic('10.69.47.238')], utun4: [nic('10.8.0.2')],
+      en5: [nic('169.254.20.1')], en1: [{ ...nic('fe80::1'), family: 'IPv6' as const }], en2: [nic('8.8.8.8')] }
+    const labels = new Map([['en0', 'Wi-Fi'], ['en9', 'USB 10/100/1000 LAN']])
+    expect(mobileLinkCandidates(interfaces, 'en9', labels)).toEqual([
+      { address: '10.69.47.238', interface: 'en9', label: 'USB 10/100/1000 LAN', preferred: true },
+      { address: '10.69.58.222', interface: 'en0', label: 'Wi-Fi', preferred: false },
+      { address: '10.8.0.2', interface: 'utun4', preferred: false },
+      { address: '169.254.20.1', interface: 'en5', preferred: false }])
+    // Without a known default route the plain order holds: named adapters first, in OS order.
+    expect(mobileLinkCandidates(interfaces, null).map(c => c.interface)).toEqual(['en0', 'en9', 'utun4', 'en5'])
+    expect(mobileLinkCandidates({ lo0: [nic('127.0.0.1', true)] }, null)).toEqual([])
+  })
+  it.runIf(process.platform === 'darwin')('reads the OS port labels once, keeps the first good read and retries after a failure', async () => {
+    const listing = 'Hardware Port: Wi-Fi\nDevice: en0\nEthernet Address: 00:00:00:00:00:01\n\nHardware Port: USB 10/100/1000 LAN\nDevice: en9\nEthernet Address: 00:00:00:00:00:02\n'
+    expect([...parsePortLabels(listing)]).toEqual([['en0', 'Wi-Fi'], ['en9', 'USB 10/100/1000 LAN']])
+    const read = vi.fn<() => Promise<string>>().mockRejectedValueOnce(new Error('timed out')).mockResolvedValue(listing)
+    const labels = createInterfacePortLabels(read)
+    expect([...await labels()]).toEqual([])
+    const [first, second] = await Promise.all([labels(), labels()])
+    expect(first).toBe(second); expect(first.get('en0')).toBe('Wi-Fi')
+    expect(await labels()).toBe(first)
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+  it('reads the link for the requested candidate and refuses an address that is not one', async () => {
+    const original = await authority(), endpointFor = (address: string) => `${address}:8443`
+    const candidates = [{ address: '10.69.47.238', interface: 'en9', preferred: true }, { address: '10.69.58.222', interface: 'en0', label: 'Wi-Fi', preferred: false }]
+    const link = vi.fn(async (address?: string) => {
+      const chosen = address === undefined ? candidates[0]! : candidates.find(candidate => candidate.address === address)
+      if (!chosen) throw new core.AgentMuxError('Not a candidate', 'INVALID_CONTROL_REQUEST')
+      return { url: offer(original.hostId, endpointFor(chosen.address)), candidates }
+    })
+    const administration = createDeviceAdministration(() => Promise.resolve(original), () => ({ state: 'connected', message: 'Ready' }), link)
+    const preferred = await administration.call('device.link', {}, {})
+    expect(preferred.relay.endpoint).toBe('10.69.47.238:8443'); expect(preferred.candidates).toEqual(candidates)
+    expect(core.parseAgentMuxRpcDeviceResult('device.link', preferred, {})).toEqual(preferred)
+    const wifi = await administration.call('device.link', { address: '10.69.58.222' }, {})
+    expect(wifi.relay.endpoint).toBe('10.69.58.222:8443'); expect(new URL(wifi.pageUrl).hostname).toBe('10.69.58.222')
+    expect(core.parseAgentMuxRpcDeviceResult('device.link', wifi, { address: '10.69.58.222' })).toEqual(wifi)
+    // A result for another address than the one asked for, or one not among its candidates, is malformed.
+    expect(() => core.parseAgentMuxRpcDeviceResult('device.link', preferred, { address: '10.69.58.222' })).toThrow()
+    expect(() => core.parseAgentMuxRpcDeviceResult('device.link', { ...preferred, candidates: [candidates[1]] }, {})).toThrow()
+    await expect(administration.call('device.link', { address: '192.168.9.9' }, {})).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(link.mock.calls.map(call => call[0])).toEqual([undefined, '10.69.58.222', '192.168.9.9'])
+    for (const address of ['fe80::1', 'example.org', '10.0.0', 42]) expect(() => core.parseAgentMuxRpcDeviceParams('device.link', { address }), String(address)).toThrow()
+    expect(() => core.parseAgentMuxRpcDeviceParams('device.link', { address: '10.0.0.1', other: true })).toThrow()
+    expect(original.devices()).toEqual([])
+  })
+})
 
 describe('original mobile link discovery', () => {
   it.each([['192.168.1.20:8443', false], ['relay.example.org', true]])('freezes one %s offer and exposes its existing endpoint even while disconnected', async (endpoint, tls) => {
-    const original = await authority(), url = offer(original.hostId, endpoint, tls), link = vi.fn(() => url)
+    const original = await authority(), url = offer(original.hostId, endpoint, tls), link = vi.fn(linked(url))
     const state = vi.fn((_url?: string) => ({ state: 'disconnected' as const, message: 'Original connection observation' }))
     const administration = createDeviceAdministration(() => Promise.resolve(original), state, link)
     const result = await administration.call('device.link', {}, {})
     expect(result).toEqual({ hostId: original.hostId, url, pageUrl: url.split('#')[0], relay: { endpoint, useTls: tls },
-      mobileAccess: { state: 'disconnected', message: 'Original connection observation', origin: new URL(url).origin } })
+      mobileAccess: { state: 'disconnected', message: 'Original connection observation', origin: new URL(url).origin }, candidates: [] })
     expect(link).toHaveBeenCalledTimes(1); expect(state).toHaveBeenCalledExactlyOnceWith(url)
     expect(original.devices()).toEqual([])
     expect(core.parseAgentMuxRpcDeviceResult('device.link', result, {})).toEqual(result)
@@ -65,7 +120,7 @@ describe('original mobile link discovery', () => {
   })
   it('authenticates the exact local caller before reading while retaining device administration boundaries', async () => {
     const h = await owner(), original = await authority(), administration = createDeviceAdministration(() => Promise.resolve(original),
-      () => ({ state: 'connected', message: 'Ready' }), () => offer(original.hostId, '192.168.1.20:8443'))
+      () => ({ state: 'connected', message: 'Ready' }), linked(offer(original.hostId, '192.168.1.20:8443')))
     const call = vi.spyOn(administration, 'call'), service = new core.AgentMuxRpcService({ coreClients: h.coreClients, deviceAdministration: administration })
     expect((await service.call('device.link', {}, { caller: h.credentials, transport: 'unix' })).hostId).toBe(original.hostId)
     expect((await service.call('device.link', {}, { caller: h.credentials, transport: 'http' })).hostId).toBe(original.hostId)
@@ -83,7 +138,7 @@ describe('original mobile link discovery', () => {
   })
   it('keeps missing original address explicit without affecting the healthy caller', async () => {
     const h = await owner(), original = await authority(), administration = createDeviceAdministration(() => Promise.resolve(original),
-      () => ({ state: 'starting', message: 'Starting' }), () => { throw new core.AgentMuxError('Original address unavailable', 'CONTROL_UNAVAILABLE') })
+      () => ({ state: 'starting', message: 'Starting' }), async () => { throw new core.AgentMuxError('Original address unavailable', 'CONTROL_UNAVAILABLE') })
     const service = new core.AgentMuxRpcService({ coreClients: h.coreClients, deviceAdministration: administration })
     await expect(service.call('device.link', {}, { caller: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
     expect(h.client.agentSession('caller').agentSessionId).toBe('caller'); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -115,9 +170,19 @@ describe('original mobile link discovery', () => {
     expect(disconnected.code, disconnected.stderr).toBe(0)
     expect(JSON.parse(disconnected.stdout).result).toEqual({ ...expected, mobileAccess: { ...expected.mobileAccess, state: 'disconnected', message: '连接中断，自动重连中；原会话保留。' } })
     expect((await user.call('device.ls', {})).devices).toEqual([])
+    // Every candidate the Host lists can be chosen through the CLI; another address is refused.
+    for (const candidate of expected.candidates) {
+      const chosen = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'device', 'link', '--address', candidate.address], env)
+      expect(chosen.code, chosen.stderr).toBe(0)
+      expect(new URL(JSON.parse(chosen.stdout).result.pageUrl).hostname).toBe(candidate.address)
+    }
+    const refused = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'device', 'link', '--address', '203.0.113.9'], env)
+    expect(refused.code).not.toBe(0); expect(refused.stdout + refused.stderr).toContain('INVALID_CONTROL_REQUEST')
     const help = await runCompiledObjectCli(['device', 'link', '--help'], env)
+
     const skill = await runCompiledObjectCli(['device', '--skill'], env)
     expect(help.stdout).toContain('pageUrl'); expect(help.stdout).toContain('does not enroll')
+    expect(help.stdout).toContain('--address IPV4'); expect(help.stdout).toContain('never falling back')
     expect(skill.stdout).toContain('address remains readable while disconnected')
-  })
+  }, 30000)
 })
