@@ -124,7 +124,7 @@
 }
 /* A local reading-safe corner, outside flow. The same original disclosure still owns all facts. */
 .terminal-view > .terminal-service-window {
-  position: absolute; isolation: isolate; z-index: 42; top: 0; left: var(--sp-2); max-width: min(140px, 42%);
+  position: absolute; isolation: isolate; z-index: 42; top: 0; left: var(--sp-2); max-width: min(360px, calc(100% - var(--sp-6)));
   min-height: 0; height: 22px; padding: 0; align-items: flex-start; gap: 0; background: transparent;
 }
 .terminal-service-window::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 13px; border-radius: var(--radius-sm); background: var(--surface-0); pointer-events: none; }
