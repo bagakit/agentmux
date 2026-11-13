@@ -162,6 +162,45 @@ it('the original Agent Region opens experience review without extracting, delive
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
 })
 
+it('a Focus card hands Take over and Pass on experience to its exact Region, which opens them in place', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  vi.spyOn(api.agentLearning, 'call').mockRejectedValue(new Error('Original learning owner is temporarily unavailable'))
+  await act(async () => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible parked interactiveResize={false} linkOrigin={source.origin} />))
+  const exact = { tabId: 'source-tab', regionId: 'source-region', sessionId: original.id, runId: original.control.run.runId }
+  await act(async () => useAppStore.getState().requestRegionDerivedAction({ ...exact, actionId: 'take-over' }))
+  expect(document.querySelector('.session-takeover:not(.session-learning)')).not.toBeNull()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(useAppStore.getState().regionDerivedActionRequest).toBeNull()
+  await act(async () => document.querySelector('.session-takeover')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover')).toBeNull() })
+  await act(async () => useAppStore.getState().requestRegionDerivedAction({ ...exact, actionId: 'pass-on-experience' }))
+  expect(document.querySelector('.session-learning')).not.toBeNull()
+  expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('a request that arrives while the Region is still hidden opens once it is shown', async () => {
+  const render = (visible: boolean) => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible={visible} parked interactiveResize={false} linkOrigin={source.origin} />)
+  await act(async () => render(false))
+  await act(async () => useAppStore.getState().requestRegionDerivedAction({ tabId: 'source-tab', regionId: 'source-region', sessionId: original.id, runId: original.control.run.runId, actionId: 'take-over' }))
+  expect(useAppStore.getState().regionDerivedActionRequest).not.toBeNull()
+  await act(async () => render(true))
+  expect(document.querySelector('.session-takeover:not([hidden])')).not.toBeNull()
+  expect(useAppStore.getState().regionDerivedActionRequest).toBeNull()
+})
+
+it('a derived action request for another Region is left alone, and a changed Run opens nothing', async () => {
+  const report = vi.spyOn(useAppStore.getState(), 'reportError')
+  await act(async () => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible parked interactiveResize={false} linkOrigin={source.origin} />))
+  await act(async () => useAppStore.getState().requestRegionDerivedAction({ tabId: 'source-tab', regionId: 'another-region', sessionId: original.id, runId: original.control.run.runId, actionId: 'take-over' }))
+  expect(document.querySelector('.session-takeover')).toBeNull()
+  expect(useAppStore.getState().regionDerivedActionRequest?.regionId).toBe('another-region')
+  await act(async () => useAppStore.getState().requestRegionDerivedAction({ tabId: 'source-tab', regionId: 'source-region', sessionId: original.id, runId: 'replaced-run', actionId: 'take-over' }))
+  expect(document.querySelector('.session-takeover')).toBeNull()
+  expect(useAppStore.getState().regionDerivedActionRequest).toBeNull()
+  expect(report).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Agent or Run in this Region changed') }), expect.anything())
+})
+
 it('the shared Launcher picker retains unknown choices and has no warm-terminal side effect in takeover', async () => {
   const prewarm = vi.spyOn(useAppStore.getState(), 'prewarmTerminal'), launch = launchBoundary()
   const tab = createWorkbenchTab('launcher-tab', { regionId: 'launcher-region', kind: 'launcher', workspaceId: 'repo' })

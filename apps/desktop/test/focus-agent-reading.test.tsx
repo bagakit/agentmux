@@ -70,13 +70,31 @@ it('real Focus action opens the original shared Reader with canonical host/SID o
   expect(document.querySelector('[role="dialog"]')).toBeNull()
 })
 
-it('Focus passes the exact source to the original learning surface without extracting or sending on open', async () => {
+it('Focus hands Pass on experience and Take over to the one confirmed Region instead of a dialog', async () => {
   const call = vi.spyOn(api.agentLearning, 'call').mockRejectedValue(new Error('Private original operation listing unavailable'))
-  await act(async () => root.render(<Scene />)); await open(); expect(call).not.toHaveBeenCalled()
+  await act(async () => root.render(<Scene />))
+  for (const [label, actionId] of [['Pass on experience', 'pass-on-experience'], ['Take over', 'take-over']] as const) {
+    await open(); await choose(label)
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(useAppStore.getState().regionDerivedActionRequest).toMatchObject({ tabId: tab.id, regionId: 'target-region', sessionId: target.id,
+      runId: target.control.run.runId, actionId })
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: tab.id, regionId: 'target-region' })
+    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(target.id)
+  }
+  expect(call).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts[target.id]).toBe('Unsent original draft')
+})
+
+it('Focus without a confirmed Region keeps the learning review in the Focus workspace, not a dialog', async () => {
+  const call = vi.spyOn(api.agentLearning, 'call').mockRejectedValue(new Error('Private original operation listing unavailable'))
+  useAppStore.setState({ tabs: {} })
+  await act(async () => root.render(<section className="global-focus-surface"><Scene /></section>)); await open()
   await choose('Pass on experience')
-  expect(document.querySelector('[aria-label="Review Agent experience"]')).toBeTruthy()
+  expect(document.querySelector('.focus-workspace-stage [aria-label="Review Agent experience"]')).toBeTruthy()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(call).toHaveBeenCalledExactlyOnceWith('agent.learning.ls', { hostId: target.control.hostId, agentSessionId: target.control.agentSessionId })
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Private original operation listing unavailable')
+  expect(document.querySelector('.focus-workspace-stage')?.textContent).toContain('Private original operation listing unavailable')
+  expect(useAppStore.getState().regionDerivedActionRequest).toBeNull()
 })
 
 it('closed cards add no Store observer, reader or hidden SessionPane', async () => {

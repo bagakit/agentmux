@@ -23,7 +23,7 @@ let root: Root, host: HTMLDivElement, execute: ReturnType<typeof vi.fn>
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
 function Scene() {
   const selector = useMemo(createFocusProjectionSelector, []), { contexts } = useAppStore(selector)
-  return <>{contexts.map(context => <FocusContextRow key={context.id} context={context} selected={false} onSelect={() => {}} />)}<input aria-label="Later work" /></>
+  return <section className="global-focus-surface">{contexts.map(context => <FocusContextRow key={context.id} context={context} selected={false} onSelect={() => {}} />)}<input aria-label="Later work" /></section>
 }
 const catalog = () => spatialCatalog(useAppStore.getState(), [])
 async function open() {
