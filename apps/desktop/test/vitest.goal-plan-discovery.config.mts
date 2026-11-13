@@ -12,6 +12,7 @@ const owners = new Set([
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/desktop-user-state.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts',
   'apps/host/src/goals.ts', 'apps/host/src/goal-discussions.ts',
   'apps/host/src/goal-delegation-owner.ts', 'apps/host/src/goal-projection.ts',
+  'apps/host/src/goal-pmo-origin.ts', 'apps/host/src/goal-participation-owner.ts',
   'packages/demand/src/demand-store.ts', 'packages/demand/src/goal-plan.ts',
   'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc.ts'
 ])
