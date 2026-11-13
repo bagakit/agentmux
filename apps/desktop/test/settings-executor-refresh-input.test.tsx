@@ -8,7 +8,6 @@ import { AgentProviderRegistry } from '@agentmux/core'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, ExecutorDetection, ExecutorDetectionInput } from '../src/shared/contracts'
 import { AgentSettingsPane } from '../src/renderer/src/components/settings/AgentSettingsPane'
-import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { BoardDiscussionCanvas } from '../src/renderer/src/components/BoardDiscussionCanvas'
@@ -112,13 +111,8 @@ it('missing type and unknown read reasons remain distinct and disappear when the
   expect(status()).toBe('Not checked'); expect(card().textContent).not.toContain('original I/O reason')
 })
 
-it('actual Workspace, launcher and Board consumers ignore same-ID command replacements; aggregate still uses the best matching Host', async () => {
+it('actual launcher and Board consumers ignore same-ID command replacements; aggregate still uses the best matching Host', async () => {
   const changed = { ...config, executors: { ...config.executors, codex: { ...config.executors.codex!, command: 'later' } } }
-  await dom.render(<WorkspaceSettingsPane config={config} onClose={vi.fn()} />)
-  const choices = () => [...dom.container.querySelectorAll<HTMLOptionElement>('.workspace-composer__wide select option')].map(option => option.value)
-  expect(choices()).toEqual(['none', 'codex', 'review'])
-  await dom.render(<WorkspaceSettingsPane config={changed} onClose={vi.fn()} />)
-  expect(choices()).toEqual(['none', 'review'])
   await act(async () => useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     agentComposerDrafts: { region: 'Preserved launcher draft' } }))
   await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)

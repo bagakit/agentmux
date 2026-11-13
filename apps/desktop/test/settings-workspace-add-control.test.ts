@@ -86,11 +86,17 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
   const fields=type.type.members.filter(ts.isPropertySignature).map(node=>node.name.getText(contract))
   expect(fields.length).toBeGreaterThan(0)
   expect(Object.keys(createWorkspaceInputSchema.shape).sort()).toEqual(fields.sort())
-  const source=ts.createSourceFile('WorkspaceSettingsPane.tsx',await readFile(new URL('../src/renderer/src/components/settings/WorkspaceSettingsPane.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+  const source=ts.createSourceFile('HostProjectsPane.tsx',await readFile(new URL('../src/renderer/src/components/settings/HostProjectsPane.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
   const calls:ts.CallExpression[]=[]
   const visit=(node:ts.Node)=>{if(ts.isCallExpression(node)&&node.expression.getText(source)==='api.workspaces.add')calls.push(node);ts.forEachChild(node,visit)}
   visit(source);expect(calls).toHaveLength(1)
-  const argument=calls[0]!.arguments[0];expect(argument).toBeDefined()
+  let argument=calls[0]!.arguments[0];expect(argument).toBeDefined()
+  if(argument&&ts.isIdentifier(argument)){
+   const inputName=argument.text,declarations:ts.VariableDeclaration[]=[]
+   const find=(node:ts.Node)=>{if(ts.isVariableDeclaration(node)&&ts.isIdentifier(node.name)&&node.name.text===inputName&&node.initializer&&ts.isObjectLiteralExpression(node.initializer))declarations.push(node);ts.forEachChild(node,find)}
+   find(source);expect(declarations).toHaveLength(1)
+   argument=declarations[0]!.initializer!
+  }
   const written=new Set<string>()
   const collect=(node:ts.Node)=>{if(ts.isPropertyAssignment(node)||ts.isShorthandPropertyAssignment(node))written.add(node.name.getText(source));ts.forEachChild(node,collect)}
   collect(argument!);expect(written.size).toBeGreaterThan(0)

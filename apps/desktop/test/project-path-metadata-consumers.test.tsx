@@ -23,7 +23,7 @@ import { SurveyItemOptions } from '../src/renderer/src/components/SurveyItemOpti
 import { LauncherResumePicker } from '../src/renderer/src/components/LauncherResumePicker'
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel'
 import { ContinuousProgressControl } from '../src/renderer/src/components/ContinuousProgressControl'
-import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'
+import { HostProjectsPane } from '../src/renderer/src/components/settings/HostProjectsPane'
 import { BoardRowsProvider } from '../src/renderer/src/hooks/useBoardRows'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { deriveFocusProjectLanes } from '../src/renderer/src/lib/focus-project-lanes'
@@ -61,7 +61,6 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'reader', source: { providerId: 'codex', nativeSessionId: 'native-reader' }, items: [], nextCursor: null })
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
-  vi.spyOn(api.continuousProgress, 'onChanged').mockReturnValue(() => {})
 })
 
 describe('typed project metadata consumers preserve canonical identities', () => {
@@ -202,11 +201,13 @@ describe('typed project metadata consumers preserve canonical identities', () =>
 
   it.each(modes)('request, continuous-progress target and Settings retain original machine path: %j %s', async (host, absolute, expected) => {
     const { config, session } = seed(host, absolute)
-    await dom.render(<><AttentionRequestPanel sessionId={session.id} onClose={() => {}} /><ContinuousProgressControl session={session} /><WorkspaceSettingsPane config={config} onClose={() => {}} /></>)
+    await dom.render(<><AttentionRequestPanel sessionId={session.id} onClose={() => {}} /><ContinuousProgressControl session={session} /><HostProjectsPane config={config} hostId={host.id} connectionChanged={false} active hidden={false} /></>)
     const target = element('[data-progress-details="target"] dd[title]')
     expect([target.textContent, target.title]).toEqual([expected, expected])
-    const settings = element('.workspace-settings-list small')
-    expect([settings.textContent, settings.title]).toEqual([expected, expected])
+    const settings = element('.host-projects__list [data-registered-folder] code')
+    expect(settings.textContent).toBe(expected)
+    expect(settings.title).toBe(path)
+    expect(config.workspaces[0]!.path).toBe(path)
     const request = element('.attention-request-panel small[title]')
     expect([request.textContent, request.title]).toEqual([expected, expected])
     expect(api.continuousProgress.list).toHaveBeenCalledExactlyOnceWith({ hostId: host.id, agentSessionId: session.id, providerId: 'codex', workspacePath: path })

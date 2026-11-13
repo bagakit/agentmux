@@ -5,7 +5,7 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { AgentSettingsPane } from '../src/renderer/src/components/settings/AgentSettingsPane'
-import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'
+import { HostProjectsPane } from '../src/renderer/src/components/settings/HostProjectsPane'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore, executorDetectionKey } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -41,21 +41,21 @@ async function category(title: string) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
 }
 
-it('finds one of 51 workspaces by path, preserves creation drafts, and distinguishes no matches from no resources', async () => {
+it('finds one of 51 Host projects by path, preserves folder drafts, and distinguishes no matches from no resources', async () => {
   const large = { ...config, workspaces: Array.from({ length: 51 }, (_, index) => ({
     ...composerConfig.workspaces[0]!, id: `w-${index}`, name: `Project ${index}`, path: (_hygiene_fixturePath("projects/repository-") + (index) + "")
   })) }
-  await dom.render(<WorkspaceSettingsPane config={large} onClose={() => {}} />)
-  expect(dom.container.querySelectorAll('.workspace-settings-list > div')).toHaveLength(51)
-  await dom.click('.settings-pane-toolbar button')
+  await dom.render(<HostProjectsPane config={large} hostId="local" connectionChanged={false} active hidden={false} />)
+  expect(dom.container.querySelectorAll('.host-projects__list [data-registered-folder]')).toHaveLength(51)
+  await dom.click('.host-projects__heading button')
   await fill('[placeholder="Project directory"]', _hygiene_fixturePath("unsaved-project"))
-  await fill('[aria-label="Filter workspaces"]', 'REPOSITORY-50')
-  expect([...dom.container.querySelectorAll('.workspace-settings-list strong')].map(node => node.textContent)).toEqual(['Project 50'])
-  await fill('[aria-label="Filter workspaces"]', 'nothing-matches')
-  expect(dom.container.querySelector('.settings-resource-empty[role="status"]')!.textContent).toContain('No workspaces match')
+  await fill('[aria-label="Find a project on This Mac"]', 'REPOSITORY-50')
+  expect([...dom.container.querySelectorAll('.host-projects__list [data-registered-folder] strong')].map(node => node.textContent)).toEqual(['Project 50'])
+  await fill('[aria-label="Find a project on This Mac"]', 'nothing-matches')
+  expect(dom.container.querySelector('.settings-resource-empty[role="status"]')!.textContent).toContain('No projects match')
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="Project directory"]')!.value).toBe(_hygiene_fixturePath("unsaved-project"))
-  await fill('[aria-label="Filter workspaces"]', '')
-  expect(dom.container.querySelectorAll('.workspace-settings-list > div')).toHaveLength(51)
+  await fill('[aria-label="Find a project on This Mac"]', '')
+  expect(dom.container.querySelectorAll('.host-projects__list [data-registered-folder]')).toHaveLength(51)
 })
 
 it('keeps the same open editor, native focus, and draft when availability changes and filtering hides it', async () => {

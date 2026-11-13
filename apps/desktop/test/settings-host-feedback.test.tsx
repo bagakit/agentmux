@@ -4,7 +4,6 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, HostCheckResult, SshHostConfig } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -185,7 +184,7 @@ it('keeps a late Ready inapplicable after editing when the user has not requeste
   expect(onSave).not.toHaveBeenCalled()
 })
 
-it('does not apply a same-ID committed replacement to old Ready in either mounted settings consumer', async () => {
+it('does not apply a same-ID committed replacement to an old Ready in the real Host settings', async () => {
   const saved = { ...config, executors: {}, workspaces: [{ ...config.workspaces[0]!, hostId: remote.id }] }
   const changed = { ...saved, hosts: [saved.hosts[0]!, { ...remote, hostname: 'published.invalid' }] }
   useAppStore.setState({ config: saved, hostChecks: { remote: { state: 'ready', input: remote,
@@ -198,11 +197,6 @@ it('does not apply a same-ID committed replacement to old Ready in either mounte
   await dom.render(<HostSettingsPane active={true} config={changed} onSave={onSave} />)
   expect(status(1)).toBe('Not tested')
 
-  await dom.render(<WorkspaceSettingsPane config={saved} onClose={vi.fn()} />)
-  const select = () => dom.container.querySelector<HTMLSelectElement>('.workspace-composer select')!
-  expect(select()).not.toBeNull(); expect([...select().options].map(option => option.value)).toEqual(['', remote.id])
-  await dom.render(<WorkspaceSettingsPane config={changed} onClose={vi.fn()} />)
-  expect([...select().options].map(option => option.value)).toEqual([''])
 
   await act(async () => useAppStore.setState({ config: changed }))
   expect(useAppStore.getState().agentComposerDrafts.region).toBe('Preserved launcher draft')
