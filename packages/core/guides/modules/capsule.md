@@ -66,7 +66,7 @@ the answer arrives as ordinary input text.
    button. End your turn and keep your Session running; do not poll.
 4. The person edits and confirms in trusted App chrome. It arrives as your next input:
    <amux:capsule-answer version="1">
-   {"capsuleId":"PAGE","interactionId":"QUESTION","question":"Which icon?","answer":"B"}
+   {"capsuleId":"Kd7mQ2xRb9Wp","interactionId":"Q4nT8vHc2Jzs","question":"Which icon?","answer":"B"}
    </amux:capsule-answer>
    It answers only that question. capsule interaction inspect with those IDs reads its
    status, answer and reply.delivery.

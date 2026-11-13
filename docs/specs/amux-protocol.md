@@ -177,7 +177,7 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 ```text
 <amux:capsule-answer version="1">
-{"capsuleId":"PAGE","interactionId":"QUESTION","question":"Which icon?","answer":"B, with a lighter shadow"}
+{"capsuleId":"Kd7mQ2xRb9Wp","interactionId":"Q4nT8vHc2Jzs","question":"Which icon?","answer":"B, with a lighter shadow"}
 </amux:capsule-answer>
 ```
 
