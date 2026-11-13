@@ -6,6 +6,42 @@ import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbe
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { placeWorkbenchWindow, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
 
+it('keeps a successfully visible hidden View in its actual host until reveal', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createClientUiRoot(container)
+  function Body() { const value = useContext(WorkbenchPresentationContext); return <input data-actual-placement={value.tabHostId} defaultValue="Original unsent hidden reading" /> }
+  const tree = (visible: boolean, targetId: string) => <><div id="deferred-home" /><div id="deferred-first" /><div id="deferred-next" />
+    <StableWorkbenchView homeId="deferred-home" targetId={targetId} active={visible} visible={visible} retainedRegionId={null}><Body /></StableWorkbenchView></>
+  try {
+    await act(async () => root.render(tree(true, 'deferred-first')))
+    const input = container.querySelector('input')!
+    input.value = 'Still the original unsent draft'
+    await act(async () => root.render(tree(false, 'deferred-home')))
+    expect(input.closest('#deferred-first')).not.toBeNull(); expect(input.dataset.actualPlacement).toBe('deferred-first')
+    await act(async () => root.render(tree(true, 'deferred-next')))
+    expect(container.querySelector('input')).toBe(input); expect(input.closest('#deferred-next')).not.toBeNull()
+    expect(input.dataset.actualPlacement).toBe('deferred-next'); expect(input.value).toBe('Still the original unsent draft')
+  } finally { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
+
+it.each(['deleted-old-slot', 'unfulfilled-visible-request'] as const)('still places an unavailable hidden original for %s', async mode => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
+  function Body() { const value = useContext(WorkbenchPresentationContext); return <input data-actual-placement={value.tabHostId} defaultValue="Original source" /> }
+  const tree = (first: boolean) => <>
+    {first && mode === 'deleted-old-slot' ? <div id="forced-old" /> : null}<div id="forced-new" />
+    <StableWorkbenchView homeId="forced-home" targetId={first ? mode === 'deleted-old-slot' ? 'forced-old' : 'not-yet-present' : 'forced-new'}
+      active={first} visible={first} retainedRegionId={null}><Body /></StableWorkbenchView>
+  </>
+  try {
+    await act(async () => root.render(tree(true))); const input = container.querySelector('input')!
+    await act(async () => root.render(tree(false)))
+    expect(input.closest('#forced-new')).not.toBeNull(); expect(input.dataset.actualPlacement).toBe('forced-new')
+    expect(input.value).toBe('Original source')
+  } finally { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
+
 it('keeps the actual placed host while a later destination is unavailable', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const container = document.createElement('div'); document.body.append(container)

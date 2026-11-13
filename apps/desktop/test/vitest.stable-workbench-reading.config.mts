@@ -26,13 +26,18 @@ export default defineConfig({ ...owning,
     if (relative(root, id.split('?')[0]!) !== stable) return
     let code = original
     const mutant = process.env.AGENTMUX_READING_MUTANT as keyof typeof changes | undefined
-    if (mutant) {
+    if (process.env.AGENTMUX_READING_MUTANT === 'force-hidden-move') {
+      const anchor = 'if (!presentedVisible && wasVisible.current && !crossDocument'
+      assert.equal(code.split(anchor).length - 1, 1, 'Unique actual hidden placement branch')
+      code = code.replace(anchor, 'if (false && !presentedVisible && wasVisible.current && !crossDocument')
+    } else if (mutant) {
       assert.ok(Object.hasOwn(changes, mutant), 'Declared actual reading capture mutation')
       assert.equal(code.split(lateCapture).length - 1, 1, 'Unique actual attach capture branch')
       code = code.replace(lateCapture, changes[mutant])
     }
     if (process.env.AGENTMUX_READING_LOADED) appendFileSync(process.env.AGENTMUX_READING_LOADED,
       JSON.stringify({ path: stable, sourceSHA256: hash(original), loadedSHA256: hash(code), mutant: mutant ?? null }) + '\n')
+    if (process.env.AGENTMUX_READING_EXECUTED) return { code: code + `\nimport { appendFileSync as __placementExecuted } from 'node:fs';__placementExecuted(${JSON.stringify(process.env.AGENTMUX_READING_EXECUTED)},${JSON.stringify(JSON.stringify({ path: stable, sourceSHA256: hash(original), loadedSHA256: hash(code), mutant: process.env.AGENTMUX_READING_MUTANT ?? null })+'\n')});\n`, map: null }
     if (code !== original) return { code, map: null }
   } }],
   test: { ...owning.test, include: ['apps/desktop/test/stable-workbench-reading-transition.test.tsx'],
