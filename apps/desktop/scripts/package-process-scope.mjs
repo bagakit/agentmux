@@ -39,6 +39,11 @@ function isCrashReporter(command) {
   return executableOf(command).endsWith('/chrome_crashpad_handler')
 }
 
+function isBundleImage(image, bundle) {
+  return typeof image === 'string' && (image === bundle.executable ||
+    image.startsWith(bundle.helperRoot) && !image.endsWith('/chrome_crashpad_handler'))
+}
+
 /**
  * @param {string} psStdout  raw stdout of `ps -axo pid=,command=`
  * @param {{ executable: string, helperRoot: string }} bundle
@@ -89,7 +94,7 @@ function assertAdmissions(admissions) {
   'Application admission identity or provenance is unavailable; its processes are retained.')
 }
 
-/** Commands select candidates; admissions retain only bound ownership facts, never argv. */
+/** Commands discover candidates; bound OS identities keep them observable across title changes. */
 export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [], previousOwners = [], independentOwners = [] } = {}) {
   assertAdmissions(previousOwners)
   const rows = processRows(psStdout), byPid = new Map(rows.map(row => [row.pid, row]))
@@ -98,8 +103,7 @@ export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [],
   const selected = new Set(classified.serving)
   const boundModes = new Map(rows.flatMap(row => {
     const mode = modes.get(row.pid)
-    return (row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `)) &&
-      ['node', 'gui'].includes(mode?.mode) && mode.executable === bundle.executable && mode.uid === process.getuid() && mode.uid === row.uid &&
+    return ['node', 'gui'].includes(mode?.mode) && isBundleImage(mode.executable, bundle) && mode.uid === process.getuid() && mode.uid === row.uid &&
       mode.birth === row.birth && mode.ppid === row.ppid ? [[row.pid, mode.mode]] : []
   }))
   const previous = new Map(previousOwners.filter(admission => identityMatches(admission, byPid.get(admission.pid))).map(admission => [admission.pid, admission]))
@@ -115,8 +119,7 @@ export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [],
       source: 'retained-gui', confirmedGui: admission.confirmedGui ?? { source: admission.source, ppid: admission.ppid }
     }]]
     if (row.uid !== process.getuid()) return []
-    if (selected.has(pid) && row.command.startsWith(bundle.helperRoot)) return [[pid, { source: 'bundle-helper' }]]
-    return boundModes.get(pid) === 'gui' ? [[pid, { source: 'bound-gui' }]] : []
+    return boundModes.get(pid) === 'gui' ? [[pid, { source: modes.get(pid).executable === bundle.executable ? 'bound-gui' : 'bundle-helper' }]] : []
   }))
   const ancestry = row => {
     let parent = row, uncertain = false, missingPid = row.pid, termination = 'missing-process', classification = 'unknown'
@@ -138,13 +141,13 @@ export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [],
     const mode = modes.get(row.pid), mismatch = [], unknown = []
     if (mode) for (const key of ['uid', 'pid', 'ppid', 'birth', 'executable']) {
       if (mode[key] == null) unknown.push(key)
-      else if (mode[key] !== (key === 'executable' ? bundle.executable : row[key])) mismatch.push(key)
+      else if (key === 'executable' ? !isBundleImage(mode[key], bundle) : mode[key] !== row[key]) mismatch.push(key)
     }
     if (mode?.uid != null && mode.uid !== process.getuid() && !mismatch.includes('uid')) mismatch.push('uid')
     return { status: !mode ? 'not-observed' : mismatch.length ? 'binding-mismatch'
       : unknown.length || !['node', 'gui'].includes(mode.mode) ? 'unknown' : 'bound',
     observation: mode ? { uid: mode.uid ?? null, pid: mode.pid, ppid: mode.ppid ?? null, birth: mode.birth ?? null,
-      mode: ['node', 'gui'].includes(mode.mode) ? mode.mode : 'unknown', executableMatches: mode.executable == null ? null : mode.executable === bundle.executable } : null,
+      mode: ['node', 'gui'].includes(mode.mode) ? mode.mode : 'unknown', executableMatches: mode.executable == null ? null : isBundleImage(mode.executable, bundle) } : null,
     mismatch, unknown }
   }
   const classify = (row, path) => {
@@ -233,13 +236,16 @@ async function osProcessSnapshot() {
 export async function observeApplicationProcesses(bundle, previousOwners = [],
   { processSnapshot = osProcessSnapshot, modes = electronNodeModes, independentOwners = [] } = {}) {
   const first = processRows(await processSnapshot())
-  const candidates = first.filter(row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `))
+  const needsMode = row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `) ||
+    row.command.startsWith(bundle.helperRoot) && !isCrashReporter(row.command) ||
+    previousOwners.some(owner => identityMatches(owner, row))
+  const candidates = first.filter(needsMode)
   const requested = new Set(candidates.map(row => row.pid))
   let nodeModes = await modes(candidates.map(row => row.pid))
   let current = await processSnapshot()
   const original = new Map(candidates.map(row => [row.pid, row]))
   const additional = processRows(current).filter(row => {
-    if (row.command !== bundle.executable && !row.command.startsWith(`${bundle.executable} `)) return false
+    if (!needsMode(row)) return false
     const before = original.get(row.pid)
     return !before || before.uid !== row.uid || before.birth !== row.birth || before.ppid !== row.ppid
   })
@@ -258,7 +264,7 @@ export async function observeApplicationProcesses(bundle, previousOwners = [],
     row.pid === mode.pid && row.birth === mode.birth && row.ppid === mode.ppid)),
     // Internal point-time facts. The failure receipt selects only its affected
     // identity and ancestry; commands, argv and environment never enter it.
-    ownershipObservation: { executable: bundle.executable, requested, admissions: new Map(scope.admissions.filter(admission =>
+    ownershipObservation: { executable: bundle.executable, helperRoot: bundle.helperRoot, requested, admissions: new Map(scope.admissions.filter(admission =>
       identityMatches(admission, identities.get(admission.pid))).map(row => [row.pid, row])), identities,
       modes: new Map(nodeModes.map(({ pid, ppid, birth, uid, mode, executable }) =>
         [pid, { pid, ppid: ppid ?? null, birth: birth ?? null, uid: uid ?? null,
@@ -275,7 +281,7 @@ function ownershipDiagnostic({ stage, pid, mainPid, before, after, previous, obs
   const mismatch = mode && current ? ['uid', 'birth', 'ppid'].filter(key => mode[key] != null && mode[key] !== current[key]) : []
   if (mode) {
     if (mode.uid != null && mode.uid !== process.getuid() && !mismatch.includes('uid')) mismatch.push('uid')
-    if (mode.executable != null && mode.executable !== observation.executable) mismatch.push('executable')
+    if (mode.executable != null && !isBundleImage(mode.executable, observation)) mismatch.push('executable')
   }
   const path = [], visited = new Set()
   let parent = current, termination = 'missing-process', missingPid = pid
