@@ -3,6 +3,10 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MoteConversationStart } from '../src/components/MoteConversationStart'
+import { MoteFirstMessage } from '../src/components/MoteFirstMessage'
+import { ClientUiProvider, type ClientUiPlatform } from '../src/platform'
+const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
+  renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null, renderObjectLink: () => null }
 
 const roots: Array<() => void> = []
 afterEach(() => { for (const close of roots.splice(0)) close(); vi.unstubAllGlobals() })
@@ -48,4 +52,29 @@ it('plays the entrance the first time the scene is shown and not when it is show
   show(true); expect(scene().hasAttribute('data-entering')).toBe(true)
   show(false); show(true); expect(scene().hasAttribute('data-entering')).toBe(false)
   expect(scene().dataset.active).toBe('true')
+})
+
+// The first message replaces the greeting and history, sits above the composer and names its stage in one line.
+it('shows the first message in place of the greeting with one stage line and a check only when unconfirmed', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const element = document.createElement('div'); document.body.append(element)
+  const root = createRoot(element)
+  roots.push(() => { act(() => root.unmount()); element.remove() })
+  const check = vi.fn()
+  const show = (stage: 'sending' | 'delivered' | 'unconfirmed', name?: string) => act(() => root.render(<ClientUiProvider platform={platform}><MoteConversationStart name="文化人" portrait={<span />}
+    composer={<textarea aria-label="Draft" />} history={<p className="history-probe">history</p>}
+    pending={<MoteFirstMessage messageId="mote-first:original" prompt="介绍一下你自己" name={name} stage={stage} action={{ label: '核对', onClick: check }} />} /></ClientUiProvider>))
+  show('sending', '文化人')
+  const scene = element.querySelector<HTMLElement>('.mote-start')!
+  expect(scene.dataset.pending).toBe('true')
+  expect(scene.querySelector('.mote-start__invitation')).toBeNull(); expect(scene.querySelector('.history-probe')).toBeNull()
+  const pending = scene.querySelector('.mote-start__pending')!
+  expect(pending.nextElementSibling?.className).toBe('mote-start__composer')
+  expect(pending.textContent).toContain('介绍一下你自己'); expect(pending.textContent).toContain('文化人 正在准备…')
+  expect(pending.querySelector('.mote-first-message__status button')).toBeNull()
+  show('delivered', undefined)
+  expect(scene.querySelector('.mote-first-message__status')?.textContent).toBe('Mote 已收到，正在接上主对话…')
+  show('unconfirmed', '文化人')
+  expect(scene.querySelector('.mote-first-message__status')?.textContent).toContain('送达尚未确认，不会重复发送')
+  act(() => scene.querySelector<HTMLButtonElement>('.mote-first-message__status button')!.click()); expect(check).toHaveBeenCalledOnce()
 })
