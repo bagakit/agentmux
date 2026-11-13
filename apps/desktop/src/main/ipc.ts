@@ -1914,12 +1914,10 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.switchProfile(id, profileId)
   })
-  // Every surface renders Main's one committed list; nothing in the Renderer keeps its own copy.
-  const publishProfiles = async <T>(change: Promise<T>): Promise<T> => {
-    const result = await change
-    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() })
-    return result
-  }
+  // Every surface renders Main's one committed list; the manager announces each commit once.
+  browserProfiles.onChange(({ revision, profiles }) => {
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, profiles })
+  })
   handleWithEvent('browser:listProfiles', async (event) => {
     await browserProfiles.initialize()
     return browserProfiles.listProfiles()
@@ -1929,18 +1927,18 @@ export async function registerIpc(args: {
     return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() }
   })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
-    return await publishProfiles(browserProfiles.createProfile(label))
+    return await browserProfiles.createProfile(label)
   })
   handleWithEvent('browser:updateProfile', async (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) => {
-    return await publishProfiles(browserProfiles.updateProfile(profileId, edit, expectedRevision))
+    return await browserProfiles.updateProfile(profileId, edit, expectedRevision)
   })
-  handleWithEvent('browser:setDefaultProfile', async (event, profileId: string, expectedRevision: number) => {
-    await publishProfiles(browserProfiles.setDefaultProfile(profileId, expectedRevision))
+  handleWithEvent('browser:setDefaultProfile', async (event, profileId: string) => {
+    await browserProfiles.setDefaultProfile(profileId)
   })
   const profileUsage = createBrowserProfileUsage({
     open: profileId => browsers.profileUses(profileId),
     readSaved: () => spatialState.read(),
-    deleteProfile: (profileId, approval) => publishProfiles(browserProfiles.deleteProfile(profileId, approval)),
+    deleteProfile: (profileId, approval) => browserProfiles.deleteProfile(profileId, approval),
     clearPreviews: profileId => browserRecoveryPreviews.clearProfile(profileId)
   })
   handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
@@ -1950,7 +1948,7 @@ export async function registerIpc(args: {
     return await browserProfiles.detectImportSources()
   })
   handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
-    return await publishProfiles(browserProfiles.importProfile(sourceToken, label))
+    return await browserProfiles.importProfile(sourceToken, label)
   })
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
     const scope = resolveInputHistoryScope(target)

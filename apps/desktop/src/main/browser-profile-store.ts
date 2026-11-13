@@ -115,8 +115,16 @@ type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
+/** The whole committed list after one write; the manager replaces its cache with it. */
+export type BrowserProfileSnapshot = { revision: number; profiles: BrowserProfileSummary[]; defaultProfileId: string }
+
 function cloneImportedSource(source: BrowserProfileImportedSource | null): BrowserProfileImportedSource | null {
   return source === null ? null : { ...source }
+}
+
+function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
+  return { revision: metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId,
+    profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
 
 function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string): BrowserProfileSummary {
@@ -153,7 +161,6 @@ export function browserProfilePartition(profileId: string): string {
 
 export class BrowserProfileStore {
   private operationTail: Promise<void> = Promise.resolve()
-  private committedRevision: number | null = null
 
   constructor(
     private readonly path = join(app.getPath('userData'), BROWSER_PROFILE_FILE_NAME)
@@ -163,15 +170,11 @@ export class BrowserProfileStore {
     return this.list().then(snapshot => snapshot.profiles)
   }
 
-  list(): Promise<{ revision: number; profiles: BrowserProfileSummary[] }> {
-    return this.enqueue(async () => {
-      const metadata = await this.readOrInitialize()
-      return { revision: metadata.revision ?? 0,
-        profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
-    })
+  list(): Promise<BrowserProfileSnapshot> {
+    return this.enqueue(async () => snapshotOf(await this.readOrInitialize()))
   }
 
-  updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<{ revision: number; profile: BrowserProfileSummary }> {
+  updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const metadata = await this.readOrInitialize()
@@ -187,24 +190,23 @@ export class BrowserProfileStore {
         if (notes === '') delete updated.notes
         else updated.notes = notes
       }
-      const next = await this.commit({
+      const snapshot = await this.commit({
         ...metadata,
         profiles: metadata.profiles.map((profile) => profile.id === validatedProfileId ? updated : profile)
       })
-      return { revision: next.revision ?? 0, profile: profileSummary(updated, next.defaultProfileId) }
+      return { snapshot, profile: profileSummary(updated, snapshot.defaultProfileId) }
     })
   }
 
-  setDefaultProfile(profileId: string, expectedRevision: number): Promise<{ revision: number }> {
+  /** Moving the default edits no Profile field, so it names only an existing target, not a revision. */
+  setDefaultProfile(profileId: string): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const metadata = await this.readOrInitialize()
-      this.assertRevision(metadata, expectedRevision)
       if (!metadata.profiles.some((profile) => profile.id === validatedProfileId)) {
         throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
       }
-      const next = await this.commit({ ...metadata, defaultProfileId: validatedProfileId })
-      return { revision: next.revision ?? 0 }
+      return await this.commit({ ...metadata, defaultProfileId: validatedProfileId })
     })
   }
 
@@ -215,7 +217,7 @@ export class BrowserProfileStore {
     })
   }
 
-  createProfile(label: string): Promise<BrowserProfileSummary> {
+  createProfile(label: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const validatedLabel = validateBrowserProfileLabel(label)
       const metadata = await this.readOrInitialize()
@@ -229,12 +231,12 @@ export class BrowserProfileStore {
         ...metadata,
         profiles: [...metadata.profiles, profile]
       })
-      const committed = await this.commit(next)
-      return profileSummary(profile, committed.defaultProfileId)
+      const snapshot = await this.commit(next)
+      return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
     })
   }
 
-  deleteProfile(profileId: string): Promise<void> {
+  deleteProfile(profileId: string): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const metadata = await this.readOrInitialize()
@@ -248,11 +250,11 @@ export class BrowserProfileStore {
         ...metadata,
         profiles: metadata.profiles.filter((profile) => profile.id !== validatedProfileId)
       })
-      await this.commit(next)
+      return await this.commit(next)
     })
   }
 
-  beginPendingImport(label: string): Promise<PendingBrowserProfileImport> {
+  beginPendingImport(label: string): Promise<{ snapshot: BrowserProfileSnapshot; pending: PendingBrowserProfileImport }> {
     return this.enqueue(async () => {
       const validatedLabel = validateBrowserProfileLabel(label)
       const metadata = await this.readOrInitialize()
@@ -265,15 +267,14 @@ export class BrowserProfileStore {
         ...metadata,
         pendingImports: [...metadata.pendingImports, pending]
       })
-      await this.commit(next)
-      return { ...pending }
+      return { snapshot: await this.commit(next), pending: { ...pending } }
     })
   }
 
   commitImportedProfile(
     profileId: string,
     source: BrowserProfileImportedSource
-  ): Promise<BrowserProfileSummary> {
+  ): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const validatedSource = importedSourceSchema.parse(source)
@@ -291,12 +292,12 @@ export class BrowserProfileStore {
         profiles: [...metadata.profiles, profile],
         pendingImports: metadata.pendingImports.filter((item) => item.profileId !== validatedProfileId)
       })
-      const committed = await this.commit(next)
-      return profileSummary(profile, committed.defaultProfileId)
+      const snapshot = await this.commit(next)
+      return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
     })
   }
 
-  abortPendingImport(profileId: string): Promise<void> {
+  abortPendingImport(profileId: string): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const metadata = await this.readOrInitialize()
@@ -307,7 +308,7 @@ export class BrowserProfileStore {
         ...metadata,
         pendingImports: metadata.pendingImports.filter((item) => item.profileId !== validatedProfileId)
       })
-      await this.commit(next)
+      return await this.commit(next)
     })
   }
 
@@ -339,16 +340,11 @@ export class BrowserProfileStore {
     if (expectedRevision !== (metadata.revision ?? 0)) throw new BrowserProfileRevisionConflict(metadata.revision ?? 0)
   }
 
-  private async commit(metadata: BrowserProfileMetadata): Promise<BrowserProfileMetadata> {
+  /** Every write advances the revision and returns the whole list it committed. */
+  private async commit(metadata: BrowserProfileMetadata): Promise<BrowserProfileSnapshot> {
     const next = metadataSchema.parse({ ...metadata, revision: (metadata.revision ?? 0) + 1 })
     await this.writeMetadata(next)
-    this.committedRevision = next.revision ?? 0
-    return next
-  }
-
-  /** Revision written by the latest commit through this store, for owners that cache the list. */
-  lastCommittedRevision(): number | null {
-    return this.committedRevision
+    return snapshotOf(next)
   }
 
   private createUnusedProfileId(metadata: BrowserProfileMetadata): string {

@@ -181,7 +181,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
           <Menu.Trigger asChild><button type="button" className="icon-button" aria-label={`More for ${profile.label}`}><ThemeActionMoreIcon size={14} /></button></Menu.Trigger>
           <DocumentOverlayPortal component={Menu.Portal}>
             <Menu.Content className="tab-context-menu" align="end" collisionPadding={8}>
-              <Menu.Item className="tab-context-menu__item" disabled={profile.isDefault} onSelect={() => void run('default', () => api.browser.setDefaultProfile(profile.id, revision))}>
+              <Menu.Item className="tab-context-menu__item" disabled={profile.isDefault} onSelect={() => void run('default', () => api.browser.setDefaultProfile(profile.id))}>
                 {profile.isDefault ? 'Default for new Browsers' : 'Make default'}
               </Menu.Item>
               <Menu.Item className="tab-context-menu__item" onSelect={() => setNaming(true)}>Rename</Menu.Item>

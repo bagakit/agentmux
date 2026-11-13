@@ -1419,8 +1419,7 @@ const mockApi: AgentMuxDesktopApi = {
       publishMockBrowserProfiles()
       return structuredClone(next)
     },
-    setDefaultProfile: async (profileId, expectedRevision) => {
-      if (expectedRevision !== mockBrowserProfileRevision) throw Object.assign(new Error('Browser Profiles changed since revision was read. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    setDefaultProfile: async (profileId) => {
       if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)
       mockBrowserProfiles = mockBrowserProfiles.map((profile) => ({ ...profile, isDefault: profile.id === profileId }))
       publishMockBrowserProfiles()

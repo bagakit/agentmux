@@ -2041,7 +2041,8 @@ export type AgentMuxDesktopApi = {
     /** Main publishes the whole list after every committed change, in revision order. */
     onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
     updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary>
-    setDefaultProfile(profileId: string, expectedRevision: number): Promise<void>
+    /** Moves only which Profile new Browsers use; it edits no Profile, so it names no revision. */
+    setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>

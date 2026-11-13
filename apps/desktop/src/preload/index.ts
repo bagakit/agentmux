@@ -752,7 +752,7 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off('browser:profilesChanged', wrapped)
     },
     updateProfile: (profileId: string, edit: BrowserProfileEdit, expectedRevision: number) => ipcRenderer.invoke('browser:updateProfile', profileId, edit, expectedRevision),
-    setDefaultProfile: (profileId: string, expectedRevision: number) => ipcRenderer.invoke('browser:setDefaultProfile', profileId, expectedRevision),
+    setDefaultProfile: (profileId: string) => ipcRenderer.invoke('browser:setDefaultProfile', profileId),
     createProfile: (label: string) => ipcRenderer.invoke('browser:createProfile', label),
     deleteProfile: (profileId: string, approval: BrowserProfileDeleteApproval) => ipcRenderer.invoke('browser:deleteProfile', profileId, approval),
     detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),

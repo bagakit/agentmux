@@ -13,7 +13,8 @@ import {
   browserProfilePartition,
   BrowserProfileStore,
   validateBrowserProfileLabel,
-  type BrowserProfileEdit
+  type BrowserProfileEdit,
+  type BrowserProfileSnapshot
 } from './browser-profile-store.js'
 import type { BrowserProfileResolver } from './browser-view-manager.js'
 
@@ -48,6 +49,9 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
   private readonly importWindows = new Set<BrowserWindow>()
   private readonly activeMutations = new Set<Promise<unknown>>()
+  private readonly changeListeners = new Set<(snapshot: BrowserProfileSnapshot) => void>()
+  /** Profiles whose partition is being cleared; a snapshot committed meanwhile cannot bring them back. */
+  private readonly deleting = new Set<string>()
   private defaultId: string | null = null
   private revision = 0
   private initialization: Promise<void> | null = null
@@ -62,19 +66,16 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     if (this.defaultId) return
     if (this.initialization) return await this.initialization
     const attempt = this.trackMutation((async () => {
-      const { revision, profiles } = await this.store.list()
-      const defaultProfile = profiles.find((profile) => profile.isDefault)
-      if (!defaultProfile) throw new Error('Browser Profile metadata has no default Profile')
+      let snapshot = await this.store.list()
+      if (!snapshot.profiles.some((profile) => profile.id === snapshot.defaultProfileId)) throw new Error('Browser Profile metadata has no default Profile')
 
       for (const pending of await this.store.listPendingImports()) {
         await this.clearPartition(pending.profileId)
-        await this.store.abortPendingImport(pending.profileId)
+        snapshot = await this.store.abortPendingImport(pending.profileId)
       }
 
-      this.profiles.clear()
-      for (const profile of profiles) this.profiles.set(profile.id, cloneProfile(profile))
-      this.defaultId = defaultProfile.id
-      this.revision = revision
+      // Loading is a read, not a change; only later commits are published.
+      this.replace(snapshot)
       this.initializationError = null
     })()).catch(cause => {
       this.initializationError = new Error(`Browser Profiles could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}. Original profile data is kept. Repair the metadata or its access, then retry the Profile connection.`, { cause })
@@ -108,22 +109,26 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return this.revision
   }
 
+  /** Called with the whole committed list after every store write, in revision order. */
+  onChange(listener: (snapshot: BrowserProfileSnapshot) => void): () => void {
+    this.changeListeners.add(listener)
+    return () => { this.changeListeners.delete(listener) }
+  }
+
   async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
     return await this.trackMutation((async () => {
-      const { profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
-      this.profiles.set(profile.id, cloneProfile(profile))
+      const { snapshot, profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
+      this.adopt(snapshot)
       return cloneProfile(profile)
     })())
   }
 
   /** Only Browsers created later without an explicit Profile use the new default. */
-  async setDefaultProfile(profileId: string, expectedRevision: number): Promise<void> {
+  async setDefaultProfile(profileId: string): Promise<void> {
     this.resolvePartition(profileId)
     await this.trackMutation((async () => {
-      await this.store.setDefaultProfile(profileId, expectedRevision)
-      for (const [id, profile] of this.profiles) this.profiles.set(id, { ...profile, isDefault: id === profileId })
-      this.defaultId = profileId
+      this.adopt(await this.store.setDefaultProfile(profileId))
     })())
   }
 
@@ -131,8 +136,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.assertInitialized()
     const validatedLabel = validateBrowserProfileLabel(label)
     return await this.trackMutation((async () => {
-      const profile = await this.store.createProfile(validatedLabel)
-      this.profiles.set(profile.id, cloneProfile(profile))
+      const { snapshot, profile } = await this.store.createProfile(validatedLabel)
+      this.adopt(snapshot)
       return cloneProfile(profile)
     })())
   }
@@ -153,13 +158,18 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     const profile = this.profiles.get(profileId)!
     await this.trackMutation((async () => {
       this.profiles.delete(profileId)
+      this.deleting.add(profileId)
+      let snapshot: BrowserProfileSnapshot
       try {
         await this.clearPartition(profileId)
-        await this.store.deleteProfile(profileId)
+        snapshot = await this.store.deleteProfile(profileId)
       } catch (error) {
+        this.deleting.delete(profileId)
         this.profiles.set(profileId, profile)
         throw error
       }
+      this.deleting.delete(profileId)
+      this.adopt(snapshot)
     })())
   }
 
@@ -222,23 +232,25 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.assertActive()
     const plan = planBrowserProfileImport(source)
     this.assertActive()
-    const pending = await this.store.beginPendingImport(label)
+    const begun = await this.store.beginPendingImport(label)
+    this.adopt(begun.snapshot)
+    const pending = begun.pending
     try {
       await this.writePlan(pending.profileId, plan)
       this.assertActive()
-      const profile = await this.store.commitImportedProfile(pending.profileId, {
+      const { snapshot, profile } = await this.store.commitImportedProfile(pending.profileId, {
         browserLabel: plan.browserLabel,
         profileLabel: plan.profileLabel,
         importedAt: Date.now(),
         importedCookies: plan.importedCookies,
         skippedCookies: plan.skippedCookies
       })
-      this.profiles.set(profile.id, cloneProfile(profile))
+      this.adopt(snapshot)
       return cloneProfile(profile)
     } catch (error) {
       try {
         await this.clearPartition(pending.profileId)
-        await this.store.abortPendingImport(pending.profileId)
+        this.adopt(await this.store.abortPendingImport(pending.profileId))
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
@@ -309,9 +321,24 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       return await operation
     } finally {
       this.activeMutations.delete(operation)
-      // Every store write advances the list revision; keep ours equal to what was committed.
-      const committed = this.store.lastCommittedRevision()
-      if (committed !== null) this.revision = committed
+    }
+  }
+
+  private replace(snapshot: BrowserProfileSnapshot): void {
+    this.profiles.clear()
+    for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
+    this.defaultId = snapshot.defaultProfileId
+    this.revision = snapshot.revision
+  }
+
+  /** The store committed this whole list; it replaces the cache, then subscribers hear it. */
+  private adopt(snapshot: BrowserProfileSnapshot): void {
+    if (this.disposed) return
+    this.replace(snapshot)
+    for (const listener of this.changeListeners) {
+      // A subscriber cannot turn a committed write into a failure.
+      try { listener({ revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles() }) }
+      catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }
 
