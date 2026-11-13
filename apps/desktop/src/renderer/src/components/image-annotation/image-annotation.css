@@ -124,11 +124,15 @@
   .image-annotation-editor__notes textarea { height: 50px; min-height: 50px; max-height: 50px; }
 }
 
-/* Inline: the frozen selection stays where it was; only a floating bar and its property popover sit beside it. */
+/* Capture: one display's frozen frame; the selection's toolbar, popover, size chip, loupe and hint float over it. */
 .image-annotation-editor--capture { background: transparent; container: none; }
 .image-annotation-editor--capture .image-annotation-editor__canvas-area { background: transparent; }
 .image-annotation-editor__size-chip { position: absolute; z-index: 3; height: 20px; padding: 0 6px; border-radius: 5px; background: rgba(28, 28, 28, .92); color: rgba(255, 255, 255, .9); font-size: 11px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .image-annotation-editor__capture-bar { position: absolute; z-index: 4; }
+/* Presses on the hint text still reach the frame beneath; only its Cancel button takes them. */
+.image-annotation-editor__capture-hint { position: absolute; z-index: 4; top: 12px; left: 50%; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 10px; border-radius: 8px; background: rgba(28, 28, 28, .92); box-shadow: 0 3px 12px rgba(0, 0, 0, .25); color: rgba(255, 255, 255, .9); font-size: 11px; white-space: nowrap; transform: translateX(-50%); pointer-events: none; }
+.image-annotation-editor .image-annotation-editor__capture-hint button { min-width: 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; color: rgba(255, 255, 255, .9); background: transparent; pointer-events: auto; }
+.image-annotation-editor .image-annotation-editor__capture-hint button:hover { color: #ffffff; background: rgba(255, 255, 255, .1); }
 /* One dark bar in both appearances: it sits on arbitrary frozen screen content, not on the app surface. */
 .image-annotation-capture-toolbar { display: flex; align-items: center; gap: 2px; height: 36px; padding: 4px; border-radius: 10px; background: rgba(28, 28, 28, .92); box-shadow: 0 3px 12px rgba(0, 0, 0, .25); color: rgba(255, 255, 255, .9); white-space: nowrap; }
 .image-annotation-capture-toolbar__group { display: flex; align-items: center; gap: 2px; }

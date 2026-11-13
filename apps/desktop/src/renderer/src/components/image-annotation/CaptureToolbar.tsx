@@ -36,3 +36,11 @@ export function CaptureToolbar({ tool, busy, loaded, label, discard, onTool, onP
     </RovingToolbarButton>
   </RovingToolbar>
 }
+
+/** The one line a capture shows before its selection exists, with the Cancel entry the toolbar carries afterwards. */
+export function CaptureHint({ text, onCancel }: { text: string; onCancel(): void }) {
+  return <div className="image-annotation-editor__capture-hint">
+    <span>{text}</span>
+    <button type="button" aria-label="Cancel" title="Cancel (Esc)" aria-keyshortcuts="Escape" onClick={onCancel}><CloseIcon size={14} /></button>
+  </div>
+}

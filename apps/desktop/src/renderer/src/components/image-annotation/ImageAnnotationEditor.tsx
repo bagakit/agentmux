@@ -6,7 +6,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
-import { CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
+import { CaptureHint, CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
 import { captureLoupePlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
@@ -689,6 +689,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const chip = shown && selection ? { left: Math.max(0, Math.min(shown.x, frame.width - measured.chip)), top: chipTop >= 0 ? chipTop : shown.y + SIZE_CHIP_GAP } : null
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
+    // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
+    const hint = !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
       {chip && selection ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{Math.round(selection.width)} × {Math.round(selection.height)} px</span> : null}
@@ -698,6 +700,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           onExpand={expand} onCancel={requestClose} onComplete={() => complete()} />
         {hasProperties ? <div className="image-annotation-editor__capture-properties" role="group" aria-label="Markup properties" data-side={placement.side === 'below' ? 'below' : 'above'}>{propertyControls}</div> : null}
       </div> : null}
+      {hint ? <CaptureHint text={hint} onCancel={requestClose} /> : null}
       {loupe && loupeBox ? <div className="image-annotation-editor__loupe" aria-label="Pixel loupe" style={loupeBox}>
         <canvas ref={loupeRef} width={LOUPE_GRID} height={LOUPE_GRID} aria-hidden="true" />
         <span>{loupe.sample.hex}  {loupe.sample.rgb.join(',')}</span>
