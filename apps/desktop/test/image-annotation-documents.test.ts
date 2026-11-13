@@ -21,7 +21,10 @@ const shapes: ScreenshotShape[] = [
   { id: 'text', kind: 'text', color: '#ffffff', fontSize: 18, at: { x: .2, y: .3 }, text: 'Existing text' },
   { id: 'note', kind: 'note', color: '#ef4444', width: 2, radius: 12, number: 1, note: 'Editable hidden note 原文', template: 'request', from: { x: .1, y: .1 }, to: { x: .8, y: .8 } },
   { id: 'pixelate', kind: 'pixelate', color: '#000', blockSize: 16, from: { x: .1, y: .1 }, to: { x: .8, y: .8 } },
-  { id: 'cover', kind: 'cover', color: '#111827', from: { x: .3, y: .2 }, to: { x: .9, y: .9 } }
+  { id: 'cover', kind: 'cover', color: '#111827', from: { x: .3, y: .2 }, to: { x: .9, y: .9 } },
+  { id: 'blur', kind: 'blur', color: '#111827', radius: 12, from: { x: .1, y: .2 }, to: { x: .6, y: .7 } },
+  { id: 'spotlight', kind: 'spotlight', color: '#ffffff', dim: .6, from: { x: .2, y: .2 }, to: { x: .7, y: .6 } },
+  { id: 'callout', kind: 'callout', color: '#ef4444', zoom: 2.5, from: { x: .1, y: .1 }, to: { x: .3, y: .3 }, at: { x: .5, y: .1 } }
 ]
 function original(): EditableAnnotationDocument {
   return createEditableAnnotationDocument({ image, shapes, crop: { x: .1, y: .1, width: .8, height: .8 }, source: {
@@ -40,7 +43,7 @@ describe('editable image annotation documents', () => {
     const reopened = parseEditableAnnotationDocument(content, ANNOTATION_DOCUMENT_LIMITS)
     expect(reopened).toEqual(before)
     expect(reopened).not.toBe(before); expect(reopened.shapes).not.toBe(before.shapes)
-    expect(reopened.shapes.map(shape => shape.kind)).toEqual(['pen', 'highlight', 'arrow', 'rect', 'ellipse', 'text', 'note', 'pixelate', 'cover'])
+    expect(reopened.shapes.map(shape => shape.kind)).toEqual(['pen', 'highlight', 'arrow', 'rect', 'ellipse', 'text', 'note', 'pixelate', 'cover', 'blur', 'spotlight', 'callout'])
     expect(reopened.shapes.find(shape => shape.id === 'note')).toMatchObject({ note: 'Editable hidden note 原文', template: 'request' })
     expect(Object.keys(JSON.parse(content))).toEqual(['schema', 'image', 'shapes', 'crop', 'source'])
     expect(Object.keys(reopened.source!)).toEqual(['url', 'title', 'viewport', 'viewportWarning'])
