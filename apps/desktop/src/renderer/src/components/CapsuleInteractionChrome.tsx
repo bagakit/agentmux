@@ -81,7 +81,7 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
       {questions === null && loading ? <p className="capsule-chrome__empty" role="status">Reading the original page requests…</p> : null}
       {questions?.map(question => <CapsuleQuestionReply key={question.interactionId} {...(browserId ? { browserId } : {})} visible={visible && open} interaction={question} onUpdated={updated} />)}
       {issue ? <p className="capsule-chrome__issue" role="status"><IssueIcon size={13} aria-hidden="true" /><span>{issue}</span>
-        <button type="button" className="small-button" disabled={loading} onClick={() => void refresh()}>Retry</button></p> : null}
+        <button type="button" className="small-button" disabled={loading} onClick={() => void refresh()}>Retry page details</button></p> : null}
       {!embedded ? <details className="capsule-chrome__source"><summary>Page identity and source</summary><code>{formatAmuxObjectLink({ kind: 'capsule', capsuleId })}</code>
         {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details> : null}
     </section>
