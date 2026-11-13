@@ -1,5 +1,13 @@
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 
+/** Author display resources belong to the original Core record, not this input-control projection. */
+function inputControlReceipt(receipt: AgentInputSubmissionReceipt): AgentInputSubmissionReceipt {
+  const record = receipt.admission, claim = record?.admission, intent = claim?.intent, message = intent?.message
+  if (!record || !claim || !intent || !message || !Object.hasOwn(message, 'authorProfile')) return receipt
+  const { authorProfile: _profile, ...content } = message
+  return { ...receipt, admission: { ...record, admission: { ...claim, intent: { ...intent, message: content } } } }
+}
+
 /** Frozen original claim identity; ACK progress and observation diagnostics are not identity. */
 function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admission']>): string | undefined {
   const claim = record.admission
@@ -39,6 +47,8 @@ const settled = (receipt: AgentInputSubmissionReceipt) =>
  * grants admission or creates a new input; Core's typed status is the source of truth. */
 export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefined,
   next: AgentInputSubmissionReceipt): AgentInputSubmissionReceipt {
+  prior = prior && inputControlReceipt(prior)
+  next = inputControlReceipt(next)
   if (!prior) return next
   const key = (value: AgentInputSubmissionReceipt['key']) => JSON.stringify([value.kind, value.agentSessionId,
     value.expectedRun.runId, value.kind === 'prompt' ? value.submissionId : value.messageId])

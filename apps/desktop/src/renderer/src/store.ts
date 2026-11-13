@@ -905,8 +905,8 @@ function projectInputReceipt(state: AppState, sessionId: string, receipt: AgentI
     const projected = retainInputReceipt(entry.inputReceipt, receipt)
     if (projected === entry.inputReceipt) return entry
     const { preparationWait: _wait, awaitingExplicitSend: _paused, error: _error, errorCode: _code, ...original } = entry
-    return { ...original, inputReceipt: receipt, status: 'deferred' as const,
-      ...((receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried') ? { archived: true as const } : {}) }
+    return { ...original, inputReceipt: projected, status: 'deferred' as const,
+      ...((projected.status === 'admitted' || projected.status === 'terminal-confirmed' || projected.status === 'launch-carried') ? { archived: true as const } : {}) }
   }) } }
 }
 
@@ -12995,6 +12995,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
+    if (state.agentSteerQueues) {
+      let changed = false
+      const queues = Object.entries(state.agentSteerQueues).map(([sessionId, entries]) => {
+        if (!Array.isArray(entries)) return [sessionId, entries] as const
+        const projected = entries.map(entry => {
+          if (!entry?.inputReceipt) return entry
+          const inputReceipt = retainInputReceipt(undefined, entry.inputReceipt)
+          return inputReceipt === entry.inputReceipt ? entry : { ...entry, inputReceipt }
+        })
+        if (projected.every((entry, index) => entry === entries[index])) return [sessionId, entries] as const
+        changed = true
+        return [sessionId, projected] as const
+      })
+      if (changed) state.agentSteerQueues = Object.fromEntries(queues)
+    }
     state.documents = Object.fromEntries(Object.entries(state.documents).map(([key, document]) => [key, document.noteEditing?.attempt?.phase === 'sending'
       ? { ...document, noteEditing: { ...document.noteEditing, attempt: { ...document.noteEditing.attempt, phase: 'unknown' as const } } } : document]))
     state.noticeReadReceipts = normalizeNotificationReadReceipts(state.noticeReadReceipts)
