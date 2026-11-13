@@ -20,6 +20,10 @@ export function browserTaskStepSummary(step: BrowserTaskStep): string {
   }
   const target = step.target?.name ?? 'Target needs location'
   if (step.kind === 'drag') return `Drag · ${target} → ${step.destination?.name ?? 'Drop target needs location'}`
+  if (step.kind === 'swipe') return `Swipe · ${target} → ${step.destination?.name ?? 'End target needs location'}`
+  if (step.kind === 'tap') return `Tap · ${target}`
+  if (step.kind === 'longPress') return `Long press · ${target} · ${step.durationMs ?? 600} ms`
+  if (step.kind === 'pinch') return `Pinch · ${target} · ${step.scale ?? 2}×`
   if (step.kind === 'press') return `Press ${step.key ?? 'key'} · ${target}`
   if (step.kind === 'hover') return `Hover · ${target}`
   if (step.kind === 'scroll') return `Scroll to · ${target}`

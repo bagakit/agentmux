@@ -48,9 +48,9 @@
 .browser-task-step-failure { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--sp-2); }
 .browser-task-step-failure .browser-task-asset__field { grid-template-columns: auto minmax(0, 1fr); padding-inline: 0; }
 
-/* A drag reviews two independent endpoints; keep its form readable in the details pane. */
-.browser-task-asset li[data-task-kind="drag"] { grid-template-columns: 20px minmax(0, 1fr); }
-.browser-task-asset li[data-task-kind="drag"] > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
-.browser-task-drag { min-width: 0; display: grid; gap: var(--sp-2); }
-.browser-task-drag > small { white-space: normal; overflow-wrap: anywhere; }
-.browser-task-asset li[data-task-kind="drag"] .browser-task-step-failure { grid-template-columns: minmax(0, 1fr); }
+/* Native gesture declarations keep readable target fields in the details pane. */
+.browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) { grid-template-columns: 20px minmax(0, 1fr); }
+.browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
+.browser-task-drag, .browser-task-gesture { min-width: 0; display: grid; gap: var(--sp-2); }
+.browser-task-drag > small, .browser-task-gesture > small { white-space: normal; overflow-wrap: anywhere; }
+.browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) .browser-task-step-failure { grid-template-columns: minmax(0, 1fr); }
