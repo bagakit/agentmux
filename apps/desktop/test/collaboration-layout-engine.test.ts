@@ -4,6 +4,8 @@ import { writeFileSync } from 'node:fs'
 import { arrangeCollaboration, reconcileCollaborationLayout, routeCollaborationLayout, handleCollaborationLayoutRequest, collaborationLayoutStructureKey, type CollaborationLayoutBox, type CollaborationLayoutInput, type CollaborationLayoutConnection, type CollaborationLayoutResponse } from '../src/renderer/src/lib/collaboration-layout-engine'
 
 const measurements = vi.hoisted(() => [] as { engine: string; nodes: string[]; edges: { source: string; target: string }[]; ms: number }[])
+/** When set, the router's output position of this obstacle is shifted by this many units. */
+const moveRouted = vi.hoisted(() => ({ id: '', by: 0 }))
 const captures = vi.hoisted(() => [] as unknown[])
 vi.mock('@viz-js/viz', async importOriginal => {
   const actual = await importOriginal<typeof import('@viz-js/viz')>()
@@ -14,6 +16,9 @@ vi.mock('@viz-js/viz', async importOriginal => {
       try {
         const result = render(input, options)
         if (process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE) captures.push({ input, options, result })
+        if (options?.engine === 'nop2' && moveRouted.id) for (const object of (result as { objects?: { name: string; pos?: string }[] }).objects ?? []) if (object.name === moveRouted.id && object.pos) {
+          const [x, y] = object.pos.split(',').map(Number); object.pos = `${x! + moveRouted.by},${y}`
+        }
         return result
       }
       finally {
@@ -26,7 +31,7 @@ vi.mock('@viz-js/viz', async importOriginal => {
     return viz
   } }
 })
-beforeEach(() => { measurements.length = 0; captures.length = 0 })
+beforeEach(() => { measurements.length = 0; captures.length = 0; moveRouted.id = ''; moveRouted.by = 0 })
 
 const box = (id: string, x: number, y: number, width = 250, height = 94, areaId = 'area'): Extract<CollaborationLayoutBox, { kind: 'agent' }> => ({ id, areaId, kind: 'agent', x, y, width, height, folded: false })
 async function successfulRoutes(boxes: readonly CollaborationLayoutBox[], connections: readonly CollaborationLayoutConnection[]) {
@@ -733,6 +738,29 @@ describe('finite collaboration Worker engine', () => {
     expect(responses[0]).toEqual(expect.objectContaining({ id: 'job', type: 'boxes' })); expect(responses.at(-1)).toEqual({ id: 'job', type: 'complete' })
     expect(responses.find(response => response.type === 'error')).toEqual(expect.objectContaining({ connectionId: 'bad' }))
     expect(responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths))).toEqual(['good'])
+  })
+
+  it('routes far from the origin despite printed position rounding, and still refuses a real move of a fixed box', async () => {
+    // A real dense world: its force layout reaches about 10000 units from the origin, where the
+    // router prints five significant digits and pinned boxes read back a fraction of a unit off.
+    const areas: CollaborationLayoutInput['areas'] = [], nodes: CollaborationLayoutInput['nodes'] = [], dense: CollaborationLayoutConnection[] = []
+    const sizes = [{ width: 250, height: 94 }, { width: 154, height: 38 }, { width: 24, height: 24 }]
+    let n = 0
+    for (let a = 0; a < 8; a++) {
+      const id = `area-${a}`; areas.push({ id, name: id, parentId: a > 4 ? 'area-0' : null, members: [], folded: false })
+      for (let m = 0; m < (a === 0 ? 30 : 6 + (a * 5) % 9); m++) { const node = `n-${n++}`; areas[a]!.members.push(node); nodes.push({ id: node, areaId: id, ...sizes[(m * 5 + a) % 3]! }) }
+    }
+    for (let c = 0; c < 70; c++) { const s = (c * 35) % n, t = (c * 13 + 26) % n; if (s !== t) dense.push({ id: `c-${c}`, source: `n-${s}`, target: `n-${t}`, kind: c % 5 ? 'communication' : 'creation', strength: 1 + c % 7 }) }
+    const world = await arrangeCollaboration({ areas, nodes, connections: dense }), routed = await successfulRoutes(world, dense)
+    expect(Math.max(...world.map(box => Math.abs(box.y)))).toBeGreaterThan(5000)
+    expect(routed).toHaveLength(dense.length)
+    const boxes = [box('a', 0, 0), box('c', 620, 0), box('between', 310, -3, 250, 100)], connections = [edge('far', 'a', 'c')]
+    expect(await successfulRoutes(boxes, connections)).toHaveLength(1)
+    // A genuine displacement of a fixed obstacle, larger than any print rounding, is still refused.
+    moveRouted.id = 'between'; moveRouted.by = 4
+    const errors: string[] = []
+    await routeCollaborationLayout(boxes, connections, { onError: (_id, error) => errors.push((error as Error).message) })
+    expect(errors).toEqual(['Connection routing moved an original fixed box. Existing connections are kept.'])
   })
 
   it('expands a detour to include previously omitted obstacles rather than trusting the first local route', async () => {
