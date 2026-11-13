@@ -20,9 +20,15 @@ Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE
   AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'),
   AGENTMUX_SPATIAL_STATE_STORE: join(state, 'spatial-state.json'), AGENTMUX_A2A_PROOF_DIRECTORY: controls,
   AGENTMUX_DESKTOP_USER_DATA: userData, CODEX_HOME: nativeHome })
-const core = await import(pathToFileURL(join(root, 'packages/core/dist/index.js')).href)
-const { connectAgentMuxRpc } = await import(pathToFileURL(join(root, 'packages/core/dist/public-rpc-client.js')).href)
-const cliPath = join(root, 'packages/core/bin/amux'), endpoint = join(runtime, 'control.sock.desktop')
+const initialStore = await stat(storePath).then(() => 'present', error => { if (error.code === 'ENOENT') return 'absent'; throw error })
+assert.equal(initialStore, 'absent', 'The private product must start with no original Session store')
+const execution = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_EXECUTION, 'utf8'))
+assert.ok(['source-build', 'prepared-artifact'].includes(execution.kind))
+const coreRoot = execution.coreRoot
+assert.ok(coreRoot.startsWith(root + '/'))
+const core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(coreRoot, 'dist/public-rpc-client.js')).href)
+const endpoint = join(runtime, 'control.sock.desktop')
 const executable = join(root, 'private-native-agent')
 await writeFile(executable, '#!' + process.execPath + '\nawait import(' + JSON.stringify(pathToFileURL(join(root, 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs')).href) + ');\n', { mode: 0o700 })
 const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private A2A proof' }],
@@ -33,7 +39,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
 const facts = { frames, chain: { cliCalls, readEffects: [] }, cleanup: { userRunTouched: false, processesReaped: false },
-  homeIsolation: { privateHome: process.env.HOME, launches: [] },
+  homeIsolation: { privateHome: process.env.HOME, initialSessionStore: initialStore, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 let client, daemon, rpc, failure
 assert.equal(process.platform, 'darwin', 'This private native actor proof qualifies the current macOS product')
@@ -65,13 +71,13 @@ async function cli(args, caller = null, expectSuccess = true) {
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   if (caller) { const identity = await credential(caller); env.AGENTMUX_AGENT_SESSION_ID = identity.agentSessionId; env.AGENTMUX_AGENT_CAPABILITY = identity.capability }
   else { delete env.AGENTMUX_AGENT_SESSION_ID; delete env.AGENTMUX_AGENT_CAPABILITY }
-  const child = spawn(process.execPath, [cliPath, '--endpoint', 'unix:' + endpoint, ...args], { cwd: workspace, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(execution.cli.executable, [...execution.cli.argv, '--endpoint', 'unix:' + endpoint, ...args], { cwd: workspace, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   children.add(child); let stdout = '', stderr = ''
   child.stdout.on('data', data => { stdout += data }); child.stderr.on('data', data => { stderr += data })
   await waitFor('actual public CLI exit', () => ended(child), 35_000); children.delete(child)
   const lines = (stdout + '\n' + stderr).split('\n').filter(line => line.startsWith('{'))
   assert.ok(lines.length, 'The public CLI returns a structured operation receipt')
-  const receipt = JSON.parse(lines.at(-1)); cliCalls.push({ args, code: child.exitCode, receipt, stderr })
+  const receipt = JSON.parse(lines.at(-1)); cliCalls.push({ invocation: execution.cli, args, code: child.exitCode, receipt, stderr })
   const diagnostic = JSON.stringify(receipt) + '\n' + stderr
   if (expectSuccess) { assert.equal(child.exitCode, 0, diagnostic); assert.equal(receipt.ok, true, diagnostic) }
   else if (expectSuccess === false) { assert.equal(child.exitCode, 1, diagnostic); assert.equal(receipt.ok, false, diagnostic) }
@@ -101,8 +107,8 @@ async function launch(label) {
   const ready = join(root, 'ready-' + label + '.json')
   const env = { ...process.env, AGENTMUX_DESKTOP_READY_FILE: ready }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(env[name], undefined)
-  const child = spawn(process.env.AGENTMUX_A2A_PROOF_ELECTRON, ['--inspect-brk=0', join(root, 'apps/desktop'), '--remote-debugging-port=0'], {
-    cwd: join(root, 'apps/desktop'), env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
+  const child = spawn(execution.executable, ['--inspect-brk=0', ...execution.argv, '--remote-debugging-port=0', '--user-data-dir=' + userData], {
+    cwd: execution.desktopRoot, env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
   children.add(child); let output = '', mainUrl, debuggerUrl
   child.stderr.on('data', bytes => { output = (output + bytes).slice(-16_384)
     mainUrl ??= /Debugger listening on (ws:\/\/\S+)/.exec(output)?.[1]
@@ -112,7 +118,7 @@ async function launch(label) {
   await main.call('Runtime.enable'); await main.call('Debugger.enable')
   // Electron resolves its home independently of ENV HOME. Use the existing
   // pre-constant inspector seam, after imports but before any home-backed workface.
-  const mainPath = join(root, 'apps/desktop/out/main/index.js'), lines = (await readFile(mainPath, 'utf8')).split('\n')
+  const mainPath = execution.mainEntry, lines = (await readFile(mainPath, 'utf8')).split('\n')
   const anchors = lines.flatMap((line, index) => line.includes('const SCRATCH_BACKING_PATH = ') && line.includes('app.getPath("home")') ? [index] : [])
   assert.equal(anchors.length, 1, 'Exactly one original compiled home boundary is required')
   const breakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
@@ -124,12 +130,45 @@ async function launch(label) {
     homePauses.push(paused)
   }
   assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId), 'Only the original pre-home boundary permits isolation')
+  const clipboardGuardPath = join(evidence, 'clipboard-guard-' + label + '.json')
+  const windowGuardPath = join(evidence, 'window-guard-' + label + '.json')
+  const homeExpression = `(()=>{
+    app.setActivationPolicy('prohibited');
+    const originalHome=app.getPath('home');
+    app.setPath('home',${JSON.stringify(process.env.HOME)});app.setPath('userData',${JSON.stringify(userData)});
+    const guard={reads:[],writes:[]};const save=()=>writeFileSync(${JSON.stringify(clipboardGuardPath)},JSON.stringify(guard));
+    clipboard.writeText=(text,...rest)=>{guard.writes.push({text,rest});save();writeFileSync(${JSON.stringify(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD)},JSON.stringify({text,port:'electron.clipboard.writeText'}))};
+    clipboard.readText=(...args)=>{guard.reads.push(args);save();throw new Error('Unexpected clipboard read in the private product proof')};save();
+    const geometry=windowConstructorGeometry;windowConstructorGeometry=(...args)=>({...geometry(...args),show:false,focusable:false});
+    return{originalHome,home:app.getPath('home'),userData:app.getPath('userData'),activationPolicy:'prohibited'}
+  })()`
   const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
-    expression: `(()=>{const originalHome=app.getPath('home');app.setPath('home',${JSON.stringify(process.env.HOME)});return{originalHome,home:app.getPath('home')}})()`, returnByValue: true })
+    expression: homeExpression, returnByValue: true })
   assert.equal(isolated.exceptionDetails, undefined)
   const { originalHome, home } = isolated.result.value
   assert.equal(home, process.env.HOME, 'Public Electron home must be private before the first home-dependent constant')
+  assert.equal(isolated.result.value.userData, userData)
+  const placements = lines.flatMap((line, index) => {
+    const match = /^\s*workbenchWindow = ([A-Za-z_$][\w$]*);?$/u.exec(line)
+    return match && lines.slice(Math.max(0, index - 20), index).some(line => line.includes('const ' + match[1] + ' = new BrowserWindow({'))
+      ? [{ line: index, binding: match[1] }] : []
+  })
+  assert.equal(placements.length, 1, 'One original workbench assignment determines the private presentation target')
+  const placement = placements[0]
+  const windowBreakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: placement.line })
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId }); await main.call('Debugger.resume')
+  const windowPause = await waitFor('original private workbench construction', () => main.pauses.shift())
+  assert.ok(windowPause.hitBreakpoints?.includes(windowBreakpoint.breakpointId))
+  const windowExpression = `(()=>{const target=${placement.binding};const guard={id:target.id,focusable:target.isFocusable(),visibleBefore:target.isVisible(),focusedBefore:target.isFocused(),primary:app.hasSingleInstanceLock(),calls:[]};
+    const save=()=>writeFileSync(${JSON.stringify(windowGuardPath)},JSON.stringify({...guard,visible:target.isVisible(),focused:target.isFocused()}));
+    if(guard.focusable||guard.focusedBefore||!guard.primary)throw new Error('Private workbench isolation was not established');
+    target.show=()=>{guard.calls.push('showInactive');target.showInactive();save()};target.focus=()=>{guard.calls.push('blocked-focus');save()};
+    target.showInactive();save();return guard})()`
+  const windowIsolation = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: windowPause.callFrames[0].callFrameId,
+    expression: windowExpression, returnByValue: true })
+  assert.equal(windowIsolation.exceptionDetails, undefined)
+  assert.equal(windowIsolation.result.value.focusable, false); assert.equal(windowIsolation.result.value.primary, true)
+  await main.call('Debugger.removeBreakpoint', { breakpointId: windowBreakpoint.breakpointId }); await main.call('Debugger.resume')
   await waitFor('ordinary private Desktop ready', async () => { if (ended(child)) throw new Error('Private Desktop exited: ' + output)
     try { return JSON.parse(await readFile(ready, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }, 40_000)
   const address = new URL(await waitFor('private Desktop debugger', () => debuggerUrl))
@@ -139,8 +178,13 @@ async function launch(label) {
   const nativeHome = await cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, process.env.HOME, 'The production snapshot must confirm the actual private Electron home')
   const catalog = (await cli(['space', 'ls'])).result.catalog
-  assert.ok(originalHome !== home && !JSON.stringify(catalog).includes(originalHome), 'The actual spatial catalog must not reference the original system home')
-  const isolation = { label, pid: child.pid, originalHome, home, nativeHome, catalog,
+  if (originalHome !== home) assert.ok(!JSON.stringify(catalog).includes(originalHome), 'The actual spatial catalog must not reference the original system home')
+  assert.ok((await stat(endpoint)).isSocket(), 'The actual public Desktop endpoint must exist in the private runtime')
+  const isolation = { label, pid: child.pid, originalHome, home, nativeHome, userData, catalog, endpoint,
+    presentationOverlay: { mainSHA256: sha(await readFile(mainPath)), homeExpressionSHA256: sha(homeExpression), windowExpressionSHA256: sha(windowExpression),
+      activationPolicy: isolated.result.value.activationPolicy, window: windowIsolation.result.value,
+      clipboardGuardPath, windowGuardPath, windowBreakpoint: { id: windowBreakpoint.breakpointId, lineNumber: placement.line },
+      windowPause: { hitBreakpoints: windowPause.hitBreakpoints, location: windowPause.callFrames[0].location } },
     breakpoint: { id: breakpoint.breakpointId, url: pathToFileURL(mainPath).href, lineNumber: anchors[0] },
     pauses: homePauses.map(event => ({ reason: event.reason, hitBreakpoints: event.hitBreakpoints,
       location: event.callFrames[0].location, url: event.callFrames[0].url })) }
@@ -174,7 +218,7 @@ async function inputEffects() {
     (await nativeRequests(session)).filter(row => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(row.method) || typeof row.manualInput === 'string') ])))
 }
 try {
-  daemon = spawn(join(root, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], {
+  daemon = spawn(join(coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], {
     detached: true, env: process.env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   children.add(daemon); let ready = ''; daemon.stdio[3].on('data', bytes => { ready += bytes }); daemon.stderr.resume()
   await waitFor('actual private ctxmux readiness', async () => ready.includes('\n') && (await stat(join(runtime, 'ctxmux.sock'))).isSocket())
@@ -189,7 +233,7 @@ try {
   const executor = await client.configureHostExecutor({ executorId: 'proof', config: originalConfig.executors.proof })
   assert.equal(executor.runtimeId, owner.runtimeId); assert.equal(executor.executor.executorId, 'proof')
   facts.semanticOwner.executor = executor
-  await scenario({ client, first, sessions, facts, executable, workspace, nativeHome, controls, cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects })
+  await scenario({ client, first, sessions, facts, coreRoot, executable, workspace, nativeHome, controls, cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects })
 } catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
 finally {
   if (client) {
@@ -198,6 +242,15 @@ finally {
   }
   try { await rpc?.dispose() } catch {}
   for (const child of [...children].reverse()) { try { await stop(child, 'SIGKILL') } catch (error) { facts.cleanup.processError ??= error.message } }
+  for (const launch of facts.homeIsolation.launches) {
+    try {
+      const clipboard = JSON.parse(await readFile(launch.presentationOverlay.clipboardGuardPath, 'utf8'))
+      assert.deepEqual(clipboard.reads, [], 'The private product never reads the user clipboard')
+      launch.presentationOverlay.clipboard = clipboard
+      launch.presentationOverlay.windowAfter = JSON.parse(await readFile(launch.presentationOverlay.windowGuardPath, 'utf8'))
+      assert.equal(launch.presentationOverlay.windowAfter.focused, false)
+    } catch (error) { failure ??= error; facts.error ??= { message: error.message, stack: error.stack } }
+  }
   facts.cleanup.processesReaped = !facts.cleanup.stopError && !facts.cleanup.processError && [...children].every(ended)
   if (!facts.cleanup.processesReaped) { failure ??= new Error('Private A2A product process cleanup was not confirmed'); facts.error ??= { message: failure.message } }
   await writeFile(join(evidence, 'facts.json'), JSON.stringify(facts, null, 2) + '\n')

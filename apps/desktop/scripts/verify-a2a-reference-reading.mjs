@@ -10,6 +10,7 @@ const config = 'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.ownin
 const sources = [
   'apps/desktop/scripts/verify-a2a-reference-reading.mjs', config, 'apps/desktop/scripts/fixtures/a2a-reference-reading/mutations.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', 'apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
+  'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs',
   'apps/desktop/scripts/probe-process.mjs',
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
@@ -77,7 +78,7 @@ function mergeSources(target, inputs) {
     target[path] = digest
   }
 }
-async function prepare() {
+async function prepare(preparation) {
   const directory = join(area, 'run-' + Date.now()); await mkdir(directory, { recursive: true })
   const receipt = { schema: 'agentmux.a2a-reference-reading.v1', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
   try {
@@ -97,7 +98,7 @@ async function prepare() {
     }
     receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], directory, 'types')
     assert.equal(receipt.types.exitCode, 0, 'Current Core and shared UI types: ' + receipt.types.log)
-    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory })
+    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation })
     const runs = [receipt.baseline, ...receipt.mutations.flatMap(item => [item.mutant, item.restored])]
     for (const path of [...runs.flatMap(run => [run.log, run.report, run.loaded]), receipt.types.log]) receipt.artifacts[path] = sha(await readFile(local(path)))
     for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Source stayed fixed: ' + path)
@@ -128,7 +129,21 @@ async function verify() {
   const product = JSON.parse(productBytes), result = await verifyA2aReferenceReadingProductProof(product, { root })
   console.log(JSON.stringify({ passed: true, tests: baseline.cases.length, mutants: receipt.mutations.length, ...result }))
 }
-const args = process.argv.slice(2); assert.ok(args.length === 0 || args.length === 1 && args[0] === '--prepare')
+const args = process.argv.slice(2)
+const preparedIndex = args.indexOf('--prepared-artifact')
+const input = preparedIndex < 0 ? undefined : args[preparedIndex + 1]
+if (preparedIndex >= 0) assert.ok(input && !input.startsWith('--'), '--prepared-artifact requires one input record')
+const preparation = input ? { kind: 'prepared-artifact', input: resolve(input) } : { kind: 'source-build' }
+const action = args.includes('--isolation-only') ? 'isolation' : args.includes('--prepare') ? 'prepare' : 'verify'
+const recognized = new Set(['--prepare', '--isolation-only', '--prepared-artifact'])
+for (const [index, value] of args.entries()) if (index !== preparedIndex + 1 || preparedIndex < 0) assert.ok(recognized.has(value), 'Unknown reference proof argument: ' + value)
+assert.ok(!args.includes('--prepare') || !args.includes('--isolation-only'), 'Choose one preparation stage')
+assert.ok(!input || action !== 'verify', 'Prepared input belongs to an explicit preparation stage')
 await mkdir(area, { recursive: true })
-if (args.length) await prepare()
-else await verify()
+if (action === 'isolation') {
+  assert.equal(preparation.kind, 'prepared-artifact', 'Isolation smoke consumes one explicitly prepared product')
+  const directory = join(area, 'isolation-' + (await import('node:crypto')).randomUUID()); await mkdir(directory)
+  const result = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation, isolationOnly: true })
+  console.log(JSON.stringify({ isolated: true, passed: false, ...result, next: 'Actual seven-scene execution and independent image review remain required.' }))
+} else if (action === 'prepare') await prepare(preparation)
+else { assert.equal(args.length, 0); await verify() }

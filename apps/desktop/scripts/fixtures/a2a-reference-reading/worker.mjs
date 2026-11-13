@@ -4,8 +4,9 @@ import { readFile } from 'node:fs/promises'
 import { runPrivateA2aProductScenario } from '../a2a-inbox-product/runtime.mjs'
 import { assertA2aReferenceUserReading } from '../../lib/a2a-inbox-product-proof.mjs'
 
-await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, executable, workspace, nativeHome, controls,
+await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, coreRoot, executable, workspace, nativeHome, controls,
   cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects }) => {
+  if (process.argv.includes('--isolation-only')) { facts.isolationOnly = true; return }
   facts.reading = { boundary: 'Actual public CLI → product Host/Core → qualified native and captured notice → Main/preload → production Conversation and Mailbox. Synthetic authenticated native actor, no model or vendor idle-race claim. Complete resource boundaries are separately exercised by the source-bound owning component tests; these App frames exercise original inline notice wire.' }
   for (const label of ['Author', 'Recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
@@ -41,7 +42,7 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, exec
   assert.equal(typeof wire, 'string'); assert.equal(typed.a2aNotificationId, key.submissionId); assert.equal(typed.systemContext, wire)
   assert.ok(Buffer.byteLength(wire) <= 64 * 1024, 'This product scene exercises bounded inline notice wire')
   for (const field of ['userContent', 'authorHuman', 'authorExternal', 'authorAgentSessionId']) assert.equal(typed[field], undefined)
-  const parse = (await import(new URL('../../../../../packages/core/dist/agent-message-render.js', import.meta.url))).parseAgentMuxMessagePrefix
+  const parse = (await import((await import('node:url')).pathToFileURL(coreRoot + '/dist/agent-message-render.js').href)).parseAgentMuxMessagePrefix
   const reading = parse(wire)
   assert.equal(reading?.kind, 'references'); assert.equal(reading.declaredAgentSessionId, null)
   assert.deepEqual(reading.references.map(item => [item.declaredAgentSessionId, item.declaredMessageId]), [[author.agentSessionId, messageId]])

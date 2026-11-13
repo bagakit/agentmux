@@ -48,7 +48,7 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'tsconfig.shared.json', 'patches',
   'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs', 'packages/core/bin', 'packages/core/native', 'packages/client-ui/scripts',
   ...assets, ...packages.flatMap(name => ['src', 'package.json', 'tsconfig.json', 'tsconfig.build.json'].map(path => 'packages/' + name + '/' + path))]
-const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/probe-process.mjs',
+const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs']
 const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
@@ -62,13 +62,16 @@ const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main
   'packages/client-ui/src/components/ConversationResourceText.tsx']
 
 /** One complete private product build for the current A2A reference-reading contract. */
-export async function runA2aReferenceReadingProductProof({ root, evidence }) {
+export async function runA2aReferenceReadingProductProof({ root, evidence, preparation, isolationOnly = false }) {
+  assert.ok(['source-build', 'prepared-artifact'].includes(preparation?.kind), 'Choose one explicit product preparation source')
+  if (preparation.kind === 'prepared-artifact') return await runPreparedReferenceProduct({ root, evidence, input: preparation.input, isolationOnly })
+  assert.equal(isolationOnly, false, 'Isolation-only consumes an explicitly prepared artifact')
   root = await realpath(root); evidence = resolve(evidence, 'reference-product'); await mkdir(evidence, { recursive: true })
   const sourceCommit = (await exec('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
   const changes = (await exec('git', ['diff', sourceCommit, '--name-only', '--', ...owns], { cwd: root })).stdout.trim()
   assert.equal(changes, '', 'Commit the integrated product candidate before its private proof; no product overlay is accepted')
   const privateRoot = await realpath(await mkdtemp(join(tmpdir(), 'amx-a2-')))
-  const product = { schema: 'agentmux.a2a-reference-product-proof.v1', prepared: false, passed: false, sourceRoot: root, sourceCommit,
+  const product = { schema: 'agentmux.a2a-reference-product-proof.v1', preparation: { kind: 'source-build' }, stage: 'reading', prepared: false, passed: false, sourceRoot: root, sourceCommit,
     privateRoot, receiptPath: join(evidence, 'receipt.json'), sources: {}, loaded: {}, compilerInputs: {}, compiled: {}, fixtures: {}, frames: [], cleanup: {},
     boundary: 'Actual complete Desktop/Main/preload/Renderer, public CLI, private ctxmux and authenticated synthetic native actor. Original Inbox body and typed independent reference notice. No live model, user Runtime, installed App, vendor idle-race or physical Mobile claim.' }
   const receiptPath = join(evidence, 'receipt.json')
@@ -176,11 +179,15 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     assert.ok(product.compiled['apps/desktop/resources/bin/agentmux-workspace-move'], 'Actual Desktop filesystem helper is included in the private build')
     for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Source stayed unchanged while building: ' + path)
     assert.equal((await exec('git', ['diff', sourceCommit, '--name-only', '--', ...assets], { cwd: root })).stdout.trim(), '', 'Immutable asset trees stayed committed during the build')
+    product.execution = { kind: 'source-build', desktopRoot: join(privateRoot, 'apps/desktop'), coreRoot: join(privateRoot, 'packages/core'),
+      mainEntry: join(privateRoot, 'apps/desktop/out/main/index.js'), executable: require('electron'), argv: [join(privateRoot, 'apps/desktop')],
+      cli: { executable: join(privateRoot, 'packages/core/bin/amux'), argv: [] } }
+    await writeFile(join(privateRoot, 'execution.json'), JSON.stringify(product.execution))
     const workerEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
     workerEnvironment.HOME = join(privateRoot, 'home'); await mkdir(workerEnvironment.HOME)
     workerEnvironment.AGENTMUX_A2A_PROOF_BUILD = privateRoot
+    workerEnvironment.AGENTMUX_A2A_PROOF_EXECUTION = join(privateRoot, 'execution.json')
     workerEnvironment.AGENTMUX_A2A_PROOF_CLIPBOARD = clipboardPath
-    workerEnvironment.AGENTMUX_A2A_PROOF_ELECTRON = require('electron')
     const lines = [], workerPath = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
     const outcome = await runProbeProcess(process.execPath, [workerPath, evidence], { cwd: privateRoot, temporaryRoot: privateRoot, env: workerEnvironment, timeoutMs: 360_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n'); assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
@@ -199,26 +206,89 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
   return { path: receiptPath, sha256: a2aProofSha(await readFile(receiptPath)), prepared: true, sourceCommit }
 }
 
+async function runPreparedReferenceProduct({ root, evidence, input, isolationOnly }) {
+  root = await realpath(root); evidence = resolve(evidence, isolationOnly ? 'reference-isolation' : 'reference-product')
+  await mkdir(evidence, { recursive: true })
+  const privateRoot = await realpath(await mkdtemp(join(tmpdir(), 'amx-a2-')))
+  const product = { schema: 'agentmux.a2a-reference-product-proof.v1', stage: isolationOnly ? 'isolation' : 'reading',
+    prepared: false, passed: false, sourceRoot: root, privateRoot, receiptPath: join(evidence, 'receipt.json'),
+    sources: {}, fixtures: {}, frames: [], cleanup: {},
+    boundary: 'Exact prepared application clone, original public Host/Core/CLI and private authenticated synthetic actor. No installed application, user Runtime, model adoption or installation-recovery claim.' }
+  let failure
+  try {
+    const { prepareA2aArtifact, verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
+    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...requiredLoaded, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts'] })
+    product.sourceCommit = product.preparation.identity.sourceCommit; product.sources = product.preparation.sourceSnapshot.files
+    product.execution = product.preparation.execution
+    for (const path of fixturePaths) {
+      const bytes = await readFile(join(root, path)); await mkdir(dirname(join(privateRoot, path)), { recursive: true })
+      await writeFile(join(privateRoot, path), bytes, { mode: 0o700 }); product.fixtures[path] = a2aProofSha(bytes)
+    }
+    await writeFile(join(privateRoot, 'package.json'), JSON.stringify({ type: 'module', private: true }))
+    await symlink(join(product.execution.desktopRoot, 'node_modules'), join(privateRoot, 'node_modules'))
+    await writeFile(join(privateRoot, 'execution.json'), JSON.stringify(product.execution))
+    const vendor = join(product.execution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch)
+    const manifestBytes = await readFile(join(vendor, 'manifest.json')), manifest = JSON.parse(manifestBytes)
+    const contract = JSON.parse(await readFile(join(product.execution.coreRoot, 'src/ctxmux-artifact-contract.json'), 'utf8'))
+    assert.equal(a2aProofSha(manifestBytes), contract.manifests[process.platform + '-' + process.arch])
+    assert.equal(a2aProofSha(await readFile(join(vendor, manifest.sdk.archive.path))), manifest.sdk.archive.sha256)
+    product.ctxmux = { manifest: a2aProofSha(manifestBytes), sdkArchive: manifest.sdk.archive.sha256, source: manifest.source }
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
+    Object.assign(env, { HOME: join(privateRoot, 'home'), AGENTMUX_A2A_PROOF_BUILD: privateRoot,
+      AGENTMUX_A2A_PROOF_EXECUTION: join(privateRoot, 'execution.json'), AGENTMUX_A2A_PROOF_CLIPBOARD: join(evidence, 'clipboard.json') })
+    await mkdir(env.HOME)
+    const lines = [], worker = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
+    const outcome = await runProbeProcess(process.execPath, [worker, evidence, ...(isolationOnly ? ['--isolation-only'] : [])],
+      { cwd: privateRoot, temporaryRoot: privateRoot, env, timeoutMs: isolationOnly ? 90_000 : 360_000, onLine: line => lines.push(line) })
+    await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n')
+    product.workerOutcome = outcome
+    Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
+    assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
+    await verifyA2aPreparedArtifact(product.preparation, { root })
+    product.prepared = true; product.reviewPath = join(evidence, 'review.json')
+  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack } }
+  finally {
+    try { await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
+    catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
+    product.cleanup.buildRetained = true; product.cleanup.privateRoot = privateRoot
+    await writeFile(product.receiptPath, JSON.stringify(product, null, 2) + '\n')
+  }
+  if (failure) throw Object.assign(failure, { productReceiptPath: product.receiptPath })
+  return { path: product.receiptPath, sha256: a2aProofSha(await readFile(product.receiptPath)), prepared: true, sourceCommit: product.sourceCommit, stage: product.stage }
+}
+
 /** Shared build identity and actual-image review; no scenario conclusion is inferred here. */
 async function verifyProductBuild(product, { root }) {
   assert.equal(product.schema, 'agentmux.a2a-reference-product-proof.v1'); assert.equal(product.prepared, true)
-  assert.ok(product.sourceCommit && Object.keys(product.sources).length > 100)
+  assert.equal(product.stage, 'reading', 'Isolation smoke does not sign the original seven scenes')
+  assert.ok(product.sourceCommit)
   assert.deepEqual(Object.keys(product.fixtures).sort(), [...fixturePaths].sort())
   for (const [path, digest] of Object.entries(product.fixtures)) {
     assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current proof source: ' + path)
     assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual private executable fixture: ' + path)
   }
-  for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current product source: ' + path)
-  for (const path of requiredLoaded) assert.equal(product.loaded[path], product.sources[path], 'Loaded original consumer: ' + path)
-  assert.equal((await exec('git', ['diff', product.sourceCommit, '--name-only', '--', ...product.assets.map(asset => asset.path)], { cwd: root })).stdout.trim(), '', 'Current immutable asset input trees')
-  for (const asset of product.assets) assert.equal((await exec('git', ['rev-parse', product.sourceCommit + ':' + asset.path], { cwd: root })).stdout.trim(), asset.tree)
-  assert.ok(Object.keys(product.compiled).length > 100)
-  for (const [path, digest] of Object.entries(product.compiled)) assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual retained compiled product: ' + path)
-  for (const path of requiredLoaded) assert.equal(product.compilerInputs[path], path === product.windowOverlay.owner ? product.windowOverlay.compilerInput : product.sources[path], 'Exact compiler input: ' + path)
-  for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
-  assert.equal(a2aProofSha(await readFile(join(product.privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
+  if (product.preparation.kind === 'prepared-artifact') {
+    const { verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
+    await verifyA2aPreparedArtifact(product.preparation, { root })
+    assert.equal(product.sourceCommit, product.preparation.identity.sourceCommit)
+    assert.deepEqual(product.execution, product.preparation.execution)
+    for (const path of requiredLoaded) assert.equal(product.sources[path], product.preparation.sourceSnapshot.files[path], 'Fixed product source: ' + path)
+  } else {
+    assert.equal(product.preparation.kind, 'source-build')
+    assert.ok(Object.keys(product.sources).length > 100)
+    for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current product source: ' + path)
+    for (const path of requiredLoaded) assert.equal(product.loaded[path], product.sources[path], 'Loaded original consumer: ' + path)
+    assert.equal((await exec('git', ['diff', product.sourceCommit, '--name-only', '--', ...product.assets.map(asset => asset.path)], { cwd: root })).stdout.trim(), '', 'Current immutable asset input trees')
+    for (const asset of product.assets) assert.equal((await exec('git', ['rev-parse', product.sourceCommit + ':' + asset.path], { cwd: root })).stdout.trim(), asset.tree)
+    assert.ok(Object.keys(product.compiled).length > 100)
+    for (const [path, digest] of Object.entries(product.compiled)) assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual retained compiled product: ' + path)
+    for (const path of requiredLoaded) assert.equal(product.compilerInputs[path], path === product.windowOverlay.owner ? product.windowOverlay.compilerInput : product.sources[path], 'Exact compiler input: ' + path)
+    for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
+  }
+  assert.equal(a2aProofSha(await readFile(join(product.execution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
   assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
   assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
+  assert.equal(product.homeIsolation.initialSessionStore, 'absent')
   assert.equal(product.semanticOwner.owner.availability, 'connected')
   assert.notEqual(product.semanticOwner.owner.processId, product.semanticOwner.workerPid)
   assert.equal(product.semanticOwner.executor.runtimeId, product.semanticOwner.owner.runtimeId)
@@ -226,8 +296,17 @@ async function verifyProductBuild(product, { root }) {
   assert.ok(product.homeIsolation.launches.length > 0)
   for (const launch of product.homeIsolation.launches) {
     assert.equal(launch.home, product.homeIsolation.privateHome); assert.equal(launch.nativeHome, launch.home)
-    assert.notEqual(launch.originalHome, launch.home); assert.ok(!JSON.stringify(launch.catalog).includes(launch.originalHome))
-    assert.ok(launch.pauses.at(-1).hitBreakpoints.includes(launch.breakpoint.id)); assert.equal(launch.breakpoint.url, pathToFileURL(join(product.privateRoot, 'apps/desktop/out/main/index.js')).href)
+    assert.equal(launch.userData, join(product.privateRoot, 'user-data'))
+    assert.equal(launch.endpoint, join(product.privateRoot, 'runtime/control.sock.desktop'))
+    if (launch.originalHome !== launch.home) assert.ok(!JSON.stringify(launch.catalog).includes(launch.originalHome))
+    const overlay = launch.presentationOverlay
+    assert.equal(overlay.activationPolicy, 'prohibited')
+    assert.equal(overlay.mainSHA256, a2aProofSha(await readFile(product.execution.mainEntry)))
+    for (const digest of [overlay.homeExpressionSHA256, overlay.windowExpressionSHA256]) assert.match(digest, /^[a-f0-9]{64}$/u)
+    assert.equal(overlay.window.focusable, false); assert.equal(overlay.window.focusedBefore, false); assert.equal(overlay.window.primary, true)
+    assert.equal(overlay.windowAfter.focused, false); assert.deepEqual(overlay.clipboard.reads, [])
+    assert.ok(overlay.windowPause.hitBreakpoints.includes(overlay.windowBreakpoint.id))
+    assert.ok(launch.pauses.at(-1).hitBreakpoints.includes(launch.breakpoint.id)); assert.equal(launch.breakpoint.url, pathToFileURL(product.execution.mainEntry).href)
     assert.ok(Number.isInteger(launch.pid) && launch.pid > 0)
   }
   assert.ok(product.frames.length >= 7)
@@ -266,7 +345,7 @@ export async function verifyA2aReferenceReadingProductProof(product, { root }) {
   assert.equal(content.systemContext, r.wire); assert.equal(content.a2aNotificationId, r.key.submissionId)
   assert.ok(Buffer.byteLength(r.wire) <= 64 * 1024)
   for (const field of ['userContent', 'authorHuman', 'authorExternal', 'authorAgentSessionId']) assert.equal(content[field], undefined)
-  const { parseAgentMuxMessagePrefix } = await import(pathToFileURL(join(product.privateRoot, 'packages/core/dist/agent-message-render.js')).href)
+  const { parseAgentMuxMessagePrefix } = await import(pathToFileURL(join(product.execution.coreRoot, 'dist/agent-message-render.js')).href)
   const parsed = parseAgentMuxMessagePrefix(r.wire)
   assert.equal(parsed?.kind, 'references'); assert.equal(parsed.declaredAgentSessionId, null)
   assert.deepEqual(parsed.references.map(item => [item.declaredAgentSessionId, item.declaredMessageId, item.readVia]),
