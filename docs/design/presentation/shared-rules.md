@@ -553,6 +553,7 @@ styles/
   automation.css  连续推进与自动化：概览、编辑、间隔与目标
   launcher.css  新 Agent 启动入口
   session-takeover.css  Session 接管层与恢复选择
+  agent-operation-feedback.css  Agent 卡片及 Region 的异步操作短状态、边沿轨迹与原操作详情
   session-learning.css  Session 学习：来源与状态
   resume.css  已有 Session 恢复入口
   launcher-resume-actions.css  启动器里恢复入口的动作与复制
