@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserTaskAssets, runBrowserTaskAsset, type BrowserTaskAssetHost, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
-import type { BrowserTaskAssetDocument, BrowserTaskStep } from '../src/shared/browser-task-assets'
+import type { BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskStep } from '../src/shared/browser-task-assets'
 import type { BrowserScriptRunReport } from '../src/shared/contracts'
 
 const url = 'https://generic.invalid/form', browserId = 'testing-browser'
@@ -178,5 +178,86 @@ describe('testing steps compile to existing Browser page calls', () => {
     if (failure) expect(fake.failures[0]).toContain(`Task step "Check result" ${failure.startsWith('could') ? 'assert ' : ''}${failure}`)
     else expect(fake.failures).toEqual([])
     expect(new Set(fake.calls.map(call => call.method))).toEqual(new Set(assert!.kind === 'url-is' ? ['pageInfo'] : ['pageInfo', 'snapshot']))
+  })
+})
+
+describe('per-step failure handling uses only known script failures', () => {
+  const failingAssert = (extra: Partial<BrowserTaskStep> = {}): BrowserTaskStep =>
+    ({ id: 'check', kind: 'assert', url, label: 'Check saved', reviewed: true, assert: { kind: 'text-present', text: 'Saved' }, ...extra })
+  const click = (id: string, name: string): BrowserTaskStep => ({ id, kind: 'click', url, reviewed: true, target: target(name) })
+
+  it('retries a failing assert twice with fresh calls, records every real operation, then stops as script-failed naming the step', async () => {
+    const fake = page([{ role: 'button', name: 'Next' }])
+    const run = await execute([failingAssert({ retry: 2 }), click('next', 'Next')], fake)
+    expect(fake.runScript).toHaveBeenCalledTimes(3)
+    expect(run).toMatchObject({ status: 'failed', nextStep: 0, operationIds: ['real-operation-1', 'real-operation-2', 'real-operation-3'],
+      stepExecutions: [1, 2, 3].map(n => ({ stepId: 'check', operationId: `real-operation-${n}` })) })
+    expect(run.warning).toBe('Task step "Check saved" failed (script-failed) after 3 attempts. Earlier steps remain; inspect operation real-operation-3 before another action.')
+    expect(run.failedSteps).toBeUndefined()
+    expect(actions(fake)).toEqual([])
+  })
+
+  it('moves on after a retry that holds, and the run completes', async () => {
+    const fake = page([{ role: 'button', name: 'Next' }])
+    fake.runScript.mockImplementationOnce(async (id, script) => { const report = await fake.runScript.getMockImplementation()!(id, script, {} as never); fake.state.nodes = [...fake.state.nodes, { role: 'status', name: 'Saved' }]; return report })
+    const run = await execute([failingAssert({ retry: 1 }), click('next', 'Next')], fake)
+    expect(run).toMatchObject({ status: 'completed', nextStep: 2, operationIds: ['real-operation-1', 'real-operation-2', 'real-operation-3'] })
+    expect(actions(fake)).toEqual([{ method: 'click', args: ['@e1'] }])
+  })
+
+  it('continues after a failed step but records it, warns, and never reports the run as completed', async () => {
+    const fake = page([{ role: 'button', name: 'Next' }])
+    const run = await execute([failingAssert({ onFail: 'continue' }), click('next', 'Next')], fake)
+    expect(actions(fake)).toEqual([{ method: 'click', args: ['@e1'] }])
+    expect(run).toMatchObject({ status: 'failed', nextStep: 2, failedSteps: [{ stepId: 'check', operationId: 'real-operation-1' }] })
+    expect(run.warning).toContain('failed steps: "Check saved" (operation real-operation-1)')
+    expect(run.warning).toContain('not a success')
+  })
+
+  it('jumps forward to the declared failure step and skips the steps between', async () => {
+    const fake = page([{ role: 'button', name: 'Skipped' }, { role: 'button', name: 'Report' }])
+    const run = await execute([failingAssert({ onFail: { goto: 'report' } }), click('skipped', 'Skipped'), click('report', 'Report')], fake)
+    expect(actions(fake)).toEqual([{ method: 'click', args: ['@e2'] }])
+    expect(run).toMatchObject({ status: 'failed', nextStep: 3, failedSteps: [{ stepId: 'check', operationId: 'real-operation-1' }] })
+  })
+
+  it('never retries an attempt whose operation already dispatched a page action', async () => {
+    const fake = page([{ role: 'button', name: 'Pay' }])
+    fake.runScript.mockImplementationOnce(async id => ({ result: undefined, logs: [], outcome: { kind: 'script-failed', message: 'thrown after the click' },
+      runOperation: { id: 'real-operation-pay', browserId: id, phase: 'failed', operator: { id: 'person', name: 'Person' }, startedAt: 1, summary: 'Generated step', url,
+        steps: [{ sequence: 1, method: 'snapshot', status: 'completed' }, { sequence: 2, method: 'click', status: 'completed' }] } }))
+    const run = await execute([{ ...click('pay', 'Pay'), retry: 3, onFail: 'continue' }], fake)
+    expect(fake.runScript).toHaveBeenCalledTimes(1)
+    expect(run).toMatchObject({ status: 'failed', operationIds: ['real-operation-pay'], failedSteps: [{ stepId: 'pay', operationId: 'real-operation-pay' }] })
+  })
+
+  it.each<['stopped' | 'indeterminate', BrowserTaskAssetRun['status']]>([['stopped', 'stopped'], ['indeterminate', 'interrupted']])(
+    'neither retries nor continues a %s result', async (kind, status) => {
+      const fake = page([{ role: 'button', name: 'Next' }])
+      fake.runScript.mockImplementationOnce(async id => ({ result: undefined, logs: [], outcome: { kind, message: 'not a known script failure' },
+        runOperation: { id: 'real-operation-unknown', browserId: id, phase: kind, operator: { id: 'person', name: 'Person' }, startedAt: 1, summary: 'Generated step', url, steps: [] } }))
+      const run = await execute([failingAssert({ retry: 3, onFail: 'continue' }), click('next', 'Next')], fake)
+      expect(fake.runScript).toHaveBeenCalledTimes(1)
+      expect(run).toMatchObject({ status, nextStep: 0, operationIds: ['real-operation-unknown'] })
+      expect(run.failedSteps).toBeUndefined()
+      expect(actions(fake)).toEqual([])
+    })
+
+  it('treats a Browser call without a known result as interrupted and never retries it', async () => {
+    const fake = page([{ role: 'button', name: 'Next' }])
+    fake.runScript.mockRejectedValueOnce(new Error('connection lost'))
+    const run = await execute([failingAssert({ retry: 3, onFail: 'continue' }), click('next', 'Next')], fake)
+    expect(fake.runScript).toHaveBeenCalledTimes(1)
+    expect(run).toMatchObject({ status: 'interrupted', nextStep: 0, operationIds: [] })
+  })
+
+  it('keeps recorded failed steps through a restart and rejects ones not bound to a real execution', async () => {
+    const store = new MemoryStore(), owner = new BrowserTaskAssets(store, { id: (() => { let n = 0; return () => `restart-${++n}` })(), now: (() => { let n = 10; return () => n++ })() })
+    const saved = await version([failingAssert({ onFail: 'continue' }), click('next', 'Next')], owner)
+    const run = await runBrowserTaskAsset(owner, { assetId: saved.id, version: 1, browserId, parameters: {} }, page([{ role: 'button', name: 'Next' }]).host)
+    const restarted = await new BrowserTaskAssets(store).state(browserId)
+    expect(restarted.runs.find(item => item.id === run.id)?.failedSteps).toEqual([{ stepId: 'check', operationId: 'real-operation-1' }])
+    store.document!.runs[0]!.failedSteps = [{ stepId: 'check', operationId: 'real-operation-2' }]
+    expect((await new BrowserTaskAssets(store).state(browserId)).warning).toContain('could not be restored')
   })
 })
