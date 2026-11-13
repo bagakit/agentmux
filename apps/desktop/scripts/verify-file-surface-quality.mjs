@@ -6,8 +6,10 @@ import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const sources = ['packages/editor-extensions/src/catalog.ts', 'apps/desktop/src/shared/note-format.ts', 'apps/desktop/src/shared/note-document.ts',
-  ...['components/FileSurfaceView.tsx', 'components/FilePreviewPane.tsx', 'components/FileDataPreview.tsx', 'components/WorkspaceImage.tsx', 'lib/file-json-preview.ts',
-    'lib/file-delimited-preview.ts', 'lib/use-workspace-file-preview.ts'].map(path => 'apps/desktop/src/renderer/src/' + path)]
+  'packages/editor-extensions/src/ui/FileDataPreview.tsx', 'packages/editor-extensions/src/engines/file-json-preview.ts',
+  'packages/editor-extensions/src/engines/file-delimited-preview.ts',
+  ...['components/FileSurfaceView.tsx', 'components/FilePreviewPane.tsx', 'components/WorkspaceImage.tsx',
+    'lib/use-workspace-file-preview.ts'].map(path => 'apps/desktop/src/renderer/src/' + path)]
 const fixture = 'apps/desktop/scripts/fixtures/file-surface-quality/vitest.owning.config.mts'
 const sourceHashes = async () => Object.fromEntries(await Promise.all(sources.map(async path => [path,
   createHash('sha256').update(await readFile(join(root, path))).digest('hex')])) )
@@ -17,14 +19,14 @@ async function sourceFiles(directory) {
     ? sourceFiles(join(directory, entry.name)) : /\.tsx?$/.test(entry.name) ? [join(directory, entry.name)] : []))
   return lists.flat()
 }
-const files = await sourceFiles('apps/desktop/src/renderer/src')
+const files = [...await sourceFiles('apps/desktop/src/renderer/src'), ...await sourceFiles('packages/editor-extensions/src')]
 assert.ok(files.length > 0, 'Production caller scan must have real files')
 const consumers = await Promise.all(files.map(async path => ({ path, source: await readFile(join(root, path), 'utf8') })))
-const definitions = { FileDataPreview: 'components/FileDataPreview.tsx', readJsonPreview: 'lib/file-json-preview.ts',
-  readDelimitedPreview: 'lib/file-delimited-preview.ts', useWorkspaceFilePreview: 'lib/use-workspace-file-preview.ts',
-  workspaceFileFormat: '../../shared/workspace-file-format.ts' }
+const definitions = { FileDataPreview: 'packages/editor-extensions/src/ui/FileDataPreview.tsx', readJsonPreview: 'packages/editor-extensions/src/engines/file-json-preview.ts',
+  readDelimitedPreview: 'packages/editor-extensions/src/engines/file-delimited-preview.ts', useWorkspaceFilePreview: 'apps/desktop/src/renderer/src/lib/use-workspace-file-preview.ts',
+  workspaceFileFormat: 'packages/editor-extensions/src/catalog.ts' }
 const outsideCallers = Object.fromEntries(Object.entries(definitions).map(([symbol, definition]) => [symbol,
-  consumers.filter(({ path, source }) => path !== 'apps/desktop/src/renderer/src/' + definition &&
+  consumers.filter(({ path, source }) => path !== definition &&
     new RegExp(symbol === 'FileDataPreview' ? '<' + symbol + '[\\s/>]' : symbol + '\\(').test(source)).map(({ path }) => path)]))
 for (const [symbol, callers] of Object.entries(outsideCallers)) assert.ok(callers.length > 0, 'Outside production caller: ' + symbol)
 const hashes = await sourceHashes()

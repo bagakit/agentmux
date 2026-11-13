@@ -16,7 +16,7 @@ assert.ok(output, 'An explicit local evidence --output=FILE is required.')
 const evidence = resolve(output), directory = await mkdtemp(join(tmpdir(), 'amx-editor-bundle-'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, targets = {}
-const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)viz|@plantuml(?:\/|\+)core|@excalidraw(?:\/|\+)excalidraw|vega(?:-lite|-interpreter)?|katex|highlight\.js|prettier|smol-toml|yaml|pdfjs-dist|djvu-rs|fflate|@zip\.js(?:/|\+)zip\.js)(?:@|\/)/
+const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)viz|@plantuml(?:\/|\+)core|@excalidraw(?:\/|\+)excalidraw|vega(?:-lite|-interpreter)?|katex|highlight\.js|prettier|smol-toml|yaml|pdfjs-dist|djvu-rs|fflate|@zip\.js(?:\/|\+)zip\.js)(?:@|\/)/
 const report = { passed: false, sources, targets }
 try {
   for (const file of ['apps/desktop/scripts/verify-editor-format-bundle.mjs', 'apps/desktop/electron.vite.config.ts',
