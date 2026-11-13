@@ -44,6 +44,7 @@ vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: 
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { registerIpc } from '../src/main/ipc'
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 
 const dom = composerDOM()
 const remote = { id: 'ssh-draft', kind: 'ssh' as const, label: 'Saved remote', hostname: 'private.invalid' }
@@ -53,7 +54,8 @@ let publications: AppConfig[], sender: EventEmitter & { id: number; isDestroyed:
 async function invoke<T>(channel: string, ...values: unknown[]): Promise<T> {
   const handler = ipc.handlers.get(channel)
   expect(handler).toBeTypeOf('function')
-  return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values) as T
+  const result = await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values)
+  return (channel === 'config:save' ? unwrapSessionInputOperationResult(result as never) : result) as T
 }
 beforeEach(async () => {
   ipc.directory = await mkdtemp(join(tmpdir(), 'amux-host-draft-owner-'))

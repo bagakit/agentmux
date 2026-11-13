@@ -44,6 +44,7 @@ vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: 
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { registerIpc } from '../src/main/ipc'
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 
 const mode = process.env.AGENTMUX_HOST_LIVENESS_MUTANT ?? 'baseline'
 const target = resolve(process.env.AGENTMUX_HOST_LIVENESS_EVIDENCE ?? resolve(process.cwd(), ".bagakit/design/settings-followups-fixture/host-liveness-evidence/direct"))
@@ -284,7 +285,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
     const next = { ...config, hosts: operation === 'delete' ? [config.hosts[0]!] : config.hosts.map(host =>
       host.id === protectedHost.id ? { ...host, label: 'Changed while referenced' } : host) }
     expect(facts).toHaveLength(1)
-    await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, next, expected)).rejects.toThrow('Stop sessions on ssh-protected')
+    await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, next, expected).then(result => unwrapSessionInputOperationResult(result as never))).rejects.toThrow('Stop sessions on ssh-protected')
     expect(prepare).toHaveBeenCalledTimes(1); expect(guard).toHaveBeenCalledTimes(1)
     expect(client.connect).toHaveBeenCalledTimes(1); expect(client.listRuns).toHaveBeenCalledTimes(1)
     expect(await readFile(disk.filePath, 'utf8')).toBe(before); expect(expected).toEqual(config)

@@ -46,6 +46,7 @@ import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 import { runOwnerDisposals } from '../src/main/owner-disposal.js'
 import * as assets from '../src/main/toolkit-asset.js'
 import { PROTOCOL_VERSION } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 
 export const children: ChildProcess[] = [], cleanups: (() => Promise<void>)[] = []
 let runnerDigest: Promise<string> | undefined
@@ -151,7 +152,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
     runner:{path:process.execPath,sha256:await (runnerDigest??=readFile(process.execPath).then(bytes=>createHash('sha256').update(bytes).digest('hex')))}})
   const core=()=>(runtime as any).hosts.get('local').client as AgentMuxClient
   rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
-  const invoke=(channel:string,...args:any[])=>fixture.handlers.get(channel)!({sender,senderFrame:sender.mainFrame},...args)
+  const invoke=async(channel:string,...args:any[])=>{const result=await fixture.handlers.get(channel)!({sender,senderFrame:sender.mainFrame},...args);return channel==='config:save'?unwrapSessionInputOperationResult(result as never):result}
   const restart=async()=>{
     await rpc!.dispose();await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
     fixture.handlers.clear();fixture.ipc.listeners.clear()
