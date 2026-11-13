@@ -20,7 +20,7 @@ async function saveBrowser(value: BrowserPreferences, expected: BrowserPreferenc
 }
 
 export const browserSettingsModule = {
-  id: 'browser',
+  id: 'browser', archetype: 'preference',
   group: 'browser-use',
   title: 'Browser',
   description: 'Manage browser resources and agent access.',

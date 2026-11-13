@@ -15,7 +15,7 @@ async function saveDerivedActions(next: AgentDerivedActionsConfig, expected: Age
 }
 
 export const derivedActionsSettingsModule = {
-  id: 'derived-actions',
+  id: 'derived-actions', archetype: 'library',
   group: 'agents',
   title: 'Derived actions',
   description: 'Start new work from an Agent: official Take over, Fork and Pass on experience, plus your own.',

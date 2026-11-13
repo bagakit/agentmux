@@ -7,7 +7,7 @@ const TopicIcon = semanticIconComponent('object.topic')
 const PromotionIcon = semanticIconComponent('object.promotion')
 
 export const topicSettingsModule = {
-  id: 'topic', group: 'know', title: 'Topic', icon: TopicIcon,
+  id: 'topic', archetype: 'preference', group: 'know', title: 'Topic', icon: TopicIcon,
   description: 'Choose the initial directory view and manage Topics in their original workface.',
   keywords: 'topic topics category categories knowledge directory discussion 主题 分类 知识',
   searchTargets: [
@@ -19,7 +19,7 @@ export const topicSettingsModule = {
 } as const satisfies SettingsModule
 
 export const motePromotionSettingsModule = {
-  id: 'mote-promotion', group: 'mote', title: 'Promotion', icon: PromotionIcon,
+  id: 'mote-promotion', archetype: 'reference', group: 'mote', title: 'Promotion', icon: PromotionIcon,
   description: 'Grow an existing Topic into a Mote.',
   keywords: 'mote promotion promote topic growth 晋升 伙伴 成长',
   searchTargets: [{ id: 'mote-configuration', title: 'Mote Profile and Quick mode', keywords: 'club personality appearance main agent executor recovery connection 配置 人格 外观 连接', kind: 'action' }],

@@ -14,7 +14,7 @@ async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[], expe
 }
 
 export const promptsSettingsModule = {
-  id: 'prompts',
+  id: 'prompts', archetype: 'library',
   group: 'message-tool',
   title: 'Prompts',
   overviewShortcut: 3,

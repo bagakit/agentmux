@@ -16,7 +16,7 @@ async function saveExecutors(executors: Record<string, AgentExecutorConfig>, exp
 }
 
 export const agentsSettingsModule = {
-  id: 'agents',
+  id: 'agents', archetype: 'library',
   group: 'agents',
   title: 'Agent CLIs',
   overviewShortcut: 2,

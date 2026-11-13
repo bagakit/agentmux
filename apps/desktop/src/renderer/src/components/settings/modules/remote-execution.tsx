@@ -3,7 +3,7 @@ import { RemoteExecutionSettingsPane } from '../RemoteExecutionSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
 export const remoteExecutionSettingsModule = {
-  id: 'remote-execution',
+  id: 'remote-execution', archetype: 'console',
   group: 'remote',
   title: 'Remote Agents',
   description: 'Keep your local project. Choose where the Agent runs.',

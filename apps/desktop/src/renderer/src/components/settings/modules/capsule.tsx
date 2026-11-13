@@ -5,7 +5,7 @@ import type { SettingsModule } from '../settings-catalog'
 const CapsuleIcon = semanticIconComponent('object.capsule')
 
 export const capsuleSettingsModule = {
-  id: 'capsule', group: 'browser-use', title: 'Capsule', icon: CapsuleIcon,
+  id: 'capsule', archetype: 'console', group: 'browser-use', title: 'Capsule', icon: CapsuleIcon,
   description: 'Keep generated pages available, isolated or connected to your App.',
   keywords: 'capsule persistent pages html static spa managed storage root isolated injected theme hitl 页面 托管 隔离 注入',
   searchTargets: [

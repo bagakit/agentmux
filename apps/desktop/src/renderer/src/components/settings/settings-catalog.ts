@@ -42,6 +42,8 @@ export type SettingsSearchTarget = {
 
 export type SettingsModule = {
   id: string
+  /** The page's editing model; presentation analysis never changes its save owner. */
+  archetype: 'preference' | 'library' | 'console' | 'reference'
   group: typeof SETTINGS_GROUPS[number]['id']
   title: string
   description: string

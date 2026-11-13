@@ -13,7 +13,7 @@ async function saveNotifications(notifications: NonNullable<AppConfig['notificat
 }
 
 export const notificationsSettingsModule = {
-  id: 'notifications',
+  id: 'notifications', archetype: 'preference',
   group: 'preferences',
   title: 'Notifications',
   description: 'Desktop banner duration and sound. In-app issues and Focus requests stay available.',

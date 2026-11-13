@@ -14,7 +14,7 @@ async function saveAppearance(appearance: AppearanceConfig, expected: Appearance
 }
 
 export const appearanceSettingsModule = {
-  id: 'appearance',
+  id: 'appearance', archetype: 'preference',
   group: 'preferences',
   title: 'Appearance',
   overviewShortcut: 1,

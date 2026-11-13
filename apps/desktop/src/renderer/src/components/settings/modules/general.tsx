@@ -13,7 +13,7 @@ async function saveGeneralSettings(value: GeneralSettingsValues, expected: Gener
 }
 
 export const generalSettingsModule = {
-  id: 'general',
+  id: 'general', archetype: 'preference',
   group: 'preferences',
   title: 'General',
   description: 'Project paths, local data, and diagnostics.',

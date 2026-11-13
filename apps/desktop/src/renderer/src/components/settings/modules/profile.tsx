@@ -12,7 +12,7 @@ async function saveProfile(profile: UserProfile, expected: UserProfile): Promise
 }
 
 export const profileSettingsModule = {
-  id: 'profile', group: 'preferences', title: 'My Profile',
+  id: 'profile', archetype: 'preference', group: 'preferences', title: 'My Profile',
   description: 'Your photo, background, and how you work with agents.', icon: ThemeObjectUserIcon,
   keywords: 'user human person avatar photo name about background collaboration identity profile context mote soul',
   searchTargets: [

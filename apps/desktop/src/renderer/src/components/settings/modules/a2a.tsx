@@ -9,7 +9,7 @@ async function saveNotifications(notifications: A2ANotificationPreference, expec
 }
 
 export const a2aSettingsModule = {
-  id: 'a2a', group: 'message-tool', title: 'A2A',
+  id: 'a2a', archetype: 'preference', group: 'message-tool', title: 'A2A',
   description: 'Incoming Agent messages and system notification preferences.',
   icon: semanticIconComponent('object.agent-messaging'),
   keywords: 'a2a agent message inbox arrival notification silent notify global 来信 提醒 静默',

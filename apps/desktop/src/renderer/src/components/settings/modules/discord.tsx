@@ -7,7 +7,7 @@ function ChannelIcon({ size = 14 }: { size?: number | undefined }) { return <img
 
 const platform = { adapterId: 'discord', title: 'Discord' } as const
 export const discordSettingsModule = {
-  id: 'discord', group: 'conversation-channels', title: 'Discord',
+  id: 'discord', archetype: 'console', group: 'conversation-channels', title: 'Discord',
   description: 'Chat with your Agents in Discord channels.',
   channel: { adapterId: platform.adapterId, domains: [{ domain: 'discord.com', title: 'Discord' }], icon: ChannelIcon },
   icon: ChannelIcon, keywords: 'channel agent conversation discord chat connector application bot token gateway intents 对话 频道 机器人',

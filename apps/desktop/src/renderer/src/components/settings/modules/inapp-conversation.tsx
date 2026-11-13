@@ -10,7 +10,7 @@ import { DocumentationNavigation } from '../../documentation/DocumentationNaviga
 import '../inapp-conversation-settings.css'
 
 export const inappConversationSettingsModule = {
-  id: 'inapp-conversation',
+  id: 'inapp-conversation', archetype: 'reference',
   group: 'conversation-channels',
   title: 'InApp',
   description: 'The app conversation view, shared input preferences and reading references.',

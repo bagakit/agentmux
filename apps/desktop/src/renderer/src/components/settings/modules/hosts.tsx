@@ -12,7 +12,7 @@ async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], exp
 }
 
 export const hostsSettingsModule = {
-  id: 'hosts',
+  id: 'hosts', archetype: 'console',
   group: 'remote',
   title: 'Hosts',
   description: 'Local and remote hosts, projects, and connections.',

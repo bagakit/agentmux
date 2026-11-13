@@ -15,7 +15,7 @@ async function saveCompletion(messageToolCompletion: ComposerInputConfig, expect
 }
 
 export const messageToolSettingsModule = {
-  id: 'message-tool',
+  id: 'message-tool', archetype: 'preference',
   group: 'message-tool',
   title: 'User Input',
   description: 'Input layout, shortcut prefixes, prompt suggestions and sending shortcuts.',

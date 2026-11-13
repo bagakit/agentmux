@@ -5,7 +5,7 @@ import type { SettingsModule } from '../settings-catalog'
 const ThemeObjectProfilesIcon = semanticIconComponent('object.contact')
 
 export const browserProfilesSettingsModule = {
-  id: 'browser-profiles',
+  id: 'browser-profiles', archetype: 'library',
   group: 'browser-use',
   title: 'Browser Profiles',
   description: 'Each Profile keeps its own sign-ins and site data. Device, fonts and user agent are the same in every Profile.',

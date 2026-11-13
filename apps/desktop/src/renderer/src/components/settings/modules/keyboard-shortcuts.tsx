@@ -7,7 +7,7 @@ const ThemeObjectKeyboardIcon = semanticIconComponent('object.keyboard')
 
 
 export const keyboardShortcutsSettingsModule = {
-  id: 'keyboard-shortcuts',
+  id: 'keyboard-shortcuts', archetype: 'reference',
   group: 'preferences',
   title: 'Keyboard shortcuts',
   description: 'Commands, platform keys, and where they work.',
