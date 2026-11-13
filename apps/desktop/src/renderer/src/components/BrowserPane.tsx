@@ -799,8 +799,9 @@ function BrowserPaneContent({
     setScreenshotCopied(null)
   }
 
-  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' | 'save-png' | 'pin' = 'png'): Promise<void> {
-    if (!screenshot || screenshotBusy) return
+  // Resolves true only when the clipboard, file or pin owner confirms this exact output.
+  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' | 'save-png' | 'pin' = 'png'): Promise<boolean> {
+    if (!screenshot || screenshotBusy) return false
     const token = screenshotToken.current
     setScreenshotBusy(true)
     setScreenshotCopied(null)
@@ -813,11 +814,11 @@ function BrowserPaneContent({
         shapes: input.shapes,
         crop: input.crop
       })
-      if (screenshotToken.current !== token) return
+      if (screenshotToken.current !== token) return false
       let feedback = kind === 'png' ? 'PNG copied' : 'Context copied'
       if (kind === 'save-png') {
         const result = await api.ui.exportScreenshot({ operationId: mintObjectId(), image })
-        if (result.status === 'cancelled') return
+        if (result.status === 'cancelled') return false
         if (result.status !== 'saved') throw new Error(result.message)
         feedback = 'PNG saved · ' + result.path
       } else if (kind === 'pin') {
@@ -825,11 +826,13 @@ function BrowserPaneContent({
         if (result.recordedOperation?.state !== 'completed') throw new Error(result.recordedOperation?.message ?? 'The original pin is unconfirmed. Inspect that operation before another pin.')
         feedback = result.state === 'open' ? 'Reference pinned' : 'Pinned reference closed'
       } else if (kind === 'png') await api.ui.writeClipboardImage(image)
-      else if (!await copyTextToClipboard(formatScreenshotContext(input.capture, input, image, input.source), error => { if (screenshotToken.current === token) reportError(error) })) return
-      if (screenshotToken.current !== token) return
+      else if (!await copyTextToClipboard(formatScreenshotContext(input.capture, input, image, input.source), error => { if (screenshotToken.current === token) reportError(error) })) return false
+      if (screenshotToken.current !== token) return false
       setScreenshotCopied(feedback)
+      return true
     } catch (error) {
       if (screenshotToken.current === token) reportError(error)
+      return false
     } finally {
       if (screenshotToken.current === token) setScreenshotBusy(false)
     }
@@ -1117,10 +1120,10 @@ function BrowserPaneContent({
             busy={screenshotBusy}
             copied={screenshotCopied}
             onCancel={cancelScreenshot}
-            onComplete={(input) => void copyScreenshot(input)}
-            onCopyContext={(input) => void copyScreenshot(input, 'context')}
-            onSavePng={(input) => void copyScreenshot(input, 'save-png')}
-            onPin={(input) => void copyScreenshot(input, 'pin')}
+            onComplete={(input) => copyScreenshot(input)}
+            onCopyContext={(input) => copyScreenshot(input, 'context')}
+            onSavePng={(input) => copyScreenshot(input, 'save-png')}
+            onPin={(input) => copyScreenshot(input, 'pin')}
             {...(screenshotPin.uncertain ? { onCheckPin: () => void checkScreenshotPin() } : {})}
             onEdited={screenshotEdited}
             onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}

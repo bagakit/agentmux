@@ -47,23 +47,25 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
     } catch (error) { if (token === ticket.current && same(original)) setFailure(presentError(error)) }
     finally { if (token === ticket.current) setBusy(false) }
   }
-  function attach(original: BrowserOpinionSource, receipt: BrowserInputSelectionReceipt, token: number) {
-    if (token !== ticket.current || !same(original) || current.current?.selectionPreparation?.operationId !== receipt.operationId) return
+  function attach(original: BrowserOpinionSource, receipt: BrowserInputSelectionReceipt, token: number): boolean {
+    if (token !== ticket.current || !same(original) || current.current?.selectionPreparation?.operationId !== receipt.operationId) return false
     browserOpinionSelection({ ...current.current, selection: receipt })
     const { selectionPreparation: _preparing, ...retained } = current.current
     change({ ...retained, selection: receipt })
     setFrame(null); prepared.current = null; setFailure(null)
+    return true
   }
-  async function save(input?: ImageAnnotationInput) {
-    if (!source?.scene || !frame || busy || locked) return
+  // Resolves true only when the attached receipt for this exact image was accepted.
+  async function save(input?: ImageAnnotationInput): Promise<boolean> {
+    if (!source?.scene || !frame || busy || locked) return false
     const original = source, token = ticket.current
     setBusy(true); setFailure(null)
     try {
       let intent = prepared.current
       if (!intent) {
-        if (!input) return
+        if (!input) return false
         const png = await composeScreenshot({ ...input, outputScale: 1, document: input.image.ownerDocument })
-        if (token !== ticket.current || !same(original)) return
+        if (token !== ticket.current || !same(original)) return false
         // Record the actual rounded source area used by the shared compositor.
         const geometry = screenshotCropGeometry(input.displayWidth, input.displayHeight, 1, input.crop)
         const region = { x: geometry.left / geometry.scale, y: geometry.top / geometry.scale,
@@ -74,8 +76,8 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
         change({ ...current.current!, selectionPreparation: { operationId: intent.operationId, frame: intent.frame } })
       }
       const receipt = await api.browser.prepareInputSelection(intent)
-      attach(original, receipt, token)
-    } catch (error) { if (token === ticket.current && same(original)) setFailure(presentError(error)) }
+      return attach(original, receipt, token)
+    } catch (error) { if (token === ticket.current && same(original)) setFailure(presentError(error)); return false }
     finally { if (token === ticket.current) setBusy(false) }
   }
   async function inspect() {
@@ -126,7 +128,7 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
         <ImageAnnotationEditor image={frame.capture.image} active={visible} busy={busy || prepared.current !== null} ownerDocument={document}
           title="Captured image" completeLabel="Attach processed image" busyLabel={busy ? 'Preparing image…' : 'Original image unconfirmed'}
           documentStatus={frame.scene.diskDurability === 'unconfirmed' ? 'Capture details are not yet confirmed on disk. Text remains available.' : 'Only the processed PNG is attached. Crop to attach a region.'}
-          onCancel={cancel} onComplete={input => void save(input)} onError={error => setFailure(presentError(error))} />
+          onCancel={cancel} onComplete={save} onError={error => setFailure(presentError(error))} />
       </section>
     </WindowOverlayPortal> : null
   }

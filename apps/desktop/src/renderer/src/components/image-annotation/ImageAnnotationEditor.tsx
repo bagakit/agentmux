@@ -18,7 +18,7 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
 import { selectionHandles, hitSelectionHandle, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
 import { fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport } from './view'
-import type { AnnotationImage, ImageAnnotationInput } from './types'
+import type { AnnotationImage, ImageAnnotationInput, ImageAnnotationOutputResult } from './types'
 import './image-annotation.css'
 
 const icon = semanticIconComponent
@@ -29,8 +29,7 @@ type Size = { width: number; height: number; dpr: number }
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId }
 // Region marks need travel; a press that moves less than this many screen pixels creates none of them.
-// An output callback may resolve true once the host has kept that exact output; closing then needs no confirmation.
-type AnnotationOutput = (input: ImageAnnotationInput) => void | Promise<boolean | void>
+type AnnotationOutput = (input: ImageAnnotationInput) => ImageAnnotationOutputResult
 // The last tool and style carry over to the next editor in this Renderer.
 let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number } = {
   tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32 }

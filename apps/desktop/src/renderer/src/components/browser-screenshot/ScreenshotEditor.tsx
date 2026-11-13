@@ -3,7 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserScreenshotCapture } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { ImageAnnotationEditor } from '../image-annotation/ImageAnnotationEditor'
-import type { ImageAnnotationInput } from '../image-annotation/types'
+import type { ImageAnnotationInput, ImageAnnotationOutputResult } from '../image-annotation/types'
 import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, type EditableAnnotationDocument, type AnnotationHistoricalSource } from '../image-annotation/document'
 import { ANNOTATION_DOCUMENT_LIMITS, readEditableAnnotationFile, saveEditableAnnotationFile } from './document-files'
 import { AnnotationFileDialog, type AnnotationFileActionResult } from './AnnotationFileDialog'
@@ -24,10 +24,10 @@ export const ScreenshotEditor = forwardRef<ScreenshotEditorHandle, {
   copied?: string | null
   active?: boolean
   onCancel(): void
-  onComplete(input: ScreenshotCompleteInput): void
-  onCopyContext?(input: ScreenshotCompleteInput): void
-  onSavePng?(input: ScreenshotCompleteInput): void
-  onPin?(input: ScreenshotCompleteInput): void
+  onComplete(input: ScreenshotCompleteInput): ImageAnnotationOutputResult
+  onCopyContext?(input: ScreenshotCompleteInput): ImageAnnotationOutputResult
+  onSavePng?(input: ScreenshotCompleteInput): ImageAnnotationOutputResult
+  onPin?(input: ScreenshotCompleteInput): ImageAnnotationOutputResult
   onCheckPin?(): void
   onEdited?(): void
   onOriginalOpened?(): void

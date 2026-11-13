@@ -11,3 +11,5 @@ export type ImageAnnotationInput = {
   displayWidth: number
   displayHeight: number
 }
+/** An output may resolve true once its host has kept that exact output; the editor then closes without a discard confirmation. */
+export type ImageAnnotationOutputResult = void | Promise<boolean | void>
