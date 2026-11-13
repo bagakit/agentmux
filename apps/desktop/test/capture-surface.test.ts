@@ -351,7 +351,7 @@ it.each([
   await delivered()
   electron.displays = [display, { id: 7, bounds: side }]
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => ({ ...frames(), displays: [
-    { displayId: display.id, frame, scale, png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
+    { displayId: display.id, frame, scale, windows: [], png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
     frames().displays[1]!] })) })
   const { overlays } = await opened()
   expect(overlays.map(row => row.input.initialCrop)).toEqual([undefined, undefined])
