@@ -31,6 +31,9 @@ export type ClientUiPlatform = {
   ownerDocument?: Document
   /** Host-owned wording for shared conversation copy and payload controls. */
   conversationToolLabels?: ConversationToolLabels
+  /** How a person's own message bubble arranges its rows. 'stacked' puts the words first and copy
+   * and details in a quiet footer below them, for narrow touch screens. Absent keeps the header row. */
+  messageLayout?: 'header' | 'stacked'
 
   /** A failed copy must call reportError and return false; success alone returns true. */
   copyText(text: string, reportError: (error: unknown) => void): Promise<boolean>
@@ -71,6 +74,10 @@ const PlatformContext = createContext<ClientUiPlatform | null>(null)
 
 export function useConversationToolLabels(): ConversationToolLabels {
   return useContext(PlatformContext)?.conversationToolLabels ?? defaultConversationToolLabels
+}
+
+export function useMessageLayout(): NonNullable<ClientUiPlatform['messageLayout']> {
+  return useContext(PlatformContext)?.messageLayout ?? 'header'
 }
 
 export function useMoteInputReader(): ClientUiPlatform['readMoteInput'] { return useContext(PlatformContext)?.readMoteInput }

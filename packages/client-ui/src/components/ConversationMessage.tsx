@@ -8,7 +8,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useContentCopyAction, ContentCopyIntentContext } from '../lib/use-content-copy-action.js'
-import { useClientUiPlatform, useConversationToolLabels, useMarkdownCopyText } from '../platform.js'
+import { useClientUiPlatform, useConversationToolLabels, useMarkdownCopyText, useMessageLayout } from '../platform.js'
 import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
@@ -210,6 +210,7 @@ export function ConversationMessage({
   const nativeCollaboration = explicitNativeCollaboration ?? recordedSpeaker?.nativeCollaboration
   const platform = useClientUiPlatform()
   const selfLabel = useConversationToolLabels().self ?? 'You'
+  const messageLayout = useMessageLayout()
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -436,6 +437,7 @@ export function ConversationMessage({
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
+      data-message-layout={messageLayout === 'stacked' && messagePhase !== 'progress' && !compact && !isTraceOnly && speaker?.role === 'human' ? 'stacked' : undefined}
     >
       {moteNotice ? <>
         <ConversationMoteNotice identity={readingIdentity} notice={moteNotice} scope={a2aReferenceScope} routeHostId={executionHostId} active={active} time={card.time} />
