@@ -293,9 +293,11 @@ export function register(on) {
     return next({ ...event, tool_use_id: matches[0][0] })
   }).catch(($, event, next) => next(event))
   on('tool.call', async ($, event, next) => {
-    const id = event?.tool_use_id, call = typeof id === 'string' ? askedCalls.get(id) : undefined
+    const id = event?.tool_use_id
     try { return await next(event) }
     finally {
+      // tool.check (and the ask it records) runs inside next, after tool.call begins.
+      const call = event?.agentId === undefined && typeof id === 'string' ? askedCalls.get(id) : undefined
       // Each asked call ends once; the native result is never inspected or altered.
       if (call && call.end === undefined && askedCalls.get(id) === call) {
         if (initialSessionId && !sourceChanged) call.end = observe($, ASKED_END, {})
