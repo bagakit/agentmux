@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import { useAppStore } from '../store'
 import type { MediaLease, MediaResume } from '../components/MediaPlayer'
@@ -17,7 +17,7 @@ function resourceKey(workspaceId: string, config: AppConfig = useAppStore.getSta
  * One playback lease for one visible File view. Hidden, retried, retargeted or unmounted views
  * release it, so a lease never outlives the view that asked for it and a URL is never reused.
  */
-export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean, revision: string | null = null) {
+export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean) {
   // Recompute only when config changes; every other store update returns the cached key in O(1).
   const selectResource = useMemo(() => {
     let config: AppConfig | undefined, key = ''
@@ -28,10 +28,10 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
   }, [workspaceId])
   const resource = useAppStore(selectResource)
   const [attempt, setAttempt] = useState(0)
+  const reload = useCallback(() => setAttempt(value => value + 1), [])
   // One per File target: hiding, retrying or a new lease of the same File resume here; another File starts fresh.
   const resume = useMemo<MediaResume>(() => ({ current: null }), [workspaceId, path])
-  // A new saved revision is a new file to play: its lease is reopened, and the place in it is kept.
-  const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt, revision])
+  const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt])
   const [lease, setLease] = useState<{ owner: typeof owner; value: MediaLease } | null>(null)
   const [failed, setFailed] = useState<{ owner: typeof owner; failure: Failure } | null>(null)
   useEffect(() => {
@@ -56,6 +56,6 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
     lease: enabled && lease?.owner === owner ? lease.value : null,
     failure: enabled && failed?.owner === owner ? failed.failure : null,
     resume,
-    reload: () => setAttempt(value => value + 1)
+    reload
   }
 }

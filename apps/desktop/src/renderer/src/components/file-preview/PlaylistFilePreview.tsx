@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useWorkspaceMediaStream } from '../../lib/use-workspace-media-stream'
 import { documentKey } from '../../lib/workbench-tabs'
 import { useAppStore } from '../../store'
@@ -8,13 +8,16 @@ const MediaPlayer = lazy(async () => ({ default: (await import('../MediaPlayer')
 
 /**
  * A playlist's preview plays the saved file through its playback lease; its source stays editable text.
- * Unsaved source edits are said to be outside what plays, and each save restarts the player on the new file.
+ * Unsaved source edits are said to be outside what plays. When they are saved or dropped the player reopens
+ * on the file, so a finished list plays the new one. A writer outside this view, such as an encoder appending
+ * to a live list, changes the file without that and is read by the player's own reloads.
  */
 export function PlaylistFilePreview({ workspaceId, path, visible }: { workspaceId: string; path: string; visible: boolean }) {
   const key = documentKey(workspaceId, path)
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
-  const revision = useAppStore(state => state.documents[key]?.revision ?? null)
-  const stream = useWorkspaceMediaStream(workspaceId, path, visible, revision)
+  const stream = useWorkspaceMediaStream(workspaceId, path, visible)
+  const { reload } = stream, wasDirty = useRef(dirty)
+  useEffect(() => { if (wasDirty.current && !dirty) reload(); wasDirty.current = dirty }, [dirty, reload])
   if (stream.failure) return <div className="file-preview-state" role="alert"><strong>{stream.failure.status === 'deleted' ? 'File was deleted' : 'Playback unavailable'}</strong>
     <span>{stream.failure.message}</span><button className="small-button" onClick={stream.reload}>Retry</button></div>
   if (!stream.lease) return <FilePreviewState title="Opening playlist" />
