@@ -107,7 +107,7 @@ const specifications = {
       find: 'const fitView = () => capture ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(', replace: 'const fitView = () => fitImageView(', test: capture,
       consumer: 'shows the whole frozen display at a fixed one-to-one pixel scale without zoom, pan or window chrome', failure: /keeps one image pixel per screen pixel/ },
     { label: 'capture-dim-inside-selection', source: component + 'ImageAnnotationEditor.tsx',
-      find: "    if (!crop) { context.fillRect(0, 0, image.width, image.height); return }\n", replace: '    context.fillRect(0, 0, image.width, image.height)\n    if (!crop) return\n', test: capture,
+      find: "    if (!crop) { context.fillRect(0, 0, image.width, image.height); return paintLitWindow(context, unit, time) }\n", replace: '    context.fillRect(0, 0, image.width, image.height)\n    if (!crop) return paintLitWindow(context, unit, time)\n', test: capture,
       consumer: 'drags a selection that becomes the crop and dims the frozen frame outside it', failure: /covers exactly the four bands outside the selection/ },
     { label: 'capture-expand-without-marks', source: component + 'ImageAnnotationEditor.tsx',
       find: 'onExpand?.({ shapes: currentShapes(), crop: documentState.crop, tool })', replace: 'onExpand?.({ shapes: [], crop: documentState.crop, tool })', test: capture,
