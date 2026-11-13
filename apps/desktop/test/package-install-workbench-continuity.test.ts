@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -626,4 +626,23 @@ it.each(['Contents/MacOS/AgentMux', 'Contents/_CodeSignature/CodeResources'])('[
   expect(JSON.parse(await readFile(join(stage, 'Contents/Resources/app/package-identity.json'), 'utf8'))).toEqual(JSON.parse(await readFile(join(f.candidate, 'Contents/Resources/app/package-identity.json'), 'utf8')))
   expect(await readFile(join(stage, artifact), 'utf8')).toBe('Different private signed artifact bytes')
   expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+})
+
+
+it('[prepared-stage] rejects a canonical reverse alias to the retained stage before quit or cutover', async () => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true })
+  await rm(f.app, { recursive: true }); await symlink(stage, f.app, 'dir')
+  // This real alias serves the staged identity; keep the controlled GUI facts
+  // accurate so deleting only the new guard reaches the actual bad cutover.
+  io.before!.main.package = JSON.parse(await readFile(join(stage, 'Contents/Resources/app/package-identity.json'), 'utf8'))
+  const canonical = await stat(f.app), retained = await lstat(stage)
+  expect((await lstat(f.app)).isSymbolicLink()).toBe(true)
+  expect({ dev: canonical.dev, ino: canonical.ino }).toEqual({ dev: retained.dev, ino: retained.ino })
+  io.resultFacts = { reverseAlias: true, canonical: { dev: canonical.dev, ino: canonical.ino }, retained: { dev: retained.dev, ino: retained.ino } }
+  await expect(install(f, 'full', stage)).rejects.toThrow('different real directory from the canonical application')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(io.signaturePaths).toEqual([])
+  expect((await lstat(f.app)).isSymbolicLink()).toBe(true)
+  expect((await lstat(stage)).ino).toBe(retained.ino)
+  expect((await stat(f.app)).ino).toBe(retained.ino)
 })

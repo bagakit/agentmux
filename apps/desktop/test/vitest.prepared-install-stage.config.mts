@@ -14,6 +14,9 @@ export default defineConfig({
       'skip-package-identity': ['assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))', '/* mutant omits selected source identity */'],
       'skip-stage-name': ['stageName.startsWith(prefix) && /^[1-9]\\d*\\.app$/.test(stageName.slice(prefix.length))', 'true'],
       'skip-stage-uid': ['stage.uid === process.getuid()', 'true'],
+      'skip-canonical-object': [
+        "    if (previouslyInstalled) {\n      const installed = await stat(destination)\n      assert(installed.dev !== stage.dev || installed.ino !== stage.ino,\n        'A prepared installer stage must be a different real directory from the canonical application; the application was not changed.')\n    }\n", ''
+      ],
       'skip-signed-bytes': ['stageHash === selectedHash', 'true'],
       'skip-retained-signature': ["await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })", '/* mutant omits stage signature verification */']
     }
