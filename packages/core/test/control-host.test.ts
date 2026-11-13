@@ -1028,6 +1028,12 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       // history 只是把 journal 已经在内存里的那份记录读出来（store 那条臂上只有一次
       // listOperationHistory，不碰页面、不等子进程），所以它跟 list.agents 同档。
       'browser.history': 'short',
+      'browser.profile.ls': 'short',
+      'browser.profile.inspect': 'short',
+      'browser.profile.create': 'long',
+      'browser.profile.update': 'long',
+      'browser.profile.set-default': 'long',
+      'browser.profile.delete': 'long',
       // replay 会把录下来的步骤真的重放到页面上——它就是一次 browser.run，只是程序是我们生成的。
       // 给短预算等于把一次正常回放掐成 CONTROL_TIMEOUT，而此时页面上已经点过几下了。
       'browser.replay': 'long',

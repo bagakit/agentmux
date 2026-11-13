@@ -243,7 +243,15 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'BROWSER_SUBSCRIBE_UNSUPPORTED',
       'BROWSER_HUMAN_CONTROL_ACTIVE',
       // The original operation read is the recovery path; another address is not a new intent.
-      'BROWSER_OPERATION_ALREADY_EXISTS'
+      'BROWSER_OPERATION_ALREADY_EXISTS',
+      // Profile owner refusals name their own recovery in the message (wait for the Browsers, read the
+      // list again, ask the person); none of them is fixed by addressing another Agent or Region.
+      'BROWSER_PROFILE_IN_USE',
+      'BROWSER_PROFILE_USAGE_UNKNOWN',
+      'BROWSER_PROFILE_REVISION_CONFLICT',
+      'BROWSER_PROFILE_NOT_FOUND',
+      'BROWSER_PROFILE_DELETE_REQUIRES_PERSON',
+      'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED'
     ]
 
     for (const code of AGENTMUX_CONTROL_ERROR_CODES) {
