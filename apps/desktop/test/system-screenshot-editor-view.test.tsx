@@ -22,10 +22,10 @@ afterEach(async () => { await act(async () => root.unmount()); node.remove(); do
 
 function retakeButton() { return [...node.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === 'Retake') }
 function retake() { const control = retakeButton(); expect(control, 'actual region capture offers Retake').toBeDefined(); return control! }
-async function mount(retakable: boolean, retake: SystemScreenshotEditorApi['retake']) {
+async function mount(retakable: boolean, retake: SystemScreenshotEditorApi['retake'], marks?: Pick<SystemScreenshotEditorInput, 'initialState' | 'initialTool'>) {
   const api: SystemScreenshotEditorApi = { load: vi.fn(), onNotice: () => () => {}, finish: vi.fn(), cancel: vi.fn(async () => {}), retake: vi.fn(retake),
     savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(), copyContext: vi.fn(), openOriginal: vi.fn(), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
-  const input: SystemScreenshotEditorInput = { requestId: 'original-request', image, attachToDraft: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, ...(retakable ? { retakable: true } : {}) }
+  const input: SystemScreenshotEditorInput = { requestId: 'original-request', image, attachToDraft: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, ...(retakable ? { retakable: true } : {}), ...marks } as SystemScreenshotEditorInput
   await act(async () => root.render(<SystemScreenshotEditorView key={Math.random()} input={input} api={api} />))
   await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
   return api
@@ -46,4 +46,13 @@ it('a failed retake keeps the editor and says why', async () => {
   await act(async () => retake().click())
   expect(node.querySelector('[role="alert"]')?.textContent, 'the reason shows in place').toContain('A screen capture is already in progress.')
   expect(retake().disabled).toBe(false)
+})
+
+it('marks moved here with Command E are unkept, so Retake confirms before it drops them', async () => {
+  const marks = { initialState: { shapes: [{ id: 'mark', kind: 'rect' as const, color: '#ef4444', width: 4, from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }], crop: null },
+    initialTool: 'rect' as const }
+  const api = await mount(true, async () => ({ status: 'cancelled' }), marks)
+  await act(async () => retake().click())
+  expect(api.retake, 'Retake waits for the in-place confirmation while handed-over marks exist nowhere else').not.toHaveBeenCalled()
+  expect(node.textContent, 'the confirmation names the marks it would drop').toMatch(/Discard 1 annotation/)
 })
