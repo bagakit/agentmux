@@ -109,3 +109,12 @@ describe('Goals list grouped by whose turn it is', () => {
     expect(commits.mock.calls.length).toBe(count)
   })
 })
+
+describe('Goal stage marks', () => {
+  it('give every stage its own glyph, so the mark reads without color', async () => {
+    const { GOAL_STAGE_ICON_NAMES } = await import('../src/renderer/src/lib/goal-groups')
+    const names = Object.values(GOAL_STAGE_ICON_NAMES)
+    expect(names.length).toBe(6)
+    expect(new Set(names).size).toBe(names.length)
+  })
+})
