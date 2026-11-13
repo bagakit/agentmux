@@ -1,7 +1,7 @@
 /** A Goal's immutable business request. Core owns actual spatial and input facts. */
 export type DemandDiscussionIntent = {
   requestOperationId: string
-  mode: 'open' | 'grill' | 'grounding'
+  mode: 'open' | 'grill' | 'grounding' | 'plan'
   executorId: string
   spaceId: string
   zoneId: string
@@ -13,7 +13,7 @@ export function parseDemandDiscussionIntent(value: unknown): DemandDiscussionInt
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The original Goal discussion intent is invalid.')
   const p = value as Record<string, unknown>
   if (Object.keys(p).some(key => !['requestOperationId','mode','executorId','spaceId','zoneId','agentMuxNote','prompt','callerAgentSessionId'].includes(key)) ||
-      typeof p.mode !== 'string' || !['open','grill','grounding'].includes(p.mode) ||
+      typeof p.mode !== 'string' || !['open','grill','grounding','plan'].includes(p.mode) ||
       !['requestOperationId','executorId','spaceId','zoneId','agentMuxNote'].every(key => typeof p[key] === 'string' && (p[key] as string).trim() && !(p[key] as string).includes('\0')) ||
       p.prompt !== undefined && (typeof p.prompt !== 'string' || p.prompt.includes('\0')) ||
       p.callerAgentSessionId !== undefined && (typeof p.callerAgentSessionId !== 'string' || !p.callerAgentSessionId.trim() || p.callerAgentSessionId.includes('\0'))) throw new Error('The original Goal discussion intent is invalid.')

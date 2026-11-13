@@ -512,7 +512,7 @@ export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
-export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding'; executorId?: string }
+export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' | 'plan'; executorId?: string }
 export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; executorId?: string; caller?: { agentSessionId: string; capability?: string } }
 export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number }
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
@@ -861,7 +861,7 @@ export type AgentMuxControlResult =
   | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
-  | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding'; tabId: string; regionId: string; hostId: string | null; agentSessionId: string | null } }
+  | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding' | 'plan'; tabId: string; regionId: string; hostId: string | null; agentSessionId: string | null } }
   | { operation: 'demand.confirm'; demand: AgentMuxDemand; receipt: { demandId: string; confirmedRevision: number; confirmedAt: number } }
   | { operation: 'demand.accept'; demand: AgentMuxDemand; receipt: { demandId: string; alignmentRevision: number; submissionId: string; acceptedAt: number; acceptedWithGaps: boolean } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }

@@ -15,9 +15,24 @@ import { projectHostGoal } from './goal-projection.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 type Request = Extract<AgentMuxControlRequest, { operation: 'demand.discuss' }>
+type TaskMode = Exclude<Request['mode'], 'open'>
+const discussionPrompt = (goal: Demand, mode: TaskMode) => mode === 'plan' ? `Make a plan for this existing Goal: ${goal.id}.`
+  : mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.'
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 /** Original Goal request text, shared by every client through the domain owner. */
-function discussionTask(goal: Demand, mode: 'grill' | 'grounding'): string {
+function discussionTask(goal: Demand, mode: TaskMode): string {
+  if (mode === 'plan') return [
+    `Make and save a dependency plan inside the existing Goal ${goal.id}.`,
+    'This is an explicit planning request only. Preserve this same Goal and its original intent. Do not start work, send execution tasks, enable continuous progress, confirm the Goal or accept results for the person.',
+    'Read the current Goal, its actual Supervisor, current alignment and plan first. A dedicated discussion Agent or a manager guidance label does not grant Supervisor authority. Only the exact current Supervisor or an authenticated person can revise the plan. If you are not that Supervisor, explain the existing management relationship and the explicit selection or coordination needed; do not assign yourself or impersonate a person.',
+    'A current proposal allows planning before human confirmation. If the proposal or meaningful success criteria are missing, clarify the real outcome in this original discussion and update this same Goal with a real alignment proposal first. Do not invent intent, standards, human approval or a placeholder plan merely to fill the graph.',
+    'Describe real work nodes with stable IDs, outcomes, covered current criterion IDs and checks another party can repeat. Record dependencies only where one node needs another result; preserve real parallel work. Use an exact known executor Host and AgentSession, or executor:null when unknown. Do not guess identities.',
+    'Read goal plan, then save through goal plan revise with the revision you read (expectedRevision:0 for the first plan) and the current alignmentRevision. Supply {goalId,revision:{operationId,expectedRevision,alignmentRevision,nodes:[{id,title,outcome,dependsOn,criterionIds,check,executor}]}}. If the plan changed, read it again; keep nodes with recorded work and their original history.',
+    'Read back the original Goal plan after saving. A received request or a textual breakdown is not a saved plan. Report the original saved revision or the exact unconfirmed step; never claim that input acknowledgement means the DAG exists.',
+    `"$AGENTMUX_CLI" goal inspect --goal ${JSON.stringify(goal.id)}`,
+    `"$AGENTMUX_CLI" goal plan --goal ${JSON.stringify(goal.id)}`,
+    '"$AGENTMUX_CLI" goal plan revise --input FILE'
+  ].join('\n\n')
   return [
     `Coordinate the existing Goal ${goal.id}. Current request: ${mode === 'grill' ? 'align the goal' : 'align the results'}.`,
     ...(!goal.alignment && !goal.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user intent. Ask what the person wants to achieve; do not invent an outcome, criteria or human approval.'] : []),
@@ -107,11 +122,11 @@ export function createHostGoalDiscussions(options: {
       body, await projectContext(goal), `Original Goal facts:\n${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: goal.grounding })}`].filter(Boolean).join('\n\n')
     const value: DemandDiscussionIntent = { requestOperationId: request.requestId, mode: request.mode, ...source, agentMuxNote: note,
       ...(context.caller ? { callerAgentSessionId: context.caller.agentSessionId } : {}),
-      ...(body === undefined ? {} : { prompt: request.mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.' }) }
+      ...(request.mode === 'open' ? {} : { prompt: discussionPrompt(goal, request.mode) }) }
     await current(context)
     return (await options.demands.prepareDiscussion(goal.id, goal.discussionOperationId, value, goal.updatedAt)).demand.discussionIntent!
   }
-  const taskContext = async (goal: Demand, mode: 'grill' | 'grounding') => [discussionTask(goal, mode), await projectContext(goal)].join('\n\n')
+  const taskContext = async (goal: Demand, mode: TaskMode) => [discussionTask(goal, mode), await projectContext(goal)].join('\n\n')
   return {
     async ownsRecipient(goal: Demand, hostId: string, sessionId: string): Promise<boolean> {
       const state = await options.spatial?.read()
@@ -206,7 +221,7 @@ export function createHostGoalDiscussions(options: {
           if (prior) break
         }
         if (prior && !prior.admission?.acknowledged) return unavailable('The original discussion request input is unconfirmed; it was not automatically repeated.')
-        if (prior && !context.caller && (prior.admission?.intent?.message?.userContent !== (request.mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.')))
+        if (prior && !context.caller && prior.admission?.intent?.message?.userContent !== discussionPrompt(goal, request.mode))
           throw new AgentMuxError('This original discussion input belongs to another frozen request. Its input and recipient remain retained.', 'CONTROL_REQUEST_CONFLICT')
         if (!prior) {
           if (context.caller) {
@@ -215,7 +230,7 @@ export function createHostGoalDiscussions(options: {
               text: await taskContext(goal, request.mode), execution: 'immediate', sourceChannel: 'api' }, context, recipient.hostId)
           } else {
           await options.runtime.submitPrompt({ kind: 'agent', hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, run: key.expectedRun },
-            request.mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.', request.requestId, agentPromptCondition(observed.session), undefined, undefined, true,
+            discussionPrompt(goal, request.mode), request.requestId, agentPromptCondition(observed.session), undefined, undefined, true,
             await taskContext(goal, request.mode), 'api', undefined, context)
           }
           prior = await options.runtime.inspectGoalAttention({ hostId: recipient.hostId, supervisorAgentSessionId: recipient.agentSessionId, supervisorRunId: key.expectedRun.runId, operationId: inputId, ...(context.caller ? { producer: 'message' as const } : {}) })
@@ -223,7 +238,14 @@ export function createHostGoalDiscussions(options: {
         if (!prior?.admission?.acknowledged) return unavailable('The original discussion input remains unconfirmed. Its operation and recipient are retained; it was not repeated.')
         if (context.caller) {
           const { message } = await options.call('message.read', { hostId: recipient.hostId, operationId: request.requestId }, context)
-          if (message?.envelope.messageId !== messageId || message.envelope.correlationId !== deriveObjectId('goal-discussion-' + request.mode, goal.id) || message.envelope.body !== await taskContext(goal, request.mode))
+          // A reference notification's input body is not the original message body.
+          // Reconcile the retained journal envelope with its exact admitted input;
+          // a later project/Goal edit must not manufacture a new planning body.
+          const originalPlan = request.mode === 'plan' && message?.envelope.operationId === request.requestId &&
+            message.envelope.senderSessionId === context.caller.agentSessionId && message.envelope.recipientSessionId === prior.agentSessionId &&
+            message.envelope.recipientRunId === prior.run.runId
+          if (message?.envelope.messageId !== messageId || message.envelope.correlationId !== deriveObjectId('goal-discussion-' + request.mode, goal.id) ||
+              (request.mode === 'plan' ? !originalPlan : message.envelope.body !== await taskContext(goal, request.mode)))
             throw new AgentMuxError('The original discussion message belongs to another business request. Its actual sender, recipient and input remain retained.', 'CONTROL_REQUEST_CONFLICT')
         }
         await options.confirmParticipation({ goalId: goal.id, hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, expectedRun: prior.run, evidence: context.caller ? 'message-input' : 'prompt-input', operationId: request.requestId }, context)
