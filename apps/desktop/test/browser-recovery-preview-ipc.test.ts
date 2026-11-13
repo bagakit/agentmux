@@ -13,6 +13,7 @@ import type { BrowserRecoveryPreview, BrowserRecoveryPreviewScope } from '../src
 import type { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { BROWSER_PROFILE_RESULT_METHODS, unwrapIpcResultMethods } from '../src/shared/ipc-result.js'
+import { BROWSER_LAST_SEEN_FAVICON_BATCH, browserPageMemory } from '../src/shared/browser-page-memory.js'
 
 type NativeOwner = { workspaceId: string | null; storage: { mode: 'normal'; profileId: string } | { mode: 'private'; profileId: null } }
 const bridge = vi.hoisted(() => ({
@@ -250,6 +251,44 @@ describe('actual preload and registered Main recovery-preview read', () => {
       expect(await f.api.getRecoveryPreview(f.scope.browserId)).toEqual({ status: 'missing' })
       expect(await readFile(f.path(other))).toEqual(before)
       for (const method of f.acquire) expect(method).not.toHaveBeenCalled()
+    } finally { await f.dispose() }
+  })
+
+  it('reads last-seen icons of live and cold Browsers in one batch with one spatial read and no page acquisition', async () => {
+    const f = await fixture(), icon = 'data:image/png;base64,AA=='
+    const cold: BrowserRecoveryPreviewScope = { ...f.scope, browserId: 'cold-browser', profileId: 'cold-profile' }
+    const plain: BrowserRecoveryPreviewScope = { ...f.scope, browserId: 'plain-browser' }
+    try {
+      bridge.owners.set(f.scope.browserId, { workspaceId: f.scope.workspaceId, storage: { mode: 'normal', profileId: f.scope.profileId! } })
+      bridge.released.set(plain.browserId, { workspaceId: plain.workspaceId, storage: { mode: 'normal', profileId: plain.profileId! } })
+      f.setGraph(savedGraph(cold.browserId, cold.profileId!))
+      await f.previews.recordPage(f.scope, browserPageMemory(f.scope, 'https://live.invalid/', icon, undefined)!, () => true)
+      await f.previews.recordPage(cold, browserPageMemory(cold, 'https://cold.invalid/', icon, undefined)!, () => true)
+      await f.previews.recordPage(plain, browserPageMemory(plain, 'https://plain.invalid/', undefined, undefined)!, () => true)
+      f.spatialRead.mockClear()
+      expect(await f.api.getLastSeenFavicons([f.scope.browserId, cold.browserId, plain.browserId, 'absent-browser'])).toEqual({
+        [f.scope.browserId]: { url: 'https://live.invalid/', faviconDataUrl: icon },
+        [cold.browserId]: { url: 'https://cold.invalid/', faviconDataUrl: icon }
+      })
+      expect(f.spatialRead).toHaveBeenCalledTimes(1)
+      f.spatialRead.mockClear()
+      expect(await f.api.getLastSeenFavicons([f.scope.browserId])).toEqual({ [f.scope.browserId]: { url: 'https://live.invalid/', faviconDataUrl: icon } })
+      expect(f.spatialRead, 'live owners need no spatial read').not.toHaveBeenCalled()
+      for (const method of f.acquire) expect(method).not.toHaveBeenCalled()
+    } finally { await f.dispose() }
+  })
+
+  it('refuses a foreign sender or a malformed or oversized icon batch before reading any scope', async () => {
+    const f = await fixture()
+    try {
+      const scope = vi.spyOn(f.manager, 'recoveryPreviewScope'), read = vi.spyOn(f.previews, 'readPage')
+      f.spatialRead.mockClear()
+      await expect(f.invoke('browser:getLastSeenFavicons', [[f.scope.browserId]], { id: f.sender.id }))
+        .rejects.toThrow('Untrusted application main document sender')
+      for (const ids of ['original-browser', [''], [7], Array.from({ length: BROWSER_LAST_SEEN_FAVICON_BATCH + 1 }, (_, i) => `b-${i}`)]) {
+        await expect(f.api.getLastSeenFavicons(ids as string[])).rejects.toThrow('at most')
+      }
+      expect(scope).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(f.spatialRead).not.toHaveBeenCalled()
     } finally { await f.dispose() }
   })
 
