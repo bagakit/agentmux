@@ -12,9 +12,7 @@ Reuse the Browser already confirmed for this task. Read its actual target/capabi
 acting; labels do not establish website state, permission or completion. Keep the original
 page, user input and unknown operation identity; do not bypass refusal or human control.
 
-For an unspecified Browser request, start from your own exact Tab; inspect this task's
-same-Tab neighbor Regions and their typed Browser bindings; do not pick a globally recent or focused page or assume
-a new page is wanted. Preserve material ambiguity and the user's exact target/tool choice.
+[Browser target choice](../shared/browser-target-choice.md "amux:include")
 
 Read only the matching local help:
 - amux browser profile --help: original Profile identities, routes and usage.
@@ -87,8 +85,8 @@ Read only the matching local help:
 For a new page in the same task, usually choose an explicit readable Region in the Agent's
 Tab. Read amux space --skill before placement for actual geometry, Focus discoverability,
 the user's new-Tab/tool choice and crowded-layout exceptions, and separate navigation/input
-focus. An app link may await a
-person's system handoff while the original page stays unchanged.
+focus. A link that the system hands to a desktop application may wait for the person's
+handoff choice while the original page stays unchanged.
 
 Profile native environment uses `browser profile update --profile ID --expected-revision N --environment JSON`.
 The bundle accepts userAgent, acceptLanguages, timeZone, locale, geolocation, userAgentMetadata, screen

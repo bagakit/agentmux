@@ -51,6 +51,16 @@ unknown; Agent CLI and ctxmux are outside this archive. It cannot establish a le
 allocation stack. Reads after restart cannot reconstruct the prior write acknowledgement.
 
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
+system metrics get returns the first bounded frame and releases its own reader; a pending
+Renderer has not failed. Watch frames may update different sources: use the app source
+observation time and process intervalMs to identify actual CPU intervals.
+Input diagnostics preserve an optional Renderer parent {observerId,source,sequence}; it is an
+untrusted correlation label, never identity, an operation ID or an input receipt. Compare
+Host/Session/Run and execution owner too; Main sender/window facts are captured independently.
+Stages and oldestPendingMs use each process's own monotonic clock, so nested wall times are not
+additive. Duplicate parents are ambiguous, and omitted coverage cannot prove uniqueness or the
+oldest pending age. active/recent stay bounded; bad optional metadata is discarded without
+changing original input bytes, FIFO order, results or errors.
 diagnostics.host describes the local machine: CPU uses whole-machine capacity and a
 matching counter interval, separately from App/Run one-logical-core percentages. Physical
 free memory is not memory pressure or reclaimable capacity. Supported macOS sources add
@@ -63,13 +73,25 @@ For a performance technical profile, first separate process identity and interva
 from Renderer sample weights, browser timeline events and object retention. Keep the loaded
 build, original PID/creation identity and each actual interval; sequential captures are not
 simultaneous evidence. Deduplicate source samples and do not add inclusive parent/child times.
-Use explicit profile/trace capture help for the exact current Renderer target. V8 samples do
+Each explicit Renderer capture (system metrics profile, allocations, trace, scene and heap capture)
+defines its exact five-field Renderer target, any duration, size limits, sensitive content and
+--output rules in its leaf --help, as do scene and heap inspect for their original capture IDs;
+read that help before capturing or exporting. These time and size limits bound observation and
+transport, not native peak memory. V8 samples do
 not cover all Main, native, worker or GPU work; a broad unknown share needs another relevant
 source, not a guessed owner. Renderer memory/backing counters overlap and are not an RSS bill.
 Explicit timeline capture requests native triggering stacks for existing events. Only stacks
 actually present establish call locations; missing stacks remain unknown. Retained category
-filters belong to the original capture, not the reader's current policy. Node-level invalidation
-tracking is not enabled by default. Names and URLs stay in the explicit raw material.
+filters belong to the original capture, not the reader's current policy. A trace's
+requestedCategories is only the requested filter; participating PIDs and categories are the
+original traceEvents pid/cat values, and missing events or categories do not prove absent work.
+Main startedAt/startMonotonicMs mark receipt of the start ACK and native events may begin earlier,
+so trace timestamps and Main/Renderer wall or monotonic clocks are never equated or summed as CPU.
+Node-level invalidation tracking is not enabled by default. Names and URLs stay in the explicit
+raw material. system diagnostics inspect --domain performance.scene --host-id local --capture-id ID
+returns only a safe scene phase summary and reference; frames, traces and profiles stay in
+system metrics scene inspect, even with --include-raw. A pending heap publication keeps the prior
+file plus one candidate and refuses further native heap captures.
 
 system metrics profile analyze --input FILE analyses one already-exported local cpuprofile
 without resolving or connecting to an endpoint, opening an App, sampling or uploading.

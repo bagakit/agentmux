@@ -2,6 +2,10 @@
 
 <!-- amux:content -->
 Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay, SSH or Tailcat.
+Unix and SSH carry line-delimited JSON; HTTP streams use SSE. HTTP is off by default: the host
+must set both AGENTMUX_RPC_HTTP_BIND (host:port) and AGENTMUX_RPC_HTTP_TOKEN, and HTTP clients
+read AGENTMUX_RPC_HTTP_TOKEN. Unknown Host, missing Session, owner ambiguity and an unreachable
+service keep distinct errors and are never resolved by choosing the first candidate or rerouting.
 Select one transport with amux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
 Endpoint, Host route and execution identity are separate:
@@ -22,7 +26,8 @@ Via this service's configured remote Host (use the actual returned routeHostId):
   amux agent context --host build-host --session SID
 Find configured route IDs with amux settings hosts ls. A listed configuration is not a connection check.
 system endpoint reports connection=not-attempted and does not verify reachability or Agent health.
-system endpoint --inspect reads the owner publication observation through RPC.
+system endpoint --inspect reads the owner publication observation through RPC. publication is
+null when this service has no endpoint observation; it is not a Run status.
 An RPC system.endpoint response reports connection=responded; this certifies that response only.
 SSH uses the remote amux system endpoint --stdio bridge and requires an existing remote service.
 The ssh URI may specify URI-encoded socket and command query parameters; system SSH owns aliases and credentials.

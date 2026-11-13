@@ -1,5 +1,5 @@
 ---
-summary: "Mote main-Agent collaboration, original-file memory and the PMO working manual"
+summary: "Mote main-Agent collaboration, original-file memory and the route to the PMO working manual"
 roles: "Mote main Agents and members"
 when: "Collaborate, maintain useful knowledge or coordinate delivery"
 ---
@@ -128,6 +128,13 @@ to original records, not another chat log or task-status store.
 <!-- amux:generated command:space.mote.dialogue.read -->
 <!-- amux:generated command:space.mote.dialogue.link -->
 
+### Main setup
+
+Setup inspect/advance, Discussion recovery ensure/inspect and main-conversation input
+submit/inspect are person/device actions, including their inspect reads; a managed Agent caller
+is refused. A managed Agent reads these rules only to understand the receipts it meets, uses
+dialogue read/link and agent send itself, and never performs these actions on the person's behalf.
+
 <!-- amux:generated command:space.mote.dialogue.setup.inspect -->
 <!-- amux:generated command:space.mote.dialogue.setup.advance -->
 
@@ -156,11 +163,13 @@ input never fetches another page or resends that input.
 Creation, old-source association and binding have separate results; native File receipts
 and observed original writer roles are separate evidence. Preference observations carry
 only the actual read summary; source observations carry only their original bind key,
-role, complete reference and file revision, without inventing a preferences snapshot. An ordinary preferences save
-can settle only the matching original bind operation, target, baseline, role and occurrence.
+role, complete reference and file revision, without inventing a preferences snapshot. An ordinary
+preferences save can settle only the matching original bind operation, target, baseline, role and occurrence.
 After a cross-owner save, explicitly advance that original setup to reconcile its writer
 role or exact source journal; inspecting alone does not mutate the admission. Read the
 original `space.state` graph to discover a pending initial creation across clients.
+
+### Main source periods and current activity
 
 Main source links may include `period`: its identity is the Mote plus exact role revision,
 not Host/Session. Repeated sources for one period can share that period ID; returning to the
@@ -178,6 +187,8 @@ for a supplementary current native-activity read; SDK `readAgentInputActivity(ke
 the same exact Session/Run. This is read-only and supplies no input permission or expiry
 by itself. Ordinary inspection performs no additional Provider activity read. An unknown
 source keeps the original input and healthy Main available.
+
+### Rollover and Discussion recovery
 
 Quick preferences can save `conversationRollover:{kind:'keep-current'}` or
 `{kind:'idle',idleMs:...}` through their original MOTE CAS. Missing preserves the current role
@@ -200,12 +211,14 @@ Inspection may discover an original unresolved operation only for the same Sessi
 Mote target and complete reference. Retain its returned operation ID and frozen source,
 including an earlier role generation, instead of starting another operation. An unresolved
 operation from another Mote or producer returns a conflict; keep both original identities,
-and never retarget this view or admit a replacement Start. A historical
-completed attachment does not establish that its Run is still alive. The original MOTE owner qualifies the role on the resource Host; the
-reference Host executes original Session continuity. A later role switch cannot redirect
+and never retarget this view or admit a replacement Start. A historical completed attachment does
+not establish that its Run is still alive. The original MOTE owner qualifies the role on the
+resource Host; the reference Host executes original Session continuity. A later role switch cannot redirect
 an admitted operation. Paused, stopped, cancelled, retired and unknown operations remain
 protected. Reading history, hover, hidden mounting, refresh and Threads grant no entry
 intent. Existing conversation records and drafts remain usable while the CLI is offline.
+
+### Person/device prompts to the main conversation
 
 <!-- amux:generated command:space.mote.dialogue.input.submit -->
 <!-- amux:generated command:space.mote.dialogue.input.inspect -->
@@ -218,6 +231,8 @@ with the same target and operationId. Keep its original route and input owner ev
 another Agent later carries the conversation; never resend it to a replacement main.
 These human/device intake methods do not let an Agent impersonate a human author:
 managed Agents continue through their original agent.send owner and permission boundary.
+
+### Link work and read threads
 
 After authorized work is actually assigned through the original agent.open or agent.send
 and its Dispatch is opened, use its exact original message Host and messageId
@@ -328,8 +343,8 @@ Read saved quick settings with the exact target and `kind: "quick"`. Preserve th
 source, baseline and operation. The default presence policy is enabled with `intervalMs`
 1800000 (30 minutes); that policy alone does not prove an Agent is online or a heartbeat
 is arranged. Quick read returns `defaults.presence`; save `values.presence: { enabled, intervalMs }`
-through the same preferences owner with its original baseline. Intervals are whole minutes expressed in milliseconds, at
-least 60000. A saved File receipt, actual maintenance/schedule, recovery, input delivery
+through the same preferences owner with its original baseline. Intervals are whole minutes
+expressed in milliseconds, at least 60000. A saved File receipt, actual maintenance/schedule, recovery, input delivery
 and work outcome are separate facts.
 
 <!-- amux:generated command:schedule.inspect -->

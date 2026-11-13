@@ -5,6 +5,11 @@ A large Goal keeps one outcome and splits its work into a plan inside the Goal, 
 many small Goals. Read goal plan --goal ID first; it returns nodes, dependencies, named
 executors, reviews, the plan revision and every node delegation. Node state is derived
 from those facts: waiting, ready, working, review, changes, done, cancelled or unknown.
+planState carries that derivation as the Goals page shows it, with each node's current
+attempt (delegation operation, source MID and thread) and every unknown reason; use it
+instead of deriving state yourself. Goal records carry the same planState with their plan.
+Without planState the owner gave no derivation: node states are unknown to you, while the
+plan and delegations still read as returned.
 goal discuss --goal ID --mode plan --operation-id OP explicitly requests a saved plan in the
 original dedicated discussion. open only navigates. Keep OP after an unknown input result;
 an acknowledgement or a textual breakdown does not prove that a plan was saved. Read the
@@ -28,13 +33,14 @@ intent.planNodeId, to the executor the plan names. Parallel ready nodes go out t
 A node is done only after goal plan review by someone other than its executor: run the
 node's check yourself and record the command, its actual result and evidence locations.
 A changes verdict says what to change; send the rework to the same executor on the same
-thread. An unknown node means its delivery or applicability to current criteria needs
-reconciliation. Read the original delegation receipt and frozen criteria before acting;
-never resend an unknown delivery. Changed or missing criteria keep the old review readable
-without completing the current work; unchanged criteria keep their accepted work.
-Continuous progress on this Goal reports
-open nodes each check and pauses when every node passed review; a person still accepts
-the Goal results. A node review or plan completion never accepts the Goal.
+thread. An unknown node names why it needs reconciliation. dispatch-link: read the original
+delegation receipt before acting and never resend that delivery. criteria: the node names no
+criterion, names one the current proposal no longer has, or one whose text changed since its
+attempt was sent; revise the plan or the proposal. Changed or missing criteria keep the old
+review readable without completing the current work; unchanged criteria keep their accepted
+work. Continuous progress on this Goal reports open nodes each check and pauses when every
+node passed review; a person still accepts the Goal results. A node review or plan
+completion never accepts the Goal.
 
 The plan's executor Host can differ from the Supervisor's Host. A delegation intent.hostId
 selects the original Supervisor route; intent.workerHostId selects the executor route.

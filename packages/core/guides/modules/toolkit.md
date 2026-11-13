@@ -16,12 +16,12 @@ Unknown creation or Run state retains its original identity; never automatically
 Local package file changes are read on the next explicit execution or source inspection.
 
 For the fixed read-only Performance tool, an unknown creation with no confirmed Run can
-start a separate observation through explicit `run --input FILE` containing
+start a separate observation through explicit `amux toolkit run performance --input FILE` containing
 `{invocationId,expectedExecutionId}`. Use the current unknown execution as the expectation
 and a new invocation identity; keep that same invocation after an unknown reply. The owner
 atomically retains the original admission and failure before dispatching the new creation.
 Ordinary opening, watch and run without that input never replace the unknown. Inspect the
-original with `inspect performance --execution-id ID`; `--failure-evidence` explicitly reads
+original with `amux toolkit inspect performance --execution-id ID`; `--failure-evidence` explicitly reads
 retained private failure material. A known original Run keeps its existing reconciliation
 path. New data does not prove the old creation failed or never ran.
 

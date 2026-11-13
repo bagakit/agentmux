@@ -16,15 +16,19 @@
    needs to be open or Space activated. First-use sharing uses file share --help.
 4. Confirm the body write, canonical content/revision, attribution and history separately;
    sharing also has separate source, shared-file and destination outcomes. After unknown,
-   keep the original request, operation/event IDs and drafts. Inspect that same file/history,
-   file share inspect or notebook inspect --operation-id as appropriate; never automatically
-   resend a write or infer its earlier receipt from matching current content.
+   keep the original request, operation/event IDs and drafts. Inspect that same file and its
+   history; for a share use file share inspect, and for a Notebook operation use notebook
+   inspect --operation-id; never automatically resend a write or infer its earlier receipt
+   from matching current content.
 
 Saved Note frontmatter uses schema: agentmux.note.md.v1 and a stable note-id. Each saved
 blockId is carried by its original Markdown anchor; preserve these identities when editing.
 Follow your own Note with notebook apply --revision CATALOG_REVISION --operation-id OP_ID
---change-json '{"kind":"follow","noteId":"NOTE_ID"}'; use unfollow to cancel yourself.
-The authenticated caller is the follower; this is saved interest, not online presence.
+--change-json '{"kind":"follow","noteId":"NOTE_ID"}'; use "unfollow" to cancel yourself.
+The authenticated caller is the follower; payloads cannot act for another identity. Query
+followers with notebook ls/inspect. A follow is durable interest, not online presence or
+notification authorization. After an unknown response keep the operation ID and inspect
+notebook inspect --operation-id OP_ID before retrying that same logical change.
 
 Diagram source stays in fenced code blocks with language mermaid, drawio, dot/gv or
 plantuml/puml; drawio content is its original XML. Inline math uses $expression$ and display
@@ -40,7 +44,7 @@ Use GFM tables and - [ ] / - [x] task items. Preserve saved cell/item annotation
 HTML and SVG code fences offer explicit static previews. These previews do not run scripts
 or fetch external resources. Unsupported bounded regions retain readable original source in a
 note-raw fence with html or markdown metadata. Preserve that source and its outside block anchor;
-preview cleaning never rewrites it. Read docs/specs/note-markdown.md for the canonical grammar.
+preview cleaning never rewrites it.
 
 Read the matching leaf --help for arguments and receipt fields; amux notebook --help expands
 the original content, link, follow and history contracts.

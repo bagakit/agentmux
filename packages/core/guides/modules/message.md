@@ -43,8 +43,7 @@ preparation position or proof of input dispatch, native adoption or task accepta
 A null notification only means this read did not find the original notice, never permission to replay unknown input.
 Managed Agents notify and inspect only references in which they are original participants,
 at their authenticated Host; every selected MID must satisfy this same boundary.
-These observations are not
-model adoption, task acceptance or business completion.
+These observations are not model adoption, task acceptance or business completion.
 A Channel input may carry a short original request directly and refer to its longer retained
 context, or refer to a long original body. Follow the exact MID and field named by the platform
 reminder; use message read --help for the available bounded field reads and retain their
@@ -54,6 +53,26 @@ Agent. Reading is not acknowledgement, task acceptance or proof that the origina
 injected. For a reaction, discover this Session’s original bound identity through connection
 --skill and choose any processing or result expression yourself within the task’s authorization.
 A connector’s waiting or delivered marker is a transport fact, not your completion report.
+
+Pending message edit, send, stop, archive and restore require a transport-authenticated user or
+device; a managed Agent cannot operate a person's pending message. message pending stop ends
+only this item's preparation backoff (preparationWait.state stopped, with changed); it never
+recalls written input or stops the Agent, and repeating it returns changed:false. With no active
+backoff, a missing item or an item already being submitted, that stop is refused and the
+message, Session and terminal are kept. While the Agent has a pending question or permission
+request, pending send of a never-delivered item writes nothing and does not answer that request:
+disposition is unconfirmed with message.delivery not-submitted, the item stays queued and is sent
+after the request ends, so do not resend it. Only message.delivery unconfirmed means the outcome
+is unknown. To answer the request now, return to its original card or terminal.
+On AGENT_PROMPT_CONDITION_CHANGED this call wrote nothing, but that does not prove the original
+message was never delivered. Check message pending ls and the original conversation first. To
+leave Pending, message pending archive --expected-text keeps the original record; archiving
+never recalls input. Then write a new message with ordinary agent send and new operation and
+message identities; never reuse the old ones. Desktop Move to draft appends the text to the same
+Session's draft and archives the item.
+
+agent send --to-tab treats several Regions of one Session as one recipient; several different
+Sessions return MESSAGE_TARGET_NOT_UNIQUE with their candidates, and no message is sent.
 
 Use message inbox check only for explicit batch consumption, and read the exact original message or
 dispatch before replying. Keep operationId, messageId, source message, thread and reply

@@ -98,8 +98,8 @@ running. Pass `--operation-id <id>` to choose it yourself, and it is addressable
 the program starts: `amux browser inspect --operation-id <id>` says how it is going, and
 `amux browser stop --operation-id <id>` stops it. Neither needs the same connection, the same
 process, or the Browser id — the operation, not the request, is what those two address, so a
-disconnect does not take the operation with it. Asking about an id we have no record of is a
-successful answer of nothing, not a failure; stopping one that has already finished answers
+disconnect does not take the operation with it. Asking about an id AgentMux has no record of is
+a successful answer of nothing, not a failure; stopping one that has already finished answers
 with its existing outcome.
 
 During an embedded Agent program, confirmed native input isolation keeps ordinary human click,
@@ -151,11 +151,11 @@ The receipt carries `result` (whatever the program returned), `logs` (everything
 including on failure), and `outcome`, which is one of four:
   completed      the program finished
   script-failed  the program threw — fix the program
-  stopped        we cut it off — the program is fine. Either its scale is (too slow, too much
-                 output), or a person took the page back mid-run. Actions before that point
-                 did happen; nothing after did. The message names the call it was in and how
-                 many had completed. Run it again once the page is free.
-  indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for a reason the message names:
+  stopped        AgentMux stopped it; the program itself is fine. Either its scale was the
+                 problem (too slow, too much output), or a person took the page back mid-run.
+                 Actions before that point did happen; nothing after did. The message names
+                 the call it was in and how many had completed. Run it again once the page is free.
+  indeterminate  what actually happened is unknown, for a reason the message names:
                  the process died partway (an action may already have been applied once), or a
                  ref from an earlier run was matched back by appearance and may have landed on a
                  look-alike, or the actions ran but their result could not be retained, or the

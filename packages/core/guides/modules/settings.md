@@ -14,13 +14,10 @@ them. A saved route/template is not a connected Host, running Agent or human app
 Read amux settings --help to select the exact configuration domain, then the matching leaf
 help for its fields, authority, revision and save receipt. Discovering settings saves nothing.
 
-Remote managed messages use message-purpose source pins. Read `settings hosts
-message-trusted-sources --host HOST` for the exact Runtime authority and approved
-sources. Only the person may approve `settings hosts trust-message-source --host
-HOST --input FILE`, carrying sourceRuntimeId, publicKey, targetRuntimeId and
-targetKeyFingerprint. Creation-source approval is independent. Both message directions
-need explicit approval; this does not require a reverse network connection or forward
-an Agent invocation capability. Read `amux message --skill` for original reply sync.
+Creation-source trust and message-source trust are separate approvals that only the
+authenticated person can grant, one direction at a time. amux settings --help defines their
+reads, exact input fields and authority; amux message --skill explains when a remote reply
+needs message-source trust and how the original sender synchronizes it.
 
 ## Host home directory
 
@@ -30,13 +27,13 @@ not a remote home source. This read does not start Native, scan Sessions or regi
 project. An unavailable Host remains unavailable; keep its original work and retry the
 same read when its connection returns. Do not substitute the caller's home.
 
-In Desktop Space, select a device name to open its home workface without manually
-creating a project. The disclosure arrow still expands/collapses that device's folders;
-the adjacent + opens another directory. Existing registered home directories reuse the
+In Desktop, the person opens a device's home workface from its device name in Space,
+without a manual project setup step; an existing registered home directory reuses its
 original workface. Opening does not start an Agent or change another Session's cwd.
 For explicit CLI registration, use the returned path unchanged with the existing
-settings workspaces register input {hostId,path,name?}. A directory is not required to
-be a Git repository. Registration, navigation and Agent creation have separate receipts.
+settings workspaces register input {hostId,path,name?}. Registration only records an
+existing directory; it creates no Git worktree and starts no Agent. A directory is not required
+to be a Git repository. Registration, navigation and Agent creation have separate receipts.
 
 ## Tailcat transport
 
@@ -47,16 +44,17 @@ tailcat holds {address, keyFile}. Turning Tailcat off leaves the original SSH ro
 settings hosts ls/test/update and settings resource configuration use the same strict Host
 codec. Read each leaf's --help for the exact input and expected-value save contract.
 
-Install AgentMux and the official Tailcat CLI on both machines. AgentMux must already be
-running on the receiving machine. Prepare persistent identities with Tailcat's own CLI:
+Tailcat needs AgentMux and the official Tailcat CLI on both machines, and AgentMux must
+already run on the receiving machine. Persistent identities come from Tailcat's own CLI:
   tailcat genkey --client --key=agentmux-client
   tailcat genkey --key=agentmux-server --fixed-region
 The first prints the client public key; the second prints a secret address. Do not replace
 existing keys or publish the address. Saved server keys must include a PSK and fixed relay.
-On the receiving Mac, select This Mac → Connection, enter the saved server key and the
-client public key in Allowed clients, enable Allow Tailcat connections, then Save hosts.
-Refresh status to read the original listener. Copy its private address to the sending
-Host's Tailcat field and select its saved client key. Save and Test that exact Host.
+The Desktop part is the person's: ask them to complete it at these locations. On the
+receiving machine, This Mac → Connection takes the saved server key, the client public key
+under Allowed clients and the Allow Tailcat connections switch; its refreshed status reads
+the original listener. On the sending machine, that Host's Tailcat field takes the
+listener's private address and the saved client key; then that exact Host is saved and tested.
 Missing CLI, invalid saved key or listener failure is visible; a listening receipt does not
 prove a client connected. Disabling only stops this listener and retains existing work.
 settings hosts inspect --host local reads the same listener state. Configuration changes
@@ -73,9 +71,9 @@ confirmed transport is retained as history, never relabeled currently connected.
 An unopened or unavailable observation remains unknown. The carrier fact does not
 prove Agent health or a measured Tailcat direct/relay path.
 
-In Desktop, hover or focus the exact device/Host identity for current communication,
-confirmation time and saved preference. This reads existing transient state and
-does not connect, probe, scan Sessions or start a polling loop. The device title's
+Desktop shows current communication, confirmation time and saved preference when the
+person hovers or focuses the exact device/Host identity. This reads existing transient
+state and does not connect, probe, scan Sessions or start a polling loop. The device title's
 ~ marks its home action, not a guessed path. Home failures stay local to that action
 with a compact retry; original workfaces and healthy capabilities remain usable.
 A recognized older remote Core owner protocol requires an explicit Core update,
@@ -84,9 +82,9 @@ Private Tailcat addresses, key paths and raw process errors are never connection
 
 ## Review a remote Core update
 
-In Desktop **Settings → Remote → Hosts → Connection**, the Core maintenance
-section compares the current deployment with the candidate bundled in this App.
-It is not an online latest-version check. Package versions, source commits,
+The Core maintenance section in Desktop Settings → Remote → Hosts → Connection compares
+the current deployment with the candidate bundled in this App. It is not an online
+latest-version check. Package versions, source commits,
 deployment digests, Core owner API protocol and required Native Runtime protocol
 are different facts. Missing current facts remain unknown; protocol numbers and
 commit hashes do not stand in for a package version.
@@ -102,10 +100,17 @@ operation by its existing ID rather than treating its candidate as the current o
 `unreadableOperations` lists operation IDs whose maintenance record cannot be read.
 Their original Host and outcome are unknown and they are never replayed; they do
 not hide the current deployment or block an upgrade of another Host.
-Only a qualified ready result includes the pinned expected facts for an upgrade.
-In Desktop, review the exact target and maintenance effect, then explicitly confirm
-that same candidate. Cancelling review does not upgrade. A changed candidate or
-target must be checked and reviewed again, not silently substituted after confirmation.
+Only an eligible result includes the pinned expected facts for an upgrade. reason ready
+means the upgrade restarts only the Core service and keeps Sessions and running processes.
+reason native-replacement means the serving Native is too old for a same-process handoff:
+the upgrade saves a copy of the Native state and restarts Native on the candidate, so the
+running Runs listed in nativeReplacement end, while Sessions, history and the Runtime ID
+are kept and ended Runs continue through Session recovery. expected pins those Runs; a Run
+started after the check refuses the upgrade before anything stops. Tell the person which
+Runs end before they confirm. In Desktop the person reviews the exact target and maintenance
+effect, then explicitly confirms that same candidate. Cancelling review does not upgrade.
+A changed candidate or target must be checked and reviewed again, not silently substituted
+after confirmation.
 
 Upgrade and reconnect require the original transport-approved user/device, without
 a managed Agent caller; command parameters cannot supply that identity. Read-only
@@ -124,8 +129,15 @@ For a completed original operation, `settings hosts upgrade-reconnect` explicitl
 adopts its verified remote command and checks that exact saved Host, retaining
 the original operationId. It does not run the upgrade again. A pending or failed
 connection check leaves the completed deployment fact intact and provides the
-original retry path. All maintenance keeps the existing Runtime, Native process,
-Session and Run preservation contract.
+original retry path. Maintenance never replaces a Session or replays an operation; only the
+reviewed native-replacement path ends the running Runs it listed.
+
+A Core running under a user systemd unit is upgraded through that same unit and
+its exact MainPID. After the new owner is verified, the release is selected as
+current and that original operation's temporary start override is removed.
+An upgrade inspection may finish removing only that override and reload the
+user manager's unit definitions; it does not start or stop a service, reinstall,
+or replay an upgrade.
 
 This path supports an already installed Linux x64 headless Core that meets the
 maintenance owner's exact qualification. A saved Linux x64 SSH Host with no Core
@@ -171,10 +183,3 @@ original operation and may confirm the original serving process without
 repeating installation or reconnecting. An unknown result never means nothing
 happened. `install-check` retains `latestOperation`; unreadable records retain
 their original IDs in `unreadableOperations` and do not hide another Host.
-
-A Core running under a user systemd unit is upgraded through that same unit and
-its exact MainPID. After the new owner is verified, the release is selected as
-current and that original operation's temporary start override is removed.
-An upgrade inspection may finish removing only that override and reload the
-user manager's unit definitions; it does not start or stop a service, reinstall,
-or replay an upgrade.

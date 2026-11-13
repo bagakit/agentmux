@@ -111,7 +111,7 @@ for native collaboration versus independent Sessions and the exact message proto
 
 ## Collect results and close out
 
-Own delivery and closeout along the original Demand, not just assignment. Follow authorized
+Own delivery and closeout of the original Goal, not just assignment. Follow authorized
 work through questions and blockers, inspect evidence for every current criterion, collect
 the original delegated reports and submit results to the same Goal for human acceptance.
 An unreported exit needs follow-up or continuation with original responsibility retained;
@@ -149,7 +149,6 @@ are separate results. A failed naming step never stops healthy work or replaces 
 
 ## Observe and adjust the display
 
-[Current command:agent.inspect](../../dist/agentmux-cli-commands.js "amux:generated command:agent.inspect")
 [Current command:agent.output](../../dist/agentmux-cli-commands.js "amux:generated command:agent.output")
 [Current command:space.inspect](../../dist/agentmux-cli-commands.js "amux:generated command:space.inspect")
 [Current command:space.mv](../../dist/agentmux-cli-commands.js "amux:generated command:space.mv")

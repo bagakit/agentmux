@@ -33,8 +33,9 @@ Read the matching leaf help for the exact JSON input:
   Before opening, read amux space --skill and browser --skill. With an attached Region,
   normally pass an explicit readable split in the same Tab instead of relying on the
   Desktop's new-Tab default when placement is omitted; preserve the user's new-Tab/tool
-  choice and real layout exceptions. Reuse the confirmed Browser. The result returns exact
-  Browser/Tab/Region IDs; it confirms presentation, not Agent delivery.
+  choice and real layout exceptions. Reuse the confirmed Browser. Read rendering.status: only
+  an available rendering returns exact Browser/Tab/Region IDs, and it confirms presentation,
+  not Agent delivery. amux capsule open --help gives the placement JSON and unknown-result recovery.
 - amux capsule operation inspect --input FILE reads {operationId} without replaying it.
 
 To show a saved page in an AgentMux Desktop conversation, write its returned
@@ -75,9 +76,9 @@ A form page can write the person's selections into the draft with saveDraft(); t
 still reviews and confirms. The Questions list refreshes when the card is visible or opened.
 If your Run is not running when the person confirms, the answer is kept and the App reports
 SESSION_NOT_RUNNING. An Agent, page script, source field or HTTP request
-cannot self-author Human input or answer a Provider-native permission or question:
-capsule interaction reply is refused for Agents and pages. Saving, submitting and the Agent adopting an answer are
-separate results.
+cannot self-author Human input or answer a Provider-native permission or question: capsule
+interaction reply is refused for Agents and pages. Saving, submitting and the Agent adopting an
+answer are separate results.
 
 ## Page script on injected pages
 

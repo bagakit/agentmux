@@ -10,8 +10,9 @@ Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
 
-Install a local extension directory with amux toolkit install ID --path <PACKAGE_DIRECTORY>
-and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd defaults to ~/.agentmux on the Host.
+Install a local extension directory with amux toolkit install ID --path <ABSOLUTE_PACKAGE_DIRECTORY>
+and optional --cwd <WORKSPACE_DIRECTORY>; --path must be an absolute Host path.
+Omitted cwd defaults to ~/.agentmux on the Host.
 Working directories accept absolute paths, ~, ~/..., $HOME and ${HOME} prefixes;
 quote shorthand arguments to preserve them for the execution Host. The Host expands and saves
 the absolute directory for create/update/install and supplied expected values. Relative paths
@@ -98,70 +99,8 @@ capture uses one private bounded file, one active write and one replaceable pend
 (each <=96KiB); droppedWrites counts superseded writes in this owner lifetime. pending/confirmed/unconfirmed describe this writer's
 ACK, observed-on-disk only proves this read. Diagnostic and cleanup issues never replace the
 primary failure; they retain actual operation, code and known write phase or null. This reads Toolkit-owned evidence, not arbitrary Run bytes or Runtime authority.
-system metrics profile capture explicitly collects one exact Renderer main-target V8 profile
-for 1000-5000ms. Supply original window-id, web-contents-id, generation, pid and creation-time.
-The same RPC returns the original bounded profile (8 MiB maximum), actual interval and separate
-stop/detach facts. --output FILE saves a new local cpuprofile without replacing files or symlinks.
-Function names, URLs and local paths may be present: no automatic watch/Toolkit capture, upload
-or error-log export. Busy DevTools/debuggers preserve their original owner and refuse only this
-profile. A lost reply is unknown and is never automatically recaptured; no retained handles,
-restart history, worker/native/compositor CPU coverage or optimization claim.
-system metrics allocations capture uses the same exact five-field target and 1000-5000ms interval.
-Fixed HeapProfiler sampling requests 32768-byte intervals, depth128 and excludes collected-by-major/minor-GC objects.
-Original heapprofile stacks and sample sizes describe sampled window allocations still alive at stop, not
-all traffic, old objects, retaining paths, native/worker memory or a leak. No GC, snapshot or object-body reads.
-system metrics scene capture requests CPU, allocations and timeline serially for 2 seconds each, with
-before/after original resources/memory and actual loaded versions. A 20-second observation budget and
-8MiB/profile, 3MiB/resource point read and 32MiB/scene limits do not bound native peak memory. One App owner rejects concurrent scenes;
-only one local latest scene is retained. Partial/failed/unknown stage receipts and successful originals survive.
-Before-replace save failure preserves old bytes; after-replace/fsync failure is unknown, never rolled back or
-recaptured. system metrics scene inspect --capture-id ID only reads that exact latest original; replaced IDs
-are explicit mismatch. Available reads are observed bytes, not reconstructed past fsync acknowledgements.
---output creates only a new local file, never replaces a file/symlink, and failed output never repeats sampling.
-system diagnostics inspect --domain performance.scene --host-id local --capture-id ID provides safe phase
-summary/reference only; large frames/trace/profile material stays in scene inspect, even with include-raw.
-No fake logId/authority, automatic capture/upload, App lifecycle, navigation, focus or input is introduced.
-system metrics trace capture uses the same exact five-field target and 1000-5000ms interval
-for a Chromium target-related timeline. Original ReportEvents objects and order are preserved;
-the 8 MiB limit bounds RPC result transport, not native buffers, event production or peak memory.
-Start/end acknowledgement, tracingComplete flush, dataLoss/buffer-full, source verification and
-detach are separate facts. Target-related Main/GPU context may appear; neither all-App/Host nor
-complete native stacks are promised. No screenshots, heap dumps or extra CPU sampling are enabled.
-requestedCategories is only the requested filter; actual participating PID/category facts are the
-original traceEvents pid/cat values. Missing events or categories do not prove absent work or coverage.
-Main startedAt/startMonotonicMs mark receipt of the start ACK. Native events may begin earlier;
-trace timestamps and Main/Renderer wall or monotonic clocks must not be equated or summed as CPU.
---output creates a new local trace JSON atomically and never overwrites files/symlinks. URLs and
-local paths may be sensitive; no automatic watch/Toolkit capture, upload, log export, retained
-handle or recapture on lost replies/local write errors. An incomplete receipt remains incomplete.
-system metrics heap capture is a separate heavy, explicit native V8 snapshot. Supply the
-exact five-field Renderer target and a new --capture-id ID. It may pause the Renderer,
-trigger engine GC and use substantial native memory/disk; cancellation only ends observation,
-not native collection. No automatic retry, upload, heap RPC body or arbitrary server destination.
-The result references the original private Host file (Host, path, bytes and hash), not a local
---output. Export the previous file before replacing the single latest snapshot. system metrics
-heap inspect --capture-id ID reads that original operation without recapturing; available
-is current file integrity, not a past durability ACK. Load an exported .heapsnapshot in DevTools
-Memory and use Retainers. This is V8 object evidence, not all workers/native/GPU/RSS or a leak
-verdict. Two-file Comparison requires independently established isolate/object-ID continuity.
-While its original attempt remains retained/pending, the same capture-id never starts
-native collection again. Every new capture intent requires a fresh capture ID. Inspect a retired
-ID first: replaced IDs report mismatch, or absent when no snapshot is retained. This bounded
-retention is not permanent historical idempotency. Only a completed original with a known
-before-replace publication failure can explicitly repeat capture to retry its small receipt
-write. After-replace unknown must inspect the actual same-ID manifest/file first;
-readability does not turn the original missing durability ACK into confirmed. A pending
-publication preserves the prior file plus one candidate and refuses further native captures.
-system metrics get returns the first bounded frame and releases its own reader; a
-pending Renderer has not failed. Watch frames may update different sources: use the
-app source observation time and process intervalMs to identify actual CPU intervals.
-Input diagnostics preserve an optional Renderer parent {observerId,source,sequence}; it is
-an untrusted correlation label, never identity, an operation ID or an input receipt. Compare
-Host/Session/Run and execution owner too. Main sender/window facts are captured independently.
-Stages and oldestPendingMs use each process's own monotonic clock; nested wall times are
-not additive. Duplicate parents are ambiguous; omitted coverage cannot prove uniqueness
-or the oldest pending age. active/recent remain bounded, and bad optional metadata is discarded
-without changing original input bytes, FIFO, results or errors.
+Explicit Renderer profile, allocation, trace, scene and heap captures belong to amux system --skill
+and each capture's leaf --help.
 
 Data-only script results may use schema agentmux.toolkit.result.v1 with summary, items
 [{label,value}], links [{label,url}] and notice. Optional agentCards contains fields,

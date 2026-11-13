@@ -55,8 +55,7 @@ A page target omits #targetBlock. A saved unbound occurrence is:
 Bound wiki text is ordinary editable text too. Edit the visible query to retarget it; its
 query snapshot mismatch releases the old target, so its old ID cannot lock your new text.
 Preserve the occurrence marker; let the original writer resolve the new query. An unchanged
-query retains its exact bound target through renames. The editor uses ordinary click to edit
-and Ctrl/Command-click to open the original target. Deleting wiki syntax retains plain text.
+query retains its exact bound target through renames. Deleting wiki syntax retains plain text.
 Original [label](note:ID#block) bindings remain readable; a canonical save writes the wiki form.
 Structural reference and embed blocks use leaf directives:
     ::note-ref{#sourceBlock ref="occurrence3" target="note:targetNote#targetBlock"}
@@ -190,11 +189,4 @@ storage owner keeps backups, exact IDs, authors, followers and committed resourc
 conversion.sourceRevision/targetRevision. Normal read/write does not keep a JSON body fallback.
 Use the exact committed mapping to locate the same Note after conversion. Preserve old drafts
 and unknown attempted bytes/revisions; never replace their revision and automatically replay them.
-
-Follow yourself using amux notebook apply --revision CATALOG_REVISION --operation-id OP_ID
---change-json '{"kind":"follow","noteId":"NOTE_ID"}'; use "unfollow" to cancel yourself.
-The authenticated caller is the follower; payloads cannot act for another identity. Query
-followers with notebook ls/inspect. A follow is durable interest, not online presence or
-notification authorization. Preserve the operation ID after an unknown response and inspect
---operation-id OP_ID before retrying that same logical change.
 

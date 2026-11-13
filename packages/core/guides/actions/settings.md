@@ -40,9 +40,9 @@ settings hosts trusted-sources --host <id> to obtain that Host authority and its
 key fingerprint. After verifying both source and target, settings hosts trust-source --host <id>
 --input <file|-> accepts exactly {"sourceRuntimeId":string,"publicKey":string,
 "targetRuntimeId":string,"targetKeyFingerprint":string}. The target identity must still
-match the reviewed values when it accepts approval. Managed
-Agents and devices cannot approve source trust. Opening a remote Agent never silently
-trusts a key or copies the caller capability to the target Host.
+match the reviewed values when it accepts approval. Managed Agents and devices cannot
+approve source trust. Opening a remote Agent never silently trusts a key or copies the
+caller capability to the target Host.
 
 Message-source trust uses the same Runtime identity with a separate `agent-message`
 approval: `settings hosts message-trusted-sources --host <id>` reads its authority
@@ -96,7 +96,8 @@ history and the Runtime ID are kept, and ended Runs continue through Session rec
 Run that started after the check refuses the upgrade before anything stops; check again.
 Updates require an exact Linux x64 headless owner with verified leases and an explicit
 supported launch environment. Additional launch configuration is refused before stopping
-the owner; it is not copied into deployment receipts. Existing Runs remain available.
+the owner; it is not copied into deployment receipts, and the refused upgrade leaves existing
+Runs available.
 Exit 0 means the Host diagnostic returned facts, including unsupported/check-failed; it
 does not prove the connection is healthy. Workspace register accepts {hostId,path,name?}; paths remain literal. It
 registers an existing directory, does not run Git/create a worktree, and returns Workspace
@@ -118,8 +119,7 @@ iconCatalog: groups with labels/descriptions, semantic icons with exact id, labe
 and defaultGlyph, and the available glyph IDs. This read-only metadata comes from the same client catalog
 as Appearance settings. Use an exact semantic ID as a theme icons key and a discovered glyph ID for
 {kind: "glyph", glyph: ID}, or embed validated path data. Theme drawings never change control meaning,
-permissions or accessible labels. Choose an
-available ID using settings set appearance.themeId ID. A theme value is the complete versioned data
+permissions or accessible labels. Choose an available ID using settings set appearance.themeId ID. A theme value is the complete versioned data
 without its envelope ID. Create/update also accept the complete exported document when its ID matches the exact target; no ID rename is inferred. Editing a built-in requires a custom. copy. Custom update requires
 {changes, expected: completeOriginalValue}; custom delete requires {expected: originalValue},
 including the original raw JSON for an unsupported record. Deleting the active custom theme

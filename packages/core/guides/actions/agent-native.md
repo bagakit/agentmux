@@ -37,3 +37,15 @@ and Provider must match the source; presentation placement never changes executi
 Omit --prompt when only continuing the conversation: no user request is invented.
 Keep the same --operation-id after an unknown result and inspect space inspect --operation-id ID;
 do not relaunch or replay input with new identities. A refused source retains existing work.
+
+To answer a native asynchronous question, read the original records with agent history --host
+HOST --session SID --source native. Question IDs are opaque Provider values qualified by the
+exact Session and source; never construct them. A missing answer means unknown, not proof that
+the Agent is waiting. agent question reply --input FILE|- answers through the same public owner
+and requires a transport-approved user or device; a managed Agent cannot answer on a person's
+behalf. A submitted receipt confirms queue admission for the original native conversation, not
+adoption; read native history by the exact question ID to observe the answer. A changed source,
+Run or operation rejects only that input; the original Agent and ordinary manual input remain
+available. After a lost or unknown receipt keep the original operation ID and inspect the
+original records before deciding; do not blindly resend. Synchronous permission requests keep
+their agent interaction respond entry.

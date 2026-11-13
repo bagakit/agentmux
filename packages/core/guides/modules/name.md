@@ -17,12 +17,20 @@ Once you understand the task and your role, give your own Session a concise name
 the current task and phase. A clear first request is enough; otherwise clarify the task first.
 Do not wait for completion, use a fixed turn count, or claim planned work is already done.
 Name once after understanding the task; refine only after a substantial task change and only
-when the current name needs to change. Do not rename a Tab or another Agent for this purpose.
+when the current name needs to change. Self-naming never renames a Tab or another Agent. A
+coordinating main Agent that names the Sessions explicitly entrusted to its work follows the
+naming section of amux mote playbook pmo instead.
 
 Use the full Session ID from whoami, then agent inspect to read displayName availability,
 source and nameRevision. Read agent rename --help and use agent rename --derived with that
 observed revision. If availability is unavailable or the revision is unknown, do not guess
-revision zero or an identity. Preserve manual names, manual clears, launch names and retained
+revision zero or an identity. A Tab's nameRevision comes from space inspect. --clear also needs
+the observed revision, and --name=--help is valid name text. On a revision conflict, read the
+target again and let the caller confirm the new intent; never overwrite a concurrent rename
+automatically. A save failure keeps the applied value, returns partial and exits nonzero. A
+null override says nothing about whether a Session exists, is retired or is healthy, and
+readable Core facts are still reported while the client is unavailable.
+Preserve manual names, manual clears, launch names and retained
 names with unknown provenance; the original naming owner enforces their priority.
 If the name is protected, naming is unavailable, or the edit fails, continue the main task.
 Do not loop on renaming, send naming reminders, or make naming a prerequisite for useful work.

@@ -5,32 +5,32 @@
 "subagent" can mean Provider-native delegation or an independent AgentMux Session.
 Choose from the user's purpose, available context and capabilities, how results return,
 whether they need to see or continue the collaborator, and any specified Executor,
-Host or execution Workspace. Briefly explain a clear choice; clarify material ambiguity.
+Host or execution Workspace. The user's specified mechanism, position and focus come first.
+Briefly explain a clear choice and continue; clarify only ambiguity that would change the
+task's purpose, execution ownership or usable workface.
 Native delegation often suits a check within the current collaboration; an independent
 Session often suits a directly accessible, continuing collaborator or another Executor/Host.
 Hierarchy does not select the mechanism. Reuse a suitable exact Session when appropriate.
-Neither mechanism guarantees complete context inheritance: check actual native fork or
-delegation support and supply the relevant task, evidence and expected result.
+Neither mechanism guarantees complete context inheritance, and an independent Session does not
+guarantee an empty context: check actual native fork, delegation and shared-file support and
+supply the relevant task, evidence and expected result.
 
 Before opening an Agent or file, inspect your actual position and the intended Tab's
 whole visible layout; your attached Region may be in the background. Keep exact display
 Workspace/Group occurrences separate from execution cwd and file Zone/path.
 For simultaneous comparison, consider a same-Tab split: left/right needs readable width
 on both sides; up/down keeps more width but reduces reading height. Consider a new Tab
-for a full workface, an independent task, long reading, or an already crowded layout.
-Choose the exact anchor and direction from content and current geometry, rather than
-always splitting right. Preserve existing content, readable text/actions and later human focus.
+for a full workface, an independent task, long reading, a wide diff, or an already crowded layout.
+Reuse a suitable existing presentation; never create a duplicate Session or file identity just to
+open it. Choose the exact anchor and direction from content and current geometry, rather than
+always splitting right. Preserve existing content, readable text/actions and later human focus;
+do not keep a split readable by shrinking text, squeezing several Regions or repeatedly
+rearranging the layout.
 
 For web pages, prefer AgentMux's embedded Browser and public CLI. Reuse the exact Browser
 already confirmed for this task; discover available targets with browser targets and read
 the typed Browser identity with space inspect rather than choosing an unrelated page.
-For an unspecified Browser request, start from your own exact Tab and first consider
-this task's same-Tab neighbor Regions.
-Inspect that exact Tab's typed Browser bindings before choosing; a title, recent use or
-human focus does not identify the intended page or grant control. Do not treat a vague
-request as an instruction to create a page. Keep multiple candidates or an unknown task
-relationship explicit and clarify only ambiguity material to the requested operation.
-Honor an exact target or the user's specified tool.
+[Browser target choice](browser-target-choice.md "amux:include")
 If a new page is needed, inspect your own actual Zone/Tab/Region and the whole Tab's visible
 layout, then prefer a directional Region in that same Tab so the Agent and page stay
 readable together. Choose the direction from actual geometry and content.
@@ -42,23 +42,26 @@ view and be harder to find. Creation alone does not confirm that the person sees
 An explicit new-Tab request, an independent task, a crowded layout, a full workface for
 reading, an unsuitable capability or a user-specified Browser/tool can justify a related
 new Tab or the specified tool; briefly explain the reason and actual location. A prototype
-or screenshot alone does not justify a new Tab. Placement does not authorize replacing existing content, changing
-focus, taking human control or bypassing refusal. Keep the original page, user input and
+or screenshot alone does not justify a new Tab. Placement does not authorize replacing existing
+content, changing focus, taking human control or bypassing refusal. Keep the original page, user input and
 unknown operation receipts; confirm the returned Browser, Tab, Region and navigation receipt.
 
 Related Tabs usually belong in the same appropriate display Group; consider proximity
-to your own Tab and inspect the real order. Agent/File new Tabs append to that Group;
+to your own Tab and inspect the real order. An independent use may be organized elsewhere.
+Tab-strip adjacency and a screen split are different positions. Agent/File new Tabs append to that Group;
 they do not offer before/after Tab flags. Do not copy another object's placement options.
 If immediately-after placement is needed, a split followed by promoting its confirmed
 new Region is an option only when the current display matches a single owner Group.
 It temporarily changes layout and activates the new Tab; it is not a routine default,
 cannot choose among multiple display occurrences, and must not move a reused old File Region.
-Keep original content and execution ownership; proximity does not justify moving directories.
+Keep original content and execution ownership; proximity does not justify moving directories
+or copying files.
 
 Background preparation usually preserves navigation/input. When the user intends to
 read the opened content, choose the appropriate navigation explicitly; selection and
 input focus are separate. Briefly name the mechanism and intended location before
-opening, then confirm the returned identity, actual Tab/Region/order and navigation.
+opening, then confirm the returned identity, actual Tab/Region/order, readability and
+navigation, and briefly report which Tab and Region it landed in.
 These are advisory strategies, not fixed directions, size thresholds or additional approval gates.
 
 ## Read an amux object link

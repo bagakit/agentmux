@@ -15,6 +15,21 @@ space inspect --operation-id reads the original creation even after its Agent is
 reports its original Session/Run and retirement fact, not a missing creation or a live Agent.
 Inspection never creates or reopens. A newly authorized takeover after retirement needs a new
 operation ID; keep the previous receipt. Unknown results always keep their original operation.
+A Project is a repository or directory resource, not a Space. A Zone may hold a Git worktree,
+a plain directory or a Topic/Mote workface. One Session may have several display positions;
+use IDs verbatim and never infer identity from a name, cwd or the first display position.
+
+space mv refuses a Region whose Tab has several display occurrences
+(SPACE_MOVE_MULTIPLE_OCCURRENCES_UNSUPPORTED) and keeps every reference and the healthy Agent;
+remove a display binding separately. space unbind of the last display reference never closes
+or deletes the entity; an explicit Close is separate. space swap exchanges two Regions of the
+same Tab across all its presentations and keeps Session, Run, cwd, documents, drafts, split
+ratios and the logical active Region. Cross-Tab, closing or ambiguous targets are refused
+before anything changes, and swapping a Region with itself returns unchanged. space focus
+--expect-session keeps that condition in the receipt as navigation.expectedAgentSessionId.
+Presentation operations do not take input by default; if the original input loses
+eligibility, the receipt is partial with that input issue and keeps the applied result.
+Only save.diskDurability: confirmed is a durable save.
 
 For a new Agent, `amux agent open --executor ID --execution-workspace AGENT_WORKSPACE
 --tool-workspace RESOURCE_WORKSPACE --zone ZONE --new-tab` keeps the Agent Run location
@@ -30,7 +45,8 @@ exact Workspace preference. An empty order restores creation order; new Sessions
 This changes no placement, focus or Run. Applied order and confirmed storage durability are
 separate receipts. After a partial/unknown save, read that exact scope before another write.
 
-Read the connected client Survey list with amux space survey-list. Global
+Survey is Know's browsing and research entry; its list organizes Zone references.
+Read the connected client's Survey list with amux space survey-list. Global
 space ls --presentation includes the same organization and all original items,
 even inside collapsed groups. Groups organize Zone references only; they are not
 spatial Tab Groups. With --input FILE|- provide {organization:{ungrouped:[ZONE],
@@ -47,10 +63,9 @@ selection, layout, cwd and Runs stay unchanged. Applied preferences and disk con
 are separate. After a partial or unknown save, read this same list before changing it.
 A missing client owner is unavailable, never an empty confirmed list.
 
-Desktop device names open their original Host's home workface without a manual project
-setup step. settings hosts home --host HOST reads that exact homeDirectory from its
-Core. Retain the returned Host/path; do not expand a remote ~ with local environment
-facts. Opening an existing home reuses its durable Folder/Zone/Tab work, and does not
-change any existing Session cwd or automatically create an Agent.
+A Host's home workface opens from its exact homeDirectory, read with settings hosts home
+--host HOST; amux settings --skill owns that read. Retain the returned Host/path and never
+expand a remote ~ with local environment facts. Opening an existing home reuses its durable
+Folder/Zone/Tab work and does not change any Session cwd or create an Agent.
 
 [spatial](../shared/spatial.md "amux:include")

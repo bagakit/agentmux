@@ -7,14 +7,13 @@ description: Discover AgentMux identity, common boundaries and local module guid
 ---
 
 Run `amux whoami` once on entry for your original identity and current unavailable facts.
-A Zone is a work partition containing Tabs. A Tab is a complete workface split into Regions;
-a Region is an exact position for Agent, Browser, File or other content, not a Session identity.
+[spatial terms](shared/spatial-terms.md "amux:include")
 Read `amux space --skill` to establish your exact Zone/Tab/Region and display bindings;
 read the whole Tab and neighbors when relevant. Execution cwd and human focus are not your
 display position. Missing spatial facts remain unknown and do not stop healthy capabilities.
 Load only the module relevant to the task; if you know the domain, skip this directory.
-For external platform work, read `amux connection --skill` before choosing a platform tool.
-Use your original bound identity unless the user explicitly selected another identity.
+For external platform work, read `amux connection --skill` before choosing a platform tool,
+and act through your Session's bound platform identity unless the user explicitly selected another.
 Keep original operation identities after unknown replies; never automatically repeat effects.
 
 ## Module directory

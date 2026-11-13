@@ -24,26 +24,30 @@ window, then its original cursor. For folded process reading, add --process-deta
 and keep that representation on inspect/changes continuations. Deferred records retain exact
 original references and revisions; read their full body with the returned versioned anchor
 through inspect --input (omit processDetails). Speech and interactions stay complete.
-JSON record lookup instead locates the current original with its surrounding history;
-use its complete-window older/newer cursors without record. A versioned anchor remains
+Deferral saves wire and Renderer payload, not initial source IO.
+A JSON record lookup through inspect --input locates the current original with its
+surrounding history; keep record and cursor across incomplete fragments, then continue a
+complete window with its older/newer cursors and no record field. A versioned anchor remains
 frozen. Stopping a watch only parks its view: release the exact window with
 agent conversation release when finished, or let its Core owner dispose it.
+
 Original turnOutcome records completed, failed or interrupted independently of metrics and current
 activity; deferred headers retain it. Failed outcomes preserve the Provider diagnosis and exact
 original turn. Optional publicMessage is a safe sharing summary, not permission to publish or retry.
-This saves wire and Renderer payload, not initial source IO; agent history --source captured or native reads full
-retained sources. Use history --kind user-message for input records, retaining human,
-Agent, external, platform and unknown authorship. For replies, inspect original assistant
-records and continue a nonterminal cursor when a bounded page has no matching reply;
-reasoning, tools and platform notices are not answers. message ls/read cover original A2A
-participation. Read leaf help for the exact Host, source, cursor and authorization contract.
-Discovery never grants access to another Agent's private messages or working surface.
+
+agent history --source captured or native reads full retained sources. Use history --kind
+user-message for input records, retaining human, Agent, external, platform and
+unknown authorship. For replies, inspect original assistant records and continue a
+nonterminal cursor when a bounded page has no matching reply; reasoning, tools and platform
+notices are not answers. message ls/read cover original A2A participation. Read leaf help for the exact Host,
+source, cursor and authorization contract. Discovery never grants access to another Agent's
+private messages or working surface.
 
 For a remote peer, `agent send --to-session SID --host HOST` selects its exact route;
-`agent send --reply-source MID` returns along an original verified message. The
-receiving user approves message-purpose source trust independently in each direction.
-A signed outbox save does not prove remote delivery. Read `amux message --skill` for
-original thread synchronization over a one-way connection and unknown receipt recovery.
+`agent send --reply-source MID` returns along an original verified message. Each direction
+needs its own message-source approval from the receiving person. A signed outbox save does not prove remote delivery.
+Read `amux message --skill` for that approval, original thread synchronization over a
+one-way connection and unknown receipt recovery.
 
 For ordinary continuous progress, `agent progress --help` exposes exact-target list,
 create, action and update. A person or device may update only the original loop's interval
@@ -108,7 +112,16 @@ Load only the journey needed now:
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
   For a new Agent with separate project tools, use --execution-workspace AGENT_WORKSPACE
   and --tool-workspace RESOURCE_WORKSPACE. This requires a transport-authenticated user/device
-  without a managed Agent caller; native resume, fork and new Zone creation cannot change this binding.
+  without a managed Agent caller. It cannot be combined with native resume, fork or new Zone
+  creation, and none of those can change this binding.
+- Typed Provider requests: agent interaction respond answers one exact original typed request
+  with a stable operation identity, and agent interaction inspect reads its durable receipt.
+  agent question reply queues asynchronous question answers only where the capability
+  asyncQuestionReply=native-input is present; submission is queue admission, not adoption.
+  Both answers require a transport-approved user or device; a managed Agent cannot answer on a
+  person's behalf, and no parameter or JSON field can claim a person's confirmation. Native
+  question handling is in amux agent native --help.
+  agent view switches an exact SID's presentation between terminal and activity without focus.
 - After freeing storage, a transport-approved user/device can release only the original active creation's current backoff with `amux agent creation continue --host HOST --operation-id ORIGINAL_CID [--session EXACT_SID]`. Managed Agent callers are refused. Use the original CID, not a new operation; an optional known SID is an extra fence. `woken` confirms scheduling only, not recovered storage, Start or delivered input. `not-waiting` stores no future wake credit; `unknown` does not reconstruct a missing/aborted owner or authorize another create. Inspect stays an observation; neither inspect nor repeating agent open wakes this wait. Keep the original creation result and unknown effects unchanged.
 - Original creator/child relations: amux agent spawn --help. Keep the original creation operation after an unknown receipt; never create a replacement to recover its result.
 - Saved native conversations or resume: amux agent native --help.
@@ -118,7 +131,8 @@ Load only the journey needed now:
   Managed Agents must use agent send; public prompt intake cannot bypass A2A attribution.
   The directed session-conversation intent uses the original Session capability and
   retains controlled waiting; a selected native request never changes to terminal after unknown.
-- Recovery or lifecycle: use the exact action's --help; interrupt, stop, resume and reopen differ.
+- Recovery or lifecycle: use the exact action's --help; interrupt, stop, restart, resume and
+  reopen differ.
   Repeating an unknown original Start operation only observes it; it never sends that Start or input again.
   A new explicit `agent resume --session SID --operation-id NEW_ID` without text may resolve a fully
   frozen unknown Start on its exact original Runtime, retaining the same Session/native conversation.
@@ -126,7 +140,9 @@ Load only the journey needed now:
   names the actual original Run; retired records the old key fence and `continuedBy` successor.
   Retirement does not mean the old Start had no effects. After handoff, the manual ID identifies the
   successor Start: an unknown successor needs another explicit manual intent, not replay of that ID.
-  This path sends no old input or automatic reminder. Missing legacy dispatch provenance stays unknown;
+  This path sends no old input or automatic reminder. A prepared resume freezes its complete
+  request privately; its execution environment never appears in the public Session, inspect
+  output or CLI receipts. Missing legacy dispatch provenance stays unknown;
   obtain its original source or an exact retained Run. Inspect/startup never authorizes retirement.
 Before opening or rearranging a workface, read amux space --skill for placement and focus.
 Readers keep their original source/cursor and release only their reader, not the Agent;

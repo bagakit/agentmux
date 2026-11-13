@@ -14,11 +14,12 @@ display Workspace and process cwd are not interchangeable. Discover globally rat
 assuming the current Tab contains every resource or Agent.
 
 app window ls observes the original client windows and their opaque document generations.
+A whole-Tab window uses --kind tab without --region. recordedOperation keeps the original
+operation's intent, author and receipt state; it does not prove the window is still in front.
 app window open moves one exact discovered Tab/Region occurrence; it does not clone content,
 change the Core graph, start a Run or change execution cwd. Use --background when opening
 only a presentation, preserving native input focus; without it, open requests window focus.
-app window focus/return require
-the exact window and document generation. Returning closes only its shell after the original
+app window focus/return require the exact window and document generation. Returning closes only its shell after the original
 workface has returned. Retain the original operation ID: query it with app window ls after
 an unknown result, without automatically opening another window. A recorded acknowledgement
 and current native presentation are separate facts; absent client support is unavailable,
@@ -29,7 +30,7 @@ identity and availability. Inspect an exact returned object through its module b
 operation. app focus selects a surface; it does not accept a task or certify input eligibility.
 Use app focus --surface focus --view map to open the same collaboration map, or --view
 list for execution contexts. Omitting --view preserves the existing Focus view; other
-surfaces cannot use --view. Space always presents the original workbench.
+surfaces cannot use --view. The Space surface always presents the original workbench.
 Use app focus --surface focus --host HOST --session SID for one exact Agent in the list.
 Both identities are required; this cannot use map view or transfer input. Original filters
 remain, with one explained temporary reveal. Inspect focus.agent for actual card visibility,
@@ -61,8 +62,7 @@ Supply the inspected expectedActiveRevision and retain the original operationId 
 reply. Inspect that operation; never replay it automatically. A changed active HTTP snapshot does
 not reload a phone or prove it loaded the release. Only the compiled page's authenticated loaded
 report supplies that fact. The page keeps both its compiled buildId and original content
-namespaceDigest. The root HTTP
-document redirects into that content-addressed namespace; reusing a build label cannot revive
+namespaceDigest. The root HTTP document redirects into that content-addressed namespace; reusing a build label cannot revive
 an older content namespace or prove that an older page loaded the current release.
 Active and previous namespaces are retained in this Host instance only; older namespaces
 explicitly become not-retained. Publication does not claim disk persistence,
