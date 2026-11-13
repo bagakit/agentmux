@@ -36,6 +36,5 @@ export async function currentWorkspaceAliases(root) {
       aliases.push({ find: new RegExp(`^${pattern}$`), replacement: source })
     }
   }
-  aliases.push(...['react', 'react-dom'].map(find => ({ find, replacement: resolve(root, 'apps/desktop/node_modules', find) })))
   return { aliases, manifests, directories }
 }
