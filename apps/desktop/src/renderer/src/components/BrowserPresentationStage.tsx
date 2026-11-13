@@ -8,6 +8,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
 import type { BrowserAgentControlPreferences } from '../../../shared/browser-agent-control'
+import type { BrowserPageShortcutAction } from '../../../shared/browser-page-shortcuts'
 import { BrowserControlBoundary } from './BrowserControlBoundary'
 
 export type BrowserStagePresentation = {
@@ -195,14 +196,19 @@ export function useBrowserPresentationCapture(browserId: string) {
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
 /** A presentation owns geometry/lease/gesture only; page and Browser UI state stay in BrowserPane. */
-export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, children }: {
+export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, onPageKey, control, preferences, children }: {
   browserId: string; navigationId: string; presentation: BrowserStagePresentation; inputSelected: boolean; blocked: boolean
   control?: AgentMuxBrowserControl | undefined; preferences?: BrowserAgentControlPreferences | undefined
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
   onPresentationRemoved?: (() => void) | undefined
+  /** A reserved chord pressed in the page while this presentation's lease holds it. */
+  onPageKey?: ((action: BrowserPageShortcutAction) => void) | undefined
 }) {
   const removed = useRef(onPresentationRemoved)
   removed.current = onPresentationRemoved
+  const pageKey = useRef(onPageKey)
+  pageKey.current = onPageKey
+  const pageKeys = onPageKey !== undefined
   const occurrenceLocationKey = JSON.stringify(presentation.occurrence.location)
   const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
@@ -211,6 +217,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const [frameSize, setFrameSize] = useState<{ stream: MediaStream; width: number; height: number } | null>(null)
   const retainedFrame = useRef<MediaStream | null>(null)
   const lease = useRef<BrowserPresentationLease | null>(null)
+  useEffect(() => pageKeys ? api.browser.onPageKey(key => {
+    if (key.browserId === browserId && key.leaseId === lease.current?.leaseId) pageKey.current?.(key.action)
+  }) : undefined, [browserId, pageKeys])
   const [notice, setNotice] = useState<{ source: 'registration' | 'presentation' | 'input'; message: string } | null>(null)
   const [registrationPending, setRegistrationPending] = useState(true)
   const latest = useRef({ presentation, blocked, navigationId, inputSelected })

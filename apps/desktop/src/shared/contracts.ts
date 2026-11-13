@@ -8,6 +8,7 @@ import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@age
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserViewport } from './browser-viewport.js'
+import type { BrowserPageShortcutAction } from './browser-page-shortcuts.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 export type { LaunchOptionSelection } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '@agentmux/browser/model/browser-outcome-criteria'
@@ -1507,6 +1508,12 @@ export type BrowserPresentationEvent =
   /** Physical coverage of this exact media generation; never an input selection receipt. */
   | { type: 'native-coverage-changed'; browserId: string; coverage: { leaseId: string; captureId: string } | null }
 export const BROWSER_PRESENTATION_EVENT_CHANNEL = 'agentmux:browser-presentation-event'
+/**
+ * Main -> the document showing this exact page: a reserved chord pressed while the page itself had focus.
+ * `leaseId` names the presentation holding the page; null when its Browser pane places the page directly.
+ */
+export type BrowserPageKeyEvent = { browserId: string; leaseId: string | null; action: BrowserPageShortcutAction }
+export const BROWSER_PAGE_KEY_CHANNEL = 'agentmux:browser-page-key'
 
 export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
 /** Main -> renderer: the user clicked a notification about this Agent Session. */
@@ -2161,6 +2168,7 @@ export type AgentMuxDesktopApi = {
     ackPresentationCapture(captureId: string, ack: BrowserPresentationCaptureAck): Promise<void>
     activatePresentation(leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt>
     onPresentationEvent(listener: (event: BrowserPresentationEvent) => void): () => void
+    onPageKey(listener: (event: BrowserPageKeyEvent) => void): () => void
     /** Release only the Main-owned native page surface; the Renderer Region remains present. */
     release(id: string, navigationId: string): Promise<import('@agentmux/core').AgentMuxBrowserReleaseReceipt>
     /** Rebuild a previously released native page from the retained Region projection. */

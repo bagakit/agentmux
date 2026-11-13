@@ -1624,6 +1624,7 @@ const mockApi: AgentMuxDesktopApi = {
     ackPresentationCapture: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
     activatePresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
     onPresentationEvent: () => () => {},
+    onPageKey: () => () => {},
     setBounds: async () => {},
     release: async (id, navigationId) => ({ browserId: id, navigationId, status: 'unknown', reasons: ['owner-unavailable'] }),
     restore: async (id, input) => {

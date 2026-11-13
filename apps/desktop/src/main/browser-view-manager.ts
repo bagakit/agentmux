@@ -26,6 +26,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
+  BROWSER_PAGE_KEY_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
   BROWSER_PNG_MAX_BASE64_CHARS,
   type BrowserAnnotationMarker,
@@ -47,8 +48,9 @@ import type {
   BrowserPresentationOccurrence, BrowserPresentationGeometry, BrowserPresentationLease,
   BrowserPresentationCapture, BrowserPresentationCaptureAck, BrowserPresentationEvent,
   BrowserPresentationRevocationReason, BrowserPresentationActivation, BrowserPresentationActivationReceipt,
-  BrowserPresentationViewportPoint, BrowserPresentationMouseModifier
+  BrowserPresentationViewportPoint, BrowserPresentationMouseModifier, BrowserPageKeyEvent
 } from '../shared/contracts.js'
+import { browserPageShortcut } from '../shared/browser-page-shortcuts.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
@@ -1570,6 +1572,22 @@ export class BrowserViewManager {
       if (!surface.presentations.delete(token)) return
       await this.releasePresentationInputSurface(surface)
     } }
+  }
+
+  /**
+   * A human's exact reserved chord on the page it reads goes to the Browser workface showing that page. An inline
+   * card, an unknown presentation or an Agent's control leaves the key where it was going.
+   */
+  private routePageKey(entry: BrowserEntry, view: WebContentsView, input: Electron.Input): boolean {
+    const action = browserPageShortcut(input, process.platform === 'darwin')
+    if (!action || !this.owns(entry, view) || this.agentOwnsInput(entry) || this.nativeOwner(entry.id)?.view !== view) return false
+    const lease = entry.inputLeaseId === null ? null : this.presentationLeases.get(entry.inputLeaseId)
+    if (lease === undefined || lease && 'kind' in lease.occurrence.location) return false
+    const host = this.windowForView(view)
+    if (host.isDestroyed() || host.webContents.isDestroyed()) return false
+    if (action !== 'reload') host.webContents.focus()
+    host.webContents.send(BROWSER_PAGE_KEY_CHANNEL, { browserId: entry.id, leaseId: lease?.id ?? null, action } satisfies BrowserPageKeyEvent)
+    return true
   }
 
   /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */
@@ -4645,6 +4663,10 @@ export class BrowserViewManager {
           if (this.inputSurfaces.get(view)?.presentations.size) this.windowForView(view).webContents.focus()
           else entry.inputShield.contents.focus()
         }
+        return
+      }
+      if (input.type === 'keyDown' && !input.isComposing && this.routePageKey(entry, view, input)) {
+        event.preventDefault()
         return
       }
       // Only this real page's non-IME Escape may be consumed by its open containing float.

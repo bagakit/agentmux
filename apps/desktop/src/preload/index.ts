@@ -24,6 +24,7 @@ import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, Age
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
   BROWSER_EVENT_CHANNEL,
+  BROWSER_PAGE_KEY_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
   CONFIG_CHANGED_CHANNEL,
   CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL,
@@ -50,6 +51,7 @@ import type {
   BrowserPresentationCaptureAck,
   BrowserPresentationActivation,
   BrowserPresentationEvent,
+  BrowserPageKeyEvent,
   BrowserEvent,
   BrowserOperation,
   BrowserStepEvidenceRead,
@@ -872,6 +874,11 @@ const api: AgentMuxPreloadApi = {
       const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserPresentationEvent): void => listener(value)
       ipcRenderer.on(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
       return () => ipcRenderer.off(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
+    },
+    onPageKey(listener: (event: BrowserPageKeyEvent) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserPageKeyEvent): void => listener(value)
+      ipcRenderer.on(BROWSER_PAGE_KEY_CHANNEL, wrapped)
+      return () => ipcRenderer.off(BROWSER_PAGE_KEY_CHANNEL, wrapped)
     },
     release: (id: string, navigationId: string) => ipcRenderer.invoke('browser:release', id, navigationId),
     restore: (id: string, input: { workspaceId: string | null; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }) =>

@@ -585,6 +585,12 @@ function BrowserPaneContent({
     else if (action === 'focus-address') addressInputs.current.get(key)?.current?.focus()
     else reloadPage()
   }
+  const pageAction = useRef(runPageAction)
+  pageAction.current = runPageAction
+  const placesPageDirectly = presentations.length === 0
+  useEffect(() => placesPageDirectly ? api.browser.onPageKey(key => {
+    if (key.browserId === tab.browserId && key.leaseId === null) pageAction.current(tab.browserId, key.action)
+  }) : undefined, [tab.browserId, placesPageDirectly])
   const recoveryVisible = (visible || presentations.some(presentation => presentation.visible)) && Boolean(
     tab.error || released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null)
   const previewKey = JSON.stringify([tab.browserId, tab.profileId, tab.mode, tab.workspaceId, tab.navigationId])
@@ -1677,6 +1683,7 @@ function BrowserPaneContent({
         control={tab.control} preferences={resolveBrowserAgentControl(agentAppearance)}
         inputSelected={presentation.occurrence.presentationId === selectedPresentationId}
         onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
+        onPageKey={action => runPageAction(key, action)}
         blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
 
