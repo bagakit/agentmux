@@ -373,15 +373,18 @@ export class AgentHookServer {
    * One lost observation of a live, Run-bound binding. Repeats only move the watermark; the public
    * fact changes when it appears or when owner work may have started for the first time.
    */
-  private recordDeliveryLoss(binding: PendingBinding, sequence: number, code: string, accepted: false | 'unknown'): void {
+  private recordDeliveryLoss(binding: PendingBinding, sequence: number, code: string, accepted: false | 'unknown', reason?: string): void {
     if (binding.closed || binding.runId === null) return
     const current = binding.delivery
+    // The reason belongs to the failure that set this code; it never outlives a code change.
+    const failure = { accepted, code, ...(reason === undefined ? {} : { reason }) }
     if (current) {
       current.lostThrough = Math.max(current.lostThrough, sequence)
       if (accepted === false || current.fact.accepted === 'unknown') return
-      current.fact = { ...current.fact, accepted, code }
+      const { reason: _previous, ...kept } = current.fact
+      current.fact = { ...kept, ...failure }
     } else {
-      binding.delivery = { fact: { run: { runId: binding.runId }, since: Date.now(), accepted, code }, lostThrough: sequence }
+      binding.delivery = { fact: { run: { runId: binding.runId }, since: Date.now(), ...failure }, lostThrough: sequence }
       this.failing.set(JSON.stringify([binding.agentSessionId, binding.runId]), binding)
     }
     this.deliveryChanged(binding)
@@ -563,7 +566,7 @@ export class AgentHookServer {
         recovery: accepted === 'unknown'
           ? 'Retain the original receipt and verify its result against the native Session source; retry observes the same outcome without repeating owner work. The Agent and terminal remain available.'
           : 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
-    if (sequence !== null) this.recordDeliveryLoss(binding, sequence, code, accepted)
+    if (sequence !== null) this.recordDeliveryLoss(binding, sequence, code, accepted, message)
   }
 
   private enqueue(binding: PendingBinding, event: HookIngressEvent): Promise<void> {

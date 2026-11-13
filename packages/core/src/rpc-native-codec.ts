@@ -165,9 +165,9 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
     }
     if (source.hookDeliveryObservation !== undefined) {
       // One live delivery loss of this exact Run; a loss of another Run is not this Session's fact.
-      const loss = record(source.hookDeliveryObservation, ['run', 'since', 'accepted', 'code'])
+      const loss = record(source.hookDeliveryObservation, ['run', 'since', 'accepted', 'code', 'reason'])
       if (runRef(loss.run).runId !== session.run.runId || (loss.accepted !== false && loss.accepted !== 'unknown')) fail()
-      count(loss.since); string(loss.code)
+      count(loss.since); string(loss.code); if (loss.reason !== undefined) text(loss.reason)
       session.hookDeliveryObservation = structuredClone(loss) as NonNullable<typeof session.hookDeliveryObservation>
     }
     if (source.currentActivity !== undefined) {

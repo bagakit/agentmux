@@ -1572,6 +1572,8 @@ export type AgentHookDeliveryObservation = {
   accepted: false | 'unknown'
   /** Failure code of the observation that set or escalated `accepted`. */
   code: string
+  /** A fixed, safe field rejection from that same failure (never tool text or credentials). */
+  reason?: string
 }
 
 /** This is the complete persistent semantic/control record. It deliberately has no
