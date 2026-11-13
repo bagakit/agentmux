@@ -51,6 +51,10 @@ Read only the matching local help:
   Another view of that Capsule does not make this exact request ambiguous. A stale field
   cannot retarget an external document; a different object still uses its original owner,
   and a global Capsule open with several existing views requires an exact destination.
+- External clients use the typed `@agentmux/core/browser-sdk` connection for an explicit RPC endpoint.
+  The separate `@agentmux/browser-mcp` stdio adapter reuses that connection and original managed
+  credentials; its `--help` describes setup. Browser/operation IDs stay explicit, stream Gap
+  facts remain visible, and cancelling an observation never substitutes for browser.stop.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
 - amux browser task --help: source/draft discovery, draft edit/publish, original create receipts,
   version reliability, run, batch and stop.
