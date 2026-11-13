@@ -7,7 +7,7 @@ const port = vi.hoisted(() => {
   const listeners = new Set<(list: BrowserProfileList) => void>()
   let list: BrowserProfileList = { revision: 1, sequence: 1, profiles: [], folders: [], views: [] }
   return { listeners, set(value: BrowserProfileList) { list = value; listeners.forEach(listener => listener(list)) },
-    readProfiles: vi.fn(async () => list), onProfilesChanged: vi.fn((listener: (list: BrowserProfileList) => void) => { listeners.add(listener); return () => listeners.delete(listener) }),
+    get: () => list, readProfiles: vi.fn(async () => list), onProfilesChanged: vi.fn((listener: (list: BrowserProfileList) => void) => { listeners.add(listener); return () => listeners.delete(listener) }),
     bulkUpdateProfiles: vi.fn(async () => [] as unknown[]), saveProfileView: vi.fn(), deleteProfileView: vi.fn(), updateProfile: vi.fn(),
     detectProfileImportSources: vi.fn(async () => []), readProfileProxySignIn: vi.fn(async () => null), listProfileSites: vi.fn(async () => []) }
 })
@@ -43,14 +43,53 @@ describe('Original Profile library query and exact selection consumer', () => {
   it('unwraps confirmed view/bulk receipts and typed refusals through the exact API registry used by preload and the product API', async () => {
     const view = { id: 'v-exact', label: 'Saved query', query: {} }, results = [{ profileId: 'p-a', expectedRevision: 'a-token', outcome: 'failed', code: 'CONFLICT', message: 'Kept original' }]
     const wire = {
-      saveProfileView: async () => ipcResult(() => view),
+      saveProfileView: async () => ipcResult(() => ({ view, revision: 7 })),
       deleteProfileView: async () => ipcResult(() => { throw Object.assign(new Error('Original bytes kept'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }) }),
       bulkUpdateProfiles: async () => ipcResult(() => results)
     }
     const gui = unwrapIpcResultMethods<any, any>(wire as never, BROWSER_PROFILE_RESULT_METHODS)
-    expect(await gui.saveProfileView()).toEqual(view)
+    expect(await gui.saveProfileView()).toEqual({ view, revision: 7 })
     expect(await gui.bulkUpdateProfiles()).toEqual(results)
     await expect(gui.deleteProfileView()).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT', message: 'Original bytes kept' })
+  })
+
+  it('keeps a confirmed save baseline available for immediate query edits and repeated Update without Reload', async () => {
+    port.saveProfileView.mockImplementation(async (label, query, expectedRevision, viewId) => {
+      expect(expectedRevision).toBe(port.get().revision)
+      const view = { id: viewId ?? 'v-created', label, query: structuredClone(query) }, next = { ...port.get(), revision: port.get().revision + 1, sequence: port.get().sequence + 1, views: [view] }
+      port.set(next)
+      return { view, revision: next.revision }
+    })
+    await render()
+    await input(container.querySelector<HTMLInputElement>('[aria-label="Profile view name"]')!, 'Immediate edits')
+    await click(button('Save new'))
+    await input(container.querySelector<HTMLSelectElement>('[aria-label="Profile order"]')!, 'name')
+    expect(button('Update view')?.disabled).toBe(false)
+    await click(button('Update view'))
+    expect(port.get().views[0]!.query).toEqual({ sort: 'name' })
+    await input(container.querySelector<HTMLSelectElement>('[aria-label="Profile observed status"]')!, 'unknown')
+    expect(button('Update view')?.disabled).toBe(false)
+    await click(button('Update view'))
+    expect(port.get().views[0]!.query).toEqual({ status: 'unknown', sort: 'name' })
+    expect(port.saveProfileView.mock.calls.map(call => call[2])).toEqual([1, 2, 3])
+  })
+
+  it('keeps a later selected view and later query/name inputs when an earlier Save acknowledgement arrives', async () => {
+    const existing = { id: 'v-other', label: 'Other saved view', query: { route: 'system' as const } }
+    port.set({ ...port.get(), views: [existing] })
+    let finish!: (view: unknown) => void
+    port.saveProfileView.mockImplementationOnce(async () => new Promise(resolve => { finish = resolve }))
+    await render()
+    await input(container.querySelector<HTMLInputElement>('[aria-label="Profile view name"]')!, 'Earlier submitted view')
+    await click(button('Save new'))
+    await input(container.querySelector<HTMLSelectElement>('[aria-label="Saved Profile view"]')!, existing.id)
+    await input(container.querySelector<HTMLSelectElement>('[aria-label="Profile order"]')!, 'recent')
+    await input(container.querySelector<HTMLInputElement>('[aria-label="Profile view name"]')!, 'Keep newer view draft')
+    const saved = { id: 'v-earlier', label: 'Earlier submitted view', query: {} }
+    await act(async () => { port.set({ ...port.get(), revision: 2, sequence: 2, views: [existing, saved] }); finish({ view: saved, revision: 2 }) })
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Saved Profile view"]')!.value).toBe(existing.id)
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Profile order"]')!.value).toBe('recent')
+    expect(container.querySelector<HTMLInputElement>('[aria-label="Profile view name"]')!.value).toBe('Keep newer view draft')
   })
 
   it('keeps the original editor and notes/route drafts while filters, order, selection and pushes change the list', async () => {

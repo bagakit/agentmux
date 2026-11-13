@@ -47,7 +47,7 @@ describe('Profile query, saved views and exact metadata batches on original owne
   it('keeps named query identity and exact folder scope across restart, without copying selection or changing Profile tokens', async () => {
     const { manager, path, id } = await fixture(), folder = await manager.createFolder('Review', manager.listRevision())
     const token = selected(manager, [id])[0]!.expectedRevision
-    const view = await manager.saveView('Proxy review', { folderId: folder.id, route: 'proxy', sort: 'recent' }, manager.listRevision())
+    const { view } = await manager.saveView('Proxy review', { folderId: folder.id, route: 'proxy', sort: 'recent' }, manager.listRevision())
     view.query.search = 'caller mutation'
     expect(manager.listViews()[0]!.query.search).toBeUndefined()
     expect(selected(manager, [id])[0]!.expectedRevision).toBe(token)
@@ -68,7 +68,7 @@ describe('Profile query, saved views and exact metadata batches on original owne
     const { manager, path, id } = await fixture()
     const other = await manager.createProfile('Retained second Profile')
     await manager.updateProfile(id, { tags: ['Keep'], notes: 'Retain this configuration' }, selected(manager, [id])[0]!.expectedRevision)
-    const view = await manager.saveView('Unknown first', { status: 'unknown', sort: 'name' }, manager.listRevision())
+    const { view } = await manager.saveView('Unknown first', { status: 'unknown', sort: 'name' }, manager.listRevision())
     const expectedProfiles = manager.listProfiles(), expectedPartition = manager.resolvePartition(id)
     const original = JSON.parse(await readFile(path, 'utf8'))
     // Both the view and its query have a different legal JSON insertion order.
@@ -89,6 +89,21 @@ describe('Profile query, saved views and exact metadata batches on original owne
     await rm(path)
     await expect(restarted.saveView('No empty replacement', {}, restarted.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('returns the exact view commit revision through Manager and public service despite a later confirmed collection write before its ACK', async () => {
+    const { manager, store } = await fixture(), before = manager.listRevision()
+    const save = store.saveView.bind(store)
+    store.saveView = async (...args) => {
+      const saved = await save(...args)
+      await manager.createProfile('Later independent collection commit')
+      return saved
+    }
+    const receipt = await executeBrowserProfileControl({ operation: 'browser.profile.view.create', label: 'Exact ACK', query: { sort: 'name' }, expectedRevision: before },
+      { profiles: manager, usage: {} as never, network: {} as never }, undefined)
+    expect(receipt).toMatchObject({ operation: 'browser.profile.view.create', revision: before + 1, view: { label: 'Exact ACK', query: { sort: 'name' } } })
+    expect(manager.listRevision()).toBe(before + 2)
+    expect(receipt.revision).not.toBe(manager.listRevision())
   })
 
   it('leaves view/folder configuration CAS and Profile tokens unchanged by activity checkpoints', async () => {

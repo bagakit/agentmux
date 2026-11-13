@@ -144,6 +144,73 @@ app.whenReady().then(async () => {
     const filtered = await cli(['browser', 'profile', 'ls', '--view', previous.viewId])
     assert.deepEqual(filtered.profiles.map((value: any) => value.id), previous.filteredIds)
     receipt.cases.push('real-process-restart-retains-saved-view-config-original-core-space-ids-and-native-login-state')
+  } else if (phase === 'save-ack') {
+    await page.executeJavaScript(`document.getElementById('draft').value='Keep save ACK page draft'`)
+    const sourceContents = page.id, actualSave = profiles.saveView.bind(profiles)
+    let deferNext = false, release!: () => void
+    receipt.viewAcks = []
+    profiles.saveView = async (...args) => {
+      const saved = await actualSave(...args)
+      receipt.viewAcks.push({ inputRevision: args[2], viewId: saved.view.id, revision: saved.revision })
+      if (deferNext) {
+        deferNext = false
+        await profiles.createProfile('Independent write after this exact view commit')
+        const waiting = new Promise<void>(done => { release = done })
+        receipt.delayedViewAck = structuredClone(saved)
+        await waiting
+      }
+      return saved
+    }
+    await click(`[...document.querySelectorAll('.browser-profile-library__views summary')].find(e=>e.textContent==='Save this view')`)
+    await input(`document.querySelector('input[aria-label="Profile view name"]')`, 'Native immediate updates')
+    await click(textButton('Save new'))
+    await until(() => evaluate(`(()=>{const e=${textButton('Update view')};return e&&!e.disabled})()`), 'Save new immediately exposes Update on its confirmed revision')
+    const first = profiles.listViews().find(view => view.label === 'Native immediate updates')!
+    await click(`document.querySelector('.browser-profile-library__views details summary')`)
+    await choose('Profile order', 'name')
+    await click(textButton('Update view'))
+    await until(() => profiles.listViews().find(view => view.id === first.id)?.query.sort === 'name', 'first immediate GUI Update without Reload')
+    await until(() => evaluate(`!(${textButton('Update view')}).disabled`), 'Update ACK retains the next edit baseline')
+    await choose('Profile observed status', 'unknown')
+    await click(textButton('Update view'))
+    await until(() => profiles.listViews().find(view => view.id === first.id)?.query.status === 'unknown', 'second immediate GUI Update without Reload')
+    await until(() => evaluate(`!(${textButton('Update view')}).disabled`), 'second Update ACK complete')
+    assert.equal(receipt.viewAcks.length, 3)
+    assert.equal(receipt.viewAcks[1].inputRevision, receipt.viewAcks[0].revision)
+    assert.equal(receipt.viewAcks[2].inputRevision, receipt.viewAcks[1].revision)
+    receipt.cases.push('actual-gui-save-new-modify-update-modify-update-consumes-each-confirmed-write-revision-without-reload')
+
+    const later = (await cli(['browser', 'profile', 'view', 'create', '--label', 'Later selected view', '--query', '{"route":"system"}', '--expected-revision', String(profiles.listRevision())])).view
+    await until(() => evaluate(`Boolean(document.querySelector('select[aria-label="Saved Profile view"] option[value="${later.id}"]'))`), 'later view discovered from original catalog')
+    await input(`document.querySelector('input[aria-label="Profile view name"]')`, 'Earlier pending save')
+    deferNext = true
+    await click(textButton('Save new'))
+    await until(() => receipt.delayedViewAck, 'earlier view confirmed before delayed ACK')
+    assert.ok(profiles.listRevision() > receipt.delayedViewAck.revision)
+    await until(() => evaluate(`viewsProof.facts().catalogRevision===${profiles.listRevision()}`), 'later confirmed catalog reaches the original list before choosing its view')
+    await choose('Saved Profile view', later.id)
+    await choose('Profile order', 'recent')
+    await input(`document.querySelector('input[aria-label="Filter profiles"]')`, 'Keep later query')
+    await input(`document.querySelector('input[aria-label="Profile view name"]')`, 'Keep later name')
+    const laterBaseline = profiles.listRevision()
+    release()
+    await until(() => evaluate(`!(${textButton('Save new')}).disabled`), 'earlier ACK delivered without taking current view')
+    assert.equal(await evaluate(`document.querySelector('select[aria-label="Saved Profile view"]').value`), later.id)
+    assert.equal(await evaluate(`document.querySelector('select[aria-label="Profile order"]').value`), 'recent')
+    assert.equal(await evaluate(`document.querySelector('input[aria-label="Filter profiles"]').value`), 'Keep later query')
+    assert.equal(await evaluate(`document.querySelector('input[aria-label="Profile view name"]').value`), 'Keep later name')
+    await click(textButton('Update view'))
+    await until(() => profiles.listViews().find(view => view.id === later.id)?.label === 'Keep later name', 'later selected view keeps its own original baseline')
+    const updated = profiles.listViews().find(view => view.id === later.id)!
+    assert.deepEqual(updated.query, { search: 'Keep later query', route: 'system', sort: 'recent' })
+    assert.equal(receipt.viewAcks.at(-1).inputRevision, laterBaseline)
+    assert.notEqual(receipt.viewAcks.at(-1).inputRevision, receipt.delayedViewAck.revision)
+    assert.equal(profiles.listViews().find(view => view.id === receipt.delayedViewAck.view.id)!.label, 'Earlier pending save')
+    assert.equal(page.id, sourceContents)
+    assert.equal(await page.executeJavaScript('document.getElementById("draft").value'), 'Keep save ACK page draft')
+    assert.equal((await evaluate('viewsProof.facts()')).sibling, 'Keep this sibling draft')
+    profiles.saveView = actualSave
+    receipt.cases.push('delayed-exact-view-ack-after-later-collection-write-preserves-new-view-query-name-baseline-and-original-page')
   } else {
     await evaluate(`viewsProof.update(${JSON.stringify(sourceId)},{label:'Original settings',notes:'Saved purpose',network:{mode:'direct'}})`)
     await page.executeJavaScript(`document.getElementById('draft').value='Keep this original page draft';document.cookie='source-sign-in=original; Max-Age=3600; Path=/';localStorage.setItem('source-only','keep original')`)

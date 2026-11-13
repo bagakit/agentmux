@@ -9,13 +9,13 @@ import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
-const seedOnly = process.argv.includes('--seed-only')
-if (process.argv.slice(2).some(arg => arg !== '--seed-only')) throw new Error('Use no flags for seed/restart, or explicit --seed-only for current GUI consumption without a restart claim')
+const seedOnly = process.argv.includes('--seed-only'), saveAckOnly = process.argv.includes('--save-ack-only')
+if ((seedOnly && saveAckOnly) || process.argv.slice(2).some(arg => arg !== '--seed-only' && arg !== '--save-ack-only')) throw new Error('Use no flags for seed/restart, or explicit --seed-only for current GUI consumption without a restart claim')
 const proof = join(root, '.tmp/browser-profile-views'); await mkdir(proof, { recursive: true })
 const out = await mkdtemp(join(proof, 'attempt-')), fixture = join(root, 'apps/desktop/scripts/fixtures/browser-profile-views')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { schema: 'agentmux.browser-profile-views.native.v1', passed: false, out,
-  requestedStages: seedOnly ? ['candidate/seed'] : ['candidate/seed', 'candidate/restart'], mode: seedOnly ? 'seed-only-no-restart-claim' : 'seed-and-restart', sources: {}, runs: [],
+  requestedStages: saveAckOnly ? ['candidate/save-ack'] : seedOnly ? ['candidate/seed'] : ['candidate/seed', 'candidate/restart'], mode: saveAckOnly ? 'save-ack-only-no-restart-or-visual-claim' : seedOnly ? 'seed-only-no-restart-claim' : 'seed-and-restart', sources: {}, runs: [],
   dependency: { electron: await realpath(require('electron')), sha256: sha(await readFile(require('electron'))), version: require('electron/package.json').version },
   boundary: 'Private App; production preload/trusted IPC/Profile metadata owner/public CLI/Settings UI and native pages. No Native Run, Provider/hook connection, installed app, user Profile, HOME override or external website. Screenshots prove App Renderer geometry, not OS child-view composition. Production mutations are separate owner-test receipts, not claimed as native stages.' }
 const aliases = [], mainModules = []
@@ -81,7 +81,7 @@ try {
     } }, sourcePlugin()] })
   await writeFile(join(renderer, 'index.html'), '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="renderer.css"><div id="root"></div><script type="module" src="renderer.js"></script>')
   const home = await mkdtemp('/tmp/amux-profile-views-')
-  const variants = [{ name: 'candidate', phases: seedOnly ? ['seed'] : ['seed', 'restart'], home }]
+  const variants = [{ name: 'candidate', phases: saveAckOnly ? ['save-ack'] : seedOnly ? ['seed'] : ['seed', 'restart'], home }]
   receipt.requestedStages = variants.flatMap(candidate => candidate.phases.map(phase => candidate.name + '/' + phase))
   assert.ok(receipt.requestedStages.length > 0)
   for (const candidate of variants) {

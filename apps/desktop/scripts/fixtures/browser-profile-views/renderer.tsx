@@ -1,3 +1,4 @@
+import { browserProfiles } from '../../../src/renderer/src/lib/browser-profiles'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -73,7 +74,7 @@ Object.assign(window, { viewsProof: {
   async persist() { const current = await api.spatial.read(); return api.spatial.commit({ expectedRevision: current?.revision ?? 0, graph: desktopSpatialGraph(useAppStore.getState(), [], current?.graph ?? null) }) },
   settings(show: boolean) { setSettings(show) }, showBrowser(id: string) { setViewed(id); setSettings(false) },
   theme(mode: 'light' | 'dark') { updateThemeSelection({ ...appearance, appAppearance: mode }) },
-  facts() { return { editor: document.querySelector('article.browser-profile-editor')?.getAttribute('aria-label'),
+  facts() { return { catalogRevision: browserProfiles.get().revision, editor: document.querySelector('article.browser-profile-editor')?.getAttribute('aria-label'),
     proxyDraft: document.querySelector<HTMLInputElement>('input[aria-label="Proxy server"]')?.value,
     notice: document.querySelector('.browser-profiles-settings__service')?.textContent,
     query: document.querySelector<HTMLInputElement>('input[aria-label="Filter profiles"]')?.value,
