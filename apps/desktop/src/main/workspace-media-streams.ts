@@ -320,6 +320,8 @@ export class WorkspaceMediaStreams {
       ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {})
     })
     if (request.method === 'HEAD' || length === 0) { response.end(); return true }
+    // A reader that already left has no close event still to come; registering it would keep it for the lease's life.
+    if (response.destroyed) return false
     lease.responses.add(response)
     response.once('close', () => lease.responses.delete(response))
     return await this.pump(lease, path, media, response, start, end)
@@ -361,6 +363,7 @@ export class WorkspaceMediaStreams {
     const previous = lease.served.get(path)
     let changed = !previous || !previous.body.equals(body)
     if (previous && !changed && previous.hold !== null) {
+      if (response.destroyed) return
       lease.responses.add(response)
       response.once('close', () => lease.responses.delete(response))
       // While held, compare a cheap stamp; only a changed stamp pays for a full confined read.
