@@ -143,6 +143,17 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     }
   }, 20_000)
 
+  it('inspect shows a Profile whose Agents are off, and update cannot change that switch', async () => {
+    profiles[1] = { ...profiles[1]!, agentAccess: false }
+    const inspected = await run(['inspect', '--profile', WORK_ID])
+    expect(inspected.code, inspected.stderr).toBe(0)
+    expect(inspected.body.result.profile.agentAccess).toBe(false)
+    profiles[1] = { ...profiles[1]!, agentAccess: true as never }
+    expect((await run(['inspect', '--profile', WORK_ID])).body.error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    const update = await runCompiledObjectCli(['browser', 'profile', 'update', '--profile', WORK_ID, '--expected-revision', '4', '--agent-access', 'off'], person())
+    expect(update.code, 'the Agent switch has no public setter').not.toBe(0)
+  }, 20_000)
+
   it('opens a Browser in an exact Profile and the receipt names it; private and conflicting choices do not', async () => {
     const open = (extra: string[]) => runCompiledObjectCli(['browser', 'open', '--url', 'https://example.invalid/', '--in-region', 'r-1', ...extra], person())
       .then(output => ({ ...output, body: objectCliReceipt(JSON.parse(output.code === 0 ? output.stdout : output.stderr)) }))
