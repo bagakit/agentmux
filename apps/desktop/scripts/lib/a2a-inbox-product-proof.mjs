@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
-import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from '../probe-process.mjs'
+import { listProbeProcesses, stopProbeProcesses, signalOwnedProbeProcess, runProbeProcess } from '../probe-process.mjs'
 
 const exec = promisify(execFile), require = createRequire(import.meta.url)
 export const a2aProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -38,6 +38,37 @@ export function assertA2aReferenceUserReading(reading, recipient, nativeSource, 
   assert.equal(reading.view.sourceCount, 2)
   assert.ok(reading.view.coverage.some(text => text.includes('已查完可用记录（本次读取）')))
   assert.deepEqual(reading.view.errors, [])
+}
+/** A one-way stop fence closes the spawn/registration race before ending an Inspector owner. */
+export const a2aPrivateMainPaths = root => ({ registry: join(root, 'private-main-lifecycle.json'), stop: join(root, 'private-main-stop-request') })
+export async function stopPrivateA2aMains(root) {
+  const paths = a2aPrivateMainPaths(root)
+  await writeFile(paths.stop, 'Stop requested before the original Inspector owner may exit.\n')
+  const deadline = Date.now() + 5_000
+  let launches
+  for (;;) {
+    try {
+      const record = JSON.parse(await readFile(paths.registry, 'utf8'))
+      assert.equal(record.schema, 'agentmux.private-a2a-launches.v1'); launches = record.launches
+      assert.ok(Array.isArray(launches))
+    } catch (error) { if (error.code !== 'ENOENT') throw error; launches = [] }
+    if (!launches.some(launch => ['launching', 'unconfirmed'].includes(launch.phase))) break
+    assert.ok(Date.now() < deadline, 'Original private Main launch registration remains unknown; retain its Inspector owner')
+    await new Promise(done => setTimeout(done, 25))
+  }
+  const stopped = []
+  for (const launch of launches) {
+    assert.ok(['spawned', 'cancelled', 'not-spawned'].includes(launch.phase))
+    if (launch.phase !== 'spawned') { assert.equal(launch.pid, null); continue }
+    assert.ok(Number.isInteger(launch.pid) && launch.pid > 0)
+    await signalOwnedProbeProcess(launch.pid, root, 'SIGKILL')
+    while (await signalOwnedProbeProcess(launch.pid, root, 0)) {
+      assert.ok(Date.now() < deadline, 'Original private Main exit is unconfirmed; retain its Inspector owner')
+      await new Promise(done => setTimeout(done, 25))
+    }
+    stopped.push({ pid: launch.pid, label: launch.label, exit: 'confirmed-absent-or-zombie' })
+  }
+  return { stopFence: paths.stop, stopped }
 }
 const packages = ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors']
 const assets = ['packages/core/vendor', 'apps/desktop/vendor', 'apps/desktop/native', 'apps/desktop/brand', 'apps/desktop/browser-extension']
@@ -189,14 +220,14 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     workerEnvironment.AGENTMUX_A2A_PROOF_EXECUTION = join(privateRoot, 'execution.json')
     workerEnvironment.AGENTMUX_A2A_PROOF_CLIPBOARD = clipboardPath
     const lines = [], workerPath = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
-    const outcome = await runProbeProcess(process.execPath, [workerPath, evidence], { cwd: privateRoot, temporaryRoot: privateRoot, env: workerEnvironment, timeoutMs: 360_000, onLine: line => lines.push(line) })
+    const outcome = await runProbeProcess(process.execPath, [workerPath, evidence], { cwd: privateRoot, temporaryRoot: privateRoot, env: workerEnvironment, timeoutMs: 360_000, onLine: line => { lines.push(line); if (line.startsWith('a2a_private_main_exit_unconfirmed=')) throw new Error(line) }, beforeStop: async () => { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot) } })
     await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n'); assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
     Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
     product.workerOutcome = outcome
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
   } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack } }
   finally {
-    try { await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
+    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
     product.cleanup.buildRetained = true
     product.cleanup.privateRoot = privateRoot
@@ -239,7 +270,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     await mkdir(env.HOME)
     const lines = [], worker = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
     const outcome = await runProbeProcess(process.execPath, [worker, evidence, ...(isolationOnly ? ['--isolation-only'] : [])],
-      { cwd: privateRoot, temporaryRoot: privateRoot, env, timeoutMs: isolationOnly ? 90_000 : 360_000, onLine: line => lines.push(line) })
+      { cwd: privateRoot, temporaryRoot: privateRoot, env, timeoutMs: isolationOnly ? 90_000 : 360_000, onLine: line => { lines.push(line); if (line.startsWith('a2a_private_main_exit_unconfirmed=')) throw new Error(line) }, beforeStop: async () => { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot) } })
     await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n')
     product.workerOutcome = outcome
     Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
@@ -248,7 +279,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
   } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack } }
   finally {
-    try { await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
+    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
     product.cleanup.buildRetained = true; product.cleanup.privateRoot = privateRoot
     await writeFile(product.receiptPath, JSON.stringify(product, null, 2) + '\n')
@@ -286,7 +317,7 @@ async function verifyProductBuild(product, { root }) {
     for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
   }
   assert.equal(a2aProofSha(await readFile(join(product.execution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
-  assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
+  assert.equal(product.cleanup.mainExitConfirmed, true); assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
   assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
   assert.equal(product.homeIsolation.initialSessionStore, 'absent')
   assert.equal(product.semanticOwner.owner.availability, 'connected')

@@ -1,10 +1,35 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync, renameSync, writeFileSync } from 'node:fs'
+import { a2aPrivateMainPaths, stopPrivateA2aMains } from '../../lib/a2a-inbox-product-proof.mjs'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+/** Register before inspecting the one-way fence, so an outer stop cannot miss a racing spawn. */
+export function spawnPrivateA2aMain(root, label, launches, launch) {
+  const paths = a2aPrivateMainPaths(root)
+  const record = () => { writeFileSync(paths.registry + '.pending', JSON.stringify({ schema: 'agentmux.private-a2a-launches.v1', launches })); renameSync(paths.registry + '.pending', paths.registry) }
+  const registration = { label, phase: 'launching', pid: null }; launches.push(registration); record()
+  if (existsSync(paths.stop)) { registration.phase = 'cancelled'; record(); throw new Error('Private Main launch cancelled by its original stop fence') }
+  let child
+  try { child = launch() } catch (error) { registration.phase = 'unconfirmed'; registration.failure = { message: error.message }; record(); throw error }
+  registration.pid = child.pid ?? null; registration.phase = child.pid ? 'spawned' : 'unconfirmed'; record()
+  if (!child.pid) child.once?.('error', error => {
+    if (child.pid) return
+    registration.phase = 'not-spawned'; registration.failure = { code: error.code, message: error.message }; record()
+  })
+  return child
+}
+
+/** A failed private cleanup is not permission to detach from a paused Main. */
+export function retainPrivateA2aInspector(diagnostic) {
+  process.stderr.on('error', error => { if (error.code !== 'EPIPE') throw error })
+  process.stderr.write('a2a_private_main_exit_unconfirmed=' + diagnostic + '\n')
+  return new Promise(() => { setInterval(() => {}, 60_000) })
+}
 
 /** Own only the current private product lifecycle, Inspector isolation and exact cleanup. */
 export async function runPrivateA2aProductScenario(scenario) {
@@ -41,7 +66,8 @@ const children = new Set(), sessions = [], frames = [], cliCalls = []
 const facts = { frames, chain: { cliCalls, readEffects: [] }, cleanup: { userRunTouched: false, processesReaped: false },
   homeIsolation: { privateHome: process.env.HOME, initialSessionStore: initialStore, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
-let client, daemon, rpc, failure
+const mainLaunches = []
+let client, daemon, rpc, failure, mainExitConfirmed = false
 assert.equal(process.platform, 'darwin', 'This private native actor proof qualifies the current macOS product')
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 async function waitFor(label, read, budget = 25_000) {
@@ -107,13 +133,17 @@ async function launch(label) {
   const ready = join(root, 'ready-' + label + '.json')
   const env = { ...process.env, AGENTMUX_DESKTOP_READY_FILE: ready }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(env[name], undefined)
-  const child = spawn(execution.executable, ['--inspect-brk=0', ...execution.argv, '--remote-debugging-port=0', '--user-data-dir=' + userData], {
+  const child = spawnPrivateA2aMain(root, label, mainLaunches, () => {
+    const child = spawn(execution.executable, ['--inspect-brk=0', ...execution.argv, '--remote-debugging-port=0', '--user-data-dir=' + userData], {
     cwd: execution.desktopRoot, env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
-  children.add(child); let output = '', mainUrl, debuggerUrl
+    children.add(child); return child
+  })
+  let output = '', mainUrl, debuggerUrl, spawnFailure
+  child.once('error', error => { spawnFailure = error })
   child.stderr.on('data', bytes => { output = (output + bytes).slice(-16_384)
     mainUrl ??= /Debugger listening on (ws:\/\/\S+)/.exec(output)?.[1]
     debuggerUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(output)?.[1] })
-  const alive = () => { if (ended(child)) throw new Error('Private Desktop exited: ' + output) }
+  const alive = () => { if (spawnFailure) throw spawnFailure; if (ended(child)) throw new Error('Private Desktop exited: ' + output) }
   const main = await cdpConnect(await waitFor('private Main inspector', () => { alive(); return mainUrl }))
   await main.call('Runtime.enable'); await main.call('Debugger.enable')
   // Electron resolves its home independently of ENV HOME. Use the existing
@@ -242,6 +272,9 @@ finally {
   }
   try { await rpc?.dispose() } catch {}
   for (const child of [...children].reverse()) { try { await stop(child, 'SIGKILL') } catch (error) { facts.cleanup.processError ??= error.message } }
+  try { facts.cleanup.mainStop = await stopPrivateA2aMains(root); mainExitConfirmed = true }
+  catch (error) { facts.cleanup.mainStopError = error.message; failure ??= error; facts.error ??= { message: error.message, stack: error.stack } }
+  facts.cleanup.mainExitConfirmed = mainExitConfirmed
   for (const launch of facts.homeIsolation.launches) {
     try {
       const clipboard = JSON.parse(await readFile(launch.presentationOverlay.clipboardGuardPath, 'utf8'))
@@ -253,10 +286,13 @@ finally {
   }
   facts.cleanup.processesReaped = !facts.cleanup.stopError && !facts.cleanup.processError && [...children].every(ended)
   if (!facts.cleanup.processesReaped) { failure ??= new Error('Private A2A product process cleanup was not confirmed'); facts.error ??= { message: failure.message } }
-  await writeFile(join(evidence, 'facts.json'), JSON.stringify(facts, null, 2) + '\n')
+  try { await writeFile(join(evidence, 'facts.json'), JSON.stringify(facts, null, 2) + '\n') }
+  catch (error) { facts.persistenceError = { message: error.message, code: error.code }; failure ??= error }
+  finally { if (!mainExitConfirmed) await retainPrivateA2aInspector(JSON.stringify({ failure: failure?.message, persistenceError: facts.persistenceError })) }
 }
+if (facts.persistenceError) await new Promise(done => process.stderr.write('Private facts persistence failed: ' + JSON.stringify(facts.persistenceError) + '\n', done))
 if (failure) await new Promise(done => process.stderr.write(failure.stack + '\n', done))
-// All original private children are stopped and facts are durable before ending this worker.
+// An unconfirmed Main never reaches this exit; other cleanup and persistence failures remain failures.
 process.exit(failure ? 1 : 0)
 
 }

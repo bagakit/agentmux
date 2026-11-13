@@ -109,7 +109,7 @@ export async function stopProbeProcesses(groupId, temporaryRoot, graceMs = 1_000
 // This receipt belongs only to the ChildProcess spawned here. It says nothing
 // about independently owned Runtime resources or descendants. A signal is not exit.
 export async function runProbeProcess(executable, args, {
-  cwd, env, timeoutMs, onLine = () => {}, onSpawn = () => {}, graceMs = 1_000
+  cwd, env, timeoutMs, onLine = () => {}, onSpawn = () => {}, beforeStop, graceMs = 1_000
 }) {
   const child = spawn(executable, args, { cwd, env, detached: true, stdio: ['ignore', 'inherit', 'pipe'] })
   const outcome = { originalPid: child.pid ?? null, exitCode: null, originalExitCode: null,
@@ -123,10 +123,11 @@ export async function runProbeProcess(executable, args, {
       settled = true
       clearTimeout(timer); clearTimeout(hardStop); clearTimeout(unknownStop)
       process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm)
-      lines?.close()
+      const retainedOwner = outcome.cleanup === 'before-stop-unconfirmed'
+      if (!retainedOwner) lines?.close()
       if (!outcome.exitConfirmed) {
         // Release only this observer's handles; keep the unconfirmed owner in the receipt.
-        child.unref(); child.stderr?.destroy()
+        child.unref(); if (!retainedOwner) child.stderr?.destroy()
       }
       const failures = [...(primary === undefined ? [] : [primary]), ...cleanupErrors]
       if (!outcome.exitConfirmed) failures.push(new Error('The original private child exit is unconfirmed; retain its namespace.'))
@@ -144,9 +145,18 @@ export async function runProbeProcess(executable, args, {
         outcome.cleanupErrors.push({ name: error.name, message: error.message, stack: error.stack, ...(error.code ? { code: error.code } : {}) })
       }
     }
-    const stopOriginal = () => {
+    const stopOriginal = async () => {
       if (settled || stopping || outcome.exitConfirmed) return
       stopping = true
+      // A debugger owner must retain its observer until the observed process is safe.
+      // Both soft and hard worker termination wait for this original-owner barrier.
+      try { if (beforeStop) await beforeStop() } catch (error) {
+        cleanupErrors.push(error)
+        outcome.cleanup = 'before-stop-unconfirmed'
+        outcome.cleanupErrors.push({ name: error.name, message: error.message, stack: error.stack })
+        finish(); return
+      }
+      if (settled || outcome.exitConfirmed) return
       signalOriginal('SIGTERM')
       if (settled) return
       hardStop = setTimeout(() => signalOriginal('SIGKILL'), graceMs)
