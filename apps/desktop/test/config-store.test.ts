@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
 import { BUILT_IN_AGENT_PROVIDERS } from '@agentmux/core'
 import {
   SCRATCH_WORKSPACE_ID,
@@ -13,7 +15,7 @@ import {
 } from '../src/shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../src/shared/notification-presentation.js'
 
-vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
+vi.mock('electron', () => ({ app: { getPath: () => tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop' } }))
 
 import { authoredConfigCarryOver, ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import type { RuntimeController, RuntimePreparation } from '../src/main/runtime-controller.js'
@@ -80,7 +82,7 @@ describe('ConfigStore workspace identity', () => {
     // 承重的一条。三个真实形状的项目 + 一个自定义 host，配置版本低一版。
     const { store, path } = await storeFixture()
     const registered: WorkspaceRecord[] = [
-      workspace({ id: 'ws-a', name: 'Pageville', path: _hygiene_fixturePath("projects/pageville") }),
+      workspace({ id: 'ws-a', name: 'Sample Pages', path: _hygiene_fixturePath("projects/sample-pages") }),
       workspace({ id: 'ws-b', name: 'Survivors', path: _hygiene_fixturePath("projects/survivors") }),
       workspace({ id: 'ws-c', name: 'Build box checkout', hostId: 'remote', path: _hygiene_fixturePath("srv/checkout") })
     ]
@@ -530,7 +532,7 @@ describe('ConfigStore workspace identity', () => {
     const loaded = await store.get()
 
     // scratch 那条是回填出来的，不是用户写的；列全集顺带钉住它没被这条路径连带丢掉。
-    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID, NOTES_WORKSPACE_ID])
   })
 
   it('an empty map container is also "no projects" — 空容器那一侧同样要能启动', async () => {
@@ -556,7 +558,7 @@ describe('ConfigStore workspace identity', () => {
     expect(
       loaded.workspaces.map((entry) => entry.id),
       '空的 map 容器被当成「持有项目」——新用户第一次启动会被守卫拒掉'
-    ).toEqual([SCRATCH_WORKSPACE_ID])
+    ).toEqual([SCRATCH_WORKSPACE_ID, NOTES_WORKSPACE_ID])
   })
 
   it('one damaged container does not collapse the others', async () => {
@@ -886,7 +888,7 @@ describe('ConfigStore workspace identity', () => {
 
     const loaded = await store.get()
 
-    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID, NOTES_WORKSPACE_ID])
     expect(loaded.hosts.some((host) => host.id === 'local'), 'local 回填没发生').toBe(true)
   })
 
@@ -899,7 +901,7 @@ describe('ConfigStore workspace identity', () => {
     const loaded = await store.get()
 
     // 只剩 get() 自己补的 scratch 那条。
-    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID, NOTES_WORKSPACE_ID])
   })
 
   it('back-fills the local host when a retired config damaged it, keeping workspaces resolvable', async () => {
@@ -983,7 +985,9 @@ describe('ConfigStore workspace identity', () => {
           hostId: 'local',
           path: join(tmpdir(), '.agentmux', 'scratch'),
           kind: 'folder'
-        }
+        },
+        { id: NOTES_WORKSPACE_ID, name: NOTES_WORKSPACE_NAME, hostId: 'local',
+          path: (await new AgentMuxNotesStorage().inspect()).directory, kind: 'folder' }
       ],
       // get() back-fills the notification default for a config saved before the field existed.
       notifications: { mode: DEFAULT_NOTIFICATION_MODE_ID },
@@ -1166,6 +1170,7 @@ describe('ConfigStore workspace identity', () => {
     } as RuntimePreparation
     const runtime = {
       prepare: vi.fn(async () => preparation),
+      validatePreparation: vi.fn(),
       commit: vi.fn(),
       discard: vi.fn(async () => {})
     } as unknown as RuntimeController
@@ -1508,7 +1513,7 @@ describe('ConfigStore recoverability', () => {
 
     const loaded = await store.get()
 
-    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID])
+    expect(loaded.workspaces.map((entry) => entry.id)).toEqual([SCRATCH_WORKSPACE_ID, NOTES_WORKSPACE_ID])
     expect(await fileText(store.quarantinePath), '首次启动不该冒出 .corrupt').toBeNull()
   })
 })
