@@ -42,6 +42,19 @@ Both endpoints must still belong to the original page and be hittable. It accept
 After a press, a changed page/target or lost acknowledgement is `effects: "unknown"`; inspect the original
 page and operation before another action. A dispatched drop/release does not certify the website’s business result.
 
+`tap(ref)` sends one native touch contact. `longPress(ref, {durationMs: 600})` holds
+that contact (600 ms by default). `swipe(sourceRef, destinationRef)` moves between two
+current refs, and `pinch(ref, {scale: 2})` changes the separation of two contacts inside
+one ref (scale 2 by default). Both pinch contacts must fit and be hittable in that
+original target. Scale describes contact separation; inspect the page to verify its result.
+These functions accept no selectors or screen coordinates and do not change device identity
+or `navigator.maxTouchPoints`. A hold must fit the original program's remaining time.
+Stop, Take control or navigation fences the remaining contact movement/end; an interrupted
+contact has `effects: "unknown"` and is never automatically replayed. Inspect the original
+page before a fresh gesture. After control is explicitly returned,
+`cdp("Input.dispatchTouchEvent", {type: "touchCancel", touchPoints: []})` can end
+remaining contacts on that current page; it does not resume the interrupted gesture.
+
 `pressKey(ref, key)` takes one key or a chord written with `+`, such as `Control+a`, `Shift+Tab` or
 `Meta+z`; modifiers are held around the key and always released. On macOS use `Meta` for the system
 shortcuts (select all, copy, undo). A shifted letter types its capital; for other shifted

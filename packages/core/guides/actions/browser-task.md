@@ -33,6 +33,11 @@ timeout), `assert` (element present/absent, URL or text), `press`, `hover`, `scr
 each with `role`, `name`, `ordinal: 1`, `count: 1`; both are resolved from one fresh complete
 snapshot of the reviewed `url`. The task editor can add and review these declarations. Changed
 or ambiguous endpoints send no drag, and unknown in-flight effects are never automatically retried.
+Touch steps are `tap`, `longPress`, `swipe` and `pinch`. All use a reviewed semantic
+`target`; a swipe also declares `destination`. `longPress.durationMs` is positive and
+uses 600 ms when absent. `pinch.scale` is positive and uses 2 when absent. The task editor
+can add and review these declarations. Their immutable versions, original operations and
+unknown-effect retry rules use the same task owner as other page steps.
 A page step may declare `retry` 0–3 and `onFail` stop, continue or goto a later step.
 Only a known `script-failed` attempt that sent no page action is retried, each with its
 own operation id. After continue or goto the run records `failedSteps` with the failed
