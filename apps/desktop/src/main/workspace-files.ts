@@ -628,7 +628,6 @@ export type WorkspaceMediaWitness = { device: string; inode: string; size: bigin
 export type WorkspaceMediaHandleState = 'same' | 'changed' | 'deleted' | 'outside-workspace'
 export type WorkspaceMediaHandle = {
   handle: FileHandle
-  witness: WorkspaceMediaWitness
   byteLength: number
   /** Compare the pinned object with the path visible inside the Workspace now. */
   current(): Promise<WorkspaceMediaHandleState>
@@ -1112,7 +1111,7 @@ export class WorkspaceFiles {
       const state = await current()
       if (state === 'outside-workspace') throw Object.assign(new Error('Path escapes the workspace root'), { code: 'WORKSPACE_PATH_ESCAPE' })
       if (state !== 'same') throw Object.assign(new Error('The file changed while it was opened. Reload to play the current file.'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
-      return { handle, witness, byteLength: Number(pinned.size), current }
+      return { handle, byteLength: Number(pinned.size), current }
     } catch (error) {
       await handle.close().catch(() => {})
       throw error
