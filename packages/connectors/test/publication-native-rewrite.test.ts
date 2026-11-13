@@ -25,8 +25,8 @@ async function fixture() {
       return { state: 'confirmed', mapping: { messageId: 'message-' + prepared.requestKey } }
     } }
   const port = createPublicationConversationPort(f.coreClients), changes = port.changes.bind(port)
-  const reads: Array<{ rewrite: unknown }> = []
-  port.changes = async (input, signal) => { reads.push({ rewrite: structuredClone(input.rewrite) }); return await changes(input, signal) }
+  const reads: Array<{ rewrite: unknown; cursor: unknown }> = []
+  port.changes = async (input, signal) => { reads.push({ rewrite: structuredClone(input.rewrite), cursor: input.cursor }); return await changes(input, signal) }
   const services = await createConnectionServices({ directory: join(f.root, 'rewrite-recovery'),
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }],
     bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref), session: async ref => ref.hostId === 'local' ? f.client.agentSession(ref.agentSessionId) : null }, publication: port })
@@ -39,7 +39,9 @@ async function fixture() {
   await vi.waitFor(async () => expect((await host.list(input)).sourceObservation?.state).toBe('ready'), { timeout: 8000 })
   const idle = () => vi.waitFor(() => expect((Reflect.get(host, 'lanes') as Map<string, { work?: unknown }>).get(binding.bindingId)?.work).toBeUndefined())
   const speech = () => host.store.list(binding).filter(op => op.payload.kind === 'speech')
-  return { ...f, host, binding, input, dispatched, reads, idle, speech }
+  /** Fresh anchored reads: carrying anchors and not continuing an earlier frame. */
+  const anchoredReads = () => reads.filter(read => read.rewrite !== undefined && read.cursor === undefined).length
+  return { ...f, host, binding, input, dispatched, reads, idle, speech, anchoredReads }
 }
 
 it('a source rewritten in place resumes automatically after its newest unchanged consumed record, without resending or editing', async () => {
@@ -67,10 +69,8 @@ it('a source rewritten in place resumes automatically after its newest unchanged
   // Every earlier platform operation is unchanged; only the two new replies were sent.
   for (const op of published) expect(f.host.store.inspect(op.operationId)).toEqual(op)
   expect(f.dispatched.slice(sentBefore).map(value => value.text)).toEqual(['First reply after resume', 'Second reply after resume'])
-  // The anchored read was attempted once and only after the rewrite was reported.
-  const anchored = f.reads.filter(read => read.rewrite !== undefined)
-  expect(anchored.length).toBeGreaterThanOrEqual(1)
-  expect(f.reads.findIndex(read => read.rewrite !== undefined)).toBeGreaterThan(0)
+  // Exactly one fresh anchored read, after an ordinary read reported the rewrite.
+  expect(f.anchoredReads()).toBe(1)
 
   // Later appends continue as ordinary reads with no anchors.
   const ordinaryBefore = f.reads.length
@@ -97,25 +97,54 @@ it('a replaced source is still refused and surfaced, with no anchored recovery a
   expect(f.dispatched).toHaveLength(sentBefore)
 }, 30_000)
 
-it('a transient source failure keeps its original cut and never requests a rewrite anchor', async () => {
+it.each(['AGENT_SESSION_HISTORY_BUSY', 'AGENT_SESSION_HISTORY_TIMEOUT'])('a transient %s reported in page coverage keeps its cut and never requests a rewrite anchor', async code => {
   const f = await fixture()
-  await appendFile(f.transcript, assistant('reply-published', 'Published before busy')); f.host.refresh()
+  await appendFile(f.transcript, assistant('reply-published', 'Published before the transient failure')); f.host.refresh()
   await vi.waitFor(() => expect(f.speech().some(op => op.state === 'confirmed')).toBe(true), { timeout: 8000 })
   await f.idle()
-  const options = Reflect.get(f.host, 'options') as { conversation: { changes: (...args: unknown[]) => Promise<unknown> } }
-  const original = options.conversation.changes.bind(options.conversation), anchored: unknown[] = []
-  let busy = true
-  options.conversation.changes = async (...args: unknown[]) => {
-    const input = args[0] as { rewrite?: unknown }
-    if (input.rewrite) anchored.push(input.rewrite)
-    if (busy) throw new core.AgentMuxError('Controlled busy source', 'AGENT_SESSION_HISTORY_BUSY')
-    return await original(...args)
-  }
-  await appendFile(f.transcript, assistant('reply-after-busy', 'Reply after busy clears')); f.host.refresh()
-  await vi.waitFor(async () => expect((await f.host.list(f.input)).sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_BUSY' }), { timeout: 8000 })
-  busy = false
-  await vi.waitFor(() => expect(f.speech().some(op => op.payload.kind === 'speech' && op.payload.text === 'Reply after busy clears' && op.state === 'confirmed')).toBe(true), { timeout: 8000 })
+  // Core turns this native primitive failure into page coverage, exactly as in production.
+  const reader = f.client as unknown as { nativeHistoryChangesPage(...args: unknown[]): Promise<unknown> }
+  const primitive = reader.nativeHistoryChangesPage.bind(reader), anchored: unknown[] = []
+  let failing = true
+  vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args: unknown[]) => {
+    const options = args[1] as { checkpoint?: unknown; atRecords?: unknown }
+    if (options.atRecords) anchored.push(options.atRecords)
+    if (failing && options.checkpoint !== undefined) throw new core.AgentMuxError('Controlled transient source failure', code)
+    return await primitive(...args)
+  })
+  const cut = f.host.store.retainedCheckpoint(f.binding)
+  await appendFile(f.transcript, assistant('reply-after', 'Reply after the failure clears')); f.host.refresh()
+  await vi.waitFor(async () => expect((await f.host.list(f.input)).sourceObservation).toMatchObject({ state: 'unavailable', code }), { timeout: 8000 })
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  failing = false
+  await vi.waitFor(() => expect(f.speech().some(op => op.payload.kind === 'speech' && op.payload.text === 'Reply after the failure clears' && op.state === 'confirmed')).toBe(true), { timeout: 8000 })
   expect(anchored).toEqual([])
+  expect(f.anchoredReads()).toBe(0)
+}, 30_000)
+
+it('a failed anchored read keeps the cut, sends nothing, and is not repeated for the same cut until an explicit recovery', async () => {
+  const f = await fixture()
+  await appendFile(f.transcript, assistant('reply-published', 'Published before the interruption'))
+  f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.state === 'confirmed')).toBe(true), { timeout: 8000 })
+  await f.idle()
+  const cut = f.host.store.retainedCheckpoint(f.binding), sentBefore = f.dispatched.length
+  // Rewrite every consumed record: no anchor remains byte-identical.
+  const header = (await readFile(f.transcript, 'utf8')).split('\n')[0]!
+  await writeFile(f.transcript, header + '\n' + assistant('reply-rewritten', 'Different bytes in place of every consumed record'))
+  f.host.refresh(); await f.idle()
+  await vi.waitFor(async () => expect((await f.host.list(f.input)).sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_REWRITTEN' }), { timeout: 8000 })
+  expect(f.anchoredReads()).toBe(1)
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  expect(f.dispatched).toHaveLength(sentBefore)
+  // Further wakes and appends cannot change the compared range; the anchored read is not repeated.
+  await appendFile(f.transcript, assistant('reply-appended', 'Appended after the failure')); f.host.refresh(); await f.idle()
+  f.host.refresh(); await f.idle()
+  expect(f.anchoredReads()).toBe(1)
+  // An explicit recovery may try once more.
+  await f.host.recoverSource(f.input, context); await f.idle()
+  expect(f.anchoredReads()).toBe(2)
+  expect(f.dispatched).toHaveLength(sentBefore)
 }, 30_000)
 
 it('a rewrite reported through the page coverage, not only by exception, uses published records as anchors', async () => {
@@ -137,17 +166,19 @@ it('a rewrite reported through the page coverage, not only by exception, uses pu
   expect(vanished.map(op => op.effect)).toEqual(['upsert'])
 }, 30_000)
 
-it('finds the newest consumed native records even when far more recent captured decisions follow them', async () => {
+it('retains the newest consumed native records with their digests at commit time, independent of later captured decisions', async () => {
   const f = await fixture()
   await appendFile(f.transcript, assistant('reply-native', 'Native reply before captured activity')); f.host.refresh()
   await vi.waitFor(() => expect(f.speech().some(op => op.state === 'confirmed')).toBe(true), { timeout: 8000 })
   await f.idle()
   const database = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
   const insert = database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?)')
-  // Captured-only activity decisions recorded after the last native record, beyond any fixed recent-row window.
+  // Many later captured-only decisions do not displace or slow the retained anchors.
   for (let index = 0; index < 1200; index++) insert.run(f.binding.bindingId, f.binding.revision, 'unified', 'scope-captured-' + index, 'r' + index, 'content-accounted',
     JSON.stringify({ kind: 'scope', event: { id: 'captured-' + index, revision: 'r' + index }, excluded: [{ record: { hostId: 'local', agentSessionId: f.binding.agentSessionId, source: { kind: 'captured', recordId: 'captured-' + index } }, recordRevision: 'c'.repeat(64), selector: { kind: 'captured-field', field: 'content' } }] }))
-  expect(f.host.store.rewriteAnchors(f.binding).map(anchor => anchor.recordId)).toContain('reply-native')
+  const anchors = f.host.store.rewriteAnchors(f.binding)
+  expect(anchors.map(anchor => anchor.recordId)).toContain('reply-native')
+  expect(anchors.every(anchor => /^[a-f0-9]{64}$/u.test(anchor.digest))).toBe(true)
   // A different Binding revision never contributes anchors.
   expect(f.host.store.rewriteAnchors({ bindingId: f.binding.bindingId, revision: f.binding.revision + 1 })).toEqual([])
 })
