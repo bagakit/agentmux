@@ -12,7 +12,7 @@ const attempt = await mkdtemp(join(output, 'attempt-')), isolated = join(attempt
 const schema = 'apps/desktop/src/main/scratch-directory-identity.mjs'
 const scratch = 'apps/desktop/src/main/scratch-topics.ts'
 const addresses = 'apps/desktop/src/shared/space-addresses.ts'
-const observer = 'apps/desktop/src/main/rpc-client-observations.ts'
+const observer = 'apps/host/src/snapshot-observation.ts'
 const ipc = 'apps/desktop/src/main/ipc.ts'
 const directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
 const config = 'apps/desktop/scripts/fixtures/mote-directory-identity/vitest.config.mts'
@@ -52,8 +52,8 @@ const variants = [
   { id: 'physical-path-mints-identity', file: addresses, from: 'if (topic.readError && !topic.identityDirectoryPath)',
     to: 'if (topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath)', pattern: 'invalid wrong-root' },
   { id: 'cold-mote-classification-lost', file: observer,
-    from: "kind: snapshot.id === PMO_TEAMS_TOPIC_ID || snapshot.soul !== undefined || snapshot.moteArchive !== undefined ? 'mote' : snapshot.readError ? 'unknown' : space?.kind === 'topic' ? 'topic' : 'unknown'",
-    to: "kind: snapshot.readError ? 'unknown' : space?.kind === 'mote' ? 'mote' : space?.kind === 'topic' ? 'topic' : 'unknown'", pattern: 'cold write-before ENOSPC' },
+    from: "kind: !isKnowledgeTopic(snapshot) ? 'mote' : snapshot.readError ? 'unknown' : 'topic'",
+    to: "kind: snapshot.readError ? 'unknown' : !isKnowledgeTopic(snapshot) ? 'mote' : 'topic'", pattern: 'cold write-before ENOSPC' },
   { id: 'startup-holds-healthy-input', file: ipc, from: 'if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity))',
     to: 'if (scratchForIdentity) await Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity))', pattern: 'executes the original IPC startup' }
 ]

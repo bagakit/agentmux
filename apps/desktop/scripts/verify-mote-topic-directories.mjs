@@ -34,7 +34,7 @@ try {
   assert.ok(files.length > 0, 'The production caller scan must be nonempty.')
   for (const [name, definition, pattern] of [
     ['physical directory resolver', 'apps/desktop/src/main/scratch-topic-directories.ts', /resolveScratchTopicDirectory\(/],
-    ['public snapshot projection', 'apps/desktop/src/main/rpc-client-observations.ts', /observeClientRpcSnapshot\(/],
+    ['public snapshot projection', 'apps/host/src/snapshot-observation.ts', /observeClientRpcSnapshot\(/],
     ['canonical launch preparation', 'apps/desktop/src/main/scratch-topics.ts', /scratchTopics\.prepareAgent\(/],
     ['durable identity projection', 'apps/desktop/src/shared/scratch-topics.ts', /scratchTopicIdentityPath\(/],
     ['Session ownership', 'apps/desktop/src/shared/scratch-topics.ts', /scratchTopicIdFromWorkspacePath\(|workspaceOwnsSessionPath\(/],
