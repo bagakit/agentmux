@@ -1,4 +1,9 @@
 .settings-mote { container-type: inline-size; }
+.settings-mote__origins { border-bottom: 1px solid var(--line-soft); padding-bottom: var(--sp-4); }
+.settings-mote__origins > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); }
+.settings-mote__origins > summary > span { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.settings-mote__origins[open] > summary { margin-bottom: var(--sp-4); }
+.settings-mote__origins > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 4px; }
 .settings-mote > .settings-pane-actions { margin-top: 0; }
 .settings-mote .mote-directory-settings { margin-bottom: var(--sp-3); }
 .settings-mote .mote-directory-settings > label { background: var(--surface-1); border-color: transparent; }

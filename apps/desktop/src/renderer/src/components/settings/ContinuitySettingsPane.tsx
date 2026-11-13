@@ -115,13 +115,14 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
     }))
   }
   return <div className="settings-pane-stack continuity-settings recovery-settings">
+    <details className="continuity-disclosure"><summary>How Session recovery works</summary>
     <SettingsConceptSummary icon="object.session-recovery" title="Continue the original Session"
       description="Recovery keeps the same Session and conversation. These preferences control when native recovery is requested."
       steps={[
         { label: 'Keep your place', detail: 'The original Session, tab and layout remain available.' },
         { label: 'Reconnect or recover', detail: 'Healthy Runs reconnect. Eligible ended or missing Runs can use native recovery.' },
         { label: 'Continue in place', detail: 'Recovery does not resend earlier input. Unknown results stay available to inspect.' }
-      ]} />
+      ]} /></details>
     <section className="settings-group">
       <header><span>Session recovery</span><small>Saved: {saved.activeRecovery === 'automatic' ? 'Automatic' : 'On demand'}</small></header>
       <fieldset className="recovery-mode" data-settings-field="activeRecovery">

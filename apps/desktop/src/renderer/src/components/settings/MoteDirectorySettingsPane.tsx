@@ -29,7 +29,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
     submitted.finish(await save.run(() => onSave(submitted.value, submitted.expected)))
   }
   return <div className="settings-pane-stack settings-mote">
-    <MoteOriginStory />
+    <details className="settings-mote__origins"><summary>Where collaborators begin <span>Explore the two paths</span></summary><MoteOriginStory /></details>
     <section className="settings-group">
       <header><span>Directory view</span><small>Saved: {moteDirectoryViewLabel(view)}</small></header>
       <fieldset className="mote-directory-settings" style={{ '--mote-directory-avatar-size': `${draft.value.avatarSize}px` } as CSSProperties}><legend className="sr-only">Mote directory view</legend>
