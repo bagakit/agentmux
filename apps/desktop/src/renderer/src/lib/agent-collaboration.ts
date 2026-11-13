@@ -27,7 +27,7 @@ export type CollaborationEvidence =
 export type CollaborationRelation = {
   id: string; source: string; target: string; kind: CollaborationEvidence['kind']; evidence: CollaborationEvidence[]
 }
-export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; reference?: SessionHistorySourceReference; sessionId: string; context?: FocusContext; providerId?: string; executorId?: string; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null }
+export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; reference?: SessionHistorySourceReference; sessionId: string; context?: FocusContext; providerId?: string; executorId?: string; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null; retiredAt?: number }
 
 /** Original owner + Session is identity. Display context IDs and area membership are not. */
 export function collaborationAgents(contexts: readonly FocusContext[]): Map<string, CollaborationAgent> {

@@ -82,7 +82,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     for (const source of history.sources) {
       const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, id = collaborationSubjectKey(subject)
       descriptors.set(id, source)
-      if (!result.has(id)) result.set(id, { id, subject, sessionId: source.agentSessionId, name: facts.names[source.agentSessionId] ?? source.agentSessionId, ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}), tier: source.state === 'retired' ? 'closed' : 'unknown', lastActivityAt: null, provenance: source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed' })
+      if (!result.has(id)) result.set(id, { id, subject, sessionId: source.agentSessionId, name: facts.names[source.agentSessionId] ?? source.agentSessionId, ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}), tier: source.state === 'retired' ? 'closed' : 'unknown', lastActivityAt: null, ...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance: source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed' })
     }
     for (const id of catalogCache.current.keys()) if (!result.has(id)) catalogCache.current.delete(id)
     return { agents: result, sessions, history: descriptors }
