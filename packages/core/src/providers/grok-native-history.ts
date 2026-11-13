@@ -523,9 +523,8 @@ export async function readGrokConversationChanges(context: ProviderConversationC
   try {
     if (context.head && (context.after !== undefined || context.tail)) throw new AgentMuxError('A beginning checkpoint cannot include another source position.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     // Grok groups physical updates into one projected message; a rewritten source requires a fresh selected read.
-    if (context.atRecords) throw new AgentMuxError('Grok conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    try { await reader.seekChanges(context.after, context.tail === true) }
-    catch (error) { throw error instanceof AgentMuxError && error.code === 'AGENT_SESSION_HISTORY_REWRITTEN' ? new AgentMuxError('Grok conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') : error }
+    await reader.seekChanges(context.after, context.tail === true)
+    if (context.atRecords) throw new AgentMuxError('Grok conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_REWRITTEN')
     if (context.through !== undefined) await reader.limitChanges(context.through)
     const initialCursor = await reader.changesCursor(), projection = new GrokMessageProjection(reader, context.source.nativeSessionId)
     const steps: { change: GrokProjectionChange; cursor: string }[] = [], ids = new Set<string>()
