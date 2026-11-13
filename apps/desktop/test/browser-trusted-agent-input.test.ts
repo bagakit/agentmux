@@ -440,13 +440,26 @@ describe('Agent pressKey and hover are trusted native input', () => {
     expect(keys(letter.peer)).toEqual([['rawKeyDown', 'a', 'KeyA', 65, null], ['char', 'a', 'KeyA', 65, 'a'], ['keyUp', 'a', 'KeyA', 65, null]])
   })
 
-  it('another key name is sent as that key alone, never as a chord or text; an unfocusable target is refused before any key', async () => {
-    const unknown = keyPeer()
-    const u = dispatchOn(unknown.peer, nativeContents())
-    const page = await u.dispatch('snapshot', []) as { nodes: { ref: string }[] }
-    await u.dispatch('pressKey', [page.nodes[0]!.ref, 'Ctrl+Enter'])
-    expect(keys(unknown.peer)).toEqual([['rawKeyDown', 'Ctrl+Enter', '', 0, null], ['keyUp', 'Ctrl+Enter', '', 0, null]])
-    expect(unknown.peer.commands.filter(command => command.method === 'Input.dispatchKeyEvent').map(command => command.params.modifiers ?? 0)).toEqual([0, 0])
+  it('a chord presses its modifiers around the key and releases them; an unknown modifier is refused unsent; an unfocusable target is refused before any key', async () => {
+    const chord = keyPeer()
+    const c = dispatchOn(chord.peer, nativeContents())
+    const page = await c.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await c.dispatch('pressKey', [page.nodes[0]!.ref, 'Ctrl+Enter'])
+    // Control is held around Enter, and no char is sent while it is: a shortcut is not text.
+    expect(keys(chord.peer)).toEqual([['rawKeyDown', 'Control', 'ControlLeft', 17, null], ['rawKeyDown', 'Enter', 'Enter', 13, null],
+      ['keyUp', 'Enter', 'Enter', 13, null], ['keyUp', 'Control', 'ControlLeft', 17, null]])
+    expect(chord.peer.commands.filter(command => command.method === 'Input.dispatchKeyEvent').map(command => command.params.modifiers)).toEqual([2, 2, 2, 0])
+    const shifted = keyPeer()
+    const sh = dispatchOn(shifted.peer, nativeContents())
+    const shiftedPage = await sh.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await sh.dispatch('pressKey', [shiftedPage.nodes[0]!.ref, 'Shift+a'])
+    // Shift alone still types, and a shifted letter is its capital.
+    expect(keys(shifted.peer)).toContainEqual(['char', 'A', 'KeyA', 65, 'A'])
+    const typo = keyPeer()
+    const ty = dispatchOn(typo.peer, nativeContents())
+    const typoPage = await ty.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(ty.dispatch('pressKey', [typoPage.nodes[0]!.ref, 'Contrl+a'])).rejects.toThrow('"Contrl" is not a modifier')
+    expect(keys(typo.peer), 'a typo never becomes some other key').toEqual([])
     const unfocused = keyPeer({ focus: false })
     const f = dispatchOn(unfocused.peer, nativeContents())
     const unfocusedPage = await f.dispatch('snapshot', []) as { nodes: { ref: string }[] }
@@ -597,5 +610,22 @@ describe('Agent native input is never recorded as a human demonstration', () => 
     await r.capture.flush()
     expect((await r.recorder.get('page'))?.steps).toEqual([expect.objectContaining({ method: 'click', source: 'native-human' })])
     await r.capture.dispose()
+  })
+})
+
+describe('pressKey chords', () => {
+  it('parse modifiers in order, the plus key, and aliases; refuse a missing key or a repeated modifier', async () => {
+    const { parseKeyChord, editingCommandFor } = await import('../src/main/browser-page-input-scripts.js')
+    expect(parseKeyChord('Control+Shift+Tab')).toMatchObject({ key: 'Tab', modifiers: [{ key: 'Control' }, { key: 'Shift' }] })
+    expect(parseKeyChord('Cmd+a').modifiers.map(modifier => modifier.key)).toEqual(['Meta'])
+    expect(parseKeyChord('+')).toEqual({ key: '+', modifiers: [] })
+    expect(parseKeyChord('Shift++')).toMatchObject({ key: '+', modifiers: [{ key: 'Shift' }] })
+    expect(() => parseKeyChord('Control+')).toThrow('needs a key after the modifiers')
+    expect(() => parseKeyChord('Shift+Shift+a')).toThrow('names a modifier twice')
+    // macOS needs the editing command with the key; other platforms handle it in the page.
+    expect(editingCommandFor(4, 'KeyA', 'darwin')).toBe('selectAll')
+    expect(editingCommandFor(12, 'KeyZ', 'darwin')).toBe('redo')
+    expect(editingCommandFor(4, 'KeyA', 'linux')).toBeUndefined()
+    expect(editingCommandFor(2, 'KeyA', 'darwin'), 'Control+a is not select-all on macOS').toBeUndefined()
   })
 })

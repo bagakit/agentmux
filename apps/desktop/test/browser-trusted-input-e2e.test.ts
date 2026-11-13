@@ -66,6 +66,7 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <input id="phone" type="tel" aria-label="Phone" style="width:60px">
     <input id="qty" type="number" value="4" aria-label="Quantity" style="width:60px">
     <textarea id="memo" aria-label="Memo" rows="1" style="width:60px">old</textarea>
+    <input id="chord" aria-label="Chord" value="select me" style="width:60px">
     <div id="rich" contenteditable="true" aria-label="Rich" role="textbox" style="width:60px;min-height:14px;border:1px solid #999">old</div>
   </div>
   <dialog id="modal"><button>Modal button</button></dialog>
@@ -77,7 +78,8 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'beforeinput', 'input', 'change', 'keydown', 'keyup', 'submit', 'mouseover'])
       document.addEventListener(type, (event) => {
         if (type === 'mouseover' && event.target.id !== 'menu') return
-        events.push({ type, target: event.target.id || event.target.tagName, trusted: event.isTrusted })
+        events.push({ type, target: event.target.id || event.target.tagName, trusted: event.isTrusted,
+          ...(type === 'keydown' ? { key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, shift: event.shiftKey } : {}) })
       }, true)
     document.getElementById('form').addEventListener('submit', (event) => event.preventDefault())
     // A web component: its fields live in an open shadow root, so document.activeElement is the host.
@@ -185,6 +187,11 @@ app.whenReady().then(async () => {
       await act(label, method, [ref(name), text], () => value(id))
     }
     await act('rich', 'fillInput', [ref('Rich'), 'Bold idea'], () => contents.executeJavaScript('document.getElementById("rich").textContent'))
+    // Chords: select all with the platform's own shortcut, a shifted letter, and a shortcut that types nothing.
+    const selection = () => contents.executeJavaScript('(() => { const field = document.getElementById("chord"); return { start: field.selectionStart, end: field.selectionEnd, value: field.value } })()')
+    await act('selectAll', 'pressKey', [ref('Chord'), process.platform === 'darwin' ? 'Meta+a' : 'Control+a'], selection)
+    await act('shiftLetter', 'pressKey', [ref('Chord'), 'Shift+a'], selection)
+    await act('ctrlEnter', 'pressKey', [ref('Chord'), 'Control+Enter'], selection)
     // Every other refusal, each before anything reaches the field.
     const nothing = (id) => () => contents.executeJavaScript('document.getElementById(' + JSON.stringify(id) + ').value')
     await act('offText', 'fillInput', [ref('Off text'), 'x'], nothing('offtext'))
@@ -233,7 +240,7 @@ async function buildBundle(outDirectory: string): Promise<void> {
     rollupOptions: { external: ['electron', '@agentmux/core', /^node:/] } } })
 }
 
-type Action = { ok: boolean; error?: string; effects?: string; events: { type: string; target: string; trusted: boolean }[]; own: boolean[]; notes?: string[]; value?: unknown }
+type Action = { ok: boolean; error?: string; effects?: string; events: { type: string; target: string; trusted: boolean; key?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }[]; own: boolean[]; notes?: string[]; value?: unknown }
 type Report = { ok?: boolean; error?: string; actions: Record<string, Action>; notes?: string[]; throttlingAfter?: boolean; framesBefore?: number }
 
 const roots: string[] = []
@@ -370,6 +377,18 @@ describe('real Electron: Agent page actions are trusted native input', () => {
       expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: true, value: expected })
       expect(trusted(actions[label]), `${label} was not trusted input`).toBe(true)
     }
+  }, 240_000)
+
+  it('a chord holds its modifiers around the key: select-all selects, Shift types a capital, Control+Enter types nothing', async () => {
+    const { actions } = await probe()
+    expect(actions.selectAll, actions.selectAll?.error).toMatchObject({ ok: true, value: { start: 0, end: 'select me'.length, value: 'select me' } })
+    // The selection was replaced by the capital, as a person's Shift+a would.
+    expect(actions.shiftLetter, actions.shiftLetter?.error).toMatchObject({ ok: true, value: { value: 'A' } })
+    const shiftDown = actions.shiftLetter!.events.find(event => event.type === 'keydown' && event.key === 'A')
+    expect(shiftDown, JSON.stringify(actions.shiftLetter!.events)).toMatchObject({ shift: true, trusted: true })
+    expect(actions.ctrlEnter, actions.ctrlEnter?.error).toMatchObject({ ok: true, value: { value: 'A' } })
+    expect(actions.ctrlEnter!.events.find(event => event.type === 'keydown' && event.key === 'Enter')).toMatchObject({ ctrl: true, trusted: true })
+    expect(actions.ctrlEnter!.events.filter(event => event.type === 'beforeinput'), 'a shortcut typed text').toEqual([])
   }, 240_000)
 
   it('every field that cannot take this input is refused before it changes, and says what to do instead', async () => {
