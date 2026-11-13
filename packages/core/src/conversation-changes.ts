@@ -6,7 +6,7 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationEventPrimary, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationNativeInputWitness, conversationInputKey,
+import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationEventPrimary, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationNativeInputWitness, conversationInputKey, withinConversationGapBudget,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-stream.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -264,7 +264,7 @@ function coverage(value: unknown, ref: ConversationRef, accepted: ConversationSc
     const source = parseConversationSource(p.source), key = conversationSourceKey(source), extent = rpcRecord(p.readExtent, ['from', 'through'], 'CONTROL_PROTOCOL_ERROR')
     if (seen.has(key) || !accepted.sources.some(v => conversationSourceKey(v) === key) ||
       !['beginning', 'retained-prefix', 'unknown'].includes(String(p.origin)) || !['complete', 'more', 'unknown-before'].includes(String(p.earlier)) ||
-      !['complete-through-cut', 'partial', 'unavailable', 'unsupported'].includes(String(p.current)) || !Array.isArray(p.gaps) || p.gaps.length > 100) return bad()
+      !['complete-through-cut', 'partial', 'unavailable', 'unsupported'].includes(String(p.current)) || !Array.isArray(p.gaps) || !withinConversationGapBudget(source.kind, p.gaps)) return bad()
     seen.add(key)
     return { source, origin: p.origin as ConversationSourceCoverage['origin'],
       readExtent: { ...(extent.from === undefined ? {} : { from: text(extent.from) }), through: text(extent.through) },

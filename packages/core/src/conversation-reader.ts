@@ -3,6 +3,7 @@ import { deferConversationProcessRecord } from './conversation-process-detail.js
 import { mintObjectId } from './object-id.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
+import { capturedBodyGaps } from './captured-history.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationValuesEqual as same, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionEvidence } from './conversation-stream.js'
@@ -28,8 +29,9 @@ export type ConversationReaderPort = {
   signal?: AbortSignal
 }
 type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number; inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut }; unavailable?: ConversationSourceCoverage[] }
+type CapturedBodyGap = AgentCapturedTimelinePage['stream']['gaps'][number]
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
-  after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean; nativeRecoveryRange?: ConversationChangesPage['nativeRecoveryRange'] }
+  after: Position; coverage: ConversationSourceCoverage[]; capturedBodyGap?: CapturedBodyGap; end?: ConversationFrontier; more: boolean; nativeRecoveryRange?: ConversationChangesPage['nativeRecoveryRange'] }
 type Cursor = ConversationRef & { processDetails?: 'deferred'; version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
   through?: ConversationCheckpoint; recover?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; record?: ConversationItemRef; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
@@ -42,10 +44,10 @@ type HistoryPosition = { position: Position; after: Position; checkpoint: Conver
 /** Live originals one span holds per source; bounds the forward re-read that recovers them. */
 const LIVE_SPAN_RECORDS = 100
 type CompleteUnit = ReturnType<typeof projection>['units'][number]
-type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: CompleteUnit[]; deferredUnits?: ConversationUnit[]; coverage: ConversationSourceCoverage[];
+type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: CompleteUnit[]; deferredUnits?: ConversationUnit[]; coverage: ConversationSourceCoverage[]; capturedBodyGap?: CapturedBodyGap;
   order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionEvidence; inputRecords: ConversationSourceRecord[]; navigation: ReturnType<typeof historyNavigation> }
 type ReadingView = ConversationRef & { processDetails?: 'deferred'; id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
-  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputWitnesses: ConversationInputWitnessIndex }
+  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; capturedBodyGap?: CapturedBodyGap; inputWitnesses: ConversationInputWitnessIndex }
 /** Temporary views live until their explicit release or this Reader owner's disposal.
  * Stopping observation parks a workface; unrelated reads cannot expire its continuation. */
 export class ConversationReaderState {
@@ -168,6 +170,7 @@ function row(ref: ConversationRef, original: ConversationSourceRecord['original'
 /** `capturedThrough` reads captured history at a later cut of the same stream: the same records, at the versions the view accepted. */
 async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, capturedThrough?: number): Promise<{ rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage }> {
   let nativePage: AgentSessionHistoryPage | undefined
+  let capturedBodyGap: CapturedBodyGap | undefined
   const rows: ConversationSourceRecord[] = [], after: Position = { ...state.position }
   let checkpoint = state.checkpoint!
   const coverage = state.scope.sources.map(source => state.position.unavailable?.find(c => conversationSourceKey(c.source) === conversationSourceKey(source)) ?? initialCoverage(source))
@@ -216,7 +219,8 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
       const before = state.position.capturedBefore ?? (capturedThrough === undefined ? undefined : state.position.capturedCut.sequence + 1)
       const page = await port.captured({ epoch: state.position.capturedCut.epoch, throughSequence: capturedThrough ?? state.position.capturedCut.sequence,
         ...(before === undefined ? {} : { beforeFirstSequence: before }), limit })
-      rows.push(...page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: page.stream.epoch, firstSequence: record.firstSequence }, record.revision)))
+      capturedBodyGap = capturedBodyGaps(page.records)[0]
+      rows.push(...page.records.flatMap(record => record.item === null ? [] : [row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: page.stream.epoch, firstSequence: record.firstSequence }, record.revision)]))
       after.capturedBefore = page.nextBeforeFirstSequence
       const current = initialCoverage(captured)
       coverage[coverage.findIndex(value => value.source.kind === 'captured')] = current
@@ -237,11 +241,13 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
   for (let index = 0; index < coverage.length; index++) if (coverage[index]!.source.kind === 'native-unavailable' || coverage[index]!.source.kind === 'captured' && !state.position.capturedCut)
     coverage[index] = unavailable(coverage[index]!.source, new AgentMuxError('This original scope has no accepted source identity. Read a new explicit scope to discover one.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
   return { rows, ...(nativePage ? { nativePage } : {}), batch: { index: 0, offset: 0, digests: [], after, coverage, end: checkpoint,
+    ...(capturedBodyGap ? { capturedBodyGap } : {}),
     more: native !== undefined && after.native !== null || !!state.position.capturedCut && after.capturedBefore !== null } }
 }
 async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, originals: ReadonlyMap<string, ConversationSourceRecord>): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
   const checkpoint = state.checkpoint!, rows: ConversationSourceRecord[] = [], coverage = state.scope.sources.map(initialCoverage), cuts = [...checkpoint.cuts]
   let more = false, nativeRecoveryRange: ConversationChangesPage['nativeRecoveryRange']
+  let capturedBodyGap: CapturedBodyGap | undefined
   for (const source of state.scope.sources) {
     const at = coverage.findIndex(c => conversationSourceKey(c.source) === conversationSourceKey(source))
     if (source.kind === 'native') {
@@ -279,19 +285,22 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
         const record = page.records.at(-1)
         if (!record && current.stream.sequence !== cut.sequence) return fail('The captured committed range is unavailable; an empty query cannot advance it.', 'AGENT_CONVERSATION_CAPTURED_GAP')
         if (page.agentSessionId !== ref.agentSessionId || page.stream.epoch !== cut.epoch ||
-          page.records.some((record, index) => record.item.agentSessionId !== ref.agentSessionId || !Number.isSafeInteger(record.sequence) ||
+          page.records.some((record, index) => (record.item === null ? typeof record.recordId !== 'string' || !record.recordId : record.item.agentSessionId !== ref.agentSessionId) || !Number.isSafeInteger(record.sequence) ||
             record.sequence <= cut.sequence || record.sequence > current.stream.sequence || !Number.isSafeInteger(record.firstSequence) || record.firstSequence < 1 || record.firstSequence > record.sequence ||
             index > 0 && record.sequence <= page.records[index - 1]!.sequence))
           return fail('The captured primitive returned records outside its accepted original ordered range. Its prior cut is retained.')
+        capturedBodyGap = capturedBodyGaps(page.records)[0]
         let inputGap=false
-        const eligible=page.records.filter(record=>{
+        const sourceRows=page.records.flatMap(record=>{
+          if(record.item===null)return []
           const origin=record.item.inputOrigin
-          if(!state.through||!origin)return true
-          const from=cut.inputJournal,to=upper?.kind==='captured'?upper.inputJournal:undefined
-          if(!to||origin.queueId!==to.queueId||origin.incarnation!==to.incarnation||from&&(origin.queueId!==from.queueId||origin.incarnation!==from.incarnation)){inputGap=true;return false}
-          return origin.sequence<=to.sequence&&(!from||origin.sequence>from.sequence)
+          if(state.through&&origin){
+            const from=cut.inputJournal,to=upper?.kind==='captured'?upper.inputJournal:undefined
+            if(!to||origin.queueId!==to.queueId||origin.incarnation!==to.incarnation||from&&(origin.queueId!==from.queueId||origin.incarnation!==from.incarnation)){inputGap=true;return []}
+            if(origin.sequence>to.sequence||from&&origin.sequence<=from.sequence)return []
+          }
+          return [row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream' as const, epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision)]
         })
-        const sourceRows = eligible.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream' as const, epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision))
         const positions = new Map<string, ConversationSourceRecord['order']>()
         for (const record of sourceRows) {
           const prior = positions.get(record.id) ?? originals.get(record.id)?.order
@@ -301,13 +310,15 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
           positions.set(record.id, record.order)
         }
         const sequence = record?.sequence ?? cut.sequence
-        const nextCoverage: ConversationSourceCoverage = { source, origin: page.stream.origin, readExtent: { from: String(cut.sequence), through: String(sequence) }, earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: sequence < current.stream.sequence ? 'partial' : 'complete-through-cut', gaps: [...page.stream.gaps,...(inputGap?[{code:'AGENT_CONVERSATION_INPUT_SOURCE_UNCONFIRMED',message:'Original input journal membership is outside or unconfirmed for this frozen range. Retain the original Session.'}]:[])] }
+        const bodyUnavailable=page.records.some(record=>record.item===null)
+        const gaps=inputGap?[...(bodyUnavailable?page.stream.gaps.slice(0,-1):page.stream.gaps),{code:'AGENT_CONVERSATION_INPUT_SOURCE_UNCONFIRMED',message:'Original input journal membership is outside or unconfirmed for this frozen range. Retain the original Session.'},...(bodyUnavailable?page.stream.gaps.slice(-1):[])]:page.stream.gaps
+        const nextCoverage: ConversationSourceCoverage = { source, origin: page.stream.origin, readExtent: { from: String(cut.sequence), through: String(sequence) }, earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: sequence < current.stream.sequence || bodyUnavailable ? 'partial' : 'complete-through-cut', gaps }
         rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence, ...(current.stream.inputJournal ? { inputJournal: current.stream.inputJournal } : {}) }
         more ||= sequence < current.stream.sequence; coverage[at] = nextCoverage
       } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, String(cut.sequence)) }
     } else coverage[at] = unavailable(source, new AgentMuxError('The original frontier has no resolved source identity. Later discovery requires a new explicit checkpoint.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
   }
-  return { rows, batch: { index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more, ...(nativeRecoveryRange ? { nativeRecoveryRange } : {}) } }
+  return { rows, batch: { index: 0, offset: 0, digests: [], after: state.position, coverage, ...(capturedBodyGap ? { capturedBodyGap } : {}), end: { ...ref, scope: state.scope, cuts }, more, ...(nativeRecoveryRange ? { nativeRecoveryRange } : {}) } }
 }
 type NativeCut = Extract<ConversationFrontier['cuts'][number], { kind: 'native' }>
 type CapturedCut = Extract<ConversationFrontier['cuts'][number], { kind: 'captured' }>
@@ -316,6 +327,7 @@ type CapturedCut = Extract<ConversationFrontier['cuts'][number], { kind: 'captur
  * A span has a source's records only after a changes read of that source, so both cuts exist. */
 async function liveSpanBatch(ref: ConversationRef, port: ConversationReaderPort, scope: ConversationFrontier['scope'], span: HistoryPosition, frontier: ConversationFrontier): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
   const rows: ConversationSourceRecord[] = [], coverage = scope.sources.map(initialCoverage)
+  let capturedBodyGap: CapturedBodyGap | undefined
   if (span.native) {
     const native = scope.sources.find((source): source is Extract<ConversationSourceRef, { kind: 'native' }> => source.kind === 'native')!
     const from = span.checkpoint.cuts.find((cut): cut is NativeCut => cut.kind === 'native')!.checkpoint, through = span.live!.through!
@@ -338,11 +350,12 @@ async function liveSpanBatch(ref: ConversationRef, port: ConversationReaderPort,
   if (span.captured) {
     const source = scope.sources.find(source => source.kind === 'captured')!, cut = frontier.cuts.find((cut): cut is CapturedCut => cut.kind === 'captured')!, { first, last, count } = span.captured
     const page = await port.captured({ epoch: cut.epoch, throughSequence: cut.sequence, beforeFirstSequence: last + 1, limit: count })
-    rows.push(...page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision)))
+    capturedBodyGap = capturedBodyGaps(page.records)[0]
+    rows.push(...page.records.flatMap(record => record.item === null ? [] : [row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision)]))
     coverage[coverage.findIndex(value => value.source.kind === 'captured')] = { source, origin: page.stream.origin, readExtent: { from: String(first - 1), through: String(cut.sequence) },
-      earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: 'complete-through-cut', gaps: page.stream.gaps }
+      earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: page.records.some(record=>record.item===null) ? 'partial' : 'complete-through-cut', gaps: page.stream.gaps }
   }
-  return { rows, batch: { index: 0, offset: 0, digests: [], after: {}, coverage, end: frontier, more: false } }
+  return { rows, batch: { index: 0, offset: 0, digests: [], after: {}, coverage, ...(capturedBodyGap ? { capturedBodyGap } : {}), end: frontier, more: false } }
 }
 /** Originals a changes read delivers first join the newest live span, so they stay reachable after
  * eviction. A captured original is new when its first version follows the lower cut; a native one when
@@ -377,7 +390,7 @@ async function anchorBatch(input: ConversationTimelineReadInput, port: Conversat
       const cut = anchor.frontier.frontier.cuts.find(c => c.kind === 'captured')
       if (!cut || cut.kind !== 'captured') return fail('The original captured anchor has no accepted cut.')
       const page = await port.captured({ epoch: cut.epoch, throughSequence: cut.sequence, recordId: source.recordId, recordRevision: anchor.revision, limit: 1 }), record = page.records[0]
-      if (!record) return fail('The original captured version is unavailable; latest content cannot replace it.')
+      if (!record || record.item === null) return fail('The original captured version is unavailable; latest content cannot replace it.')
       rows.push(row(input, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision))
     }
   } catch (error) {
@@ -595,6 +608,11 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       rows = rows.filter(record => !removed.has(record.id))
       if (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
       let inputAdoption = inputWitnesses.context(rows)
+      // One body-free fact belongs to this accepted view's read extent. A later
+      // healthy page cannot make its earlier missing originals complete again.
+      const capturedBodyGap = loaded.batch.capturedBodyGap ?? view.capturedBodyGap
+      if (capturedBodyGap && !loaded.batch.capturedBodyGap) loaded.batch.coverage = loaded.batch.coverage.map(source => source.source.kind === 'captured'
+        ? { ...source, current: source.current === 'complete-through-cut' ? 'partial' : source.current, gaps: [...source.gaps, capturedBodyGap] } : source)
       let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption, preserveCurrent)
       let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
       if (preserveCurrent && unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This older expansion cannot retain the accepted canonical contributions within its assembly budget. The original live view and continuation remain available.', 'AGENT_CONVERSATION_WINDOW_FULL')
@@ -608,7 +626,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }, navigation = historyNavigation(rows, history)
       if (navigation.older === null) outside.older = null
       if (navigation.newer === null) outside.newer = null
-      snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order, navigation,
+      snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, ...(capturedBodyGap ? { capturedBodyGap } : {}), order: projected.order, navigation,
         ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: frontier, committed: false, requestKey, outside, history, inputAdoption, inputRecords: accepted }
       state.viewRevision = view.revision; state.snapshotId = mintObjectId(); state.batch = { index: 0, offset: 0 }
       view.snapshots.set(state.snapshotId, snapshot)
@@ -665,7 +683,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     port.signal?.throwIfAborted()
     if (page.window.complete && !snapshot.committed) {
       if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
-      view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputWitnesses.accept(snapshot.inputRecords); snapshot.committed = true
+      view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; if (snapshot.capturedBodyGap) view.capturedBodyGap = snapshot.capturedBodyGap; view.inputWitnesses.accept(snapshot.inputRecords); snapshot.committed = true
     }
     delivered = true
     return parsed
@@ -699,7 +717,10 @@ export async function readAgentConversation(input: ConversationTimelineReadInput
         return located
       }
       const source = page.coverage.find(value => value.source.kind === record.source.kind)
-      const gap = source?.gaps[0]
+      // A missing captured version is a local hole in this frozen read, not
+      // evidence that another original record on an older page is unavailable.
+      const gap = source?.gaps.find(gap => !(source.source.kind === 'captured' &&
+        gap.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE' && gap.record === undefined && gap.continuation === undefined))
       if (gap || source?.current === 'unavailable' || source?.current === 'unsupported') return fail(gap?.message ?? 'The original record source is unavailable. The displayed window is retained.', gap?.code ?? 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
       const after = view.history.at(-1)?.after
       const end = record.source.kind === 'native' ? after?.native === null : after?.capturedBefore === null

@@ -239,9 +239,17 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
   const matchCount = () => textMode ? result.items.length : result.userMessages!.length
   let page = view.firstNative && (position.page === null ? view.firstNative : await nativePage(owner, input, position.page, signal))
   if (page && view.nativeSource && !sameSource(page.source, view.nativeSource)) return fail('Native query source changed.')
-  const capturedAt=async(before?:string)=>await options.readCapturedHistory!(input.agentSessionId,{...view!.capturedCut,limit:100,...(before===undefined?{}:{beforeFirstSequence:Number(before)})})
+  let bodyUnavailable = view.firstCaptured?.records.some(record=>record.item===null) ?? false
+  const capturedAt=async(before?:string)=>{
+    const page=await options.readCapturedHistory!(input.agentSessionId,{...view!.capturedCut,limit:100,...(before===undefined?{}:{beforeFirstSequence:Number(before)})})
+    if(!bodyUnavailable&&page.records.some(record=>record.item===null)&&result.capturedStream){
+      result.capturedStream={...result.capturedStream,gaps:[...result.capturedStream.gaps,page.stream.gaps.at(-1)!]}
+      bodyUnavailable=true
+    }
+    return page
+  }
   let captured=view.firstCaptured&&(position.page===null?view.firstCaptured:await capturedAt(position.page))
-  let items: readonly (AgentTimelineItem | AgentSessionHistoryItem)[]=captured?captured.records.map(r=>r.item):[...page!.items].reverse()
+  let items: readonly (AgentTimelineItem | AgentSessionHistoryItem | null)[]=captured?captured.records.map(r=>r.item):[...page!.items].reverse()
   while (true) {
     signal?.throwIfAborted()
     if (position.index > items.length) return fail('Query cursor exceeds its original page.')
@@ -263,6 +271,7 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
     }
     if (result.scan!.examined >= scanLimit || matchCount() >= limit) break
     const item = items[position.index]!
+    if(item===null){position.index++;result.scan!.examined++;continue}
     const messages = textMode ? [] : input.source === 'captured'
       ? projectSessionUserMessages({ agentSessionId: input.agentSessionId, timeline: { agentSessionId: input.agentSessionId, revision: 0, items: [item as AgentTimelineItem] } })
       : projectSessionUserMessages({ agentSessionId: input.agentSessionId, historyPage: { agentSessionId: input.agentSessionId, source: view.nativeSource!, items: [item as AgentSessionHistoryItem], nextCursor: null } })

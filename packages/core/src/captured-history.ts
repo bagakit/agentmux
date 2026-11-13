@@ -7,7 +7,7 @@ import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js';
 import { parseAgentInputJournalCut, type AgentInputJournalCut } from './agent-input-conversation.js'
 import type { AgentCapturedTimelinePage, AgentCapturedTimelineRead, AgentCapturedTimelineRecord, AgentCapturedTimelineStream, AgentTimelineCommit, AgentTimelineMutation, AgentTimelineSnapshot } from './types.js';
 // These are tables in the original Session database, under its original transaction/flock.
-// Bodies exist only in immutable versions. Heads and recent windows are indexes/queries.
+// Original headers survive body retirement. Heads and recent windows are indexes/queries.
 export const capturedHistorySchema = `
  CREATE TABLE IF NOT EXISTS captured_streams (
   session_id TEXT PRIMARY KEY, epoch TEXT NOT NULL, sequence INTEGER NOT NULL,
@@ -60,7 +60,19 @@ function accepted(db: DatabaseSync, id: string): StreamRow {
   return row;
 }
 function decode(row: Record<string, unknown>): AgentCapturedTimelineRecord {
-  return { item: normalizeAgentTimelineItem(JSON.parse(String(row.item_json))), firstSequence: Number(row.first_sequence), sequence: Number(row.sequence), revision: String(row.revision) };
+  const header = { firstSequence: Number(row.first_sequence), sequence: Number(row.sequence), revision: String(row.revision) };
+  return row.item_json === 'null' ? { ...header, item: null, recordId: String(row.record_id) }
+    : { ...header, item: normalizeAgentTimelineItem(JSON.parse(String(row.item_json))) };
+}
+function decodeHead(row: Record<string, unknown>) {
+  const record = decode(row);
+  if (record.item === null) throw new AgentMuxError('The current captured head body is unavailable. Retain its original stream.', 'INVALID_AGENT_TIMELINE');
+  return record;
+}
+/** Read-local disclosure, never one persistent gap per retired version. */
+export function capturedBodyGaps(records: readonly AgentCapturedTimelineRecord[]): AgentCapturedTimelineStream['gaps'] {
+  return records.some(record => record.item === null)
+    ? [{ code: 'AGENT_CONVERSATION_VERSION_UNAVAILABLE', message: 'Selected original captured versions have retired bodies. Their headers and positions remain; latest content does not replace them.' }] : [];
 }
 export function capturedStreamMetadata(db: DatabaseSync, id: string, cut?: number): AgentCapturedTimelineStream {
   const row = accepted(db, id), sequence = cut ?? row.sequence;
@@ -73,7 +85,7 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   const previousRow = db.prepare(`SELECT v.*,h.first_sequence FROM captured_record_heads h JOIN captured_record_versions v
   ON v.session_id=h.session_id AND v.epoch=h.epoch AND v.sequence=h.latest_sequence
   WHERE h.session_id=? AND h.epoch=? AND h.record_id=?`).get(id, stream.epoch, recordId);
-  const previous = previousRow ? decode(previousRow).item : undefined;
+  const previous = previousRow ? decodeHead(previousRow).item : undefined;
   const items = previous ? [previous] : [];
   const next = applyNormalizedTimelineMutation(items, mutation);
   const changed = next !== items;
@@ -84,6 +96,20 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   if (!Number.isSafeInteger(stream.sequence + 1) || !Number.isSafeInteger(stream.revision + 1))
     throw new AgentMuxError('Captured stream sequence limit reached.', 'AGENT_TIMELINE_REVISION_LIMIT');
   const item = next[0]!, sequence = stream.sequence + 1, revision = stream.revision + 1, itemRevision = conversationRevision(item);
+  let retirementAfter: number | undefined;
+  if (!preparing) {
+    // Keep existing table shapes and old writers intact. One immutable cut belongs
+    // to this original stream, under the same writer/SAVEPOINT as the new version.
+    db.exec(`CREATE TABLE IF NOT EXISTS captured_retirement_cuts (
+      session_id TEXT NOT NULL, epoch TEXT NOT NULL, after_sequence INTEGER NOT NULL,
+      PRIMARY KEY(session_id,epoch))`);
+    const cut = db.prepare('SELECT after_sequence FROM captured_retirement_cuts WHERE session_id=? AND epoch=?').get(id, stream.epoch);
+    const after = cut ? cut.after_sequence : stream.sequence;
+    if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0 || after > stream.sequence)
+      throw new AgentMuxError('The original captured retirement cut is unconfirmed. Retain its records.', 'AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED');
+    retirementAfter = after;
+    if (!cut) db.prepare('INSERT INTO captured_retirement_cuts VALUES (?,?,?)').run(id, stream.epoch, retirementAfter);
+  }
   if (item.inputOrigin) {
     initializeInputProjection(db)
     if (item.inputRef && item.inputSubmission && (item.inputSubmission.status === 'waiting' || item.inputSubmission.status === 'unknown' || item.inputSubmission.observation === 'owned'))
@@ -95,6 +121,9 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   db.prepare(`INSERT INTO captured_record_heads VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id,epoch,record_id)
   DO UPDATE SET latest_sequence=excluded.latest_sequence,kind=excluded.kind,activity=excluded.activity`)
     .run(id, stream.epoch, recordId, sequence, sequence, item.kind, Number(item.activityState !== undefined));
+  if (previousRow && retirementAfter !== undefined && Number(previousRow.sequence) > retirementAfter)
+    db.prepare("UPDATE captured_record_versions SET item_json='null' WHERE session_id=? AND epoch=? AND sequence=?")
+      .run(id, stream.epoch, Number(previousRow.sequence));
   db.prepare('UPDATE captured_streams SET sequence=?,revision=? WHERE session_id=?').run(sequence, revision, id);
   return { agentSessionId: id, revision, changed: true, mutation, stream: { ...header, sequence, revision },
     position: { id: recordId, firstSequence: previousRow ? Number(previousRow.first_sequence) : sequence, sequence, revision: itemRevision } };
@@ -142,7 +171,8 @@ export function readCapturedPage(db: DatabaseSync, id: string, input: AgentCaptu
    ORDER BY h.first_sequence DESC LIMIT ?`).all(cut, id, stream.epoch, input.beforeFirstSequence ?? Number.MAX_SAFE_INTEGER, ...(input.recordId === undefined ? [] : [input.recordId]), limit + 1);
   }
   const more = rows.length > limit, records = rows.slice(0, limit).map(decode);
-  return { agentSessionId: id, stream: capturedStreamMetadata(db, id, cut), records,
+  const metadata = capturedStreamMetadata(db, id, cut);
+  return { agentSessionId: id, stream: { ...metadata, gaps: [...metadata.gaps, ...capturedBodyGaps(records)] }, records,
     nextBeforeFirstSequence: more && input.afterSequence === undefined ? records.at(-1)!.firstSequence : null, more };
 }
 export function readRecentCaptured(db: DatabaseSync, id: string): AgentTimelineSnapshot {
@@ -153,7 +183,7 @@ export function readRecentCaptured(db: DatabaseSync, id: string): AgentTimelineS
    SELECT record_id FROM (SELECT record_id FROM captured_record_heads WHERE session_id=? AND epoch=? AND activity=1 ORDER BY first_sequence DESC LIMIT 200)
    UNION ALL SELECT record_id FROM (SELECT record_id FROM captured_record_heads WHERE session_id=? AND epoch=? AND activity=0 AND kind='user_message' ORDER BY first_sequence DESC LIMIT 200)
    UNION ALL SELECT record_id FROM (SELECT record_id FROM captured_record_heads WHERE session_id=? AND epoch=? AND activity=0 AND kind!='user_message' ORDER BY first_sequence DESC LIMIT 200))
-  ORDER BY h.first_sequence`).all(id, stream.epoch, id, stream.epoch, id, stream.epoch, id, stream.epoch).map(decode);
+  ORDER BY h.first_sequence`).all(id, stream.epoch, id, stream.epoch, id, stream.epoch, id, stream.epoch).map(decodeHead);
   return { agentSessionId: id, revision: stream.revision, items: rows.map(row => row.item), stream: { ...stream,
       positions: rows.map(({ item, ...position }) => ({ id: item.id, ...position })) } };
 }

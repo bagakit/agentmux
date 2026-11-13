@@ -2230,11 +2230,14 @@ export type AgentCapturedTimelineStream = {
   gaps: Array<{ code: string; message: string }>
 }
 export type AgentCapturedTimelineRecord = {
-  item: AgentTimelineItem
   firstSequence: number
   sequence: number
   revision: string
-}
+} & ({ item: AgentTimelineItem } | {
+  /** The original version header survives retirement of its body. */
+  item: null
+  recordId: string
+})
 export type AgentCapturedTimelineRead = {
   epoch?: string
   throughSequence?: number

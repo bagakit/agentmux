@@ -52,7 +52,7 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
     : (await client.sessionHistorySources()).find(entry => entry.hostId === input.hostId && entry.agentSessionId === input.agentSessionId)
   if (!descriptor || descriptor.hostId !== input.hostId || descriptor.agentSessionId !== input.agentSessionId) return fail('No exact retained Session exists at the requested Host.', 'UNKNOWN_AGENT_SESSION')
   const limit = input.limit ?? 30
-  let items: Array<AgentSessionHistoryItem | AgentTimelineItem>, revision: string, afterNative: string | null = null
+  let items: Array<AgentSessionHistoryItem | AgentTimelineItem | null>, revision: string, afterNative: string | null = null
   let nativeSource: AgentSessionHistorySource | undefined, capturedPage: AgentCapturedTimelinePage | undefined
   if (input.source === 'captured') {
     capturedPage = await options.readCapturedHistory!(input.agentSessionId, { ...cursor.captured, limit: cursor.nativeLimit ?? limit })
@@ -95,7 +95,12 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
   const fits = (entry: AgentSessionHistoryReadEntry, next: string | null): boolean =>
     Buffer.byteLength(JSON.stringify({ ...result, items: [...result.items, entry], nextCursor: next })) <= budgetBytes - 1024
   while (index < items.length && result.items.length < limit) {
-    const item = items[index]!, bytes = Buffer.from(JSON.stringify(item))
+    const item = items[index]!
+    if (item === null) {
+      if (offset) return fail('The original captured version body is unavailable. Retain its partial read and exact cursor.', 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
+      index++; continue
+    }
+    const bytes = Buffer.from(JSON.stringify(item))
     if (offset > bytes.length) return fail('History cursor exceeds its item.')
     const next = continuation(index + 1, 0)
     const whole: AgentSessionHistoryReadEntry = { kind: 'item', item }
@@ -119,6 +124,7 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
     break
   }
   result.nextCursor = continuation(index, offset)
+  result.availability = result.items.length ? 'available' : 'empty'
   if (Buffer.byteLength(JSON.stringify(result)) > budgetBytes - 1024) return fail('History continuation cannot fit the requested budget. Increase --max-bytes.', 'AGENT_SESSION_HISTORY_BUDGET')
   if (index < items.length && result.items.length === 0) return fail('History continuation cannot fit the requested budget. Increase --max-bytes.', 'AGENT_SESSION_HISTORY_BUDGET')
   return result

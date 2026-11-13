@@ -50,6 +50,14 @@ export type ConversationSourceCoverage = {
   current: 'complete-through-cut' | 'partial' | 'unavailable' | 'unsupported'
   gaps: readonly { code: string; message: string; record?: ConversationItemRef; continuation?: string }[]
 }
+/** Preserve 100 original gaps; only captured coverage has one final body-gap slot. */
+export function withinConversationGapBudget(sourceKind: string, gaps: readonly unknown[]): boolean {
+  if (gaps.length <= 100) return true
+  if (sourceKind !== 'captured' || gaps.length !== 101) return false
+  const last = gaps[100]
+  return !!last && typeof last === 'object' && !Array.isArray(last) &&
+    'code' in last && last.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE' && !('record' in last) && !('continuation' in last)
+}
 export type ConversationSourceRecord = {
   id: string
   reference: ConversationItemRef | null

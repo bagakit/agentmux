@@ -42,7 +42,7 @@ import { continuityExecutorEntries } from './agent-session-recovery/executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import { conversationRevision } from './conversation-stream.js'
-import { beginCapturedStream, capturedHistorySchema, capturedStream, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream, readCapturedInputProjection, writeCapturedInputProjection } from './captured-history.js'
+import { beginCapturedStream, capturedHistorySchema, capturedStream, capturedBodyGaps, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream, readCapturedInputProjection, writeCapturedInputProjection } from './captured-history.js'
 import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from './captured-history-import.js'
 import {
   normalizeAgentTimelineMutation
@@ -2717,7 +2717,9 @@ function spawnRecord(phase: AgentMuxSpawnRecord['phase'], value: unknown): Agent
     createdAt: session.createdAt, creation: { ...creation, createdBy: creation.createdBy } } : null
 }
 
-type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream']; heads: Map<string, AgentCapturedTimelinePage['records'][number]>; versions: AgentCapturedTimelinePage['records'] }
+type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
+  heads: Map<string, Extract<AgentCapturedTimelinePage['records'][number], { item: AgentTimelineItem }>>;
+  versions: AgentCapturedTimelinePage['records']; retirementAfterSequence?: number }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
   private readonly spawnQueryOwner = mintObjectId()
@@ -2832,7 +2834,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const limit = input.limit ?? 100
     // Captured versions are append-only with sequence == array index + 1.
     const rows = timeline.versions.slice(window.afterSequence, Math.min(window.throughSequence, window.afterSequence + limit + 1))
-      .map(record => ({ sequence: record.sequence, logicalBytes: Buffer.byteLength(JSON.stringify(record.item)) }))
+      .map(record => ({ sequence: record.sequence, logicalBytes: record.item === null ? 0 : Buffer.byteLength(JSON.stringify(record.item)) }))
     return sessionUsageMeasurement(window, rows, limit)
   }
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
@@ -3272,16 +3274,16 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (input.afterSequence !== undefined)
       rows = history.versions.filter(r => r.sequence > input.afterSequence! && r.sequence <= cut);
     else if (input.recordId !== undefined && input.recordRevision !== undefined)
-      rows = history.versions.filter(r => r.item.id === input.recordId && r.revision === input.recordRevision && r.sequence <= cut).slice(-1);
+      rows = history.versions.filter(r => (r.item === null ? r.recordId : r.item.id) === input.recordId && r.revision === input.recordRevision && r.sequence <= cut).slice(-1);
     else {
       const atCut = new Map<string, AgentCapturedTimelinePage['records'][number]>();
       for (const row of history.versions)
         if (row.sequence <= cut)
-          atCut.set(row.item.id, row);
-      rows = [...atCut.values()].filter(r => r.firstSequence < (input.beforeFirstSequence ?? Number.MAX_SAFE_INTEGER) && (input.recordId === undefined || r.item.id === input.recordId)).sort((a, b) => b.firstSequence - a.firstSequence);
+          atCut.set(row.item === null ? row.recordId : row.item.id, row);
+      rows = [...atCut.values()].filter(r => r.firstSequence < (input.beforeFirstSequence ?? Number.MAX_SAFE_INTEGER) && (input.recordId === undefined || (r.item === null ? r.recordId : r.item.id) === input.recordId)).sort((a, b) => b.firstSequence - a.firstSequence);
     }
     const more = rows.length > limit, records = rows.slice(0, limit);
-    return structuredClone({ agentSessionId: id, stream: { ...stream, sequence: cut, revision: cut }, records, nextBeforeFirstSequence: more && input.afterSequence === undefined ? records.at(-1)!.firstSequence : null, more });
+    return structuredClone({ agentSessionId: id, stream: { ...stream, sequence: cut, revision: cut, gaps: [...stream.gaps, ...capturedBodyGaps(records)] }, records, nextBeforeFirstSequence: more && input.afterSequence === undefined ? records.at(-1)!.firstSequence : null, more });
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
@@ -3313,11 +3315,18 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const revision = changed ? nextTimelineRevision(history.stream.revision) : history.stream.revision
     const head = changed ? { item: next[0]!, firstSequence: previous?.firstSequence ?? sequence,
       sequence, revision: conversationRevision(next[0]!) } : previous!
+    const retirementAfter = history.retirementAfterSequence === undefined ? history.stream.sequence : history.retirementAfterSequence
+    if (changed && (!Number.isSafeInteger(retirementAfter) || retirementAfter < 0 || retirementAfter > history.stream.sequence))
+      throw new AgentMuxError('The original captured retirement cut is unconfirmed. Retain its records.', 'AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED')
+    const retired = changed && previous && previous.sequence > retirementAfter
+      ? { item: null, recordId, firstSequence: previous.firstSequence, sequence: previous.sequence, revision: previous.revision } as const : undefined
     const commit = structuredClone({ agentSessionId: id, revision, changed, mutation,
       stream: { ...history.stream, sequence, revision }, position: { id: recordId,
         firstSequence: head.firstSequence, sequence: head.sequence, revision: head.revision } })
     return { commit, write: () => {
       if (changed) {
+        history.retirementAfterSequence ??= retirementAfter
+        if (retired) history.versions[retired.sequence - 1] = retired
         history.versions.push(head)
         history.heads.set(recordId, head)
         history.stream.sequence = sequence
@@ -3607,7 +3616,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const window = sessionUsageWindow(id, stream.epoch, stream.sequence, input.cursor)
       const limit = input.limit ?? 100
       // The original (session_id,epoch,sequence) key bounds both the visit and returned rows.
-      const rows = db.prepare(`SELECT sequence, octet_length(item_json) AS logicalBytes
+      const rows = db.prepare(`SELECT sequence, CASE WHEN item_json='null' THEN 0 ELSE octet_length(item_json) END AS logicalBytes
         FROM captured_record_versions WHERE session_id=? AND epoch=? AND sequence>? AND sequence<=?
         ORDER BY sequence LIMIT ?`).all(id, window.epoch, window.afterSequence, window.throughSequence, limit + 1)
         .map(row => ({ sequence: Number(row.sequence), logicalBytes: Number(row.logicalBytes) }))
