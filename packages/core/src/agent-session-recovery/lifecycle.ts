@@ -1062,6 +1062,35 @@ export class AgentSessionRunLifecycle {
     if (!complete) throw new AgentMuxError('The original resumed Session commit is unconfirmed. Inspect its original Start.', 'AGENT_RESUME_UNCONFIRMED')
   }
 
+  /**
+   * The Runtime witness a Stop needs to take over one prepared resume of the exact Session and Run.
+   * With the original dispatch, the creation key is read and, if still open, sealed; a retained Run
+   * must match the whole frozen request. Without it (an older reservation), only a retained Run under
+   * the key is a witness: a missing Run proves nothing and the key cannot be sealed, so the Stop is
+   * refused with the original operation named. No Start or input of the original operation is replayed.
+   */
+  async fencePreparedResumeForStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>):
+    Promise<{ fence: 'retired' | 'retained'; runtimeId: string; run?: CtxmuxAdapterRun }> {
+    const dispatch = reservation.preparedDispatch, kernel = this.ports.runtime.kernel
+    if (dispatch) {
+      const observed = await kernel.observePreparedStartRetirement(reservation.operationId, dispatch.runtime)
+      if (observed.outcome === 'retired') return { fence: 'retired', runtimeId: observed.runtime.runtimeId }
+      const sealed = await kernel.retirePreparedStart(decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
+      return sealed.outcome === 'retired' ? { fence: 'retired', runtimeId: sealed.runtime.runtimeId }
+        : { fence: 'retained', runtimeId: sealed.runtime.runtimeId, run: sealed.run }
+    }
+    const retained = await kernel.inspectRetainedStart(reservation.operationId)
+    if (retained) {
+      assertPreparedResumeBinding(retained.prepared, reservation.preparedSession, reservation.operationId, 'AGENT_RESUME_RETAINED_MISMATCH')
+      return { fence: 'retained', runtimeId: retained.runtime.runtimeId, run: retained.run }
+    }
+    const resumeOperationId = reservation.preparedSession?.continuity?.operationId
+    throw new AgentMuxError(`Stop cannot take over the original resume${resumeOperationId ? ` ${resumeOperationId}` : ''} (lifecycle operation ${reservation.operationId}). ` +
+      'That resume was recorded without its Runtime and launch request, and this Runtime retains no Run under its key, so Core cannot prove it left no Run behind. ' +
+      'No Core action can prove that from the current state. The Session, its Run and the original resume are kept unchanged; agent stop inspect reports this holder.',
+      'AGENT_STOP_BLOCKED_BY_UNCONFIRMED_RESUME')
+  }
+
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     const run = await this.inspectPreparedResume(reservation)
     return run ? await this.completeObservedPreparedResume(reservation, run) : null

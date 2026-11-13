@@ -23,7 +23,25 @@ export type AgentMuxAgentStopRuntime = {
   /** The Runtime's own receipt for the stop, when one was sent. */
   stop: 'graceful' | 'forced' | 'not-required' | 'not-found'
 }
-export type AgentMuxAgentStopAdmission = 'new' | 'retained' | 'joined'
+/** `superseded-resume`: this Stop took over a prepared resume after the Runtime gave a witness for its creation key. */
+export type AgentMuxAgentStopAdmission = 'new' | 'retained' | 'joined' | 'superseded-resume'
+/**
+ * The prepared resume a Stop took over and the Runtime witness that allowed it. The Stop keeps this
+ * record of the original operation on its own reservation and then in the retirement; it never
+ * replays that operation's Start or input.
+ */
+export type AgentMuxStopSupersededResume = {
+  /** The prepared resume's creation key. */
+  lifecycleOperationId: string
+  /** The caller's identity for that resume, when it was recorded. */
+  resumeOperationId?: string
+  /** `retired`: the key is sealed, so no Run can start under it. `retained`: that key's one Run exists and is stopped with this Session. */
+  fence: 'retired' | 'retained'
+  runtimeId: string
+  retainedRun?: AgentMuxRunRef
+  /** How the retained Run was stopped; written at retirement. */
+  retainedStop?: AgentMuxAgentStopRuntime['stop']
+}
 export type AgentMuxAgentStopReceipt = {
   agentSessionId: string
   expectedRun: AgentMuxRunRef
@@ -34,6 +52,7 @@ export type AgentMuxAgentStopReceipt = {
   runtime: AgentMuxAgentStopRuntime
   retiredAt: number
   stages: AgentMuxAgentStopStage[]
+  supersededResume?: AgentMuxStopSupersededResume
 }
 /** What a still-open Stop reservation records about how far it got. */
 export type AgentMuxAgentStopProgress = {
@@ -47,6 +66,7 @@ export type AgentMuxAgentStopRecord = {
   lifecycleOperationId: string
   runtime: AgentMuxAgentStopRuntime
   stages: AgentMuxAgentStopStage[]
+  supersededResume?: AgentMuxStopSupersededResume
 }
 export type AgentMuxAgentStopIdentity = { agentSessionId: string; expectedRun: AgentMuxRunRef; operationId?: string }
 export type AgentMuxAgentStopInspection = {
@@ -69,6 +89,8 @@ export type AgentMuxAgentStopInspection = {
   failure?: AgentMuxAgentStopProgress['failure']
   retiredAt?: number
   holder?: { kind: 'create' | 'resume' | 'reopen'; operationId: string }
+  /** The prepared resume this Stop took over, with its Runtime witness. */
+  supersededResume?: AgentMuxStopSupersededResume
   observedAt: number
 }
 
@@ -126,18 +148,31 @@ export function parseAgentStopProgress(value: unknown): AgentMuxAgentStopProgres
   }
   return progress
 }
+export function parseStopSupersededResume(value: unknown): AgentMuxStopSupersededResume {
+  const source = object(value, 'superseded resume')
+  const fence = member(source.fence, ['retired', 'retained'] as const, 'superseded resume fence')
+  const parsed: AgentMuxStopSupersededResume = { lifecycleOperationId: id(source.lifecycleOperationId, 'superseded resume operation'), fence,
+    runtimeId: id(source.runtimeId, 'superseded resume Runtime') }
+  if (source.resumeOperationId !== undefined) parsed.resumeOperationId = id(source.resumeOperationId, 'superseded resume caller operation')
+  if (source.retainedRun !== undefined) parsed.retainedRun = { runId: id(object(source.retainedRun, 'retained Run').runId, 'retained Run') }
+  if (source.retainedStop !== undefined) parsed.retainedStop = member(source.retainedStop, DISPOSITIONS, 'retained Run stop')
+  if ((fence === 'retained') !== (parsed.retainedRun !== undefined) || fence === 'retired' && parsed.retainedStop !== undefined) invalid('superseded resume witness')
+  return parsed
+}
 export function parseAgentStopRecord(value: unknown): AgentMuxAgentStopRecord {
   const source = object(value, 'record')
   return { operationId: id(source.operationId, 'record operation'), lifecycleOperationId: id(source.lifecycleOperationId, 'record lifecycle'),
-    runtime: parseAgentStopRuntime(source.runtime), stages: parseAgentStopStages(source.stages) }
+    runtime: parseAgentStopRuntime(source.runtime), stages: parseAgentStopStages(source.stages),
+    ...(source.supersededResume === undefined ? {} : { supersededResume: parseStopSupersededResume(source.supersededResume) }) }
 }
 export function parseAgentStopReceipt(value: unknown, expected?: { agentSessionId: string; operationId?: string }): AgentMuxAgentStopReceipt {
   const source = object(value, 'receipt'), run = object(source.expectedRun, 'receipt Run')
   const receipt: AgentMuxAgentStopReceipt = {
     agentSessionId: id(source.agentSessionId, 'receipt Session'), expectedRun: { runId: id(run.runId, 'receipt Run') },
     operationId: id(source.operationId, 'receipt operation'), lifecycleOperationId: id(source.lifecycleOperationId, 'receipt lifecycle'),
-    admission: member(source.admission, ['new', 'retained', 'joined'] as const, 'receipt admission'),
-    runtime: parseAgentStopRuntime(source.runtime), retiredAt: time(source.retiredAt, 'receipt retirement'), stages: parseAgentStopStages(source.stages)
+    admission: member(source.admission, ['new', 'retained', 'joined', 'superseded-resume'] as const, 'receipt admission'),
+    runtime: parseAgentStopRuntime(source.runtime), retiredAt: time(source.retiredAt, 'receipt retirement'), stages: parseAgentStopStages(source.stages),
+    ...(source.supersededResume === undefined ? {} : { supersededResume: parseStopSupersededResume(source.supersededResume) })
   }
   if (expected && (receipt.agentSessionId !== expected.agentSessionId || expected.operationId !== undefined && receipt.operationId !== expected.operationId)) {
     throw new AgentMuxError('The Stop receipt belongs to another Session or operation.', 'CONTROL_PROTOCOL_ERROR')

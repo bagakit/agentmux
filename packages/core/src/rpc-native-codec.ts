@@ -1,5 +1,5 @@
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
-import { parseAgentStopRuntime, parseAgentStopStages } from './agent-stop-receipt.js'
+import { parseAgentStopRuntime, parseAgentStopStages, parseStopSupersededResume } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote-dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
@@ -609,7 +609,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.stop.inspect': {
-        record(p, ['agentSessionId', 'expectedRun', 'phase', 'canRetry', 'lifecycleOperationId', 'operationIdMatched', 'stages', 'runtime', 'failure', 'retiredAt', 'holder', 'observedAt'])
+        record(p, ['agentSessionId', 'expectedRun', 'phase', 'canRetry', 'lifecycleOperationId', 'operationIdMatched', 'stages', 'runtime', 'failure', 'retiredAt', 'holder', 'supersededResume', 'observedAt'])
         if (p.agentSessionId !== input.agentSessionId || record(p.expectedRun, ['runId']).runId !== record(input.expectedRun).runId ||
           !['not-requested', 'stopping', 'retired', 'unconfirmed'].includes(String(p.phase)) || typeof p.canRetry !== 'boolean') fail()
         count(p.observedAt)
@@ -617,6 +617,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.operationIdMatched !== undefined && (typeof p.operationIdMatched !== 'boolean' || input.operationId === undefined)) fail()
         if (p.stages !== undefined) parseAgentStopStages(p.stages)
         if (p.runtime !== undefined) parseAgentStopRuntime(p.runtime)
+        if (p.supersededResume !== undefined) { parseStopSupersededResume(p.supersededResume); if (p.phase !== 'stopping' && p.phase !== 'retired') fail() }
         if (p.retiredAt !== undefined) count(p.retiredAt)
         if (p.failure !== undefined) { const failure = record(p.failure, ['stage', 'code', 'message', 'observedAt']); string(failure.stage); string(failure.code); text(failure.message); count(failure.observedAt) }
         if (p.holder !== undefined) { const holder = record(p.holder, ['kind', 'operationId']); if (!['create', 'resume', 'reopen'].includes(String(holder.kind))) fail(); string(holder.operationId) }

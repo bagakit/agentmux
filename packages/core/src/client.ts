@@ -169,8 +169,9 @@ import {
 import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation, type CtxmuxAdapterInputChannel } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
-import { parseAgentStopIdentity, type AgentMuxAgentStopIdentity, type AgentMuxAgentStopInspection, type AgentMuxAgentStopReceipt,
-  type AgentMuxAgentStopRecord, type AgentMuxAgentStopRuntime, type AgentMuxAgentStopStage, type AgentMuxAgentStopStageName } from './agent-stop-receipt.js'
+import { parseAgentStopIdentity, type AgentMuxAgentStopAdmission, type AgentMuxAgentStopIdentity, type AgentMuxAgentStopInspection, type AgentMuxAgentStopReceipt,
+  type AgentMuxAgentStopRecord, type AgentMuxAgentStopRuntime, type AgentMuxAgentStopStage, type AgentMuxAgentStopStageName,
+  type AgentMuxStopSupersededResume } from './agent-stop-receipt.js'
 import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
@@ -312,7 +313,7 @@ type AgentStopAdmission = {
   reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>
   stopOperation: CtxmuxAdapterStopOperation
   operationId: string
-  admission: 'new' | 'retained'
+  admission: Exclude<AgentMuxAgentStopAdmission, 'joined'>
   stages: AgentMuxAgentStopStage[]
 }
 
@@ -8016,10 +8017,18 @@ export class AgentMuxClient {
         if (run) await this.releaseRunAttachment(session.run)
         stages.push({ stage: 'runtime-stop', startedAt: stopAt, endedAt: Date.now(), outcome: 'skipped' })
       }
+      // The taken-over resume's one retained Run belongs to this Session too, so it stops with it.
+      let supersededResume = reservation.supersededResume
+      if (supersededResume?.retainedRun) {
+        const retainedStop = await this.stopRetainedResumeRun(supersededResume.retainedRun)
+          .catch(error => fail('runtime-stop', Date.now(), error))
+        supersededResume = { ...supersededResume, retainedStop }
+      }
       // A late original reader joins the same retirement, even after the Session
       // leaves the registry. A failed cleanup permits explicit retry of that tail.
       if (!flight.retirement) {
-        const record = { operationId: admission.operationId, lifecycleOperationId: reservation.operationId, runtime: { observed, stop: disposition }, stages }
+        const record: AgentMuxAgentStopRecord = { operationId: admission.operationId, lifecycleOperationId: reservation.operationId,
+          runtime: { observed, stop: disposition }, stages, ...(supersededResume ? { supersededResume } : {}) }
         const retirement = this.retireStoppedAgent(session, reservation, record, admission.admission, () => { flight.retired = true })
         flight.retirement = retirement
         void retirement.catch(() => { if (!flight.retired && flight.retirement === retirement) delete flight.retirement })
@@ -8045,15 +8054,39 @@ export class AgentMuxClient {
     const operationId = retained ? retained.progress?.operationId ?? retained.operationId : callerOperationId ?? mintObjectId()
     const lifecycleOperationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, operationId)
     const admitted: AgentMuxAgentStopStage = { stage: 'admission', startedAt, endedAt: startedAt, outcome: 'ok' }
+    // A prepared resume of this exact Run holds the Session; the Runtime fence for its creation key is
+    // the only witness that lets this Stop take it over. The fence refuses when no witness exists.
+    const holder = retained ? null : await this.store.readLifecycleReservation(agentSessionId)
+    const supersededResume = holder?.kind === 'resume' && holder.preparedSession && !holder.restart && sameRun(holder.expectedRun, expectedRun)
+      ? await this.fencePreparedResume(holder) : undefined
     const stopOperation = retained ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, lifecycleOperationId)
     admitted.endedAt = Date.now()
     const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, lifecycleOperationId, stopOperation,
-      { operationId, stages: [admitted] })
+      { progress: { operationId, stages: [admitted] }, ...(supersededResume ? { supersededResume } : {}) })
     // Intent is recorded only after admission succeeds. Keep this prepared
     // identity through observation/receipt/cleanup failures until retirement;
     // no individual reader can release another reader's accepted operation.
     this.stopRequestedRuns.add(expectedRun.runId)
-    return { session, reservation, stopOperation, operationId, admission: retained ? 'retained' : 'new', stages: [admitted] }
+    return { session, reservation, stopOperation, operationId, stages: [admitted],
+      admission: retained ? 'retained' : reservation.supersededResume ? 'superseded-resume' : 'new' }
+  }
+
+  /** Stop the one Run a taken-over resume left under its key; an ended or absent Run needs no stop. */
+  private async stopRetainedResumeRun(run: AgentMuxRunRef): Promise<AgentMuxAgentStopRuntime['stop']> {
+    let observed: CtxmuxAdapterRun
+    try { observed = await this.kernel.status(run.runId) }
+    catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') return 'not-found'; throw error }
+    if (observed.state.type !== 'running') return 'not-required'
+    this.stopRequestedRuns.add(run.runId)
+    try { return (await this.kernel.stop(await this.kernel.prepareStop(run.runId))).disposition }
+    catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') return 'not-found'; throw error }
+  }
+
+  private async fencePreparedResume(holder: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStopSupersededResume> {
+    const witness = await this.recovery.fencePreparedResumeForStop(holder)
+    const resumeOperationId = holder.preparedSession?.continuity?.operationId
+    return { lifecycleOperationId: holder.operationId, fence: witness.fence, runtimeId: witness.runtimeId,
+      ...(resumeOperationId ? { resumeOperationId } : {}), ...(witness.run ? { retainedRun: { runId: witness.run.runId } } : {}) }
   }
 
   private async retireStoppedAgent(session: AgentMuxAgentSession, reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>,
@@ -8088,7 +8121,8 @@ export class AgentMuxClient {
     const errors = cleanup.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length > 0) throw new AggregateError(errors, 'Agent stopped but Agent Session cleanup failed.')
     return { agentSessionId, expectedRun: { ...session.run }, operationId: final.operationId, lifecycleOperationId: final.lifecycleOperationId,
-      admission, runtime: { ...final.runtime }, retiredAt: stored!.observedAt, stages: structuredClone(final.stages) }
+      admission, runtime: { ...final.runtime }, retiredAt: stored!.observedAt, stages: structuredClone(final.stages),
+      ...(final.supersededResume ? { supersededResume: structuredClone(final.supersededResume) } : {}) }
   }
 
   /**
@@ -8104,11 +8138,13 @@ export class AgentMuxClient {
     if (reservation?.kind === 'stop' && reservation.expectedRun.runId === expectedRun.runId) {
       return { ...base, phase: 'stopping', canRetry: true, lifecycleOperationId: reservation.operationId, ...matched(reservation.progress?.operationId ?? reservation.operationId),
         ...(reservation.progress ? { stages: structuredClone(reservation.progress.stages) } : {}),
-        ...(reservation.progress?.failure ? { failure: { ...reservation.progress.failure } } : {}) }
+        ...(reservation.progress?.failure ? { failure: { ...reservation.progress.failure } } : {}),
+        ...(reservation.supersededResume ? { supersededResume: structuredClone(reservation.supersededResume) } : {}) }
     }
     if (retired?.run.runId === expectedRun.runId && !metadata) {
       return { ...base, phase: 'retired', canRetry: false, retiredAt: retired.observedAt,
         ...(retired.stop ? { lifecycleOperationId: retired.stop.lifecycleOperationId, stages: structuredClone(retired.stop.stages), runtime: { ...retired.stop.runtime } } : {}),
+        ...(retired.stop?.supersededResume ? { supersededResume: structuredClone(retired.stop.supersededResume) } : {}),
         ...matched(retired.stop?.operationId) }
     }
     if (reservation && reservation.kind !== 'stop') {

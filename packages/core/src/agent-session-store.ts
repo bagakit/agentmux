@@ -46,7 +46,8 @@ import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from
 import {
   normalizeAgentTimelineMutation
 } from './session-timeline.js'
-import { parseAgentStopProgress, parseAgentStopRecord, type AgentMuxAgentStopProgress, type AgentMuxAgentStopRecord } from './agent-stop-receipt.js'
+import { parseAgentStopProgress, parseAgentStopRecord, parseStopSupersededResume, type AgentMuxAgentStopProgress, type AgentMuxAgentStopRecord,
+  type AgentMuxStopSupersededResume } from './agent-stop-receipt.js'
 import {
   normalizeNativeSessionId,
   normalizeNativeTranscriptPath,
@@ -155,6 +156,8 @@ export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
       stopOperation: AgentMuxRecoverableStopOperation
       /** How far this Stop got; written before the Runtime stop and when a stage fails. */
       progress?: AgentMuxAgentStopProgress
+      /** The prepared resume this Stop took over, with its Runtime witness. */
+      supersededResume?: AgentMuxStopSupersededResume
     }
 )
 
@@ -585,8 +588,11 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
       ...(source.preparedDispatch === undefined ? {} : { preparedDispatch: preparedResumeDispatch(source.preparedDispatch, preparedSession, base.operationId) }),
       ...(restart ? { restart } : {}), ...(resolution ? { resolution } : {}), ...(source.ownerReleased === true ? { ownerReleased: true as const } : {}) }
   }
+  const supersededResume = source.supersededResume === undefined ? undefined : parseStopSupersededResume(source.supersededResume)
+  if (supersededResume?.retainedRun?.runId === expectedRun!.runId) throw new AgentMuxError('A retained resume Run cannot be the Run it resumed.', 'INVALID_AGENT_SESSION_STORE')
   return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation!,
-    ...(source.progress === undefined ? {} : { progress: parseAgentStopProgress(source.progress) }) }
+    ...(source.progress === undefined ? {} : { progress: parseAgentStopProgress(source.progress) }),
+    ...(supersededResume ? { supersededResume } : {}) }
 }
 
 function sameSession(
@@ -630,6 +636,20 @@ function canSupersedeRestartWithStop(
     !current.preparedSession && current.agentSessionId === requested.agentSessionId &&
     current.expectedRun.runId === requested.expectedRun.runId &&
     (current.ownerId === requested.ownerId || current.ownerReleased === true || !processIsAlive(current.ownerPid))
+}
+
+/**
+ * A Stop replaces a prepared resume (one that froze its Session before Start) only with the Runtime's
+ * witness for that exact creation key: sealed, so no Run can start under it, or retained, so its one
+ * Run is known and is stopped with the Session. Time passing or an owner process ending is no witness.
+ */
+function canSupersedePreparedResumeWithStop(current: AgentMuxLifecycleReservation, requested: AgentMuxLifecycleReservation): boolean {
+  if (requested.kind !== 'stop' || current.kind !== 'resume' || !current.preparedSession || current.restart) return false
+  const witness = requested.supersededResume
+  return Boolean(witness && witness.lifecycleOperationId === current.operationId &&
+    current.reservationId !== requested.reservationId && current.agentSessionId === requested.agentSessionId &&
+    current.expectedRun.runId === requested.expectedRun.runId &&
+    (current.ownerId === requested.ownerId || current.ownerReleased === true || !processIsAlive(current.ownerPid)))
 }
 
 function assertLifecycleReceiptFence(reservation: AgentMuxLifecycleReservation | null | undefined,
@@ -2504,12 +2524,23 @@ function stopProgressReservation(current: AgentMuxLifecycleReservation | undefin
   return lifecycleReservation({ ...current, progress }) as StopReservation
 }
 
+/** A Stop retires the Session's Runs and the one Run a taken-over resume left under its key. */
+function stopRetiredRuns(previous: AgentMuxStoredAgentSession, reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>): AgentMuxRunRef[] {
+  const retained = reservation.supersededResume?.retainedRun
+  return [...previous.retiredRuns, previous.run, ...(retained ? [retained] : [])]
+}
+
 /** Only a Stop retirement carries a Stop record, and only the record of that same lifecycle operation. */
 function stopRecordFor(reservation: AgentMuxLifecycleReservation, value: AgentMuxAgentStopRecord | undefined): AgentMuxAgentStopRecord | undefined {
   if (value === undefined) return undefined
   const record = parseAgentStopRecord(value)
   if (reservation.kind !== 'stop' || record.lifecycleOperationId !== reservation.operationId) {
     throw new AgentMuxError('The Stop record belongs to another lifecycle operation.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  // The record reports the takeover the reservation admitted, adding only how its retained Run stopped.
+  const { retainedStop: _stopped, ...reported } = record.supersededResume ?? {}
+  if (!isDeepStrictEqual(record.supersededResume ? reported : undefined, reservation.supersededResume)) {
+    throw new AgentMuxError('The Stop record names another taken-over resume.', 'INVALID_AGENT_SESSION_STORE')
   }
   return record
 }
@@ -2879,7 +2910,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
     const reservation = lifecycleReservation(value)
     const current = this.reservations.get(reservation.agentSessionId)
-    if (current && !canSupersedeRestartWithStop(current, reservation)) {
+    if (current && !canSupersedeRestartWithStop(current, reservation) && !canSupersedePreparedResumeWithStop(current, reservation)) {
       throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     }
     assertReservationPrecondition(
@@ -3081,11 +3112,12 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     stop?: AgentMuxAgentStopRecord
   ): Promise<AgentMuxRetiredAgentSession | null> {
     const reservation = lifecycleReservation(value)
-    const stopRecord = stopRecordFor(reservation, stop)
     const currentReservation = this.reservations.get(reservation.agentSessionId)
     if (!currentReservation || !sameReservationOwner(currentReservation, reservation)) {
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
     }
+    // The Store's own row is the admitted takeover; the caller's copy cannot add or drop one.
+    const stopRecord = stopRecordFor(currentReservation, stop)
     assertReservationPrecondition(
       reservation,
       [...this.sessions.values()],
@@ -3100,8 +3132,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     if (normalized) values.push(normalized)
     const sessions = normalizeAgentSessions(values)
-    const retiredRuns = reservation.kind === 'stop' && previous
-      ? mergeRetiredRuns(this.retiredRuns, [...previous.retiredRuns, previous.run])
+    const retiredRuns = currentReservation.kind === 'stop' && previous
+      ? mergeRetiredRuns(this.retiredRuns, stopRetiredRuns(previous, currentReservation))
       : reservation.kind === 'reopen'
         ? withoutReopenedRuns(this.retiredRuns, reservation.expectedRetirement)
         : this.retiredRuns
@@ -3582,7 +3614,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       // A row-level read keeps unrelated Sessions and the accumulated history out of this admission.
       const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(reservation.agentSessionId)
       const current = row ? lifecycleReservation(JSON.parse(String(row.json))) : undefined
-      if (current && !canSupersedeRestartWithStop(current, reservation)) {
+      if (current && !canSupersedeRestartWithStop(current, reservation) && !canSupersedePreparedResumeWithStop(current, reservation)) {
         throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
       }
       const session = this.sessionMetadata(this.db, reservation.agentSessionId)
@@ -3851,8 +3883,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     let committed: AgentMuxRetiredAgentSession | null = null
     await this.enqueue(async () => {
       const reservation = lifecycleReservation(value)
-      const stopRecord = stopRecordFor(reservation, stop)
-      if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next, stopRecord); return }
+      if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next, stop); return }
+      stopRecordFor(reservation, stop) // refuses a Stop record on any other lifecycle
       this.commitSessionLifecycle(reservation, next)
     }, undefined, value.agentSessionId)
     return committed
@@ -3902,15 +3934,17 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const db = this.db, id = reservation.agentSessionId
     const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(id)
     const current = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
-    if (!current || !sameReservationOwner(current, reservation)) {
+    if (!current || current.kind !== 'stop' || !sameReservationOwner(current, reservation)) {
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
     }
+    // The Store's own row is the admitted takeover; the caller's copy cannot add or drop one.
+    const record = stopRecordFor(current, stop)
     const previous = this.sessionMetadata(db, id)
     if (!previous) throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
     assertReservationPrecondition(reservation, [previous], [])
     assertLifecycleReceiptFence(current, previous, null, true)
     assertLifecycleCommit(current, next)
-    const runs = [...previous.retiredRuns, previous.run].map(runRef)
+    const runs = stopRetiredRuns(previous, current).map(runRef)
     for (const run of runs) {
       const bound = db.prepare('SELECT session_id FROM run_bindings WHERE run_id=?').get(run.runId)
       if (bound && bound.session_id !== id) throw new AgentMuxError('Unbound retired Run conflicts with an Agent Session.', 'INVALID_AGENT_SESSION_STORE')
@@ -3930,7 +3964,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       history: sessionHistoryMetadata(previous),
       continuityControlReceipts: continuityControlReceipts(previous),
       ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
-      ...(stop ? { stop } : {})
+      ...(record ? { stop: record } : {})
     })
     db.prepare('INSERT INTO retired_sessions (id, json) VALUES (?, ?)').run(id, JSON.stringify(retired))
     this.dirty = true

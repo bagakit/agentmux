@@ -301,6 +301,10 @@ export class AgentSessionRecoveryService {
     await this.continuitySupervisor.serialize(ref.key.agentSessionId, () => this.lifecycle.continuePreparedMessageInput(ref, carrier))
   }
 
+  async fencePreparedResumeForStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>) {
+    return this.continuitySupervisor.serialize(reservation.agentSessionId, () => this.lifecycle.fencePreparedResumeForStop(reservation))
+  }
+
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     return this.continuitySupervisor.serialize(reservation.agentSessionId, async () => {
       const restored = await this.lifecycle.completePreparedResume(reservation)

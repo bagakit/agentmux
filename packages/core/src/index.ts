@@ -94,7 +94,7 @@ export * from './runtime-paths.js'
 export * from './runtime-storage-usage.js'
 export * from './agent-session-store.js'
 export type { AgentMuxAgentStopAdmission, AgentMuxAgentStopIdentity, AgentMuxAgentStopInspection, AgentMuxAgentStopProgress, AgentMuxAgentStopReceipt,
-  AgentMuxAgentStopRecord, AgentMuxAgentStopRuntime, AgentMuxAgentStopStage, AgentMuxAgentStopStageName } from './agent-stop-receipt.js'
+  AgentMuxAgentStopRecord, AgentMuxAgentStopRuntime, AgentMuxAgentStopStage, AgentMuxAgentStopStageName, AgentMuxStopSupersededResume } from './agent-stop-receipt.js'
 export * from './agent-session-registry.js'
 export * from './agent-session-id.js'
 export * from './agent-native-locator.js'

@@ -1,4 +1,4 @@
-import type { AgentMuxAgentStopProgress, AgentMuxAgentStopRecord } from './agent-stop-receipt.js'
+import type { AgentMuxAgentStopProgress, AgentMuxAgentStopRecord, AgentMuxStopSupersededResume } from './agent-stop-receipt.js'
 import type { ResumeResolutionRequest } from './agent-prepared-resume.js'
 import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { mintObjectId } from './object-id.js'
@@ -63,6 +63,9 @@ type AgentSessionLoadCut = {
   retirements: Set<string>
   runs: Set<string>
 }
+
+/** What a Stop records at admission: its first stages and, when it takes over a prepared resume, that witness. */
+type StopAdmissionFacts = { progress?: AgentMuxAgentStopProgress; supersededResume?: AgentMuxStopSupersededResume }
 
 export class AgentMuxAgentSessionRegistry {
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
@@ -296,7 +299,7 @@ export class AgentMuxAgentSessionRegistry {
     expectedRun: AgentMuxRunRef,
     operationId: string,
     stopOperation: AgentMuxRecoverableStopOperation,
-    progress: AgentMuxAgentStopProgress
+    stop?: StopAdmissionFacts
   ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>>
   async reserveExisting(
     kind: 'resume' | 'stop',
@@ -304,7 +307,7 @@ export class AgentMuxAgentSessionRegistry {
     expectedRun: AgentMuxRunRef,
     operationId: string,
     stopOperation?: AgentMuxRecoverableStopOperation,
-    progress?: AgentMuxAgentStopProgress
+    stop: StopAdmissionFacts = {}
   ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' | 'stop' }>> {
     const session = this.get(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
@@ -321,7 +324,7 @@ export class AgentMuxAgentSessionRegistry {
           operationId,
           expectedRun,
           stopOperation: stopOperation!,
-          progress: progress!
+          ...stop
         })
     if (reservation.kind === 'create' || reservation.kind === 'reopen') {
       throw new AgentMuxError('Existing lifecycle reservation changed kind.', 'INVALID_AGENT_SESSION_STORE')
@@ -694,8 +697,7 @@ export class AgentMuxAgentSessionRegistry {
         operationId: string
         expectedRun: AgentMuxRunRef
         stopOperation: AgentMuxRecoverableStopOperation
-        progress: AgentMuxAgentStopProgress
-      }
+      } & StopAdmissionFacts
   )): Promise<AgentMuxLifecycleReservation> {
     const now = Date.now()
     const base = {
@@ -715,7 +717,8 @@ export class AgentMuxAgentSessionRegistry {
             kind: 'stop',
             expectedRun: { ...input.expectedRun },
             stopOperation: { ...input.stopOperation },
-            progress: structuredClone(input.progress)
+            ...(input.progress ? { progress: structuredClone(input.progress) } : {}),
+            ...(input.supersededResume ? { supersededResume: structuredClone(input.supersededResume) } : {})
           }
     await this.store.reserveLifecycle(reservation)
     return reservation
