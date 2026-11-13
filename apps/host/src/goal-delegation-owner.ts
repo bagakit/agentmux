@@ -46,6 +46,18 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         const p = input as GoalDelegationParamsMap['goal.patrol.report']; await this.patrol.report(p.goalId, p.patrolOperationId, p.report, authority)
       }
     }
+    if (method === 'goal.plan.revise') {
+      const goal = await this.demands.get(input.goalId)
+      if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
+      // People edit the plan freely; among Agents only the current Supervisor maintains it.
+      if (authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId)
+        throw new AgentMuxError('Only this Goal\'s current Supervisor or a person can revise its plan. Read goal plan and ask the Supervisor.', 'CONTROL_PERMISSION_DENIED')
+      await this.demands.revisePlan(input.goalId, (input as GoalDelegationParamsMap['goal.plan.revise']).revision, authority.actor)
+    }
+    if (method === 'goal.plan.review') {
+      // The store refuses the node's own executor; any other admitted Agent or person may review.
+      await this.demands.reviewPlanNode(input.goalId, (input as GoalDelegationParamsMap['goal.plan.review']).review, authority.actor)
+    }
     if (method === 'goal.progress') {
       if (!this.responsibility) throw new AgentMuxError('The original Goal responsibility owner is unavailable. Original work and native input remain available.', 'CONTROL_UNAVAILABLE')
       await this.responsibility.progress(input.goalId, (input as GoalDelegationParamsMap['goal.progress']).progress, context, authority)
@@ -95,7 +107,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           const coordination = JSON.stringify({ schema: 'agentmux.goal-delegation.v1', goalId: input.goalId,
             operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
-            hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds,
+            hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds, ...(intent.planNodeId ? { planNodeId: intent.planNodeId } : {}),
             next: 'Use goal report --input FILE to return every delegated criterion with evidence, gap or unknown under this original dispatch. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.' })
           intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination + '\n\n' + guidance }
         }
@@ -183,18 +195,19 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     }
     const goal = await this.demands.get(input.goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
-    const observations = method === 'goal.delegation.prepare' ? undefined
+    const quiet = method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
+    const observations = quiet ? undefined
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal.supervisorSessionId)))
-    const startObservations = method === 'goal.delegation.prepare' || !this.readStart ? undefined
+    const startObservations = quiet || !this.readStart ? undefined
       : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
-    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [],
+    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...(goal.plan ? { plan: goal.plan } : {}),
       goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),
       ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}),
       ...(goal.patrols ? { patrols: goal.patrols, ...(this.patrol ? { patrolObservations: await this.patrol.observe(goal) } : {}) } : {}),
       ...(goal.grounding ? { grounding: goal.grounding } : {}), diskDurability: 'confirmed' }
-    if (this.responsibility && method !== 'goal.delegation.prepare') result.responsibility = await this.responsibility.observe(goal, result)
+    if (this.responsibility && !quiet) result.responsibility = await this.responsibility.observe(goal, result)
     return result
   }
 

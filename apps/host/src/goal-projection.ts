@@ -11,7 +11,7 @@ export function projectHostGoal(goal: Demand): AgentMuxDemand {
     plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
-    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}),
+    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...(goal.plan ? { plan: goal.plan } : {}),
     sessionIds: [...goal.sessionIds], ...(goal.contentRefs ? { contentRefs: goal.contentRefs } : {}),
     createdAt: goal.createdAt, updatedAt: goal.updatedAt, source: 'default-topic',
     ...(goal.alignment ? { alignment: goal.alignment } : {}), ...(goal.grounding ? { grounding: goal.grounding } : {}) }
