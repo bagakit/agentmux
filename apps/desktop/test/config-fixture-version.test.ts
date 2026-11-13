@@ -61,27 +61,77 @@ function objectLiteralOf(
   return initializer && ts.isObjectLiteralExpression(initializer) ? initializer : null
 }
 
-/**
- * Every `version:` on an object that is stringified into a path ending in agentmux.config.json.
- *
- * Shape matched: `writeFile(join(dir, 'agentmux.config.json'), `${JSON.stringify(<obj>)}\n`, …)`,
- * where `<obj>` is an inline literal or a `const` bound to one — both spellings are in the tree today.
- */
+/** Follow the actual write destination, including a const-bound path, without treating reads as writers. */
+function namesPath(module: ReturnType<typeof parseModule>, node: ts.Node, name: string, seen = new Set<ts.Node>()): boolean {
+  if (seen.has(node)) return false
+  seen.add(node)
+  if (ts.isStringLiteralLike(node)) return node.text === name
+  if (ts.isIdentifier(node)) {
+    const declaration = declarationOf(module, node)
+    if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
+      return namesPath(module, declaration.initializer, name, seen)
+    }
+  }
+  let found = false
+  ts.forEachChild(node, child => { if (namesPath(module, child, name, seen)) found = true })
+  return found
+}
+
+/** The private seeder bundles only the actual ConfigStore export; it does not author a version. */
+function inheritsCurrentDefaults(module: ReturnType<typeof parseModule>, object: ts.ObjectLiteralExpression): boolean {
+  return object.properties.some(property => {
+    if (!ts.isSpreadAssignment(property) || !ts.isCallExpression(property.expression) ||
+      property.expression.expression.getText() !== 'structuredClone') return false
+    const identifier = property.expression.arguments[0]
+    if (!identifier || !ts.isIdentifier(identifier)) return false
+    const binding = declarationOf(module, identifier)
+    if (!binding || !ts.isBindingElement(binding) || !ts.isObjectBindingPattern(binding.parent) ||
+      !ts.isVariableDeclaration(binding.parent.parent) || binding.name.getText() !== 'DEFAULT_CONFIG') return false
+    const initializer = binding.parent.parent.initializer
+    if (!initializer || !ts.isAwaitExpression(initializer) || !ts.isCallExpression(initializer.expression) ||
+      initializer.expression.expression.kind !== ts.SyntaxKind.ImportKeyword) return false
+    const imported = initializer.expression.arguments[0]
+    if (!imported || !ts.isPropertyAccessExpression(imported) || imported.name.text !== 'href' ||
+      !ts.isCallExpression(imported.expression) || imported.expression.expression.getText() !== 'pathToFileURL') return false
+    const modulePath = imported.expression.arguments[0]
+    if (!modulePath || !ts.isIdentifier(modulePath)) return false
+    const moduleDeclaration = declarationOf(module, modulePath)
+    if (!moduleDeclaration) return false
+    let ownsExport = false
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText() === 'build' && node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0])) {
+        const options = node.arguments[0], outfile = propertyInitializer(options, 'outfile'), input = propertyInitializer(options, 'stdin')
+        const contents = input && ts.isObjectLiteralExpression(input) && propertyInitializer(input, 'contents')
+        if (outfile && declarationOf(module, outfile) === moduleDeclaration && contents && ts.isTemplateExpression(contents) &&
+          contents.head.text === 'export { DEFAULT_CONFIG } from ' && contents.templateSpans.length === 1 && contents.templateSpans[0]!.literal.text === '') {
+          const expression = contents.templateSpans[0]!.expression
+          ownsExport = ts.isCallExpression(expression) && expression.expression.getText() === 'JSON.stringify' &&
+            expression.arguments[0] !== undefined && namesPath(module, expression.arguments[0], 'apps/desktop/src/main/config-store.ts')
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(module.sourceFile)
+    return ownsExport
+  })
+}
+
+/** Unknown versions remain NaN so a newly discovered writer fails the owning version assertion. */
 function configVersionsIn(source: string, label: string): number[] {
   const module = parseModule(source, label)
   const versions: number[] = []
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && node.expression.getText().endsWith('JSON.stringify')) {
+    if (ts.isCallExpression(node) && node.expression.getText() === 'JSON.stringify') {
       const argument = node.arguments[0]
-      // Walk out to the writeFile() call and ask which file this stringify feeds.
       let ancestor: ts.Node | undefined = node.parent
       while (ancestor && !ts.isCallExpression(ancestor)) ancestor = ancestor.parent
-      if (argument && ancestor && ts.isCallExpression(ancestor)) {
+      if (argument && ancestor && ts.isCallExpression(ancestor) && /(?:^|\.)writeFile(?:Sync)?$/.test(ancestor.expression.getText())) {
         const target = ancestor.arguments[0]
-        if (target && target.getText().includes(CONFIG_FILE_NAME)) {
+        if (target && namesPath(module, target, CONFIG_FILE_NAME)) {
           const object = objectLiteralOf(module, argument)
           const version = object && propertyInitializer(object, 'version')
-          if (version && ts.isNumericLiteral(version)) versions.push(Number(version.text))
+          versions.push(version && ts.isNumericLiteral(version) ? Number(version.text) :
+            !version && object && inheritsCurrentDefaults(module, object) ? CONFIG_VERSION : NaN)
         }
       }
     }
@@ -100,7 +150,8 @@ function configWritingScripts(): ConfigWritingScript[] {
     // 完全相同时才交出源码。用真实的 .mjs 名字时 program 里一个文件都没有，checker 于是对每个
     // 标识符都返回"无声明"——`JSON.stringify(fixtureConfig)` 这种写法会被静默当成"没有版本号"。
     // 这不是洁癖：实测 .mjs 名下 5 个标识符实参 0 个解析得到，换成 .ts 名 5 个全部解析得到。
-    found.push({ path, declaredVersions: configVersionsIn(text, `${join(desktopRoot, path)}.ts`) })
+    const declaredVersions = configVersionsIn(text, `${join(desktopRoot, path)}.ts`)
+    if (declaredVersions.length) found.push({ path, declaredVersions })
   }
   return found
 }
@@ -118,6 +169,26 @@ describe('scripts fixture config version', () => {
     expect(configVersionsIn(sample, _hygiene_fixturePath("synthetic/three-stores.ts"))).toEqual([9])
   })
 
+  it('finds const-bound write targets, excludes reads and rejects an unwitnessed version', () => {
+    const label = _hygiene_fixturePath('synthetic/config-writer.ts')
+    const target = `const target = join(root, 'agentmux.config.json');`
+    expect(configVersionsIn(target + `await writeFile(target, JSON.stringify({version: 9}));`, label)).toEqual([9])
+    expect(configVersionsIn(target + `await readFile(target); await writeFile('other.json', JSON.stringify({version: 1}));`, label)).toEqual([])
+    expect(Number.isNaN(configVersionsIn(target + `await writeFile(target, JSON.stringify({hosts: []}));`, label)[0])).toBe(true)
+    expect(Number.isNaN(configVersionsIn(target + `const DEFAULT_CONFIG = {version: 1}; await writeFile(target, JSON.stringify({...structuredClone(DEFAULT_CONFIG)}));`, label)[0])).toBe(true)
+  })
+
+  it('recognizes only the seed module that bundles the actual ConfigStore default export', () => {
+    const source = `const seedModule = join(root, 'seed.mjs'); const source = join(repository, 'apps/desktop/src/main/config-store.ts');
+      await build({stdin:{contents: \`export { DEFAULT_CONFIG } from \${JSON.stringify(source)}\`}, outfile: seedModule});
+      const { DEFAULT_CONFIG } = await import(pathToFileURL(seedModule).href);
+      await writeFile(join(root, 'agentmux.config.json'), JSON.stringify({...structuredClone(DEFAULT_CONFIG)}));`
+    const label = _hygiene_fixturePath('synthetic/derived-config.ts')
+    expect(configVersionsIn(source, label)).toEqual([CONFIG_VERSION])
+    expect(Number.isNaN(configVersionsIn(source.replace('src/main/config-store.ts', 'src/main/unrelated.ts'), label)[0])).toBe(true)
+    expect(configVersionsIn(source.replace('{...structuredClone(DEFAULT_CONFIG)}', '{...structuredClone(DEFAULT_CONFIG),version:1}'), label)).toEqual([1])
+  })
+
   it('scans real tracked scripts instead of passing on an empty result', () => {
     const scripts = trackedScripts()
     // 扫描根写错时这里立刻红，而不是让下面每条断言在空集合上恒真通过。
@@ -127,11 +198,13 @@ describe('scripts fixture config version', () => {
     expect(
       writers.map((script) => basename(script.path)).sort(),
       `没有任何脚本被识别为 ${CONFIG_FILE_NAME} 的写方：要么判据失效了，要么脚本改了写法`
-    ).toEqual([
+    ).toEqual(expect.arrayContaining([
       'file-editing-fixture.mjs',
       'measure-desktop-resources.mjs',
       'probe-attention-review-restart.mjs'
-    ])
+    ]))
+    expect(writers.length).toBeGreaterThan(3)
+    expect(new Set(writers.map(script => script.path)).size).toBe(writers.length)
   })
 
   it('keeps every scripted fixture config at the current CONFIG_VERSION', () => {
