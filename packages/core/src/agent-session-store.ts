@@ -3266,6 +3266,24 @@ function sqliteBusy(error: unknown): boolean {
   return (error as { errcode?: unknown } | null)?.errcode === 5
 }
 
+/**
+ * Repeat one side-effect-free read step while another connection holds the lock it needs. A
+ * rollback-journal writer refuses new readers while it commits, from the first validation PRAGMA;
+ * the writer's COMMIT already waits out readers, and a read waits out the writer on the same
+ * budget. Only pure reads go through here: a write keeps its own single retry budget.
+ */
+async function whileBusy<T>(step: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    signal?.throwIfAborted()
+    try { return await step() } catch (error) {
+      // A failed cleanup leaves the original connection unconfirmed; opening another reader
+      // cannot confirm that release or make its failure disappear.
+      if (!sqliteBusy(error) || (error as { cleanup?: unknown[] } | null)?.cleanup?.length || attempt >= LOCK_ATTEMPTS) throw error
+      await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
+    }
+  }
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
@@ -4205,23 +4223,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal, committedOnly = false): Promise<T> {
     signal?.throwIfAborted()
     if (this.database && !committedOnly) return read(this.database)
-    for (let attempt = 1; ; attempt += 1) {
-      try { return await this.readCommittedSnapshot(read, rescue, signal) } catch (error) {
-        // A rollback-journal writer refuses new readers while it commits, from the very first
-        // validation PRAGMA. The writer's COMMIT already waits out readers; a read has no side
-        // effects, so it waits out the writer on the same budget and takes a whole new snapshot.
-        if (!sqliteBusy((error as { cause?: unknown }).cause) || attempt >= LOCK_ATTEMPTS) throw error
-        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
-      }
-    }
-  }
-
-  private async readCommittedSnapshot<T>(read: (db: DatabaseSync) => T,
-    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal): Promise<T> {
     let db: DatabaseSync | null = null
     let failure: unknown
     try {
-      db = await readCurrentSessionDatabase(this.path)
+      db = await whileBusy(() => readCurrentSessionDatabase(this.path), signal)
       signal?.throwIfAborted()
       if (!db) {
         let raw: Buffer | undefined
@@ -4240,11 +4245,19 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         }
         signal?.throwIfAborted()
         await this.enqueue(async () => {}, signal)
-        db = await readCurrentSessionDatabase(this.path)
+        db = await whileBusy(() => readCurrentSessionDatabase(this.path), signal)
         signal?.throwIfAborted()
         if (!db) throw new AgentMuxError('Session persistence identity is unconfirmed; retry the original read.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
       }
-      db.exec('BEGIN'); const result = read(db); db.exec('COMMIT'); return result
+      const reader = db
+      return await whileBusy(() => {
+        try { reader.exec('BEGIN'); const result = read(reader); reader.exec('COMMIT'); return result }
+        catch (error) {
+          try { if (reader.isTransaction) reader.exec('ROLLBACK') }
+          catch (cleanup) { throw sessionStorageFailure(error, 'read', [cleanup]) }
+          throw error
+        }
+      }, signal)
     } catch (error) {
       failure = signal?.aborted ? signal.reason : sessionStorageFailure(error, 'read')
       throw failure
