@@ -139,7 +139,7 @@ async function electron() {
         rendererTailBeforeMs: before.actualShownMs - before.grabs.at(-1).returnedMs, rendererTailAfterMs: after.actualShownMs - after.grabs.at(-1).returnedMs })
     }
     assert.equal(receipt.comparisons.length, 4)
-    assert.ok(median(receipt.comparisons.map(row => row.actualShownGainMs)) > 0, 'independent real window show events must establish the median gain')
+    assert.ok(median(receipt.comparisons.map(row => row.actualShownGainMs)) > 0, 'independently observed native window visibility must establish the median gain')
     assert.ok(median(receipt.comparisons.map(row => row.shownGainMs)) > 0, 'matched first/repeat single/multi display median must show an actual improvement')
     assert.ok(median(receipt.comparisons.map(row => row.rendererTailBeforeMs - row.rendererTailAfterMs)) > 0, 'improvement must include the measured Renderer tail after native, not a fabricated native speed claim')
   } finally { await rm(work, { recursive: true, force: true }) }

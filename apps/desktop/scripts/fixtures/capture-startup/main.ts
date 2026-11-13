@@ -17,7 +17,8 @@ const displays = [{ id: 1, bounds: { x: 0, y: 0, width: 960, height: 640 }, scal
   { id: 7, bounds: { x: 960, y: 0, width: 800, height: 640 }, scaleFactor: 1, displayFrequency: 60 }].slice(0, count)
 const receipt: any = { schema: 'agentmux.capture-startup-electron.v1', passed: false, variant, count, captures: [],
   boundary: 'Actual production CaptureSurface, isolated preload and shared Renderer in Electron; native pixels, display list and 200 ms producer delay are controlled. No OS pixels, clipboard, TCC or physical multi-monitor proof.',
-  conditions: { loadavg: loadavg(), freeMemory: freemem(), totalMemory: totalmem(), electron: process.versions.electron } }
+  conditions: { loadavg: loadavg(), freeMemory: freemem(), totalMemory: totalmem(), electron: process.versions.electron },
+  visibilityObservation: 'Native BrowserWindow.isVisible() sampled every 5 ms; show event offset retained separately because macOS panels shown inactive may omit it.' }
 let host: BrowserWindow, surface: CaptureSurface, active: any = null
 const latestPath = join(out, 'latest-timing.json')
 const info = console.info
@@ -29,9 +30,14 @@ console.info = (...args) => {
 app.on('browser-window-created', (_event, window) => {
   // Only production present() constructs windows while this exact capture is active.
   if (active) {
-    const row = active, entry: any = { window, constructedMs: performance.now() - row.startedAt, shownMs: null }
+    const row = active, entry: any = { window, constructedMs: performance.now() - row.startedAt, shownMs: null, showEventMs: null }
     row.windows.push(entry)
-    window.on('show', () => { entry.shownMs ??= performance.now() - row.startedAt })
+    window.on('show', () => { entry.showEventMs ??= performance.now() - row.startedAt })
+    const observe = setInterval(() => {
+      if (window.isDestroyed()) { clearInterval(observe); return }
+      if (window.isVisible()) { entry.shownMs = performance.now() - row.startedAt; clearInterval(observe) }
+    }, 5)
+    window.once('closed', () => clearInterval(observe))
   }
 })
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -63,7 +69,7 @@ async function capture(iteration: number) {
     if (captureError) throw captureError
     if (row.windows.length !== count || !row.timing) return null
     const windows = row.windows.map((entry: any) => entry.window as BrowserWindow)
-    if (windows.some((window: BrowserWindow) => window.isDestroyed() || !window.isVisible())) return null
+    if (windows.some((window: BrowserWindow) => window.isDestroyed() || !window.isVisible()) || row.windows.some((entry: any) => entry.shownMs === null)) return null
     for (const window of windows) {
       const input = await window.webContents.executeJavaScript('window.captureSurface.load()')
       const expected = row.grabs.find((grab: any) => grab.includeHostWindows).sources[input.displayId]
@@ -75,7 +81,7 @@ async function capture(iteration: number) {
     return windows
   })
   const observedShownMs = performance.now() - row.startedAt
-  assert.ok(row.windows.every((entry: any) => typeof entry.shownMs === 'number'), 'actual window show events must be observed')
+  assert.ok(row.windows.every((entry: any) => typeof entry.shownMs === 'number'), 'actual native window visibility must be observed')
   const actualShownMs = Math.max(...row.windows.map((entry: any) => entry.shownMs))
   assert.equal(row.windows.length, count, 'exactly the current displays get overlays')
   assert.deepEqual(row.grabs.map((grab: any) => grab.includeHostWindows), [true, false])
@@ -117,7 +123,7 @@ async function capture(iteration: number) {
   assert.ok(overlays.every((window: BrowserWindow) => window.isDestroyed()), 'the capture releases all of its shells')
   const sourceHashes = row.grabs.map((grab: any) => Object.fromEntries(Object.entries(grab.sources).map(([id, png]) => [id, createHash('sha256').update(String(png)).digest('hex')])))
   if (receipt.captures.length) assert.notDeepEqual(sourceHashes, receipt.captures[0].sourceHashes, 'repeat capture actually freezes different pixels')
-  receipt.captures.push({ iteration, actualShownMs, loggedShowOffsetMs: row.timing.shownMs - actualShownMs, constructedMs: row.windows.map((entry: any) => entry.constructedMs),
+  receipt.captures.push({ iteration, actualShownMs, showEventMs: row.windows.map((entry: any) => entry.showEventMs), loggedShowOffsetMs: row.timing.shownMs - actualShownMs, constructedMs: row.windows.map((entry: any) => entry.constructedMs),
     grabs: row.grabs.map(({ sources, ...grab }: any) => grab), sourceHashes, timing: row.timing, diagnostic: row.diagnostic,
     observedShownMs })
   active = null
