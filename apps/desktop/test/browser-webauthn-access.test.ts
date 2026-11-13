@@ -65,7 +65,8 @@ const native = vi.hoisted(() => {
   return { Session, Frame, Contents, Window, Menu, frameContents, fromFrame: vi.fn((frame: Frame) => frameContents.get(frame)) }
 })
 vi.mock('electron', () => ({ Menu: native.Menu, webContents: { fromFrame: native.fromFrame } }))
-import { registerBrowserWebAuthnAccess, cancelBrowserWebAuthnAccess } from '../src/main/browser-webauthn-access.js'
+import { registerBrowserWebAuthnAccess, cancelBrowserWebAuthnAccess, allowsBrowserWebAuthnHid, allowsBrowserWebAuthnDevice } from '../src/main/browser-webauthn-access.js'
+import { registerBrowserSessionPermissions } from '../src/main/browser-session-permissions.js'
 import { acquireBrowserWebAuthnWindowMenu, releaseBrowserWebAuthnWindowMenu } from '../src/main/browser-webauthn-window-menu.js'
 
 const releases: Array<() => void> = []
@@ -96,6 +97,13 @@ function fixture(session = new native.Session(), window = new native.Window()) {
   return { session, contents, frame, window, owner, state }
 }
 type Fixture = ReturnType<typeof fixture>
+function permissions(f: Fixture) {
+  const owner = { ownsContents: (contents: unknown) => f.state.current && contents === f.contents,
+    resolveHidOwner: (contents: unknown) => contents === f.contents ? f.owner : null }
+  const release = registerBrowserSessionPermissions(f.session as never, owner as never)
+  releases.push(release)
+  return { owner, release }
+}
 function register(f: Fixture, resolver = (contents: unknown) => contents === f.contents ? f.owner : null) {
   const release = registerBrowserWebAuthnAccess(f.session as never, resolver)
   releases.push(release)
@@ -130,22 +138,18 @@ describe('Browser WebAuthn access original Session and request', () => {
     const f = fixture(); register(f)
     const origins = ['https://one.example.invalid', 'https://two.example.invalid:9443', 'http://localhost:8888', 'http://127.0.0.1:8888', 'http://[::1]:8888',
       'http://ordinary.example.invalid', 'ftp://localhost', ("file://localhost" + _hygiene_fixturePath("secret")), 'custom://localhost', 'http://localhost.example.invalid', 'null', '', undefined]
-    expect(origins.map(origin => f.session.check(f.contents, 'hid', 'https://unrelated.example.invalid', { securityOrigin: origin, isMainFrame: false })))
+    expect(origins.map(origin => allowsBrowserWebAuthnHid(f.session as never, f.contents as never, origin)))
       .toEqual([true, true, true, true, true, false, false, false, false, false, false, false, false])
-    expect(f.session.check(f.contents, 'hid', 'https://frame.example.invalid', { requestingUrl: 'https://frame.example.invalid', isMainFrame: true })).toBe(false)
+    expect(allowsBrowserWebAuthnHid(f.session as never, f.contents as never, undefined)).toBe(false)
   })
 
-  it('denies every other permission and unowned, retired, foreign-Session contents', () => {
+  it('denies unowned, retired and foreign-Session HID contents', () => {
     const f = fixture(); register(f)
-    expect(['clipboard-read', 'usb', 'serial', 'notifications', 'media', 'openExternal'].map(permission => f.session.check(f.contents, permission, f.frame.origin, { securityOrigin: f.frame.origin })))
-      .toEqual([false, false, false, false, false, false])
-    expect(f.session.check(null, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(false)
-    expect(f.session.check(new native.Contents(f.session), 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(false)
-    const foreign = fixture(); expect(f.session.check(foreign.contents, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(false)
+    expect(allowsBrowserWebAuthnHid(f.session as never, null, f.frame.origin)).toBe(false)
+    expect(allowsBrowserWebAuthnHid(f.session as never, new native.Contents(f.session) as never, f.frame.origin)).toBe(false)
+    const foreign = fixture(); expect(allowsBrowserWebAuthnHid(f.session as never, foreign.contents as never, f.frame.origin)).toBe(false)
     f.state.current = false
-    expect(f.session.check(f.contents, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(false)
-    const callback = vi.fn(); f.session.request(f.contents, 'media', callback, { requestingUrl: f.frame.url, isMainFrame: true })
-    expect(callback.mock.calls).toEqual([[false]])
+    expect(allowsBrowserWebAuthnHid(f.session as never, f.contents as never, f.frame.origin)).toBe(false)
   })
 
   it('device policy requires hid, trusted actual origin and numeric FIDO collection', () => {
@@ -161,7 +165,7 @@ describe('Browser WebAuthn access original Session and request', () => {
       { deviceType: 'hid', origin: 'https://one.example.invalid', device: { collections: [] } },
       { deviceType: 'hid', origin: 'https://one.example.invalid', device: { collections: [{ usagePage: '61904' }] } }
     ]
-    expect(inputs.map(input => f.session.device(input))).toEqual([true, true, false, false, false, false, false, false, false])
+    expect(inputs.map(input => allowsBrowserWebAuthnDevice(input as never))).toEqual([true, true, false, false, false, false, false, false, false])
   })
 
   it('empty native list and non-FIDO list cancel once without claiming hardware availability', () => {
@@ -366,33 +370,109 @@ describe('Browser WebAuthn access original Session and request', () => {
     assertClean(f); expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('shared Session installs policies exactly once, resolver references release only their own requests', () => {
+  it('shared Session installs one HID listener, resolver references release only their own requests', () => {
     const a = fixture(), b = fixture(a.session)
     const resolveA = (contents: unknown) => contents === a.contents ? a.owner : null
     const releaseA = register(a, resolveA), releaseAgain = register(a, resolveA), releaseB = register(b)
-    expect(a.session.setPermissionCheckHandler).toHaveBeenCalledOnce(); expect(a.session.setPermissionRequestHandler).toHaveBeenCalledOnce(); expect(a.session.setDevicePermissionHandler).toHaveBeenCalledOnce()
+    expect(a.session.setPermissionCheckHandler).not.toHaveBeenCalled(); expect(a.session.setPermissionRequestHandler).not.toHaveBeenCalled(); expect(a.session.setDevicePermissionHandler).not.toHaveBeenCalled()
     expect(a.session.listenerCount('select-hid-device')).toBe(1)
     const first = request(a), second = request(b)
     releaseA(); releaseA(); expect(first.callback).not.toHaveBeenCalled()
     releaseAgain(); expect(first.callback.mock.calls).toEqual([[null]]); expect(second.callback).not.toHaveBeenCalled()
-    expect(a.session.check(b.contents, 'hid', b.frame.origin, { securityOrigin: b.frame.origin })).toBe(true)
-    expect(a.session.setDevicePermissionHandler).toHaveBeenCalledOnce()
+    expect(allowsBrowserWebAuthnHid(a.session as never, b.contents as never, b.frame.origin)).toBe(true)
+    expect(a.session.setDevicePermissionHandler).not.toHaveBeenCalled()
     releaseB(); expect(second.callback.mock.calls).toEqual([[null]])
     expect(a.session.listenerCount('select-hid-device')).toBe(0)
-    expect(a.session.check).toBeNull(); expect(a.session.request).toBeNull(); expect(a.session.device).toBeNull()
-    expect(a.session.setDevicePermissionHandler.mock.calls).toHaveLength(2)
+    expect(allowsBrowserWebAuthnHid(a.session as never, b.contents as never, b.frame.origin)).toBe(false)
+    expect(a.session.setDevicePermissionHandler).not.toHaveBeenCalled()
     assertClean(a); assertClean(b)
   })
 
-  it('last release detaches old policies before callback registers a fresh Session owner', () => {
+  it('last release detaches the old HID listener before callback registers a fresh owner', () => {
     const f = fixture(); const release = register(f)
     const r = request(f, devices, f.frame, vi.fn(() => { register(f) }))
     release()
     expect(r.callback.mock.calls).toEqual([[null]])
     expect(f.session.listenerCount('select-hid-device')).toBe(1)
-    expect(f.session.setDevicePermissionHandler.mock.calls.map(call => call[0] === null)).toEqual([false, true, false])
-    expect(f.session.check(f.contents, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(true)
+    expect(f.session.setDevicePermissionHandler).not.toHaveBeenCalled()
+    expect(allowsBrowserWebAuthnHid(f.session as never, f.contents as never, f.frame.origin)).toBe(true)
     const fresh = request(f, [devices[0]!]); expect(fresh.callback.mock.calls).toEqual([['first-original-id']])
     assertClean(f)
   })
+})
+
+describe('Browser Session permission composition', () => {
+  it('allows only current owned Chromium clipboard write, without a HID or URL-origin gate', () => {
+    const f = fixture(); permissions(f)
+    f.window.visible = false; f.window.focused = false; f.window.minimized = true
+    for (const source of [
+      { origin: 'https://one.example.invalid', url: 'https://one.example.invalid/path', main: true },
+      { origin: 'https://one.example.invalid', url: 'about:blank', main: false },
+      { origin: 'https://one.example.invalid', url: 'about:srcdoc', main: false },
+      { origin: 'file:///', url: 'file:///private/local-page.html', main: true }
+    ]) expect(f.session.check(f.contents, 'clipboard-sanitized-write', source.origin, { requestingUrl: source.url, isMainFrame: source.main })).toBe(true)
+    const callback = vi.fn()
+    f.session.request(f.contents, 'clipboard-sanitized-write', callback, { requestingUrl: 'about:srcdoc', isMainFrame: false })
+    expect(callback.mock.calls).toEqual([[true]])
+    expect(f.session.check(f.contents, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(true)
+    expect(f.session.check(f.contents, 'hid', f.frame.origin, { securityOrigin: 'http://ordinary.example.invalid' })).toBe(false)
+  })
+
+  it('denies clipboard read, unrelated permissions and absent foreign or retired contents', () => {
+    const f = fixture(); permissions(f)
+    const details = { requestingUrl: f.frame.url, isMainFrame: true }, callback = vi.fn()
+    for (const permission of ['clipboard-read', 'deprecated-sync-clipboard-read', 'usb', 'serial', 'notifications', 'media', 'fullscreen', 'openExternal', 'unknown']) {
+      expect(f.session.check(f.contents, permission, f.frame.origin, details), permission).toBe(false)
+      f.session.request(f.contents, permission, callback, details)
+    }
+    expect(callback.mock.calls).toEqual(Array.from({ length: 9 }, () => [false]))
+    for (const contents of [null, new native.Contents(f.session), fixture().contents])
+      expect(f.session.check(contents, 'clipboard-sanitized-write', f.frame.origin, details)).toBe(false)
+    f.contents.destroyed = true
+    expect(f.session.check(f.contents, 'clipboard-sanitized-write', f.frame.origin, details)).toBe(false)
+    f.contents.destroyed = false; f.state.current = false
+    expect(f.session.check(f.contents, 'clipboard-sanitized-write', f.frame.origin, details)).toBe(false)
+  })
+
+  it('reference counts one Session slot set and does not revoke a healthy remaining registration', () => {
+    const a = fixture(), b = fixture(a.session), first = permissions(a)
+    const again = registerBrowserSessionPermissions(a.session as never, first.owner as never); releases.push(again)
+    const second = permissions(b), staleCheck = a.session.check
+    expect(a.session.setPermissionCheckHandler).toHaveBeenCalledOnce()
+    expect(a.session.setPermissionRequestHandler).toHaveBeenCalledOnce()
+    expect(a.session.setDevicePermissionHandler).toHaveBeenCalledOnce()
+    first.release(); first.release()
+    expect(a.session.check(a.contents, 'clipboard-sanitized-write', a.frame.origin, {})).toBe(true)
+    expect(a.session.check(a.contents, 'hid', a.frame.origin, { securityOrigin: a.frame.origin })).toBe(true)
+    expect(a.session.setPermissionCheckHandler).toHaveBeenCalledOnce()
+    again()
+    expect(a.session.check(a.contents, 'clipboard-sanitized-write', a.frame.origin, {})).toBe(false)
+    expect(a.session.check(b.contents, 'clipboard-sanitized-write', b.frame.origin, {})).toBe(true)
+    expect(a.session.check(b.contents, 'hid', b.frame.origin, { securityOrigin: b.frame.origin })).toBe(true)
+    second.release()
+    expect(a.session.check).toBeNull(); expect(a.session.request).toBeNull(); expect(a.session.device).toBeNull()
+    expect(a.session.setPermissionCheckHandler).toHaveBeenCalledTimes(2)
+    const fresh = permissions(a)
+    expect(staleCheck(a.contents, 'clipboard-sanitized-write', a.frame.origin, {})).toBe(false)
+    expect(staleCheck(a.contents, 'hid', a.frame.origin, { securityOrigin: a.frame.origin })).toBe(false)
+    expect(a.session.check(a.contents, 'clipboard-sanitized-write', a.frame.origin, {})).toBe(true)
+    fresh.release()
+  })
+
+  it('retires original Session slots before cancelling a HID request that registers a new owner', () => {
+    const f = fixture(), first = permissions(f)
+    const callback = vi.fn(() => permissions(f)); request(f, devices, f.frame, callback)
+    first.release()
+    expect(callback.mock.calls).toEqual([[null]])
+    expect(f.session.check(f.contents, 'clipboard-sanitized-write', f.frame.origin, {})).toBe(true)
+    expect(f.session.check(f.contents, 'hid', f.frame.origin, { securityOrigin: f.frame.origin })).toBe(true)
+    expect(f.session.setDevicePermissionHandler.mock.calls.map(call => call[0] === null)).toEqual([false, true, false])
+  })
+})
+
+it('Session identity is mandatory even if a registration mistakenly claims a foreign contents', () => {
+  const a = fixture(), foreign = fixture()
+  const release = registerBrowserSessionPermissions(a.session as never, { ownsContents: () => true, resolveHidOwner: () => null }); releases.push(release)
+  expect(a.session.check(foreign.contents, 'clipboard-sanitized-write', foreign.frame.origin, {})).toBe(false)
+  expect(a.session.check(null, 'clipboard-sanitized-write', foreign.frame.origin, {})).toBe(false)
 })

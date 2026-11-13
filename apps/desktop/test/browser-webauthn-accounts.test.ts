@@ -11,6 +11,7 @@ const native = vi.hoisted(() => {
   class Emitter {
     listeners = new Map<string, Listener[]>()
     on(event: string, listener: Listener) { this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]); return this }
+    prependListener(event: string, listener: Listener) { this.listeners.set(event, [listener, ...(this.listeners.get(event) ?? [])]); return this }
     once(event: string, listener: Listener) {
       const once = (...args: any[]) => { this.removeListener(event, once); listener(...args) }
       return this.on(event, once)
@@ -77,6 +78,7 @@ const native = vi.hoisted(() => {
     isVisible() { return this.visible }
     isMinimized() { return this.minimized }
     isFocused() { return this.focused }
+    getContentBounds() { return { x: 0, y: 0, width: 1200, height: 800 } }
   }
   class View {
     static instances: View[] = []

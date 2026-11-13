@@ -13,11 +13,17 @@ const sourcePath = 'apps/desktop/src/main/browser-view-manager.ts'
 const testPath = 'apps/desktop/test/browser-webauthn-accounts.test.ts'
 const configPath = 'apps/desktop/scripts/fixtures/browser-webauthn-accounts/vitest.owning.config.mts'
 const original = readFileSync(join(root, sourcePath), 'utf8')
-const before = '      const releaseAccess = registerBrowserWebAuthnAccess(session, resolveOwner)'
+const before = `      const releaseAccess = registerBrowserSessionPermissions(session, {
+        ownsContents: contents => {
+          const entry = this.entriesByContents.get(contents)
+          return !!entry && this.owns(entry, entry.view) && entry.view.webContents === contents
+        },
+        resolveHidOwner: resolveOwner
+      })`
 assert.equal(original.split(before).length - 1, 1, 'One nonempty actual BVM Session registration block')
 const changed = original.replace(before, '      const releaseAccess = () => {}')
 const sha = value => createHash('sha256').update(value).digest('hex')
-const inputs = [sourcePath, testPath, configPath, 'apps/desktop/src/main/browser-webauthn-accounts.ts', 'apps/desktop/src/main/browser-webauthn-access.ts', 'apps/desktop/src/main/browser-webauthn-window-menu.ts']
+const inputs = [sourcePath, testPath, configPath, 'apps/desktop/src/main/browser-session-permissions.ts', 'apps/desktop/src/main/browser-webauthn-accounts.ts', 'apps/desktop/src/main/browser-webauthn-access.ts', 'apps/desktop/src/main/browser-webauthn-window-menu.ts']
   .map(path => { const bytes = readFileSync(join(root, path)); return { path, sha256: sha(bytes), bytes: bytes.length } })
 const scratch = mkdtempSync(join(tmpdir(), 'agentmux-webauthn-manager-mutant-'))
 const replacement = join(scratch, 'browser-view-manager.ts')
