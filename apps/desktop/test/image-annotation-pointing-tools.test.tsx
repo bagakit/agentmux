@@ -155,6 +155,17 @@ describe('pointing-mark entry points in the mounted editor', () => {
     expect((await shapes()).at(-1), 'a new note never duplicates a gapped number').toMatchObject({ kind: 'note', number: 10 })
   })
 
+  it('numbers a new note after every existing note when a saved original repeats a number', async () => {
+    // The old max + 1 rule gives 2 here and repeats the count; the model's next number follows all three notes.
+    const { click, shapes, editor } = await mount([note('first', 1, 40), note('second', 1, 120), note('third', 1, 200)])
+    await click('Numbered note')
+    await act(async () => {
+      const canvas = editor.querySelector('canvas')!
+      for (const type of ['pointerdown', 'pointerup']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons: type === 'pointerdown' ? 1 : 0, clientX: 300, clientY: 200 }))
+    }); await frame()
+    expect((await shapes()).at(-1), 'a new note takes the number after all existing notes').toMatchObject({ kind: 'note', number: 4 })
+  })
+
   it('offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', () => {
     expect(CAPTURE_TOOLS.map(item => item.id), 'the capture toolbar carries blur and the magnifier but no spotlight')
       .toEqual(['rect', 'ellipse', 'arrow', 'pen', 'pixelate', 'blur', 'text', 'note', 'callout'])
