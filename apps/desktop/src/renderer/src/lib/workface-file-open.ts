@@ -6,6 +6,7 @@ import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './fi
 import { spatialCatalog, zoneContext, type SpatialWorkbench, type SpatialControlOptions } from './space-agent-control'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
+import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 
 export type WorkfaceFileOpenPorts = {
   get(): SpatialWorkbench & FileWorkbenchState
@@ -106,7 +107,9 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     const focus = request.focus && ports.navigationSelection() === originalNavigation
     const input = focus && inputPolicy === 'target' ? null : captureDesktopInput(state.tabs)
     let actual: FileOpenResult | undefined
-    await ports.openFile(mapped.path, target.groupId, undefined, workspace.id, fileOpenIntent === 'source', {
+    // File-only placement keeps bookmarks as Files; a book's explicit Source mode is a separate action.
+    const openAsText = fileOpenIntent === 'source' && workspaceFilePreviewFormat(mapped.path)?.kind !== 'book'
+    await ports.openFile(mapped.path, target.groupId, undefined, workspace.id, openAsText, {
       ...resolved.placement,
       focus, inputPolicy, fileOnly: fileOpenIntent === 'source',
       ...(request.tabId && request.regionId && request.split ? { split: { tabId: request.tabId, regionId: request.regionId, direction: request.split } } : {}),

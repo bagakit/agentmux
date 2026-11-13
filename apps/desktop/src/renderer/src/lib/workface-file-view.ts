@@ -44,17 +44,20 @@ export async function executeWorkfaceFileView(ports: WorkfaceFileViewPorts,
   base.locations = catalog.locations.filter(location => location.regionId === id && location.tabId === tab.id)
   const read = (current: ReturnType<WorkfaceFileViewPorts['get']>) => {
     const currentBinary = current.documentIssues[key]?.kind === 'binary'
-    const currentReadonly = Boolean(currentBinary || !format.sourceEditable)
-    base.supportedModes = currentReadonly ? ['preview'] : current.documents[key]
+    const currentBook = format.media?.kind === 'book'
+    const dirtyDocument = Boolean(current.documents[key] && current.dirtyDocuments[key])
+    const retainedBookDraft = currentBook && format.sourceEditable && dirtyDocument
+    const currentReadonly = Boolean(currentBinary && !retainedBookDraft || !format.sourceEditable)
+    base.supportedModes = currentReadonly ? ['preview'] : currentBook ? ['source', 'diff', 'preview'] : current.documents[key]
       ? fileSupportsInlinePreview(surface.path) ? ['source', 'diff', 'preview'] : ['source', 'diff'] : null
     base.storedOverride = publicFileRegionMode(storedFileRegionMode(current.editorRegionModes, id))
-    const mode = effectiveFileRegionMode(current.editorRegionModes, id, surface.path, current.documentIssues[key]?.kind === 'binary')
+    const mode = effectiveFileRegionMode(current.editorRegionModes, id, surface.path, currentBinary, dirtyDocument)
     base.effectiveMode = publicFileRegionMode(mode)
-    base.data = currentBinary ? 'binary-preview' : !format.sourceEditable ? 'media-preview' : current.documents[key] ? 'text'
+    base.data = retainedBookDraft ? 'text' : currentBinary ? 'binary-preview' : !format.sourceEditable || currentBook && mode === 'preview' && !current.documents[key] ? 'media-preview' : current.documents[key] ? 'text'
       : current.documentIssues[key] ? 'failed' : 'unconfirmed'
     const diff = Object.hasOwn(current.editorRegionDiffs, id) ? current.editorRegionDiffs[id] : undefined
     base.content = mode === 'diff' ? { status: diff?.error ? 'failed' : diff?.loading ? 'loading' : diff?.diff ? 'available' : 'unconfirmed', reason: diff?.error ?? null }
-      : currentReadonly ? { status: 'unconfirmed', reason: 'Preview bytes and decoding belong to the original visible File pane.' }
+      : currentReadonly || currentBook && mode === 'preview' ? { status: 'unconfirmed', reason: 'Preview bytes and decoding belong to the original visible File pane.' }
       : mode === 'preview' && format.previewConfirmation === 'renderer' ? { status: 'unconfirmed', reason: 'The original source is available; rendering is confirmed by its visible File pane.' }
       : current.documents[key] ? { status: 'available', reason: null }
       : { status: current.documentIssues[key] ? 'failed' : 'unconfirmed', reason: current.documentIssues[key]?.kind === 'read-error' ? current.documentIssues[key].message : null }
