@@ -52,7 +52,7 @@ export type SessionStopOutcome =
 export function sessionStopIntentFor(control: AgentSessionControl): SessionStopIntent {
   return unconfirmedStopFor(control) ?? mintSessionStopIntent(control)
 }
-export function retainUnconfirmedStop(intent: SessionStopIntent): void {
+export function retainUnconfirmedStop(intent: SessionStopIntent) {
   const operation = { kind: 'stop' as const, operationId: intent.operationId,
     control: { ...intent.control, run: { ...intent.control.run } },
     subject: { hostId: intent.control.hostId, agentSessionId: intent.control.agentSessionId },
@@ -61,6 +61,7 @@ export function retainUnconfirmedStop(intent: SessionStopIntent): void {
   useAppStore.setState(state => state.agentOperations[key] ? state : {
     agentOperations: { ...state.agentOperations, [key]: operation }
   })
+  return operation
 }
 export function settleSessionStop(intent: SessionStopIntent): void {
   const key = agentOperationKey({ kind: 'stop', operationId: intent.operationId,

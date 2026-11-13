@@ -249,6 +249,7 @@ import {
   retainUnconfirmedStop, sessionStopErrorCode, sessionStopFailedStage, sessionStopFailure, sessionStopInspectCommand, sessionStopIntentFor,
   settleSessionStop, STALE_STOP_CODE, unconfirmedStopFor, type SessionStopOutcome
 } from './lib/session-stop-intent'
+import { acceptAgentStopReceipt } from './lib/agent-operation-feedback'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
 import { agentContinuityDetail, currentUnconfirmedResumeOperation } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
@@ -1827,10 +1828,11 @@ async function stopLastViewSession(
   if (resource.control.kind !== 'agent') { await api.sessions.stop(resource.control); return }
   // Closing the View again resends this same Stop, so Core continues it.
   const intent = sessionStopIntentFor(resource.control)
-  retainUnconfirmedStop(intent)
+  const operation = retainUnconfirmedStop(intent)
   try {
-    await api.sessions.stop(intent.control, intent.operationId)
-    settleSessionStop(intent)
+    const receipt = await api.sessions.stop(intent.control, intent.operationId)
+    if (!receipt || !acceptAgentStopReceipt(operation, receipt)) throw new Error('The original Agent Stop receipt could not be confirmed. Its Session and View are kept.')
+    settleSessionStop({ ...intent, operationId: receipt.operationId })
   } catch (error) {
     if (sessionStopErrorCode(error) === STALE_STOP_CODE) settleSessionStop(intent)
     throw sessionStopFailure(error, intent)
@@ -12610,11 +12612,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     const intent = sessionStopIntentFor(session.control)
-    retainUnconfirmedStop(intent)
+    const operation = retainUnconfirmedStop(intent)
     try {
       const receipt = await api.sessions.stop(intent.control, intent.operationId)
-      settleSessionStop(intent)
-      return { status: 'stopped', ...(receipt ? { receipt } : {}) }
+      if (!receipt || !acceptAgentStopReceipt(operation, receipt)) throw new Error('The original Agent Stop receipt could not be confirmed. Its Session and View are kept.')
+      settleSessionStop({ ...intent, operationId: receipt.operationId })
+      return { status: 'stopped', receipt }
     } catch (error) {
       if (sessionStopErrorCode(error) === STALE_STOP_CODE) {
         settleSessionStop(intent)

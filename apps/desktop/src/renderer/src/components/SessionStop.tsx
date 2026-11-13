@@ -23,8 +23,7 @@ export function useSessionStop(active = true) {
 
   function requestStop(target: AgentMenuTarget | null | undefined, name: string, origin: HTMLElement | null) {
     const state = useAppStore.getState()
-    const session = agentMenuSession(state.sessions, target)
-    if (!target?.control || !agentMenuRunMatches(session, target.control)) {
+    if (!target?.control) {
       state.reportError(new Error('This Agent’s current Run identity is unavailable. No stop request was sent.'), {
         kind: 'indeterminate', ...(target?.control ? { subject: target.control } : {}), summary: 'The original work surface is kept. Refresh this Agent’s observation, then retry Stop Agent.'
       })
