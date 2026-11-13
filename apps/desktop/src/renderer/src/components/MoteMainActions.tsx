@@ -3,7 +3,6 @@ import { agentPromptSubmissionOutcome, type MoteMainDeferredInput, type MoteMain
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
-import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 import { createMoteMain, continueMoteMainAction, inspectMoteMainAction, readMoteMainAction,
@@ -16,7 +15,6 @@ export type MoteStartActions = { reading: MoteMainActionReading | null; result: 
   ready: boolean; pending: string[]; submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision): Promise<void>; inspect(id: string): void; advance(id: string): void; refresh(): void }
 export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult }: {
   scope: MoteWorkfaceScope; active: boolean; presentation?: 'menu' | 'setup' | undefined; entryToken?: string | undefined
-  reference?: WorkbenchProjectionSelection | null | undefined
   onConfigure(): void; onCreated?(reference: MoteDefaultConversation): void; onOpenCreated?: ((reference: MoteDefaultConversation) => void) | undefined; onRefresh?: (() => void) | undefined; onOpenWorkspace?: (() => void) | undefined
   onStartNew?: (() => void) | undefined; renderStart?: ((state: MoteStartActions) => ReactNode) | undefined
   onQueryResult?: ((result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) => void) | undefined
