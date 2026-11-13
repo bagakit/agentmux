@@ -36,7 +36,7 @@ export interface PublicationPermissionsPort {
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
 type SourceRead = { observation: ConnectionDeliverySourceObservation; checkpoint: ConversationCheckpoint | null }
-type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined; rewrite?: ConversationChangesInput['rewrite'] } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -322,7 +322,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !this.authorized(binding)) return
       // A valid coverage/route envelope can exceed the interactive default before
       // any content fits. Use Core's existing wire bound for this background reader.
-      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
+      const state: NonNullable<Lane['read']> = lane.read, input: ConversationChangesInput = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}), ...(state.rewrite ? { rewrite: state.rewrite } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input) }
       catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, state.after); return }
@@ -331,6 +331,13 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const unavailable = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') &&
         (value.current === 'unavailable' || value.current === 'unsupported' || value.gaps.length > 0))
       nativeFailure = unavailable ? { ...(unavailable.gaps[0]?.code ? { code: unavailable.gaps[0].code } : {}) } : undefined
+      // The original source was rewritten in place before this cut. Resume once, at
+      // this Binding's newest consumed native record still unchanged in the source;
+      // Core reads only the records after it. Nothing is accepted from this page.
+      if (nativeFailure?.code === 'AGENT_SESSION_HISTORY_REWRITTEN' && !state.rewrite && !state.cursor && !state.pending) {
+        const anchors = this.store.rewriteAnchors(binding)
+        if (anchors.length) { lane.view = undefined; lane.viewId = undefined; lane.read = { after: state.after, rewrite: { anchors } }; reads--; continue }
+      }
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') {
         state.pending = consumed.pending

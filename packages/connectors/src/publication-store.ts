@@ -16,7 +16,7 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDeliveryRetrySource, parseConnectionDeliveryContinuation, type ConnectionDeliveryRetrySource, type ConnectionDeliveryContinuation, type ConnectionDeliveryRetryInput, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef, type ConversationRewriteAnchor, CONVERSATION_REWRITE_MAX_ANCHORS } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope' | 'executionRuntimeId' | 'inputTarget' | 'publicationBoundary'>
@@ -127,6 +127,8 @@ const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item &&
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
 const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) => encode([source.providerId, source.nativeSessionId])
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
+/** Newest accepted native parts read for rewrite anchors; bounded and only on a rewritten source. */
+const REWRITE_ANCHOR_SCAN = 256
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 /** A neighboring observation revision does not replace an unchanged original image effect. */
@@ -585,6 +587,31 @@ export class PublicationStore {
   }
   private saveDecision(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, id: string, revision: string, value: unknown): void {
     this.decisionWrite.run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
+  }
+  /** Newest native records this exact Binding revision already accepted, newest first,
+   * each with its accepted revision. Only a rewritten source consults this; ordinary
+   * reads never do. These are reading anchors, not delivery or publication receipts. */
+  rewriteAnchors(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): ConversationRewriteAnchor[] {
+    // Captured activity can follow the last native record by thousands of decisions,
+    // so select native parts directly rather than scanning a fixed window of rows.
+    // Scope decisions freeze excluded parts and representations freeze published
+    // parts, each with its exact record and accepted revision.
+    const rows = this.database.prepare(`SELECT id, revision FROM (
+        SELECT d.rowid AS ordinal, json_extract(e.value,'$.record.source.recordId') AS id, json_extract(e.value,'$.recordRevision') AS revision
+        FROM connector_publication_decision d, json_each(d.decision_json,'$.excluded') e
+        WHERE d.binding_id=? AND d.binding_revision=? AND json_extract(d.decision_json,'$.kind')='scope' AND json_extract(e.value,'$.record.source.kind')='native'
+        UNION ALL
+        SELECT d.rowid, json_extract(d.decision_json,'$.part.record.source.recordId'), json_extract(d.decision_json,'$.part.recordRevision')
+        FROM connector_publication_decision d
+        WHERE d.binding_id=? AND d.binding_revision=? AND json_extract(d.decision_json,'$.kind')='representation' AND json_extract(d.decision_json,'$.part.record.source.kind')='native'
+      ) ORDER BY ordinal DESC LIMIT ?`).all(...scopeKey(boundary), ...scopeKey(boundary), REWRITE_ANCHOR_SCAN)
+    const anchors: ConversationRewriteAnchor[] = [], seen = new Set<string>()
+    for (const row of rows) {
+      if (typeof row.id !== 'string' || typeof row.revision !== 'string' || seen.has(row.id)) continue
+      seen.add(row.id); anchors.push({ recordId: row.id, revision: row.revision })
+      if (anchors.length === CONVERSATION_REWRITE_MAX_ANCHORS) break
+    }
+    return anchors
   }
   /** Reuse only this accepted original part's exact derived image; no second resource cache. */
   retainedDiagram(boundary: PublicationBoundary, part: ConversationContentRef, text: string,
