@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest } from '../../../packages/core/src/control-host.js'
-import { parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from '../../../packages/core/src/browser-task-control.js'
+import { browserTaskCreateInput, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from '../../../packages/core/src/browser-task-control.js'
 import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -254,6 +254,12 @@ describe('public task authoring consumes the original Main asset owner', () => {
       const request = parseAgentMuxControlRequest({ ...base, operation, browserId, assetId: 'original-asset', expectedRevision: 1,
         ...(operation === 'browser.task.edit' ? { content: { name: 'Draft', url, steps: [], parameters: [] } } : {}) })
       await expect(useAppStore.getState().executeControl(request)).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: 'Browser task authoring belongs to the Main asset owner.' })
+    }
+    const input = browserTaskCreateInput({ id: 'original-recording', browserId, revision: 1 })
+    for (const payload of [{ operation: 'browser.task.source', browserId }, { operation: 'browser.task.draft', browserId, assetId: input.assetId },
+      { operation: 'browser.task.create', browserId, input }, { operation: 'browser.task.create-inspect', browserId, input }]) {
+      const request = parseAgentMuxControlRequest({ ...base, ...payload })
+      await expect(useAppStore.getState().executeControl(request)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
     }
     const after = useAppStore.getState()
     for (const key of ['tabs', 'layouts', 'sessions', 'browserOpinionDrafts'] as const) expect(after[key]).toBe(before[key])
