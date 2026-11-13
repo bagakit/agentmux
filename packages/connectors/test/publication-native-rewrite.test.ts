@@ -1,4 +1,5 @@
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import * as core from '../../core/dist/index.js'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -226,3 +227,18 @@ it('retains the newest consumed native records with their digests at commit time
   // A different Binding revision never contributes anchors.
   expect(f.host.store.rewriteAnchors({ bindingId: f.binding.bindingId, revision: f.binding.revision + 1 })).toEqual([])
 })
+
+it('the original publication consumer retains the digest of the latest native record revision', async () => {
+  const f = await fixture()
+  await appendFile(f.transcript, assistant('same-native-record', 'First revision'))
+  f.host.refresh()
+  await vi.waitFor(() => expect(f.host.store.rewriteAnchors(f.binding).some(anchor => anchor.recordId === 'same-native-record')).toBe(true), { timeout: 8000 })
+  await f.idle()
+  const previous = f.host.store.rewriteAnchors(f.binding).find(anchor => anchor.recordId === 'same-native-record')!.digest
+  const revised = assistant('same-native-record', 'Second revision')
+  await appendFile(f.transcript, revised)
+  f.host.refresh()
+  const expected = createHash('sha256').update(revised.slice(0, -1)).digest('hex')
+  await vi.waitFor(() => expect(f.host.store.rewriteAnchors(f.binding).find(anchor => anchor.recordId === 'same-native-record')?.digest).toBe(expected), { timeout: 8000 })
+  expect(expected).not.toBe(previous)
+}, 30_000)

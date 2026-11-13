@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
 import { readFile, rename, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { consumeConversationWindowPage, parseConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint } from '../src/conversation-changes.js'
 import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
 
@@ -237,4 +238,21 @@ it('reads a Claude message resent before any reply as appended history, never as
   const whole = await f.client.readConversationChanges({ ...ref, checkpoint: start, limit: 100 })
   expect(nativeCoverage(whole).gaps).toEqual([])
   expect(ids(whole).filter(id => id.startsWith('prompt-'))).toEqual(['prompt-unanswered', 'prompt-resent'])
+})
+
+it('retains native ordering but updates the digest with a newer original version', async () => {
+  const f = await codex()
+  const initial = await f.client.readAgentConversation(f.ref)
+  await append(f.path, [assistant('same-original', 'first version')])
+  const first = await f.client.readConversationChanges({ ...f.ref, checkpoint: initial.window.checkpoint, view: initial.window.view! })
+  const firstRecord = records(first).find(row => row.original.item.id === 'same-original')!
+  expect(firstRecord.order.kind).toBe('native-page')
+  await append(f.path, [assistant('same-original', 'second version')])
+  const next = await f.client.readConversationChanges({ ...f.ref, checkpoint: first.window.checkpoint, view: first.window.view! })
+  const current = records(next).find(row => row.original.item.id === 'same-original')!
+  expect(current.order.kind).toBe('native-page')
+  if (firstRecord.order.kind !== 'native-page' || current.order.kind !== 'native-page') throw Error('Native records required')
+  expect(current.original.item.contentParts).not.toEqual(firstRecord.original.item.contentParts)
+  expect(current.order.recordDigest).toBe(createHash('sha256').update(jsonl([assistant('same-original', 'second version')]).trimEnd()).digest('hex'))
+  expect(current.order.recordDigest).not.toBe(firstRecord.order.recordDigest)
 })
