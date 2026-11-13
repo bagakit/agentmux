@@ -19,3 +19,6 @@ If management is busy, missing, exited or on a different Run, retain the origina
 show the exact inspect, selection or same-Session recovery action. Resume only through an
 explicit supported continuation with proven original input state; never silently replace the
 manager or retry uncertain input. Recovery/navigation and actual patrol completion are distinct.
+When the Goal has a plan, read goal plan first and follow the plan section of amux goal --skill:
+delegate only ready nodes to their named executor, and mark a node done only through an
+independent goal plan review that ran its check.

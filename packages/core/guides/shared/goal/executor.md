@@ -12,3 +12,5 @@ Return delivery evidence for every delegated criterion through the original Goal
 dispatch; preserve the actual reporting Run. Give the manager the next action and evidence
 needed to verify or collect it. A temporary idle turn or healthy background Run is not failure.
 Do not claim another person's confirmation, acceptance or a live model's adoption of updated guidance.
+A delegation that names a planNodeId delivers that plan node: meet its outcome and make its
+check pass. An independent reviewer runs the check; you never review your own node.

@@ -68,6 +68,10 @@ Mote. Keep its exact original agent.open operation and inspect it with space ins
 --operation-id ID after an unknown reply; never create another discussion to recover it.
 Creation, input, actual work and inspection completion remain separate facts.
 
+## Plan
+
+[plan](../shared/goal/plan.md "amux:include")
+
 [patrol](../shared/goal/patrol.md "amux:include")
 
 Read amux goal create --help only when creating or promoting a Goal; that leaf owns the
