@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -24,6 +24,7 @@ const reusable = previous?.baseline?.passed === 16 && previous.baseline.exitCode
 const hits = join(output, 'mutation-loaded.ndjson'); if (!reusable) await writeFile(hits, '')
 const run = async (name, mutation, pattern) => {
   const report = join(output, name + '-tests.json')
+  await rm(report, { force: true }) // A killed/setup-failed run cannot consume an earlier JSON report.
   const child = spawnSync(join(root, 'node_modules/.bin/vitest'), ['run', '--config', 'apps/desktop/test/vitest.file-view-reading.config.mts', '--reporter=json', '--outputFile=' + report, ...(pattern ? ['--testNamePattern', pattern] : [])], { cwd: root, env: { ...process.env, FILE_VIEW_READING_MUTATION: mutation ?? '', FILE_VIEW_READING_HITS: hits, FILE_VIEW_READING_COST: join(output, 'cost.json') }, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   const result = JSON.parse(await readFile(report, 'utf8'))
   assert.equal(result.numTotalTests, 16, 'Every intended nonempty owner test is collected')
