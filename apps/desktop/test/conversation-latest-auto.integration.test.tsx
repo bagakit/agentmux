@@ -6,7 +6,7 @@ import { beforeEach, afterEach, it, expect, vi } from 'vitest'
 import { mkdtemp, writeFile, readFile, appendFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxStoredAgentSession, type AgentSessionHistoryPage } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import type { AgentNativeSourceFacts } from '../src/shared/agent-native-source'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -23,7 +23,9 @@ const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSess
 const initial = useAppStore.getState()
 let container: HTMLDivElement, root: Root, directory: string, transcript: string, client: AgentMuxClient
 let originalStore: Buffer, expectedTranscript: Buffer, stored: AgentMuxStoredAgentSession
-let requests: { cursor?: string; limit?: number }[], reads: Promise<AgentSessionHistoryPage>[], observation: Parameters<AgentMuxClient['observeSessionHistory']>[1] | null
+let requests: Parameters<AgentMuxClient['readAgentConversation']>[0][], reads: Promise<unknown>[]
+let consumerRequests: Parameters<typeof api.conversation.readAgentConversation>[0][]
+let observation: Parameters<AgentMuxClient['observeSessionHistory']>[1] | null
 let controls: ReturnType<typeof vi.spyOn>[]
 let bridgeCloses: Array<() => unknown | Promise<unknown>>
 let commits: boolean[]
@@ -121,14 +123,30 @@ beforeEach(async () => {
  originalStore = await readFile(join(directory, 'sessions.json')); expectedTranscript = await readFile(transcript)
  client = new AgentMuxClient({ store }); const kernel = Reflect.get(client, 'kernel')
  controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot control Runtime ' + name) }))
- bridgeCloses = []; requests = []; reads = []; observation = null; commits = []; extent = 1500; viewportHeight = 600; physicalTop = 0
- const historyPage = client.sessionHistoryPage.bind(client), observeHistory = client.observeSessionHistory.bind(client)
- vi.spyOn(client, 'sessionHistoryPage').mockImplementation((agentSessionId, options) => {
-  expect(agentSessionId).toBe(sid); requests.push(options ?? {})
-  const read = historyPage(agentSessionId, options); reads.push(read); return read
+ bridgeCloses = []; requests = []; consumerRequests = []; reads = []; observation = null; commits = []; extent = 1500; viewportHeight = 600; physicalTop = 0
+ const readConversation = client.readAgentConversation.bind(client), readChanges = client.readConversationChanges.bind(client)
+ const observeHistory = client.observeSessionHistory.bind(client)
+ vi.spyOn(client, 'readAgentConversation').mockImplementation((input, options) => {
+  expect(input.agentSessionId).toBe(sid)
+  // Exact process-detail reads are not window navigation and have no page limit.
+  if (!input.record && !input.anchor) requests.push(input)
+  return readConversation(input, options)
+ })
+ vi.spyOn(client, 'readConversationChanges').mockImplementation((input, options) => {
+  expect(input.agentSessionId).toBe(sid)
+  return readChanges(input, options)
  })
  vi.spyOn(client, 'observeSessionHistory').mockImplementation((agentSessionId, listener, options) => { observation = listener; return observeHistory(agentSessionId, listener, options) })
- await desktopConversationReadBridge({ root: directory, client }, bridgeCloses)
+ const publicRead = await desktopConversationReadBridge({ root: directory, client }, bridgeCloses)
+ // Wait for the complete public transport reply, including Main/preload/Renderer
+ // delivery. A completed Core read alone has not committed a consumer frame yet.
+ vi.mocked(api.conversation.readAgentConversation).mockImplementation((...args) => {
+  if (!args[0].record && !args[0].anchor) consumerRequests.push(args[0])
+  const read = publicRead.readAgentConversation(...args); reads.push(read); return read
+ })
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation((...args) => {
+  const read = publicRead.readConversationChanges(...args); reads.push(read); return read
+ })
  useAppStore.setState({ sessions: [], timelines: {}, agentComposerDrafts: { [sid]: 'Original unsent draft' } })
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -144,6 +162,7 @@ afterEach(async () => {
  await act(async () => root.unmount()); container.remove(); window.getSelection()?.removeAllRanges()
  expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
  expect(requests.length).toBeGreaterThan(0); expect(requests.every(input => input.limit !== undefined && input.limit > 0 && input.limit <= 100)).toBe(true)
+ expect(consumerRequests.length).toBeGreaterThan(0)
  expect(await readFile(join(directory, 'sessions.json'))).toEqual(originalStore)
  expect(await readFile(transcript)).toEqual(expectedTranscript)
  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original unsent draft')
@@ -164,8 +183,11 @@ it('automatically accepts all 60 retained and 100 appended same-source records w
  expect(requests).toHaveLength(count)
 })
 it('keeps upward reading and its original expanded body/scroll while accepting a non-destructive append', async () => {
- await render(); await followAt(900); await followAt(300)
+ await render()
+ await vi.waitFor(async () => { await flush(); expect(container.querySelector('[data-native-record-id="original-1"] .log-turn__body')).not.toBeNull() })
  const body = container.querySelector<HTMLElement>('[data-native-record-id="original-1"] .log-turn__body')!
+ await followAt(900); await followAt(300)
+ expect(container.querySelector('[data-native-record-id="original-1"] .log-turn__body')).toBe(body)
  const details = body.querySelector<HTMLDetailsElement>('details')!; await act(async () => { details.open = true })
  const before = ids(), count = requests.filter(input => input.limit === 100).length
  await publish(60)
@@ -212,11 +234,14 @@ it('discards an actual delayed changes reply while hidden and resumes once throu
  })
  try {
   await publish(60); await vi.waitFor(() => expect(held).toBe(true))
+  const retainedView = vi.mocked(api.conversation.readConversationChanges).mock.calls.at(-1)?.[0].view
+  expect(retainedView).toBeTypeOf('string')
   await render(false); await act(async () => release()); await flush()
   expect(ids().at(-1)).toBe('original-59')
-  const before = requests.length
+  const before = requests.filter(input => !input.view).length
   await render(); await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('original-159') })
-  expect(requests, 'resume replays the accepted view rather than opening a raw latest page').toHaveLength(before)
+  expect(consumerRequests.at(-1)?.view, 'resume names the original accepted public Reader view').toBe(retainedView)
+  expect(requests.filter(input => !input.view), 'resume replays the accepted view rather than opening a raw latest page').toHaveLength(before)
   const done = requests.length; await render(); expect(requests).toHaveLength(done)
  } finally { release?.() }
 })

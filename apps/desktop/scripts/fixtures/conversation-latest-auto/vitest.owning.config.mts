@@ -31,7 +31,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
   const file = id.split('?')[0]!; if (!file.startsWith(root + '/apps/desktop/src/') && !file.startsWith(root + '/packages/') && file !== resolve(root, 'apps/desktop/test/conversation-latest-auto.integration.test.tsx')) return
   let code = source
   const mutation = process.env.AGENTMUX_LATEST_CONTROL_MUTATION
-  if (mutation && file === resolve(root, 'apps/desktop/src/renderer/src/components/ActivityView.tsx')) {
+  if (mutation && mutation !== 'disable-visible-resume' && file === resolve(root, 'apps/desktop/src/renderer/src/components/ActivityView.tsx')) {
    const replacements: Record<string, [string, string]> = {
     'transient-visibility': ['const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical', 'const needsReturnToLatest = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.newerOutside'],
     'loaded-return-refresh': ['if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {', 'if (conversationReading?.opened || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held) {'],
@@ -41,9 +41,19 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
    if (!replacement || source.split(replacement[0]).length !== 2) throw Error('Unknown or non-unique latest-control mutation: ' + mutation)
    code = source.replace(...replacement)
   }
+  if (mutation === 'disable-visible-resume' && file === resolve(root, 'packages/client-ui/src/lib/use-conversation-view.ts')) {
+   const anchor = "void read(parked ? 'resume' : 'latest')"
+   if (source.split(anchor).length !== 2) throw Error('Non-unique visible-resume mutation')
+   code = source.replace(anchor, "if (!parked) void read('latest') /* Source mutation: retained visible return never resumes */")
+  }
   const log = process.env.AGENTMUX_UNIFIED_LOADED
   if (log) appendFileSync(log, JSON.stringify({ path: relative(root, file), bytes: Buffer.byteLength(code), sha256: createHash('sha256').update(code).digest('hex'),
    originalSHA256: createHash('sha256').update(source).digest('hex'), ...(code !== source ? { mutation } : {}) }) + '\n')
+  const executed = process.env.AGENTMUX_UNIFIED_EXECUTED
+  if (executed && ['apps/desktop/src/renderer/src/components/ActivityView.tsx', 'packages/client-ui/src/lib/use-conversation-view.ts'].some(path => file === resolve(root, path))) {
+   const record = JSON.stringify({ path: relative(root, file), sha256: createHash('sha256').update(code).digest('hex'), mutation: code !== source ? mutation : null }) + '\n'
+   return { code: code + `\nimport { appendFileSync as __latestControlExecuted } from 'node:fs'; __latestControlExecuted(${JSON.stringify(executed)}, ${JSON.stringify(record)});\n`, map: null }
+  }
   return code === source ? undefined : { code, map: null }
  }}],
  test: { include: ['apps/desktop/test/conversation-latest-auto.integration.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15000,
