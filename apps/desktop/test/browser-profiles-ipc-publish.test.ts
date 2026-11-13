@@ -11,6 +11,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() }, session: { fromPa
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
 import { ipcResult, unwrapIpcResult, type IpcResult } from '../src/shared/ipc-result.js'
+import { readBrowserProfileSnapshot, registerBrowserProfileEditorIpc } from '../src/main/browser-profile-editor-ipc.js'
 
 const DEFAULT_ID = '11111111-1111-4111-8111-111111111111'
 const WORK_ID = '22222222-2222-4222-8222-222222222222'
@@ -22,10 +23,17 @@ function productionWiring(names: string[], scope: Record<string, unknown>): Reco
   const source = readFileSync(new NodeURL('../src/main/ipc.ts', import.meta.url), 'utf8')
   const parsed = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
   const found: Record<string, string> = {}
+  const bound: Record<string, (...args: any[]) => any> = {}
+  let editorBinding = 0
   const subscriptions: string[] = []
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && names.includes(node.arguments[0].text)) {
       found[node.arguments[0].text] = node.arguments[1]!.getText(parsed)
+    }
+    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'registerBrowserProfileEditorIpc') {
+      expect(node.arguments[0]?.getText(parsed)).toBe('{ handle: handleWithEvent, profiles: browserProfiles }')
+      editorBinding++
+      registerBrowserProfileEditorIpc({ profiles: scope.browserProfiles as BrowserProfileManager, handle: (channel, handler) => { if (names.includes(channel)) bound[channel] = handler } })
     }
     if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'browserProfiles.onChange') {
       // The proxy credential owner also observes metadata changes. Select the actual Renderer
@@ -42,11 +50,12 @@ function productionWiring(names: string[], scope: Record<string, unknown>): Reco
     ts.forEachChild(node, visit)
   }
   visit(parsed)
-  expect(Object.keys(found).sort()).toEqual([...names].sort())
+  expect(editorBinding).toBe(1)
+  expect([...Object.keys(found), ...Object.keys(bound)].sort()).toEqual([...names].sort())
   expect(subscriptions, 'ipc.ts subscribes to Profile changes exactly once').toHaveLength(1)
-  const body = `${subscriptions[0]}; return { ${names.map(n => `${JSON.stringify(n)}: ${found[n]}`).join(', ')} };`
+  const body = `${subscriptions[0]}; return { ${Object.keys(found).map(n => `${JSON.stringify(n)}: ${found[n]}`).join(', ')} };`
   const compiled = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  return new Function(...Object.keys(scope), compiled)(...Object.values(scope))
+  return { ...bound, ...new Function(...Object.keys(scope), compiled)(...Object.values(scope)) }
 }
 
 async function manager() {
@@ -61,6 +70,26 @@ async function manager() {
 }
 
 describe('Main publishes the committed Profile list after every change', () => {
+  it('publishes original environment notifications without inventing a persistent sequence', async () => {
+    const profiles = await manager(), sequence = profiles.listSequence(), revision = profiles.listRevision()
+    let notify!: () => void
+    const sent: unknown[] = []
+    const source = readFileSync(new NodeURL('../src/main/ipc.ts', import.meta.url), 'utf8')
+    const parsed = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true), subscriptions: string[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'browserProfiles.onEnvironmentApplicationChange') subscriptions.push(node.getText(parsed))
+      ts.forEachChild(node, visit)
+    }
+    visit(parsed); expect(subscriptions).toHaveLength(1)
+    const listener = vi.spyOn(profiles, 'onEnvironmentApplicationChange').mockImplementation(value => { notify = () => value(DEFAULT_ID); return () => {} })
+    const compiled = ts.transpileModule(subscriptions[0]!, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+    new Function('browserProfiles', 'contents', 'readBrowserProfileSnapshot', compiled)(profiles, { isDestroyed: () => false, send: (_channel: string, value: unknown) => sent.push(value) }, readBrowserProfileSnapshot)
+    notify()
+    expect(sent).toEqual([readBrowserProfileSnapshot(profiles)])
+    expect(profiles.listSequence()).toBe(sequence); expect(profiles.listRevision()).toBe(revision)
+    listener.mockRestore(); await profiles.dispose()
+  })
+
   it('sends the manager list once per committed create, update and default move, and never for reads or refusals', async () => {
     const browserProfiles = await manager()
     const sent: Array<[string, { revision: number; profiles: { id: string; label: string; isDefault: boolean }[] }]> = []

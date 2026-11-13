@@ -95,6 +95,30 @@ describe('one Profile list from Main', () => {
     stop()
   })
 
+  it('keeps a same-sequence native application push over the older in-flight read', async () => {
+    const slow = deferred<BrowserProfileList>()
+    port.readProfiles.mockReturnValueOnce(slow.promise).mockRejectedValueOnce(new Error('unavailable'))
+    const store = createBrowserProfilesStore(port), stop = store.subscribe(() => {})
+    const applied: BrowserProfileList = { revision: 3, sequence: 7, folders: [], views: [], profiles: [{ ...personal, environmentApplication: { status: 'applied', scope: 'session-defaults', unsupported: [] } }] }
+    port.push(applied)
+    await act(async () => slow.resolve({ ...applied, profiles: [personal] }))
+    expect(store.get().profiles).toEqual(applied.profiles)
+    await store.refresh()
+    expect(store.get().profiles).toEqual(applied.profiles)
+    expect(store.get().error).toContain('unavailable')
+    stop()
+  })
+
+  it('accepts a higher metadata sequence read even after an intervening native push', async () => {
+    const slow = deferred<BrowserProfileList>()
+    port.readProfiles.mockReturnValue(slow.promise)
+    const store = createBrowserProfilesStore(port), stop = store.subscribe(() => {})
+    port.push({ revision: 3, sequence: 7, folders: [], views: [], profiles: [personal] })
+    await act(async () => slow.resolve({ revision: 4, sequence: 8, folders: [], views: [], profiles: [personal, client] }))
+    expect(store.get()).toMatchObject({ revision: 4, sequence: 8, profiles: [personal, client] })
+    stop()
+  })
+
   it('keeps the last list visible when a later read fails, and recovers on refresh', async () => {
     port.readProfiles.mockResolvedValueOnce({ revision: 1, sequence: 1, folders: [], views: [], profiles: [personal] }).mockRejectedValueOnce(new Error('Profile metadata unavailable: EACCES'))
       .mockResolvedValueOnce({ revision: 2, sequence: 2, folders: [], views: [], profiles: [personal, client] })
