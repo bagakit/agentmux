@@ -34,13 +34,13 @@ try { receipt = JSON.parse(await fs.readFile(path.join(evidence, 'capture.json')
 if (!receipt?.passed || JSON.stringify(receipt.sourceCandidates) !== JSON.stringify(sourceCandidates)) {
   receipt = { schema: 'agentmux.branch-status-style.v1', passed: false, sourceCandidates, mutations: [], productionConsumers: [],
     isolation: 'Actual BranchesPanel, useWorkspaceBranches/useGitAheadBehind, SelectorRow/AgentAvatar and current stylesheet entry run in a private Electron. External Store/API snapshots are fixture inputs; no real Git, user data, Session or Runtime is touched.',
-    scope: 'Two pre-existing allStyles assertions are excluded because unrelated concurrent agent-current-fork.css/conversation-ruler.css lack index imports; actual Electron verifies this slice status/sync/pin computed styles. No broad regression is claimed.' }
+    scope: 'All branch panel cases run, including the whole-stylesheet ones; actual Electron verifies this slice status/sync/pin computed styles. No broad regression is claimed.' }
   const config = path.join(fixture, 'vitest.config.mts')
-  const relevant = '^(?!.*(?:每种可见 kind|未 pin 的 pin 键)).*$'
-  const control = await command('control', ['run', '--config', config, '-t', relevant])
+  // Every case runs: the shared stylesheet reader no longer throws, so nothing is excluded.
+  const control = await command('control', ['run', '--config', config])
   assert.equal(control.code, 0, control.output)
-  assert.match(control.output, /Tests\s+14 passed/)
-  receipt.tests = { passed: 14, skippedPreExistingStyles: 2 }
+  assert.match(control.output, /Tests\s+18 passed/)
+  receipt.tests = { passed: 18 }
   for (const [label, before, after] of [
     ['wrong-current-meaning', "const statusLabel = branch.isCurrent ? 'Current branch'", "const statusLabel = branch.isCurrent ? 'Worktree'"],
     ['drop-accessible-status', 'aria-label={statusLabel}', 'aria-label={undefined}']
