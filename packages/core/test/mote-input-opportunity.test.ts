@@ -66,13 +66,15 @@ async function fixture(firstOutcome: 'not-applied' | 'unconfirmed') {
   // Start from a confirmed original observation. Source capture and its input budget
   // are outside this test's opportunity-policy boundary.
   await queue.saveMoteInputObservation(observation, 0)
-  let runId = 'primary-original-run', idleId = 'native-idle-original'
+  let runId = 'primary-original-run', idleId = 'native-idle-original', automatic: 'idle-queue' | 'turn-end' | 'none' = 'idle-queue'
   const writes: AgentMuxMessageNotification[] = []
   const issues: string[] = []
   const unexpected = async (): Promise<never> => { throw new Error('A result-history port was unexpectedly read.') }
   const opportunity = vi.fn(async (primary: string): Promise<AutomaticInputOpportunity> => {
     expect(primary).toBe('primary')
+    if (automatic !== 'idle-queue') return { automatic }
     return {
+      automatic,
       session: {
         kind: 'agent',
         agentSessionId: 'primary',
@@ -129,7 +131,8 @@ async function fixture(firstOutcome: 'not-applied' | 'unconfirmed') {
     change,
     restore,
     setRun: (value: string) => { runId = value },
-    setIdle: (value: string) => { idleId = value }
+    setIdle: (value: string) => { idleId = value },
+    setAutomatic: (value: typeof automatic) => { automatic = value }
   }
 }
 
@@ -188,4 +191,14 @@ it('an unknown notice keeps its original attempt across later idle evidence and 
     state: 'unconfirmed', key: first.key, wire: first.wire
   })
   expect(f.issues).toEqual([])
+})
+
+it.each(['turn-end', 'none'] as const)('a %s primary has no idle input opportunity, so a new coordination notice is not sent and the observation is kept', async path => {
+  const f = await fixture('not-applied')
+  f.setAutomatic(path)
+  f.setRun('primary-recovered-run')
+  await f.change()
+  expect(f.writes).toHaveLength(1)
+  expect(f.issues).toEqual([expect.stringContaining('has no native idle queue')])
+  expect((await f.queue.readMoteInputObservation(f.id))?.issue).toContain('has no native idle queue')
 })

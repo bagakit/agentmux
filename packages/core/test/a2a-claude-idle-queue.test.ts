@@ -72,7 +72,9 @@ it('hands the frozen references to Claude’s idle queue and records them submit
     turnEnd: { nativeTurnId: 'turn-1', hookReceiptId: 'ask-1' } } })
   // Written to the module is only "handed over"; the native queue's own admission decides.
   await new Promise(resolve => setTimeout(resolve, 50))
-  expect((await h.read('pending-1'))?.notification?.state).toBe('pending')
+  // Handed to the native queue, it no longer waits for an automatic path, so it names none.
+  expect((await h.read('pending-1'))?.notification).toMatchObject({ state: 'pending', notificationId: agentmuxNotice.notificationId })
+  expect((await h.read('pending-1'))?.notification).not.toHaveProperty('automatic')
   await h.report('admit-1', agentmuxNotice.notificationId, { entered: true })
   await expect.poll(async () => (await h.read('pending-1'))?.notification?.state).toBe('submitted')
   expect(h.inner.kernel.input).not.toHaveBeenCalled()
@@ -86,7 +88,7 @@ it('returns references to awaiting notification when Claude’s queue drops the 
   await h.report('admit-drop', first.agentmuxNotice.notificationId, { dropped: 'the session was stopped and nobody has sent input since' })
   // The notice itself is a confirmed whole refusal; its original message is awaiting notification again.
   await expect.poll(async () => (await h.results()).find(record => record.notificationId === first.agentmuxNotice.notificationId)?.state).toBe('not-applied')
-  expect((await h.read('dropped'))?.notification).toEqual({ state: 'pending' })
+  expect((await h.read('dropped'))?.notification).toEqual({ state: 'pending', automatic: 'turn-end' })
   // The next real turn end hands the same original reference again, through a new notice.
   const next = await (await h.ask('ask-next', { turnId: 'turn-2' })).json() as { agentmuxNotice: { notificationId: string; text: string } }
   expect(next.agentmuxNotice.notificationId).not.toBe(first.agentmuxNotice.notificationId)

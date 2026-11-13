@@ -55,9 +55,10 @@ async function fixture(providerId: 'grok' | 'codex', working = true) {
   return { ...h, original, semanticStatus: working ? semanticStatus : undefined, providers, queue, events, send, settled, notifications, changed, diagnostics }
 }
 
-async function retained(h: Awaited<ReturnType<typeof fixture>>, messageId: string) {
+async function retained(h: Awaited<ReturnType<typeof fixture>>, messageId: string, automatic?: 'idle-queue' | 'turn-end' | 'none') {
   const message = await h.client.readMessage({ messageId, caller: h.credentials })
-  expect(message).toMatchObject({ deliveryMode: 'reference', delivery: { state: 'queued' }, notification: { state: 'pending' },
+  expect(message?.notification).toEqual({ state: 'pending', ...(automatic ? { automatic } : {}) })
+  expect(message).toMatchObject({ deliveryMode: 'reference', delivery: { state: 'queued' },
     envelope: { body: 'Retained original ' + messageId, recipientRunId: h.original.run.runId } })
   expect((await h.queue.readJournal()).some(record => record.kind === 'a2a-notification')).toBe(false)
   expect(h.client.agentSession('recipient').run).toEqual(h.original.run)
@@ -67,14 +68,11 @@ async function retained(h: Awaited<ReturnType<typeof fixture>>, messageId: strin
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 }
 
-it('explains the missing built-in Grok idle notification transport while preserving its Inbox and manual input', async () => {
+it('names the Grok turn-end path on the saved reference, without an error notice, while preserving its Inbox and manual input', async () => {
   const h = await fixture('grok')
   expect(h.providers.get('grok').prepareNativeInput).toBeUndefined()
-  await h.send('original-grok-message'); await retained(h, 'original-grok-message')
-  expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('next turn end'), evidence: expect.objectContaining({ run: h.original.run }) }))
-  expect(h.diagnostics()[0]?.message).toContain('healthy manual input')
-  expect(h.diagnostics()[0]?.message).toContain('explicitly notify')
+  await h.send('original-grok-message'); await retained(h, 'original-grok-message', 'turn-end')
+  expect(h.diagnostics()).toEqual([])
   const ack = await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.original.run, source: 'user', data: 'Existing draft' })
   expect(ack.appliedByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength('Existing draft') })
   expect(h.rawInput).toHaveBeenCalledExactlyOnceWith(h.original.run.runId, 'Existing draft')
@@ -85,7 +83,7 @@ it('explains the missing built-in Grok idle notification transport while preserv
 
 it('uses the built-in Grok terminal input to explicitly notify an original MID while its automatic queue is unavailable', async () => {
   const h = await fixture('grok')
-  await h.send('original-grok-reference'); await retained(h, 'original-grok-reference')
+  await h.send('original-grok-reference'); await retained(h, 'original-grok-reference', 'turn-end')
   const request = { operationId: 'grok-explicit-notice', messageIds: ['original-grok-reference'], caller: h.credentials }
   const result = await h.client.notifyMessages(request)
   expect(result.notification).toMatchObject({ state: 'submitted', mode: 'steer', messageIds: ['original-grok-reference'],
@@ -106,9 +104,8 @@ it.each([true, false])('checks the actual native input contribution before waiti
   const h = await fixture('codex', working), provider = h.providers.get('codex')
   expect(provider.catalog.capabilities.nativeConversationInput?.managedRuns).toBe(true)
   h.providers.replace(withoutNativeInput(provider))
-  await h.send('missing-implementation'); await retained(h, 'missing-implementation')
-  expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('no automatic Inbox notification path') }))
+  await h.send('missing-implementation'); await retained(h, 'missing-implementation', 'none')
+  expect(h.diagnostics()).toEqual([])
 })
 
 it('does not invent unsupported transport from an absent catalog field when the native input contribution exists', async () => {
@@ -116,13 +113,21 @@ it('does not invent unsupported transport from an absent catalog field when the 
   const { nativeConversationInput: _discovery, ...capabilities } = provider.catalog.capabilities
   const prepare = vi.fn(async () => { throw new Error('A working recipient has no idle input opportunity') })
   h.providers.replace({ ...provider, catalog: { ...provider.catalog, capabilities }, prepareNativeInput: prepare })
-  await h.send('supported-current-work'); await retained(h, 'supported-current-work')
+  await h.send('supported-current-work'); await retained(h, 'supported-current-work', 'idle-queue')
   expect(prepare).not.toHaveBeenCalled()
   expect(h.events.filter(event => event.type === 'agent-error' && event.code === 'A2A_NOTIFICATION_UNCONFIRMED')).toEqual([])
 })
 
+/** A native idle queue whose own read genuinely fails: an unconfirmed observation, not a missing path. */
+function failingIdleRead(h: Awaited<ReturnType<typeof fixture>>, message = 'Native idle read rejected') {
+  const provider = h.providers.get('codex'), read = vi.fn(async () => { throw new AgentMuxError(message, 'PRIVATE_READ_UNAVAILABLE') })
+  h.providers.replace({ ...provider, readPromptExecutionEvidence: read })
+  return { provider, read }
+}
+
 it('keeps one failure observation through repeated Session updates, unavailable reads and reconnection', async () => {
-  const h = await fixture('grok')
+  const h = await fixture('codex', false)
+  failingIdleRead(h)
   await h.send('pending-reference')
   expect(h.diagnostics()).toHaveLength(1)
   for (let index = 0; index < 3; index++) await h.changed()
@@ -131,17 +136,19 @@ it('keeps one failure observation through repeated Session updates, unavailable 
   const absent = vi.spyOn(registry, 'has').mockReturnValue(false)
   await h.changed(); absent.mockRestore(); await h.changed()
   expect(h.diagnostics()).toHaveLength(1)
-  await retained(h, 'pending-reference')
+  await retained(h, 'pending-reference', 'idle-queue')
 })
 
 it('reports a new failure after successful observation or a changed Run without settling the original message', async () => {
-  const h = await fixture('grok'), missing = h.providers.get('grok')
+  const h = await fixture('codex', false), { provider, read } = failingIdleRead(h)
   await h.send('recoverable-reference')
   const prepare = vi.fn(async () => { throw new Error('A working recipient cannot prepare an idle notice') })
-  h.providers.replace({ ...missing, prepareNativeInput: prepare }); await h.changed()
-  h.providers.replace(missing); await h.changed()
+  // A confirmed working observation is a successful read with no idle opportunity.
+  h.providers.replace({ ...provider, prepareNativeInput: prepare,
+    readPromptExecutionEvidence: async () => ({ state: 'working', sourceId: 'private-source', id: 'private-working' }) }); await h.changed()
+  h.providers.replace({ ...provider, readPromptExecutionEvidence: read }); await h.changed()
   expect(h.diagnostics()).toHaveLength(2)
-  await retained(h, 'recoverable-reference'); expect(prepare).not.toHaveBeenCalled()
+  await retained(h, 'recoverable-reference', 'idle-queue'); expect(prepare).not.toHaveBeenCalled()
   const original = (await h.store.readMetadata('recipient'))!, nextRun = { runId: 'next-recipient-run' }
   await h.store.compareAndSwap(original, { ...original, run: nextRun, retiredRuns: [original.run] })
   await h.inner.registry.load('local'); await h.changed()
@@ -169,7 +176,7 @@ it('retains the observed Run when a Provider read rejects after the registry adv
 
 it('delivers the pending reference through the original owner when the native capability becomes available', async () => {
   const h = await fixture('codex', false), provider = h.providers.get('codex')
-  h.providers.replace(withoutNativeInput(provider)); await h.send('awaiting-capability')
+  h.providers.replace(withoutNativeInput(provider)); await h.send('awaiting-capability'); await retained(h, 'awaiting-capability', 'none')
   const native = vi.fn(async (_wire: string) => ({ outcome: 'admitted' as const, queuedSubmissionId: 'private-native-notice' }))
   h.inner.kernel.status = vi.fn(async id => ({ ...h.run(id), pid: 1234 }))
   h.providers.replace({ ...provider,
@@ -181,7 +188,7 @@ it('delivers the pending reference through the original owner when the native ca
   expect(native).toHaveBeenCalledTimes(1)
   expect(native.mock.calls[0]?.[0]).toContain('awaiting-capability')
   expect((await h.queue.readByMessageId('awaiting-capability'))?.notification).toMatchObject({ state: 'submitted' })
-  expect(h.diagnostics()).toHaveLength(1)
+  expect(h.diagnostics()).toEqual([])
   await h.changed(); expect(native).toHaveBeenCalledTimes(1)
   expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })

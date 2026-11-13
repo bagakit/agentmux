@@ -137,12 +137,12 @@ it('records a lost response unconfirmed and never resends its references at a la
   expect(h.events.some(event => event.type === 'agent-error' && /Cannot read properties/u.test(event.message))).toBe(false)
 })
 
-it('tells the sender an idle Grok waits for its next turn end while explicit notification stays available', async () => {
+it('tells the sender an idle Grok waits for its next turn end, without an error notice, while explicit notification stays available', async () => {
   const h = await fixture()
   await h.send('idle-wait')
-  expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('next turn end') }))
-  expect(h.events.some(event => event.type === 'agent-error' && /no automatic Inbox notification path/u.test(event.message))).toBe(false)
+  expect((await h.read('idle-wait'))?.notification).toEqual({ state: 'pending', automatic: 'turn-end' })
+  // Waiting for the next turn end is a known path of a healthy Agent, not a failed observation.
+  expect(h.events.filter(event => event.type === 'agent-error')).toEqual([])
   const explicit = await h.client.notifyMessages({ operationId: 'explicit-now', messageIds: ['idle-wait'], caller: h.credentials })
   expect(explicit.notification).toMatchObject({ mode: 'steer', messageIds: ['idle-wait'] })
 })
