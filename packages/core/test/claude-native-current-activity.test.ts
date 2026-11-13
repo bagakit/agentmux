@@ -122,6 +122,60 @@ it('source gap and a genuine semantic claim consume idle; raw ACK does not act a
   expect(h.client.agentSession('native-activity').currentActivity?.state).toBe('unknown')
 })
 
+// The production semantic claim changes this exact durable owner field. No terminal bytes prove a claim.
+async function claimPrompt(h: Awaited<ReturnType<typeof harness>>, submissionId: string) {
+  const inner = h.client as unknown as { registry: { update(id: string, run: {runId: string}, update: (s: any) => any): Promise<unknown> } }
+  const key = {kind:'prompt' as const, agentSessionId:'native-activity', expectedRun:{runId:h.run.runId}, submissionId}
+  await inner.registry.update('native-activity', {runId: h.run.runId}, current => ({...current, promptCompletionAdmission: {
+    submissionId, operationId:`${submissionId}-operation`, startByte:11, endByte:15, inputKey: key,
+    inputDispatch: {ref:{key,waitGeneration:1},gateId:submissionId}, outputCursorBytes: 17,
+    intent: {run:{runId:h.run.runId},ownerInstanceId:'owner',prompt:submissionId,plan:{kind:'single-phase',data:`${submissionId}\r`},execution:'immediate'},
+    acknowledged: false
+  }}))
+}
+
+it('an input admitted mid-turn keeps the running turn active and its end unconfirmed until a new native turn', async () => {
+  const h = await harness()
+  await claimPrompt(h, 'first-prompt')
+  await start(h)
+  await claimPrompt(h, 'merged-prompt')
+  // Claude merged the input into the running turn: no new turn.start, ordinary tools continue.
+  await h.hook('PreToolUse', 'in-turn-tool', { session_id: 'native-main', tool_name: 'Bash', tool_use_id: 'in-turn', tool_input: {} })
+  let status = await h.client.statusAgent('native-activity')
+  expect(status.observation).toMatchObject({ semantic: 'active', readiness: 'ready', source: 'native-hook' })
+  expect(status.session.currentActivity).toMatchObject({ state: 'active', nativeTurnId: 'native-turn-1' })
+  const durable = (await h.sessions())[0]!.recoveryActivity
+  expect(durable).toMatchObject({ state: 'active', promptSubmissionId: 'first-prompt' })
+
+  // The same turn's real end is accepted, yet it cannot prove the merged input was consumed.
+  await end(h)
+  status = await h.client.statusAgent('native-activity')
+  expect(status.observation).toMatchObject({ semantic: 'unknown', reason: 'activity-unconfirmed', readiness: 'ready' })
+  expect(status.session.currentActivity).toMatchObject({ state: 'unknown', nativeTurnId: 'native-turn-1' })
+  expect((await h.sessions())[0]!.recoveryActivity).toMatchObject({ state: 'idle', promptSubmissionId: 'first-prompt' })
+  expect(agentTurnCompletionIdentity(status.session)).toBeUndefined()
+
+  // A later native turn re-establishes current activity; only its own end confirms idle.
+  await start(h, 3, 'native-turn-2')
+  expect((await h.client.statusAgent('native-activity')).observation.semantic).toBe('active')
+  await end(h, 4, 'native-turn-2')
+  status = await h.client.statusAgent('native-activity')
+  expect(status.observation.semantic).toBe('idle')
+  expect((await h.sessions())[0]!.recoveryActivity).toMatchObject({ state: 'idle', nativeTurnId: 'native-turn-2', promptSubmissionId: 'merged-prompt' })
+})
+
+it('an old turn end cannot become the idle of a turn started under a later input', async () => {
+  const h = await harness()
+  await claimPrompt(h, 'first-prompt')
+  await start(h)
+  await claimPrompt(h, 'second-prompt')
+  await start(h, 2, 'native-turn-2')
+  await end(h, 3, 'native-turn-1')
+  const status = await h.client.statusAgent('native-activity')
+  expect(status.observation.semantic).toBe('active')
+  expect(status.session.currentActivity).toMatchObject({ state: 'active', nativeTurnId: 'native-turn-2' })
+})
+
 it('real public service and compiled inspect preserve the live fact and strict exact-Run codec rejects corruption', async () => {
   const h = await harness()
   await start(h); await end(h)
