@@ -2298,13 +2298,32 @@ function assertReservationPrecondition(
   }
 }
 
+/**
+ * The earlier Runs a reopened Session carries, before the Run it was closed on.
+ *
+ * A retirement keeps only its last Run, but the Session's own creation fact still names the
+ * Run it was created on. Without that Run in its lineage the reopened Session fails the
+ * creation-key invariant, so a Session resumed even once before closing could never reopen.
+ */
+export function reopenedPriorRuns(retirement: AgentMuxRetiredAgentSession): AgentMuxRunRef[] {
+  const creation = retirement.history?.creation
+  const named = [creation?.createdRun, creation?.initialInputKey?.expectedRun].filter((run): run is AgentMuxRunRef => Boolean(run))
+  return [...new Set(named.map(run => run.runId))].filter(runId => runId !== retirement.run.runId).map(runId => ({ runId }))
+}
+
+/** A reopen rebinds the closed Run and every prior Run it restores to the reopened Session. */
+function withoutReopenedRuns(retiredRuns: readonly AgentMuxRunRef[], retirement: AgentMuxRetiredAgentSession): AgentMuxRunRef[] {
+  const rebound = new Set([retirement.run, ...reopenedPriorRuns(retirement)].map(run => run.runId))
+  return retiredRuns.filter(run => !rebound.has(run.runId))
+}
+
 function assertPreparedReopen(retirement: AgentMuxRetiredAgentSession, session: AgentMuxStoredAgentSession): void {
   const history = retirement.history
   if (!history || session.agentSessionId !== retirement.agentSessionId || session.hostId !== retirement.hostId ||
     session.providerId !== history.providerId || session.executorId !== history.executorId ||
     session.workspacePath !== history.workspacePath || !isDeepStrictEqual(session.toolExecution, history.toolExecution) || session.createdAt !== history.createdAt ||
     JSON.stringify(session.nativeHandle) !== JSON.stringify(history.nativeHandle) || session.run.runId !== retirement.run.runId ||
-    session.retiredRuns.length !== 0 || !session.hookBindingId || !session.hookToken || !session.capabilityHash) {
+    !isDeepStrictEqual(session.retiredRuns, reopenedPriorRuns(retirement)) || !session.hookBindingId || !session.hookToken || !session.capabilityHash) {
     throw new AgentMuxError('Prepared continue identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
 }
@@ -2550,7 +2569,7 @@ function assertLifecycleCommit(
       next.executorId !== history.executorId || next.workspacePath !== history.workspacePath || !isDeepStrictEqual(next.toolExecution, history.toolExecution) ||
       next.createdAt !== history.createdAt || JSON.stringify(next.nativeHandle) !== JSON.stringify(history.nativeHandle) ||
       JSON.stringify(next.reopenedFrom) !== JSON.stringify({ run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }) ||
-      next.run.runId === retirement.run.runId || !next.retiredRuns.some(run => run.runId === retirement.run.runId)) {
+      next.run.runId === retirement.run.runId || !isDeepStrictEqual(next.retiredRuns, [...reopenedPriorRuns(retirement), retirement.run])) {
       throw new AgentMuxError('Reopen commit changed its original identity or retirement fact.', 'INVALID_AGENT_SESSION_STORE')
     }
     if (reservation.preparedSession) {
@@ -3038,7 +3057,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const retiredRuns = reservation.kind === 'stop' && previous
       ? mergeRetiredRuns(this.retiredRuns, [...previous.retiredRuns, previous.run])
       : reservation.kind === 'reopen'
-        ? this.retiredRuns.filter(run => run.runId !== reservation.expectedRetirement.run.runId)
+        ? withoutReopenedRuns(this.retiredRuns, reservation.expectedRetirement)
         : this.retiredRuns
     const retiredAgentSessions = retiredAgentSessionsForRuns(
       reservation.kind === 'stop' && previous
@@ -3851,7 +3870,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (normalized) sessions.push(normalized)
       const committedSessions = normalizeAgentSessions(sessions)
       const retiredRuns = reservation.kind === 'reopen'
-        ? document.retiredRuns.filter(run => run.runId !== reservation.expectedRetirement.run.runId)
+        ? withoutReopenedRuns(document.retiredRuns, reservation.expectedRetirement)
         : document.retiredRuns
       const retiredAgentSessions = retiredAgentSessionsForRuns(document.retiredAgentSessions, retiredRuns)
       assertUnboundRetiredRuns(committedSessions, retiredRuns)

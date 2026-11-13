@@ -13,6 +13,7 @@ import {
   AgentMuxSessionDurabilityError,
   agentLifecycleOperationIdentity,
   normalizeStoredAgentSession,
+  reopenedPriorRuns,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
   type AgentMuxPreparedCreation,
@@ -514,8 +515,10 @@ export class AgentMuxAgentSessionRegistry {
       if (reservation.kind === 'reopen') {
         this.noteMetadataChange('retirements', normalized.agentSessionId)
         this.retiredAgentSessions.delete(normalized.agentSessionId)
-        this.noteMetadataChange('runs', reservation.expectedRetirement.run.runId)
-        this.unboundRetiredRuns.delete(reservation.expectedRetirement.run.runId)
+        for (const run of [reservation.expectedRetirement.run, ...reopenedPriorRuns(reservation.expectedRetirement)]) {
+          this.noteMetadataChange('runs', run.runId)
+          this.unboundRetiredRuns.delete(run.runId)
+        }
       }
       this.remember(normalized)
       return this.get(normalized.agentSessionId)

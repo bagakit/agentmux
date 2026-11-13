@@ -19,7 +19,7 @@ import { AGENT_TERMINAL_HANDSHAKE_FAILED } from '../agent-terminal-handshake-out
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
-import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
+import { agentLifecycleOperationIdentity, reopenedPriorRuns, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
 import type { AgentCapabilitySnapshot, AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
@@ -304,7 +304,7 @@ export class AgentSessionRunLifecycle {
     }
     const retirement = reservation.expectedRetirement
     const nativeBindingObservedAt = Date.now()
-    const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [retirement.run],
+    const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [...prepared.retiredRuns, retirement.run],
       reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Math.max(prepared.updatedAt + 1, nativeBindingObservedAt),
       ...(prepared.nativeHandle ? { nativeBinding: { source: 'semantic-resume-target' as const, run: runRef(run.runId), observedAt: nativeBindingObservedAt } } : {}) }
     // A lost start ACK cannot reconstruct a pre-start Provider observation.
@@ -429,7 +429,7 @@ export class AgentSessionRunLifecycle {
       }
       const current = previous ?? {
         ...retirement!.history!, kind: 'agent' as const, agentSessionId: retirement!.agentSessionId,
-        hostId: retirement!.hostId, run: retirement!.run, retiredRuns: [],
+        hostId: retirement!.hostId, run: retirement!.run, retiredRuns: reopenedPriorRuns(retirement!),
         updatedAt: retirement!.observedAt,
         ...(retirement!.activityCommit === undefined ? {} : { activityCommit: structuredClone(retirement!.activityCommit) }),
         ...(retirement!.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: structuredClone(retirement!.continuityControlReceipts) }),
@@ -565,7 +565,7 @@ export class AgentSessionRunLifecycle {
         hookBinding.endpoint
       )
       if (reservation.kind === 'reopen') {
-        const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: [],
+        const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: reopenedPriorRuns(reservation.expectedRetirement),
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
         delete preparedSession.nativePromptPredecessor
