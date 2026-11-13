@@ -33,6 +33,10 @@ A page function that AgentMux itself refuses or cannot confirm throws an error w
 "not-dispatched"` means nothing reached the page, so retrying is safe; `"unknown"` means the action
 may have happened, so read the page before trying again. Errors without these fields came from the
 page or your own code; decide from them only after looking.
+`pressKey(ref, key)` takes one key or a chord written with `+`, such as `Control+a`, `Shift+Tab` or
+`Meta+z`; modifiers are held around the key and always released. On macOS use `Meta` for the system
+shortcuts (select all, copy, undo). A shifted letter types its capital; for other shifted
+characters pass the character itself, such as `"!"`.
 `cdp(method, params)` reaches this page and its frames only. A command that reaches the whole
 Profile or the browser (cookies, site storage, certificate checks, permissions, download behavior,
 creating or closing targets) is refused before it is sent, with what to use instead. Raw `Input.*`
