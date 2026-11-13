@@ -7,9 +7,9 @@ function fixture() {
   const frame = { executeJavaScript: vi.fn(async (code: string) => code.includes('?.prepare(') ? identity : undefined) }
   const contents = { isDestroyed: vi.fn(() => false), mainFrame: frame }
   const focusedWindow = vi.fn(() => nativeWindow), windowForDocument = vi.fn(() => nativeWindow)
-  const capture = vi.fn(async (_attach: boolean): Promise<string | null> => 'original.png'), reportIssue = vi.fn()
-  const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument, capture, reportIssue } as never)
-  return { action, frame, contents, nativeWindow, focusedWindow, windowForDocument, capture, reportIssue }
+  const capture = vi.fn(async (_attach: boolean): Promise<string | null> => 'original.png'), reportIssue = vi.fn(), remindPending = vi.fn()
+  const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument, capture, remindPending, reportIssue } as never)
+  return { action, frame, contents, nativeWindow, focusedWindow, windowForDocument, capture, remindPending, reportIssue }
 }
 
 it('captures with no Renderer or workbench and treats attachment as optional', async () => {
@@ -82,11 +82,28 @@ it('repeated pending hotkeys do not open another selection or repin a later draf
   const f = fixture()
   let finish!: (value: string | null) => void
   f.capture.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
-  const first = f.action.run(), repeated = f.action.run()
+  const first = f.action.run()
+  expect(f.remindPending, 'the first press opens the capture without a reminder').not.toHaveBeenCalled()
+  const repeated = f.action.run()
   expect(repeated).toBe(first)
+  expect(f.remindPending, 'a repeated press shows where the open capture is').toHaveBeenCalledOnce()
   await vi.waitFor(() => expect(f.capture).toHaveBeenCalledOnce())
   finish('original.png'); await first
   expect(f.frame.executeJavaScript).toHaveBeenCalledTimes(2)
+  await f.action.run()
+  expect(f.remindPending, 'a press after the capture settles starts a new capture').toHaveBeenCalledOnce()
+})
+
+it('a failed reminder is reported and keeps the open capture', async () => {
+  const f = fixture()
+  let finish!: (value: string | null) => void
+  f.capture.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  f.remindPending.mockImplementationOnce(() => { throw new Error('editor window is gone') })
+  const first = f.action.run()
+  expect(f.action.run()).toBe(first)
+  expect(f.reportIssue).toHaveBeenCalledExactlyOnceWith(new Error('editor window is gone'))
+  await vi.waitFor(() => expect(f.capture).toHaveBeenCalledOnce())
+  finish(null); await first
 })
 
 it('native unknown releases only the original attachment and preserves the failure', async () => {

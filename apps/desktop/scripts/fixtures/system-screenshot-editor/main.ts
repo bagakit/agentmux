@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
-import { app, BrowserWindow, nativeImage } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage } from 'electron'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 import { ScreenshotOriginalFiles } from '../../../src/main/screenshot-original-files'
 import { ScreenshotPins } from '../../../src/main/screenshot-pins'
-import { exportScreenshotPng, writeScreenshotFile } from '../../../src/main/screenshot-files'
 import { ScreenCapture } from '../../../src/main/screen-capture'
 import { SystemScreenshotEditor } from '../../../src/main/system-screenshot-editor'
 
@@ -78,7 +77,7 @@ async function open(image: ReturnType<typeof pngFromBytes>, attach: boolean) {
   })
   await settle()
   process.stdout.write('native-editor: decoded editor ready\n')
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'copyContext', 'finish', 'inspectOriginal', 'inspectOriginalOperation', 'inspectPin', 'load', 'openOriginal', 'pin', 'saveOriginal', 'savePng'])
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'copyContext', 'finish', 'inspectOriginal', 'inspectOriginalOperation', 'inspectPin', 'load', 'onNotice', 'openOriginal', 'pin', 'saveOriginal', 'savePng'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full application preload is absent')
   const glyphs = await evaluate(`(()=>{const svg=document.querySelector('[aria-label="Crop"] svg use');return !!svg&&!!document.getElementById(svg.getAttribute('href').slice(1))})()`)
   assert.equal(glyphs, true, 'the shared theme runtime installs actual semantic glyphs')
@@ -100,10 +99,11 @@ x.font='600 15px -apple-system';x.fillStyle='#304a5e';x.fillText('Next milestone
 async function run() {
   await app.whenReady()
   pins = new ScreenshotPins({ hostId: 'local', appearance: () => ({ terminalTheme: 'graphite', appAppearance: appearance }), copy: async () => {} })
+  // The production save owner opens the native sheet; this private chooser answers it with the proof file.
+  dialog.showSaveDialog = (async () => ({ canceled: false, filePath: join(out, 'processed.png') })) as typeof dialog.showSaveDialog
   editor = new SystemScreenshotEditor(() => ({ terminalTheme: 'graphite', appAppearance: appearance }), {
     inspectPin: operationId => pins.call('image.inspect', { hostId: 'local', operationId }, { actor: { kind: 'user', id: 'private-editor-user' } }),
     copyText: async text => { contexts.push(text) },
-    savePng: async image => exportScreenshotPng(image, { chooseFile: async () => join(out, 'processed.png'), writeFile: writeScreenshotFile }),
     pin: async (image, operationId) => {
       const result = await pins.call('image.pin', { hostId: 'local', operationId, image: { format: 'png', data: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, scale: 1 } }, { actor: { kind: 'user', id: 'private-editor-user' } })
       if (dropPinReceipt) { dropPinReceipt = false; throw new Error('The private pin reader lost its first response.') }
@@ -112,7 +112,7 @@ async function run() {
     originalFiles: () => new ScreenshotOriginalFiles({ chooseOpen: async () => join(out, 'original.json'), chooseSave: async () => join(out, 'original.json'),
       worker: { helperPath: process.env.AGENTMUX_SCREENSHOT_FILE_HELPER! } })
   })
-  capture = new ScreenCapture({ home: out, native: () => ({
+  capture = new ScreenCapture({ home: out, appActive: () => true, native: () => ({
     captureScreenshot: async () => ({ state: 'captured', completionAction: 'edit', screenshot: { format: 'png', data: nextImage.dataUrl.split(',')[1]!, width: nextImage.width, height: nextImage.height, scale: 1 } }),
     writeClipboardImage: async result => { if (failDelivery) throw new Error('The private clipboard sink is unavailable.'); deliveries.push(result) }
   }), edit: (...args) => editor.edit(...args), reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
@@ -196,7 +196,9 @@ async function run() {
   const newer = window
   window = retained; retained.show(); retained.focus(); await settle()
   await click('Clear all'); await click('Copy')
-  await waitFor('retained editor copies a changed image independently', async () => deliveries.length === 2)
+  // Copy is enabled again only after the whole completion settled, including any draft write it started.
+  await waitFor('retained editor copies a changed image independently', async () => deliveries.length === 2
+    && await evaluate<boolean>(`[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`))
   assert.equal(deliveries[1].width, image.width, 'the later clipboard image is independently edited')
   assert.equal(draftDeliveries.length, 1, 'later copies do not redeliver into the original draft')
   assert.ok((await readFile(draftDeliveries[0])).equals(originalDraftBytes), 'later editing cannot overwrite the original draft image')

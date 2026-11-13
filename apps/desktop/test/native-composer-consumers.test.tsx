@@ -30,7 +30,7 @@ afterEach(async () => { await rm(home, { recursive: true, force: true }) })
 function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
   const handlers = new Map<string, (...args: any[]) => any>()
   const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: vi.fn() }
-  const capture = new ScreenCapture({ home, native: () => native, edit: vi.fn(), reportIssue: vi.fn() })
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), reportIssue: vi.fn() })
   registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))

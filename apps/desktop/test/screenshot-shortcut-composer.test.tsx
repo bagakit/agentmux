@@ -42,7 +42,7 @@ function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
   const handlers = new Map<string, (...args: any[]) => any>()
   const clipboard = vi.fn(async () => {}), reportIssue = vi.fn()
   const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: clipboard }
-  const capture = new ScreenCapture({ home, native: () => native, edit: vi.fn(), reportIssue })
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), reportIssue })
   registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   const saved = vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))
@@ -51,7 +51,7 @@ function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
   const nativeWindow = { isDestroyed: () => false, isFocused: () => focused, isMinimized: () => !focused }
   globalCapture = new GlobalScreenshot({ contents: { isDestroyed: () => false, mainFrame: frame } as never,
     focusedWindow: () => focused ? nativeWindow as never : null, windowForDocument: () => nativeWindow as never,
-    capture: attach => capture.capture(attach), reportIssue })
+    capture: attach => capture.capture(attach), remindPending: () => {}, reportIssue })
   disposeReceiver?.(); disposeReceiver = installScreenshotAttachmentReceiver(window)
   return { saved, clipboard, reportIssue, frame }
 }

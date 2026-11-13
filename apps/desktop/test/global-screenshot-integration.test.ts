@@ -65,9 +65,9 @@ async function fixture(focused = true, cancelled = false) {
   const workbench = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false }
   const focusedWindow = vi.fn(() => focused ? workbench : null), reportIssue = vi.fn()
   const editor = new SystemScreenshotEditor(); editors.push(editor)
-  const capture = new ScreenCapture({ home, native: () => native, edit: editor.edit.bind(editor), reportIssue })
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: editor.edit.bind(editor), reportIssue })
   const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument: () => workbench,
-    capture: capture.capture.bind(capture), reportIssue } as never)
+    capture: capture.capture.bind(capture), remindPending: () => {}, reportIssue } as never)
   async function editing() {
     await vi.waitFor(() => expect(electron.windows).toHaveLength(1))
     const window = electron.windows[0]

@@ -46,7 +46,7 @@ async function fixture() {
   new Function('registerNativeDesktopIpc', 'app', 'getDesktopNativeUiOwner', 'handleWithEvent', 'screenCapture', code)(
     registerNativeDesktopIpc, { getPath: () => home }, native,
     (channel: string, handler: (...args: any[]) => any) => { handlers.set(channel, handler) },
-    new ScreenCapture({ home, native, edit: vi.fn(), reportIssue: vi.fn() }))
+    new ScreenCapture({ home, native, appActive: () => true, edit: vi.fn(), reportIssue: vi.fn() }))
   handlers.set('ui:readPastedImage', (_event, path: string) => readPastedImage(home, path))
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => handlers.get(channel)!({ sender: trusted }, ...args))
   return { api: bridge.api!.ui, native, home, trusted, handlers }

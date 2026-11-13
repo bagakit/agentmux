@@ -395,7 +395,7 @@ it('the real Main native owner reports unknown locally and preserves typing unti
     code: 'operation_unknown', operation: { operationId: 'original-native-capture', instanceId: 'original-native-instance' }
   })
   const native = { captureScreenshot: vi.fn().mockRejectedValueOnce(unknown).mockResolvedValueOnce({ state: 'cancelled' }), writeClipboardImage: vi.fn() }
-  const captureOwner = new ScreenCapture({ home: _hygiene_fixturePath("home"), native: () => native, edit: vi.fn(), reportIssue: vi.fn() })
+  const captureOwner = new ScreenCapture({ home: _hygiene_fixturePath("home"), native: () => native, appActive: () => true, edit: vi.fn(), reportIssue: vi.fn() })
   vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => captureOwner.capture(true))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await act(async () => useAppStore.getState().setAgentComposerDraft('agent-1', ("Kept body @" + _hygiene_fixturePath("repo/old.png") + " ")))

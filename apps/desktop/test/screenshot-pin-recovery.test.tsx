@@ -106,7 +106,7 @@ it('an authoritative failed creation clears uncertainty without reporting succes
 
 function button(name: string) { const found = [...node.querySelectorAll<HTMLButtonElement>('button')].find(value => value.getAttribute('aria-label') === name || value.textContent?.trim() === name); expect(found, name).toBeDefined(); return found! }
 it('the actual System host exposes Check pin while retaining Copy and Cancel, then checks its exact bridge request', async () => {
-  const api: SystemScreenshotEditorApi = { load: vi.fn(), finish: vi.fn(async () => ({ status: 'completed' })), cancel: vi.fn(async () => {}),
+  const api: SystemScreenshotEditorApi = { load: vi.fn(), onNotice: () => () => {}, finish: vi.fn(async () => ({ status: 'completed' })), cancel: vi.fn(async () => {}),
     savePng: vi.fn(), pin: vi.fn(async () => { throw new Error('Pin response lost') }), inspectPin: vi.fn(),
     copyContext: vi.fn(), openOriginal: vi.fn(), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
   await act(async () => root.render(<SystemScreenshotEditorView input={{ requestId: 'original-request', image, attachToDraft: false, theme: { status: 'unavailable', message: 'Private fixture appearance' } }} api={api} />))
@@ -141,7 +141,7 @@ it('the actual System host exposes Check pin while retaining Copy and Cancel, th
 })
 
 it('Escape dismisses the actual Original menu before a second Canvas Escape cancels the System request', async () => {
-  const api: SystemScreenshotEditorApi = { load: vi.fn(), finish: vi.fn(), cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
+  const api: SystemScreenshotEditorApi = { load: vi.fn(), onNotice: () => () => {}, finish: vi.fn(), cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
     copyContext: vi.fn(), openOriginal: vi.fn(), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
   await act(async () => root.render(<SystemScreenshotEditorView input={{ requestId: 'original-request', image, attachToDraft: false,
     theme: { status: 'unavailable', message: 'Private fixture appearance' } }} api={api} />))
@@ -186,7 +186,7 @@ it('an earlier Copy settles the original attachment without overwriting a newly 
   class Decoder { naturalWidth = 1; naturalHeight = 1; onload: (() => void) | null = null; onerror: (() => void) | null = null
     set src(_value: string) { queueMicrotask(() => this.onload?.()) } }
   vi.stubGlobal('Image', Decoder)
-  const api: SystemScreenshotEditorApi = { load: vi.fn(), finish: vi.fn(() => copying.promise), cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
+  const api: SystemScreenshotEditorApi = { load: vi.fn(), onNotice: () => () => {}, finish: vi.fn(() => copying.promise), cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
     copyContext: vi.fn(), openOriginal: vi.fn(() => reading.promise), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
   await act(async () => root.render(<SystemScreenshotEditorView input={{ requestId: 'original-request', image, attachToDraft: true,
     theme: { status: 'unavailable', message: 'Private fixture appearance' } }} api={api} />))

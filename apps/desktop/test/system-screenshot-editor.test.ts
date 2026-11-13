@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const native = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], savePath: null as string | null, saveCalls: 0,
-  saveNames: [] as string[], resized: [] as Array<{ width: number; height: number }>,
+  saveNames: [] as string[], resized: [] as Array<{ width: number; height: number }>, focused: null as unknown,
   displays: [] as Array<{ bounds: { x: number; y: number; width: number; height: number }; workArea: { x: number; y: number; width: number; height: number } }> }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
@@ -21,13 +21,14 @@ vi.mock('electron', async () => {
       removeHandler: (channel: string) => native.handlers.delete(channel) },
     BrowserWindow: class extends EventEmitter {
       dead = false
-      webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn() })
+      static getFocusedWindow() { return native.focused }
+      webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn(), send: vi.fn() })
       show = vi.fn(); focus = vi.fn()
       loadFile = vi.fn(async () => { this.emit('ready-to-show') })
       loadURL = this.loadFile
       constructor(readonly options: unknown) { super(); native.windows.push(this) }
       isDestroyed() { return this.dead }
-      close() { this.destroy() }
+      close() { this.emit('close'); this.destroy() }
       destroy() { if (this.dead) return; this.dead = true; this.emit('closed') }
     }
   }
@@ -36,15 +37,15 @@ vi.mock('electron', async () => {
 const image = pngFromBytes(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cWZkAAAAASUVORK5CYII=', 'base64'))
 let editor: SystemScreenshotEditor
 beforeEach(() => {
-  native.windows = []; native.handlers.clear(); native.savePath = null; native.saveCalls = 0; native.saveNames = []; native.resized = []
+  native.windows = []; native.handlers.clear(); native.savePath = null; native.saveCalls = 0; native.saveNames = []; native.resized = []; native.focused = null
   native.displays = [{ bounds: { x: 0, y: 0, width: 1440, height: 900 }, workArea: { x: 0, y: 25, width: 1440, height: 875 } },
     { bounds: { x: 1440, y: -200, width: 2560, height: 1440 }, workArea: { x: 1440, y: -200, width: 2560, height: 1400 } }]
   editor = new SystemScreenshotEditor()
 })
 afterEach(() => editor.dispose())
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
-async function open(complete = vi.fn(async () => {}), attachToDraft = false, initialIssue?: string, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource) {
-  const closed = editor.edit(image, attachToDraft, complete, { ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}) })
+async function open(complete = vi.fn(async () => {}), attachToDraft = false, initialIssue?: string, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource, returnFocus = false) {
+  const closed = editor.edit(image, attachToDraft, complete, { ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}), ...(returnFocus ? { returnFocus } : {}) })
   await Promise.resolve()
   const window = native.windows.at(-1)
   const call = (action: string, params?: unknown, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
@@ -248,4 +249,40 @@ it('pins the edited image over its capture rectangle at the image logical size',
   const plain = await open()
   await plain.call('pin', { requestId: plain.input.requestId, operationId: 'plain-pin', image })
   expect(pin.mock.calls[1], 'a pin without a capture source opens near the pointer').toEqual([image, 'plain-pin', undefined])
+})
+
+it('a repeated capture shortcut brings the newest editor forward with a notice', async () => {
+  expect(editor.notice('Finish or cancel this screenshot first'), 'no editor means nothing to remind').toBe(false)
+  const older = await open(), newer = await open()
+  older.window.focus.mockClear(); newer.window.show.mockClear(); newer.window.focus.mockClear()
+  expect(editor.notice('Finish or cancel this screenshot first')).toBe(true)
+  expect(newer.window.webContents.send).toHaveBeenCalledExactlyOnceWith('screenshot:editor-notice', 'Finish or cancel this screenshot first')
+  expect(newer.window.show).toHaveBeenCalledOnce(); expect(newer.window.focus).toHaveBeenCalledOnce()
+  expect(older.window.webContents.send).not.toHaveBeenCalled(); expect(older.window.focus).not.toHaveBeenCalled()
+})
+
+it('closing the last editor of a capture taken from another app returns focus to that app', async () => {
+  editor.dispose()
+  const returnFocus = vi.fn()
+  editor = new SystemScreenshotEditor(undefined, { pin: vi.fn(), returnFocus })
+  const fromOtherApp = await open(undefined, false, undefined, undefined, true)
+  native.focused = fromOtherApp.window
+  await fromOtherApp.call('cancel', { requestId: fromOtherApp.input.requestId }); await fromOtherApp.closed
+  expect(returnFocus).toHaveBeenCalledOnce()
+
+  const fromAgentMux = await open()
+  await fromAgentMux.call('cancel', { requestId: fromAgentMux.input.requestId }); await fromAgentMux.closed
+  expect(returnFocus, 'a capture started inside AgentMux keeps AgentMux in front').toHaveBeenCalledOnce()
+
+  const moved = await open(undefined, false, undefined, undefined, true)
+  native.focused = { another: 'AgentMux window' }
+  await moved.call('cancel', { requestId: moved.input.requestId }); await moved.closed
+  expect(returnFocus, 'the user already moved to another AgentMux window').toHaveBeenCalledOnce()
+
+  const first = await open(undefined, false, undefined, undefined, true), second = await open(undefined, false, undefined, undefined, true)
+  native.focused = null
+  await first.call('cancel', { requestId: first.input.requestId }); await first.closed
+  expect(returnFocus, 'another editor is still open').toHaveBeenCalledOnce()
+  await second.call('cancel', { requestId: second.input.requestId }); await second.closed
+  expect(returnFocus).toHaveBeenCalledTimes(2)
 })

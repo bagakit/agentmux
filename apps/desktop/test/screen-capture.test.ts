@@ -16,7 +16,8 @@ async function fixture() {
   const native = { captureScreenshot: vi.fn(async () => captured), writeClipboardImage: vi.fn(async (_image: BrowserPng) => {}) }
   const edit = vi.fn(async (_image: BrowserPng, _attach: boolean, _complete: (png: BrowserPng) => Promise<void>, _context: { initialIssue?: string; source?: unknown }) => {})
   const reportIssue = vi.fn()
-  return { home, native, edit, reportIssue, owner: new ScreenCapture({ home, native: () => native, edit, reportIssue }) }
+  const appActive = vi.fn(() => true)
+  return { home, native, edit, reportIssue, appActive, owner: new ScreenCapture({ home, native: () => native, appActive, edit, reportIssue }) }
 }
 
 it('copies the same final pixels and saves a durable draft image through the original pasted owner', async () => {
@@ -166,4 +167,15 @@ it('hands the editor the capture rectangle, scale and start time', async () => {
     await f.owner.capture(false)
     expect(f.edit.mock.calls[1]![3], 'no source without a native rectangle').toEqual({})
   } finally { vi.useRealTimers() }
+})
+
+it('asks the editor to return focus only when another app was active at capture start', async () => {
+  const f = await fixture()
+  f.native.captureScreenshot.mockResolvedValue({ ...captured, completionAction: 'edit' } as never)
+  await f.owner.capture(false)
+  expect(f.edit.mock.calls[0]![3]).not.toHaveProperty('returnFocus')
+  f.appActive.mockReturnValue(false)
+  f.native.captureScreenshot.mockImplementationOnce(async () => { f.appActive.mockReturnValue(true); return { ...captured, completionAction: 'edit' } as never })
+  await f.owner.capture(false)
+  expect(f.edit.mock.calls[1]![3], 'read before the selection takes focus').toMatchObject({ returnFocus: true })
 })

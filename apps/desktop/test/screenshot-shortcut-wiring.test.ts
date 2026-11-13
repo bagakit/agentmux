@@ -34,7 +34,9 @@ function nodes(source: string, name: string) {
   walk(file)
   return { file, all }
 }
-const transpile = (source: string) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+// The extracted statements run in a Function body, so the module-only `import.meta` becomes a parameter.
+const transpile = (source: string) => ts.transpileModule(source.replaceAll('import.meta', 'importMeta'),
+  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
 
 /** Execute the production composition, registration and preload with controlled physical IO. */
 async function mainFixture() {
@@ -61,12 +63,12 @@ async function mainFixture() {
   const nativeWindow = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false }
   const body = statements.join('\n') + '\n' + nativeRegistration[0]!.getText(source.file) + '\n' + statusHandlers[0]!.getText(source.file)
   const original = new Function('ScreenCapture', 'GlobalScreenshot', 'SystemScreenshotEditor', 'registerScreenshotShortcut', 'registerNativeDesktopIpc', 'process', 'globalShortcut',
-    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent',
+    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent', 'importMeta', 'pinScreenshot', 'inspectScreenshotPin',
     transpile(body) + '\nreturn { screenshotShortcut, globalScreenshot }')(
-    ScreenCapture, GlobalScreenshot, class { edit = vi.fn(); dispose = vi.fn() }, registerScreenshotShortcut, registerNativeDesktopIpc,
-    { platform: 'darwin' }, { register, unregister }, { getPath: () => home }, () => native, contents,
+    ScreenCapture, GlobalScreenshot, class { edit = vi.fn(); notice = vi.fn(); dispose = vi.fn() }, registerScreenshotShortcut, registerNativeDesktopIpc,
+    { platform: 'darwin' }, { register, unregister }, { getPath: () => home, hide: vi.fn() }, () => native, contents,
     { workbenchWindows: { windowForDocument: () => nativeWindow } }, { getFocusedWindow: () => nativeWindow }, { appearance: {} },
-    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler))
+    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler), { dirname: home }, vi.fn(), vi.fn())
   bridge.invoke.mockImplementation((channel: string) => Promise.resolve(handlers.get(channel)!({ sender: trusted })))
   return { ...original, register, unregister, native, receiver, contents, home, bytes, handlers, markDestroyed: () => { destroyed = true } }
 }
