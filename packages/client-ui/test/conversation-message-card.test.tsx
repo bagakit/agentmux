@@ -62,3 +62,15 @@ it('places collaboration context once in Info when compact details and continuat
   expect(host.querySelector('.conversation-input-details__body .log-turn__input-source')).not.toBeNull()
   expect(host.querySelector('.log-turn__body')).toBeNull()
 })
+
+it('says a spoken record has no readable body instead of drawing a header over nothing', async () => {
+  // An empty final answer (the reply went out through a tool) still has an Agent author and time.
+  await render({ speaker: { role: 'agent', id: 'agent' }, content: '', parts: [{ kind: 'text', text: '' }] })
+  const empty = host.querySelector('.log-turn [data-empty-message="true"]')
+  expect(empty?.textContent).toContain('原生记录没有可读正文')
+  expect(host.querySelectorAll('.log-turn__body')).toHaveLength(1)
+  // A record with readable text renders its text and no empty note.
+  await render({ speaker: { role: 'agent', id: 'agent' }, content: 'Real answer', parts: [{ kind: 'text', text: 'Real answer' }] })
+  expect(host.querySelector('[data-empty-message]')).toBeNull()
+  expect(host.querySelector('.log-turn__body')?.textContent).toContain('Real answer')
+})
