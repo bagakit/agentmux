@@ -260,17 +260,16 @@ function drawBlur(context: CanvasRenderingContext2D, shape: BlurShape): void {
 
 /** Dim the whole canvas except the region; the even-odd hole keeps it untouched. */
 function drawSpotlight(context: CanvasRenderingContext2D, shape: SpotlightShape): void {
-  const rect = normalizeRect(shape.from, shape.to), inverse = context.getTransform().inverse()
-  const corner = (x: number, y: number) => inverse.transformPoint({ x, y })
-  const start = corner(0, 0), end = corner(context.canvas.width, context.canvas.height)
+  // Like cover and pixelation, the canvas transform is an axis-aligned scale and offset.
+  const rect = normalizeRect(shape.from, shape.to), transform = context.getTransform()
   context.beginPath()
-  context.rect(start.x, start.y, end.x - start.x, end.y - start.y)
+  context.rect(-transform.e / transform.a, -transform.f / transform.d, context.canvas.width / transform.a, context.canvas.height / transform.d)
   context.rect(rect.x, rect.y, rect.width, rect.height)
   context.fillStyle = `rgba(0,0,0,${shape.dim})`
   context.fill('evenodd')
   if (rect.width <= 0 || rect.height <= 0) return
   context.strokeStyle = 'rgba(255,255,255,0.6)'
-  context.lineWidth = 1 / Math.hypot(context.getTransform().a, context.getTransform().b)
+  context.lineWidth = 1 / transform.a
   context.strokeRect(rect.x, rect.y, rect.width, rect.height)
 }
 
@@ -293,10 +292,10 @@ function drawCallout(context: CanvasRenderingContext2D, shape: CalloutShape): vo
     if (!copy) throw new Error('Screenshot callout requires a 2D canvas')
     copy.drawImage(canvas, left, top, sample.width, sample.height, 0, 0, sample.width, sample.height)
   }
-  context.lineWidth = 2 / Math.hypot(transform.a, transform.b)
+  context.lineWidth = 2 / transform.a
   context.beginPath(); context.moveTo(leader.from.x, leader.from.y); context.lineTo(leader.to.x, leader.to.y); context.stroke()
   context.strokeRect(source.x, source.y, source.width, source.height)
-  const radius = Math.min(10 / Math.hypot(transform.a, transform.b), bubble.width / 2, bubble.height / 2)
+  const radius = Math.min(10 / transform.a, bubble.width / 2, bubble.height / 2)
   context.save()
   context.shadowColor = 'rgba(0,0,0,0.35)'
   context.shadowBlur = 12
