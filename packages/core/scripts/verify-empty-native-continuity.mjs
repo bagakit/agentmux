@@ -15,6 +15,8 @@ const variants = [
   { name: 'fact-skips-authorization', target: 'still refuses a revoked standing source' },
   { name: 'ignore-candidates', target: 'keeps native candidates awaiting selection' },
   { name: 'ignore-durability', target: 'keeps an unconfirmed identity save' },
+  { name: 'stale-absence-at-commit', target: 'committed before the no-conversation receipt' },
+  { name: 'stale-absence-fence-retained', target: 'after a rejected no-conversation receipt fence' },
   { name: 'ignore-identity-channel', target: 'whose identity channel Core does not install' },
   { name: 'ignore-run-input', target: 'accepted typed input beyond the handshake' },
   { name: 'ignore-first-prompt', target: 'holds an authored first prompt' },
@@ -24,7 +26,7 @@ const variants = [
   { name: 'public-pending', target: 'reports the dedicated reason through the public' }
 ]
 // Every case, including the compiled CLI one, must run unmutated: a skipped case proves nothing.
-const CASES = 24
+const CASES = 28
 const output = join(root, 'packages/core/.tmp/empty-native-continuity')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-'))

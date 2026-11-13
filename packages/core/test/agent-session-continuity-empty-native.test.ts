@@ -121,6 +121,67 @@ it('keeps an unconfirmed identity save on the existing identity path', async () 
   noNewStartOrInput(f)
 })
 
+it.each(['native identity', 'native candidates', 'unconfirmed identity save'] as const)(
+  're-decides the same startup operation when %s is committed before the no-conversation receipt', async fact => {
+    const f = await emptyEndedSession()
+    const update = f.inner.updateExactAgentSession.bind(f.inner)
+    let changed = false
+    f.inner.updateExactAgentSession = async (...args: Parameters<typeof update>) => {
+      if (!changed && args[0] === f.previous.agentSessionId) {
+        changed = true
+        // This is after the Runtime observation and just before the real receipt CAS. An earlier
+        // refresh cannot close this window; the Store updater must check its own current value.
+        if (fact === 'unconfirmed identity save') {
+          ;(f.inner.registry as { unconfirmedDurability: Set<string> }).unconfirmedDurability.add(f.previous.agentSessionId)
+        } else await f.inner.registry.update(f.previous.agentSessionId, f.previous.run, (value: AgentMuxStoredAgentSession) => ({
+          ...value, updatedAt: value.updatedAt + 1, ...(fact === 'native identity' ? { nativeHandle: f.previous.nativeHandle } : {
+            nativeSourceObservation: { state: 'ambiguous', run: value.run, observedAt: value.updatedAt + 1, reason: 'frontend-selection-unconfirmed',
+              candidates: [{ kind: 'provider', providerId: f.provider.id, sessionId: 'candidate-a' }, { kind: 'provider', providerId: f.provider.id, sessionId: 'candidate-b' }] }
+          })
+        }))
+      }
+      return await update(...args)
+    }
+    const operationId = 'original-startup'
+    const result = await continuity(f, operationId, 'startup')
+    expect(changed).toBe(true)
+    expect(result).toMatchObject({ kind: 'pending', reason: 'idle-unknown', continuity: { operationId } })
+    const stored = await f.store.readMetadata(f.previous.agentSessionId)
+    expect(Object.keys(stored!.continuityOperations!)).toEqual([operationId])
+    expect(stored!.continuity).toMatchObject({ operationId, kind: 'pending', reason: 'idle-unknown' })
+    if (fact === 'native identity') expect(stored!.nativeHandle).toEqual(f.previous.nativeHandle)
+    if (fact === 'native candidates') expect(stored!.nativeSourceObservation?.state).toBe('ambiguous')
+    expect(await f.correlation()).toBeUndefined()
+    noNewStartOrInput(f)
+  })
+
+it('re-decides the same startup operation after a rejected no-conversation receipt fence', async () => {
+  const f = await emptyEndedSession()
+  const update = f.inner.updateExactAgentSession.bind(f.inner)
+  let rejected = false
+  f.inner.updateExactAgentSession = async (...args: Parameters<typeof update>) => {
+    if (!rejected && args[0] === f.previous.agentSessionId) {
+      rejected = true
+      await f.inner.registry.update(f.previous.agentSessionId, f.previous.run, (value: AgentMuxStoredAgentSession) => ({
+        ...value, nativeHandle: f.previous.nativeHandle, updatedAt: value.updatedAt + 1
+      }))
+      // The original exact receipt update rejected its fence after this same Session changed.
+      throw new core.AgentMuxError('Original receipt fence changed.', 'STALE_AGENT_SESSION')
+    }
+    return await update(...args)
+  }
+  const operationId = 'original-fenced-startup'
+  const result = await continuity(f, operationId, 'startup')
+  expect(rejected).toBe(true)
+  expect(result).toMatchObject({ kind: 'pending', reason: 'idle-unknown', continuity: { operationId } })
+  const stored = await f.store.readMetadata(f.previous.agentSessionId)
+  expect(stored!.nativeHandle).toEqual(f.previous.nativeHandle)
+  expect(Object.keys(stored!.continuityOperations!)).toEqual([operationId])
+  expect(stored!.continuity).toMatchObject({ operationId, kind: 'pending', reason: 'idle-unknown' })
+  expect(await f.correlation()).toBeUndefined()
+  noNewStartOrInput(f)
+})
+
 it('does not turn an unknown Runtime state into a final answer', async () => {
   const f = await emptyEndedSession()
   const status = f.inner.kernel.status.bind(f.inner.kernel)

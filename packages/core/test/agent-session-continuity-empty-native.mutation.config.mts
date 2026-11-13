@@ -23,6 +23,13 @@ export const mutations: Record<string, Array<[string, string, string]>> = {
   // An unconfirmed identity save is wrongly treated as final.
   'ignore-durability': [[policy, '  if (!facts.durabilityConfirmed || !facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false',
     '  if (!facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false']],
+  // A native fact committed after the earlier observation is overwritten by the stale absence.
+  'stale-absence-at-commit': [[attempt, "          if (result.kind === 'unavailable' && result.reason === 'native-conversation-absent') {",
+    '          if (false) {']],
+  // A rejected receipt fence still returns the old absence rather than reading the current target.
+  'stale-absence-fence-retained': [[attempt,
+    "        if (result.kind === 'unavailable' && result.reason === 'native-conversation-absent' && error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {",
+    '        if (false) {']],
   // A Provider whose identity channel Core does not install is wrongly treated as fully observed.
   'ignore-identity-channel': [[policy, '  if (!facts.durabilityConfirmed || !facts.managedIdentityChannel || agentSessionHoldsNativeEvidence(session)) return false',
     '  if (!facts.durabilityConfirmed || agentSessionHoldsNativeEvidence(session)) return false']],
