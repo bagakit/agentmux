@@ -27,6 +27,8 @@ const port = vi.hoisted(() => {
     setDefaultProfile: vi.fn(async () => {}),
     createProfile: vi.fn(async (label: string) => { const created = { id: 'p-new', label, createdAt: 3, isDefault: false, source: null }; commit([...list.profiles, created]); return created }),
     deleteProfile: vi.fn(async () => {}),
+    listProfileSites: vi.fn(async () => [{ site: 'github.com', cookies: 3 }, { site: 'example.com', cookies: 1 }]),
+    clearProfileSite: vi.fn(async () => {}),
     detectProfileImportSources: vi.fn(async () => []),
     importProfile: vi.fn()
   }
@@ -386,5 +388,42 @@ describe('Settings › Browser Profiles by keyboard', () => {
     expect(container.querySelector('[role="alertdialog"]')).toBeNull()
     expect(dialog.isConnected).toBe(false)
     expect(port.deleteProfile).not.toHaveBeenCalled()
+  })
+})
+
+describe('Settings › Browser Profiles clears one site', () => {
+  const section = () => container.querySelector('[aria-label="Sites with sign-ins"]')!
+  const button = (text: string) => [...section().querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)
+
+  it('reads sites only when asked, confirms in place, and clears only the confirmed site', async () => {
+    port.listProfileSites.mockClear(); port.clearProfileSite.mockClear()
+    expect(port.listProfileSites).not.toHaveBeenCalled()
+    await act(async () => button('Show sites')!.click())
+    expect(port.listProfileSites).toHaveBeenCalledExactlyOnceWith('p-personal')
+    expect([...section().querySelectorAll('li')].map(li => li.textContent)).toEqual(['github.com3 cookiesClear…', 'example.com1 cookieClear…'])
+
+    await act(async () => section().querySelector<HTMLButtonElement>('[aria-label="Clear github.com"]')!.click())
+    const confirm = section().querySelector('[role="alertdialog"]')!
+    expect(confirm.textContent).toContain('Sign out of github.com and remove its site data in this Profile?')
+    expect(document.activeElement?.textContent).toBe('Cancel')
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(section().querySelector('[role="alertdialog"]')).toBeNull()
+    expect(port.clearProfileSite).not.toHaveBeenCalled()
+
+    await act(async () => section().querySelector<HTMLButtonElement>('[aria-label="Clear github.com"]')!.click())
+    await act(async () => section().querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
+    expect(port.clearProfileSite).toHaveBeenCalledExactlyOnceWith('p-personal', 'github.com',
+      { kind: 'user-confirmed', operation: 'clear-site-data', scope: 'profile-site', profileId: 'p-personal', site: 'github.com' })
+    expect([...section().querySelectorAll('li')].map(li => li.textContent)).toEqual(['example.com1 cookieClear…'])
+    expect(section().querySelector('[role="status"]')?.textContent).toBe('Signed out of github.com in Personal. Reload its open pages to see it.')
+  })
+
+  it('keeps the site and says why when clearing is refused', async () => {
+    port.clearProfileSite.mockRejectedValueOnce(new Error('EBUSY'))
+    await act(async () => button('Show sites')!.click())
+    await act(async () => section().querySelector<HTMLButtonElement>('[aria-label="Clear example.com"]')!.click())
+    await act(async () => section().querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
+    expect([...section().querySelectorAll('li')].map(li => li.textContent)).toContain('example.com1 cookieClear…')
+    expect(section().querySelector('[role="alert"]')?.textContent).toContain('example.com was not cleared.')
   })
 })
