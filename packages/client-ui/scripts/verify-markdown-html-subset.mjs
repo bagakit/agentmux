@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
@@ -15,7 +15,7 @@ const config = 'packages/client-ui/test/markdown-html.config.mts'
 const tests = ['packages/client-ui/test/markdown-html-subset.test.tsx', 'packages/client-ui/test/markdown-html-render.test.tsx', 'packages/client-ui/test/markdown-semantics.test.tsx']
 const mutations = [
   { mode: 'unknown-element-becomes-element', path: parser, from: "if (!BLOCK.has(name) && !INLINE.has(name)) { emit({ kind: 'literal', source: raw }, start, end); return }", to: "if (false) { emit({ kind: 'literal', source: raw }, start, end); return }" },
-  { mode: 'raw-text-script-body-parsed', path: parser, from: 'tokenizer.state = RAW_TEXT[name]!', to: 'rawText = null' },
+  { mode: 'raw-text-script-body-parsed', path: parser, from: 'tokenizer.state = rawMode', to: 'rawText = null' },
   { mode: 'width-unvalidated', path: parser, from: "if (!match) return undefined\n  const amount", to: "if (!match) return value\n  const amount" },
   { mode: 'unclosed-element-repaired', path: parser, from: "if (item.close === null || PARENT[item.name]) { visibleTags(item).forEach(visit); return }", to: "if (PARENT[item.name]) { visibleTags(item).forEach(visit); return }" },
   { mode: 'picture-ignores-media', path: parser, from: "if (scheme && href && !variants[scheme]) variants[scheme] = href", to: "if (href && !variants.dark) variants.dark = href" },
@@ -30,6 +30,15 @@ const mutations = [
   { mode: 'alert-label-missing', path: renderer, from: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" />{label}</p>', to: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" /></p>' },
   { mode: 'fragment-link-escapes-document', path: renderer, from: 'const fragment = context.documentMode && context.openWorkspaceFile ?', to: 'const fragment = context.openWorkspaceFile ?' },
   { mode: 'fragment-link-skips-root-check', path: renderer, from: 'const anchored = fragment ? classifyMarkdownLinkHref(fragment[1]!, context.workspaceRoot, context.homeDir, context.sourcePath) : null', to: "const anchored = fragment ? { index: 0, length: fragment[1]!.length, path: fragment[1]! } : null" },
+  { mode: 'unclosed-raw-text-swallows-tail', path: parser, from: "if (!rawTextEnd(source, name, end)) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }", to: '' },
+  { mode: 'unclosed-raw-text-swallows-siblings', path: parser, from: "last.rawText && closedLater(index, last.rawText)", to: 'last.rawText' },
+  { mode: 'nested-html-link-kept', path: parser, from: "if (index > 0) { for (const implied of stack.splice(index)) implied.close ??= ''; impliedAnchorEnds++ }", to: '' },
+  { mode: 'link-inside-link-label', path: renderer, from: 'if (context.inLink) return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>', to: '' },
+  { mode: 'link-label-keeps-nested-link', path: parser, from: 'content = unlink(children())', to: 'content = children()' },
+  { mode: 'inherited-raw-text-lookup', path: parser, from: 'const rawMode = RAW_TEXT.get(name)', to: 'const rawMode = (Object.fromEntries(RAW_TEXT) as Record<string, number>)[name]' },
+  { mode: 'flattened-heading-in-outline', path: parser, from: 'align, inlineDepth === 0)]', to: 'align, true)]' },
+  { mode: 'quadratic-trim', path: parser, from: 'function trimEndHtml(text: string): string { let end = text.length; while (end > 0 && isHtmlSpace(text.charCodeAt(end - 1))) end--; return text.slice(0, end) }', to: "function trimEndHtml(text: string): string { return text.replace(/[\\t\\n\\f\\r ]+$/u, '') }" },
+  { mode: 'unclosed-raw-block-reflowed', path: parser, from: '  const index = nodes.findIndex(opensRawBlock)', to: '  const index = -1' },
   { mode: 'closed-details-searchable', path: renderer, from: 'if (node.kind === \'details\') return node.open ? project(node.children) : []', to: "if (node.kind === 'details') return project(node.children)" },
 ]
 
@@ -42,7 +51,19 @@ try {
     await cp(join(root, path), join(snapshot, path))
   }
   await symlink(join(root, 'node_modules'), join(snapshot, 'node_modules'), 'dir')
-  await symlink(join(root, 'packages/client-ui/node_modules'), join(snapshot, 'packages/client-ui/node_modules'), 'dir')
+  // client-ui reaches Core through @agentmux/core. Freeze a copy of Core's package (dist and its own
+  // dependencies) into the snapshot, so another build replacing the shared dist cannot fail a proof run.
+  const clientModules = join(snapshot, 'packages/client-ui/node_modules')
+  await mkdir(join(clientModules, '@agentmux'), { recursive: true })
+  for (const entry of await readdir(join(root, 'packages/client-ui/node_modules'))) {
+    if (entry !== '@agentmux') await symlink(join(root, 'packages/client-ui/node_modules', entry), join(clientModules, entry))
+  }
+  const core = join(snapshot, 'packages/core')
+  await cp(join(root, 'packages/core/package.json'), join(core, 'package.json'))
+  await cp(join(root, 'packages/core/dist'), join(core, 'dist'), { recursive: true })
+  assert.ok((await readdir(join(core, 'dist'))).length > 100, 'Frozen Core dist is complete')
+  await symlink(join(root, 'packages/core/node_modules'), join(core, 'node_modules'), 'dir')
+  await symlink(core, join(clientModules, '@agentmux/core'), 'dir')
   // The committed owning config must name exactly these tests, so the proof and the gate run the same files.
   assert.ok(tests.every(test => readFileSync(join(root, config), 'utf8').includes(test)), 'Owning config names every proof test')
   async function run(mode) {
@@ -68,7 +89,15 @@ try {
     assert.notEqual(mutation.from, mutation.to)
     try {
       await writeFile(file, original.replace(mutation.from, mutation.to))
-      const mutant = await run(mutation.mode)
+      // A run where an owning test file failed to load proves nothing either way (often another
+      // build replacing shared dist mid-run); retry it rather than calling the mutant killed or survived.
+      let mutant = await run(mutation.mode)
+      for (let attempt = 1; mutant.loaded !== tests.length && attempt <= 3; attempt++) {
+        console.log(`retry   ${mutation.mode}: ${mutant.loaded}/${tests.length} files loaded`)
+        await new Promise(resolve => setTimeout(resolve, 15000))
+        mutant = await run(mutation.mode)
+      }
+      assert.equal(mutant.loaded, tests.length, `Mutant ${mutation.mode} must load every owning test file: ${mutant.loadFailures.join(' | ')}`)
       const killed = mutant.exitCode !== 0 && mutant.loaded === tests.length && mutant.assertions.some(test => test.failureMessages.some(message => /AssertionError|expected/u.test(message)))
       results.push({ mode: mutation.mode, killed, failed: mutant.failed, firstFailure: mutant.assertions[0]?.fullName })
       console.log(`${killed ? 'killed  ' : 'SURVIVED'} ${mutation.mode} (exit ${mutant.exitCode}, ${mutant.passed} passed, ${mutant.failed} failed, ${mutant.loaded}/${tests.length} loaded)${mutant.loadFailures.length ? ' LOAD: ' + mutant.loadFailures.join(' | ') : ''}`)

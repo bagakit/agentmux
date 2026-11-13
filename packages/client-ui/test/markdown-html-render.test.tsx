@@ -9,6 +9,14 @@ import { AgentMarkdown } from '../src/components/AgentMarkdown.js'
 import { MarkdownRemoteImage } from '../src/components/MarkdownRemoteImage.js'
 import { MarkdownExcerpt } from '../src/components/MarkdownExcerpt.js'
 import { parseAgentMarkdown } from '../src/lib/agent-markdown.js'
+// The component's own parser import is wrapped so tests can count real parses of the rendered content.
+const parses = vi.hoisted(() => ({ document: 0, blocks: 0 }))
+vi.mock('../src/lib/agent-markdown.js', async original => {
+  const actual = await original<typeof import('../src/lib/agent-markdown.js')>()
+  return { ...actual,
+    parseAgentMarkdown: (source: string) => { parses.blocks++; return actual.parseAgentMarkdown(source) },
+    parseAgentMarkdownDocument: (source: string) => { parses.document++; return actual.parseAgentMarkdownDocument(source) } }
+})
 import { markdownImageReferences } from '../src/lib/conversation-image-references.js'
 import { conversationReplyPreview } from '../src/lib/conversation-reply-preview.js'
 import { conversationFiles } from '../src/lib/conversation-files.js'
@@ -76,6 +84,17 @@ describe('README HTML subset rendering', () => {
     expect(container.textContent).toContain('escape')
   })
 
+  it('renders an HTML link inside a Markdown link label as text, so one click opens one destination', async () => {
+    const openHttpLink = vi.fn()
+    await render(<AgentMarkdown documentMode openHttpLink={openHttpLink} content={'[outer <a href="https://inner.example">inner</a>](https://outer.example)'} />)
+    const buttons = all<HTMLButtonElement>('button.md-link')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]!.querySelector('button')).toBeNull()
+    expect(buttons[0]!.textContent).toBe('outer inner')
+    await click(buttons[0]!)
+    expect(openHttpLink.mock.calls.map(call => call[0])).toEqual(['https://outer.example/'])
+  })
+
   it('opens another file for a heading link in a document, never outside the root and never in conversations', async () => {
     const openWorkspaceFile = vi.fn()
     const content = '[Setup](guide.md#setup) [Escape](../../outside.md#x) [Weird](a.md#b#c) <a href="design/spec.md#%E7%A9%BA%E9%97%B4">Spec</a>'
@@ -92,13 +111,15 @@ describe('README HTML subset rendering', () => {
     const release = mountThemeRuntime(window, { appAppearance: 'dark' })
     try {
       const content = '<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="arch-dark.svg">\n  <img src="arch-light.svg" alt="Architecture" width="100%">\n</picture>'
-      const parse = vi.fn(parseAgentMarkdown)
+      parses.blocks = 0
       await render(<AgentMarkdown documentMode workspaceRoot={WORKSPACE} sourcePath="README.md" renderWorkspaceImage={workspaceImage} content={content} />)
       expect(element('[data-workspace-image]').getAttribute('data-workspace-image')).toBe('arch-dark.svg')
+      expect(parses.blocks).toBe(1)
       await act(async () => { updateThemeSelection({ appAppearance: 'light' }) })
       expect(element('[data-workspace-image]').getAttribute('data-workspace-image')).toBe('arch-light.svg')
       expect(element('[data-workspace-image]').getAttribute('alt')).toBe('Architecture')
-      expect(parse).not.toHaveBeenCalled()
+      // The appearance swaps the address in place; the document is not parsed again.
+      expect(parses.blocks).toBe(1)
     } finally { release() }
   })
 
@@ -108,12 +129,21 @@ describe('README HTML subset rendering', () => {
     expect(layout!.classList.contains('md-html-table--layout')).toBe(true)
     expect(layout!.getAttribute('role')).toBe('presentation')
     const cell = element<HTMLTableCellElement>('td.md-html-cell', layout!)
+    // A row whose only authored width is 40% keeps it; the other cell takes the rest.
     expect(cell.style.width).toBe('40%')
     expect(cell.getAttribute('data-valign')).toBe('top')
     expect(element('strong', cell).textContent).toBe('Card')
     expect(element('code', cell).textContent).toBe('code')
     expect(data!.classList.contains('md-html-table--layout')).toBe(false)
     expect(element('th', data!).textContent).toBe('Name')
+  })
+
+  it('reads layout card percentages as proportions so 33% x 3 fills the column', async () => {
+    await render(<AgentMarkdown documentMode content={'<table><tr><td width="33%">a</td><td width="33%">b</td><td width="33%">c</td></tr></table>\n\n<table><tr><td width="50%">d</td><td width="60%">e</td></tr></table>'} />)
+    const [thirds, overflow] = all<HTMLTableElement>('table.md-html-table--layout')
+    expect(all<HTMLTableCellElement>('td', thirds!).map(cell => cell.style.width)).toEqual(['33.333%', '33.333%', '33.333%'])
+    // Authored widths that already overflow stay exactly as written.
+    expect(all<HTMLTableCellElement>('td', overflow!).map(cell => cell.style.width)).toEqual(['50%', '60%'])
   })
 
   it('names every alert type by icon and text, not by color alone', async () => {
@@ -197,14 +227,34 @@ describe('Markdown document reading layout', () => {
     expect(document.style.getPropertyValue('--md-reading-size')).toBe('13px')
     await click(element('button[aria-label="Reading layout"]'))
     await click(element('[role="radio"][data-option="wide"]'))
-    expect(onChange).toHaveBeenLastCalledWith({ width: 'wide', typeface: 'sans', fontSize: 13 })
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'width', width: 'wide' })
     await click(element('[role="radio"][data-option="serif"]'))
-    expect(onChange).toHaveBeenLastCalledWith({ width: 'standard', typeface: 'serif', fontSize: 13 })
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'typeface', typeface: 'serif' })
     await click(element('button[aria-label="Larger text"]'))
-    expect(onChange).toHaveBeenLastCalledWith({ width: 'standard', typeface: 'sans', fontSize: 14 })
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'font-size-step', step: 1 })
+    parses.document = 0; parses.blocks = 0
     await render(<AgentMarkdown documentMode content={'# Title\n\nBody'} readingLayout={{ ...layout, value: { width: 'full', typeface: 'serif', fontSize: 20 } }} />)
     expect(element('.md-document').getAttribute('data-reading-typeface')).toBe('serif')
     expect(element<HTMLButtonElement>('button[aria-label="Larger text"]').disabled).toBe(true)
+    // A new layout value only changes attributes on the same document; the content is not parsed again.
+    expect(parses.document + parses.blocks).toBe(0)
+  })
+
+  it('is keyboard operable: arrows move within a choice and Escape returns focus to Aa', async () => {
+    const onChange = vi.fn()
+    const layout = { value: { width: 'standard', typeface: 'sans', fontSize: 13 }, fontSizes: { min: 12, max: 20, default: 13 }, onChange } as const
+    await render(<AgentMarkdown documentMode content={'# Title\n\nBody'} readingLayout={layout} />)
+    const trigger = element<HTMLButtonElement>('button[aria-label="Reading layout"]')
+    await act(async () => { trigger.focus(); trigger.click() })
+    const standard = element<HTMLButtonElement>('[role="radio"][data-option="standard"]')
+    await act(async () => { standard.focus(); standard.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+    expect(onChange).toHaveBeenLastCalledWith({ kind: 'width', width: 'wide' })
+    expect(document.activeElement?.getAttribute('data-option')).toBe('wide')
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    // The dialog restores focus after its close transition, as the Contents outline does.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => requestAnimationFrame(() => resolve(null))) })
+    expect(container.ownerDocument.querySelector('.md-reading__popover')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('is absent outside interactive documents', async () => {
