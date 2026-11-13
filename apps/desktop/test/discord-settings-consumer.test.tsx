@@ -3,14 +3,16 @@ import { act } from 'react'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer } from '../../../packages/core/dist/index.js'
+import { AgentMuxControlServer, AgentMuxHostedRuntimeService, connectAgentMuxRpc } from '@agentmux/core'
+import { createCredentialAdministration } from '../../host/src/credential-administration.js'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { discordSettingsModule } from '../src/renderer/src/components/settings/modules/discord.js'
 import { settingsCatalog, settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules.js'
 import { api } from '../src/renderer/src/lib/api'
-import { composerDOM } from './helpers/composer-dom-fixture.js'
+import { composerConfig, composerDOM } from './helpers/composer-dom-fixture.js'
+import { useAppStore } from '../src/renderer/src/store'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import { DiscordAdapter } from '../../../packages/connectors/src/adapters/discord/index.js'
 import { discordTransport } from '../../../packages/connectors/test/fixtures/discord.js'
@@ -34,17 +36,35 @@ async function fixture() {
   const services = await createConnectionServices({ directory: join(original.root, 'discord-settings'), adapters: [adapter],
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
-  const server = new AgentMuxControlServer({ socketPath: join(original.root, 'discord-ui.sock'), connections: services.connections, coreClients: original.coreClients })
+  const hostingTarget = { hostId: 'local', runtimeId: 'discord-settings-runtime' }
+  const identity = { runtimeId: hostingTarget.runtimeId, ownerInstanceId: 'discord-settings-owner', protocolVersion: 2, processId: process.pid, availability: 'connected' as const, ctxmux: original.client.runtimeIdentity() }
+  const hosted = new AgentMuxHostedRuntimeService(original.client, original.store.path, () => identity)
+  cleanup.push(() => hosted.dispose())
+  services.connections.credential = createCredentialAdministration({ target: identity, secrets: services.secrets })
+  const server = new AgentMuxControlServer({ socketPath: join(original.root, 'discord-ui.sock'), connections: services.connections, coreClients: original.coreClients, hostedRuntime: () => hosted })
   await server.start(); cleanup.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, runtimeFence: { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId } })
+  cleanup.push(() => rpc.dispose())
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: server.path, secrets: services.secrets })
-  const calls: Array<{ method: string; params: unknown }> = []
-  vi.spyOn(api.connections, 'call').mockImplementation(async (method, params) => { calls.push({ method, params: structuredClone(params) }); return unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, params)) })
-  const store = vi.spyOn(api.connections, 'storeCredential').mockImplementation(input => handlers.get('connections:storeCredential')!({}, input))
-  vi.spyOn(api.connections, 'inspectCredential').mockImplementation(operationId => handlers.get('connections:inspectCredential')!({}, operationId))
+  const runtime: import('../src/main/connection-host-ipc').ConnectionHostIpc = {
+    connectionHostingTarget: async () => structuredClone(hostingTarget),
+    callConnectionHost: (target, method, params) => { expect(target).toEqual(hostingTarget); return rpc.call(method, params) },
+    watchConnectionMetadata: (target, callbacks) => { expect(target).toEqual(hostingTarget); return rpc.subscribe('connection.metadata.watch', {}, callbacks) }
+  }
+  const registration = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, runtime, metadata: { publish() {}, observation() {} } })
+  cleanup.push(() => registration.dispose())
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
+  const calls: Array<{ method: string; params: unknown; target: unknown }> = []
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method, params, target) => { calls.push({ method, params: structuredClone(params), target: structuredClone(target) }); return unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, params, target)) })
+  const store = vi.spyOn(api.connections, 'storeCredential').mockImplementation((input, target) => handlers.get('connections:storeCredential')!({}, input, target))
+  vi.spyOn(api.connections, 'inspectCredential').mockImplementation((operationId, target) => handlers.get('connections:inspectCredential')!({}, operationId, target))
   const external = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
-  const config = await api.config.get()
-  return { ...original, services, wire, calls, store, external, config, rejectCheck: () => { rejectCheck = true } }
+  const config = composerConfig
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  window.localStorage.clear(); await useAppStore.persist.rehydrate()
+  const stopStartup = await useAppStore.getState().initialize(); stopStartup()
+  return { ...original, services, wire, calls, store, external, config, hostingTarget, rejectCheck: () => { rejectCheck = true } }
 }
 async function fill(label: string, text: string) {
   const input = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
@@ -71,7 +91,8 @@ it('the real Discord settings contribution stores the token through secure IPC a
   const record = (await f.services.connections.list()).connections[0]!
   expect(record.config).toMatchObject({ adapterId: 'discord', application: { domain: 'discord.com', appId: '100' } })
   expect(record.config.credentialRef).not.toBe('private-discord-token')
-  expect(f.store).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ secret: 'private-discord-token' }))
+  expect(f.store).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ secret: 'private-discord-token' }), f.hostingTarget)
+  expect(f.calls.find(call => call.method === 'connection.configure')?.target).toEqual(f.hostingTarget)
   expect(JSON.stringify(f.calls)).not.toContain('private-discord-token')
   expect(dom.container.querySelector<HTMLInputElement>('input[type=password]')).toBeNull()
   expect(f.calls.some(call => call.method.startsWith('connection.setup.') || call.method.startsWith('connection.profile.'))).toBe(false)
