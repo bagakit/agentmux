@@ -41,7 +41,7 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
 }
 /** The original selection inside the host window's viewport, in that viewport's CSS pixels; the host converts screen coordinates. */
 export type InlineAnnotationFrame = { x: number; y: number; width: number; height: number }
-/** The marks and tool an inline editor hands to a separate window editor on Expand. */
+/** The marks and tool an inline editor hands to a separate window editor on Expand; color and other styles carry over through the editors' shared in-process style memory. */
 export type InlineAnnotationHandoff = { shapes: ScreenshotShape[]; crop: ScreenshotDocument['crop']; tool: AnnotationTool }
 // The floating toolbar's height and its gap to the selection, in viewport CSS pixels.
 const INLINE_BAR_HEIGHT = 36, INLINE_BAR_GAP = 6
@@ -78,7 +78,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   presentation?: 'window' | 'inline'
   /** Image pixels per viewport CSS pixel. Inline uses it for the fixed view, and widths and font sizes in image pixels. Defaults to 1. */
   pixelRatio?: number
-  /** Inline only: where the original selection sits in the host viewport. */
+  /** Inline only: where the original selection sits in the host viewport. Defaults to the whole viewport. */
   inlineFrame?: InlineAnnotationFrame
   onCancel(): void
   onComplete: AnnotationOutput
@@ -109,7 +109,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const textDraftRef = useRef<TextDraft | null>(null), noteEditorRef = useRef<string | null>(null), paintFrame = useRef(0), spaceHeld = useRef(false)
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') committedLayerRef.current = document.createElement('canvas')
-  const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 }), [hostHeight, setHostHeight] = useState(0)
+  const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 }), [hostSize, setHostSize] = useState({ width: 0, height: 0 })
   const [imageError, setImageError] = useState(false)
   const [documentState, setDocumentState] = useState<ScreenshotDocument>(() => ({ ...createScreenshotDocument(), ...initialState }))
   const [pendingText, setPendingText] = useState<TextDraft | null>(null)
@@ -213,7 +213,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const measure = () => { const rect = container.getBoundingClientRect()
       const next = { width: Math.max(1, rect.width), height: Math.max(1, rect.height), dpr: ownerWindow.devicePixelRatio || 1 }
       setSize(current => current.width === next.width && current.height === next.height && current.dpr === next.dpr ? current : next)
-      if (inline) setHostHeight(editorRef.current?.getBoundingClientRect().height ?? 0)
+      const host = inline ? editorRef.current?.getBoundingClientRect() : undefined
+      if (host) setHostSize(current => current.width === host.width && current.height === host.height ? current : { width: host.width, height: host.height })
     }
     measure(); const observer = new ResizeObserver(measure); observer.observe(container)
     if (inline && editorRef.current) observer.observe(editorRef.current)
@@ -545,8 +546,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         </div>
   </>
   if (inline) {
-    const frame = inlineFrame ?? { x: 0, y: 0, width: image.width / pixelRatio, height: image.height / pixelRatio }
-    const placement = inlineToolbarPlacement(frame, hostHeight)
+    const frame = inlineFrame ?? { x: 0, y: 0, width: hostSize.width, height: hostSize.height }
+    const placement = inlineToolbarPlacement(frame, hostSize.height)
     // The bar and popover align their right edges with the selection, and the bar shrinks rather than leave the viewport.
     // Below the selection the popover opens downward; above it or inside its bottom edge, upward.
     const bar = { top: placement.top, right: 'calc(100% - ' + (frame.x + frame.width) + 'px)', maxWidth: 'min(calc(100% - 16px), ' + (frame.x + frame.width) + 'px)' }
