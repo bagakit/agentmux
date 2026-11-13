@@ -55,7 +55,7 @@ beforeEach(async () => {
     directoryPath: 'topic--existing', topicPath: 'topic--existing/topic.md', collaborators: [] }])
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   vi.spyOn(api.config, 'get').mockResolvedValue(structuredClone(config))
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   dispose = await useAppStore.getState().initialize()
@@ -81,18 +81,16 @@ function placements() {
   return Object.entries(useAppStore.getState().layouts).flatMap(([workspaceId, layout]) =>
     layout.groups.flatMap(group => group.tabOrder.map(tabId => ({ workspaceId, tabId }))))
 }
-async function moveIntoTopic() {
+async function moveIntoTopic({ duplicate }: { duplicate: boolean }) {
   const source = createWorkbenchTab('source', { regionId: 'a-region', workspaceId: 'repo', kind: 'agent', phase: 'attached', sessionId: 'a' })
   let target = createWorkbenchTab('target', { regionId: 'vacancy', workspaceId: SCRATCH_WORKSPACE_ID, kind: 'launcher' })
   target = { ...addWorkbenchRegion(target, 'vacancy', 'right', { regionId: 'b-region', workspaceId: SCRATCH_WORKSPACE_ID,
     kind: 'agent', phase: 'attached', sessionId: 'b' }), topicId }
-  const duplicate = createWorkbenchTab('duplicate', { regionId: 'duplicate-region', workspaceId: 'other', kind: 'agent', phase: 'attached', sessionId: 'a' })
-  // target precedes duplicate after source removal: keep the established first-projection selection
-  // policy, while proving navigation cannot rewrite the unselected projection either.
-  useAppStore.setState({ tabs: { source, target, duplicate }, layouts: {
+  const copy = createWorkbenchTab('duplicate', { regionId: 'duplicate-region', workspaceId: 'other', kind: 'agent', phase: 'attached', sessionId: 'a' })
+  useAppStore.setState({ tabs: { source, target, ...(duplicate ? { duplicate: copy } : {}) }, layouts: {
     repo: createWorkspaceLayout('source-group', ['source']),
     [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('topic-group', ['target']),
-    other: createWorkspaceLayout('other-group', ['duplicate'])
+    other: createWorkspaceLayout('other-group', duplicate ? ['duplicate'] : [])
   } })
   const receipt = await useAppStore.getState().executeControl(parseAgentMuxControlRequest({ schemaVersion: 5,
     requestId: 'private:move-for-navigation', operation: 'space.mv', fromRegionId: 'a-region', expectedAgentSessionId: 'a',
@@ -103,7 +101,7 @@ async function moveIntoTopic() {
 
 describe('existing Session projection navigation', () => {
   it.each(['Open Session', 'Continue in Session'])('mv → real %s navigates durable placement without reparenting a Topic Tab or extra projection', async label => {
-    await moveIntoTopic()
+    await moveIntoTopic({ duplicate: false })
     const before = useAppStore.getState()
     const tabs = structuredClone(before.tabs)
     const graph = placements()
@@ -130,9 +128,8 @@ describe('existing Session projection navigation', () => {
     expect(after.tabs.target!.regions).toEqual(tabs.target!.regions)
     expect(after.tabs.target!.layout.root).toEqual(tabs.target!.layout.root)
     expect(after.tabs.target!.layout.activeRegionId).toBe('a-region')
-    expect(after.tabs.duplicate).toEqual(tabs.duplicate)
     expect(placements()).toEqual(graph)
-    expect(graph).toEqual([{ workspaceId: SCRATCH_WORKSPACE_ID, tabId: 'target' }, { workspaceId: 'other', tabId: 'duplicate' }])
+    expect(graph).toEqual([{ workspaceId: SCRATCH_WORKSPACE_ID, tabId: 'target' }])
     expect(after.sessions.map(one => ({ id: one.id, control: one.control, cwd: one.workspacePath, hostId: one.hostId })))
       .toEqual(sessions.map(one => ({ id: one.id, control: one.control, cwd: one.workspacePath, hostId: one.hostId })))
     expect(after.retainedSpatialFocus).toBeNull()
@@ -141,7 +138,7 @@ describe('existing Session projection navigation', () => {
   })
 
   it('the actual awaiting-recovery Open Session consumer can enter the preserved projection before Session facts arrive', async () => {
-    await moveIntoTopic()
+    await moveIntoTopic({ duplicate: false })
     useAppStore.setState({ sessions: [], mainSurface: 'board' })
     const before = structuredClone(useAppStore.getState().tabs)
     const graph = placements()
@@ -150,22 +147,43 @@ describe('existing Session projection navigation', () => {
     await click('Open Session')
     expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
     expect(useAppStore.getState().tabs.target!.regions).toEqual(before.target!.regions)
-    expect(useAppStore.getState().tabs.duplicate).toEqual(before.duplicate)
     expect(useAppStore.getState().sessions).toEqual([])
     expect(placements()).toEqual(graph)
+    expect(graph).toHaveLength(1)
+  })
+
+  it('a second display keeps Open Session from guessing until the held occurrence chooses one, without rewriting the other', async () => {
+    await moveIntoTopic({ duplicate: true })
+    const tabs = structuredClone(useAppStore.getState().tabs)
+    const graph = placements()
+    await act(async () => root.render(<SessionObservationRegions sessionIds={['a']} contextId="private-board" />))
+    await click('Open Session')
+    expect(useAppStore.getState().notificationEvents.at(-1)?.message).toMatch(/no unique confirmed display occurrence/)
+    expect(useAppStore.getState().activeWorkspaceId).toBe('repo')
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(useAppStore.getState().tabs).toEqual(tabs)
+    expect(placements()).toEqual(graph)
+    await act(async () => { expect(useAppStore.getState().focusExecutionSession('a',
+      { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group', tabId: 'target', regionId: 'a-region' }, { navigate: false })).toBe(true) })
+    await click('Open Session')
+    expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(useAppStore.getState().tabs.target!.layout.activeRegionId).toBe('a-region')
+    expect(useAppStore.getState().tabs.duplicate).toEqual(tabs.duplicate)
+    expect(placements()).toEqual(graph)
     expect(graph).toHaveLength(2)
+    expect(graph).toEqual(expect.arrayContaining([{ workspaceId: SCRATCH_WORKSPACE_ID, tabId: 'target' }, { workspaceId: 'other', tabId: 'duplicate' }]))
   })
 
   it('missing durable Tab Group reports failure and preserves the projection instead of falling back to execution cwd', async () => {
-    await moveIntoTopic()
+    await moveIntoTopic({ duplicate: false })
     useAppStore.setState({ layouts: { repo: createWorkspaceLayout('source-group'), other: useAppStore.getState().layouts.other! } })
     const tabs = structuredClone(useAppStore.getState().tabs)
     const graph = placements()
-    useAppStore.getState().selectSession('a')
+    expect(useAppStore.getState().selectSession('a')).toBe(false)
     expect(useAppStore.getState().tabs).toEqual(tabs)
     expect(placements()).toEqual(graph)
-    expect(graph).toEqual([{ workspaceId: 'other', tabId: 'duplicate' }])
-    expect(useAppStore.getState().error).toMatch(/Tab Group/)
+    expect(graph).toEqual([])
+    expect(useAppStore.getState().notificationEvents.at(-1)?.message).toMatch(/no unique confirmed display occurrence/)
     expect(useAppStore.getState().activeWorkspaceId).toBe('repo')
   })
 })
