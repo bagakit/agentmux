@@ -784,3 +784,20 @@ it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the original four Codex
   expect(controls.every(control => !control.mock.calls.length)).toBe(true)
   expect(connected).not.toHaveBeenCalled()
 })
+
+it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the compiled CLI reports invalid rewrite input as the caller error', async () => {
+  const f = await fixture(), compiled = await import('../dist/index.js')
+  const client = new compiled.AgentMuxClient({ store: new compiled.AgentMuxFileAgentSessionStore(f.storePath) })
+  release.push(() => client.dispose())
+  const server = new compiled.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] })
+  await server.start(); release.push(() => server.stop())
+  const cut = (await client.conversationCheckpoint(ref)).checkpoint
+  const result = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--input', '-'], objectCliEnvironment(f.root),
+    JSON.stringify({ ...ref, checkpoint: cut, rewrite: { anchors: [{ recordId: '', digest: 'a'.repeat(64) }] } }))
+  expect(result.code).not.toBe(0)
+  expect(JSON.parse(result.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
+  const help = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--help'], objectCliEnvironment(f.root))
+  expect(help.code).toBe(0)
+  expect(help.stdout).toContain('cannot be combined with through or view')
+  expect(help.stdout).toContain('Every cursor continuation must retain the same checkpoint and rewrite value')
+}, 30_000)

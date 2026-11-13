@@ -214,6 +214,10 @@ it('validates rewrite anchors at the public input boundary', async () => {
   for (const rewrite of [{ anchors: [] }, { anchors: [{ ...valid, digest: 'short' }] }, { anchors: [{ recordId: 'x', revision: 'a'.repeat(64) }] }, { anchors: Array(65).fill(valid) }, { anchors: [valid], extra: 1 }])
     expect(() => parseConversationChangesInput({ ...base, rewrite })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
   expect(() => parseConversationChangesInput({ ...base, through: checkpoint, rewrite: { anchors: [valid] } })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+  for (const anchor of [{ recordId: '', digest: valid.digest }, { recordId: 'id', digest: 42 }, { recordId: 'bad\nname', digest: valid.digest }]) {
+    expect(() => parseConversationChangesInput({ ...base, rewrite: { anchors: [anchor] } })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+    await expect(f.client.readConversationChanges({ ...base, rewrite: { anchors: [anchor] } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  }
 })
 
 it('reads a Claude message resent before any reply as appended history, never as a rewrite', async () => {
@@ -255,4 +259,18 @@ it('retains native ordering but updates the digest with a newer original version
   expect(current.original.item.contentParts).not.toEqual(firstRecord.original.item.contentParts)
   expect(current.order.recordDigest).toBe(createHash('sha256').update(jsonl([assistant('same-original', 'second version')]).trimEnd()).digest('hex'))
   expect(current.order.recordDigest).not.toBe(firstRecord.order.recordDigest)
+})
+
+it('reports a changed rewrite continuation as an invalid cursor, not a replaced source', async () => {
+  const f = await codex(), start = await f.checkpoint()
+  await append(f.path, [assistant('msg-kept', 'known')])
+  const kept = await readFile(f.path)
+  await append(f.path, [call('old-tail')])
+  const before = await consumed(f, start)
+  await rewriteInPlace(f.path, kept, [assistant('new-large', 'a'.repeat(100_000))])
+  const rewrite = { anchors: anchorsOf(before.records) }
+  const page = await f.client.readConversationChanges({ ...f.ref, checkpoint: before.page.checkpoint, rewrite, maxBytes: 16384 })
+  expect(page.nextCursor).toBeTruthy()
+  await expect(f.client.readConversationChanges({ ...f.ref, checkpoint: before.page.checkpoint, cursor: page.nextCursor!, maxBytes: 16384 }))
+    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' })
 })
