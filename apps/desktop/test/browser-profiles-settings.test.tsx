@@ -201,7 +201,7 @@ describe('Settings › Browser Profiles', () => {
   })
 
   it('New Profile opens straight into naming the new Profile', async () => {
-    const create = [...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('New Profile'))!
+    const create = container.querySelector<HTMLButtonElement>('.settings-pane-toolbar button[aria-label="New Profile"]')!
     await act(async () => create.click())
     expect(port.createProfile).toHaveBeenCalledWith('Profile 1')
     expect(document.activeElement).toBe($('input[aria-label="Profile name"]'))
@@ -307,7 +307,7 @@ describe('Settings › Browser Profiles keeps what the person typed', () => {
     browserProfiles.reset()
     port.set({ revision: 4, profiles: [personal, { ...client, label: 'Profile 1' }, { ...client, id: 'p-3', label: 'Profile 3' }] })
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
-    const create = [...container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('New Profile'))!
+    const create = container.querySelector<HTMLButtonElement>('.settings-pane-toolbar button[aria-label="New Profile"]')!
     await act(async () => create.click())
     expect(port.createProfile).toHaveBeenCalledWith('Profile 2')
   })
