@@ -429,7 +429,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 - `Region` 是 View 内的内容 leaf，可展示 Agent、Terminal、File、Browser 或 Launcher。
 
-- `split-left|right|up|down` 只修改目标 View 的 Region 树；`placement=tab` 创建新 View。用户明确给定的目标、Tab 或分屏方向优先；未指定时，Agent 可在已授权的开启范围内依据任务用途、当前布局与可读空间选择，并简短说明。选择与核验见[开启工作面的意图与落点](#开启工作面的意图与落点)，不把未指定位置视为必须再问一次的条件。
+- `split`（`left|right|up|down`）只修改目标 View 的 Region 树；`new-tab` 创建新 View。用户明确给定的目标、Tab 或分屏方向优先；未指定时，Agent 可在已授权的开启范围内依据任务用途、当前布局与可读空间选择，并简短说明。选择与核验见[开启工作面的意图与落点](#开启工作面的意图与落点)，不把未指定位置视为必须再问一次的条件。
 
 - Workspace 保存 Tab Group 树，每个 View 保存自己的 Region 树。两个树使用不同 ID、焦点、resize 状态和操作入口。
 
@@ -439,7 +439,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 - **眼前的分屏比例必须与已保存布局一致。** 用户或公开 Control 追加、重排及改变分屏比例后，已打开的原 Region 立即按同一布局显示；不能只写持久树、等重启才变成真实尺寸。拖动仍由原分隔条表达当前意图，不被过时投影拉回。同步尺寸保留 Tab、Group、Region、焦点、原内容实例与健康 Run；普通重启在同窗口尺寸与字体条件下恢复同一最终比例和终端网格。
 
-- **关闭当前格、按序号切 Tab、分屏、切换焦点格都必须能纯键盘完成**，不该只有鼠标一条路。窗口级只补这四个高价值动作，**不建 action catalog、不做用户改键**——那是预防性抽象，与"最简实现"相悖。键位跟随成熟终端/编辑器的既有惯例而非自创：关闭当前 Region 用平台的关闭键（mac `Cmd+W`／其他平台 `Ctrl+Shift+W`），按序号切 Tab 用 `Cmd/Ctrl+1..9`（第 9 键恒指最后一张），分屏用 mac `Cmd+D`（右）/`Cmd+Shift+D`（下）、其他平台 `Ctrl+Shift+E`（右）/`Ctrl+Shift+O`（下），切换焦点格用 `Cmd/Ctrl+Alt+方向键`。**平台底线：非 macOS 绝不接管裸 `Ctrl+字母`**——那些是 shell/readline 的地盘（`Ctrl+W` 删词、`Ctrl+D` 是 EOF），接管会让用户在终端里丢掉肌肉记忆；数字与 `Ctrl+Alt+方向` 不落在 readline 键上，可安全使用。新键位不得与终端作用域键（`Cmd+F/C/K`、`Shift+Enter`）冲突，冲突判断按键位比对、不靠猜。判定及落点解析共用原 owner；接线验证见[工作面键盘与地址验证](../../testing/strategy.md#工作面键盘与地址验证)。焦点格的"相邻"按屏幕几何（Region 归一化 bounds）判定，不按分屏树的父子深度，与上文「哪个算右边」同一处轴向定义。
+- **关闭当前格、按序号切 Tab、分屏、切换焦点格都必须能纯键盘完成**，不该只有鼠标一条路。窗口级只补这四个高价值动作，**不建 action catalog、不做用户改键**——那是预防性抽象，与"最简实现"相悖。键位跟随成熟终端/编辑器的既有惯例而非自创：关闭当前 Region 用平台的关闭键（mac `Cmd+W`／其他平台 `Ctrl+Shift+W`），按序号切 Tab 用 `Cmd/Ctrl+1..9`（第 9 键恒指最后一张），分屏用 mac `Cmd+D`（右）/`Cmd+Shift+D`（下）、其他平台 `Ctrl+Shift+E`（右）/`Ctrl+Shift+O`（下），切换焦点格用 `Cmd/Ctrl+Alt+方向键`。**平台底线：非 macOS 绝不接管裸 `Ctrl+字母`**——那些是 shell/readline 的地盘（`Ctrl+W` 删词、`Ctrl+D` 是 EOF），接管会让用户在终端里丢掉肌肉记忆；数字与 `Ctrl+Alt+方向` 不落在 readline 键上，可安全使用。新键位不得与终端作用域键（`Cmd+F/C/K`、`Shift+Enter`）冲突，冲突判断按键位比对、不靠猜。判定及落点解析共用原 owner；接线验证见[工作面键盘与地址验证](../../testing/strategy.md#工作面键盘与地址验证)。焦点格的"相邻"按屏幕几何（Region 归一化 bounds）判定，不按分屏树的父子深度，与[《对象地址、分享与方向》](public-control.md#对象地址分享与方向)中「哪个算右边」同一处轴向定义。
 
 持久布局与 Session 的恢复顺序、未知状态保留和启动边界只见[工作面持久恢复与启动边界](session-recovery.md#工作面持久恢复与启动边界)。
 
@@ -477,7 +477,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 - Agent/Terminal 内容上方只保留一行 Tabbar，不再显示第二条 Session Info Bar。
 - Agent Tab 使用 Provider 图标并叠加语义状态点；Terminal Tab 使用 Terminal 图标，不能用同形状态点同时表达内容身份。
-- 语义状态点是全窗口共享语汇（StatusDot 与 Attention Bar 的 StatusCount 同源）：`waiting`/`blocked`（"需要你"）带 `?` 字形而非仅靠颜色，`disconnected` 用中性空心环从琥珀让出，使琥珀唯一表示"需要你"；字形只在全尺寸点上浮现，Tab 角与 Rail 行的 5px 角标仍只用颜色加位置区分。详见 `agentmux-surface-density.md`「响应式与可访问性」。
+- 语义状态点是全窗口共享语汇（StatusDot 与 Attention Bar 的 StatusCount 同源）：`waiting`/`blocked`（"需要你"）带 `?` 字形而非仅靠颜色，`disconnected` 用中性空心环从琥珀让出，使琥珀唯一表示"需要你"；字形只在全尺寸点上浮现，Tab 角与 Rail 行的 5px 角标仍只用颜色加位置区分。详见密度 SSOT[《响应式与可访问性》](../presentation/shared-rules.md#响应式与可访问性)。
 - Tab 保持稳定可读宽度和单行名称；窄 Pane 使用自身横向 overflow、左右导航和自动滚入可见区。
 - Active Run 的 Stop 是 Tabbar 内的图标动作，继续使用统一确认和 Core stop owner。
 - `Split` 表示拆分当前 View 内容；移动整张 Tab 使用独立命令和拖拽落点，两种预览和结果不能混用。
