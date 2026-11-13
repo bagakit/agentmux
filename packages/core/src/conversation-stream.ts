@@ -37,7 +37,7 @@ export type ConversationRelation =
 export type ConversationSourceOrder =
   | { kind: 'native-page'; source: AgentSessionHistorySource; pageWitness?: string; indexInPage: number
       /** sha256 of the record's exact physical bytes from a durable changes read; identifies it after a rewrite. */
-      recordDigest?: string }
+      recordDigest?: string; recordIdentity?: 'protocol' | 'position' }
   | { kind: 'captured-stream'; epoch: string; firstSequence: number }
   | { kind: 'captured-window'; revision: number; indexInWindow: number }
 export type ConversationSourceRef = ({ kind: 'native' } & AgentSessionHistorySource)
@@ -103,6 +103,19 @@ export function conversationValuesEqual(a: unknown, b: unknown): boolean {
 /** Content version only: never consulted by association or order. Browser-safe. */
 export function conversationRevision(value: unknown): string {
   return Array.from(sha256(new TextEncoder().encode(JSON.stringify(canonical(value)))), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+/** Complete content/provenance version independent of renewable read capabilities.
+ * Exact read revisions still include their original resource references. */
+export function conversationContentRevision(record: ConversationSourceRecord): string {
+  if (record.original.kind !== 'native') return conversationRevision(record.original.item)
+  const item = record.original.item
+  return conversationRevision({ id: item.id, kind: item.kind, contentParts: item.contentParts.map(part => {
+    if (part.kind !== 'resource' || part.resourceType !== 'text' || part.content?.encoding !== 'json-utf8') return part
+    const { reference: _readCapability, label: _projectionLabel, ...content } = part
+    return content
+  }), ...(item.turnId ? { turnId: item.turnId } : {}), ...(item.turnOutcome ? { turnOutcome: item.turnOutcome } : {}),
+    ...(item.questionRequest ? { questionRequest: item.questionRequest } : {}), ...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {}),
+    ...(item.conversation ? { conversation: item.conversation } : {}), ...(item.collaboration ? { collaboration: item.collaboration } : {}) })
 }
 export function conversationRecordId(reference: { hostId?: string; agentSessionId: string; source: ConversationItemRef['source'] }): string {
   const { source } = reference

@@ -222,6 +222,6 @@ export async function readClaudeConversationChanges(context: ProviderConversatio
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
     return await readNativeConversationChanges(reader, context, (row, start) => mainRecord(row, start, context.source.nativeSessionId),
-      (row, start) => { try { return mainRecord(row, start, context.source.nativeSessionId)?.id ?? null } catch { return null } })
+      (row, start) => { try { return mainRecord(row, start, context.source.nativeSessionId)?.id ?? null } catch { return null } }, row => (row.type === 'assistant' || row.type === 'user') && typeof row.uuid === 'string' && !!row.uuid)
   } finally { await reader.close() }
 }

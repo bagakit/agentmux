@@ -42,9 +42,9 @@ export type AgentConversationReadPage = ConversationRef & { sourceHostId: string
   order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow; processDetails?: 'deferred' }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
-export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
-export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
+export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning'; nativeSnapshot?: 'scope' | 'range' }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; recover?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
+export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean; nativeRecoveryRange?: { from: NativeConversationCheckpoint; through: NativeConversationCheckpoint } }
 export type ConversationWatchInput = ConversationRef & { view?: string }
 export type ConversationViewReleaseInput = ConversationRef & { view: string }
 export type ConversationViewReleaseResult = ConversationRef & { sourceHostId: string; viewId: string; released: boolean }
@@ -158,10 +158,11 @@ function scope(value: unknown): ConversationScope {
   return { sources }
 }
 export function parseConversationCheckpointInput(value: unknown): ConversationCheckpointInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'nativePosition'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   if (p.nativePosition !== undefined && p.nativePosition !== 'beginning') return bad('Native checkpoint position must be beginning when supplied.', 'INVALID_CONTROL_REQUEST')
-  return { ...ref, ...(p.nativePosition === undefined ? {} : { nativePosition: 'beginning' as const }) }
+  if (p.nativeSnapshot !== undefined && p.nativeSnapshot !== 'scope' && p.nativeSnapshot !== 'range') return bad('Native snapshot must be scope or range.', 'INVALID_CONTROL_REQUEST')
+  return { ...ref, ...(p.nativePosition === undefined ? {} : { nativePosition: 'beginning' as const }), ...(p.nativeSnapshot === undefined ? {} : { nativeSnapshot: p.nativeSnapshot as 'scope' | 'range' }) }
 }
 export function parseConversationFrontier(value: unknown, expected?: ConversationRef): ConversationFrontier {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'scope', 'cuts'], 'CONTROL_PROTOCOL_ERROR')
@@ -237,10 +238,10 @@ export function parseConversationTimelineReadInput(value: unknown): Conversation
     ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'through', 'recover', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
-  return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p) }
+  return { ...ref, checkpoint, ...(p.recover === undefined ? {} : { recover: parseConversationCheckpoint(p.recover, ref) }), ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p) }
 }
 export function parseConversationWatchInput(value: unknown): ConversationWatchInput {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'view'])
@@ -307,16 +308,17 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
     const r = rpcRecord(value, ['id', 'reference', 'revision', 'order', 'original'], 'CONTROL_PROTOCOL_ERROR')
     const reference = itemRef(r.reference, ref, accepted), id = text(r.id, 131_072), version = revision(r.revision)
     if (id !== conversationRecordId(reference)) return bad()
-    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'), order = rpcRecord(r.order, ['kind', 'source', 'pageWitness', 'indexInPage', 'recordDigest', 'epoch', 'firstSequence'], 'CONTROL_PROTOCOL_ERROR')
+    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'), order = rpcRecord(r.order, ['kind', 'source', 'pageWitness', 'indexInPage', 'recordDigest', 'recordIdentity', 'epoch', 'firstSequence'], 'CONTROL_PROTOCOL_ERROR')
     let result: ConversationSourceRecord
     if (original.kind === 'native' && reference.source.kind === 'native' && order.kind === 'native-page') {
       const s = parseConversationSource({ kind: 'native', ...rpcRecord(order.source) })
       if (s.kind !== 'native' || s.providerId !== reference.source.providerId || s.nativeSessionId !== reference.source.nativeSessionId || order.epoch !== undefined || order.firstSequence !== undefined) return bad()
       const item = normalizeSessionHistoryPage(s, { source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, items: [original.item], nextCursor: null }, 1).items[0]!
       if (item.id !== reference.source.recordId || !same(original.item, item)) return bad()
-      result = { id, reference, revision: version, order: { kind: 'native-page', source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, indexInPage: integer(order.indexInPage), ...(order.pageWitness === undefined ? {} : { pageWitness: text(order.pageWitness, 32_768) }), ...(order.recordDigest === undefined ? {} : { recordDigest: revision(order.recordDigest) }) }, original: { kind: 'native', item } }
+      if (order.recordIdentity !== undefined && order.recordIdentity !== 'protocol' && order.recordIdentity !== 'position') return bad()
+      result = { id, reference, revision: version, order: { kind: 'native-page', source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, indexInPage: integer(order.indexInPage), ...(order.pageWitness === undefined ? {} : { pageWitness: text(order.pageWitness, 32_768) }), ...(order.recordDigest === undefined ? {} : { recordDigest: revision(order.recordDigest) }), ...(order.recordIdentity === undefined ? {} : { recordIdentity: order.recordIdentity as 'protocol' | 'position' }) }, original: { kind: 'native', item } }
     } else {
-      if (original.kind !== 'captured' || reference.source.kind !== 'captured' || order.kind !== 'captured-stream' || order.source !== undefined || order.pageWitness !== undefined || order.indexInPage !== undefined || order.recordDigest !== undefined) return bad()
+      if (original.kind !== 'captured' || reference.source.kind !== 'captured' || order.kind !== 'captured-stream' || order.source !== undefined || order.pageWitness !== undefined || order.indexInPage !== undefined || order.recordDigest !== undefined || order.recordIdentity !== undefined) return bad()
       const epoch = text(order.epoch), item = normalizeAgentTimelineItem(original.item)
       if (!accepted.sources.some(s => s.kind === 'captured' && s.epoch === epoch) || item.id !== reference.source.recordId || item.agentSessionId !== ref.agentSessionId || !same(original.item, item)) return bad()
       result = { id, reference, revision: version, order: { kind: 'captured-stream', epoch, firstSequence: integer(order.firstSequence, 1) }, original: { kind: 'captured', item } }
@@ -440,7 +442,7 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
   return { event: { ...event, revision: version }, records }
 }
 function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false, original?: AgentConversationReadPage): AgentConversationReadPage {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', 'processDetails', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', 'processDetails', ...(changes ? ['checkpoint', 'more', 'nativeRecoveryRange'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   if (p.processDetails !== input.processDetails) return bad('The process detail representation changed during reading.')
   const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
@@ -486,7 +488,10 @@ export function parseConversationReadPage(value: unknown, input: ConversationTim
 function changesPage(value: unknown, input: ConversationChangesInput, original?: AgentConversationReadPage): ConversationChangesPage {
   const result = basePage(value, input, true, original), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
   if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || !same(result.window.checkpoint, checkpoint) || typeof p.more !== 'boolean') return bad()
-  return { ...result, checkpoint, more: p.more }
+  const range = p.nativeRecoveryRange === undefined ? undefined : rpcRecord(p.nativeRecoveryRange, ['from', 'through'], 'CONTROL_PROTOCOL_ERROR')
+  const nativeRecoveryRange = range ? { from: parseNativeConversationCheckpoint(range.from), through: parseNativeConversationCheckpoint(range.through) } : undefined
+  if (nativeRecoveryRange && [nativeRecoveryRange.from, nativeRecoveryRange.through].some(cut => cut.agentSessionId !== input.agentSessionId || !result.scope.sources.some(source => source.kind === 'native' && source.providerId === cut.source.providerId && source.nativeSessionId === cut.source.nativeSessionId))) return bad()
+  return { ...result, checkpoint, more: p.more, ...(nativeRecoveryRange ? { nativeRecoveryRange } : {}) }
 }
 export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
   return changesPage(value, input)

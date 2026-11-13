@@ -1,3 +1,7 @@
+import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
+import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
+import { NativeSourceSnapshots } from './native-source-snapshot.js'
+import { parseConversationSnapshotInput, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput, type ConversationSnapshotPage, type ConversationSnapshotReleaseResult } from './conversation-snapshot.js'
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { homedir } from 'node:os'
@@ -175,7 +179,7 @@ import { parseAgentStopIdentity, type AgentMuxAgentStopAdmission, type AgentMuxA
 import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
-import { isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
+import { nativeContentSnapshotBacking, nativeContentSnapshotBacked, isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
 import { readAgentSessionHistory, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage } from './session-history-reader.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
@@ -2902,7 +2906,7 @@ export class AgentMuxClient {
   async conversationCheckpoint(input: ConversationCheckpointInput, options: ConversationReadOptions = {}): Promise<ConversationCheckpointPage> {
     input = parseConversationCheckpointInput(input)
     const owner = await this.conversationReader(input, options)
-    const page = await cutUnifiedConversation(owner.reference, owner.port, input.nativePosition)
+    const page = await cutUnifiedConversation(owner.reference, owner.port, input.nativePosition, input.nativeSnapshot)
     return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
   }
 
@@ -2913,10 +2917,36 @@ export class AgentMuxClient {
       const owner = await this.conversationReader(input, options)
       parseConversationCheckpoint(input.checkpoint, input)
       parseConversationFrontier(input.checkpoint.frontier, owner.reference)
+      if(input.recover){parseConversationCheckpoint(input.recover,input);parseConversationFrontier(input.recover.frontier,owner.reference)}
       if(input.through){parseConversationCheckpoint(input.through,input);parseConversationFrontier(input.through.frontier,owner.reference)}
       const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference }, ...(input.through ? {through:{...input.through,...owner.reference}} : {}) }, owner.port)
       return page
     })
+  }
+
+  private nativeSnapshotKey: Promise<string> | undefined
+  private async nativeSnapshotSecret(create: boolean): Promise<string> {
+    const pending = this.nativeSnapshotKey ??= nativeSnapshotSigningKey(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'native-source-snapshots'), create)
+    try { return await pending } catch (error) { if (this.nativeSnapshotKey === pending) this.nativeSnapshotKey = undefined; throw error }
+  }
+  private async conversationSnapshots(input: ConversationSnapshotInput | ConversationSnapshotReleaseInput) {
+    const descriptor = await this.historyDescriptor(input.agentSessionId)
+    if (input.hostId !== 'local' && input.hostId !== descriptor.hostId) throw new AgentMuxError('The exact original source Host is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const handle = [descriptor.history?.nativeHandle, descriptor.history?.previousNativeHandle].find(handle => handle?.kind === 'provider' && handle.providerId === input.source.providerId && handle.sessionId === input.source.nativeSessionId)
+    const secret = await this.nativeSnapshotSecret(false)
+    if (handle?.kind !== 'provider' || !handle.transcriptPath || !secret) throw new AgentMuxError('The original native snapshot owner is unavailable.', 'AGENT_SESSION_HISTORY_SNAPSHOT_UNAVAILABLE')
+    return new NativeSourceSnapshots({ directory: join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'native-source-snapshots'), secret, agentSessionId: input.agentSessionId, source: input.source, sourcePath: handle.transcriptPath })
+  }
+  /** Exact source custody metadata, including original receipts after a lost response. */
+  async listConversationSnapshots(input: ConversationSnapshotInput): Promise<ConversationSnapshotPage> {
+    input = parseConversationSnapshotInput(input) as ConversationSnapshotInput
+    const store = await this.conversationSnapshots(input); await store.collectAbandoned()
+    return { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source, ...await store.list(input.after, input.limit ?? 30) }
+  }
+  async releaseConversationSnapshot(input: ConversationSnapshotReleaseInput): Promise<ConversationSnapshotReleaseResult> {
+    input = parseConversationSnapshotInput(input, true) as ConversationSnapshotReleaseInput
+    await (await this.conversationSnapshots(input)).releaseReadReference(input.reference)
+    return { ...input, released: true }
   }
 
   /** Release only this temporary read view; original records, cuts and Runs are unchanged. */
@@ -2964,15 +2994,15 @@ export class AgentMuxClient {
         return { ...page, stream: { ...page.stream, ...(inputJournal ? { inputJournal } : {}), gaps: [...page.stream.gaps, ...(failure ? [failure] : [])] } }
       },
       nativePage: (cursor, limit) => this.readSessionHistoryPage(input.agentSessionId, { ...sourceOptions, limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }, source),
-      nativeCheckpoint: async position => (await this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions,
-        ...(position === 'beginning' ? { head: true as const } : { tail: true as const }), ...(options.signal ? { signal: options.signal } : {}) }, source)).checkpoint,
-      nativeChanges: (checkpoint, limit, through) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
-      nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
+      nativeCheckpoint: async (position, snapshot) => (await this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions,
+        ...(position === 'beginning' ? { head: true as const } : { tail: true as const }), ...(snapshot ? { snapshot } : {}), ...(options.signal ? { signal: options.signal } : {}) }, source)).checkpoint,
+      nativeChanges: (checkpoint, limit, through, recover) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(recover ? {recover} : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
+      nativeRecord: (source, id, checkpoint) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal, checkpoint ? { nativeSnapshotCursor: checkpoint.cursor } : {}) } }
   }
 
   /** Exact-record lookup reuses the original Provider binding, resource signer and read lifetime. */
   private async readConversationNativeRecord(agentSessionId: string, source: AgentSessionHistorySource, recordId: string, signal?: AbortSignal,
-    invocation: Pick<AgentMuxSessionQuestionReplyInput, 'commandOverride' | 'args' | 'env'> & { turnId?: string } = {}): Promise<AgentSessionHistoryItem> {
+    invocation: Pick<AgentMuxSessionQuestionReplyInput, 'commandOverride' | 'args' | 'env'> & { turnId?: string; nativeSnapshotCursor?: string } = {}): Promise<AgentSessionHistoryItem> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this exact original record.', 'AGENT_SESSION_HISTORY_BUSY')
     const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
@@ -2987,8 +3017,9 @@ export class AgentMuxClient {
       if (source.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId) throw new AgentMuxError('The exact native record belongs to another original source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       if (!provider.readSessionHistoryRecord) throw new AgentMuxError('This Provider cannot locate the exact recorded version. The original source remains readable.', 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED')
       const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
+      const nativeSnapshotSecret = invocation.nativeSnapshotCursor?.startsWith('nsc1.') ? await read(this.nativeSnapshotSecret(false)) : undefined
       const originalSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId }
-      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source: originalSource, recordId, ...(invocation.turnId === undefined ? {} : { turnId: invocation.turnId }), signal: controller.signal,
+      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source: originalSource, recordId, ...(nativeSnapshotSecret ? { nativeSnapshotSecret, nativeSnapshotDirectory: join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'native-source-snapshots'), nativeSnapshotCursor: invocation.nativeSnapshotCursor! } : {}), ...(invocation.turnId === undefined ? {} : { turnId: invocation.turnId }), signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable), args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }))
       await read(binding.assertCurrent())
@@ -3767,7 +3798,7 @@ export class AgentMuxClient {
     return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true },
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; recover?: NativeConversationCheckpoint; tail?: true; head?: true; snapshot?: 'scope' | 'range' },
     originalSource?: AgentSessionHistorySource): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
@@ -3784,13 +3815,17 @@ export class AgentMuxClient {
       if (options.checkpoint && (options.checkpoint.source.providerId !== source.providerId || options.checkpoint.source.nativeSessionId !== source.nativeSessionId))
         throw new AgentMuxError('The original native conversation source changed. Keep its checkpoint and inspect the new sharing boundary.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       const executor = binding.executorOptions, contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
+      const nativeSnapshotSecret = options.snapshot || options.recover || options.checkpoint?.cursor.startsWith('nsc1.') || options.through?.cursor.startsWith('nsc1.') ? await read(this.nativeSnapshotSecret(!!options.snapshot)) : undefined
       const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
+        nativeSnapshotDirectory: join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'native-source-snapshots'), ...(nativeSnapshotSecret ? { nativeSnapshotSecret } : {}), ...(options.snapshot ? { snapshot: options.snapshot } : {}),
         command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
-        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
+        ...(options.through ? {through:options.through.cursor} : {}), ...(options.recover ? {recover:options.recover.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
+      if (options.snapshot && !page.cursor.startsWith('nsc1.')) throw new AgentMuxError('This Provider does not expose immutable source custody. Ordinary reads remain available.', 'AGENT_SESSION_HISTORY_SNAPSHOT_UNAVAILABLE')
       await read(binding.assertCurrent())
-      const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
-      const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, ...(page.digests ? { digests: page.digests } : {}), checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+      const nativeSnapshot = decodeNativeSnapshotCursor({ agentSessionId, source, ...(nativeSnapshotSecret ? { nativeSnapshotSecret } : {}), contentSigningSecret: contentSigningSecret ?? '', transcriptPath: handle.transcriptPath ?? '', command: '', args: [], env: {}, workspacePath: session.workspacePath, limit, signal: controller.signal }, page.cursor)
+      const checkpoint = { agentSessionId, source, cursor: page.cursor, ...(nativeSnapshot?.kind === 'scope' ? { scopeEvidence: { reference: nativeSnapshot.reference } } : {}) }, ref = { hostId: 'local', agentSessionId }
+      const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, ...(page.digests ? { digests: page.digests } : {}), ...(page.identities ? { identities: page.identities } : {}), ...(page.recoveryRange ? { recoveryRange: { from: { agentSessionId, source, cursor: page.recoveryRange.from }, through: { agentSessionId, source, cursor: page.recoveryRange.through } } } : {}), checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
       const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
       await this.observeNotificationAdoptions(items)
       return { ...normalized, items: normalizeSessionHistoryPage(source, { source, items, nextCursor: null }, limit).items }
@@ -3823,12 +3858,15 @@ export class AgentMuxClient {
         recordId: input.recordId, partIndex: input.partIndex }
       if (isNativeContentReference(input.expectedReference)) {
         const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
-        const context = { agentSessionId, ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, signal: controller.signal,
+        const nativeSnapshotSecret = nativeContentSnapshotBacked(input.expectedReference) ? await read(this.nativeSnapshotSecret(false)) : undefined
+        const context = { agentSessionId, ...(nativeSnapshotSecret ? { nativeSnapshotSecret } : {}), nativeSnapshotDirectory: join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'native-source-snapshots'), ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, signal: controller.signal,
           command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env: input.env ?? {},
           workspacePath: session.workspacePath, ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }
+        const backing = nativeContentSnapshotBacking(input.expectedReference, nativeSnapshotSecret)
+        if (backing) Object.assign(context, { nativeSnapshotReference: backing })
         let authorizedReference = input.expectedReference
         let originalKind: AgentSessionHistoryItem['kind'] | undefined
-        if (input.markdownImage || nativeContentNeedsRevalidation(input.expectedReference, contentSigningSecret)) {
+        if (input.markdownImage || nativeContentNeedsRevalidation(input.expectedReference, contentSigningSecret, nativeSnapshotSecret)) {
           // The Provider reissues a retired credential's exact extent. Markdown file IO also
           // needs its original speaker and purpose even when the signed text remains valid.
           let cursor: string | undefined
@@ -3840,7 +3878,7 @@ export class AgentMuxClient {
             if (item) {
               const part = item.contentParts[input.partIndex]
               if (part?.kind !== 'resource' || part.resourceType !== 'text') throw new AgentMuxError('The original native content is no longer the same resource.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-              revalidateNativeContentReference(input.expectedReference, part.reference, contentSigningSecret)
+              revalidateNativeContentReference(input.expectedReference, part.reference, contentSigningSecret, nativeSnapshotSecret)
               authorizedReference = part.reference; originalKind = item.kind; break
             }
             if (!page.nextCursor) throw new AgentMuxError('The original native record is no longer present.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')

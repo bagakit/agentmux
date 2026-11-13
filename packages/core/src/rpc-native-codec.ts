@@ -1,5 +1,6 @@
 import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
 import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
+import { parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { parseAgentStopInspection, type AgentMuxAgentStopIdentity } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
@@ -597,6 +598,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
       case 'agent.conversation.record': return parseExternalConversationReceipt(value, input as import('./external-conversation.js').AgentExternalConversationReference)
+      case 'agent.conversation.snapshot.ls':
+      case 'agent.conversation.snapshot.release': return parseConversationSnapshotResult(value, input as ConversationSnapshotInput | ConversationSnapshotReleaseInput)
       case 'agent.conversation.release': return parseConversationViewReleaseResult(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)

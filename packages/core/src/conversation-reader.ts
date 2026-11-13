@@ -20,18 +20,18 @@ export type ConversationReaderPort = {
   readHostId?: string
   captured(input: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   nativePage(cursor: string | undefined, limit: number): Promise<AgentSessionHistoryPage>
-  nativeCheckpoint(position?: 'beginning'): Promise<NativeConversationCheckpoint>
-  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint): Promise<NativeConversationChangesPage>
+  nativeCheckpoint(position?: 'beginning', snapshot?: 'scope' | 'range'): Promise<NativeConversationCheckpoint>
+  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint, recover?: NativeConversationCheckpoint): Promise<NativeConversationChangesPage>
   /** Original Provider interface fact. Unsupported sources retain complete process bodies. */
   nativeRecordAvailable?: boolean
-  nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
+  nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string, checkpoint?: NativeConversationCheckpoint): Promise<AgentSessionHistoryItem>
   signal?: AbortSignal
 }
 type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number; inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut }; unavailable?: ConversationSourceCoverage[] }
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
-  after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
+  after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean; nativeRecoveryRange?: ConversationChangesPage['nativeRecoveryRange'] }
 type Cursor = ConversationRef & { processDetails?: 'deferred'; version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
-  through?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
+  through?: ConversationCheckpoint; recover?: ConversationCheckpoint; batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
   native?: { witness: string; first: string; last: string; count: number };
   captured?: { first: number; last: number; count: number };
@@ -150,14 +150,14 @@ async function discover(ref: ConversationRef, port: ConversationReaderPort): Pro
     return { scope: { sources: coverage.map(c => c.source) }, coverage, position: { capturedBefore: null } }
   }
 }
-export async function conversationCheckpoint(ref: ConversationRef, port: ConversationReaderPort, nativePosition?: 'beginning'): Promise<ConversationCheckpointPage> {
+export async function conversationCheckpoint(ref: ConversationRef, port: ConversationReaderPort, nativePosition?: 'beginning', nativeSnapshot?: 'scope' | 'range'): Promise<ConversationCheckpointPage> {
   port.signal?.throwIfAborted()
   const found = await discover(ref, port), cuts: ConversationFrontier['cuts'][number][] = []
   if (found.position.capturedCut) cuts.push({ kind: 'captured', ...found.position.capturedCut })
   const native = found.scope.sources.find(s => s.kind === 'native')
   if (native) {
     try {
-      const checkpoint = await port.nativeCheckpoint(nativePosition)
+      const checkpoint = await port.nativeCheckpoint(nativePosition, nativeSnapshot)
       if (checkpoint.source.providerId !== native.providerId || checkpoint.source.nativeSessionId !== native.nativeSessionId) return fail('The original native source changed before its checkpoint.')
       cuts.unshift({ kind: 'native', checkpoint })
       const c = found.coverage.find(c => c.source.kind === 'native')!; c.current = 'complete-through-cut'; c.readExtent = { through: checkpoint.cursor }
@@ -258,7 +258,7 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
 }
 async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, originals: ReadonlyMap<string, ConversationSourceRecord>): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
   const checkpoint = state.checkpoint!, rows: ConversationSourceRecord[] = [], coverage = state.scope.sources.map(initialCoverage), cuts = [...checkpoint.cuts]
-  let more = false
+  let more = false, nativeRecoveryRange: ConversationChangesPage['nativeRecoveryRange']
   for (const source of state.scope.sources) {
     const at = coverage.findIndex(c => conversationSourceKey(c.source) === conversationSourceKey(source))
     if (source.kind === 'native') {
@@ -267,13 +267,17 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
       try {
         const upper = state.through?.frontier.cuts.find(c => c.kind === 'native')
         if (state.through && upper?.kind !== 'native') throw new AgentMuxError('The upper frontier lacks this original native source.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
-        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined)
+        if (state.recover && (state.recover.sourceHostId !== ref.hostId || state.recover.frontier.hostId !== ref.hostId || !same(state.recover.frontier.scope, checkpoint.scope))) throw new AgentMuxError('The recovery scope belongs to another original source vector.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        const original = state.recover?.frontier.cuts.find(c => c.kind === 'native')
+        if (state.recover && original?.kind !== 'native') throw new AgentMuxError('Recovery requires the original native sharing cut.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
+        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined, original?.kind === 'native' ? original.checkpoint : undefined)
         if (page.agentSessionId !== ref.agentSessionId || page.hostId !== ref.hostId ||
           page.source.providerId !== source.providerId || page.source.nativeSessionId !== source.nativeSessionId ||
           page.checkpoint.agentSessionId !== ref.agentSessionId || page.checkpoint.source.providerId !== source.providerId || page.checkpoint.source.nativeSessionId !== source.nativeSessionId)
           return fail('The native primitive returned another original source. Its prior cut is retained.')
         const sourceRows = page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
-          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])), ...(page.digests?.[item.id] ? { recordDigest: page.digests[item.id] } : {}) }))
+          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])), ...(page.digests?.[item.id] ? { recordDigest: page.digests[item.id] } : {}), ...(page.identities?.[item.id] ? { recordIdentity: page.identities[item.id] } : {}) }))
+        nativeRecoveryRange = page.recoveryRange
         const nextCoverage: ConversationSourceCoverage = { ...initialCoverage(source), current: page.more ? 'partial' : 'complete-through-cut', readExtent: { from: cut.checkpoint.cursor, through: page.checkpoint.cursor } }
         rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'native', checkpoint: page.checkpoint }
         more ||= page.more; coverage[at] = nextCoverage
@@ -320,7 +324,7 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
       } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, String(cut.sequence)) }
     } else coverage[at] = unavailable(source, new AgentMuxError('The original frontier has no resolved source identity. Later discovery requires a new explicit checkpoint.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
   }
-  return { rows, batch: { index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more } }
+  return { rows, batch: { index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more, ...(nativeRecoveryRange ? { nativeRecoveryRange } : {}) } }
 }
 type NativeCut = Extract<ConversationFrontier['cuts'][number], { kind: 'native' }>
 type CapturedCut = Extract<ConversationFrontier['cuts'][number], { kind: 'captured' }>
@@ -383,7 +387,7 @@ async function anchorBatch(input: ConversationTimelineReadInput, port: Conversat
   const anchor = input.anchor, reference = input.record ?? anchor!.record, rows: ConversationSourceRecord[] = [], source = reference.source, coverage = state.scope.sources.map(initialCoverage)
   try {
     if (source.kind === 'native') {
-      const item = await port.nativeRecord(source, source.recordId), value = row(input, { kind: 'native', item }, { kind: 'native-page', source, indexInPage: 0 })
+      const item = await port.nativeRecord(source, source.recordId, state.checkpoint?.cuts.find((cut): cut is NativeCut => cut.kind === 'native')?.checkpoint), value = row(input, { kind: 'native', item }, { kind: 'native-page', source, indexInPage: 0 })
       if (anchor && value.revision !== anchor.revision) return fail('This original native version is unavailable; latest content cannot replace the anchor.')
       if (input.record) {
         // The opening cut cannot certify a record created while this exact read was pending.
@@ -463,6 +467,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   let state: Cursor
   if (input.cursor) {
     state = decode(input.cursor, ref, mode)
+    if (mode === 'changes' && !same(state.recover, (input as ConversationChangesInput).recover)) return fail('The continuation changed its original recovery scope.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     if (mode === 'changes' && !same(state.through, (input as ConversationChangesInput).through)) return fail('The continuation changed its original upper frontier.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     if (mode === 'changes' && !same(state.checkpoint, (input as ConversationChangesInput).checkpoint.frontier) || ('record' in input && input.record ? !same(state.anchor?.record, input.record) : !same(state.anchor, 'anchor' in input ? input.anchor : undefined))) return fail('The continuation belongs to another original frontier or anchor.')
   } else if (mode === 'inspect' && input.view && !('anchor' in input && input.anchor) && !('record' in input && input.record) && !('nativeSource' in input && input.nativeSource)) {
@@ -476,7 +481,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const checkpoint = (input as ConversationChangesInput).checkpoint.frontier
     const through = (input as ConversationChangesInput).through
     if (through && !same(through.frontier.scope, checkpoint.scope)) return fail('The upper frontier belongs to another original source scope.')
-    state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, ...(through ? {through} : {}), position: {} }
+    state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, ...(through ? {through} : {}), ...('recover' in input && input.recover ? { recover: input.recover } : {}), position: {} }
   } else if ('anchor' in input && input.anchor) state = { ...ref, version: 1, mode, scope: input.anchor.frontier.frontier.scope, checkpoint: input.anchor.frontier.frontier, anchor: input.anchor, position: {} }
   else {
     const opening = await conversationCheckpoint(ref, port), checkpoint = opening.checkpoint.frontier
@@ -508,7 +513,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   try {
     state.viewId = view.id
     if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
-    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent, state.processDetails]))
+    const requestKey = hash(JSON.stringify([state.recover, mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent, state.processDetails]))
     if (!state.snapshotId) {
       const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
       if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
@@ -659,7 +664,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
           ...(snapshot.anchor ? { anchor: { ...snapshot.anchor, frontier: checkpoint } } : {}),
           view: complete ? encode({ ...ref, ...(state.processDetails ? { processDetails: state.processDetails } : {}), version: 1, mode: 'inspect', scope: state.scope, position: {}, viewId: view.id, viewRevision: snapshot.revision }) : null,
           replay: encode({ ...state, position: {}, batch: state.batch! }), checkpoint, outside: snapshot.outside, navigation: { older: complete ? historyCursor(navigation.older) : null, newer: complete ? historyCursor(navigation.newer, 'newer') : null } },
-        ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more } : {}) }
+        ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more, ...(batch.nativeRecoveryRange ? { nativeRecoveryRange: batch.nativeRecoveryRange } : {}) } : {}) }
     }
     // The envelope changes with the cursor; accepted entries do not. Count the
     // original JSON bytes and commas without re-encoding the accepted prefix.
@@ -721,7 +726,7 @@ export function forwardConversationInput<T extends ConversationTimelineReadInput
   const sourceHostId = checkpoint?.sourceHostId ?? recordHostId ?? continuation?.sourceHostId ?? view?.sourceHostId
   if (checkpoint && checkpoint.hostId !== input.hostId || recordHostId && sourceHostId !== recordHostId || continuation && sourceHostId !== continuation.sourceHostId || view && sourceHostId !== view.sourceHostId) return fail('Conversation route, anchor or frontier changed its original source.')
   return { input: { ...input, hostId: 'local', ...(continuation ? { cursor: continuation.cursor } : {}), ...(view ? { view: view.cursor } : {}),
-    ...('checkpoint' in input ? { checkpoint: { ...input.checkpoint, hostId: 'local' }, ...(input.through?{through:{...input.through,hostId:'local'}}:{}) } : {}),
+    ...('checkpoint' in input ? { checkpoint: { ...input.checkpoint, hostId: 'local' }, ...(input.through?{through:{...input.through,hostId:'local'}}:{}), ...(input.recover?{recover:{...input.recover,hostId:'local'}}:{}) } : {}),
     ...('anchor' in input && input.anchor ? { anchor: { ...input.anchor, frontier: { ...input.anchor.frontier, hostId: 'local' } } } : {}) },
     ...(sourceHostId ? { sourceHostId } : {}) }
 }

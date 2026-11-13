@@ -216,7 +216,7 @@ export * from './conversation-landmarks.js'
 
 export type { ConversationProjectionInput } from './conversation-timeline.js'
 export type * from './conversation-stream.js'
-export { conversationValuesEqual, conversationRevision, conversationRecordId, conversationInvocationId,
+export { conversationValuesEqual, conversationRevision, conversationContentRevision, conversationRecordId, conversationInvocationId,
   conversationRecordRelations, conversationRecordRole, conversationRecordAuthor, conversationEventAuthor,
   conversationSourceKey, conversationTailComesAfter, conversationInvocationFacts, conversationInvocationMembers,
   conversationSameEventTarget, conversationEventCoalesces, conversationInputKey, conversationInputIdentity, conversationInputWitnessKey,

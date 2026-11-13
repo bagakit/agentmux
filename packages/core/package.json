@@ -432,6 +432,7 @@
     "diff": "9.0.0",
     "fs-native-extensions": "1.5.1",
     "json-rpc-2.0": "1.8.1",
+    "koffi": "3.3.7",
     "node-diff3": "3.2.1",
     "remark-parse": "^11.0.0",
     "unified": "^11.0.5",

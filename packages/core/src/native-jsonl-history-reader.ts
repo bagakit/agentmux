@@ -1,3 +1,8 @@
+import { DatabaseSync } from 'node:sqlite'
+import { join, dirname } from 'node:path'
+import { chmod } from 'node:fs/promises'
+import { decodeNativeSnapshotCursor, encodeNativeSnapshotCursor, liveNativeCut, nativeSnapshotStore, type NativeSnapshotCursor } from './native-snapshot-cursor.js'
+import type { NativeSnapshotLease } from './native-source-snapshot.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './session-history-changes.js'
 import { constants } from 'node:fs'
 import { open, stat, type FileHandle } from 'node:fs/promises'
@@ -88,6 +93,9 @@ export async function readNativeHistoryBytes(
 
 /** Bounded, read-only physical JSONL paging. Provider readers own every record's meaning. */
 export class NativeJsonlHistoryReader {
+  private recoveryIndex: DatabaseSync | undefined
+  private snapshotCursor: NativeSnapshotCursor | undefined
+  private snapshotLease: NativeSnapshotLease | undefined
   private readonly budget: NativeHistoryReadBudget
   private readonly identity: { dev: number; ino: number }
   private position: number
@@ -117,7 +125,7 @@ export class NativeJsonlHistoryReader {
     if (!slot.text) {
       const metadata = nativeStringMetadata()
       appendNativeStringMetadata(metadata, slot.value)
-      slot.text = nativeSourceText({ path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
+      slot.text = nativeSourceText({ path: this.actualPath, ...(this.snapshotLease && this.snapshotCursor ? { snapshot: this.snapshotCursor.reference } : {}), ...this.identity, cut: this.cut,
         head: this.head, tail: this.tail, start: slot.start, end: slot.end }, metadata)
     }
     return slot.text
@@ -129,7 +137,8 @@ export class NativeJsonlHistoryReader {
     { dev, ino, birthtimeMs }: { dev: number; ino: number; birthtimeMs: number },
     size: number,
     cursor: Cursor | undefined,
-    budget: NativeHistoryReadBudget
+    budget: NativeHistoryReadBudget,
+    private readonly actualPath = context.transcriptPath!
   ) {
     this.budget = budget
     this.permitsPartialTail = cursor === undefined
@@ -162,8 +171,31 @@ export class NativeJsonlHistoryReader {
       return failure('SOURCE_CHANGED', 'Native history cursor belongs to another source.')
     }
     // Nonblocking open prevents a bad locator naming a FIFO from waiting for a writer.
-    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK)
+    const changes = context as ProviderConversationChangesContext
+    const retained = decodeNativeSnapshotCursor(context, changes.after ?? context.nativeSnapshotCursor)
+    let lease: NativeSnapshotLease | undefined
+    let physicalPath = path
+    let captured: NativeSnapshotCursor | undefined
+    if (retained?.kind === 'range' || context.nativeSnapshotReference) { lease = await nativeSnapshotStore(context).open(context.nativeSnapshotReference ?? retained!.reference); physicalPath = lease.path; captured = retained ?? { version: 1, kind: 'range', reference: context.nativeSnapshotReference!, cursor: '', origin: lease.manifest.origin } }
+    let originalFile = lease?.file ?? await open(path, constants.O_RDONLY | constants.O_NONBLOCK)
     try {
+      if (changes.snapshot || changes.recover && retained?.kind !== 'range') {
+        const store = nativeSnapshotStore(context)
+        if (changes.recover) { const failure = await store.recoveryFailure(originalFile, changes.recover); if (failure) throw failure }
+        const receipt = await store.capture(originalFile, changes.snapshot ?? 'range', context.signal, async (file, size) => {
+          let end = size
+          while (end) {
+            const start = Math.max(0, end - 64 * 1024), bytes = await readNativeHistoryBytes(file, start, end - start, context.signal, activeBudget), newline = bytes.lastIndexOf(10)
+            if (newline >= 0) { end = start + newline + 1; break }; end = start
+          }
+          return { start: changes.tail ? end : 0, end }
+        })
+        await originalFile.close()
+        lease = await store.open(receipt.reference)
+        physicalPath = lease.path; originalFile = lease.file
+        captured = { version: 1, kind: changes.snapshot ?? 'range', reference: receipt.reference, cursor: '', origin: lease.manifest.origin }
+      }
+      const file = originalFile
       context.signal.throwIfAborted()
       if (Date.now() - activeBudget.startedAt > SESSION_HISTORY_TIMEOUT_MS) {
         return failure('TIMEOUT', 'Native transcript page timed out.')
@@ -174,14 +206,112 @@ export class NativeJsonlHistoryReader {
       if (cursor && (cursor.dev !== current.dev || cursor.ino !== current.ino || cursor.cut > current.size)) {
         return failure('SOURCE_CHANGED', 'Native transcript was replaced or truncated; reopen its newest page.')
       }
-      const reader = new NativeJsonlHistoryReader(context, file, current, current.size, cursor, activeBudget)
+      const reader = new NativeJsonlHistoryReader(context, file, current, current.size, cursor, activeBudget, physicalPath)
+      reader.snapshotCursor = captured ?? retained; reader.snapshotLease = lease
+      if (lease) { reader.cut = lease.manifest.end; reader.position = reader.cut }
       if (cursor) await reader.verifyUnchanged()
       return reader
     } catch (error) {
-      await file.close()
+      if (lease) await lease.close(); else await originalFile.close()
       throw error
     }
   }
+
+  async prepareRecovery(convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>,
+    stable: ((row: Record<string, unknown>) => boolean) | undefined, original: string): Promise<void> {
+    if (this.snapshotCursor?.recovery) { await this.openRecoveryIndex(); return }
+    if (!this.snapshotLease || !this.snapshotCursor || !stable) return failure('SOURCE_REPAIR_REQUIRED', 'This original source lacks qualified stable recovery identities.')
+    const store = nativeSnapshotStore(this.context), scope = decodeNativeSnapshotCursor(this.context, original)
+    const sourceOrigin = this.snapshotCursor.origin
+    if (BigInt(sourceOrigin.birth) <= 0n) return failure('SOURCE_REPAIR_REQUIRED', 'The original filesystem has no qualified birth identity for automatic recovery.')
+    const expectedBirth = Number(BigInt(sourceOrigin.birth) / 1_000_000_000n) * 1000 + Number(BigInt(sourceOrigin.birth) % 1_000_000_000n) / 1e6
+    let retainedOffset = 0
+    for (const token of [original, (this.context as ProviderConversationChangesContext).after]) {
+      if (!token) return failure('SOURCE_CHANGED', 'Recovery requires both original source and sharing cuts.')
+      const wrapped = decodeNativeSnapshotCursor(this.context, token)
+      let cut: { version?: number; providerId?: string; nativeSessionId?: string; ino?: number; birth?: number; offset?: number }
+      try { cut = JSON.parse(Buffer.from(wrapped?.cursor ?? token, 'base64url').toString('utf8')) as typeof cut } catch { return failure('INVALID_CURSOR', 'The original source cut is malformed.') }
+      if (token === (this.context as ProviderConversationChangesContext).after && Number.isSafeInteger(cut.offset)) retainedOffset = Number(cut.offset)
+      if (cut.version !== 1 || cut.providerId !== this.context.source.providerId || cut.nativeSessionId !== this.context.source.nativeSessionId || cut.ino !== Number(sourceOrigin.ino) || cut.birth !== expectedBirth)
+        return failure('SOURCE_CHANGED', 'The original native file identity changed; a matching prefix cannot authorize a replacement source.')
+    }
+    let start: number
+    if (scope) {
+      const before = await store.open(scope.reference)
+      try {
+        if (before.manifest.origin.ino !== sourceOrigin.ino || before.manifest.origin.birth !== sourceOrigin.birth) return failure('SOURCE_CHANGED', 'The original scope snapshot belongs to another physical native source.')
+        start = before.manifest.start
+        if (start > this.cut) return failure('SOURCE_REPAIR_REQUIRED', 'The original sharing prefix is missing from this frozen source.')
+        for (let at = 0; at < start; at += 64 * 1024) {
+          const length = Math.min(64 * 1024, start - at)
+          const expected = await readNativeHistoryBytes(before.file, at, length, this.context.signal, this.budget)
+          if (!expected.equals(await this.read(at, length))) return failure('SOURCE_REPAIR_REQUIRED', 'The original complete sharing prefix changed; an exact original-owner range review is required.')
+        }
+      } finally { await before.close() }
+    } else {
+      let saved: { offset: number; head: string; tail: string }
+      try { saved = JSON.parse(Buffer.from(original, 'base64url').toString('utf8')) as typeof saved } catch { return failure('INVALID_CURSOR', 'The original scope cut is malformed.') }
+      // Only these old cuts authenticate their *entire* prefix. Larger sampled cuts
+      // cannot retrospectively authorize the omitted bytes.
+      if (!Number.isSafeInteger(saved.offset) || saved.offset < 0 || saved.offset > 256 || saved.offset > this.cut) return failure('SOURCE_REPAIR_REQUIRED', 'The old sharing cut has no retained complete-prefix evidence.')
+      const fingerprints = await this.prefixFingerprints(saved.offset)
+      if (saved.head !== fingerprints.head || saved.tail !== fingerprints.tail) return failure('SOURCE_REPAIR_REQUIRED', 'The complete old sharing prefix is no longer available.')
+      start = saved.offset
+    }
+    if (start > retainedOffset) return failure('INVALID_CURSOR', 'The original sharing start is later than its retained source cut.')
+    if (start && (await this.read(start - 1, 1))[0] !== 10) return failure('SOURCE_REPAIR_REQUIRED', 'The original scope is not a complete record boundary.')
+    const path = join(dirname(this.actualPath), 'identities.sqlite')
+    const created = await open(path, 'wx', 0o600); await created.close()
+    const index = new DatabaseSync(path)
+    try {
+      index.exec('PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; CREATE TABLE identity(id TEXT PRIMARY KEY, digest TEXT NOT NULL, position INTEGER NOT NULL, excluded INTEGER NOT NULL)')
+      const find = index.prepare('SELECT digest,excluded FROM identity WHERE id=?'), insert = index.prepare('INSERT INTO identity VALUES(?,?,?,?)')
+      this.forwardPosition = 0
+      for (;;) {
+        const entry = await this.readNext(); if (!entry) break
+        const item = await convert(entry.value, entry.start); if (!item) continue
+        // A positional ID or open semantic relation cannot be silently reinterpreted
+        // after a rewrite. This does not block ordinary source reads or input.
+        const publicCandidate = ['assistant-message', 'user-message'].includes(item.kind) && item.contentParts.some(part => part.contentEligibility === 'public') || !!item.questionRequest || !!item.questionAnswers || item.turnOutcome?.status === 'failed' || item.contentParts.some(part => part.kind === 'resource' && part.contentEligibility === 'public')
+        const crossRecord = item.conversation && Object.keys(item.conversation).some(key => key !== 'nativeInvocationScope')
+        if (entry.start >= start && publicCandidate && (!stable(entry.value) || crossRecord || item.questionRequest || item.questionAnswers)) return failure('SOURCE_REPAIR_REQUIRED', 'The frozen range contains an identity or semantic relation needing original-owner qualification.')
+        const digest = await this.recordDigest(entry), previous = find.get(item.id)
+        if (previous && previous.digest !== digest) return failure('SOURCE_REPAIR_REQUIRED', 'The frozen range contains conflicting versions of one native identity.')
+        if (!previous) insert.run(item.id, digest, entry.start, entry.start < start ? 1 : 0)
+      }
+    } finally { index.close() }
+    await chmod(path, 0o600)
+    const fd = await open(path, 'r'); try { await fd.sync() } finally { await fd.close() }
+    const state = await stat(path)
+    this.snapshotCursor.recovery = { start, index: { ino: state.ino, size: state.size, mtimeMs: state.mtimeMs, ctimeMs: state.ctimeMs } }
+    // This source was just proven to retain the original sharing prefix, so its
+    // retained range now carries exactly that original start, never the current end.
+    await store.setRangeStart(this.snapshotLease, start)
+    this.forwardPosition = start
+    await this.openRecoveryIndex()
+  }
+  private async openRecoveryIndex(): Promise<void> {
+    if (this.recoveryIndex || !this.snapshotCursor?.recovery) return
+    const path = join(dirname(this.actualPath), 'identities.sqlite'), current = await stat(path), expected = this.snapshotCursor.recovery.index
+    if (Object.entries(expected).some(([key, value]) => Reflect.get(current, key) !== value)) return failure('SOURCE_REPAIR_REQUIRED', 'The validated original identity inventory changed.')
+    this.recoveryIndex = new DatabaseSync(path, { readOnly: true })
+  }
+  async recoveredItemAccepted(id: string, position: number): Promise<boolean> {
+    if (!this.snapshotCursor?.recovery) return true
+    await this.openRecoveryIndex()
+    const row = this.recoveryIndex!.prepare('SELECT position,excluded FROM identity WHERE id=?').get(id)
+    if (!row) return failure('SOURCE_REPAIR_REQUIRED', 'The original range identity inventory is incomplete.')
+    return row.excluded === 0 && row.position === position
+  }
+  async rememberRecoveryFailure(scope: string, error: unknown): Promise<void> {
+    if (this.snapshotCursor) await nativeSnapshotStore(this.context).rememberRecoveryFailure(this.snapshotCursor.origin, this.snapshotLease?.manifest.dataGeneration, scope, error).catch(() => undefined)
+  }
+  async recoveryRange(): Promise<{ from: string; through: string } | undefined> {
+    if (!this.snapshotCursor?.recovery || !this.snapshotLease) return undefined
+    const at = async (offset: number) => encodeNativeSnapshotCursor(this.context, { ...this.snapshotCursor!, kind: 'range', cursor: Buffer.from(JSON.stringify({ version: 1, ...this.context.source, ...this.identity, birth: this.birth, offset, ...await this.prefixFingerprints(offset) })).toString('base64url') })
+    return { from: await at(this.snapshotCursor.recovery.start), through: await at(this.snapshotLease.manifest.end) }
+  }
+  get recovered(): boolean { return !!this.snapshotCursor?.recovery }
 
   private check(): void {
     this.context.signal.throwIfAborted()
@@ -255,7 +385,7 @@ export class NativeJsonlHistoryReader {
           stringRange = currentRange
           if (big || currentRange && currentRange.end - currentRange.start > SESSION_HISTORY_MAX_PAGE_BYTES / 2) {
             if (!currentRange || currentRange.end <= currentRange.start) return failure('INVALID_TRANSCRIPT', 'A native string extent is incomplete.')
-            deferred = nativeSourceText({ path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
+            deferred = nativeSourceText({ path: this.actualPath, ...(this.snapshotLease && this.snapshotCursor ? { snapshot: this.snapshotCursor.reference } : {}), ...this.identity, cut: this.cut,
               head: this.head, tail: this.tail, start: currentRange.start, end: currentRange.end },
               metadata)
             retainedBytes += 4096 // bounded source metadata, not its unmaterialized body
@@ -414,7 +544,7 @@ export class NativeJsonlHistoryReader {
   /** Reuse the physical source boundary for durable append reads, independently of UI page cursors. */
   async seekChanges(after?: string, tail = false): Promise<void> {
     if (after !== undefined) {
-      const saved = this.savedChangesCut(after), bound = Math.min(saved.offset, this.cut)
+      const saved = this.savedChangesCut(decodeNativeSnapshotCursor(this.context, after)?.cursor ?? after), bound = Math.min(saved.offset, this.cut)
       const fingerprints = await this.prefixFingerprints(bound)
       if (saved.head !== fingerprints.head) return failure('SOURCE_CHANGED', 'The original conversation source was replaced.')
       // Same file and beginning, but the bytes before the cut are gone or differ:
@@ -492,8 +622,16 @@ export class NativeJsonlHistoryReader {
 
   async changesCursor(): Promise<string> {
     await this.verifyUnchanged()
-    return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, ...this.identity, birth: this.birth,
+    let cursor = Buffer.from(JSON.stringify({ version: 1, ...this.context.source, ...this.identity, birth: this.birth,
       offset: this.forwardPosition, ...await this.prefixFingerprints(this.forwardPosition) })).toString('base64url')
+    if (this.snapshotCursor) {
+      if (this.snapshotLease) await nativeSnapshotStore(this.context).retain(this.snapshotLease)
+      const completed = this.snapshotCursor.recovery && this.snapshotLease && this.forwardPosition >= this.snapshotLease.manifest.end
+      if ((this.snapshotCursor.kind === 'scope' || completed) && this.snapshotLease) cursor = liveNativeCut(cursor, this.snapshotCursor.origin)
+      if (completed) this.snapshotCursor = { ...this.snapshotCursor, kind: 'scope' }; if (completed) delete this.snapshotCursor.recovery
+      cursor = encodeNativeSnapshotCursor(this.context, { ...this.snapshotCursor, cursor })
+    }
+    return cursor
   }
 
   /** The changes cut of this same physical history snapshot, including when its
@@ -511,7 +649,7 @@ export class NativeJsonlHistoryReader {
 
   async verifyUnchanged(): Promise<void> {
     this.check()
-    const current = await stat(this.context.transcriptPath!)
+    const current = await stat(this.actualPath)
     if (current.dev !== this.identity.dev || current.ino !== this.identity.ino || current.size < this.cut) {
       failure('SOURCE_CHANGED', 'Native transcript was replaced or truncated during reading.')
     }
@@ -527,7 +665,7 @@ export class NativeJsonlHistoryReader {
   async historyReplayCursor(): Promise<string> {
     await this.verifyUnchanged()
     const before = Math.min(this.context.cursor ? decodeCursor(this.context.cursor).before : this.cut, this.cut)
-    return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, path: this.context.transcriptPath!,
+    return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, path: this.actualPath,
       ...this.identity, cut: this.cut, before, head: this.head, tail: this.tail,
       ...(this.continuation === undefined ? {} : { continuation: this.continuation }) })).toString('base64url')
   }
@@ -535,13 +673,13 @@ export class NativeJsonlHistoryReader {
   async nextCursor(continuation?: string): Promise<string | null> {
     await this.verifyUnchanged()
     if (this.position === 0) return null
-    const cursor: Cursor = { version: 1, ...this.context.source, path: this.context.transcriptPath!,
+    const cursor: Cursor = { version: 1, ...this.context.source, path: this.actualPath,
       ...this.identity, cut: this.cut, before: this.position, head: this.head, tail: this.tail,
       ...(continuation === undefined ? {} : { continuation }) }
     return Buffer.from(JSON.stringify(cursor)).toString('base64url')
   }
 
-  async close(): Promise<void> { await this.file.close() }
+  async close(): Promise<void> { this.recoveryIndex?.close(); if (this.snapshotLease) await this.snapshotLease.close(); else await this.file.close() }
 }
 
 export const NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES = 64 * 1024
@@ -552,17 +690,23 @@ const RECORD_DIGEST_READ_BYTES = 1024 * 1024
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
   convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>,
   /** The Provider supplies record identity so returned original bytes can carry digests. */
-  identify?: (row: Record<string, unknown>, start: number) => string | null): Promise<ProviderConversationChangesPage> {
+  identify?: (row: Record<string, unknown>, start: number) => string | null,
+  stable?: (row: Record<string, unknown>) => boolean): Promise<ProviderConversationChangesPage> {
   if (context.head && (context.after !== undefined || context.tail)) return failure('INVALID_CURSOR', 'A beginning checkpoint cannot include another source position.')
-  await reader.seekChanges(context.after, context.tail === true)
+  if (context.recover && !decodeNativeSnapshotCursor(context, context.after)?.recovery) {
+    try { await reader.prepareRecovery(convert, stable, context.recover) }
+    catch (error) { await reader.rememberRecoveryFailure(context.recover, error); throw error }
+  }
+  else await reader.seekChanges(context.after, context.tail === true)
   if (context.through !== undefined) await reader.limitChanges(context.through)
-  const items: AgentSessionHistoryItem[] = [], digests: Record<string, string> = {}
+  const items: AgentSessionHistoryItem[] = [], digests: Record<string, string> = {}, identities: Record<string, 'protocol' | 'position'> = {}
   let bytes = 0
   if (!context.tail && !context.head) for (let scanned = 0; scanned < context.limit; scanned++) {
     const entry = await reader.readNext()
     if (!entry) break
     const original = await convert(entry.value, entry.start)
     if (!original) continue
+    if (!await reader.recoveredItemAccepted(original.id, entry.start)) continue
     const item = await reader.materializeItem(original), size = Buffer.byteLength(JSON.stringify(item))
     if (bytes + size > SESSION_HISTORY_MAX_PAGE_BYTES - NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES) {
       if (!items.length) throw new AgentMuxError('The original change cannot fit its materialized page.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
@@ -571,7 +715,9 @@ export async function readNativeConversationChanges(reader: NativeJsonlHistoryRe
     // Versions of one native identity must remain separate accepted pages.
     if (items.some(previous => previous.id === item.id)) { reader.repeatNext(); break }
     items.push(item); bytes += size
+    if (stable) identities[item.id] = stable(entry.value) ? 'protocol' : 'position'
     if (identify) digests[item.id] = await reader.recordDigest(entry)
   }
-  return { source: context.source, items, ...(identify ? { digests } : {}), cursor: await reader.changesCursor(), more: context.tail || context.head ? false : await reader.hasMoreChanges() }
+  const recoveryRange = await reader.recoveryRange()
+  return { source: context.source, items, ...(recoveryRange ? { recoveryRange } : {}), ...(identify ? { digests } : {}), ...(stable ? { identities } : {}), cursor: await reader.changesCursor(), more: context.tail || context.head ? false : await reader.hasMoreChanges() }
 }

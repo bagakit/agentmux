@@ -1,3 +1,4 @@
+import { nativeSnapshotStore } from './native-snapshot-cursor.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from './session-history.js'
@@ -11,7 +12,7 @@ import { nativeRangeBytes, nativeStringChunks, nativeStringRange, type NativeCon
 
 type SourceBlock = NativeContentRange & { rawSha256: string }
 type Segment = { literal: string; sourceBlocks?: SourceBlock[] } | (SourceBlock & { escapeDepth: number; byteLength: number; base64?: { skip: number; length: number } })
-type Reference = { version: 1; authority: string; agentSessionId?: string; providerId: string; nativeSessionId: string; ownerPath: string;
+type Reference = { version: 1; custody?: 'snapshot'; authority: string; agentSessionId?: string; providerId: string; nativeSessionId: string; ownerPath: string;
   recordId: string; partIndex: number; turnId?: string; segments: Segment[]; byteLength: number; sha256: string }
 const key = randomBytes(32)
 const prefix = 'amux-native-content:'
@@ -129,9 +130,11 @@ export async function materializeNativeContent(
       hash.update(bytes); segment.byteLength = bytes.length
     }
     const byteLength = segments.reduce((total, segment) => total + lengthOf(segment), 0), sha256 = hash.digest('hex')
-    const reference = encode({ version: 1, authority: digest(signingKey(context.contentSigningSecret)), ...(context.agentSessionId === undefined ? {} : { agentSessionId: context.agentSessionId }),
+    const snapshotBacked = segments.some(segment => 'literal' in segment ? segment.sourceBlocks?.some(block => block.snapshot) : segment.snapshot)
+    const secret = snapshotBacked ? context.nativeSnapshotSecret : context.contentSigningSecret
+    const reference = encode({ version: 1, ...(snapshotBacked ? { custody: 'snapshot' as const } : {}), authority: digest(signingKey(secret)), ...(context.agentSessionId === undefined ? {} : { agentSessionId: context.agentSessionId }),
       ...context.source, ownerPath: context.transcriptPath!, recordId: item.id,
-      partIndex: contentParts.length, ...(item.turnId === undefined ? {} : { turnId: item.turnId }), segments, byteLength, sha256 }, context.contentSigningSecret)
+      partIndex: contentParts.length, ...(item.turnId === undefined ? {} : { turnId: item.turnId }), segments, byteLength, sha256 }, secret)
     contentParts.push({ kind: 'resource', resourceType: 'text', reference,
       ...(part.contentEligibility === undefined ? {} : { contentEligibility: part.contentEligibility }),
       ...(part.contentRole === undefined ? {} : { contentRole: part.contentRole }),
@@ -146,9 +149,23 @@ export async function readNativeContentResource(
   input: AgentSessionHistoryResourceReadOptions,
   originalKind?: AgentSessionHistoryItem['kind']
 ): Promise<AgentSessionHistoryResourceReadResult['result']> {
-  const reference = decode(input.expectedReference, context.contentSigningSecret)
+  const inspected = decode(input.expectedReference, context.contentSigningSecret, false)
+  const reference = decode(input.expectedReference, inspected.custody === 'snapshot' ? context.nativeSnapshotSecret : context.contentSigningSecret)
+  const blocks = reference.segments.flatMap(segment => 'literal' in segment ? segment.sourceBlocks ?? [] : [segment])
+  const refs = [...new Set(blocks.flatMap(block => block.snapshot ? [block.snapshot] : []))]
+  const leases = [] as Awaited<ReturnType<ReturnType<typeof nativeSnapshotStore>['open']>>[]
+  try {
+    for (const id of refs) {
+      const lease = await nativeSnapshotStore({ ...context, limit: 1 }).open(id); leases.push(lease)
+      if (blocks.some(block => block.snapshot === id && block.path !== lease.path)) return failure('The signed snapshot extent belongs to another retained file.')
+    }
+    return await readNativeContentWithLease(context, input, reference, originalKind)
+  } finally { for (const lease of leases.reverse()) await lease.close() }
+}
+async function readNativeContentWithLease(context: Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'>,
+  input: AgentSessionHistoryResourceReadOptions, reference: Reference, originalKind?: AgentSessionHistoryItem['kind']): Promise<AgentSessionHistoryResourceReadResult['result']> {
   if (reference.agentSessionId !== context.agentSessionId || reference.providerId !== context.source.providerId || reference.nativeSessionId !== context.source.nativeSessionId ||
-    reference.ownerPath !== context.transcriptPath || reference.recordId !== input.recordId || reference.turnId !== input.turnId ||
+    (reference.custody !== 'snapshot' && reference.ownerPath !== context.transcriptPath) || reference.recordId !== input.recordId || reference.turnId !== input.turnId ||
     reference.partIndex !== input.partIndex) return failure('This content reference belongs to another native record or source.')
   if (input.representation === 'image' || input.representation === 'file') {
     const maxBytes = input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES
@@ -202,12 +219,19 @@ export async function readNativeContentResource(
 }
 
 /** A changed credential is not a changed native source. Unauthenticated fields grant no read scope. */
-export function nativeContentNeedsRevalidation(reference: string, secret?: string): boolean {
-  return decode(reference, secret, false).authority !== digest(signingKey(secret))
+export function nativeContentSnapshotBacking(reference: string, secret?: string): string | undefined {
+  if (!nativeContentSnapshotBacked(reference)) return undefined
+  const value = decode(reference, secret), blocks = value.segments.flatMap(segment => 'literal' in segment ? segment.sourceBlocks ?? [] : [segment])
+  return blocks.find(block => block.snapshot)?.snapshot
+}
+export function nativeContentSnapshotBacked(reference: string): boolean { return decode(reference, undefined, false).custody === 'snapshot' }
+export function nativeContentNeedsRevalidation(reference: string, secret?: string, snapshotSecret?: string): boolean {
+  const value = decode(reference, secret, false)
+  return value.authority !== digest(signingKey(value.custody === 'snapshot' ? snapshotSecret : secret))
 }
 /** Only a newly issued reference from the original Provider may authorize an old credential's extent. */
-export function revalidateNativeContentReference(original: string, fresh: string, secret?: string): void {
-  const old = decode(original, secret, false), current = decode(fresh, secret)
+export function revalidateNativeContentReference(original: string, fresh: string, secret?: string, snapshotSecret?: string): void {
+  const old = decode(original, secret, false), inspected = decode(fresh, secret, false), current = decode(fresh, inspected.custody === 'snapshot' ? snapshotSecret : secret)
   const sourceFacts = (block: SourceBlock) => ({ path: block.path, dev: block.dev, ino: block.ino,
     start: block.start, end: block.end, rawSha256: block.rawSha256 })
   const facts = ({ authority: _authority, segments, ...rest }: Reference) => ({ ...rest, segments: segments.map(segment =>

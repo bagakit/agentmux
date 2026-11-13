@@ -362,6 +362,6 @@ export async function readCodexSavedConversationChanges(context: ProviderConvers
   try { return await readNativeConversationChanges(reader, context, async (record, start) => {
     const converted = item(record, start, context.source.nativeSessionId, paginated)
     return converted ? await materializeSavedItem(reader, context, record, start, converted, paginated) : null
-  }, (record, start) => item(record, start, context.source.nativeSessionId, paginated, false)?.id ?? null) }
+  }, (record, start) => item(record, start, context.source.nativeSessionId, paginated, false)?.id ?? null, record => record.type === 'response_item' && object(record.payload).type === 'message' && typeof object(record.payload).id === 'string' && !!object(record.payload).id) }
   finally { await reader.close() }
 }

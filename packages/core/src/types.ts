@@ -1054,6 +1054,12 @@ export type AgentProviderSessionHistoryContext = {
   agentSessionId?: string
   /** Existing private Session credential for domain-separated content signatures; never a public locator. */
   contentSigningSecret?: string
+  /** Private durable Core custody root. Never accepted from a public caller. */
+  nativeSnapshotDirectory?: string
+  /** Durable source custody credential, independent of per-Run Hook rotation. */
+  nativeSnapshotSecret?: string
+  nativeSnapshotCursor?: string
+  nativeSnapshotReference?: string
   source: AgentSessionHistorySource
   /** Exact locator captured from this Session's durable native handle; never guessed from a home directory. */
   transcriptPath?: string

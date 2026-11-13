@@ -4,7 +4,7 @@ import { open, stat, type FileHandle } from 'node:fs/promises'
 import { AgentMuxError } from './errors.js'
 import { NativeText, nativeStringMetadata, appendNativeStringMetadata, type NativeTextValue } from './native-history-value.js'
 
-export type NativeContentExtent = { path: string; dev: number; ino: number; cut: number; head: string; tail: string }
+export type NativeContentExtent = { snapshot?: string; path: string; dev: number; ino: number; cut: number; head: string; tail: string }
 export type NativeContentRange = NativeContentExtent & { start: number; end: number }
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 function changed(message: string): never { throw new AgentMuxError(message, 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') }

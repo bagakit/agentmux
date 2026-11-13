@@ -1,5 +1,6 @@
 import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
 import { parseMessageApplication } from './agent-message-envelope.js'
+import { parseConversationSnapshotInput, parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
@@ -154,7 +155,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -373,8 +374,10 @@ const NATIVE_FIELDS = {
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction', 'moteSource'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
-  'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition'],
-  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view'],
+  'agent.conversation.snapshot.ls': ['hostId', 'agentSessionId', 'source', 'after', 'limit'],
+  'agent.conversation.snapshot.release': ['hostId', 'agentSessionId', 'source', 'reference'],
+  'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition', 'nativeSnapshot'],
+  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'recover', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'],
@@ -1815,6 +1818,16 @@ export class AgentMuxRpcService {
       if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
       const result = await owners[0]!.client.recordExternalConversationMessage(input)
       return parseExternalConversationReceipt(result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.conversation.snapshot.ls' || method === 'agent.conversation.snapshot.release') {
+      const input = parseConversationSnapshotInput(params, method.endsWith('.release'))
+      if (method.endsWith('.release') && (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Releasing durable source evidence requires the original authenticated user or device. Read-only inspection, the original cuts and healthy Agent remain available.', 'CONTROL_PERMISSION_DENIED')
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact original snapshot Host is unavailable.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client
+      const result = method.endsWith('.release') ? await client.releaseConversationSnapshot({ ...input, hostId: 'local' } as ConversationSnapshotReleaseInput)
+        : await client.listConversationSnapshots({ ...input, hostId: 'local' } as ConversationSnapshotInput)
+      return parseConversationSnapshotResult({ ...result, hostId: input.hostId }, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.conversation.release') {
       const input = parseConversationViewReleaseInput(params), forwarded = forwardConversationInput(input)
