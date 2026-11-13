@@ -20,7 +20,7 @@ describe('lightweight File format capabilities', () => {
     ['a.vl.json', 'vega-lite', 'application/json', 'json'],
     ['a.markdown', 'markdown', 'text/markdown', 'markdown'],
     ['a.svg', 'svg', 'image/svg+xml', 'xml'],
-    ['draft.note.json', 'note', 'application/json', 'json']
+    ['draft.note.md', 'note', 'text/markdown', 'markdown']
   ])('declares %s without parsing source', (path, sourcePreview, mime, language) => {
     expect(workspaceFileFormat(path)).toMatchObject({ sourcePreview, mime, language, sourceEditable: true })
     expect(detectLanguage(path)).toBe(language)
