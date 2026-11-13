@@ -46,6 +46,9 @@ const native = vi.hoisted(() => {
       const set = this.listeners.get(event) ?? new Set()
       set.add(listener); this.listeners.set(event, set); return this
     }
+    prependListener(event: string, listener: (...args: any[]) => void) {
+      this.listeners.set(event, new Set([listener, ...(this.listeners.get(event) ?? [])])); return this
+    }
     once(event: string, listener: (...args: any[]) => void) {
       const wrapped = (...args: any[]) => { this.removeListener(event, wrapped); listener(...args) }
       return this.on(event, wrapped)
@@ -879,4 +882,92 @@ it('closed workbench owners revoke late media requests and release the exact ori
     Object.defineProperty(f.window, 'webContents', { configurable: true, writable: true, value: f.app })
     Object.defineProperty(f.app, 'session', { configurable: true, writable: true, value: requesterSession })
   }
+})
+
+// A hidden child of a native window keeps its drawable size, so setBounds alone does not relay out the page:
+// the original view leaves its host for the resize and returns hidden. Only the declared layout host drives it.
+const layoutHost = (f: Awaited<ReturnType<typeof fixture>>, value = geometry) => f.manager.registerPresentation(f.app as never, f.frame as never,
+  { browserId: 'browser', occurrence: { ...occurrence('card'), layoutHost: true }, geometry: value }, f.identity())
+const size = (view: { getBounds(): { width: number; height: number } }) => ({ width: view.getBounds().width, height: view.getBounds().height })
+
+it('lets only the declared layout host relay out a page that is not shown natively', async () => {
+  const f = await fixture(), host = layoutHost(f)
+  const viewer = f.register('viewer', { visible: true, bounds: { x: 0, y: 0, width: 300, height: 200 } })
+  expect(size(f.source)).toEqual({ width: 480, height: 240 })
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.views).toEqual([f.source])
+  const placements = f.addChildView.mock.calls.length
+  const expanded = { visible: true as const, bounds: { x: 24, y: 36, width: 480, height: 512 } }
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, expanded)
+  expect(size(f.source)).toEqual({ width: 480, height: 512 })
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.views).toEqual([f.source])
+  expect(f.addChildView).toHaveBeenCalledTimes(placements + 1)
+  expect(f.manager.nativeOwner('browser')).toBeUndefined()
+  // A move without a size change, as a scrolled reading window gives, does not relay out the page.
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { ...expanded.bounds, y: 300 } })
+  expect(f.addChildView).toHaveBeenCalledTimes(placements + 1)
+  f.manager.updatePresentation(f.app as never, f.frame as never, viewer.leaseId, { visible: true, bounds: { x: 0, y: 0, width: 900, height: 600 } })
+  expect(size(f.source)).toEqual({ width: 480, height: 512 })
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: false })
+  expect(size(f.source)).toEqual({ width: 480, height: 512 })
+  expect(f.source.webContents.getURL()).toBe('https://generic.example/one')
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  expect(f.events()).toEqual([])
+})
+
+it('maps a press on the relaid-out preview through the size the page now has', async () => {
+  const f = await fixture(), host = layoutHost(f)
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, host.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { x: 24, y: 36, width: 480, height: 512 } })
+  const prepared = await f.manager.activatePresentation(f.app as never, f.frame as never, host.leaseId, { kind: 'prepare-first-press',
+    captureId: capture.captureId, navigationId: f.browser.navigationId, down: { x: 0.5, y: 0.5 }, button: 'left', clickCount: 1, modifiers: [] })
+  if (prepared.outcome !== 'prepared') throw new Error('The relaid-out preview must accept a press')
+  expect(prepared.sourceViewport).toMatchObject({ width: 480, height: 512 })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, host.leaseId, { kind: 'commit-first-press', inputScopeId: prepared.inputScopeId, up: { x: 0.5, y: 0.5 }, modifiers: [] })
+  expect(f.source.webContents.sendInputEvent.mock.calls[0]![0]).toMatchObject({ type: 'mouseDown', x: 240, y: 256 })
+})
+
+it('relays out the source being prepared for capture inside its hidden shell', async () => {
+  const f = await fixture(), host = layoutHost(f)
+  f.manager.armPresentationCapture(f.app as never, f.frame as never, host.leaseId)
+  const shell = native.shells.at(-1)!
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { x: 24, y: 36, width: 308, height: 304 } })
+  expect(f.source.getBounds()).toEqual({ x: 0, y: 0, width: 308, height: 304 })
+  expect(shell.views).toEqual([f.source])
+  expect(f.views).toEqual([])
+  expect(f.source.getVisible()).toBe(true)
+})
+
+it('keeps a selected layout host on the original native placement path', async () => {
+  const f = await fixture(), host = layoutHost(f)
+  await f.manager.activatePresentation(f.app as never, f.frame as never, host.leaseId, { kind: 'select', focus: 'preserve' })
+  const moved = { visible: true as const, bounds: { x: 40, y: 60, width: 480, height: 512 } }
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, moved)
+  expect(f.source.getBounds()).toEqual(moved.bounds)
+  expect(f.source.getVisible()).toBe(true)
+  expect(f.manager.nativeOwner('browser')?.bounds).toEqual(moved.bounds)
+})
+
+it('treats only an exact declaration as the layout host', async () => {
+  const f = await fixture()
+  const other = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser',
+    occurrence: { ...occurrence('other'), layoutHost: 'yes' as never }, geometry }, f.identity())
+  f.manager.updatePresentation(f.app as never, f.frame as never, other.leaseId, { visible: true, bounds: { x: 0, y: 0, width: 300, height: 200 } })
+  expect(size(f.source)).toEqual({ width: 900, height: 700 })
+})
+
+it("leaves a page that another owner shows or holds input for at that owner's size", async () => {
+  const f = await fixture(), host = layoutHost(f)
+  const shown = { x: 10, y: 10, width: 640, height: 400 }
+  f.manager.setBounds('browser', shown)
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { x: 24, y: 36, width: 480, height: 512 } })
+  expect(f.source.getBounds()).toEqual(shown)
+  const viewer = f.register('viewer', { visible: true, bounds: shown })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, viewer.leaseId, { kind: 'select', focus: 'preserve' })
+  f.manager.setBounds('browser', null)
+  f.manager.updatePresentation(f.app as never, f.frame as never, host.leaseId, { visible: true, bounds: { x: 24, y: 36, width: 300, height: 200 } })
+  expect(f.source.getBounds()).toEqual(shown)
 })
