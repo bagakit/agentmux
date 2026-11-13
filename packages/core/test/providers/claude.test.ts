@@ -330,6 +330,124 @@ describe('Claude native mod activity', () => {
     })
   })
 
+  it('an asked end travels in the ordered stream, before its turn ends, and never as a second runner', async () => {
+    const runs: Array<Record<string, unknown>> = []
+    let release: (() => void) | undefined
+    const held = new Promise<void>(resolve => { release = resolve })
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async (_argv: string[], init: { stdin: string }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
+        runs.push(body)
+        if (runs.length === 1) await held
+        return { exitCode: 0, stdout: '{}\n', stderr: '' }
+      } }, ui: { log: vi.fn(async () => {}) } }
+    await withNativeActivityMod('agentmux-claude-asked-order-', async handlers => {
+      try {
+        const next = (event: Record<string, unknown>) => event
+        await handlers.get('session.start')!(api, {}, next)
+        handlers.get('turn.start')!(api, { turnId: 'turn-A' }, next)
+        await handlers.get('tool.check')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ decision: 'ask' }))
+        await handlers.get('tool.call')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ ref: 1, result: 'declined' }))
+        handlers.get('turn.complete')!(api, { turnId: 'turn-A', reason: 'answer', isAborted: false }, next)
+        await new Promise<void>(resolve => setImmediate(resolve))
+        // Only the held turn.start is out; the end waits its turn instead of racing on its own runner.
+        expect(runs).toHaveLength(1)
+      } finally { release?.() }
+      await vi.waitFor(() => expect(runs).toHaveLength(3))
+      expect(runs.map(body => body.hook_event_name)).toEqual(['turn.start', CLAUDE_ASKED_TOOL_END_EVENT, 'turn.complete'])
+      expect(runs[1]).toEqual({ hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_q', tool_name: 'AskUserQuestion' })
+    })
+  })
+
+  it('an unconfirmed asked end is kept, sent again ahead of later observations, and holds the delivery gap until confirmed', async () => {
+    const runs: Array<Record<string, unknown>> = []
+    // The first send and the next two resends fail; the third resend is confirmed.
+    let endFailures = 3
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async (_argv: string[], init: { stdin: string }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
+        runs.push(body)
+        const failed = body.hook_event_name === CLAUDE_ASKED_TOOL_END_EVENT && endFailures-- > 0
+        return { exitCode: 0, stdout: '{}\n', stderr: failed ? 'receipt delivery unconfirmed' : '' }
+      } }, ui: { log: vi.fn(async () => {}) } }
+    await withNativeActivityMod('agentmux-claude-asked-retain-', async handlers => {
+      const next = (event: Record<string, unknown>) => event
+      const settled = async () => { await vi.waitFor(() => expect(runs.length).toBeGreaterThan(0)); await new Promise<void>(resolve => setTimeout(resolve, 5)) }
+      const end = { hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_q', tool_name: 'AskUserQuestion' }
+      await handlers.get('session.start')!(api, {}, next)
+      await handlers.get('tool.check')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ decision: 'ask' }))
+      await handlers.get('tool.call')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ ref: 1, result: 'declined' }))
+      await settled()
+      expect(runs.splice(0)).toEqual([end])
+      // The failed end goes first again, keeps its identity, and the turn end is reported as a gap.
+      handlers.get('turn.complete')!(api, { turnId: 'turn-A', reason: 'answer', isAborted: false }, next)
+      await settled()
+      expect(runs.splice(0)).toEqual([end, expect.objectContaining({ hook_event_name: 'AgentMuxActivityUnavailable', reason: 'delivery-gap' })])
+      // Still unconfirmed: a new turn cannot clear the gap while the end is kept.
+      handlers.get('turn.start')!(api, { turnId: 'turn-B' }, next)
+      await settled()
+      expect(runs.splice(0)).toEqual([end, expect.objectContaining({ hook_event_name: 'AgentMuxActivityUnavailable', reason: 'delivery-gap' })])
+      // Confirmed now: the turn starts plainly and no end is sent again.
+      handlers.get('turn.start')!(api, { turnId: 'turn-C' }, next)
+      await settled()
+      expect(runs.splice(0)).toEqual([end, expect.objectContaining({ hook_event_name: 'turn.start', turnId: 'turn-C' })])
+      handlers.get('turn.complete')!(api, { turnId: 'turn-C', reason: 'answer', isAborted: false }, next)
+      await settled()
+      expect(runs.splice(0)).toEqual([expect.objectContaining({ hook_event_name: 'turn.complete', turnId: 'turn-C' })])
+    })
+  })
+
+  it('an asked end that overflows the observation queue keeps its place and goes ahead of the next delivery', async () => {
+    const runs: Array<Record<string, unknown>> = []
+    let release: (() => void) | undefined
+    const held = new Promise<void>(resolve => { release = resolve })
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async (_argv: string[], init: { stdin: string }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
+        runs.push(body)
+        if (runs.length === 1) await held
+        return { exitCode: 0, stdout: '{}\n', stderr: '' }
+      } }, ui: { log: vi.fn(async () => {}) } }
+    await withNativeActivityMod('agentmux-claude-asked-overflow-', async handlers => {
+      const next = (event: Record<string, unknown>) => event
+      try {
+        await handlers.get('session.start')!(api, {}, next)
+        for (let turn = 0; turn < 32; turn++) handlers.get('turn.start')!(api, { turnId: `turn-${turn}` }, next)
+        await handlers.get('tool.check')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ decision: 'ask' }))
+        await handlers.get('tool.call')!(api, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' }, async () => ({ ref: 1, result: 'declined' }))
+      } finally { release?.() }
+      await vi.waitFor(() => expect(runs).toHaveLength(32))
+      expect(runs.some(body => body.hook_event_name === CLAUDE_ASKED_TOOL_END_EVENT)).toBe(false)
+      runs.splice(0)
+      handlers.get('turn.start')!(api, { turnId: 'turn-after' }, next)
+      await vi.waitFor(() => expect(runs).toHaveLength(2))
+      expect(runs[0]).toEqual({ hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_q', tool_name: 'AskUserQuestion' })
+    })
+  })
+
+  it('a call whose end is not yet confirmed cannot make a new identical ask ambiguous', async () => {
+    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+      process: { run: async (_argv: string[], init: { stdin: string }) => {
+        const body = JSON.parse(init.stdin) as Record<string, unknown>
+        return { exitCode: 0, stdout: '{}\n', stderr: body.hook_event_name === CLAUDE_ASKED_TOOL_END_EVENT ? 'receipt delivery unconfirmed' : '' }
+      } }, ui: { log: vi.fn(async () => {}) } }
+    await withNativeActivityMod('agentmux-claude-asked-kept-identity-', async handlers => {
+      await handlers.get('session.start')!(api, {}, event => event)
+      const input = { command: 'mkdir -p build/probe' }
+      const classic = { hook_event_name: 'PermissionRequest', session_id: 'original-native', tool_name: 'Bash', tool_input: input, permission_suggestions: [] }
+      const ask = (event: Record<string, unknown>) => handlers.get('classic.PermissionRequest')!(api, event, value => value) as Record<string, unknown>
+      await handlers.get('tool.check')!(api, { tool: 'Bash', tool_use_id: 'toolu_A', input }, async () => ({ decision: 'ask' }))
+      await handlers.get('tool.call')!(api, { tool: 'Bash', tool_use_id: 'toolu_A' }, async () => ({ ref: 1, result: 'declined' }))
+      await new Promise<void>(resolve => setTimeout(resolve, 5))
+      // A's end failed and is kept for resending; it is no candidate for B's identical ask.
+      await handlers.get('tool.check')!(api, { tool: 'Bash', tool_use_id: 'toolu_B', input }, async () => ({ decision: 'ask' }))
+      expect(await ask(classic)).toEqual({ ...classic, tool_use_id: 'toolu_B' })
+    })
+  })
+
   it('outside an AgentMux-launched session the observer never touches Claude’s ask or reports ends', async () => {
     const runs: unknown[] = []
     const api = { env: { get: async () => undefined }, session: { id: async () => 'someone-else' },
