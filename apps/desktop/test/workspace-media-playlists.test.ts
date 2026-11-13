@@ -203,8 +203,10 @@ describe('workspace playlist leases', () => {
     expect(probe.status).toBe(404)
     expect(probe.body.equals(segment(9))).toBe(false)
     expect((await get(new URL('gone.ts', opened.url).href)).status).toBe(404)
-    expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
+    // The miss is recorded as retryable, so a player error now explains itself; it never ends the lease.
+    expect(f.streams.status(opened.id)).toEqual({ state: 'transient', path: 'hls/gone.ts', code: 'ENOENT' })
     expect((await get(new URL('a.ts', opened.url).href)).status).toBe(200)
+    expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
   })
 
   it('refuses a listed segment whose link leaves the real Workspace root', async () => {
@@ -241,6 +243,21 @@ describe('workspace playlist leases', () => {
   })
 })
 
+describe('retryable refusals', () => {
+  it('a playlist rewritten during every read is recorded as transient, so the player offers Retry instead of a codec verdict', async () => {
+    const f = await fixture()
+    await f.put('hls/live.m3u8', live(0, 'live0.ts'))
+    await f.put('hls/live0.ts', segment(1))
+    const opened = await ready(f, 'hls/live.m3u8')
+    vi.spyOn(f.files, 'readMediaPlaylist').mockRejectedValueOnce(Object.assign(new Error('rewritten'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' }))
+    const refused = await get(opened.url)
+    expect(refused.status).toBe(503)
+    expect(f.streams.status(opened.id)).toEqual({ state: 'transient', path: 'hls/live.m3u8', code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
+    expect((await get(opened.url)).status).toBe(200)
+    expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
+  })
+})
+
 describe('live playlist pacing', () => {
   it('serves an appended segment on the next reload without waiting', async () => {
     const f = await fixture()
@@ -258,6 +275,8 @@ describe('live playlist pacing', () => {
     // The window dropped live0; the player may still ask for it once, and the lease keeps playing.
     await rm(join(f.root, 'hls/live0.ts'))
     expect((await get(new URL('live0.ts', opened.url).href)).status).toBe(404)
+    expect(f.streams.status(opened.id)).toMatchObject({ state: 'transient', path: 'hls/live0.ts' })
+    expect((await get(opened.url)).status).toBe(200)
     expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
   })
 

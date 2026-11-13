@@ -77,6 +77,8 @@ describe('failure explanation', () => {
     expect(describeMediaFailure('changed', 2)?.title).toBe('File changed while playing')
     expect(describeMediaFailure('external-reference', 4)?.title).toBe('Playlist points outside the Workspace')
     expect(describeMediaFailure('released', 4)).toBeNull()
+    expect(describeMediaFailure('transient', 4)?.title).toBe('Playback was interrupted')
+    expect(describeMediaFailure('transient', 4)?.retry).toBe(true)
   })
   it('a source error after frames were decoded is a stopped stream, never an unsupported format', () => {
     expect(describeMediaFailure('active', 4, true)?.title).toBe('Playback stopped')
