@@ -136,7 +136,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const editorRef = useRef<HTMLDivElement>(null), containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null), canvasRef = useRef<HTMLCanvasElement>(null), textInputRef = useRef<HTMLTextAreaElement>(null)
   const currentGestureRef = useRef<ScreenshotShape | null>(null), transformRef = useRef<TransformGesture | null>(null)
-  const cropRef = useRef<CropGesture | null>(null), downRef = useRef<{ at: ScreenshotPoint; deselected: boolean } | null>(null)
+  const cropRef = useRef<CropGesture | null>(null), downRef = useRef<{ at: ScreenshotPoint; deselected: boolean; dragged?: true } | null>(null)
   const eraseRef = useRef<Set<string> | null>(null), lastErasePoint = useRef<ScreenshotPoint | null>(null)
   const panRef = useRef<{ start: ScreenshotPoint; view: AnnotationView; fitted: boolean } | null>(null)
   const textDraftRef = useRef<TextDraft | null>(null), noteEditorRef = useRef<string | null>(null), paintFrame = useRef(0), spaceHeld = useRef(false)
@@ -621,9 +621,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const at = localPoint(event), crop = documentState.crop
     setHover(cropRef.current || !crop ? { at, sample: sampleLoupe(at) } : null)
     if (cropRef.current || currentGestureRef.current || eraseRef.current) {
-      // A press keeps showing the window its release selects until the pointer travels into a drag.
+      // A press keeps showing the window its release selects until the pointer travels into a drag, which it stays.
       const down = downRef.current
-      if (!down || Math.hypot(at.x - down.at.x, at.y - down.at.y) >= CLICK_DISTANCE) lightWindow(null)
+      if (down && Math.hypot(at.x - down.at.x, at.y - down.at.y) >= CLICK_DISTANCE) down.dragged = true
+      if (!down || down.dragged) lightWindow(null)
       return
     }
     const spot = point(event), handle = crop ? hitCropHandle(crop, spot, CROP_HANDLE_HIT / viewRef.current.scale) : null
@@ -653,8 +654,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const click = down !== null && Math.hypot(up.x - down.at.x, up.y - down.at.y) < CLICK_DISTANCE
     resetGesture()
     if (crop) {
-      // Before any selection, a click without travel selects the window under it as this display shows it.
-      const target = crop.mode === 'create' && click && !crop.original ? windowAt(crop.start) : null
+      // Before any selection, a press that never travelled selects the window it lit, as this display shows it.
+      const target = crop.mode === 'create' && click && !down.dragged && !crop.original ? windowAt(crop.start) : null
       const box = target ? intersectRect(target, originalBounds) : cropGestureRect(crop, originalBounds)
       if (box && !(crop.mode === 'create' && click && !target) && JSON.stringify(box) !== JSON.stringify(crop.original)) {
         edit(doc => setCrop(doc, box)); if (crop.mode === 'create') onSelect?.()
