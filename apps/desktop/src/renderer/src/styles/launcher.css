@@ -1,9 +1,9 @@
 /* A compact work origin; all Runtime and draft facts keep their existing owners. */
-.launch-surface { --surface-state-width: 720px; --launcher-brand-cover: 62%; padding: clamp(var(--sp-6), 4%, var(--sp-8)); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-0) var(--launcher-brand-cover), transparent), var(--surface-0) 320px), url('../../../../resources/settings-banner.png') top right / max(100%, 880px) auto no-repeat, var(--surface-0); container-name: launcher; container-type: inline-size; }
+.launch-surface { --surface-state-width: 720px; --launcher-brand-cover: 62%; padding: clamp(var(--sp-6), 4%, var(--sp-8)); background: linear-gradient(90deg, var(--surface-0) 0, var(--surface-0) min(68%, calc(50% + 300px)), transparent min(92%, calc(50% + 520px))), linear-gradient(180deg, color-mix(in srgb, var(--surface-0) var(--launcher-brand-cover), transparent), var(--surface-0) 320px), url('../../../../resources/settings-banner.png') top right / max(100%, 880px) auto no-repeat, var(--surface-0); container-name: launcher; container-type: inline-size; }
 [data-appearance='light'] .launch-surface { --launcher-brand-cover: 86%; }
 .launch-surface > .surface-state__content > .surface-state__body { display: flex; flex-direction: column; }
 .launcher-environment { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-5); border-bottom: 1px solid var(--line-soft); }
-.launcher-environment__project { min-width: 0; display: grid; gap: var(--sp-2); }
+.launcher-environment__project { flex: 1; min-width: 0; display: grid; gap: var(--sp-2); }
 .launcher-environment__title { min-width: 0; display: flex; align-items: center; gap: var(--sp-4); }
 .launcher-environment__title > svg { flex: none; color: var(--text-2); }
 .launcher-environment h2 { margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-title); font-weight: 650; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
@@ -20,16 +20,17 @@
 .launcher-file-references__entry small { color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-mono); }
 .launcher-file-references__list p { margin: var(--sp-4) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 /* The project and its device come from Space; the label only reads them. */
-.launcher-environment__device { flex: none; max-width: 40%; min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 2px var(--sp-3); border: 1px solid var(--line-soft); border-radius: 999px; color: var(--text-2); background: color-mix(in srgb, var(--surface-1) 72%, transparent); font-size: var(--fs-meta); font-weight: 500; line-height: 1.4; cursor: default; transition: color var(--dur-fast) var(--ease-enter), border-color var(--dur-fast) var(--ease-enter), background var(--dur-fast) var(--ease-enter); }
+.launcher-environment__device { flex: 0 1 auto; max-width: min(46%, 260px); min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 1px var(--sp-1); border-radius: var(--radius-sm); color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; line-height: 1.4; cursor: default; transition: color var(--dur-fast) var(--ease-enter); }
 .launcher-environment__device > svg { flex: none; color: var(--text-3); }
 .launcher-environment__device > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.launcher-environment__device:hover, .launcher-environment__device:focus-visible { color: var(--text); border-color: var(--line); background: var(--surface-2); }
+.launcher-environment__device:hover, .launcher-environment__device:focus-visible { color: var(--text-2); }
 .launcher-environment__device:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 /* Runs on sits with the Agents it chooses between. */
 .launcher-agents-head__identity { flex: none; }
-.launcher-agent-device { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-meta); }
+.launcher-agent-device { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; margin-inline-end: var(--sp-4); padding-inline-end: var(--sp-4); border-inline-end: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-meta); }
+.launcher-agent-device > .launcher-agent-device__label { white-space: nowrap; }
 .launcher-agent-device__label { flex: none; color: var(--text-3); }
-.launcher-agent-device > .selection-field { min-width: 0; max-width: 220px; min-height: 28px; }
+.launcher-agent-device > .selection-field { flex: 0 1 auto; width: auto; min-width: 128px; max-width: 220px; min-height: 28px; }
 .launcher-agent-device[data-pending] .selection-field { opacity: .72; }
 .launcher-agent-device__status { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); animation: launcher-device-status-in var(--dur-enter) var(--ease-enter); }
 .launcher-agent-device__status[data-state='failed'] { color: var(--text-2); }
@@ -182,6 +183,7 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launch-surface[data-density='compact'] .launch-surface__alt { margin-top: var(--sp-4); padding-top: var(--sp-3); }
 .launch-surface[data-density='compact'] .launch-terminal__body { height: 156px; }
 @container launcher (max-width: 560px) {
+  .launcher-agent-device__label { display: none; }
   .launcher-environment { align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-5); }
   .launcher-environment__project { gap: var(--sp-3); }
   .launch-surface__footer { gap: var(--sp-3) var(--sp-4); }
