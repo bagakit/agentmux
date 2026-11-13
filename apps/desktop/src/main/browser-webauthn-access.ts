@@ -62,6 +62,15 @@ function owned(session: Session, state: SessionAccess, contents: WebContents | n
   } catch { return false }
 }
 
+export function allowsBrowserWebAuthnHid(session: Session, contents: WebContents | null, securityOrigin: string | undefined): boolean {
+  const state = sessions.get(session)
+  return !!state && trustedOrigin(securityOrigin) && owned(session, state, contents)
+}
+
+export function allowsBrowserWebAuthnDevice(details: Electron.DevicePermissionHandlerHandlerDetails): boolean {
+  return details.deviceType === 'hid' && trustedOrigin(details.origin) && fidoDevice(details.device)
+}
+
 function captureFrames(frame: WebFrameMain): FrameSnapshot[] {
   const frames: FrameSnapshot[] = []
   for (let current: WebFrameMain | null = frame; current; current = current.parent) {
@@ -264,7 +273,7 @@ function selectDevice(session: Session, state: SessionAccess, details: Electron.
   }
 }
 
-/** One policy set and HID listener for a shared profile Session. */
+/** One HID listener and original request lifetime for a shared profile Session. */
 export function registerBrowserWebAuthnAccess(session: Session, resolveOwner: ResolveOwner): () => void {
   let state = sessions.get(session)
   if (!state) {
@@ -272,12 +281,6 @@ export function registerBrowserWebAuthnAccess(session: Session, resolveOwner: Re
       event.preventDefault()
       selectDevice(session, created, details, callback)
     } }
-    session.setPermissionCheckHandler((contents, permission, _origin, details) => permission === 'hid'
-      && trustedOrigin(details.securityOrigin) && owned(session, created, contents))
-    // Electron routes WebHID through PermissionCheck; its PermissionRequest union
-    // contains no HID permission. Every unrelated request remains denied.
-    session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-    session.setDevicePermissionHandler(details => details.deviceType === 'hid' && trustedOrigin(details.origin) && fidoDevice(details.device))
     session.on('select-hid-device', created.listener)
     sessions.set(session, created)
     state = created
@@ -297,12 +300,8 @@ export function registerBrowserWebAuthnAccess(session: Session, resolveOwner: Re
     if (--originalRegistration.references > 0) return
     originalState.registrations.delete(resolveOwner)
     if (originalState.registrations.size === 0 && sessions.get(session) === originalState) {
-      // Release policies before callbacks, which may register a fresh owner.
       sessions.delete(session)
       session.removeListener('select-hid-device', originalState.listener)
-      session.setPermissionCheckHandler(null)
-      session.setPermissionRequestHandler(null)
-      session.setDevicePermissionHandler(null)
     }
     for (const pending of [...originalRegistration.pending]) pending.finish(null, changedMessage)
   }

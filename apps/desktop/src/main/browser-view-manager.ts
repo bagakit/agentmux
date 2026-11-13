@@ -57,7 +57,8 @@ import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
-import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
+import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
+import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
 import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
@@ -4295,7 +4296,13 @@ export class BrowserViewManager {
     }
     if (!this.webAuthnSessions.has(session)) {
       const resolveOwner = (contents: WebContents): BrowserWebAuthnOwner | null => this.webAuthnOwner(contents)
-      const releaseAccess = registerBrowserWebAuthnAccess(session, resolveOwner)
+      const releaseAccess = registerBrowserSessionPermissions(session, {
+        ownsContents: contents => {
+          const entry = this.entriesByContents.get(contents)
+          return !!entry && this.owns(entry, entry.view) && entry.view.webContents === contents
+        },
+        resolveHidOwner: resolveOwner
+      })
       const releaseAccounts = registerBrowserWebAuthnAccounts(session, resolveOwner)
       const downloading = (_event: Electron.Event, _item: Electron.DownloadItem, contents: WebContents): void => {
         const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === contents)
