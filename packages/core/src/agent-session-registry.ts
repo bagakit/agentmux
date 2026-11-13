@@ -486,7 +486,8 @@ export class AgentMuxAgentSessionRegistry {
   ): Promise<AgentMuxStoredAgentSession | null> {
     const normalized = session ? normalizeStoredAgentSession(session) : null
     return await this.enqueue(reservation.agentSessionId, async () => {
-      await this.persist(normalized, () => this.store.commitLifecycle(reservation, normalized))
+      const commit: { retired: AgentMuxRetiredAgentSession | null } = { retired: null }
+      await this.persist(normalized, async () => { commit.retired = await this.store.commitLifecycle(reservation, normalized) })
       const previous = this.sessions.get(reservation.agentSessionId)
       if (previous) this.forget(previous)
       if (!normalized) {
@@ -495,10 +496,9 @@ export class AgentMuxAgentSessionRegistry {
             this.noteMetadataChange('runs', run.runId)
             this.unboundRetiredRuns.add(run.runId)
           }
-          const retired = (await this.store.loadRetiredAgentSessions()).find(
-            (session) => session.agentSessionId === reservation.agentSessionId
-          )
-          if (!retired) {
+          // The Store returns the exact retirement it committed in the same transaction.
+          const retired = commit.retired
+          if (!retired || retired.agentSessionId !== reservation.agentSessionId) {
             throw new AgentMuxError(
               'Stop lifecycle did not persist Agent Session retirement.',
               'INVALID_AGENT_SESSION_STORE'
