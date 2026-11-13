@@ -121,6 +121,19 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return browserProfilePartition(profileId)
   }
 
+  /** The listed Profile that owns this session, or null for a private page, a Capsule or anything else. */
+  profileOfSession(target: Session): string | null {
+    if (!this.defaultId) return null
+    for (const id of this.profiles.keys()) if (session.fromPartition(browserProfilePartition(id)) === target) return id
+    return null
+  }
+
+  /** The proxy server a Profile's route sends its pages through, if its route is a proxy. */
+  proxyOf(profileId: string): { host: string; port: number } | null {
+    const network = this.profiles.get(profileId)?.network
+    return network?.mode === 'proxy' ? { host: network.server.host, port: network.server.port } : null
+  }
+
   listProfiles(): BrowserProfileSummary[] {
     this.assertInitialized()
     return [...this.profiles.values()].map(cloneProfile)

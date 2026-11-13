@@ -149,6 +149,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  safeStorage,
   session,
   shell,
   BrowserWindow,
@@ -221,6 +222,7 @@ import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descri
 import { createBrowserProfileUsage } from './browser-profile-usage.js'
 import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
 import { createBrowserProfileExitCheck } from './browser-profile-exit-check.js'
+import { createBrowserProfileProxyAuth } from './browser-profile-proxy-auth.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
@@ -452,6 +454,29 @@ export async function registerIpc(args: {
   // Every page, child windows included, keeps WebRTC on its Profile's proxy; one hook instead of every creation site.
   const observeProfileContents = (_event: unknown, contents: WebContents): void => browserProfiles.sessions.observe(contents)
   app.on('web-contents-created', observeProfileContents)
+  // A Profile's proxy sign-in is answered here only, for that Profile's own proxy; the password stays in Main.
+  const profileProxyAuth = createBrowserProfileProxyAuth({
+    crypto: { available: () => safeStorage.isEncryptionAvailable(), encrypt: text => safeStorage.encryptString(text), decrypt: data => safeStorage.decryptString(data) },
+    path: join(app.getPath('userData'), 'browser-profile-proxy-auth.json'),
+    profileOfSession: target => browserProfiles.profileOfSession(target),
+    proxyOf: profileId => browserProfiles.proxyOf(profileId),
+    // A refused or missing sign-in surfaces as the proxy's own 407 page; its reason goes to the Main log, never the password.
+    report: (profileId, reason) => { if (reason) console.warn(`browser_profile_proxy_sign_in profile=${profileId}: ${reason}`) }
+  })
+  const answerProfileProxy = (event: Electron.Event, contents: WebContents | null, details: { firstAuthAttempt?: boolean },
+    authInfo: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): void => {
+    // Claim the challenge only for a Profile's own proxy, so every other sign-in keeps Chromium's default.
+    if (!authInfo.isProxy || !contents || !browserProfiles.profileOfSession(contents.session)) return
+    event.preventDefault()
+    void profileProxyAuth.answer(contents, authInfo, callback, details.firstAuthAttempt === true).then(answered => { if (!answered) callback() }, () => callback())
+  }
+  app.on('login', answerProfileProxy)
+  // A sign-in belongs to one Profile's proxy: forget it when that Profile is gone or no longer uses a proxy.
+  // This listens to every committed list, so the GUI, the public CLI and deletion all reach it.
+  const disposeProfileProxyAuthSync = browserProfiles.onChange(({ profiles }) => {
+    const proxied = new Set(profiles.filter(profile => profile.network?.mode === 'proxy').map(profile => profile.id))
+    void profileProxyAuth.forgetExcept(proxied).catch(error => console.warn('A Browser Profile proxy sign-in could not be forgotten; it is kept until the next change.', error instanceof Error ? error.message : String(error)))
+  })
   void browserProfiles.initialize().catch(error => {
     // Profile metadata is a Browser service failure, not authority to stop healthy Agents or
     // prevent the host from loading. The manager retains the cause for Browser requests below.
@@ -2372,7 +2397,7 @@ export async function registerIpc(args: {
     acceptingControl = false
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
-      { owner: 'browser-profile-contents', dispose: () => { app.off('web-contents-created', observeProfileContents) } },
+      { owner: 'browser-profile-contents', dispose: () => { app.off('web-contents-created', observeProfileContents); app.off('login', answerProfileProxy); disposeProfileProxyAuthSync() } },
       { owner: 'capture-surface', dispose: () => captureSurface.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'screenshot-pins', dispose: () => screenshotPins.dispose() },
