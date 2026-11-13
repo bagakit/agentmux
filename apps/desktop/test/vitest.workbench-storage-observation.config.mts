@@ -11,9 +11,9 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/workbench-s
     const file = relative(root, id.split('?')[0]!)
     const original = source
     if (file === 'apps/desktop/scripts/package-semantic-host.mjs') source = source.replace('../../host/dist/macos-service.js', '../../host/src/macos-service.ts')
+    if (!adjacent && file.startsWith('apps/desktop/src/renderer/') && !file.endsWith('/api.ts')) source = source.replaceAll('__AGENTMUX_WEB_PREVIEW__', 'false')
     let anchor: string | undefined, replacement: string | undefined
     if (file === 'apps/desktop/src/renderer/src/store.ts') {
-      if (!adjacent) source = source.replaceAll('__AGENTMUX_WEB_PREVIEW__', 'false')
       if (mutation === 'hide-renderer-pending') {
         anchor = 'userStatePending: persistentWorkbenchStorage.pending()'; replacement = 'userStatePending: false'
       }
