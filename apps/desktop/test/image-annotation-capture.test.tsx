@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SEMANTIC_ICON_CATALOG, type SemanticIconName } from '@agentmux/client-ui/icons'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
+import { CaptureSurfaceView } from '../src/renderer/screenshot-editor/CaptureSurfaceView'
+import type { CaptureSurfaceApi } from '../src/shared/capture-surface'
 import { captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
 import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
 
@@ -417,6 +419,20 @@ describe('capture image annotation', () => {
     expect([off.bar(), off.props.onSelect.mock.calls.length], 'a click off every window selects nothing').toEqual([null, 0])
     await off.drag([210, 160], [290, 190]); await off.key('Enter')
     expect(off.props.onComplete.mock.lastCall![0].crop, 'a drag still makes a free selection').toEqual({ x: 420, y: 320, width: 160, height: 60 })
+  })
+
+  it('the capture overlay hands its frozen windows to the editor, so a click there selects one', async () => {
+    const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
+      pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
+    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, ...FRAME }, scale: 2, attachToDraft: false, expandable: true,
+      theme: { status: 'unavailable' as const, message: '' }, image: { mimeType: 'image/png' as const, byteLength: 1, ...image }, windows: [FRONT, BACK] }
+    await act(async () => root.render(<CaptureSurfaceView input={input} api={api} />)); await frame(); await frame()
+    const canvas = node.querySelector<HTMLCanvasElement>('[aria-label="Screenshot canvas"]')!
+    canvas.setPointerCapture = vi.fn()
+    const send = (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y }))
+    await act(async () => { send('pointerdown', 300, 200) }); await act(async () => { send('pointerup', 300, 200) }); await frame()
+    expect(api.select, 'a click on a frozen window claims the selection').toHaveBeenCalledWith('request')
+    expect(node.querySelector('[aria-label="Selection size"]')?.textContent, 'the selection is that window').toBe('400 × 200 px')
   })
 
   it('snaps a new selection to window edges within 6 points and not beyond, with guides only while it engages', async () => {
