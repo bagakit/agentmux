@@ -279,6 +279,28 @@ describe('actual Desktop Store spatial cutover', () => {
     expect((await store.read())!.graph.tabs[0]!.name).toBe('Edited while offline');
     expect(useAppStore.getState().workbenchSaveWarning).toBeNull();
   });
+  it('still saves drafts and asks Main to flush when the spatial checkpoint is refused', async () => {
+    const store = await fixture(), work = workbench('Original');
+    await store.commit({ expectedRevision: 0, graph: desktopSpatialGraph(work, []) });
+    useAppStore.setState({...work, restoredWorkbench: {tabs: work.tabs, layouts: work.layouts}});
+    disposers.push(await useAppStore.getState().initialize());
+    const commit = vi.spyOn(api.spatial, 'commit').mockRejectedValue(new Error('Disk write unavailable'));
+    const flush = vi.spyOn(api.ui, 'requestStorageFlush');
+    // A spatial edit the Core owner cannot save (a new Tab), and a draft typed meanwhile.
+    const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'file', workspaceId: 'resource', path: 'second.md' });
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, second }, layouts: { resource: createWorkspaceLayout('group', ['file', 'second']) },
+      agentComposerDrafts: { 'some-session': 'Unsent draft typed while the space could not save' } }));
+    localStorage.removeItem('agentmux-workbench-v1');
+    const { prepareRendererUpdate } = await import('../src/renderer/src/store');
+    // The spatial failure is still reported to the caller and in the warning.
+    await expect(prepareRendererUpdate('quit')).rejects.toThrow('Disk write unavailable');
+    expect(useAppStore.getState().workbenchSaveWarning).toContain('Disk write unavailable');
+    // The user document and the Main flush are separate owners: neither waits on the space.
+    expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.agentComposerDrafts)
+      .toEqual({ 'some-session': 'Unsent draft typed while the space could not save' });
+    expect(flush).toHaveBeenCalled();
+    expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).not.toContain('second'); commit.mockRestore();
+  });
 
 });
 describe('a conflict on one workface item never stalls the actual Store', () => {
