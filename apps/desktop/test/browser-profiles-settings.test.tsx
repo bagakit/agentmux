@@ -32,8 +32,15 @@ const port = vi.hoisted(() => {
   }
 })
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
-const store = vi.hoisted(() => ({ tabs: {} as Record<string, unknown> }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (state: typeof store) => unknown) => select(store) }))
+const store = vi.hoisted(() => ({
+  tabs: {} as Record<string, unknown>,
+  layouts: {} as Record<string, { activeGroupId: string; groups: { id: string; tabOrder: string[] }[] }>,
+  activeWorkspaceId: 'ws-1' as string | null,
+  selectMainRegion: vi.fn((_reference: unknown) => true),
+  createBrowser: vi.fn(async (..._args: unknown[]) => {}),
+  reportError: vi.fn()
+}))
+vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select: (state: typeof store) => unknown) => select(store), { getState: () => store }) }))
 
 import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 import { BrowserProfilesSettingsPane, PROFILE_HUES } from '../src/renderer/src/components/settings/BrowserProfilesSettingsPane'
@@ -43,7 +50,7 @@ const personal: BrowserProfileSummary = { id: 'p-personal', label: 'Personal', c
 const client: BrowserProfileSummary = { id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null, notes: 'Launch QA' }
 
 function browserTab(id: string, profileId: string, deferred: boolean) {
-  return { regions: { [id]: { kind: 'browser', browserId: id, profileId, title: id === 'b-open' ? 'Launch board' : 'Release notes', url: 'https://app.example/', ...(deferred ? { nativeOwnerDeferred: true } : {}) } } }
+  return { id: id === 'b-open' ? 't1' : 't2', workspaceId: 'ws-1', regions: { [id]: { kind: 'browser', browserId: id, profileId, title: id === 'b-open' ? 'Launch board' : 'Release notes', url: 'https://app.example/', ...(deferred ? { nativeOwnerDeferred: true } : {}) } } }
 }
 
 let root: Root, container: HTMLDivElement
@@ -60,6 +67,9 @@ beforeEach(async () => {
   for (const fn of [port.readProfiles, port.updateProfile, port.setDefaultProfile, port.createProfile, port.deleteProfile]) fn.mockClear()
   port.set({ revision: 4, profiles: [personal, client] })
   store.tabs = { t1: browserTab('b-open', 'p-client', false), t2: browserTab('b-saved', 'p-client', true) }
+  store.layouts = { 'ws-1': { activeGroupId: 'g-1', groups: [{ id: 'g-1', tabOrder: ['t1'] }, { id: 'g-2', tabOrder: ['t2'] }] } }
+  store.activeWorkspaceId = 'ws-1'
+  for (const fn of [store.selectMainRegion, store.createBrowser, store.reportError]) fn.mockClear()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(<BrowserProfilesSettingsPane active />))
 })
@@ -247,5 +257,36 @@ describe('Settings › Browser Profiles keeps what the person typed', () => {
     const rows = [...container.querySelectorAll<HTMLButtonElement>('[data-resource-row]')]
     await act(async () => { rows[0]!.focus(); rows[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
     expect(container.querySelector('.browser-profile-editor__name')?.textContent).toBe('Northwind client')
+  })
+})
+
+describe('Settings › Browser Profiles leads to the Browsers it describes', () => {
+  const onClose = vi.fn()
+  beforeEach(async () => {
+    onClose.mockClear()
+    await act(async () => root.render(<BrowserProfilesSettingsPane active onClose={onClose} />))
+  })
+
+  it('Show closes Settings and selects that exact Browser in its own Tab Group', async () => {
+    await select('Northwind client')
+    const saved = [...container.querySelectorAll<HTMLButtonElement>('.browser-profile-editor__use')].find(button => button.textContent?.includes('Release notes'))!
+    await act(async () => { saved.click(); await new Promise(resolve => setTimeout(resolve, 40)) })
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(store.selectMainRegion).toHaveBeenCalledExactlyOnceWith({ displayWorkspaceId: 'ws-1', groupId: 'g-2', tabId: 't2', regionId: 'b-saved' })
+    expect(store.reportError).not.toHaveBeenCalled()
+  })
+
+  it('a Browser that can no longer be selected is said, not silently dropped', async () => {
+    store.selectMainRegion.mockReturnValueOnce(false)
+    await select('Northwind client')
+    await act(async () => { container.querySelector<HTMLButtonElement>('.browser-profile-editor__use')!.click(); await new Promise(resolve => setTimeout(resolve, 40)) })
+    expect(String(store.reportError.mock.calls[0]?.[0])).toContain('“Launch board” could not be shown')
+  })
+
+  it('Open Browser opens a normal Browser in exactly this Profile beside the current work', async () => {
+    await select('Northwind client')
+    await act(async () => { container.querySelector<HTMLButtonElement>('.browser-profile-editor__open')!.click(); await new Promise(resolve => setTimeout(resolve, 40)) })
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(store.createBrowser).toHaveBeenCalledExactlyOnceWith('g-1', undefined, 'about:blank', undefined, 'ws-1', 'ws-1', 'normal', undefined, 'p-client')
   })
 })
