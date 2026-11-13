@@ -106,14 +106,19 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       coverageDemand.current.remaining = 0; return
     }
     coverageDemand.current.remaining--
-    intent.current = 'coverage'; void view.earlier(limit)
+    // Background coverage only adds older context. It must never evict the newest
+    // records the reader is watching, so a full window ends the batch instead.
+    intent.current = 'coverage'; void view.earlier(limit, { preserveCurrent: true })
   }, [page, nativeMetadata, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
     intent.current = 'current'; boundary.current = null; coverageDemand.current.remaining = 0
     if (source) void view.selectSource(source); else void view.refresh()
   }
-  const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null
-  const error = (automaticReadError ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
+  const coverageFull = intent.current === 'coverage' && view.errorOperation === 'older' &&
+    (view.error as (Error & { code?: string }) | null)?.code === 'AGENT_CONVERSATION_WINDOW_FULL'
+  // A full window is the normal end of background coverage, not a read failure.
+  const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' && !coverageFull ? view.error : null
+  const error = (automaticReadError || coverageFull ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
   const boundaryIndex = nativeMetadata.findIndex(item => item.id === boundary.current)
