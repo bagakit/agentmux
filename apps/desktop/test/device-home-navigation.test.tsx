@@ -180,6 +180,26 @@ it('a Host change while folder registration is pending retains the registration 
   expect(add).toHaveBeenCalledTimes(1)
 })
 
+it.each(['read', 'register'] as const)('display-only rename and reordered fields during %s preserve the original Home navigation and work', async step => {
+  const pendingHome = deferred<{ routeHostId: string; homeDirectory: string }>(), pendingRegistration = deferred<WorkspaceRecord>()
+  vi.spyOn(api.hosts, 'home').mockReturnValue(step === 'read' ? pendingHome.promise : Promise.resolve({ routeHostId: R, homeDirectory: directory }))
+  const add = vi.spyOn(api.workspaces, 'add').mockReturnValue(step === 'register' ? pendingRegistration.promise : Promise.resolve(home))
+  await mount(); const original = useAppStore.getState(), sessions = original.sessions, drafts = original.agentComposerDrafts
+  await click(R)
+  if (step === 'register') await vi.waitFor(() => expect(add).toHaveBeenCalled())
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.map(host => {
+    if (host.id !== R) return host
+    const { label: _label, ...route } = host
+    return { label: 'Renamed Studio', ...route }
+  }) } })))
+  await act(async () => { if (step === 'read') pendingHome.resolve({ routeHostId: R, homeDirectory: directory }); else pendingRegistration.resolve(home) })
+  expect(useAppStore.getState().activeWorkspaceId).toBe(home.id)
+  expect(useAppStore.getState().config!.workspaces).toContainEqual(home)
+  expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  expect(title(R).getAttribute('aria-label')).toBe('Open Renamed Studio home')
+  expect(dom.container.querySelector('.space-device-home-status')).toBeNull()
+})
+
 it('device disclosure and plus remain independent and home registration uses the existing factual directory tree', async () => {
   const project = { id: 'studio-project', hostId: R, path: directory + '/work/project', name: 'Project', kind: 'folder' as const }
   config.workspaces.push(project); useAppStore.setState({ config })

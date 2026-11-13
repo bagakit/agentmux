@@ -133,6 +133,47 @@ it('rejects unknown, ambiguous and changed Host routes without a local-home fall
   expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled()
 })
 
+it('Home accepts a display-only rename before and during its read while other Host observations keep their original expected contract', async () => {
+  const f = core(), read = vi.spyOn(f.client, 'hostEnvironment').mockResolvedValue({ homeDirectory: '/remote/original-home' })
+  const expected = { id: 'selected', kind: 'ssh', label: 'Original', hostname: 'original.fixture' }
+  let configuration = { hostname: expected.hostname, label: 'Renamed', kind: expected.kind, id: expected.id }
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'selected', client: f.client }], hostConfiguration: () => configuration }); cleanups.push(() => service.dispose())
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected }, user)).resolves.toEqual({ routeHostId: 'selected', homeDirectory: '/remote/original-home' })
+  read.mockImplementationOnce(async () => { configuration = { ...configuration, label: 'Renamed during read' }; return { homeDirectory: '/remote/original-home' } })
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected }, user)).resolves.toEqual({ routeHostId: 'selected', homeDirectory: '/remote/original-home' })
+  expect(read).toHaveBeenCalledTimes(2)
+  for (const method of ['settings.hosts.inspect', 'settings.hosts.network'] as const) {
+    await expect(service.call(method, { hostId: 'selected', expected }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  }
+  expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.sessions).not.toHaveBeenCalled()
+})
+
+it.each([
+  { hostname: 'changed.fixture' }, { transport: 'tailcat' }, { tailcat: { address: 'tcChangedFixture', keyFile: '/fixture/client' } },
+  { tailcat: { address: 'tcOriginalFixture', keyFile: '/fixture/changed-client' } }, { runtimeId: 'changed-runtime' }, { remoteCommand: 'another-amux' }
+])('Home keeps the exact route fence before and after reads for %j', async change => {
+  const f = core(), read = vi.spyOn(f.client, 'hostEnvironment').mockResolvedValue({ homeDirectory: '/remote/original-home' })
+  const expected = { id: 'selected', kind: 'ssh', label: 'Original', hostname: 'original.fixture', transport: 'ssh-tailcat',
+    tailcat: { address: 'tcOriginalFixture', keyFile: '/fixture/client' }, runtimeId: 'original-runtime', remoteCommand: 'amux' }
+  let configuration = { ...expected, ...change }
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'selected', client: f.client }], hostConfiguration: () => configuration }); cleanups.push(() => service.dispose())
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  expect(read).not.toHaveBeenCalled()
+  configuration = { ...expected }
+  read.mockImplementationOnce(async () => { configuration = { ...expected, ...change }; return { homeDirectory: '/remote/stale-route' } })
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  expect(read).toHaveBeenCalledOnce(); expect(f.connect).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled()
+})
+
+it('Home still refuses a replaced client even when its route configuration and display name are unchanged', async () => {
+  const f = core(), replacement = core(), configuration = { id: 'selected', kind: 'ssh', label: 'Original', hostname: 'original.fixture' }
+  let client = f.client
+  const read = vi.spyOn(f.client, 'hostEnvironment').mockImplementation(async () => { client = replacement.client; return { homeDirectory: '/remote/old-client-home' } })
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'selected', client }], hostConfiguration: () => configuration }); cleanups.push(() => service.dispose())
+  await expect(service.call('settings.hosts.home', { hostId: 'selected', expected: configuration }, user)).rejects.toMatchObject({ code: 'HOST_CONFIGURATION_CHANGED' })
+  expect(read).toHaveBeenCalledOnce(); expect(replacement.connect).not.toHaveBeenCalled(); expect(replacement.native).not.toHaveBeenCalled()
+})
+
 it('retains the original read failure and cancels only this reader, with no healthy Run or other Host effects', async () => {
   const f = core(), read = vi.spyOn(f.client, 'hostEnvironment').mockRejectedValueOnce(new AgentMuxError('Original Host home is unavailable.', 'HOST_ENVIRONMENT_UNAVAILABLE'))
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'selected', client: f.client }] }); cleanups.push(() => service.dispose())
