@@ -404,15 +404,19 @@ import {
 import { assertUnreachableSurface, isAgentOrLauncherSurface, isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
 import { resolveSpatialCommit } from './lib/control-spatial-commit'
 import {
+  agentSessionsWithoutViewsAfterClosing,
   applyWorkbenchViewCloseTopology,
+  closingWorkbenchRegion,
+  closingWorkbenchReservations,
   hasAttachedSessionOutsideClosingViews,
   planWorkbenchViewClose,
   reconcileWorkbenchViewClose,
   sameWorkbenchSurfaceOwner,
   workbenchViewCloseAllowsSession,
+  workbenchSessionCloseResource,
   workbenchViewCloseAllowsView,
-  type WorkbenchViewClosePlan,
   type WorkbenchViewCloseReceipt,
+  type WorkbenchViewCloseReservation,
   type WorkbenchViewCloseResource
 } from './lib/workbench-view-close'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
@@ -1034,7 +1038,7 @@ export type AppState = GitReadingActions & {
   lastActiveFileByWorkspace: Record<string, string | undefined>
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
-  closingWorkbenchViews: Record<string, WorkbenchViewClosePlan>
+  closingWorkbenchViews: Record<string, WorkbenchViewCloseReservation>
   // 键盘请求关整张 Tab 的「意图」——键盘层够不着组件里的确认流（未保存/在跑 Agent 的对话框只活在
   // WorkspaceWorkbench），所以窗口监听只投一个意图，活动 Tab 组件读到它就跑自己既有的 requestTabsClose
   // （与鼠标点 X 同一条路），跑完清掉。同 documentRevealTargets 的 consume-and-clear 套路。
@@ -1417,7 +1421,8 @@ export type AppState = GitReadingActions & {
   // Tab」。纯布局代数（promoteRegionToTab）——把这一格从源 Tab 的分屏树里摘出来，作为一张新 Tab 的
   // 唯一一格，落在源 Tab 紧邻其后的位置并激活。只剩一格的 Tab 促升无意义（它已经就是一张 Tab），是 no-op。
   promoteRegionToTab(workspaceId: string, tabId: string, regionId: string): void
-  closeRegion(workspaceId: string, tabId: string, regionId: string): Promise<void>
+  // Closing an Agent's last View stops its Run unless `keepAgentSessions`; the Region confirmation asks first.
+  closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean }): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   clearCloseTabRequest(nonce: number): void
@@ -1783,6 +1788,25 @@ async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewC
   return results.map((result, index) => result.status === 'fulfilled'
     ? { key: resources[index]!.key, status: 'fulfilled' }
     : { key: resources[index]!.key, status: 'rejected', reason: result.reason })
+}
+
+/** The one stop step of every View close (Tab or split): exact Run, rechecked against other Views. */
+async function stopLastViewSession(
+  current: Pick<AppState, 'tabs' | 'sessions' | 'closingWorkbenchViews'>,
+  resource: Extract<WorkbenchViewCloseResource, { kind: 'session' }>
+): Promise<void> {
+  if (!current.sessions.some((session) => (
+    session.id === resource.sessionId && sessionOwnsControl(session, resource.control)
+  ))) return
+  if (hasAttachedSessionOutsideClosingViews({
+    tabs: current.tabs,
+    sessions: current.sessions,
+    isClosing: closingWorkbenchReservations(current.closingWorkbenchViews),
+    sessionId: resource.sessionId
+  })) {
+    throw new Error(`Session gained another View while closing: ${resource.sessionId}`)
+  }
+  await api.sessions.stop(resource.control)
 }
 
 function workbenchViewCloseFailure(receipts: readonly WorkbenchViewCloseReceipt[]): Error {
@@ -7427,7 +7451,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       tabGroupId,
       tabId,
       keepAgentSessions: options?.keepAgentSessions === true,
-      closingViewIds: new Set(Object.keys(state.closingWorkbenchViews))
+      closing: closingWorkbenchReservations(state.closingWorkbenchViews)
     })
     if (!plan) return Promise.resolve(true)
     // Publish only the exact View deletion committed here, independently of cleanup receipts.
@@ -7492,20 +7516,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ),
           settleWorkbenchViewCloseResources(
             plan.resources.filter((resource) => resource.kind === 'session'),
-            async (resource) => {
-              const current = get()
-              if (!current.sessions.some((session) => (
-                session.id === resource.sessionId && sessionOwnsControl(session, resource.control)
-              ))) return
-              if (hasAttachedSessionOutsideClosingViews({
-                tabs: current.tabs,
-                plans: current.closingWorkbenchViews,
-                sessionId: resource.sessionId
-              })) {
-                throw new Error(`Session gained another View while closing: ${resource.sessionId}`)
-              }
-              await api.sessions.stop(resource.control)
-            }
+            async (resource) => await stopLastViewSession(get(), resource)
           )
         ])
         const reconciliation = reconcileWorkbenchViewClose({
@@ -7752,13 +7763,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       layouts: result.layouts
     }))
   },
-  async closeRegion(workspaceId, tabId, regionId) {
+  async closeRegion(workspaceId, tabId, regionId, options) {
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
     const surface = tab?.regions[regionId]
     if (!tab || tab.workspaceId !== workspaceId || !surface) return
     if (!removeWorkbenchRegion(tab, regionId)) return
+    // An Agent whose last View this Region is stops through the same step as Tab close. Only Sessions
+    // confirmed in `sessions` are stopped; an unconfirmed one was named in the confirmation and is kept.
+    const stops = options?.keepAgentSessions ? [] : agentSessionsWithoutViewsAfterClosing({
+      tabs: current.tabs,
+      sessions: current.sessions,
+      isClosing: (candidate, candidateRegionId) => closingWorkbenchRegion(tabId, regionId)(candidate, candidateRegionId) ||
+        closingWorkbenchReservations(current.closingWorkbenchViews)(candidate, candidateRegionId)
+    }).sessions.map(workbenchSessionCloseResource)
+    if (stops.length > 0) {
+      const reservation: WorkbenchViewCloseReservation = {
+        tabId, regionId, reservedSessionIds: stops.map((resource) => resource.sessionId)
+      }
+      set((state) => ({ closingWorkbenchViews: { ...state.closingWorkbenchViews, [tabId]: reservation } }))
+      try {
+        const receipts = await settleWorkbenchViewCloseResources(stops, async (resource) => await stopLastViewSession(get(), resource))
+        // A Stop that failed or stayed unconfirmed keeps this Region: it is the Agent's only View and
+        // the place its retry or Keep Session lives. The error names the step and the Session.
+        if (receipts.some((receipt) => receipt.status === 'rejected')) {
+          get().reportError(workbenchViewCloseFailure(receipts))
+          return
+        }
+      } finally {
+        set((state) => {
+          if (state.closingWorkbenchViews[tabId] !== reservation) return state
+          const closingWorkbenchViews = { ...state.closingWorkbenchViews }
+          delete closingWorkbenchViews[tabId]
+          return { closingWorkbenchViews }
+        })
+      }
+    }
     // What this surface owns outside the tree is decided once, exhaustively (workbench-surface-kinds).
     // Asking `kind === 'browser'` / `kind === 'file'` here instead would let a sixth resource-bearing
     // kind answer "nothing to release" and leak with no compile error.

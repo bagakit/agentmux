@@ -209,32 +209,6 @@ export function workbenchSurfaces<S>(tab: { regions: Record<string, S> }): S[] {
   return Object.values(tab.regions)
 }
 
-export function sessionIdsWithoutViewsAfterClosingTabs(
-  tabs: Readonly<Record<string, WorkbenchTab>>,
-  closingTabIds: readonly string[],
-  kind: 'agent' | 'terminal'
-): string[] {
-  const closingIds = new Set(closingTabIds)
-  return sessionIdsWithoutViewsAfterClosing(tabs, kind, (tab) => closingIds.has(tab.id))
-}
-
-function sessionIdsWithoutViewsAfterClosing(
-  tabs: Readonly<Record<string, WorkbenchTab>>,
-  kind: 'agent' | 'terminal',
-  isClosing: (tab: WorkbenchTab, surface: AgentWorkbenchSurface | TerminalWorkbenchSurface) => boolean
-): string[] {
-  const closingSessionIds = new Set<string>()
-  const remainingSessionIds = new Set<string>()
-  for (const tab of Object.values(tabs)) {
-    for (const surface of workbenchSurfaces(tab)) {
-      if (surface.kind !== kind || surface.phase !== 'attached') continue
-      if (isClosing(tab, surface)) closingSessionIds.add(surface.sessionId)
-      else remainingSessionIds.add(surface.sessionId)
-    }
-  }
-  return [...closingSessionIds].filter((sessionId) => !remainingSessionIds.has(sessionId))
-}
-
 export function findWorkbenchRegion(
   tabs: Readonly<Record<string, WorkbenchTab>>,
   regionId: string

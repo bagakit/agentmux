@@ -6,6 +6,7 @@ import {
   gitDiffIdentity,
   tabStillOpen,
   workbenchSurfaces,
+  type BrowserWorkbenchSurface,
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
@@ -31,9 +32,20 @@ export type WorkbenchViewClosePlan = {
   closesView: boolean
   surfaces: ReadonlyArray<{
     owner: WorkbenchViewCloseSurfaceOwner
-    resourceKey: WorkbenchViewCloseResource['key'] | null
+    /** Every resource this Region's removal waits on: its own, plus the Agent a Browser binds. */
+    resourceKeys: ReadonlyArray<WorkbenchViewCloseResource['key']>
   }>
   resources: readonly WorkbenchViewCloseResource[]
+  reservedSessionIds: readonly string[]
+}
+
+/**
+ * What a close in progress holds. A Tab close stores its whole plan; a split close holds only its
+ * Region (`regionId`) and the Sessions it is stopping.
+ */
+export type WorkbenchViewCloseReservation = {
+  tabId: string
+  regionId?: string
   reservedSessionIds: readonly string[]
 }
 
@@ -76,7 +88,8 @@ export function planWorkbenchViewClose(input: {
   tabGroupId: string
   tabId: string
   keepAgentSessions: boolean
-  closingViewIds?: ReadonlySet<string>
+  /** Views other closes in progress are already removing. */
+  closing?: WorkbenchViewClosing
 }): WorkbenchViewClosePlan | null {
   const tab = input.tabs[input.tabId]
   const layout = input.layouts[input.workspaceId]
@@ -99,40 +112,35 @@ export function planWorkbenchViewClose(input: {
   }
 
   const sessions = new Map(input.sessions.map((session) => [session.id, session]))
-  const attachedOutsideView = new Set(Object.values(input.tabs).flatMap((candidate) => (
-    candidate.id === input.tabId || input.closingViewIds?.has(candidate.id)
-      ? []
-      : workbenchSurfaces(candidate).flatMap((surface) => (
-          isSessionSurface(surface) && surface.phase === 'attached'
-            ? [surface.sessionId]
-            : []
-        ))
-  )))
+  const attachedOutsideView = sessionsShownOutsideClosingViews({
+    tabs: input.tabs,
+    sessions: input.sessions,
+    isClosing: (candidate, regionId) => candidate.id === input.tabId || input.closing?.(candidate, regionId) === true
+  })
   const resources = new Map<WorkbenchViewCloseResource['key'], WorkbenchViewCloseResource>()
+  const stopResource = (session: SessionSnapshot | undefined, kind: 'agent' | 'terminal'): WorkbenchViewCloseResource['key'] | null => {
+    if (!session || attachedOutsideView.has(session.id) || session.processState === 'exited') return null
+    if (kind === 'agent' && input.keepAgentSessions) return null
+    const resource = workbenchSessionCloseResource(session)
+    resources.set(resource.key, resource)
+    return resource.key
+  }
   const surfaces = workbenchSurfaces(tab).map((surface) => {
     if (surface.kind === 'browser') {
       const key = `browser:${surface.browserId}` as const
       resources.set(key, { key, kind: 'browser', browserId: surface.browserId })
-      return { owner: surfaceOwner(surface, sessions), resourceKey: key }
+      const binding = browserAgentBinding(surface)
+      const bound = binding ? stopResource(boundAgentSession(binding, input.sessions), 'agent') : null
+      return { owner: surfaceOwner(surface, sessions), resourceKeys: bound ? [key, bound] : [key] }
     }
     if (!isSessionSurface(surface)) {
-      return { owner: surfaceOwner(surface, sessions), resourceKey: null }
+      return { owner: surfaceOwner(surface, sessions), resourceKeys: [] }
     }
     if (surface.phase !== 'attached' || attachedOutsideView.has(surface.sessionId)) {
-      return { owner: surfaceOwner(surface, sessions), resourceKey: null }
+      return { owner: surfaceOwner(surface, sessions), resourceKeys: [] }
     }
-    const session = sessions.get(surface.sessionId)
-    const shouldStop = session !== undefined && session.processState !== 'exited' &&
-      (surface.kind !== 'agent' || !input.keepAgentSessions)
-    if (!shouldStop) return { owner: surfaceOwner(surface, sessions, true), resourceKey: null }
-    const key = `session:${surface.sessionId}` as const
-    resources.set(key, {
-      key,
-      kind: 'session',
-      sessionId: surface.sessionId,
-      control: freezeSessionControl(session.control)
-    })
-    return { owner: surfaceOwner(surface, sessions, true), resourceKey: key }
+    const key = stopResource(sessions.get(surface.sessionId), surface.kind)
+    return { owner: surfaceOwner(surface, sessions, true), resourceKeys: key ? [key] : [] }
   })
   const plannedResources = [...resources.values()]
   return freezePlan({
@@ -175,8 +183,7 @@ export function reconcileWorkbenchViewClose(input: {
       if (current) changedWhileClosing = true
       continue
     }
-    const receipt = planned.resourceKey ? receiptByKey.get(planned.resourceKey) : null
-    if (planned.resourceKey && receipt?.status !== 'fulfilled') continue
+    if (planned.resourceKeys.some((key) => receiptByKey.get(key)?.status !== 'fulfilled')) continue
     tab = removeWorkbenchRegion(tab, planned.owner.regionId)
   }
   if (tab) {
@@ -186,12 +193,8 @@ export function reconcileWorkbenchViewClose(input: {
     }
   }
   const retainedResourceKeys = new Set(input.plan.surfaces.flatMap((planned) => (
-    planned.resourceKey && sameSurfaceOwner(
-      tab?.regions[planned.owner.regionId],
-      planned.owner,
-      currentSessions
-    )
-      ? [planned.resourceKey]
+    sameSurfaceOwner(tab?.regions[planned.owner.regionId], planned.owner, currentSessions)
+      ? planned.resourceKeys
       : []
   )))
   const failures = failureCandidates.filter((failure) => retainedResourceKeys.has(failure.key))
@@ -270,31 +273,155 @@ function freezeSessionControl(control: SessionControl): SessionControl {
 }
 
 export function workbenchViewCloseAllowsView(
-  plans: Readonly<Record<string, WorkbenchViewClosePlan>>,
+  plans: Readonly<Record<string, WorkbenchViewCloseReservation>>,
   viewId: string
 ): boolean {
   return plans[viewId] === undefined
 }
 
 export function workbenchViewCloseAllowsSession(
-  plans: Readonly<Record<string, WorkbenchViewClosePlan>>,
+  plans: Readonly<Record<string, WorkbenchViewCloseReservation>>,
   sessionId: string
 ): boolean {
   return !Object.values(plans).some((plan) => plan.reservedSessionIds.includes(sessionId))
 }
 
+/** Which Views a close removes: whole Tabs or one Region inside one. */
+export type WorkbenchViewClosing = (tab: WorkbenchTab, regionId: string) => boolean
+
+export function closingWorkbenchTabs(tabIds: Iterable<string>): WorkbenchViewClosing {
+  const closing = new Set(tabIds)
+  return (tab) => closing.has(tab.id)
+}
+
+export function closingWorkbenchRegion(tabId: string, regionId: string): WorkbenchViewClosing {
+  return (tab, candidate) => tab.id === tabId && candidate === regionId
+}
+
+/** The Views closes in progress hold: a Tab reservation covers the Tab, a split one only its Region. */
+export function closingWorkbenchReservations(
+  plans: Readonly<Record<string, WorkbenchViewCloseReservation>>
+): WorkbenchViewClosing {
+  return (tab, regionId) => {
+    const plan = plans[tab.id]
+    return plan !== undefined && (plan.regionId === undefined || plan.regionId === regionId)
+  }
+}
+
+type BrowserAgentBinding = { hostId: string; agentSessionId: string }
+
+/** Current control facts outrank cold metadata. `null` is a confirmed "no Agent"; `undefined` is unknown. */
+export function browserAgentBinding(surface: BrowserWorkbenchSurface): BrowserAgentBinding | null | undefined {
+  return surface.control ? surface.control.agent : surface.agent
+}
+
+function boundAgentSession(
+  binding: BrowserAgentBinding,
+  sessions: readonly SessionSnapshot[]
+): SessionSnapshot | undefined {
+  return sessions.find((session) => session.kind === 'agent' &&
+    session.control.hostId === binding.hostId &&
+    session.control.agentSessionId === binding.agentSessionId)
+}
+
+/**
+ * The Sessions a View outside the closing set still shows: attached Agent/Terminal Regions, and Browsers
+ * bound to an exact Agent of `sessions`. An unknown binding is never guessed to be another View.
+ * This is the one "is there another View" judgment; the last-View confirmation, the close plan and the
+ * pre-stop recheck all read it.
+ */
+export function sessionsShownOutsideClosingViews(input: {
+  tabs: Readonly<Record<string, WorkbenchTab>>
+  sessions: readonly SessionSnapshot[]
+  isClosing: WorkbenchViewClosing
+}): Set<string> {
+  const shown = new Set<string>()
+  for (const tab of Object.values(input.tabs)) {
+    for (const surface of workbenchSurfaces(tab)) {
+      if (input.isClosing(tab, surface.regionId)) continue
+      if (isSessionSurface(surface)) {
+        if (surface.phase === 'attached') shown.add(surface.sessionId)
+        continue
+      }
+      if (surface.kind !== 'browser') continue
+      const binding = browserAgentBinding(surface)
+      const session = binding ? boundAgentSession(binding, input.sessions) : undefined
+      if (session) shown.add(session.id)
+    }
+  }
+  return shown
+}
+
 export function hasAttachedSessionOutsideClosingViews(input: {
   tabs: Readonly<Record<string, WorkbenchTab>>
-  plans: Readonly<Record<string, WorkbenchViewClosePlan>>
+  sessions: readonly SessionSnapshot[]
+  isClosing: WorkbenchViewClosing
   sessionId: string
 }): boolean {
-  return Object.values(input.tabs).some((tab) => (
-    input.plans[tab.id] === undefined && workbenchSurfaces(tab).some((surface) => (
-      isSessionSurface(surface) &&
-      surface.phase === 'attached' &&
-      surface.sessionId === input.sessionId
-    ))
-  ))
+  return sessionsShownOutsideClosingViews(input).has(input.sessionId)
+}
+
+/** A closing View names an Agent whose Session cannot be confirmed: asked about, named, never stopped. */
+export type UnconfirmedAgentView = {
+  key: string
+  regionId: string
+  /** `null`: the closing Browser's Agent binding itself is unknown. */
+  agentSessionId: string | null
+}
+
+export type AgentLastViewClose = {
+  /** Agent Sessions whose Run has not exited and whose last View this close removes. */
+  sessions: SessionSnapshot[]
+  unconfirmed: UnconfirmedAgentView[]
+}
+
+/** "This close removes the last View of these Agents", for Tab close and split close alike. */
+export function agentSessionsWithoutViewsAfterClosing(input: {
+  tabs: Readonly<Record<string, WorkbenchTab>>
+  sessions: readonly SessionSnapshot[]
+  isClosing: WorkbenchViewClosing
+}): AgentLastViewClose {
+  const shown = sessionsShownOutsideClosingViews(input)
+  const byId = new Map(input.sessions.map((session) => [session.id, session]))
+  const closing = new Map<string, SessionSnapshot>()
+  const unconfirmed = new Map<string, UnconfirmedAgentView>()
+  const unknownAgent = (regionId: string, agentSessionId: string): void => {
+    const key = `agent:${agentSessionId}`
+    if (!unconfirmed.has(key)) unconfirmed.set(key, { key, regionId, agentSessionId })
+  }
+  for (const tab of Object.values(input.tabs)) {
+    for (const surface of workbenchSurfaces(tab)) {
+      if (!input.isClosing(tab, surface.regionId)) continue
+      if (surface.kind === 'agent') {
+        if (surface.phase !== 'attached' || shown.has(surface.sessionId)) continue
+        const session = byId.get(surface.sessionId)
+        if (session) closing.set(session.id, session)
+        else unknownAgent(surface.regionId, surface.sessionId)
+        continue
+      }
+      if (surface.kind !== 'browser') continue
+      const binding = browserAgentBinding(surface)
+      if (binding === null) continue
+      if (binding === undefined) {
+        const key = `browser:${surface.browserId}`
+        unconfirmed.set(key, { key, regionId: surface.regionId, agentSessionId: null })
+        continue
+      }
+      const session = boundAgentSession(binding, input.sessions)
+      if (!session) unknownAgent(surface.regionId, binding.agentSessionId)
+      else if (!shown.has(session.id)) closing.set(session.id, session)
+    }
+  }
+  return {
+    sessions: [...closing.values()].filter((session) => session.processState !== 'exited'),
+    unconfirmed: [...unconfirmed.values()]
+  }
+}
+
+export function workbenchSessionCloseResource(
+  session: SessionSnapshot
+): Extract<WorkbenchViewCloseResource, { kind: 'session' }> {
+  return { key: `session:${session.id}`, kind: 'session', sessionId: session.id, control: freezeSessionControl(session.control) }
 }
 
 export function sameWorkbenchSurfaceOwner(
