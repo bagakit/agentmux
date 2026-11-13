@@ -66,7 +66,7 @@ export function captureSizeChipPlacement(selection: NormalizedRect, chipWidth: n
   return { left: clamp(selection.x, 0, frame.width - chipWidth), top: barSide !== 'above' && above >= 0 ? above : selection.y + SIZE_CHIP_GAP }
 }
 
-export const LOUPE_WIDTH = 136, LOUPE_HEIGHT = 150
+export const LOUPE_WIDTH = 136, LOUPE_HEIGHT = 176
 // The loupe's distance from the pointer, and the clearance it keeps from the selection's border and handles.
 const LOUPE_OFFSET = 16, LOUPE_CLEARANCE = 8
 /** Beside the pointer, on the first diagonal that stays in the frame and off the selection. */

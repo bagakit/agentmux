@@ -166,8 +166,10 @@
 .image-annotation-editor .image-annotation-editor__capture-properties button { color: var(--capture-chrome-text); }
 .image-annotation-editor .image-annotation-editor__capture-properties button:hover:not(:disabled) { color: #ffffff; background: var(--capture-chrome-hover); }
 .image-annotation-editor__capture-properties .image-annotation-editor__mode button[aria-pressed=true] { border-color: transparent; color: #ffffff; background: var(--capture-chrome-pressed); box-shadow: none; }
-/* 136 × 150: a 120 px grid of 15 × 15 frozen pixels, then the color and coordinate rows. */
-.image-annotation-editor__loupe { position: absolute; z-index: 5; box-sizing: border-box; display: flex; flex-direction: column; width: 136px; height: 150px; padding: 8px 8px 3px; border-radius: 8px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); pointer-events: none; }
+/* LOUPE_WIDTH × LOUPE_HEIGHT in capture-geometry.ts: a 120 px grid of 15 × 15 frozen pixels, then three 13 px rows. */
+.image-annotation-editor__loupe { position: absolute; z-index: 5; box-sizing: border-box; display: flex; flex-direction: column; width: 136px; height: 176px; padding: 8px 8px 6px; border-radius: 8px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); pointer-events: none; }
 .image-annotation-editor__loupe canvas { display: block; flex: none; width: 120px; height: 120px; image-rendering: pixelated; }
-.image-annotation-editor__loupe span { overflow: hidden; font-size: 9px; line-height: 9.5px; font-variant-numeric: tabular-nums; white-space: pre; text-overflow: ellipsis; }
+.image-annotation-editor__loupe canvas + span { margin-top: 3px; }
+.image-annotation-editor__loupe > span { display: flex; justify-content: space-between; gap: 6px; overflow: hidden; font-size: 10px; font-weight: 500; line-height: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.image-annotation-editor__loupe small { color: var(--capture-chrome-muted); font-size: inherit; }
 .image-annotation-editor--capture > .image-annotation-editor__status { position: absolute; left: 8px; bottom: 8px; width: auto; height: auto; max-width: 60%; padding: 2px 6px; border-radius: 4px; background: var(--capture-chrome); color: var(--capture-chrome-text); pointer-events: none; }

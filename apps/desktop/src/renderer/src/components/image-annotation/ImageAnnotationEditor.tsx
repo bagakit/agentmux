@@ -723,8 +723,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       {hint ? <CaptureHint text={hint} onCancel={requestClose} /> : null}
       {loupe && loupeBox ? <div className="image-annotation-editor__loupe" aria-label="Pixel loupe" style={loupeBox}>
         <canvas ref={loupeRef} width={LOUPE_GRID} height={LOUPE_GRID} aria-hidden="true" />
-        <span>{loupe.sample.hex}  {loupe.sample.rgb.join(',')}</span>
-        <span>{Math.round(origin.x + loupe.at.x)}, {Math.round(origin.y + loupe.at.y)} pt · {loupe.sample.x}, {loupe.sample.y} px</span>
+        <span>{loupe.sample.hex}<span>{loupe.sample.rgb.join(',')}</span></span>
+        <span>{Math.round(origin.x + loupe.at.x) + ', ' + Math.round(origin.y + loupe.at.y)}<small>pt</small></span>
+        <span>{loupe.sample.x + ', ' + loupe.sample.y}<small>px</small></span>
       </div> : null}
       {copied || documentStatus ? <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status">{copied ?? documentStatus}</span> : null}
     </div>
