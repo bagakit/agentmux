@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runA2aProof } from './lib/a2a-proof.mjs'
-import { sealReferenceDeliveryProof } from './lib/a2a-reference-proof.mjs'
 import { idleInputOwners } from '../test/fixtures/a2a-idle-input-proof.mjs'
 
 const journal = ['packages/core/test/a2a-reference-delivery.test.ts']
 const native = ['packages/core/test/a2a-reference-native.test.ts']
-const args = process.argv.slice(2)
-assert.ok(args.length === 0 || args.length === 2 && args[0] === '--prepared-artifact' && !args[1].startsWith('--'), 'Choose one explicit prepared artifact or the source-build candidate')
-const preparedArtifact = args.length ? resolve(args[1]) : undefined
+assert.equal(process.argv.length, 2, 'This gate takes no arguments; it runs the freshly built committed candidate')
 
 // The Runtime fixture uses an explicit verification Provider, not a simulated
 // kernel. The actual Codex adapter and model adoption have their own native gate.
 const compiled = await runA2aProof({
-  name: 'a2a-reference-delivery', freezeTests: true, preparedArtifact,
+  name: 'a2a-reference-delivery', freezeTests: true,
   frozenSupport: ['test/fixture-values.mjs', 'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'], tests: [...journal, ...native],
   environment: ({ label, evidence, dist, url }) => ({ AGENTMUX_TEST_REFERENCE_FACTS: join(evidence, label + '-native-facts.jsonl'), AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
   sourceInputs: ['packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
@@ -28,8 +25,6 @@ const compiled = await runA2aProof({
     'packages/core/src/generated/agentmux-guides.ts', 'packages/core/src/generated/agentmux-guides-index.ts',
     'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/types.ts',
     'packages/core/scripts/verify-a2a-reference-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
-    ...(preparedArtifact ? ['apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/package-identity.mjs',
-      'apps/desktop/scripts/runtime-application-payload.mjs', 'apps/desktop/scripts/macos-application-brand.mjs'] : []),
     'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'],
   callers: [
     { path: 'packages/core/src/agentmux-cli-commands.ts', symbol: "command('agent.send'" },
@@ -75,8 +70,7 @@ const compiled = await runA2aProof({
 // The actual CLI/Runtime chain above cannot stand in for the Codex adapter's
 // source contract; compose its owning gate and require identical shared inputs.
 const compiledReceipt = JSON.parse(await readFile(compiled.receipt, 'utf8'))
-const nativeArgs = compiledReceipt.preparation ? ['--prepared-source', compiledReceipt.preparation.path] : []
-const result = await promisify(execFile)(process.execPath, [join(import.meta.dirname, 'verify-a2a-idle-input.mjs'), ...nativeArgs], { maxBuffer: 1024 * 1024 })
+const result = await promisify(execFile)(process.execPath, [join(import.meta.dirname, 'verify-a2a-idle-input.mjs')], { maxBuffer: 1024 * 1024 })
 const nativeGate = JSON.parse(result.stdout.trim().split('\n').at(-1))
 assert.equal(nativeGate.passed, true); assert.equal(nativeGate.sourceOnly, true)
 const nativeReceipt = JSON.parse(await readFile(nativeGate.receipt, 'utf8'))
@@ -88,5 +82,4 @@ const receipt = join(dirname(compiled.receipt), 'delivery-gate.json')
 await writeFile(receipt, JSON.stringify({ schema: 'agentmux.a2a-reference-delivery-gate.v1', passed: true,
   compiled: compiled.receipt, nativeSource: nativeGate.receipt, sharedInputs: shared,
   boundary: 'Actual CLI and private Runtime consumer chain, compiled behavior mutants, and separately loaded native adapter source mutants; model adoption is a separate proof.' }, null, 2) + '\n')
-await sealReferenceDeliveryProof({ root: resolve(import.meta.dirname, '../../..'), receipt })
 process.stdout.write(JSON.stringify({ passed: true, receipt }) + '\n')

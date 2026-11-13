@@ -10,7 +10,6 @@ const config = 'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.ownin
 const sources = [
   'apps/desktop/scripts/verify-a2a-reference-reading.mjs', config, 'apps/desktop/scripts/fixtures/a2a-reference-reading/mutations.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', 'apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
-  'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs',
   'apps/desktop/scripts/probe-process.mjs',
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
@@ -115,39 +114,23 @@ function owningProductionInputs(facts) {
   for (const path of new Set(readingMutations.map(edit => edit.path))) assert.ok(inputs[path], 'Actual tests must consume their production mutation owner: ' + path)
   return inputs
 }
-async function reusableTest(run, mutation, label, receipt) {
-  if (!run) return null
-  try { await testFacts(run, mutation); return run }
-  catch (error) {
-    (receipt.invalidatedTests ??= []).push({ label, reason: error.message })
-    console.log(label + ': original test conditions changed; running this subset anew')
-    return null
-  }
-}
-async function prepare(preparation, reusePath) {
+async function prepare() {
   for (const edit of readingMutations) {
     assert.ok(edit.path.includes('/src/') && sources.includes(edit.path), 'Mutation targets one declared production owner: ' + edit.label)
     assert.equal((await readFile(local(edit.path), 'utf8')).split(edit.before).length, 2, 'One exact current mutation owner: ' + edit.label)
     await access(local(edit.test))
   }
-  const reused = reusePath ? await json(reusePath) : undefined
-  if (reused) {
-    assert.equal(reused.schema, 'agentmux.a2a-reference-reading.v1')
-    assert.deepEqual(reused.mutations.map(item => item.label), readingMutations.map(item => item.label), 'Explicit test reuse requires the complete original mutation collection')
-  }
   const directory = join(area, 'run-' + Date.now()); await mkdir(directory, { recursive: true })
-  const receipt = { schema: 'agentmux.a2a-reference-reading.v1', boundary: 'Current A2A owners and test/harness inputs remain exact; production owners join the fixed product. Other actual loaded dependency hashes retain their original test conditions, without a current-main claim.', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
+  const receipt = { schema: 'agentmux.a2a-reference-reading.v1', boundary: 'Current A2A owners and test/harness inputs remain exact and join the committed product. Other actual loaded dependency hashes retain their original test conditions, without a current-main claim.', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
   try {
     for (const path of sources) receipt.sources[path] = sha(await readFile(local(path)))
-    if (reused) receipt.reusedTests = { path: reusePath, sha256: sha(await readFile(reusePath)), boundary: 'Only original runs with current owning inputs and recorded unmodified dependency conditions revalidated; changed owning subsets, product execution and types run anew.' }
-    receipt.baseline = (reused && await reusableTest(reused.baseline, undefined, 'baseline', receipt)) || await tests(directory, 'baseline')
+    receipt.baseline = await tests(directory, 'baseline')
     const baseline = await testFacts(receipt.baseline)
     assert.ok(baseline.cases.length >= 100, 'Core, shared reading and Desktop adjacent consumers must all run')
     mergeSources(receipt.sources, Object.fromEntries(baseline.inputs.map(input => [input.path, input.sourceSHA256])))
-    for (const [index, edit] of readingMutations.entries()) {
-      const prior = reused?.mutations[index]
-      let mutant = (prior && await reusableTest(prior.mutant, edit, edit.label, receipt)) || await tests(directory, edit.label, edit)
-      let restored = (prior && await reusableTest(prior.restored, undefined, edit.label + '-restored', receipt)) || await tests(directory, edit.label + '-restored', undefined, edit.test)
+    for (const edit of readingMutations) {
+      let mutant = await tests(directory, edit.label, edit)
+      let restored = await tests(directory, edit.label + '-restored', undefined, edit.test)
       // A restored subset selects the same file, with no compiler mutation.
       let failed = await testFacts(mutant, edit), green = await testFacts(restored)
       try { assertTestPair(failed, green, edit) } catch (error) {
@@ -160,11 +143,11 @@ async function prepare(preparation, reusePath) {
       }
       mergeSources(receipt.sources, Object.fromEntries([...failed.inputs, ...green.inputs].map(input => [input.path, input.sourceSHA256])))
       receipt.mutations.push({ label: edit.label, mutant, restored })
-      console.log(edit.label + ': behavior RED → original GREEN' + (prior && mutant === prior.mutant && restored === prior.restored ? '; original runs reused after current-input validation' : ''))
+      console.log(edit.label + ': behavior RED → original GREEN')
     }
     receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], directory, 'types')
     assert.equal(receipt.types.exitCode, 0, 'Current Core and shared UI types: ' + receipt.types.log)
-    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation, testInputs: owningProductionInputs(baseline) })
+    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, testInputs: owningProductionInputs(baseline) })
     const runs = [receipt.baseline, ...receipt.mutations.flatMap(item => [item.mutant, item.restored])]
     for (const path of [...runs.flatMap(run => [run.log, run.report, run.loaded]), receipt.types.log]) receipt.artifacts[path] = sha(await readFile(local(path)))
     for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Source stayed fixed: ' + path)
@@ -179,7 +162,6 @@ async function prepare(preparation, reusePath) {
 async function verify() {
   const index = await json(join(area, 'current.json')), bytes = await readFile(local(index.path)); assert.equal(sha(bytes), index.sha256)
   const receipt = JSON.parse(bytes)
-  if (receipt.reusedTests) assert.equal(sha(await readFile(receipt.reusedTests.path)), receipt.reusedTests.sha256, 'Original explicit test reuse receipt')
   assert.equal(receipt.schema, 'agentmux.a2a-reference-reading.v1'); assert.equal(receipt.prepared, true)
   for (const path of sources) assert.ok(receipt.sources[path], 'Required owning source: ' + path)
   for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Current candidate: ' + path)
@@ -197,23 +179,7 @@ async function verify() {
   console.log(JSON.stringify({ passed: true, tests: baseline.cases.length, mutants: receipt.mutations.length, ...result }))
 }
 const args = process.argv.slice(2)
-const preparedIndex = args.indexOf('--prepared-artifact')
-const input = preparedIndex < 0 ? undefined : args[preparedIndex + 1]
-if (preparedIndex >= 0) assert.ok(input && !input.startsWith('--'), '--prepared-artifact requires one input record')
-const preparation = input ? { kind: 'prepared-artifact', input: resolve(input) } : { kind: 'source-build' }
-const reuseIndex = args.indexOf('--reuse-tests'), reuse = reuseIndex < 0 ? undefined : args[reuseIndex + 1]
-if (reuseIndex >= 0) assert.ok(reuse && !reuse.startsWith('--'), '--reuse-tests requires one original receipt')
-const action = args.includes('--isolation-only') ? 'isolation' : args.includes('--prepare') ? 'prepare' : 'verify'
-const recognized = new Set(['--prepare', '--isolation-only', '--prepared-artifact', '--reuse-tests'])
-for (const [index, value] of args.entries()) if (!(preparedIndex >= 0 && index === preparedIndex + 1 || reuseIndex >= 0 && index === reuseIndex + 1)) assert.ok(recognized.has(value), 'Unknown reference proof argument: ' + value)
-assert.ok(!args.includes('--prepare') || !args.includes('--isolation-only'), 'Choose one preparation stage')
-assert.ok(!reuse || action === 'prepare', 'Recorded tests belong to an explicit preparation stage')
-assert.ok(!input || action !== 'verify', 'Prepared input belongs to an explicit preparation stage')
+assert.ok(args.length === 0 || args.length === 1 && args[0] === '--prepare', 'Run bare to verify, or --prepare to run tests, mutations and the private product scene')
 await mkdir(area, { recursive: true })
-if (action === 'isolation') {
-  assert.equal(preparation.kind, 'prepared-artifact', 'Isolation smoke consumes one explicitly prepared product')
-  const directory = join(area, 'isolation-' + (await import('node:crypto')).randomUUID()); await mkdir(directory)
-  const result = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation, isolationOnly: true })
-  console.log(JSON.stringify({ isolated: true, passed: false, ...result, next: 'Actual seven-scene execution and independent image review remain required.' }))
-} else if (action === 'prepare') await prepare(preparation, reuse ? resolve(reuse) : undefined)
-else { assert.equal(args.length, 0); await verify() }
+if (args.length) await prepare()
+else await verify()

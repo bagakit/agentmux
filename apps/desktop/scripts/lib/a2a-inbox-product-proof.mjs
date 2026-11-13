@@ -124,7 +124,7 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'tsconfig.shared.json', 'patches',
   'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs', 'packages/core/bin', 'packages/core/native', 'packages/client-ui/scripts',
   ...assets, ...packages.flatMap(name => ['src', 'package.json', 'tsconfig.json', 'tsconfig.build.json'].map(path => 'packages/' + name + '/' + path))]
-const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/probe-process.mjs',
+const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', hostServiceSource]
 const nativeClipboardSources = ['apps/desktop/src/main/native-desktop-owner.ts', 'apps/desktop/src/main/native-desktop-ipc.ts', 'packages/native-desktop/src/client.ts']
@@ -139,10 +139,7 @@ const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main
   'packages/client-ui/src/components/ConversationResourceText.tsx']
 
 /** One complete private product build for the current A2A reference-reading contract. */
-export async function runA2aReferenceReadingProductProof({ root, evidence, preparation, isolationOnly = false, testInputs = {} }) {
-  assert.ok(['source-build', 'prepared-artifact'].includes(preparation?.kind), 'Choose one explicit product preparation source')
-  if (preparation.kind === 'prepared-artifact') return await runPreparedReferenceProduct({ root, evidence, input: preparation.input, isolationOnly, testInputs })
-  assert.equal(isolationOnly, false, 'Isolation-only consumes an explicitly prepared artifact')
+export async function runA2aReferenceReadingProductProof({ root, evidence, testInputs = {} }) {
   root = await realpath(root); evidence = resolve(evidence, 'reference-product'); await mkdir(evidence, { recursive: true })
   const sourceCommit = (await exec('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
   const changes = (await exec('git', ['diff', sourceCommit, '--name-only', '--', ...owns], { cwd: root })).stdout.trim()
@@ -282,98 +279,26 @@ export async function runA2aReferenceReadingProductProof({ root, evidence, prepa
   return { path: receiptPath, sha256: a2aProofSha(await readFile(receiptPath)), prepared: true, sourceCommit }
 }
 
-async function runPreparedReferenceProduct({ root, evidence, input, isolationOnly, testInputs }) {
-  root = await realpath(root); evidence = resolve(evidence, isolationOnly ? 'reference-isolation' : 'reference-product')
-  await mkdir(evidence, { recursive: true })
-  const privateRoot = await realpath(await mkdtemp(join(tmpdir(), 'amx-a2-')))
-  const product = { schema: 'agentmux.a2a-reference-product-proof.v1', stage: isolationOnly ? 'isolation' : 'reading',
-    prepared: false, passed: false, sourceRoot: root, privateRoot, receiptPath: join(evidence, 'receipt.json'),
-    sources: {}, testSourceJoin: testInputs, fixtures: {}, frames: [], cleanup: {},
-    boundary: 'Exact prepared application clone, original public Host/Core/CLI and private authenticated synthetic actor. No installed application, user Runtime, model adoption or installation-recovery claim.' }
-  let failure
-  try {
-    const { prepareA2aArtifact, verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
-    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...new Set([...requiredLoaded, ...nativeClipboardSources, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts', hostServiceSource, ...Object.keys(testInputs)])] })
-    product.sourceCommit = product.preparation.identity.sourceCommit; product.sources = product.preparation.sourceSnapshot.files
-    product.execution = product.preparation.execution
-    if (!isolationOnly) assert.ok(Object.keys(testInputs).length > 0, 'Actual owning-test production inputs are required')
-    for (const [path, digest] of Object.entries(testInputs)) assert.equal(product.sources[path], digest, 'Owning-test production input differs from the fixed prepared product: ' + path)
-    for (const path of fixturePaths) {
-      const bytes = await readFile(join(root, path)); await mkdir(dirname(join(privateRoot, path)), { recursive: true })
-      await writeFile(join(privateRoot, path), bytes, { mode: 0o700 }); product.fixtures[path] = a2aProofSha(bytes)
-    }
-    await writeFile(join(privateRoot, 'package.json'), JSON.stringify({ type: 'module', private: true }))
-    await symlink(join(product.execution.desktopRoot, 'node_modules'), join(privateRoot, 'node_modules'))
-    product.hostServiceOwner = await preparePrivateHostService({ root, privateRoot, execution: product.execution, sourceCommit: product.sourceCommit })
-    await writeFile(join(privateRoot, 'host-service.json'), JSON.stringify(product.hostServiceOwner))
-    await writeFile(join(privateRoot, 'execution.json'), JSON.stringify(product.execution))
-    const vendor = join(product.execution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch)
-    const manifestBytes = await readFile(join(vendor, 'manifest.json')), manifest = JSON.parse(manifestBytes)
-    const contract = JSON.parse(await readFile(join(product.execution.coreRoot, 'src/ctxmux-artifact-contract.json'), 'utf8'))
-    assert.equal(a2aProofSha(manifestBytes), contract.manifests[process.platform + '-' + process.arch])
-    assert.equal(a2aProofSha(await readFile(join(vendor, manifest.sdk.archive.path))), manifest.sdk.archive.sha256)
-    product.ctxmux = { manifest: a2aProofSha(manifestBytes), sdkArchive: manifest.sdk.archive.sha256, source: manifest.source }
-    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
-    Object.assign(env, { HOME: join(privateRoot, 'home'), AGENTMUX_A2A_PROOF_BUILD: privateRoot,
-      AGENTMUX_A2A_PROOF_EXECUTION: join(privateRoot, 'execution.json'), AGENTMUX_A2A_PROOF_HOST_SERVICE: join(privateRoot, 'host-service.json'), AGENTMUX_A2A_PROOF_CLIPBOARD: join(evidence, 'clipboard.json') })
-    await mkdir(env.HOME)
-    const lines = [], worker = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
-    const outcome = await runProbeProcess(process.execPath, [worker, evidence, ...(isolationOnly ? ['--isolation-only'] : [])],
-      { cwd: privateRoot, temporaryRoot: privateRoot, env, timeoutMs: isolationOnly ? 90_000 : 360_000, onLine: line => { lines.push(line); if (line.startsWith('a2a_private_main_exit_unconfirmed=')) throw new Error(line) }, beforeStop: async () => { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot) } })
-    await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n')
-    product.workerOutcome = outcome
-    Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
-    assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
-    if (isolationOnly) {
-      assert.equal(product.isolationOnly, true); assert.equal(product.clipboardIsolation.copied.sequence, 1)
-      assert.equal(product.clipboardIsolation.copied.text, product.clipboardIsolation.text)
-      assert.equal(product.clipboardIsolation.copied.port, 'NativeDesktop.writeClipboardText')
-      assert.equal(product.clipboardIsolation.copied.destination, 'private-recorder')
-      assert.equal(product.homeIsolation.launches[0].presentationOverlay.clipboard.writes.length, 1)
-    }
-    await verifyA2aPreparedArtifact(product.preparation, { root })
-    for (const [path, digest] of Object.entries(product.fixtures)) assert.equal(a2aProofSha(await readFile(join(privateRoot, path))), digest, 'Actual post-run proof fixture: ' + path)
-    product.prepared = true; product.reviewPath = join(evidence, 'review.json')
-  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack, diagnostic: inspect(error, { depth: 8 }), ...(error.probe ? { probe: error.probe } : {}) } }
-  finally {
-    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); if (product.hostServiceOwner) product.cleanup.outerHostService = await stopPrivateA2aHostService(product.hostServiceOwner); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
-    catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
-    product.cleanup.buildRetained = true; product.cleanup.privateRoot = privateRoot
-    await writeFile(product.receiptPath, JSON.stringify(product, null, 2) + '\n')
-  }
-  if (failure) throw Object.assign(failure, { productReceiptPath: product.receiptPath })
-  return { path: product.receiptPath, sha256: a2aProofSha(await readFile(product.receiptPath)), prepared: true, sourceCommit: product.sourceCommit, stage: product.stage }
-}
-
 /** Shared build identity and actual-image review; no scenario conclusion is inferred here. */
 async function verifyProductBuild(product, { root }) {
   assert.equal(product.schema, 'agentmux.a2a-reference-product-proof.v1'); assert.equal(product.prepared, true)
-  assert.equal(product.stage, 'reading', 'Isolation smoke does not sign the original seven scenes')
   assert.ok(product.sourceCommit)
   assert.deepEqual(Object.keys(product.fixtures).sort(), [...fixturePaths].sort())
-  let retainedExecution = product.execution
+  const retainedExecution = product.execution
   for (const [path, digest] of Object.entries(product.fixtures)) {
     assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current proof source: ' + path)
-    if (product.preparation.kind === 'source-build') assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual private executable fixture: ' + path)
+    assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual private executable fixture: ' + path)
   }
-  if (product.preparation.kind === 'prepared-artifact') {
-    const { verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
-    retainedExecution = await verifyA2aPreparedArtifact(product.preparation, { root, artifact: 'origin' })
-    assert.equal(product.sourceCommit, product.preparation.identity.sourceCommit)
-    assert.deepEqual(product.execution, product.preparation.execution)
-    for (const path of [...requiredLoaded, ...nativeClipboardSources]) assert.equal(product.sources[path], product.preparation.sourceSnapshot.files[path], 'Fixed product source: ' + path)
-  } else {
-    assert.equal(product.preparation.kind, 'source-build')
-    assert.ok(Object.keys(product.sources).length > 100)
-    for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current product source: ' + path)
-    for (const path of requiredLoaded) assert.equal(product.loaded[path], product.sources[path], 'Loaded original consumer: ' + path)
-    assert.equal((await exec('git', ['diff', product.sourceCommit, '--name-only', '--', ...product.assets.map(asset => asset.path)], { cwd: root })).stdout.trim(), '', 'Current immutable asset input trees')
-    for (const asset of product.assets) assert.equal((await exec('git', ['rev-parse', product.sourceCommit + ':' + asset.path], { cwd: root })).stdout.trim(), asset.tree)
-    assert.ok(Object.keys(product.compiled).length > 100)
-    for (const [path, digest] of Object.entries(product.compiled)) assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual retained compiled product: ' + path)
-    for (const path of requiredLoaded) assert.equal(product.compilerInputs[path], path === product.windowOverlay.owner ? product.windowOverlay.compilerInput : product.sources[path], 'Exact compiler input: ' + path)
-    for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
-  }
+  assert.equal(product.preparation.kind, 'source-build')
+  assert.ok(Object.keys(product.sources).length > 100)
+  for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Current product source: ' + path)
+  for (const path of requiredLoaded) assert.equal(product.loaded[path], product.sources[path], 'Loaded original consumer: ' + path)
+  assert.equal((await exec('git', ['diff', product.sourceCommit, '--name-only', '--', ...product.assets.map(asset => asset.path)], { cwd: root })).stdout.trim(), '', 'Current immutable asset input trees')
+  for (const asset of product.assets) assert.equal((await exec('git', ['rev-parse', product.sourceCommit + ':' + asset.path], { cwd: root })).stdout.trim(), asset.tree)
+  assert.ok(Object.keys(product.compiled).length > 100)
+  for (const [path, digest] of Object.entries(product.compiled)) assert.equal(a2aProofSha(await readFile(join(product.privateRoot, path))), digest, 'Actual retained compiled product: ' + path)
+  for (const path of requiredLoaded) assert.equal(product.compilerInputs[path], path === product.windowOverlay.owner ? product.windowOverlay.compilerInput : product.sources[path], 'Exact compiler input: ' + path)
+  for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
   assert.ok(Object.keys(product.testSourceJoin).length > 0)
   for (const [path, digest] of Object.entries(product.testSourceJoin)) assert.equal(product.sources[path], digest, 'Same owning-test and actual product source: ' + path)
   assert.equal(a2aProofSha(await readFile(join(retainedExecution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)

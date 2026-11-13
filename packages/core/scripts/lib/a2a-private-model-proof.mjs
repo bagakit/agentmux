@@ -43,19 +43,18 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
   coordinatorEntry, name = 'a2a-agent-behavior', schema = 'agentmux.a2a-agent-behavior-launcher.v1',
   scenario = 'independent-session-channel', model = 'gpt-6.1-sol', minimumOnly = false, prepareOnly = false,
   executableName = process.env.AGENTMUX_A2A_BEHAVIOR_CODEX || 'codex',
-  requiredFlags = ['--no-daemon', '--ignore-user-config', '--ignore-rules', '--json'], privatePrefix = 'amux-real-a2a-', freezeCandidate = false, preparedArtifact }) {
+  requiredFlags = ['--no-daemon', '--ignore-user-config', '--ignore-rules', '--json'], privatePrefix = 'amux-real-a2a-', freezeCandidate = false, installedCoreRoot }) {
   const authSource = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json')
-  let executionCoreRoot = join(repository, 'packages/core'), executionCoordinator = coordinatorEntry
-  let preparation, preparedOwner
+  // An installed bundle's Core is the executable under test; it is read in place, never copied or rehashed as a graph.
+  let executionCoreRoot = installedCoreRoot ?? join(repository, 'packages/core'), executionCoordinator = coordinatorEntry
+  assert.ok(!installedCoreRoot || !freezeCandidate, 'An installed Core is already immutable; it is not frozen again')
   const hash = value => createHash('sha256').update(value).digest('hex')
   const compiledInputs = sourceInputs.filter(path => path.includes('/src/') && path.endsWith('.ts')).map(path => path.replace('/src/', '/dist/').replace(/\.ts$/u, '.js'))
   const compiledHashes = async () => {
     const paths = freezeCandidate ? (await readdir(join(executionCoreRoot, 'dist'), { recursive: true })).filter(path => path.endsWith('.js')).map(path => 'packages/core/dist/' + path) : compiledInputs
     return Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(executionCoreRoot, path.slice('packages/core/'.length))))])))
   }
-  const productSource = path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)
-  const readInput = path => preparation && productSource(path)
-    ? preparedOwner.readA2aPreparedSource(preparation, { root: repository, path }) : readFile(join(repository, path))
+  const readInput = path => readFile(join(repository, path))
   const sourceHashes = async () => Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, hash(await readInput(path))])))
   async function executablePath(name) {
     const paths = isAbsolute(name) ? [name] : (process.env.PATH ?? '').split(delimiter).map(path => resolve(path, name))
@@ -83,42 +82,28 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     const executable = await executablePath(executableName)
     privateRoot = await realpath(await mkdtemp(join(tmpdir(), privatePrefix))); await chmod(privateRoot, 0o700)
     for (const name of ['home', 'auth', 'workspace', 'runtime', 'state/ctxmux', 'tmp']) await mkdir(join(privateRoot, name), { recursive: true, mode: 0o700 })
-    if (preparedArtifact) {
-      assert.equal(freezeCandidate, true, 'Prepared model proofs freeze their exact harness and executable')
-      preparedOwner = await import(new URL('../../../../apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', import.meta.url))
-      const production = sourceInputs.filter(productSource)
-      preparation = await preparedOwner.prepareA2aArtifact({ root: repository, input: preparedArtifact, privateRoot, sourcePaths: production })
-      launcher.harnessCommit = launcher.candidateCommit; launcher.candidateCommit = preparation.identity.sourceCommit
-      executionCoreRoot = preparation.execution.coreRoot
-      const path = join(evidence, 'prepared-artifact.json')
-      await writeFile(path, JSON.stringify(preparation, null, 2) + '\n')
-      launcher.preparation = { path, sha256: hash(await readFile(path)) }
-    } else {
+    if (installedCoreRoot) launcher.installedCoreRoot = installedCoreRoot
+    else {
       const { staleDistComplaint } = await import(new URL('../../../../vitest.dist-freshness.ts', import.meta.url))
       assert.equal(await staleDistComplaint(executionCoreRoot), null, 'Build this candidate Core before running real models')
     }
     launcher.sourceBefore = await sourceHashes()
     launcher.compiledBefore = await compiledHashes()
-    if (preparation) assert.deepEqual(Object.fromEntries(Object.entries(launcher.compiledBefore).map(([path, digest]) => [path.slice('packages/core/'.length), digest])), preparation.coreGraph)
     if (freezeCandidate) {
       const candidate = join(privateRoot, 'candidate'), core = join(candidate, 'packages/core')
       for (const path of sourceInputs) {
         const target = join(candidate, path)
         await mkdir(resolve(target, '..'), { recursive: true })
-        if (preparation && productSource(path)) await writeFile(target, await readInput(path))
-        else await cp(join(repository, path), target)
+        await cp(join(repository, path), target)
         assert.equal(hash(await readFile(target)), launcher.sourceBefore[path], `Source changed while freezing ${path}`)
       }
-      if (!preparation) {
-        await cp(join(repository, 'packages/core/dist'), join(core, 'dist'), { recursive: true, filter: path => !/\.(?:map|ts)$/u.test(path) })
-        await cp(join(repository, 'packages/core/package.json'), join(core, 'package.json'))
-        for (const name of ['vendor', 'node_modules']) await symlink(join(repository, 'packages/core', name), join(core, name))
-        executionCoreRoot = core
-      }
+      await cp(join(repository, 'packages/core/dist'), join(core, 'dist'), { recursive: true, filter: path => !/\.(?:map|ts)$/u.test(path) })
+      await cp(join(repository, 'packages/core/package.json'), join(core, 'package.json'))
+      for (const name of ['vendor', 'node_modules']) await symlink(join(repository, 'packages/core', name), join(core, name))
+      executionCoreRoot = core
       executionCoordinator = join(candidate, relative(repository, coordinatorEntry))
       assert.deepEqual(await compiledHashes(), launcher.compiledBefore, 'Compiled candidate changed while freezing')
       launcher.frozenCandidate = { sourceSnapshot: true, compiledSnapshot: true, liveWorkingTreeUsedByModel: false }
-      if (preparation) launcher.frozenCandidate.sourceOrigins = { product: 'fixed-git', harness: 'captured-checkout' }
     }
     // Auth bytes are copied without inspection. No host config/instructions/plugin,
     // tool settings, AgentMux state or existing model Session enters the scope.
@@ -171,7 +156,6 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
       if (freezeCandidate && launcher.frozenCandidate) {
         await attempt(async () => {
           launcher.compiledAfter = await compiledHashes()
-          if (preparation) await preparedOwner.verifyA2aPreparedArtifact(preparation, { root: repository })
           for (const path of sourceInputs) assert.equal(hash(await readFile(join(privateRoot, 'candidate', path))), launcher.sourceBefore[path], `Frozen source changed: ${path}`)
         })
       }

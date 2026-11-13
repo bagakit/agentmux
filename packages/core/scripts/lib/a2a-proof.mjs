@@ -12,15 +12,12 @@ const root = resolve(import.meta.dirname, '../../../..')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 
 /** Mutations run in a private compiled copy; no shared source, output or user Runtime is mutated. */
-export async function runA2aProof({ name, tests, regressionTests = [], mutations, callers, sourceInputs, environment, freezeTests = false, frozenSupport = [], preparedArtifact }) {
+export async function runA2aProof({ name, tests, regressionTests = [], mutations, callers, sourceInputs, environment, freezeTests = false, frozenSupport = [] }) {
   const evidence = join(root, '.tmp', `${name}-${Date.now()}`)
   const copy = await realpath(await mkdtemp(fixtureRootPath("tmp/amx-a2a-proof-")))
   const core = join(copy, 'core'), dist = join(core, 'dist')
   const inputs = [...new Set([...sourceInputs, ...frozenSupport, ...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...callers.map(item => item.path)])]
-  let preparation, preparedOwner
-  const productSource = path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)
-  const readInput = path => preparation && productSource(path)
-    ? preparedOwner.readA2aPreparedSource(preparation, { root, path }) : readFile(join(root, path))
+  const readInput = path => readFile(join(root, path))
   const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, hash(await readInput(path))])))
   const receipt = { schema: 'agentmux.a2a-protocol-proof.v1', name, privateCopyRoot: copy, passed: false, sharedTreeMutations: 0, cases: [] }
   const originals = new Map()
@@ -50,17 +47,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
   }
   try {
     await mkdir(evidence, { recursive: true })
-    let sourceCore = join(root, 'packages/core')
-    if (preparedArtifact) {
-      assert.equal(freezeTests, true, 'Prepared executable proofs freeze their actual test consumers')
-      preparedOwner = await import(pathToFileURL(join(root, 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs')).href)
-      const production = inputs.filter(productSource)
-      preparation = await preparedOwner.prepareA2aArtifact({ root, input: preparedArtifact, privateRoot: copy, sourcePaths: production })
-      sourceCore = preparation.execution.coreRoot
-      const path = join(evidence, 'prepared-artifact.json')
-      await writeFile(path, JSON.stringify(preparation, null, 2) + '\n')
-      receipt.preparation = { path, sha256: hash(await readFile(path)) }
-    }
+    const sourceCore = join(root, 'packages/core')
     receipt.sourceBefore = await sourceHashes()
     // Every definition-excluded path below is a product caller, not a test inventory.
     receipt.callers = await Promise.all(callers.map(async ({ symbol, path }) => {
@@ -77,10 +64,8 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
     const projectTests = [...new Set(mutations.flatMap(mutation => mutation.projectTests ?? []))]
     if (freezeTests) {
       assert.equal(projectTests.length, 0, 'Frozen Core tests and copied Desktop tests have separate module graphs')
-      if (!preparation) {
-        const { staleDistComplaint } = await import(pathToFileURL(join(root, 'vitest.dist-freshness.ts')).href)
-        assert.equal(await staleDistComplaint(sourceCore), null, 'Freeze a freshly compiled candidate before running this gate')
-      }
+      const { staleDistComplaint } = await import(pathToFileURL(join(root, 'vitest.dist-freshness.ts')).href)
+      assert.equal(await staleDistComplaint(sourceCore), null, 'Freeze a freshly compiled candidate before running this gate')
       await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
       await mkdir(join(copy, 'packages/core'), { recursive: true })
       await symlink(join(root, 'packages/core/node_modules'), join(copy, 'packages/core/node_modules'))
@@ -88,8 +73,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       for (const path of inputs) {
         const target = join(copy, 'snapshot', path)
         await mkdir(resolve(target, '..'), { recursive: true })
-        if (preparation && productSource(path)) await writeFile(target, await readInput(path))
-        else await cp(join(root, path), target)
+        await cp(join(root, path), target)
         assert.equal(hash(await readFile(target)), receipt.sourceBefore[path], `Candidate changed during freeze: ${path}`)
       }
       const testGraph = [...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...frozenSupport])]
@@ -99,9 +83,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       }
       await writeFile(join(copy, 'vitest.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ esbuild: { jsx: 'automatic' }, server: { fs: { allow: ${JSON.stringify([copy, root])} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? [])])])} } })\n`)
       receipt.frozenTests = { inputs: testGraph, sourceSnapshot: true, mutableWorkingTreeUsedByTests: false }
-      if (preparation) receipt.frozenTests.sourceOrigins = { product: 'fixed-git', harness: 'captured-checkout' }
       receipt.compiledInputs = Object.fromEntries(await Promise.all((await readdir(dist, { recursive: true })).filter(path => path.endsWith('.js')).map(async path => [path, hash(await readFile(join(dist, path)))])))
-      if (preparation) assert.deepEqual(Object.fromEntries(Object.entries(receipt.compiledInputs).map(([path, digest]) => ['dist/' + path, digest])), preparation.coreGraph, 'The tests execute the complete selected Core graph')
     }
     if (projectTests.length) {
       // Registered IPC tests retain their real relative module graph and local mocks in this copy.
@@ -155,11 +137,6 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       for (const [path, originalHash] of Object.entries(receipt.sourceBefore)) assert.equal(hash(await readFile(join(copy, 'snapshot', path))), originalHash)
     } else assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
     for (const [file, bytes] of originals) assert.equal(await readFile(join(dist, file), 'utf8'), bytes)
-    if (preparation) {
-      const restored = Object.fromEntries(await Promise.all((await readdir(dist, { recursive: true })).filter(path => path.endsWith('.js')).map(async path => [path, hash(await readFile(join(dist, path)))])))
-      assert.deepEqual(restored, receipt.compiledInputs, 'The complete tested graph was restored')
-      await preparedOwner.verifyA2aPreparedArtifact(preparation, { root })
-    }
     receipt.passed = true
   } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
   finally {

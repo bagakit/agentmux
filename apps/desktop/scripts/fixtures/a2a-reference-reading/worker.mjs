@@ -19,13 +19,6 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
       return { ...assertPrivateA2aClipboardWrite(value, text, before), beforeSequence: before }
     })
   }
-  if (process.argv.includes('--isolation-only')) {
-    const text = 'Private native text-port isolation ' + randomUUID()
-    const copied = await copy('isolated original preload/Main/native text port', text, () =>
-      first.cdp.evaluate(`(async()=>{await window.agentmux.ui.writeClipboardText(${JSON.stringify(text)});return{completed:true}})()`))
-    facts.isolationOnly = true; facts.clipboardIsolation = { text, copied, boundary: 'Original preload/Main and NativeDesktop text port; private recorder replaces only the OS text write. No native helper write or OS clipboard success is claimed.' }
-    return
-  }
   facts.reading = { boundary: 'Actual public CLI → product Host/Core → qualified native and captured notice → Main/preload → production Conversation and Mailbox. Synthetic authenticated native actor, no model or vendor idle-race claim. Complete resource boundaries are separately exercised by the source-bound owning component tests; these App frames exercise qualified original Inbox reading with an independent notification wire.' }
   for (const label of ['Author', 'Recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
