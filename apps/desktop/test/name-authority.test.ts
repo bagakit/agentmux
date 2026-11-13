@@ -290,7 +290,7 @@ describe('name authority at its durable boundary and real projection consumers',
     const tabTarget = { kind: 'tab', id: 'private-tab' }
     const named = await owner.mutateDisplayLabel({ target: tabTarget, operationId: 'tab-edit', value: 'New tab', source: 'manual', expectedNameRevision: 0 }, ui)
     const namedAgent = await change(owner, 'agent-edit', 'New agent', 0)
-    const merged = reconcileSpatialGraphs(baseline.graph, local, namedAgent.state.graph)
+    const merged = reconcileSpatialGraphs(baseline.graph, local, namedAgent.state.graph).graph
     expect(merged.tabs[0]!.name).toBe('New tab')
     expect(merged.resources['region:private-region']).toEqual({ unsentDraft: 'later thought' })
     const projection = acknowledgedNameProjection(namedAgent.state, 0)!
@@ -478,7 +478,7 @@ const named=await owner.mutateDisplayLabel({operationId:'tab-name',target:{kind:
 const forged=structuredClone(named.state.graph);forged.tabs[0].name='Full graph bypass';let refused=false;
 try {await owner.commit({expectedRevision:named.state.revision,graph:forged})} catch(e) {if(e.code==='NAME_AUTHORITY_CONFLICT')refused=true;else throw e}
 assert.equal(refused,true,'ordinary public graph owner must reject label bypass');
-let merged=null;try {merged=reconcileSpatialGraphs(before.graph,local,named.state.graph)} catch {}
+let merged=null;try {merged=reconcileSpatialGraphs(before.graph,local,named.state.graph).graph} catch {}
 assert.equal(merged?.tabs[0]?.name,'Current choice','Renderer rebase must keep current remote label');
 assert.equal(merged?.resources['region:private-region']?.unsentDraft,'local thought');console.log('NAME_MUTATION_GREEN');
 globalThis.__NAME_FAIL_PATH=owner.path;let partial=null;try {partial=await owner.mutateDisplayLabel({operationId:'partial',target,value:'Applied unknown',source:'manual',expectedNameRevision:1},ctx)}catch{}

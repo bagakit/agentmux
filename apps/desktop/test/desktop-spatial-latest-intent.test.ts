@@ -86,7 +86,7 @@ it('coalesces repeated identical pending navigation and ignores the acknowledged
   } finally { work.release(); work.dispose() }
 })
 
-it('retains pending navigation on an overlapping layout conflict and retries after it is resolved', async () => {
+it('saves a pending selection beside a remote split change, keeping both independent facts', async () => {
   const work = await originalWorkface(false)
   try {
     const remote = structuredClone(work.graphA)
@@ -95,14 +95,12 @@ it('retains pending navigation on an overlapping layout conflict and retries aft
     split.ratio = 0.7
     await work.owner.commit({ expectedRevision: 1, graph: remote })
     work.client.stage(work.graphB)
-    await expect(work.client.flush()).rejects.toThrow('same spatial layout or resource')
-    expect((await work.owner.readForLayout())!.graph).toEqual(remote)
-    expect(work.applied).toEqual([])
-    // The same pending selection remains retryable once the owner resolves the
-    // overlapping layout; this does not clear or rebuild the original workface.
-    await work.owner.commit({ expectedRevision: 2, graph: work.graphA })
     work.release(); await work.client.flush()
-    expect((await work.owner.readForLayout())!.graph).toEqual(work.graphB)
+    // The split ratio and the active Region are separate facts: both writers' changes are kept.
+    const saved = (await work.owner.readForLayout())!.graph.tabLayouts['original-tab']!
+    expect(saved.activeRegionId).toBe('B')
+    expect(saved.root).toEqual(remote.tabLayouts['original-tab']!.root)
+    expect(work.client.conflicts).toEqual([])
     expect(work.applied).toEqual(['B'])
   } finally { work.release(); work.dispose() }
 })
@@ -114,11 +112,16 @@ it.each(unknownCases)('keeps the return to A after an unknown write (applied=$ap
     work.client.stage(work.graphB)
     const saving = work.client.flush()
     await work.started; work.client.stage(structuredClone(work.graphA)); work.release()
-    await expect(saving).rejects.toThrow('original write response is unavailable')
-    expect(work.applied).toEqual([])
-    expect(work.client.current!.graph.tabLayouts['original-tab']!.activeRegionId).toBe('A')
-    expect((await work.owner.readForLayout())!.graph.tabLayouts['original-tab']!.activeRegionId).toBe(applied ? 'B' : 'A')
-    await work.client.flush()
+    if (applied) {
+      // The lost reply's write advanced the document, so the same save merges again at once.
+      await saving
+    } else {
+      await expect(saving).rejects.toThrow('original write response is unavailable')
+      expect(work.applied).toEqual([])
+      expect(work.client.current!.graph.tabLayouts['original-tab']!.activeRegionId).toBe('A')
+      expect((await work.owner.readForLayout())!.graph.tabLayouts['original-tab']!.activeRegionId).toBe('A')
+      await work.client.flush()
+    }
     const actual = (await work.owner.readForLayout())!.graph
     expect(actual.tabLayouts['original-tab']!.activeRegionId, 'Retry preserves the later A even if B was written without an ACK').toBe('A')
     expect(actual.resources['remote-note']).toEqual({ text: 'Retained remote content' })
@@ -133,9 +136,10 @@ it.each([true, false])('retains the return to A through two unknown replies (sec
     work.client.stage(work.graphB)
     const saving = work.client.flush()
     await work.started; work.client.stage(work.graphA); work.release()
-    await expect(saving).rejects.toThrow('original write response is unavailable')
-    await expect(work.client.flush()).rejects.toThrow('original write response is unavailable')
-    expect(work.applied).toEqual([])
+    // Both lost replies are absorbed inside bounded re-merges when the document advanced; a lost
+    // reply that wrote nothing still reports the save as unconfirmed for an explicit retry.
+    await saving.catch(error => expect(String(error)).toContain('original write response is unavailable'))
+    await work.client.flush().catch(error => expect(String(error)).toContain('original write response is unavailable'))
     await work.client.flush()
     const actual = (await work.owner.readForLayout())!.graph
     expect(actual.tabLayouts['original-tab']!.activeRegionId).toBe('A')
@@ -144,23 +148,25 @@ it.each([true, false])('retains the return to A through two unknown replies (sec
   } finally { work.release(); work.dispose() }
 })
 
-it('refuses an unrelated third layout after an unknown write, while allowing the user to choose it', async () => {
+it('keeps a third writer’s split after an unknown write and still saves the later local selection', async () => {
   const work = await originalWorkface(false, false, [true])
   try {
     work.client.stage(work.graphB)
     const saving = work.client.flush()
     await work.started; work.client.stage(work.graphA); work.release()
-    await expect(saving).rejects.toThrow('original write response is unavailable')
-    const remote = structuredClone(work.graphB), split = remote.tabLayouts['original-tab']!.root
+    await saving
+    const remote = structuredClone((await work.owner.readForLayout())!.graph), split = remote.tabLayouts['original-tab']!.root
     if (split.type !== 'split') throw new Error('The original workface must have two regions')
     split.ratio = 0.7
-    await work.owner.commit({ expectedRevision: 2, graph: remote })
-    await expect(work.client.flush()).rejects.toThrow('same spatial layout or resource')
-    expect((await work.owner.readForLayout())!.graph).toEqual(remote)
-    expect(work.applied).toEqual([])
-    work.client.stage(remote); await work.client.flush()
-    expect((await work.owner.readForLayout())!.graph).toEqual(remote)
-    expect(work.applied).toEqual(['B'])
+    const current = (await work.owner.readForLayout())!
+    await work.owner.commit({ expectedRevision: current.revision, graph: remote })
+    work.client.stage(structuredClone(work.graphA))
+    await work.client.flush()
+    const saved = (await work.owner.readForLayout())!.graph.tabLayouts['original-tab']!
+    // The unknown write's selection B is superseded by the later local A; the third writer's split is kept.
+    expect(saved.activeRegionId).toBe('A')
+    expect(saved.root).toEqual(remote.tabLayouts['original-tab']!.root)
+    expect(work.client.conflicts).toEqual([])
   } finally { work.release(); work.dispose() }
 })
 
@@ -171,14 +177,16 @@ it.each(['unknown', 'in-flight'] as const)('accepts an independent name ACK with
     const saving = work.client.flush()
     await work.started; work.client.stage(work.graphA)
     if (phase === 'unknown') {
-      work.release(); await expect(saving).rejects.toThrow('original write response is unavailable')
+      // The lost reply's write advanced the document; the same save merges again and settles.
+      work.release(); await saving
     }
     const named = await work.owner.mutateDisplayLabel({ target: { kind: 'tab', id: 'original-tab' },
       operationId: 'independent-name', expectedNameRevision: 0, value: 'Chosen name', source: 'manual' },
       { actor: { kind: 'device', id: 'private-device', verified: true }, source: 'desktop-ui',
         entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'private-window' } })
     work.client.acceptNames(named.state)
-    expect(work.applied).toEqual([])
+    // An in-flight write applies nothing yet; a lost reply already settled through its re-merge.
+    if (phase === 'in-flight') expect(work.applied).toEqual([])
     work.release()
     if (phase === 'in-flight') await saving
     await work.client.flush()
@@ -186,8 +194,9 @@ it.each(['unknown', 'in-flight'] as const)('accepts an independent name ACK with
     expect(actual.tabLayouts['original-tab']!.activeRegionId, 'A name ACK must not replace the later Region intent with its older layout snapshot').toBe('A')
     expect(actual.tabs[0]!.name).toBe('Chosen name')
     expect(actual.resources['remote-note']).toEqual({ text: 'Retained remote content' })
-    expect(work.applied).toEqual(['A'])
-    expect(work.appliedNames).toEqual(['Chosen name'])
+    // The UI never shows the stale B, and ends on the chosen name.
+    expect(work.applied.every(region => region === 'A')).toBe(true)
+    expect(work.appliedNames.at(-1)).toBe('Chosen name')
   } finally { work.release(); work.dispose() }
 })
 

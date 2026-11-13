@@ -77,7 +77,7 @@ it('the actual Mobile creator admits one original Session and durable workface w
   expect((await spatial.read())!.graph.tabs).toEqual(after.graph.tabs)
   await expect(phone.forwardRpc('agent.open', { ...retained!.input, content: { ...retained!.input.content, prompt: 'another original intent' } })).rejects.toMatchObject({ code: 'SPACE_REQUEST_CONFLICT' })
   await expect(spatial.commit({ expectedRevision: before.revision, graph: before.graph })).rejects.toMatchObject({ code: 'SPATIAL_STATE_CONFLICT' })
-  const merged = reconcileSpatialGraphs(before.graph, before.graph, after.graph)
+  const merged = reconcileSpatialGraphs(before.graph, before.graph, after.graph).graph
   expect(merged.regions).toEqual(after.graph.regions); expect(merged.layouts).toEqual(after.graph.layouts)
   const missingAssociation = structuredClone(after.graph); delete missingAssociation.resources['core:agent-open']
   await spatial.commit({ expectedRevision: after.revision, graph: missingAssociation })

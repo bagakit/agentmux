@@ -280,3 +280,45 @@ describe('actual Desktop Store spatial cutover', () => {
   });
 
 });
+describe('a conflict on one workface item never stalls the actual Store', () => {
+  it('reports the conflicting item, keeps saving new Tabs and leaves Quit unblocked', async () => {
+    const store = await fixture()
+    vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => store.retainDisplayLabels(values))
+    const tab = addWorkbenchRegion(createWorkbenchTab('file', { regionId: 'file-region', kind: 'file', workspaceId: 'resource', path: 'research.md' }), 'file-region', 'right',
+      { regionId: 'notes-region', kind: 'file', workspaceId: 'resource', path: 'notes.md' })
+    const work = { ...workbench('unused'), tabs: { file: tab } }
+    await store.commit({ expectedRevision: 0, graph: desktopSpatialGraph(work, []) })
+    useAppStore.setState({ ...work, restoredWorkbench: { tabs: work.tabs, layouts: work.layouts } })
+    disposers.push(await useAppStore.getState().initialize())
+    // Another process changes the split after this window read the document and before it commits.
+    let raced = false
+    const read = vi.mocked(api.spatial.read).getMockImplementation()!
+    vi.mocked(api.spatial.read).mockImplementation(async () => {
+      const observed = await read()
+      if (!raced && observed) {
+        raced = true
+        const remote = structuredClone(observed.graph), split = remote.tabLayouts.file!.root
+        if (split.type !== 'split') throw new Error('The fixture Tab must be split')
+        split.ratio = 0.8
+        await store.commit({ expectedRevision: observed.revision, graph: remote })
+      }
+      return observed
+    })
+    // The user drags the same split elsewhere and opens a second Tab.
+    useAppStore.setState(state => {
+      const live = state.tabs.file!, root = live.layout.root
+      if (root.type !== 'split') throw new Error('The live Tab must be split')
+      const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'file', workspaceId: 'resource', path: 'second.md' })
+      return { tabs: { ...state.tabs, file: { ...live, layout: { ...live.layout, root: { ...root, ratio: 0.3 } } }, second },
+        layouts: { resource: createWorkspaceLayout('group', ['file', 'second']) } }
+    })
+    await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(value => value.tabId)).toContain('second'))
+    const savedRoot = (await store.read())!.graph.tabLayouts.file!.root
+    expect(savedRoot.type === 'split' && savedRoot.ratio).toBe(0.8)
+    await vi.waitFor(() => expect(useAppStore.getState().notificationEvents.some(event => event.context?.event?.source === 'workface-save-conflict')).toBe(true))
+    expect(useAppStore.getState().workbenchSaveWarning).toBeNull()
+    // A checkpoint is a confirmed save of every other change, so Quit is not paused by the conflict.
+    const { checkpointSpatialWorkbench } = await import('../src/renderer/src/store')
+    await expect(checkpointSpatialWorkbench()).resolves.toBeUndefined()
+  })
+})

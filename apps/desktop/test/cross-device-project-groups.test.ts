@@ -103,14 +103,17 @@ describe('cross-device Project organization through the real spatial owner', () 
     await expect(owner.commit({ expectedRevision: saved.revision, graph: { ...saved.graph, projectGroups: [] }, allowEntityRemoval: true })).rejects.toMatchObject({ code: 'SPATIAL_ENTITY_REMOVAL_UNCONFIRMED' })
     expect(await owner.read()).toEqual(saved)
   })
-  it('merges disjoint group edits and reports same-group conflicts without changing either graph', () => {
+  it('merges disjoint group edits and names a same-group conflict without changing either input graph', () => {
     const base = desktopSpatialGraph({ ...workbench(), projectGroups: [group] }, [])
     const local = { ...base, projectGroups: [{ ...group, name: 'Local name' }] }
     const second = { groupId: 'other-group', name: 'Other', projectIds: ['opaque-project-a', 'opaque-project-b'] }
     const remote = { ...base, projectGroups: [group, second] }
-    expect(reconcileSpatialGraphs(base, local, remote).projectGroups).toEqual([{ ...group, name: 'Local name' }, second])
+    expect(reconcileSpatialGraphs(base, local, remote).graph.projectGroups).toEqual([{ ...group, name: 'Local name' }, second])
     const conflicting = { ...base, projectGroups: [{ ...group, name: 'Remote name' }] }
-    expect(() => reconcileSpatialGraphs(base, local, conflicting)).toThrow('edited elsewhere')
+    const merged = reconcileSpatialGraphs(base, local, conflicting)
+    // The conflicting group keeps the confirmed remote name and is reported by its exact key.
+    expect(merged.graph.projectGroups).toEqual([{ ...group, name: 'Remote name' }])
+    expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['projectGroups:' + group.groupId])
     expect(conflicting.projectGroups[0]!.name).toBe('Remote name')
     expect(local.projectGroups[0]!.name).toBe('Local name')
   })

@@ -90,13 +90,18 @@ describe('Desktop consumes the Core spatial owner', () => {
     expect(closed.resources).not.toHaveProperty('tab:tab');
     expect(closed.resources).not.toHaveProperty('region:agent');
   });
-  it('keeps disjoint remote edits and refuses overlapping changes', () => {
+  it('keeps disjoint remote edits and names an overlapping change without blocking the rest', () => {
     const base = desktopSpatialGraph(workbench(), []), local = structuredClone(base), remote = structuredClone(base);
-    local.tabs[0]!.name = 'Local title';
+    local.tabLayouts.tab!.activeRegionId = 'agent';
     remote.resources['separate-resource'] = { draft: 'remote' };
-    expect(reconcileSpatialGraphs(base, local, remote)).toMatchObject({ tabs: [{ name: 'Local title' }], resources: { 'separate-resource': { draft: 'remote' } } });
-    remote.tabs[0]!.name = 'Another title';
-    expect(() => reconcileSpatialGraphs(base, local, remote)).toThrow(/retained/);
+    expect(reconcileSpatialGraphs(base, local, remote)).toMatchObject({ graph: { tabLayouts: { tab: { activeRegionId: 'agent' } }, resources: { 'separate-resource': { draft: 'remote' } } }, conflicts: [] });
+    local.resources['local-resource'] = { draft: 'local' };
+    local.resources['region:file'] = { ...local.resources['region:file'] as object, note: 'local' };
+    remote.resources['region:file'] = { ...remote.resources['region:file'] as object, note: 'remote' };
+    const merged = reconcileSpatialGraphs(base, local, remote);
+    expect(merged.graph.resources['region:file']).toMatchObject({ note: 'remote' });
+    expect(merged.graph.resources['local-resource']).toEqual({ draft: 'local' });
+    expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['resources:region:file']);
   });
   it('imports only an absent Core document, receives CLI-owner updates and persists local changes', async () => {
     const store = await owner(), warnings: unknown[] = [], client = new DesktopSpatialPersistence({ read: () => store.read(), commit: i => store.commit(i), onChange: f => store.subscribe(f) }, e => warnings.push(e));
