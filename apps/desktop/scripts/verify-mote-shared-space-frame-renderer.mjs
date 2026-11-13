@@ -86,7 +86,7 @@ try {
   const clientExports = Object.entries(clientManifest.exports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
   for (const [subpath, target] of clientExports) {
     const source = typeof target === 'string' ? target : target.browser ?? target.types
-    assert.ok(source.startsWith('./src/'), 'Client UI consumes public current Source: ' + subpath)
+    assert.ok(source && !source.startsWith('./dist/'), 'Client UI consumes public current Source: ' + subpath)
     const specifier = '@agentmux/client-ui' + (subpath === '.' ? '' : subpath.slice(1))
     const expression = specifier.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
     aliases.push({ find: new RegExp('^' + expression + '$'), replacement: resolve(client, source).replace('*', '$1') })

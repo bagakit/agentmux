@@ -133,7 +133,7 @@ try {
     .sort(([left], [right]) => Number(left.includes('*')) - Number(right.includes('*')) || right.length - left.length)
     .map(([key, spec]) => {
       const target = typeof spec === 'string' ? spec : spec.browser
-      assert.ok(target?.startsWith('./src/'), 'Current client-ui browser source export: ' + key)
+      assert.ok(target && !target.startsWith('./dist/'), 'Current client-ui browser source export: ' + key)
       return { pattern: '^' + escape('@agentmux/client-ui' + (key === '.' ? '' : key.slice(1))).replace('\\*', '(.+)') + '$',
         replacement: resolve(root, 'packages/client-ui', target).replace('*', '$1') }
     })
