@@ -114,7 +114,7 @@ it('Overview, sidebar and actual navigation share every configuration module wit
     .toEqual(settingsNavGroups('').map(group => group.id))
   expect([...overview().querySelectorAll('.settings-overview__group > header h3')].map(node => node.textContent))
     .toEqual(settingsNavGroups('').map(group => group.title))
-  expect(overview().querySelectorAll('img')).toHaveLength(1)
+  expect(overview().querySelectorAll('.settings-overview__hero > .settings-overview__art')).toHaveLength(1)
   const banner = connected<HTMLImageElement>('.settings-overview__art', overview())
   expect(banner.alt).toBe(''); expect(banner.getAttribute('aria-hidden')).toBe('true')
   expect(mountedPanes()).toEqual([])
@@ -150,7 +150,7 @@ it('keeps empty and whitespace queries on Overview, then returns search to the o
   expect(appearance.inert).toBe(true)
   expect(overviewIsShown()).toBe(false)
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button[data-settings-target]:not([data-settings-overview-nav])')]
-    .map(node => node.textContent)).toEqual(['Appearance', 'Recall'])
+    .map(node => node.textContent)).toEqual(visibleSettingsSections('font').map(section => section.title))
   await dom.click('[data-settings-search-section="appearance"]')
   expect(pane('appearance')).toBe(appearance)
   expect(appearance.hidden).toBe(false)
