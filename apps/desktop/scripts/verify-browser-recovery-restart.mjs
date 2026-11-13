@@ -31,12 +31,14 @@ const mainPath = packageRoot ? join(packageRoot, 'out/main/index.js') : join(des
 const appExecutable = privateApp ? join(privateApp, 'Contents/MacOS/AgentMux') : null
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, signalOwnedProbeProcess } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
+const { macosHostServiceAddress, macosHostServiceRegistration } = await import(pathToFileURL(join(repositoryRoot, 'apps/host/dist/macos-service.js')).href)
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(coreRoot, 'dist/index.js')))
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-browser-recovery-"))
 const userData = join(root, 'user-data'), privateHome = join(root, 'home'), runtimeDirectory = join(root, 'runtime')
+const privateService = macosHostServiceAddress(join(runtimeDirectory, 'control.sock'))
 const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
 const workspacePath = join(root, 'workspace'), codexHome = join(privateHome, 'codex')
 const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser recovery'
@@ -1083,6 +1085,8 @@ try {
   try{await rpc.dispose()}catch(error){errors.push(error.message)}
   for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
+  // launchd restarts the private Host after every exit, so its job leaves before the owned processes are reaped.
+  try{if(await macosHostServiceRegistration(privateService))await exec('/bin/launchctl',['bootout',privateService.target],{timeout:10_000});assert.equal(await macosHostServiceRegistration(privateService),null)}catch(error){errors.push(error.message)}
   const ownedCleanup=await cleanupOwnedProbes(root)
   const cleanupObservations=privateCase&&ownedCleanup.remaining?.length===0?ownedCleanup.errors:[]
   if(!privateCase||ownedCleanup.remaining?.length!==0)errors.push(...ownedCleanup.errors)
