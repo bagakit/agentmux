@@ -46,7 +46,7 @@ try {
   }
   await step('ready')
   const source = join(profile!, 'source'); await mkdir(source, { recursive: true })
-  await writeFile(join(source, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Original page</title><style>*{box-sizing:border-box}body{margin:0;padding:24px;background:#edf4ef;color:#20392b;font:15px/1.5 system-ui}h1{font-size:24px;margin:0 0 12px}input{display:block;width:100%;padding:12px;border:1px solid #9cb4a4;border-radius:5px;background:#fff;font:inherit}button{margin-top:12px;padding:9px 15px;border:0;border-radius:5px;background:#2d6549;color:white;font:inherit}output{margin-left:10px}</style><h1>A saved result, right in the conversation</h1><input id="draft" aria-label="Page draft" placeholder="Keep a thought here"><button id="increment">Count</button><output id="count">0</output><p id="bridge"></p><script>let count=0;document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(++count);document.querySelector('#bridge').textContent=window.capsule?'Injected: original App SDK':'Isolated: independent page';</script>`)
+  await writeFile(join(source, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Original page</title><style>*{box-sizing:border-box}body{margin:0;padding:24px;background:#edf4ef;color:#20392b;font:15px/1.5 system-ui}h1{font-size:24px;margin:0 0 12px}input{display:block;width:100%;padding:12px;border:1px solid #9cb4a4;border-radius:5px;background:#fff;font:inherit}button{margin-top:12px;padding:9px 15px;border:0;border-radius:5px;background:#2d6549;color:white;font:inherit}output{margin-left:10px}</style><h1>A saved result, right in the conversation</h1><input id="draft" aria-label="Page draft" placeholder="Keep a thought here"><button id="increment">Count</button><output id="count">0</output><p id="bridge"></p><h2 style="font-size:17px;margin:20px 0 8px">Candidates</h2><ol id="candidates" style="margin:0;padding-left:22px">${['Keep the original Run and page', 'Restore the saved draft first', 'Ask before reopening the Browser', 'Show the answer as question and answer', 'Reconnect the preview on return', 'Release the page while hidden'].map(item => `<li style="margin:6px 0">${item}</li>`).join('')}</ol><script>let count=0;document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=String(++count);document.querySelector('#bridge').textContent=window.capsule?'Injected: original App SDK':'Isolated: independent page';</script>`)
   owner = await NodeCapsuleOwner.open({ stateDirectory: join(profile!, 'capsules'), replies: {
     prepare: async ({ interaction, answer, inputOperationId, operationId }, context) => ({ version: 1, operationId,
       capsuleId: interaction.capsuleId, interactionId: interaction.interactionId, inputOperationId, target: interaction.target!,
@@ -278,12 +278,21 @@ try {
   const [collapsed, expanded] = [report.pageFill.find((item: any) => item.name === 'collapsed'), report.pageFill.at(-1)]
   assert.equal(expanded.zoom, collapsed.zoom, 'Expand keeps the page text size')
   assert.ok(expanded.css.height > collapsed.css.height + 100, 'Expand shows more of the page at the same text size')
+  const shown = () => webContents.getAllWebContents().find(contents => contents.getURL() === (isolated.endpoint as any).url)!
+    .executeJavaScript('[...document.querySelectorAll("#candidates li")].filter(item => item.getBoundingClientRect().bottom <= innerHeight).length')
+  report.expandedCandidates = { expanded: await shown() }
   assert.ok(report.expanded.height <= 700 && report.expanded.browserId === first.browserId)
   assert.equal(report.created.length, createdBeforeFrame, 'Expanding the original stage must not acquire another Browser')
+  // Frame the whole expanded card, as a reader who expanded it would see it.
+  await evaluate("document.querySelector('.conversation-capsule').scrollIntoView({ block: 'end' })")
+  await delay(120)
   await writeFile(join(evidence!, `${phase}-expanded.png`), (await win.webContents.capturePage()).toPNG())
+  await evaluate("document.querySelector('.activity-feed').scrollTop=0")
   await evaluate("conversationCapsuleProbe.click('Compact page')")
   await until('conversationCapsuleProbe.facts().height<=320 && conversationCapsuleProbe.facts().ready', 'Compact restores the original bounded live stage')
   await settledFill('compacted', 'f.stage.height<=320')
+  report.expandedCandidates.collapsed = await shown()
+  assert.ok(report.expandedCandidates.expanded > report.expandedCandidates.collapsed, `Expand shows candidates the collapsed page cut off (${JSON.stringify(report.expandedCandidates)})`)
   const nativePage = webContents.getAllWebContents().find(contents => contents.getURL() === (isolated.endpoint as any).url)!
   assert.ok(nativePage, 'The page comes from an actual native owner, not a screenshot fixture')
   assert.equal(await nativePage.executeJavaScript('document.querySelector("h1").textContent'), 'A saved result, right in the conversation')
@@ -423,7 +432,7 @@ try {
   win.setContentSize(1040, 820)
   await delay(80)
   await hostAction('Confirm answer')
-  await until('conversationCapsuleProbe.facts().text.includes("input unconfirmed")', 'An actual private-owner unknown delivery remains visible with its saved answer')
+  await until('conversationCapsuleProbe.facts().text.includes("result needs checking")', 'An actual private-owner unknown delivery remains visible with its saved answer')
   report.unknown = await facts()
   assert.equal(report.replySubmissions.length, 1)
   assert.equal(report.unknown.questions[0].answer, retainedDraft)
@@ -442,7 +451,7 @@ try {
     await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))})`)
     await until(`conversationCapsuleProbe.facts().ready && !!document.querySelector('[aria-label="Page questions"]')`, 'The original Capsule questions must return after message remount')
     await evaluate(`document.querySelector('[aria-label="Page questions"]').click()`)
-    await until('conversationCapsuleProbe.facts().text.includes("input unconfirmed")', 'The exact saved unknown answer must remain inspectable after remount')
+    await until('conversationCapsuleProbe.facts().text.includes("result needs checking")', 'The exact saved unknown answer must remain inspectable after remount')
     assert.equal((await facts()).questions[0].answer, retainedDraft)
     const restored = (await owner.call('capsule.interaction.inspect', { capsuleId: injected.record.capsuleId, interactionId: savedUnknown.interactionId })).interaction
     assert.equal(restored.reply?.operationId, savedUnknown.reply.operationId)
