@@ -26,7 +26,7 @@ describe('app.snapshot over the Host configuration file and Topic owner', () => 
     const f = await hostFixture()
     const topic = await f.topics.ensure(f.scratch, 'view:topic')
     const mote = await f.topics.ensureMote(f.scratch, 'view:mote')
-    const observed = await createHostSnapshotObservation(f.configurationPath)({})
+    const observed = await createHostSnapshotObservation(f.configurationPath, () => [])({ include: ['workspaces', 'topics', 'motes'] })
     expect(observed).toEqual(await observeClientRpcSnapshot({ workspaces: f.workspaces }, new ScratchTopics(), {}))
     expect(observed.workspaces!.map(workspace => [workspace.workspaceId, workspace.kind])).toEqual([['repo', 'folder'], [SCRATCH_WORKSPACE_ID, 'folder']])
     expect(observed.topics!.map(item => [item.id, item.kind, item.spaceId]).sort()).toEqual([
@@ -40,14 +40,14 @@ describe('app.snapshot over the Host configuration file and Topic owner', () => 
     const mote = await f.topics.ensureMote(f.scratch, 'view:mote')
     const topicFile = join(mote.physicalDirectoryPath!, 'topic.md')
     await rm(topicFile); await mkdir(topicFile)
-    const observed = await createHostSnapshotObservation(f.configurationPath)({ include: ['motes'] })
+    const observed = await createHostSnapshotObservation(f.configurationPath, () => [])({ include: ['motes'] })
     expect(observed.motes).toEqual([expect.objectContaining({ id: 'view:mote', kind: 'mote', readError: expect.stringContaining('topic.md: ') })])
     expect(observed.unavailable).toEqual([{ source: 'motes', code: 'TOPIC_FILESYSTEM_UNAVAILABLE',
       message: expect.stringMatching(/^view:mote: topic\.md: /), recovery: 'Read this exact Topic again after its original files are available.' }])
   })
 
   it('needs no configuration for sources it does not project, and does not guess them without it', async () => {
-    const observe = createHostSnapshotObservation(undefined)
+    const observe = createHostSnapshotObservation(undefined, () => [])
     expect(await observe({ include: ['agents', 'sessions'] })).toEqual({ unavailable: [] })
     await expect(observe({ include: ['topics'] })).rejects.toThrow('The original configuration metadata is unavailable.')
   })
