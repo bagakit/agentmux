@@ -106,7 +106,7 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     setInspecting(true)
     try {
       const { operation } = await api.capsules.call('capsule.operation.inspect', { operationId: held.params.operationId })
-      if (!operation || operation.status === 'pending') { annotate(held, 'Checked: still unconfirmed. Nothing was sent again.'); return }
+      if (!operation || operation.status === 'pending') { annotate(held, 'Checked just now. Nothing was sent again.'); return }
       if (operation.operationId !== held.params.operationId || operation.method !== held.method || operation.capsuleId !== held.params.capsuleId) {
         annotate(held, 'The original operation identity could not be confirmed. Your answer and operation are retained.'); return
       }
