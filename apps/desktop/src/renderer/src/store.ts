@@ -8048,12 +8048,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const value = readingProjection(get().fileViewReading, binding.owner)
     if (!value) return
     // Initial layout is an observation, not an edit of an unread native preference.
-    if (initial) { if (!value.position) editFileReading(binding.owner, current => ({ ...current, position: { ...position }, binding })); return }
-    if (sameReadingPosition(value.position, position)) {
-      if (value.binding !== binding) editFileReading(binding.owner, current => ({ ...current, binding }))
-      return
-    }
-    editFileReading(binding.owner, current => ({ ...current, position: { ...position }, input: current.input + 1, binding }))
+    if (initial) { if (!value.position) editFileReading(binding.owner, current => ({ ...current, position: { ...position } })); return }
+    if (sameReadingPosition(value.position, position)) return
+    // View registration belongs to loadFileViewReading. An old layout cleanup may
+    // flush its last exact-owner sample without replacing a newer view's capture.
+    editFileReading(binding.owner, current => ({ ...current, position: { ...position }, input: current.input + 1 }))
     if (value.loaded && value.phase !== 'error') void writeFileReading(binding.owner)
   },
   async retryFileViewReading(binding) {
