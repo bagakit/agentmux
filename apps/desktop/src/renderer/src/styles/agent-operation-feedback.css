@@ -22,13 +22,19 @@
 .agent-operation-feedback__label { color: var(--operation-accent); cursor: pointer; list-style: none; white-space: nowrap; }
 .agent-operation-feedback__label::-webkit-details-marker { display: none; }
 .agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { color: var(--success); animation: agent-operation-settle var(--dur-exit) ease-out 1; }
+.agent-operation-feedback__item[data-detail-open='true'] .agent-operation-feedback__label { animation: none; }
 .agent-operation-feedback__label::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: var(--sp-1); border: 1px solid currentColor; border-radius: 1px; vertical-align: 1px; }
 .agent-operation-feedback__detail { color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
 .agent-operation-feedback__detail p { margin: var(--sp-1) 0; }
 .agent-operation-feedback__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .agent-operation-feedback__actions button { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
 .agent-operation-feedback--compact { position: relative; align-items: center; padding: 0; pointer-events: auto; }
-.agent-operation-feedback--compact .agent-operation-feedback__item[open] .agent-operation-feedback__detail { position: absolute; top: 100%; right: 0; min-width: 240px; max-width: min(360px, 80vw); padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); z-index: var(--z-popover, 20); box-shadow: var(--shadow-overlay); }
+.agent-operation-feedback--compact button.agent-operation-feedback__label { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; font: inherit; }
+.agent-operation-feedback__label:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; border-radius: 2px; }
+.agent-operation-feedback__popover { position: fixed; z-index: var(--layer-popover); box-sizing: border-box; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text); font-size: var(--fs-meta); }
+.agent-operation-feedback__popover-header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.agent-operation-feedback__popover-title { margin: 0; font: inherit; font-weight: 600; }
+.agent-operation-feedback__popover-header .icon-button { flex: none; width: 24px; height: 24px; }
 @keyframes agent-operation-orbit { to { offset-distance: 100%; } }
 @keyframes agent-operation-enter { to { transform: translateX(500%) skewX(-20deg); } }
 @keyframes agent-operation-settle { from { opacity: 1; } to { opacity: 0; } }
