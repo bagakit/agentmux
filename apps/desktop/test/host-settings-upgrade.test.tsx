@@ -83,6 +83,49 @@ it('preserves the original admitted ID after a lost response and inspects it wit
   expect(upgradeCall).toHaveBeenCalledTimes(1)
   expect(reconnectCall).not.toHaveBeenCalled()
 })
+it('a refusal before admission leaves no record, so the original check clears it and restores Check versions', async () => {
+  upgradeCall.mockRejectedValue(new Error('Save this exact Host configuration before upgrading it.'))
+  inspectCall.mockResolvedValue(null)
+  await render(); await review(); await confirm()
+  const operationId = upgradeCall.mock.calls[0]![2]
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check original result')
+  await action()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, operationId)
+  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Upgrade not started')
+  expect(dom.container.querySelector('[aria-label="Original update receipt"]')).toBeNull()
+  expect(dom.container.textContent).toContain('Save this exact Host configuration before upgrading it.')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check versions')
+  await action()
+  expect(checkCall).toHaveBeenCalledTimes(2)
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Review upgrade')
+  expect(upgradeCall).toHaveBeenCalledTimes(1)
+})
+it('names an unreadable update record beside the receipt of a prior operation', async () => {
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'up-to-date', expected: undefined, latestOperation: receipt('completed'), unreadableOperations: ['damaged-operation'] })
+  await render()
+  expect(dom.container.querySelector('[aria-label="Original update receipt"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-upgrade-unreadable-records]')?.textContent ?? '').toContain('Could not read update record damaged-operation.')
+  expect(dom.container.querySelector('.host-upgrade__diagnostic-message')!.textContent).toBe('Original service result')
+  const details = dom.container.querySelector('.host-upgrade__facts')!.textContent!
+  expect(details).toContain('Unreadable update records'); expect(details).toContain('damaged-operation')
+  expect(upgradeCall).not.toHaveBeenCalled(); expect(inspectCall).not.toHaveBeenCalled()
+})
+it.each([
+  ['connected', 'The saved Core connection was adopted. It was not saved for restart: the ledger could not be read.'],
+  ['pending-confirmation', 'Confirm reconnect. Saved adoption receipts could not be read (Unexpected token).']
+] as const)('shows the %s connection detail beside the receipt detail in Technical details and copied diagnostics', async (state, adoptionDetail) => {
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'up-to-date', expected: undefined,
+    latestOperation: { ...receipt('completed'), connectionAdoption: { ...receipt('completed').connectionAdoption!, state, detail: adoptionDetail } } })
+  await render()
+  expect(dom.container.querySelector('[data-upgrade-connection-detail]')?.textContent).toBe(adoptionDetail)
+  expect(dom.container.querySelector('.host-upgrade__diagnostic-message')!.textContent).toBe('Original service result')
+  await dom.click('[data-copy-upgrade-diagnostics]')
+  const text = clipboard.mock.calls[0]![0]
+  expect(text).toContain(`Connection detail: ${adoptionDetail}`); expect(text).toContain('Details: Original service result')
+  expect(upgradeCall).not.toHaveBeenCalled(); expect(inspectCall).not.toHaveBeenCalled(); expect(reconnectCall).not.toHaveBeenCalled()
+})
+
 it('same-tick double confirmation admits one operation and preserves its exact ID for inspection', async () => {
   const pending = deferred<RemoteCoreUpgradeReceipt>()
   upgradeCall.mockReturnValue(pending.promise)
