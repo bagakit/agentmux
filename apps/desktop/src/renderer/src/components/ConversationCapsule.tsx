@@ -109,9 +109,10 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
     }
   }), [browserId])
   // The containing workface supplies its exact occurrence. Gallery cards belong to the original Renderer document,
-  // not to a guessed focused Region or the Agent's execution cwd.
+  // not to a guessed focused Region or the Agent's execution cwd. This card owns its page, so its page area is the
+  // page's layout: the page fills it 1:1 and relays out on Expand, Compact and window changes.
   const presentation = useMemo<BrowserStagePresentation>(() => ({
-    occurrence: { presentationId: `capsule:${occurrenceId}`, location: owner.reference ?? { kind: 'inline' } },
+    occurrence: { presentationId: `capsule:${occurrenceId}`, location: owner.reference ?? { kind: 'inline' }, layoutHost: true },
     stageHostId: `capsule:${occurrenceId}`, visible: active, active: false, yieldToFocusRing: true, clipToScrollport: true,
     target: { hostId: `capsule:${occurrenceId}`, active: false, visible: active, ...(owner.reference ? { reference: owner.reference } : {}) }
   }), [occurrenceId, owner.reference, active])
@@ -148,6 +149,6 @@ function CardTool({ label, onClick, expanded, pressed, children }: { label: stri
 function CapsuleNativePage({ browser, presentation, release }: { browser: BrowserSnapshot; presentation: BrowserStagePresentation; release(): void }) {
   const media = useBrowserPresentationCapture(browser.id)
   const [selected, setSelected] = useState(false)
-  return <BrowserPresentationStage browserId={browser.id} navigationId={browser.navigationId} presentation={presentation} fit="cover"
+  return <BrowserPresentationStage browserId={browser.id} navigationId={browser.navigationId} presentation={presentation} notice="overlay"
     inputSelected={selected} blocked={false} media={media} onInputSelected={() => setSelected(true)} onPresentationRemoved={release} />
 }
