@@ -395,6 +395,10 @@
     "./agent-automation": {
       "types": "./dist/agent-automation.d.ts",
       "import": "./dist/agent-automation.js"
+    },
+    "./app-capture": {
+      "types": "./dist/app-capture.d.ts",
+      "import": "./dist/app-capture.js"
     }
   },
   "bin": {

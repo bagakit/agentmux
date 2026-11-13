@@ -1254,3 +1254,5 @@ export type { AgentMuxNameTarget, AgentMuxNameActor, AgentMuxNameContext, AgentM
 
 export * from './public-rpc-image.js'
 export { parsePngImage, pngImageDimensions } from './png-image.js'
+
+export * from './app-capture.js'

@@ -4,6 +4,7 @@ import { mintObjectId } from './object-id.js'
 import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
 import { writeRuntimeV8Profile } from './runtime-v8-profile-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
+import { writeAppCaptureFile, appCaptureCliMetadata } from './app-capture-cli.js'
 import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
@@ -52,6 +53,10 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (method.startsWith('image.')) {
     const operation = body.recordedOperation as { state: string } | null
     if (body.state === 'unknown' || operation && operation.state !== 'completed') return true
+  }
+  if (method.startsWith('app.record.')) {
+    const recording = body.recording as { state?: string } | null
+    if (!recording || ['failed', 'partial', 'interrupted', 'stopping'].includes(String(recording.state))) return true
   }
   if (method.startsWith('native.')) {
     if (body.state === 'unknown' || body.error !== undefined) return true
@@ -258,18 +263,19 @@ async function main(): Promise<number> {
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>, callOptions)
     let output: { path: string } | undefined
     try {
-      output = invocation.output === undefined ? undefined : method === 'system.metrics.host-profile.capture'
+      output = invocation.output === undefined ? undefined : method === 'app.capture' || method === 'app.record.read'
+        ? await writeAppCaptureFile(invocation.output, method, result) : method === 'system.metrics.host-profile.capture'
         ? await writeRuntimeV8Profile(invocation.output, result, invocation.params) : method === 'system.metrics.profile.capture'
         ? await writeRendererV8Profile(invocation.output, result) : method === 'system.metrics.allocations.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'allocations') : method === 'system.metrics.scene.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-capture') : method === 'system.metrics.scene.inspect' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-inspect') : method === 'system.metrics.trace.capture'
           ? await writeRendererTrace(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
     } catch (error) {
-      if (!['system.metrics.host-profile.capture','system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
+      if (!['app.capture','app.record.read','system.metrics.host-profile.capture','system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
       const source = error instanceof Error ? error as Error & { code?: string } : null
-      write({ ok: false, operation: method, result, outputError: { code: source?.code ?? (method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
+      write({ ok: false, operation: method, result: method === 'app.capture' || method === 'app.record.read' ? appCaptureCliMetadata(method, result) : result, outputError: { code: source?.code ?? (method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
         message: source?.message ?? String(error) } })
       return 1
     }
-    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result })
+    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result: output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }
 }

@@ -77,6 +77,7 @@ import { inspectNotebook, notebookFingerprint, parseNotebookState } from './note
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
 import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult } from './public-rpc-git.js'
+import { isAppCaptureMethod, parseAppCaptureParams, parseAppCaptureResult } from './app-capture.js'
 import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams } from './public-rpc-windows.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { isNativeDesktopMethod, parseNativeDesktopParams, parseNativeDesktopResult } from './public-rpc-native-desktop.js'
@@ -414,6 +415,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isGoalDelegationMethod(method)) return parseGoalDelegationRpcResult(method, value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
+    if (isAppCaptureMethod(method)) return parseAppCaptureResult(method, value, parseAppCaptureParams(method, params)) as unknown as Record<string, unknown>
     if (isAppWindowMethod(method)) return parseAppWindowPage(method, value, parseAppWindowParams(method, params)) as unknown as Record<string, unknown>
     if (isGitMethod(method)) return parseGitResult(method, value, parseGitParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'file.share.undo') return parseFileShareUndoResult(value, parseFileShareUndoParams(params)) as unknown as Record<string, unknown>

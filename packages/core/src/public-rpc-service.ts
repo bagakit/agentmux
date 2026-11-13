@@ -100,6 +100,7 @@ import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, 
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
 import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner, type FileWriteResult } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
+import { isAppCaptureMethod, parseAppCaptureParams, parseAppCaptureResult, type AppCapturePort, type AppCaptureMethod } from './app-capture.js'
 import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams, type AgentMuxRpcWindowsOwner, type AppWindowActor, type AppWindowMethod } from './public-rpc-windows.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { isNativeDesktopMethod, parseNativeDesktopParams, parseNativeDesktopResult, type AgentMuxRpcNativeDesktopOwner, type NativeDesktopMethod } from './public-rpc-native-desktop.js'
@@ -182,6 +183,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
+  captures?: AppCapturePort
   moteDialogue?: MoteDialoguePort
   moteChat?: MoteChatPort
   /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
@@ -328,6 +330,8 @@ export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-sha
   return { ...parsed, destination: compact(parsed.destination), collections: parsed.collections.map(item => ({ ...item, source: compact(item.source) })) }
 }
 const NATIVE_FIELDS = {
+  'app.capture': ['target'], 'app.record.start': ['operationId', 'target', 'durationMs', 'fps'],
+  'app.record.inspect': ['operationId'], 'app.record.stop': ['operationId'], 'app.record.read': ['operationId'],
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'sourceMessageId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
@@ -1560,6 +1564,20 @@ export class AgentMuxRpcService {
           ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId, ...(runtimeId ? { runtimeId } : {}) } : {}) }), input) as AgentMuxRpcResult<M>
     }
 
+    if (isAppCaptureMethod(method)) {
+      const input = parseAppCaptureParams(method, params)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const actor: AppWindowActor | null = caller ? { kind: 'agent', id: caller.agentSessionId }
+        : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal as AppWindowActor : null
+      if (!actor) throw new AgentMuxError('Capture needs its authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      if (!this.ports.captures) {
+        if (!this.ports.forwardControl) throw new AgentMuxError('The Desktop capture owner is unavailable. Original work remains available.', 'CONTROL_UNAVAILABLE')
+        return parseAppCaptureResult(method, await this.ports.forwardControl<AppCaptureMethod>(method, input, context), input, actor) as AgentMuxRpcResult<M>
+      }
+      const result = await this.ports.captures.call(method, input, { actor, ...(context.signal ? { signal: context.signal } : {}),
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) })
+      return parseAppCaptureResult(method, result, input, actor) as AgentMuxRpcResult<M>
+    }
     if (isAppWindowMethod(method)) {
       const input = parseAppWindowParams(method, params)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()

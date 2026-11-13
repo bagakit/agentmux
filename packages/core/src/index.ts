@@ -226,3 +226,5 @@ export { parsePngImage, pngImageDimensions } from './png-image.js'
 
 export type { AgentMuxMessageAuthorityIdentity, AgentMuxMessageTrustInput, AgentMuxMessageTrust, AgentMuxMessageProvenance, AgentMuxMessageParticipant, AgentMuxSignedMessage, AgentMuxMessageReadAuthority, AgentMuxFederatedThread, AgentMuxMessageTransport } from './agent-message-federation.js'
 export type { AgentMuxMessageApplication, AgentMuxMessageJson } from './agent-message-envelope.js'
+
+export * from './app-capture.js'

@@ -1,3 +1,4 @@
+import { APP_CAPTURE_CLI_COMMANDS } from './app-capture-cli.js'
 import { AGENTMUX_IMAGE_CLI_COMMANDS } from './image-cli.js'
 import { parseMoteMainCreationIntent } from './spatial-agent-open-contract.js'
 import { parseMoteDialogueParams } from './mote-dialogue.js'
@@ -223,6 +224,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   ...AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS,
   ...AGENTMUX_IMAGE_CLI_COMMANDS,
+  ...APP_CAPTURE_CLI_COMMANDS,
   empty('runtime.owner.identity', 'Read the selected semantic Runtime identity and current owner instance through the original typed owner. This does not confirm native receiver health or grant management authority.'),
   command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
     { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),
@@ -1197,7 +1199,7 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
   if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
   let tail = match!.tail, output: string | undefined
-  if (['system.metrics.host-profile.capture', 'system.metrics.profile.capture', 'system.metrics.trace.capture', 'system.metrics.allocations.capture', 'system.metrics.scene.capture', 'system.metrics.scene.inspect'].includes(command.method)) {
+  if (['app.capture', 'app.record.read', 'system.metrics.host-profile.capture', 'system.metrics.profile.capture', 'system.metrics.trace.capture', 'system.metrics.allocations.capture', 'system.metrics.scene.capture', 'system.metrics.scene.inspect'].includes(command.method)) {
     output = value(flags(tail, command.flags!), '--output')
     if (output !== undefined && (!output || output === '-')) invalid(command.method === 'system.metrics.profile.capture'
       ? '--output requires a named new local cpuprofile file.' : '--output requires a named new local diagnostic file.')
