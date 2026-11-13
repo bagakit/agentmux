@@ -439,7 +439,10 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   assert(await macosHostServiceRegistration(service) === null, 'Private launch smoke Host service already exists.')
   let verificationError
   let verificationStage = 'launch-request'
-  const verificationDeadline = Date.now() + 60_000
+  // One absolute hang guard across launch, ready, Runtime ownership and exit. On a loaded machine a
+  // freshly signed candidate's first launch spent most of a minute before Main wrote its first file,
+  // so a one-minute window rejected healthy candidates. Early exit and identity checks still fail fast.
+  const verificationDeadline = Date.now() + 300_000
   try {
     for (const name of ['HOME', 'TMPDIR', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
       await mkdir(guiEnvironment[name], { recursive: true, mode: 0o700 })

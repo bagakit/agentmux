@@ -291,7 +291,9 @@ async function daemonDeclaration(selected) {
 
 async function extractSdk(artifact, directory) {
   await mkdir(directory)
-  await exec('/usr/bin/tar', ['-xzf', artifact.archivePath, '-C', directory], { timeout: 10_000, maxBuffer: 1024 * 1024 })
+  // Local, identity-checked archive: its size bounds the work. A fixed short timeout only killed
+  // healthy extractions on a loaded machine; the caller's own stage window still applies.
+  await exec('/usr/bin/tar', ['-xzf', artifact.archivePath, '-C', directory], { maxBuffer: 1024 * 1024 })
   return join(directory, 'package/dist/index.js')
 }
 
