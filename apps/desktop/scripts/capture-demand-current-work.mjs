@@ -9,7 +9,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const root = path.resolve(import.meta.dirname, '../../..'), desktop = path.join(root, 'apps/desktop'), fixture = path.join(desktop, 'scripts/fixtures/demand-current-work')
 const evidence = path.join(root, '.tmp/demand-current-work', 'visual-' + globalThis.crypto.randomUUID()), privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-current-demand-visual-'))
 const require = createRequire(path.join(desktop, 'package.json')), { build, loadConfigFromFile } = await import(pathToFileURL(require.resolve('vite')).href)
-const files = ['src/renderer/src/components/AgentRegionHeader.tsx', 'src/renderer/src/components/RegionCurrentDemand.tsx', 'src/renderer/src/lib/goal-current-work.ts', 'src/renderer/src/styles/region-current-demand.css', 'src/renderer/src/components/GlobalBoardSurface.tsx', 'src/renderer/src/App.tsx', 'scripts/fixtures/demand-current-work/entry.tsx', 'scripts/fixtures/demand-current-work/main.cjs']
+const files = ['src/renderer/src/components/AgentRegionHeader.tsx', 'src/renderer/src/components/RegionCurrentDemand.tsx', 'src/renderer/src/lib/goal-current-work.ts', 'src/renderer/src/styles/region-current-demand.css', 'src/renderer/src/components/GlobalBoardSurface.tsx', 'src/renderer/src/components/GoalsCollection.tsx', 'src/renderer/src/App.tsx', 'scripts/fixtures/demand-current-work/entry.tsx', 'scripts/fixtures/demand-current-work/main.cjs']
 const hashes = async () => Object.fromEntries(await Promise.all(files.map(async file => [file, createHash('sha256').update(await fs.readFile(path.join(desktop, file))).digest('hex')])))
 await fs.mkdir(evidence, { recursive: true }); let source
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

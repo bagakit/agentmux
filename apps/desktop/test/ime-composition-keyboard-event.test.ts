@@ -568,7 +568,7 @@ const GUARD_EXCEPTIONS: ReadonlyArray<{ anchor: string; kind: 'fact' | 'debt'; r
       '（该文件同时为 peer 持有、本轮只读，但那与本条是不是欠账无关。）'
   },
   {
-    anchor: 'components/GlobalBoardSurface.tsx::div:onSelect',
+    anchor: 'components/GoalsCollection.tsx::div:onSelect',
     kind: 'fact',
     reason:
       '事实豁免：Demand 卡片是 role=button 的 div，按 Enter/Space 选中这张卡（onSelect → setSelectedDemand），' +

@@ -14,7 +14,7 @@ const files = [domain, input, store, projection, widget, 'packages/demand/src/di
   'packages/core/src/control.ts', 'packages/core/src/control-codec.ts', 'packages/core/src/agentmux-cli-commands.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/goal-dispatch.ts',
   'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/global-demand-board.ts', 'apps/desktop/src/renderer/src/lib/steer-queue-delivery.ts',
-  'apps/desktop/src/renderer/src/components/AgentRegionHeader.tsx', 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx',
+  'apps/desktop/src/renderer/src/components/AgentRegionHeader.tsx', 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalsCollection.tsx',
   'apps/desktop/src/renderer/src/styles/region-current-demand.css', 'apps/desktop/test/demand-current-work.test.tsx', 'apps/desktop/test/demand-current-work-product.test.tsx',
   'apps/desktop/test/helpers/current-demand-product.tsx', 'apps/desktop/scripts/fixtures/demand-current-work/vitest.config.mts', 'apps/desktop/scripts/verify-demand-current-work.mjs']
 const mutations = [
@@ -31,7 +31,7 @@ const mutations = [
   { id: 'related-region-cache', file: projection, before: 'retained && JSON.stringify(retained) === JSON.stringify(fact) ? retained : fact', after: 'fact' },
   { id: 'current-work-exact-host', file: projection, before: 'JSON.stringify([hostId, agentSessionId])', after: 'JSON.stringify([agentSessionId])' },
   { id: 'region-exact-goal-focus', file: widget, before: "target: { kind: 'goal', goalId }", after: "target: { kind: 'goal', goalId: work.goals[0]!.goalId }" },
-  { id: 'historical-related-not-current', file: 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', before: 'const context = !fact ? null', after: "const context = !fact ? demand.sessionIds.includes(source?.control.agentSessionId ?? '') ? 'Current execution' : null" }
+  { id: 'historical-related-not-current', file: 'apps/desktop/src/renderer/src/components/GoalsCollection.tsx', before: 'const context = !fact ? null', after: "const context = !fact ? demand.sessionIds.includes(source?.control.agentSessionId ?? '') ? 'Current execution' : null" }
 ]
 const receipt = { schema: 'agentmux.demand-current-work.proof.v1', passed: false, candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(),
   source: {}, baseline: null, mutations: [], userRunTouched: false, boundaries: [

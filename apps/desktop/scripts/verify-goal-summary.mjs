@@ -42,14 +42,14 @@ assert.equal(proof.passed, true); assert.equal(proof.cases.length, mutations.len
 const baseline = await readFile(join(dirname(proofPath), 'baseline-green.log'), 'utf8')
 assert.match(baseline, /Tests\s+[1-9]\d* passed/)
 assert.doesNotMatch(baseline, /Tests\s+[1-9]\d* failed|Failed Suites|Unhandled Error/)
-const consumer = 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx'
+const consumer = 'apps/desktop/src/renderer/src/components/GoalsCollection.tsx'
 const consumerSource = await readFile(join(root, consumer), 'utf8')
 assert.match(consumerSource, /<GoalResponsibilitySummary demand=\{demand\} compact/)
 assert.match(await readFile(join(root, product), 'utf8'), /mount\(createElement\(GlobalBoardSurface\)\)/)
 const candidateFiles = [summary, patrol, css, product, helper, consumer, 'apps/desktop/scripts/verify-goal-summary.mjs']
 const candidate = Object.fromEntries(await Promise.all(candidateFiles.map(async file => [file, createHash('sha256').update(await readFile(join(root, file))).digest('hex')])))
 const receipt = { schema: 'agentmux.goal-summary-qualification.v1', passed: true, candidate,
-  consumers: [{ file: consumer, component: 'GlobalBoardSurface', test: product,
+  consumers: [{ file: consumer, component: 'GoalRow', test: product,
     boundary: 'Mounted production Board -> compact responsibility summary -> original Host/Store/Core public CLI/RPC and patrol callbacks. Native transport/status are isolated fixtures.' }],
   mutationReceipt: proofPath, mutations: proof.cases.map(item => ({ label: item.label, red: item.log, restoredGreen: item.restore.log })),
   runtimeControl: [], sharedTreeMutations: 0,
