@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/contracts'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
+import { browserProfiles, useBrowserProfiles } from '../lib/browser-profiles'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -108,10 +109,10 @@ export function BrowserProfilesPanel({
 }) {
   const mounted = useRef(true)
   const importRequest = useRef(0)
-  const profileRequest = useRef(0)
-  const [profiles, setProfiles] = useState<BrowserProfileSummary[] | null>(null)
-  const [profilesLoading, setProfilesLoading] = useState(true)
-  const [profileError, setProfileError] = useState<string | null>(null)
+  const list = useBrowserProfiles()
+  const profiles = list.profiles
+  const profilesLoading = list.reading
+  const profileError = list.error
   const [sources, setSources] = useState<BrowserProfileImportSourceSummary[] | null>(null)
   const [createLabel, setCreateLabel] = useState('')
   const [sourceToken, setSourceToken] = useState('')
@@ -120,28 +121,11 @@ export function BrowserProfilesPanel({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadProfiles(): Promise<void> {
-    const request = ++profileRequest.current
-    setProfilesLoading(true)
-    try {
-      const next = await api.browser.listProfiles()
-      if (!mounted.current || profileRequest.current !== request) return
-      setProfiles(next)
-      setProfileError(null)
-    } catch (cause) {
-      if (mounted.current && profileRequest.current === request) setProfileError(presentError(cause))
-    } finally {
-      if (mounted.current && profileRequest.current === request) setProfilesLoading(false)
-    }
-  }
-
   useEffect(() => {
     mounted.current = true
-    void loadProfiles()
     return () => {
       mounted.current = false
       importRequest.current += 1
-      profileRequest.current += 1
     }
   }, [])
 
@@ -151,9 +135,8 @@ export function BrowserProfilesPanel({
     setBusy('create')
     setError(null)
     try {
-      const created = await api.browser.createProfile(label)
+      await api.browser.createProfile(label)
       if (!mounted.current) return
-      setProfiles((current) => [...(current ?? []), created])
       setCreateLabel('')
     } catch (cause) {
       if (mounted.current) setError(presentError(cause))
@@ -203,9 +186,8 @@ export function BrowserProfilesPanel({
     setBusy('import')
     setError(null)
     try {
-      const imported = await api.browser.importProfile(sourceToken, label)
+      await api.browser.importProfile(sourceToken, label)
       if (!mounted.current) return
-      setProfiles((current) => [...(current ?? []), imported])
       closeImport()
     } catch (cause) {
       if (mounted.current) setError(presentError(cause))
@@ -239,7 +221,6 @@ export function BrowserProfilesPanel({
         profileId
       })
       if (!mounted.current) return
-      setProfiles((current) => current?.filter((profile) => profile.id !== profileId) ?? null)
       setConfirmDeleteId(null)
     } catch (cause) {
       if (mounted.current) setError(presentError(cause))
@@ -343,7 +324,7 @@ export function BrowserProfilesPanel({
       ) : null}
       {profileError ? <div className="surface-tool-error" role="alert">
         {profileError}{' '}
-        <button className="small-button" type="button" disabled={profilesLoading || busy !== null} onClick={() => void loadProfiles()}>
+        <button className="small-button" type="button" disabled={profilesLoading || busy !== null} onClick={() => void browserProfiles.refresh()}>
           {profilesLoading ? 'Retrying Profile connection…' : 'Retry Profile connection'}
         </button>
       </div> : null}
