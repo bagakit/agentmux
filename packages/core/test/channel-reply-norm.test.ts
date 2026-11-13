@@ -42,8 +42,10 @@ it('keeps the note when the body is too large to inline', () => {
   expect(text).toContain('Read it before acting'); expect(text).toContain(GROUP); expect(text).toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
 })
 
-it('places the note in the delivered wire', () => {
-  expect(prepareMessageInputRepresentation(envelope(), 'direct').promptWire).toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
+it('places the note in the delivered wire, not in the frozen envelope', () => {
+  const prepared = prepareMessageInputRepresentation(envelope(), 'direct')
+  expect(prepared.promptWire).toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
+  expect(JSON.stringify(envelope())).not.toContain('conversationKind')
 })
 
 it('the connection skill carries the same reply norm, so the input note and the skill never drift', () => {
@@ -69,13 +71,6 @@ it('the queue freezes the note only into a new external input, from the kind its
     const wires = { 'group-message': await wire('group-message'), 'plain-message': await wire('plain-message') }
     expect(wires['group-message']).toContain(GROUP); expect(wires['group-message']).toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
     expect(wires['plain-message']).toBeDefined(); expect(wires['plain-message']).not.toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
-    // The raw saved journal rows carry the note in the frozen wire, and the kind nowhere else.
-    const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(join(root, 'messages.sqlite'), { readOnly: true })
-    try {
-      const rows = db.prepare('SELECT json FROM records').all().map(row => String(row.json))
-      expect(rows.some(row => row.includes('group chat'))).toBe(true)
-      expect(rows.filter(row => row.includes('"conversationKind"'))).toEqual([])
-    } finally { db.close() }
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

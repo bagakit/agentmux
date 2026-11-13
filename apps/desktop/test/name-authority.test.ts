@@ -12,8 +12,7 @@ import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-st
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabel, displayLabelDocument, type AgentMuxNameContext,
   type AgentMuxSpatialGraph } from '../../../packages/core/src/spatial-graph'
 import { acknowledgedNameProjection } from '../src/renderer/src/lib/name-authority'
-import { DesktopSpatialPersistence } from '../src/renderer/src/lib/desktop-spatial-state'
-import { reconcileSpatialGraphs } from '../src/renderer/src/lib/spatial-merge'
+import { DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { api } from '../src/renderer/src/lib/api'

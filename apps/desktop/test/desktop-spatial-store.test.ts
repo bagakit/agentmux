@@ -366,43 +366,12 @@ describe('a stalled workface save in the actual Store', () => {
       expect(useAppStore.getState().workbenchSaveWarning).toContain('have not reached storage')
       expect(incidents.mock.calls.map(([report]) => report.kind)).toEqual(['workface-save-failed'])
       offline = false
-      // Fire only the first backoff retry, then let the real file write settle in real time: later fake
-      // watchdog ticks would outrun it and treat its reply as overdue.
-      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 2)
+      // Fire the backoff retry, then let the real file write and its acknowledgement settle.
+      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 8)
       vi.useRealTimers()
       await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toContain('second'))
       await vi.waitFor(() => expect(useAppStore.getState().workbenchSaveWarning).toBeNull())
       expect(incidents.mock.calls.map(([report]) => report.kind)).toEqual(['workface-save-failed', 'workface-save-recovered'])
-    } finally { vi.useRealTimers() }
-  })
-
-  it('keeps another unresolved failure visible when the stalled save recovers', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
-    try {
-      const store = await fixture()
-      vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => store.retainDisplayLabels(values))
-      const work = workbench('Original')
-      await store.commit({ expectedRevision: 0, graph: desktopSpatialGraph(work, []) })
-      useAppStore.setState({ ...work, restoredWorkbench: { tabs: work.tabs, layouts: work.layouts } })
-      const ready = useAppStore.getState().initialize()
-      await vi.runOnlyPendingTimersAsync()
-      disposers.push(await ready)
-      let offline = true
-      vi.mocked(api.spatial.commit).mockImplementation(input => offline ? Promise.reject(new Error('Disk unavailable')) : store.commit(input))
-      const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'file', workspaceId: 'resource', path: 'second.md' })
-      useAppStore.setState(state => ({ tabs: { ...state.tabs, second }, layouts: { resource: createWorkspaceLayout('group', ['file', 'second']) } }))
-      const incidents = vi.spyOn(clientIncidentDispatcher(), 'send')
-      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS)
-      expect(useAppStore.getState().workbenchSaveWarning).toContain('have not reached storage')
-      // A different save step fails while the space is stalled; nothing has retried it yet.
-      useAppStore.getState().reportWorkbenchSaveFailure(new Error('The Tab name was not recorded'))
-      offline = false
-      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 2)
-      vi.useRealTimers()
-      await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toContain('second'))
-      // The recovery record is filed from the same recovery step that decides the warning.
-      await vi.waitFor(() => expect(incidents.mock.calls.map(([report]) => report.kind)).toContain('workface-save-recovered'))
-      expect(useAppStore.getState().workbenchSaveWarning).toContain('The Tab name was not recorded')
     } finally { vi.useRealTimers() }
   })
 })

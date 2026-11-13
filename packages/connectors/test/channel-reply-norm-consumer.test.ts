@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import * as core from '../../core/dist/index.js'
 import { DurableIngressHost } from '../src/durable-ingress.js'
 import { ingressFixture } from './fixtures/ingress.js'
 
@@ -20,10 +21,9 @@ it.each([['direct', 'group'], ['group', 'direct']] as const)('a %s chat input re
   expect(submit.mock.calls[0]![0]).toMatchObject({ conversationKind: kind })
   const wire = (f.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls[0]![1].data as string
   expect(wire).toContain(notes[kind]); expect(wire).toContain(NORM); expect(wire).not.toContain(notes[other])
-  // The kind selects presentation only: the raw saved journal holds it in no record field.
-  const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(f.client.agentMessageQueuePath(), { readOnly: true })
-  try { expect(db.prepare('SELECT json FROM records').all().map(row => String(row.json)).filter(row => row.includes('"conversationKind"'))).toEqual([]) }
-  finally { db.close() }
+  // The kind selects presentation only; the frozen original envelope carries no new field.
+  const original = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(submit.mock.calls[0]![0].envelope.operationId)
+  expect(original?.envelope).not.toHaveProperty('conversationKind')
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 

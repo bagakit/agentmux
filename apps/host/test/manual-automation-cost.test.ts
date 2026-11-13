@@ -169,19 +169,14 @@ it('cancel discovery fences an already paused resume before the later intent rea
   } finally { releaseObservation.resolve(); releaseIntents.resolve(); await Promise.allSettled([resume, ...(pause ? [pause] : [])]) }
 })
 
-it('a person\'s input moves a Mote standing heartbeat one interval later and keeps it on, without a manual resume', async () => {
+it('leaves a Mote standing heartbeat running: each of its ticks already skips while input is occupied', async () => {
   const managedSource = { sourceId: 'mote-main:fixture', revision: 'role-1' }
-  const heartbeat = schedules()[0]!, managed = { ...heartbeat, loopId: 'heartbeat', everyMs: 1_800_000, managedSource, nextCheckAt: 50 }
+  const heartbeat = schedules()[0]!, managed = { ...heartbeat, loopId: 'heartbeat', everyMs: 1_800_000, managedSource }
   delete (managed as Partial<ContinuousProgressLoop>).afterMs
   const f = await fixture([record('progress'), managed], {
     listIntents: async () => ({ intents: [{ intentId: managed.futureIntentId!, intent: { continuitySource: managedSource, operationId: 'standing', prompt: '', message: {}, active: true } }], nextIntentId: null }) as never })
   const result = await f.owner.pause(input, person)
-  expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: ['progress'], deferredLoopIds: ['heartbeat'], disabledIntentIds: [], issues: [] })
-  // The due occurrence now waits a full interval after the input (the fixture clock reads 100), saved durably.
-  expect((await f.store.load()).find(loop => loop.loopId === 'heartbeat')).toMatchObject({ status: 'active', nextCheckAt: 100 + 1_800_000 })
+  expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: ['progress'], disabledIntentIds: [], issues: [] })
+  expect((await f.store.load()).find(loop => loop.loopId === 'heartbeat')).toMatchObject({ status: 'active' })
   expect(f.future).not.toHaveBeenCalled()
-  // A heartbeat already later than one interval keeps its own time.
-  const later = await f.owner.pause({ ...input, operationId: 'second-pause' }, person)
-  expect(later.receipt).toMatchObject({ deferredLoopIds: ['heartbeat'] })
-  expect((await f.store.load()).find(loop => loop.loopId === 'heartbeat')).toMatchObject({ status: 'active', nextCheckAt: 100 + 1_800_000 })
 })

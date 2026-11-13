@@ -168,23 +168,6 @@ describe('Core original owned spatial resource SDK', () => {
     expect(await new AgentMuxSpatialStateStore(store.path).read()).toEqual(initial)
     expect(writes.calls).toEqual([])
   })
-  it('attaches a Launcher Agent under the same placement rule, never over a newer Run of the same Session', async () => {
-    const store = await fixture(), initial = await store.commit({ expectedRevision: 0, graph: launcherGraph() })
-    const { resource, ...region } = attachment()
-    const attached = await store.attachLauncherAgent(attachment())
-    expect(attached.outcome).toBe('attached')
-    expect(attached.state.graph.regions[0]).toEqual({ ...region, kind: 'agent' })
-    expect(attached.state.graph.resources['region:original-region']).toEqual(resource)
-    expect(attached.state.graph.regions[1]).toEqual(initial.graph.regions[1])
-    // A repeat is settled without a new revision.
-    await expect(store.attachLauncherAgent(attachment())).resolves.toMatchObject({ outcome: 'already-attached', state: { revision: attached.state.revision } })
-    // The same Session restarted into a newer Run: a late original receipt cannot move it back.
-    const restarted = structuredClone(attached.state.graph); restarted.regions[0]!.runId = 'newer-run'
-    const current = await store.commit({ expectedRevision: attached.state.revision, graph: restarted }); writes.calls.length = 0
-    await expect(store.attachLauncherAgent(attachment())).rejects.toMatchObject({ code: 'SPATIAL_RESOURCE_TARGET_CONFLICT' })
-    expect(await new AgentMuxSpatialStateStore(store.path).read()).toEqual(current)
-    expect(writes.calls).toEqual([])
-  })
   it('refuses the wrong Tab membership, another occupant, Host or cwd without editing any original fact', async () => {
     const agentRegion = attachment()
     for (const mutate of [

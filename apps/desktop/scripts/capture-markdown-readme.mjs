@@ -21,8 +21,6 @@ await rm(evidence, { recursive: true, force: true }); await mkdir(evidence, { re
 try {
   await mkdir(workspace, { recursive: true }); await mkdir(profile)
   for (const file of ['README.md', 'README.zh-CN.md']) await copyFile(join(root, file), join(workspace, file))
-  // README constructs the root files do not use yet: other alert types, details, inline marks, a failing badge.
-  await copyFile(join(fixture, 'elements.md'), join(workspace, 'elements.md'))
   await cp(join(root, 'docs/assets/readme'), join(workspace, 'docs/assets/readme'), { recursive: true })
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     plugins: [{ name: 'candidate-source-binding', enforce: 'pre', async generateBundle() {

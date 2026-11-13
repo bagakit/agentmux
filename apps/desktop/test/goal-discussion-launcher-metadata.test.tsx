@@ -30,7 +30,7 @@ it.each(['missing', 'unreadable'] as const)('keeps the original native creation 
   const result = await creating
   expect(launch).toHaveBeenCalledExactlyOnceWith(input, expect.any(Object), { ...input.launcher, executionWorkspaceId: input.executionWorkspaceId })
   expect(result.created).toEqual(original)
-  expect(result.placementIssue).toMatchObject({ scope: 'goal-discussion', message: expect.stringMatching(/original Launcher/i) })
+  expect(result.placementIssue).toMatch(/original Launcher/i)
   expect(result.projectionFailures).toEqual([])
   expect(client.agentSession(session.agentSessionId).run).toEqual(original.run)
 })
