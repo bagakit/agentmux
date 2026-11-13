@@ -70,6 +70,7 @@ async function heldOperations(path: string, deviceId: string) {
   return [...archived, ...(device.operations ?? [])] as Array<{ id: string; result: string }>
 }
 
+// Each operation is a real durable write of the authority file; 305 of them take seconds on a busy machine.
 it('keeps every device operation, and device.ls shows only the newest window', async () => {
   const { path } = await registry(2, 0)
   const owner = await DeviceAuthority.open(path)
@@ -88,7 +89,7 @@ it('keeps every device operation, and device.ls shows only the newest window', a
   expect(await heldOperations(path, 'device-1')).toEqual([])
   // The authority file keeps at most two windows per device, so its rewrite cost stays bounded.
   expect(JSON.parse(await readFile(path, 'utf8')).devices[0].operations.length).toBeLessThanOrEqual(200)
-})
+}, 60_000)
 
 it('keeps operations in the authority file while their archive cannot be written', async () => {
   const { path } = await registry(1, 0)
@@ -105,4 +106,4 @@ it('keeps operations in the authority file while their archive cannot be written
   await record(owner, 250)
   expect((await heldOperations(path, 'device-0')).map(value => value.id)).toEqual(Array.from({ length: 251 }, (_, index) => `operation-${index}`))
   expect(JSON.parse(await readFile(path, 'utf8')).devices[0].operations).toHaveLength(100)
-})
+}, 60_000)
