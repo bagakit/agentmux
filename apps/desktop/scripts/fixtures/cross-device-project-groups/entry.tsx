@@ -11,7 +11,7 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { workspaceProjectId } from '../../../src/renderer/src/lib/workspace-projects'
-import localProjectImage from '../../../resources/icon-128.png'
+import localProjectImage from '../../../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'
 import remoteProjectImage from '../../../../../packages/client-ui/src/assets/agent-icons/gemini.png'
 import archiveProjectImage from '../../../../../packages/client-ui/src/assets/agent-icons/hermes.png'
 import '../../../src/renderer/src/styles/index.css'

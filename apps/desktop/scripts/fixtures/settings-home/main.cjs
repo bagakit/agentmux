@@ -70,7 +70,7 @@ app.whenReady().then(async () => {
       const { root } = await win.webContents.debugger.sendCommand('DOM.getDocument')
       const { nodeId } = await win.webContents.debugger.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector })
       assert.ok(nodeId, 'The original image file input exists')
-      await win.webContents.debugger.sendCommand('DOM.setFileInputFiles', { nodeId, files: [path.resolve(__dirname, '../../../resources/icon-512.png')] })
+      await win.webContents.debugger.sendCommand('DOM.setFileInputFiles', { nodeId, files: [path.resolve(__dirname, '../../../../../packages/client-ui/src/assets/app-icons/qingzhuan.png')] })
       result.interactions.push({kind:'native-file-selection',selector,fixture:'product icon PNG'})
       await settle()
     } finally { if (!alreadyAttached) win.webContents.debugger.detach() }

@@ -57,7 +57,7 @@ async function bind(file) {
 try {
   for (const file of ['index.html','entry.mjs','lark-preview.ts','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
-  await bind(path.join(root,'apps/desktop/resources/icon-512.png'))
+  await bind(path.join(root,'packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   for (const mode of process.argv.includes('--visual-only') || conceptIntros || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
     const directory = path.join(evidence,mode), temporary = path.join(owned,mode), output = []
     await fs.mkdir(directory)

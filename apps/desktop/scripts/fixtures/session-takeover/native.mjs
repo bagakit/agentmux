@@ -31,7 +31,7 @@ export async function runNative(requestedEvidence, options = {}) {
     userSessionTouched: false, independentVisualReview: 'pending',
     scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. A controlled Native retirement challenges a stale Renderer projection; trusted user choices create a distinct successor operation and both requests remain inspectable after restart. Native session facts/creation API remain controlled preview; this receipt does not prove vendor CLI or ctxmux process execution; Core exact Store/Hosted creation inspection has separate source-test evidence.',
     controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.',
-    fixtureAssetCompatibility: 'A deleted unrelated settings-banner.png import is privately aliased to existing icon-128.png. Region takeover scenes never render that banner; this proof makes no full application build/install claim.' }
+    fixtureAssetCompatibility: 'A deleted unrelated settings-banner.png import is privately aliased to the shared default App icon asset. Region takeover scenes never render that banner; this proof makes no full application build/install claim.' }
   let failure
   try {
     receipt.fixtureBefore = Object.fromEntries(await Promise.all(['entry.tsx', 'main.cjs', 'preload.cjs', 'index.html', 'native.mjs'].map(async name => [name, hash(await readFile(join(fixture, name)))])))
@@ -43,7 +43,7 @@ export async function runNative(requestedEvidence, options = {}) {
     receipt.coreSpatialInputs = Object.fromEntries(await Promise.all(Object.keys(spatialBuild.metafile.inputs).map(async path => [path, hash(await readFile(resolve(repo, path)))])))
     receipt.coreSpatialModuleSha256 = hash(await readFile(spatialModule))
     const { build } = await import(require.resolve('vite'))
-    const banner = join(desktop, 'resources/settings-banner.png'), icon = join(desktop, 'resources/icon-128.png')
+    const banner = join(desktop, 'resources/settings-banner.png'), icon = join(repo, 'packages/client-ui/src/assets/app-icons/qingzhuan.png')
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
       resolve: { alias: [{ find: /^.*settings-banner\.png$/, replacement: icon }], dedupe: ['react', 'react-dom'] },
       worker: { format: 'es' },

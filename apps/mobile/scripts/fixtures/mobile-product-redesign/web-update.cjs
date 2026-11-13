@@ -8,7 +8,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await tap(editor, 'Original draft editor'); win.webContents.insertText('更新网页前保留这份草稿。')
   const original = await read('mobileProductScene.facts().record.selectedSessionId')
   const picked = path.join(evidence, 'selected-picture.png')
-  await fs.copyFile(path.resolve(__dirname, '../../../../../apps/desktop/resources/icon-128.png'), picked)
+  await fs.copyFile(path.resolve(__dirname, '../../../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'), picked)
   await win.webContents.debugger.sendCommand('Page.enable')
   await win.webContents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true })
   let listener

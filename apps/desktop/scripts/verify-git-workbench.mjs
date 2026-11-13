@@ -19,7 +19,7 @@ const excludedSourceDirectories = new Set(['node_modules', 'dist', 'out', 'cover
   '.git', '.bagakit', '.tmp', '.local', '.cache', '.vite', '.turbo', '.worktrees', '.claude',
   '.codex-output', 'test-results', 'playwright-report', '__pycache__'])
 const generatedSourcePaths = ['apps/desktop/release', 'apps/desktop/resources/bin',
-  'apps/desktop/resources/icon.png', 'apps/desktop/resources/icon-128.png', 'apps/desktop/resources/icon.icns']
+  'apps/desktop/resources/icon.png', 'apps/desktop/resources/icon.icns']
 function isSourcePath(path) {
   return sourceRoots.some(rootPath => path === rootPath || path.startsWith(rootPath + '/')) &&
     !path.split('/').some(part => excludedSourceDirectories.has(part)) &&

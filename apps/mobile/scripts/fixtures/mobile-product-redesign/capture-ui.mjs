@@ -154,7 +154,7 @@ try {
   }
   const iconProject = path.join(directory, 'original-project')
   await fs.mkdir(iconProject)
-  await fs.copyFile(path.join(root, 'apps/desktop/resources/icon-128.png'), path.join(iconProject, 'logo.png'))
+  await fs.copyFile(path.join(root, 'packages/client-ui/src/assets/app-icons/qingzhuan.png'), path.join(iconProject, 'logo.png'))
   const iconOwner = path.join(compiled, 'project-appearance-owner.mjs')
   const iconBuild = await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/project-appearance.ts'], outfile: iconOwner, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', metafile: true, plugins: [workspaceSources] })
   const projectAppearance = await (await import(pathToFileURL(iconOwner).href)).projectAppearance(iconProject)
@@ -163,7 +163,7 @@ try {
   const providerCatalog = new (require(providerOwner)).AgentProviderRegistry().catalog()
   assert.ok(providerCatalog.find(value => value.id === 'codex')?.composer?.commands?.length, 'Original Provider owner declares the captured Commands')
   assert.ok(projectAppearance.icon?.startsWith('data:image/'), 'The original App filesystem owner returns the real bounded project image')
-  receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'apps/desktop/resources/icon-128.png', imageSha256: sha(projectAppearance.icon) }
+  receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'packages/client-ui/src/assets/app-icons/qingzhuan.png', imageSha256: sha(projectAppearance.icon) }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workspaceSources, workers, sourceProof],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })

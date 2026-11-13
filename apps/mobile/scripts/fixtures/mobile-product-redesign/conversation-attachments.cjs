@@ -8,7 +8,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await until('!!document.querySelector('+JSON.stringify(editor)+')')
   await resize(320,760)
   const picked = path.join(evidence,'所选截图.png')
-  await fs.copyFile(path.resolve(__dirname,'../../../../../apps/desktop/resources/icon-128.png'),picked)
+  await fs.copyFile(path.resolve(__dirname,'../../../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'),picked)
   await win.webContents.debugger.sendCommand('Page.enable')
   await win.webContents.debugger.sendCommand('Page.setInterceptFileChooserDialog',{enabled:true})
   let listener

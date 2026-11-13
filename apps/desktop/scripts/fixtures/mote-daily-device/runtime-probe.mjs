@@ -39,7 +39,7 @@ export async function probeDeviceGoalRuntime({ repository, evidence, mainRef } =
       'packages/core/src', 'packages/core/package.json', 'packages/core/bin', `packages/core/vendor/ctxmux/${platform}`,
       'packages/core/test/fixtures/fake-codex-cli.mjs', 'apps/desktop/src', 'apps/desktop/package.json',
       'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay', 'apps/mobile/src',
-      'apps/desktop/resources/settings-banner.png', 'apps/desktop/resources/icon-128.png'], { cwd: repo, maxBuffer: 50 * 1024 * 1024 }) })
+      'apps/desktop/resources/settings-banner.png'], { cwd: repo, maxBuffer: 50 * 1024 * 1024 }) })
     const overlay = ['apps/mobile/src/navigation/goal-work.ts', 'apps/mobile/src/recovery/device-workface.ts',
       'apps/desktop/scripts/fixtures/mote-daily-device/runtime-owner.ts']
     for (const name of overlay) { await mkdir(dirname(join(source, name)), { recursive: true }); await cp(join(repo, name), join(source, name)) }
