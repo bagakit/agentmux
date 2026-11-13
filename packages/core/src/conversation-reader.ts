@@ -184,7 +184,8 @@ function row(ref: ConversationRef, original: ConversationSourceRecord['original'
   const reference = { hostId: ref.hostId, agentSessionId: ref.agentSessionId, source }
   return { id: conversationRecordId(reference), reference, revision: version ?? conversationRevision(original.item), order, original }
 }
-async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number): Promise<{ rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage }> {
+/** `capturedThrough` reads captured history at a later cut of the same stream: the same records, at the versions the view accepted. */
+async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, capturedThrough?: number): Promise<{ rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage }> {
   let nativePage: AgentSessionHistoryPage | undefined
   const rows: ConversationSourceRecord[] = [], after: Position = { ...state.position }
   let checkpoint = state.checkpoint!
@@ -230,8 +231,10 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
   const captured = state.scope.sources.find(source => source.kind === 'captured')
   if (captured && state.position.capturedCut && state.position.capturedBefore !== null) {
     try {
-      const page = await port.captured({ epoch: state.position.capturedCut.epoch, throughSequence: state.position.capturedCut.sequence,
-        ...(state.position.capturedBefore === undefined ? {} : { beforeFirstSequence: state.position.capturedBefore }), limit })
+      // Records first created after the opening cut belong to live reads, not to this page.
+      const before = state.position.capturedBefore ?? (capturedThrough === undefined ? undefined : state.position.capturedCut.sequence + 1)
+      const page = await port.captured({ epoch: state.position.capturedCut.epoch, throughSequence: capturedThrough ?? state.position.capturedCut.sequence,
+        ...(before === undefined ? {} : { beforeFirstSequence: before }), limit })
       rows.push(...page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: page.stream.epoch, firstSequence: record.firstSequence }, record.revision)))
       after.capturedBefore = page.nextBeforeFirstSequence
       const current = initialCoverage(captured)
@@ -409,6 +412,12 @@ async function anchorBatch(input: ConversationTimelineReadInput, port: Conversat
   }
   return { rows, batch: { index: 0, offset: 0, digests: [], after: { native: null, capturedBefore: null }, coverage, more: false } as Batch }
 }
+/** The view's captured cut once live reading advanced it past this page's opening cut. The view's scope
+ * names one captured epoch and changes reads refuse any other, so both cuts are of the same stream. */
+function acceptedCapturedSequence(frontier: ConversationFrontier, position: Position): number | undefined {
+  const cut = frontier.cuts.find(cut => cut.kind === 'captured'), opening = position.capturedCut
+  return cut?.kind === 'captured' && opening && cut.sequence > opening.sequence ? cut.sequence : undefined
+}
 /** Original accepted page adjacency, never timestamps or opaque-cursor ordering. */
 function historyNavigation(rows: readonly ConversationSourceRecord[], history: readonly HistoryPosition[]) {
   // One short-lived inventory of the bounded accepted frame. Original page
@@ -520,7 +529,8 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const records = new Map(view.rows.map(record => [record.id, record]))
       const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30, records)
         : ('anchor' in input && input.anchor || 'record' in input && input.record) ? await anchorBatch(input, port, state)
-        : previousPosition?.live ? await liveSpanBatch(ref, port, state.scope, previousPosition, view.checkpoint) : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30)
+        : previousPosition?.live ? await liveSpanBatch(ref, port, state.scope, previousPosition, view.checkpoint)
+        : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30, mode === 'inspect' && state.pageIndex !== undefined ? acceptedCapturedSequence(view.checkpoint, state.position) : undefined)
       // History navigation adds older or evicted originals; the view keeps the frontier live reading reached.
       const frontier = mode === 'inspect' && state.pageIndex !== undefined ? view.checkpoint : loaded.batch.end ?? state.checkpoint!
       if (mode === 'inspect' && !state.anchor && !previousPosition?.live) {
