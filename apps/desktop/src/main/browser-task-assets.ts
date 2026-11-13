@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { AgentMuxError } from '@agentmux/core'
 import type { NameChangeAudit } from './name-change-audit.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -218,13 +219,13 @@ export class BrowserTaskAssets {
     })
   }
 
-  async edit(assetId: string, expectedRevision: number, replacement: BrowserTaskContent): Promise<BrowserTaskAsset> {
+  async edit(assetId: string, expectedRevision: number, replacement: unknown): Promise<BrowserTaskAsset> {
     return this.change(async () => {
       const asset = this.requireAsset(assetId)
       // A full replacement is deliberate. In particular, an empty step list stays empty.
       const next = content(replacement)
       const revisionConflict = asset.revision !== expectedRevision
-        ? new Error('Task draft changed; reload before editing.') : null
+        ? revisionChanged(asset, expectedRevision) : null
       const change = { target: { kind: 'browser-task', id: assetId },
         location: { browserId: asset.browserId }, before: asset.draft.name,
         requested: next.name, ownerRevision: asset.revision }
@@ -232,7 +233,7 @@ export class BrowserTaskAssets {
         if (revisionConflict) throw revisionConflict
         asset.draft = next
         asset.revision += 1; asset.updatedAt = this.now()
-        await this.persist(asset.browserId)
+        await this.persistAuthoring(asset)
         return copy(asset)
       }
       return this.options.nameAudit
@@ -245,12 +246,12 @@ export class BrowserTaskAssets {
   async saveVersion(assetId: string, expectedRevision: number): Promise<BrowserTaskAsset> {
     return this.change(async () => {
       const asset = this.requireAsset(assetId)
-      if (asset.revision !== expectedRevision) throw new Error('Task draft changed; reload before saving its version.')
+      if (asset.revision !== expectedRevision) throw revisionChanged(asset, expectedRevision)
       if (!asset.draft.steps.length) throw new Error('The draft has no steps. Add a reviewed step before saving a runnable version.')
       validateBrowserTaskPath(asset.draft.steps)
       asset.versions.push({ ...copy(asset.draft), version: (asset.versions.at(-1)?.version ?? 0) + 1, savedAt: this.now() })
       asset.revision += 1; asset.updatedAt = this.now()
-      await this.persist(asset.browserId)
+      await this.persistAuthoring(asset)
       return copy(asset)
     })
   }
@@ -591,6 +592,13 @@ export class BrowserTaskAssets {
     return next
   }
   private async updateRun(run: BrowserTaskAssetRun): Promise<void> { run.updatedAt = this.now(); await this.persist(run.browserId) }
+  private async persistAuthoring(asset: BrowserTaskAsset): Promise<void> {
+    try { await this.persist(asset.browserId) }
+    catch {
+      throw new AgentMuxError('Task assets could not be saved. The live draft remains; read browser task assets for its current revision, restore storage and inspect before retrying.',
+        'BROWSER_TASK_SAVE_UNCONFIRMED', JSON.stringify({ browserId: asset.browserId, assetId: asset.id, currentRevision: asset.revision, saved: 'unconfirmed' }))
+    }
+  }
   private async persist(browserId?: string): Promise<void> {
     if (this.loadUnavailable) throw new Error(this.warning)
     // These costs are a projection of the original item runs, including a call that is still
@@ -714,16 +722,34 @@ function safeUrl(value: string): string {
   } catch { return '' }
 }
 function target(value: BrowserReplayTarget): BrowserReplayTarget {
+  draftFields(value, ['role', 'name', 'ordinal', 'count'])
   if (!value || !value.role || typeof value.name !== 'string' || !Number.isSafeInteger(value.ordinal) || !Number.isSafeInteger(value.count) ||
       value.ordinal < 1 || value.count < value.ordinal) throw new Error('Invalid task target')
   return { role: text(value.role), name: text(value.name), ordinal: value.ordinal, count: value.count }
 }
-function content(raw: BrowserTaskContent): BrowserTaskContent {
+function revisionChanged(asset: BrowserTaskAsset, expectedRevision: number): AgentMuxError {
+  return new AgentMuxError('Task draft changed; read browser task assets and edit the current revision.', 'BROWSER_TASK_REVISION_CONFLICT',
+    JSON.stringify({ browserId: asset.browserId, assetId: asset.id, expectedRevision, currentRevision: asset.revision }))
+}
+function draftFields(value: unknown, fields: readonly string[]): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Reflect.ownKeys(value).some(key => typeof key !== 'string' || !fields.includes(key) || !('value' in Object.getOwnPropertyDescriptor(value, key)!))) throw new Error('Invalid or unsupported task draft field')
+}
+function content(value: unknown): BrowserTaskContent {
+  draftFields(value, ['name', 'url', 'steps', 'parameters', 'completion'])
+  const raw = value as BrowserTaskContent
   if (!raw || !Array.isArray(raw.steps) || raw.steps.length > MAX_STEPS || !Array.isArray(raw.parameters) || raw.parameters.length > MAX_PARAMETERS) throw new Error('Invalid task draft or budget')
-  const parameters: BrowserTaskParameter[] = raw.parameters.map(parameter => ({ key: parameterKey(parameter.key), label: text(parameter.label), secret: parameter.secret === true }))
+  if (typeof raw.name !== 'string' || typeof raw.url !== 'string') throw new Error('Invalid task name or URL')
+  const parameters: BrowserTaskParameter[] = raw.parameters.map(parameter => {
+    draftFields(parameter, ['key', 'label', 'secret'])
+    if (typeof parameter.label !== 'string' || typeof parameter.secret !== 'boolean') throw new Error('Invalid task parameter')
+    return { key: parameterKey(parameter.key), label: text(parameter.label), secret: parameter.secret }
+  })
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
+    draftFields(step, ['id', 'kind', 'url', 'target', 'parameterKey', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
     if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
+    if (typeof step.url !== 'string' || typeof step.reviewed !== 'boolean' || (step.label !== undefined && typeof step.label !== 'string') || (step.warning !== undefined && typeof step.warning !== 'string')) throw new Error('Invalid task step field')
     const url = safeUrl(step.url)
     return { id: identity(step.id), kind: step.kind, url, ...(step.target ? { target: target(step.target) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
@@ -779,7 +805,8 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
         !Array.isArray(asset.versions)) throw new Error('Invalid task asset')
     const versions = asset.versions.map((version, index) => {
       if (version.version !== index + 1 || !Number.isFinite(version.savedAt)) throw new Error('Invalid task version')
-      return { ...content(version), version: version.version, savedAt: version.savedAt }
+      const { version: _version, savedAt: _savedAt, ...definition } = version
+      return { ...content(definition), version: version.version, savedAt: version.savedAt }
     })
     return { id: identity(asset.id), browserId: identity(asset.browserId), sourceRecordingId: identity(asset.sourceRecordingId), revision: asset.revision,
       draft: content(asset.draft), versions, createdAt: asset.createdAt, updatedAt: asset.updatedAt }
@@ -824,8 +851,11 @@ function normalizeHumanCheckpoints(run: BrowserTaskAssetRun, version: BrowserTas
 }
 
 function branch(value: NonNullable<BrowserTaskStep['branch']>): NonNullable<BrowserTaskStep['branch']> {
+  draftFields(value, ['condition', 'onTrue', 'onFalse'])
   if (!value || !value.condition || !['page-url-is', 'element-present'].includes(value.condition.kind) ||
       (value.onTrue !== null && typeof value.onTrue !== 'string') || (value.onFalse !== null && typeof value.onFalse !== 'string')) throw new Error('Invalid task condition declaration')
+  draftFields(value.condition, value.condition.kind === 'page-url-is' ? ['kind', 'url'] : ['kind', 'target'])
+  if (value.condition.kind === 'element-present') draftFields(value.condition.target, ['role', 'name'])
   const condition = value.condition.kind === 'page-url-is'
     ? { kind: value.condition.kind, url: safeUrl(value.condition.url) }
     : { kind: value.condition.kind, target: { role: text(value.condition.target.role), name: text(value.condition.target.name) } }
@@ -833,6 +863,7 @@ function branch(value: NonNullable<BrowserTaskStep['branch']>): NonNullable<Brow
   return { condition, onTrue: value.onTrue === null ? null : identity(value.onTrue), onFalse: value.onFalse === null ? null : identity(value.onFalse) }
 }
 function semanticTarget(value: BrowserTaskSemanticTarget): BrowserTaskSemanticTarget {
+  draftFields(value, ['role', 'name'])
   if (!value || typeof value.role !== 'string' || typeof value.name !== 'string' || !value.role.trim()) throw new Error('A page check needs a semantic element role and name.')
   return { role: text(value.role), name: text(value.name) }
 }
@@ -843,6 +874,7 @@ function checkUrl(value: string): string {
 }
 function waitCondition(value: BrowserTaskWait): BrowserTaskWait {
   if (!value || typeof value !== 'object') throw new Error('Invalid wait condition')
+  draftFields(value, value.kind === 'element-present' ? ['kind', 'target'] : ['kind', 'url'])
   if (value.kind === 'element-present') return { kind: value.kind, target: semanticTarget(value.target) }
   if (value.kind === 'url-is') return { kind: value.kind, url: checkUrl(value.url) }
   throw new Error('Invalid wait condition')
@@ -853,6 +885,7 @@ function waitTimeout(value: number): number {
 }
 function assertion(value: BrowserTaskAssertion): BrowserTaskAssertion {
   if (!value || typeof value !== 'object') throw new Error('Invalid assertion')
+  draftFields(value, value.kind === 'text-present' ? ['kind', 'text'] : value.kind === 'url-is' ? ['kind', 'url'] : ['kind', 'target'])
   if (value.kind === 'element-present' || value.kind === 'element-absent') return { kind: value.kind, target: semanticTarget(value.target) }
   if (value.kind === 'url-is') return { kind: value.kind, url: checkUrl(value.url) }
   if (value.kind === 'text-present' && typeof value.text === 'string' && value.text.trim()) return { kind: value.kind, text: text(value.text) }

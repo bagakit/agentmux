@@ -2971,7 +2971,6 @@ export class BrowserViewManager {
   }
 
   private async requireTaskAsset(id: string, assetId: string): Promise<BrowserTaskAsset> {
-    this.require(id)
     if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
     const asset = await this.taskAssets.get(assetId)
     if (!asset || asset.browserId !== id) throw new Error('This task asset does not belong to the Browser.')
@@ -2986,14 +2985,19 @@ export class BrowserViewManager {
     return await this.taskAssets.importRecording(draft, name)
   }
 
-  async saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset> {
+  async saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset> {
     await this.requireTaskAsset(id, assetId)
     return await this.taskAssets!.edit(assetId, expectedRevision, content)
   }
 
   async saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset> {
     const updated = await this.saveTaskAssetDraft(id, assetId, expectedRevision, content)
-    return await this.taskAssets!.saveVersion(assetId, updated.revision)
+    return await this.publishTaskAsset(id, assetId, updated.revision)
+  }
+
+  async publishTaskAsset(id: string, assetId: string, expectedRevision: number): Promise<BrowserTaskAsset> {
+    await this.requireTaskAsset(id, assetId)
+    return await this.taskAssets!.saveVersion(assetId, expectedRevision)
   }
 
   async locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset> {

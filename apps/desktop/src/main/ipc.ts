@@ -700,11 +700,22 @@ export async function registerIpc(args: {
     if (!response || typeof response.requestId !== 'string') return
     controlBridge.accept(response)
   }
+  const controlBrowserTask = (request: unknown) => executeBrowserTaskControl(request, {
+    getTaskAssets: async (id: string) => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
+    saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => browsers.saveTaskAssetDraft(id, assetId, revision, content),
+    publishTaskAsset: (id: string, assetId: string, revision: number) => browsers.publishTaskAsset(id, assetId, revision),
+    getOperation: (id: string) => browsers.getOperation(id),
+    runControlledTaskBatch: async (input: BrowserTaskBatchInput) => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskBatch(input) },
+    runControlledTaskAsset: async (input: BrowserTaskAssetRunInput) => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskAsset(input) },
+    stopTaskBatch: (id: string, batchId: string) => browsers.stopTaskBatch(id, batchId),
+    stopTaskAsset: (id: string, runId: string) => browsers.stopTaskAsset(id, runId)
+  }, browserAutomation)
   const executeControlOwner = async (
     request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
+    if (request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish') return await controlBrowserTask(request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       if (request.kind === 'quick') return controlBridge.execute(request, signal)
       throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')
@@ -2197,14 +2208,7 @@ export async function registerIpc(args: {
     return await browsers.getTaskAssets(id)
   })
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
-    return await executeBrowserTaskControl(request, {
-      getTaskAssets: async id => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
-      getOperation: id => browsers.getOperation(id),
-      runControlledTaskBatch: async input => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskBatch(input) },
-      runControlledTaskAsset: async input => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskAsset(input) },
-      stopTaskBatch: (id, batchId) => browsers.stopTaskBatch(id, batchId),
-      stopTaskAsset: (id, runId) => browsers.stopTaskAsset(id, runId)
-    }, browserAutomation)
+    return await controlBrowserTask(request)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
     await ensureBrowser(id)

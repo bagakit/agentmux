@@ -1,10 +1,12 @@
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOperation } from '../shared/browser-operation.js'
-import type { BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 
 type BrowserTaskControlOwner = {
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
+  saveTaskAssetDraft(browserId: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset>
+  publishTaskAsset(browserId: string, assetId: string, expectedRevision: number): Promise<BrowserTaskAsset>
   getOperation(operationId: string): Promise<BrowserOperation | null>
   runControlledTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun>
   stopTaskBatch(browserId: string, batchId: string): Promise<BrowserTaskBatchRun | null>
@@ -31,6 +33,13 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
   let raw: unknown
   if (request.operation === 'browser.task.assets') {
     raw = { state: await owner.getTaskAssets(request.browserId) }
+  } else if (request.operation === 'browser.task.edit') {
+    const asset = await owner.saveTaskAssetDraft(request.browserId, request.assetId, request.expectedRevision, request.content)
+    // A confirmed write receipt must not grow with the original owner's cumulative history.
+    raw = { asset: { id: asset.id, browserId: asset.browserId, revision: asset.revision } }
+  } else if (request.operation === 'browser.task.publish') {
+    const asset = await owner.publishTaskAsset(request.browserId, request.assetId, request.expectedRevision)
+    raw = { asset: { id: asset.id, browserId: asset.browserId, revision: asset.revision }, publishedVersion: asset.versions.at(-1)?.version }
   } else if (request.operation === 'browser.task.reliability') {
     const state = await owner.getTaskAssets(request.browserId)
     const needed = new Set(state.runs.filter(run => run.browserId === request.browserId && run.assetId === request.assetId && run.version === request.version).flatMap(run => run.operationIds))

@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { rpcRecord } from './rpc-data.js'
 
 export type BrowserTaskRunStatus = 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
@@ -45,13 +46,19 @@ export type AgentMuxBrowserTaskReliability = {
 
 export type BrowserTaskControlPayload =
   | { operation: 'browser.task.assets'; browserId: string }
+  | { operation: 'browser.task.edit'; browserId: string; assetId: string; expectedRevision: number; content: Record<string, unknown> }
+  | { operation: 'browser.task.publish'; browserId: string; assetId: string; expectedRevision: number }
   | { operation: 'browser.task.batch'; browserId: string; assetId: string; version: number; items: { id: string; parameters: Record<string, string> }[]; parameters: Record<string, string>; batchId?: string }
   | { operation: 'browser.task.batch-stop'; browserId: string; batchId: string }
   | { operation: 'browser.task.run'; browserId: string; assetId: string; version: number; parameters: Record<string, string>; mode?: 'run' | 'step'; runId?: string }
   | { operation: 'browser.task.stop'; browserId: string; runId: string }
   | { operation: 'browser.task.reliability'; browserId: string; assetId: string; version: number }
+/** Confirmed write identity; cumulative definition/version history is read separately. */
+export type AgentMuxBrowserTaskAssetReceipt = { id: string; browserId: string; revision: number }
 export type BrowserTaskControlResult =
   | { operation: 'browser.task.assets'; state: AgentMuxBrowserTaskState }
+  | { operation: 'browser.task.edit'; asset: AgentMuxBrowserTaskAssetReceipt }
+  | { operation: 'browser.task.publish'; asset: AgentMuxBrowserTaskAssetReceipt; publishedVersion: number }
   | { operation: 'browser.task.batch'; batch: AgentMuxBrowserTaskBatch }
   | { operation: 'browser.task.batch-stop'; batch: AgentMuxBrowserTaskBatch | null }
   | { operation: 'browser.task.run'; run: AgentMuxBrowserTaskRun }
@@ -63,7 +70,7 @@ const RESULTS: BrowserTaskReliabilityResult[] = ['passed', 'not-met', 'unavailab
 const MAX_BYTES = 1_048_576
 
 export function isBrowserTaskControlOperation(operation: string): operation is BrowserTaskControlPayload['operation'] {
-  return operation === 'browser.task.assets' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
+  return operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
 }
 
 function bad(message: string, request = false): never {
@@ -99,9 +106,39 @@ function bounded(value: unknown, limit: number, request = false): unknown[] {
   return value
 }
 
+/** Transport-only JSON carrier. Step semantics stay with the Browser Client's asset owner. */
+function definition(value: unknown, request = false): Record<string, unknown> {
+  const code = request ? 'INVALID_CONTROL_REQUEST' : 'CONTROL_PROTOCOL_ERROR'
+  const seen = new Set<object>()
+  function json(value: unknown, depth: number): unknown {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return value
+    if (!value || typeof value !== 'object' || depth > 64 || seen.has(value)) bad('Browser task definition must contain bounded JSON data.', request)
+    seen.add(value)
+    let result: unknown
+    if (Array.isArray(value)) {
+      if (Object.keys(value).length !== value.length || Object.getOwnPropertySymbols(value).length) bad('Browser task definition must contain JSON arrays.', request)
+      result = Array.from({ length: value.length }, (_, index) => {
+        const item = Object.getOwnPropertyDescriptor(value, String(index))
+        if (!item || !('value' in item)) bad('Browser task definition must contain JSON data.', request)
+        return json(item.value, depth + 1)
+      })
+    } else result = Object.fromEntries(Object.entries(rpcRecord(value, undefined, code)).map(([key, item]) => [key, json(item, depth + 1)]))
+    seen.delete(value)
+    return result
+  }
+  const result = rpcRecord(json(value, 0), undefined, code)
+  if (Buffer.byteLength(JSON.stringify(result)) > MAX_BYTES) bad('Browser task definition byte budget exceeded.', request)
+  return result
+}
+
 export function parseBrowserTaskControlPayload(value: unknown): BrowserTaskControlPayload {
   const source = record(value, true)
   const browserId = identifier(source.browserId, true)
+  if (source.operation === 'browser.task.edit' || source.operation === 'browser.task.publish') {
+    rpcRecord(source, ['operation', 'browserId', 'assetId', 'expectedRevision', ...(source.operation === 'browser.task.edit' ? ['content'] : []), 'schemaVersion', 'requestId'])
+    const common = { browserId, assetId: identifier(source.assetId, true), expectedRevision: integer(source.expectedRevision, true, 1) }
+    return source.operation === 'browser.task.edit' ? { operation: source.operation, ...common, content: definition(source.content, true) } : { operation: source.operation, ...common }
+  }
   if (source.operation === 'browser.task.assets') return { operation: source.operation, browserId }
   if (source.operation === 'browser.task.batch-stop') return { operation: source.operation, browserId, batchId: identifier(source.batchId, true) }
   if (source.operation === 'browser.task.stop') return { operation: source.operation, browserId, runId: identifier(source.runId, true) }
@@ -239,6 +276,12 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
   if (Buffer.byteLength(serialized) > MAX_BYTES) bad('Browser task result byte budget exceeded.')
   switch (operation) {
     case 'browser.task.assets': return { operation, state: state(source.state) }
+    case 'browser.task.edit':
+    case 'browser.task.publish': {
+      const row = rpcRecord(source.asset, ['id', 'browserId', 'revision'], 'CONTROL_PROTOCOL_ERROR')
+      const asset = { id: identifier(row.id), browserId: identifier(row.browserId), revision: integer(row.revision, false, 1) }
+      return operation === 'browser.task.edit' ? { operation, asset } : { operation, asset, publishedVersion: integer(source.publishedVersion, false, 1) }
+    }
     case 'browser.task.batch': return { operation, batch: batch(source.batch) }
     case 'browser.task.batch-stop': return { operation, batch: source.batch === null ? null : batch(source.batch) }
     case 'browser.task.run': return { operation, run: run(source.run) }
@@ -251,6 +294,8 @@ export function assertBrowserTaskControlTarget(request: BrowserTaskControlPayloa
   if (request.operation !== result.operation) bad('Browser task result operation does not match its request.')
   if (request.operation === 'browser.task.assets' && result.operation === request.operation) {
     if (result.state.assets.some(asset => asset.browserId !== request.browserId) || result.state.runs.some(run => run.browserId !== request.browserId) || result.state.batches?.some(batch => batch.browserId !== request.browserId)) bad('Browser task state belongs to another Browser.')
+  } else if ((request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish') && result.operation === request.operation) {
+    if (result.asset.id !== request.assetId || result.asset.browserId !== request.browserId || result.asset.revision !== request.expectedRevision + 1) bad('Browser task authoring receipt belongs to another asset or revision.')
   } else if (request.operation === 'browser.task.batch' && result.operation === request.operation) {
     if (result.batch.browserId !== request.browserId || result.batch.assetId !== request.assetId || result.batch.version !== request.version ||
         (request.batchId !== undefined && request.batchId !== result.batch.id) || result.batch.items.length !== request.items.length || result.batch.items.some((item, index) => item.id !== request.items[index]?.id)) bad('Browser task batch belongs to another invocation.')
