@@ -134,6 +134,15 @@ describe('real format preview pane', () => {
     await render(<FilePreviewPane surface={file} />)
     expect(open).toHaveBeenCalledTimes(2)
   })
+  it('an unrelated store update does not rescan Workspaces for a playing media File', async () => {
+    vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-quiet', url: 'http://127.0.0.1:1/lease-quiet/clip.mp4', kind: 'video', mimeType: 'video/mp4', byteLength: 3 })
+    vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
+    const { file } = seed('clip.mp4')
+    await render(<FilePreviewPane surface={file} />)
+    const workspaces = useAppStore.getState().config!.workspaces, find = vi.spyOn(workspaces, 'find')
+    await act(async () => { for (let index = 0; index < 20; index++) useAppStore.setState({ lastError: `unrelated ${index}` }) })
+    expect(find).not.toHaveBeenCalled()
+  })
   it('an HLS playlist is source text whose preview plays it through a playback lease', async () => {
     const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'ready', id: 'lease-list', url: 'http://127.0.0.1:1/lease-list/live/index.m3u8', kind: 'playlist', mimeType: 'application/vnd.apple.mpegurl', byteLength: 154 })
     vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
