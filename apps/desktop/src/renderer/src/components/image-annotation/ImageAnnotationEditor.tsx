@@ -835,7 +835,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate' || strength !== null
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
     const hint = locked ? 'Selecting on another display · Esc to cancel'
-      : !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
+      : !documentState.crop && gesture === null ? `${windows.length ? 'Click a window or drag' : 'Drag'} to select · Arrows nudge · Enter to finish · Esc to cancel` : null
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
       {chip ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{sizeText}</span> : null}
