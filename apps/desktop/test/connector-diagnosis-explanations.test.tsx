@@ -2,9 +2,13 @@
 import { act } from 'react'
 import { appendFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 import * as core from '../../../packages/core/src/index.js'
+import { consumeConversationWindowPage, type AgentConversationReadPage, type ConversationTimelineReadInput, type ConversationWindowAssembly } from '../../../packages/core/src/conversation.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import type { ConnectionDiagnosisIntake, RoomBinding } from '@agentmux/core/connections'
 import { fixture, append, native, imageBlock, imageOperation, contentOperations, closes } from '../../../packages/connectors/test/fixtures/publication-source-owner.js'
 import { RuntimeController } from '../src/main/runtime-controller'
@@ -53,9 +57,69 @@ async function consumer() {
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   useAppStore.setState({ connectorRoomIntents: {}, agentComposerDrafts: { 'original-agent': 'Keep the original diagnosis draft' } })
   const unchanged = () => { expect(starts).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original diagnosis draft'); expect(calls.every(call => JSON.stringify(call.target) === JSON.stringify(hostingTarget))).toBe(true);  }
-  return { ...f, hostingTarget, calls, unchanged, mount: (binding: RoomBinding = f.binding) => dom.render(<ConnectorDeliveryDetails binding={binding} hostingTarget={hostingTarget} />),
+  return { ...f, hosted, hostingTarget, calls, unchanged, mount: (binding: RoomBinding = f.binding) => dom.render(<ConnectorDeliveryDetails binding={binding} hostingTarget={hostingTarget} />),
     failInspect: () => { failInspect = true }, hold: () => { held = new Promise<void>(resolve => { release = resolve }) }, release: () => { held = undefined; release() } }
 }
+
+it('keeps same-source reading conflicts precise through SDK Hosted CLI and original connector diagnosis', async () => {
+  const f = await consumer(), publication = f.services.publication!
+  clearInterval(Reflect.get(publication, 'timer'))
+  for (const id of ['reading-oldest', 'reading-middle', 'reading-latest']) await append(f, native(id, [{ type: 'text', text: id }]))
+  publication.refresh()
+  await wait(() => expect(contentOperations(publication.store, f.binding).filter(row => row.state === 'confirmed')).toHaveLength(3))
+  await wait(() => expect(Reflect.get(publication, 'lanes').get(f.binding.bindingId)?.work).toBeUndefined())
+  const ref = { hostId: f.binding.executionHostId, agentSessionId: f.binding.agentSessionId }, options = { ...ref, limit: 1, maxBytes: 4 * 1024 * 1024 }
+  const metadata = await f.store.readMetadata(ref.agentSessionId), sourceBytes = await readFile(f.transcript)
+  if (metadata?.nativeHandle?.kind !== 'provider') throw Error('Original native identity required for the reading fixture')
+  const { run: _originalRun, retiredRuns: _retiredRuns, ...foreign } = metadata
+  await f.store.compareAndSwap(null, { ...foreign, run: { runId: 'foreign-reading-run' }, retiredRuns: [], hookBindingId: 'foreign-reading-hook', hookToken: 'foreign-reading-token', agentSessionId: 'foreign-reading-session', nativeHandle: { ...metadata.nativeHandle, sessionId: 'foreign-native-source' } })
+  const sdk = (input: ConversationTimelineReadInput) => f.client.readAgentConversation(input)
+  async function complete(read: typeof sdk, input: ConversationTimelineReadInput, first?: AgentConversationReadPage) {
+    let pending: ConversationWindowAssembly | undefined, cursor = input.cursor, page = first
+    for (let count = 0; count < 16; count++) {
+      page ??= await read({ ...input, ...(cursor ? { cursor } : {}) })
+      const result = consumeConversationWindowPage(page, pending)
+      if (result.kind === 'complete') return result.snapshot
+      pending = result.pending; cursor = page.nextCursor!; page = undefined
+    }
+    throw Error('Original small reading window did not complete')
+  }
+  const initial = await complete(sdk, options), older = initial.window.navigation.older!
+  expect(older).toBeTruthy()
+  const ordinary = await sdk({ ...options, cursor: older }), preserved = await f.hosted.readAgentConversation({ ...options, cursor: older, preserveCurrent: true })
+  expect(ordinary.window.complete).toBe(false); expect(preserved.window.complete).toBe(false)
+  const invalid = { ...options, cursor: preserved.nextCursor! }
+  await expect(sdk(invalid), 'same native preservation conflict is an invalid continuation, not a replaced source').rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' })
+  // The public route owns its wrapped cursors; raw local SDK tokens are not RPC continuations.
+  const routed = await complete(input => f.rpc.call('agent.conversation.inspect', input), options)
+  const routedPending = await f.rpc.call('agent.conversation.inspect', { ...options, cursor: routed.window.navigation.older!, preserveCurrent: true })
+  expect(routedPending.window.complete).toBe(false)
+  await expect(f.rpc.call('agent.conversation.inspect', { ...options, cursor: routedPending.nextCursor!, preserveCurrent: true, processDetails: 'deferred' }), 'same native process representation is immutable in the original continuation').rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' })
+  const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + join(f.root, 'images.sock'), 'agent', 'conversation', 'inspect', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify({ ...options, cursor: routedPending.nextCursor! }))
+  expect(cli.code).not.toBe(0); expect(cli.stdout + cli.stderr).toContain('AGENT_SESSION_HISTORY_INVALID_CURSOR')
+  const finished = await complete(sdk, { ...options, cursor: older, preserveCurrent: true }, preserved)
+  expect(finished.window.id).toBe(initial.window.id); expect(finished.window.revision).toBe(initial.window.revision + 1)
+  const stale = { ...ref, checkpoint: finished.window.checkpoint, view: initial.window.view!, limit: 100 }
+  await expect(f.client.readConversationChanges(stale), 'same native advanced view must report temporary window expiry').rejects.toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED' })
+  await expect(f.hosted.readConversationChanges(stale)).rejects.toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED' })
+  const kept = await complete(sdk, { ...options, view: finished.window.view! })
+  expect(kept.units).toEqual(finished.units); expect(kept.window.checkpoint).toEqual(finished.window.checkpoint)
+  const current = await f.client.readConversationChanges({ ...ref, checkpoint: finished.window.checkpoint, view: finished.window.view! })
+  expect(current.window.id).toBe(finished.window.id)
+  await expect(f.rpc.call('agent.conversation.inspect', { ...options, agentSessionId: 'foreign-reading-session', view: routed.window.view! }), 'a genuine foreign original Session remains refused').rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  const beforeEffects = f.remote.calls.length, beforeCut = publication.store.retainedCheckpoint(f.binding), changes = f.port.changes.bind(f.port)
+  vi.spyOn(f.port, 'changes').mockImplementation(async (...args) => { await f.hosted.readConversationChanges(stale); return changes(...args) })
+  publication.refresh()
+  const input = { connectionId: f.binding.connectionId, bindingId: f.binding.bindingId, bindingRevision: f.binding.revision }
+  await wait(async () => expect((await publication.list(input)).sourceObservation?.code).toBe('AGENT_CONVERSATION_VIEW_EXPIRED'))
+  const diagnosis = await f.rpc.call('connection.diagnose', { executionHostId: ref.hostId, agentSessionId: ref.agentSessionId, bindingId: f.binding.bindingId, bindingRevision: f.binding.revision })
+  expect(diagnosis.groups.value!.items[0]!.outgoing.value!.sourceObservation).toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED', codeRecorded: true })
+  await f.mount(); await wait(() => expect(dom.container.querySelector('[data-direction="outgoing"] strong')?.textContent).toBe('Original reading window unavailable'))
+  expect(dom.container.textContent).not.toContain('Saved conversation source changed')
+  expect(publication.store.retainedCheckpoint(f.binding)).toEqual(beforeCut); expect(f.remote.calls).toHaveLength(beforeEffects)
+  expect(await f.store.readMetadata(ref.agentSessionId)).toEqual(metadata); expect(await readFile(f.transcript)).toEqual(sourceBytes)
+  f.unchanged(); facts({ sameNativeIdentity: metadata.nativeHandle.sessionId, sdkCursorCode: 'AGENT_SESSION_HISTORY_INVALID_CURSOR', hostedViewCode: 'AGENT_CONVERSATION_VIEW_EXPIRED', cli, correctContinuationReadable: true, foreignSourceRefused: true, actualPublicDiagnosis: diagnosis.groups.value!.items[0]!.outgoing.value!.sourceObservation, mountedTitle: 'Original reading window unavailable', originalCutAndEffectsKept: true, noInputOrLifecycleWrites: true })
+}, 35_000)
 
 it('shows real BUSY and timeout causes, follows the original older receipt and keeps unknown effects read-only through Main and Hosted', async () => {
   const f = await consumer()
