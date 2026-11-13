@@ -222,7 +222,7 @@ describe('mounted original Goal delegation consumer', () => {
     expect(relationships.querySelector('summary')!.textContent).toContain('Supervisor · original-owner')
     const summary = work.querySelector('.goal-delegation__summary')!
     expect(summary.textContent).toBe('Original worker result'); expect(summary.closest('details')).toBeNull()
-    expect(button('Collect report').classList.contains('goals-button--primary')).toBe(true)
+    expect(button('Collect report').classList.contains('primary-button')).toBe(true)
     const notice = work.querySelector<HTMLDetailsElement>('.goal-delegation__notice')!
     expect(notice.open).toBe(false); expect(notice.querySelector('summary')!.textContent).toBe('Supervisor reminder received')
     expect(work.querySelector('.goals-service')).toBeNull()

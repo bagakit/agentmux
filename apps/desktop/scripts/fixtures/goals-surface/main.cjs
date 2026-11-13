@@ -43,7 +43,7 @@ app.whenReady().then(async()=>{
       if(mode==='unknown'||mode==='stale'){ assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept], [data-goal-accept-gaps]"))'),false,'Ineligible results have no acceptance shortcut') }
       if(['proposal','confirmed','results','gap','unknown','stale','accepted-gaps','receipt-failure','done-confirmed','no-alignment-report','delivery-failure'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
       if(mode==='receipt-failure') {
-        assert.deepEqual(await evaluate('([...document.querySelectorAll(".goals-detail .goals-button--primary")].map(node=>node.textContent.trim()))'),['Reload current proposal'],'Unknown acknowledgement has one visible primary recovery')
+        assert.deepEqual(await evaluate('([...document.querySelectorAll(".goals-detail .primary-button")].map(node=>node.textContent.trim()))'),['Reload current proposal'],'Unknown acknowledgement has one visible primary recovery')
         await click(button('Back to goals')); await waitFor('Boolean(document.querySelector("[data-demand-id]"))')
         assert.equal(await evaluate('document.querySelector("[data-demand-id]").textContent.includes("Reload current proposal")'),true,'The retained failure keeps the same next step in the list')
         await capture('1280-receipt-failure-list',1280); await size(620); await capture('620-receipt-failure-list',620)

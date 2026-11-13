@@ -231,7 +231,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     useAppStore.setState({ demands: { one: goal('one', { alignment: { ...alignment, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) } }) }, selectedDemandId: 'one' }); await mount()
     const section = dom.container.querySelector('[data-goal-result-state="missing"]')!
     expect(section.querySelector('h2')!.textContent).toBe('Results review')
-    expect(section.querySelector('.goals-button--primary')).toBeNull()
+    expect(section.querySelector('.primary-button')).toBeNull()
     expect([...dom.container.querySelectorAll('[aria-label="Open discussion for Recover the work one"]')]).toHaveLength(1)
     await click('Open discussion for Recover the work one')
     expect(open).toHaveBeenCalledExactlyOnceWith('one'); expect(request).not.toHaveBeenCalled()

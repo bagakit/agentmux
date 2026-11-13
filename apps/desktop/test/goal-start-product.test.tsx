@@ -39,7 +39,7 @@ it('visible one-time task → actual preload/Main/Core receipt without confirmat
   expect(container.querySelector('a')?.getAttribute('href')).toBe(`#goal-work-${goal.id}`)
   const another = container.querySelector('details')!
   expect(another.open).toBe(false)
-  expect(container.querySelector('.goals-button--primary')).toBeNull()
+  expect(container.querySelector('.primary-button')).toBeNull()
 })
 
 it('finite task uses the observed Goal version at the real owner and a stale click writes no Agent input', async () => {

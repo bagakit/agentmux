@@ -42,8 +42,8 @@ it('mounted original acceptance leaves work open, then explicit Finish goal uses
   await demands.proposeGrounding('goal', report()); await publish(); await mount()
   const expected = (await demands.get('goal'))!, originalRun = structuredClone(session.run), lifecycle = noLifecycleChange()
   const originalInput = [...writes], originalSessions = useAppStore.getState().sessions
-  expect(button('Accept and finish').classList.contains('goals-button--primary')).toBe(true)
-  expect(button('Accept results').classList.contains('goals-button--primary')).toBe(false)
+  expect(button('Accept and finish').classList.contains('primary-button')).toBe(true)
+  expect(button('Accept results').classList.contains('primary-button')).toBe(false)
   await click('Accept results')
   await settled(async () => expect((await demands.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
   const accepted = (await demands.get('goal'))!
@@ -69,7 +69,7 @@ it('mounted original acceptance leaves work open, then explicit Finish goal uses
 it('the primary gap completion action preserves the reviewed gap through actual IPC and durable storage', async () => {
   await demands.proposeGrounding('goal', report('gap')); await publish(); await mount()
   const submission = (await demands.get('goal'))!.grounding!.submissionId
-  const primary = container.querySelector<HTMLButtonElement>('.goals-grounding .goals-button--primary')!
+  const primary = container.querySelector<HTMLButtonElement>('.goals-grounding .primary-button')!
   expect(primary?.textContent).toMatch(/Accept/iu); expect(primary?.textContent).toMatch(/finish/iu); expect(primary?.textContent).toMatch(/gap/iu)
   await act(async () => primary.click())
   await settled(async () => expect((await demands.get('goal'))!.status).toBe('done'))
@@ -110,7 +110,7 @@ it('a stale primary finish cannot close or accept a replacement report, and relo
   const current = (await demands.get('goal'))!
   expect(current.status).toBe('todo'); expect(current.grounding!.acceptedAt).toBeNull()
   expect(accepts()).toEqual([accepted(old.grounding!.submissionId, false, true)])
-  expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Reload current proposal'])
+  expect([...container.querySelectorAll('.goals-detail .primary-button')].map(node => node.textContent?.trim())).toEqual(['Reload current proposal'])
   await click('Reload current proposal')
   await settled(() => expect(container.textContent).toContain('New report requiring review.'))
   expect(accepts()).toHaveLength(1); expect((await demands.get('goal'))!.status).toBe('todo')

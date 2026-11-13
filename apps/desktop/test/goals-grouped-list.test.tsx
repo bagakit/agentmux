@@ -135,8 +135,8 @@ describe('One solid primary per surface', () => {
     const create = dom.container.querySelector<HTMLButtonElement>('[data-new-goal]')!
     expect(create.getAttribute('aria-label')).toBe('New Goal')
     expect(create.classList.contains('primary-button')).toBe(false)
-    expect(dom.container.querySelectorAll('.goals-surface .primary-button, .goals-surface .goals-button--primary').length).toBe(1)
-    expect(dom.container.querySelector('.goals-detail .goals-button--primary')).not.toBeNull()
+    expect(dom.container.querySelectorAll('.goals-surface .primary-button').length).toBe(1)
+    expect(dom.container.querySelector('.goals-detail .primary-button')).not.toBeNull()
   })
 })
 
