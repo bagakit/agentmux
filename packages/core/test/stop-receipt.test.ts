@@ -265,8 +265,11 @@ describe('the public Stop surface carries the same receipt', () => {
     await server.start(); cleanup.push(() => server.stop())
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(async () => rpc.dispose())
     const identity = { agentSessionId: f.original.agentSessionId, expectedRun: f.original.run, operationId: 'rpc-stop' }
+    const catalogs = [vi.spyOn(f.store, 'loadMetadata'), vi.spyOn(f.store, 'loadRetiredAgentSessions')]
     expect(await rpc.call('agent.stop.inspect', identity)).toMatchObject({ phase: 'stopping', canRetry: true, operationIdMatched: true,
       failure: { stage: 'runtime-stop' } })
+    // The public route finds the owner by the exact Session, never by reading every Session's history.
+    for (const catalog of catalogs) { expect(catalog).not.toHaveBeenCalled(); catalog.mockRestore() }
     await expect((server as any).service.call('agent.stop.inspect', identity, { caller: { agentSessionId: f.original.agentSessionId, capability: 'private-test' },
       principal: { kind: 'user', id: 'private-local-user' } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
