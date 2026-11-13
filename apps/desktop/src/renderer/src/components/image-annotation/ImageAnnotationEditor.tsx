@@ -153,6 +153,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const originalBounds = { x: 0, y: 0, width: image.width, height: image.height }
   // The selection a capture shows now: the moving gesture's, else the document crop.
   const selection = shownSelection(cropRef.current, documentState.crop, originalBounds)
+  // The capture toolbar shows on a kept selection at rest; the size chip names the shown selection's image pixels.
+  const barShown = capture && selection !== null && documentState.crop !== null && gesture === null
+  const sizeText = capture && selection ? Math.round(selection.width) + ' × ' + Math.round(selection.height) + ' px' : null
   // The loupe shows the frozen pixel under the pointer while a selection is made or adjusted, never at rest or while drawing.
   const loupe = capture && hover?.sample && (gesture === 'selection' || (!documentState.crop && gesture === null)) ? { at: hover.at, sample: hover.sample } : null
   const live = useRef({ size, documentState, loaded, selected, tool, active, pendingText, loupe })
@@ -284,12 +287,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (!locked) return
     resetGesture(); setSelectedId(null); setHover(null); setDocumentState(createScreenshotDocument()); schedulePaint()
   }, [locked, resetGesture, schedulePaint])
-  // The capture toolbar and size chip are placed from their laid-out widths before the frame paints, so they appear in place.
+  // The capture toolbar and size chip are placed from their laid-out widths before the frame paints, so they appear in
+  // place. Their widths change only with what they show, so pointer moves that change neither force no layout.
   useLayoutEffect(() => {
     if (!capture) return
     const bar = barRef.current?.getBoundingClientRect().width, chip = chipRef.current?.getBoundingClientRect().width
     setMeasured(current => (bar ?? current.bar) === current.bar && (chip ?? current.chip) === current.chip ? current : { bar: bar ?? current.bar, chip: chip ?? current.chip })
-  })
+  }, [capture, barShown, sizeText, label, busy, busyLabel, confirmingDiscard])
   const loupeSample = capture ? hover?.sample : undefined
   useLayoutEffect(() => {
     const target = loupeRef.current?.getContext('2d'), source = samplerRef.current
@@ -700,7 +704,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const shown = selection && { x: selection.x * scale, y: selection.y * scale, width: selection.width * scale, height: selection.height * scale }
     // The bar shows only at rest, but its side is known during a gesture too, so the size chip never swaps sides on release.
     const placement = shown ? captureToolbarPlacement(shown, measured.bar, frame) : null
-    const bar = placement && documentState.crop && gesture === null ? placement : null
+    const bar = barShown ? placement : null
     const chip = shown && placement ? captureSizeChipPlacement(shown, measured.chip, placement.side, frame) : null
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
@@ -709,7 +713,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       : !documentState.crop && gesture === null ? 'Drag to select · Arrows nudge · Enter to finish · Esc to cancel' : null
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
-      {chip && selection ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{Math.round(selection.width)} × {Math.round(selection.height)} px</span> : null}
+      {chip ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{sizeText}</span> : null}
       {bar ? <div ref={barRef} className="image-annotation-editor__capture-bar" data-side={bar.side} style={{ left: bar.left, top: bar.top }}>
         <CaptureToolbar tool={tool} busy={busy} loaded={loaded} label={busy ? busyLabel : label} discard={discardControl}
           onTool={next => { resetGesture(); setTool(next); schedulePaint() }} onPin={() => complete('pin')} onSavePng={() => complete('save-png')}
