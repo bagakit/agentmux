@@ -6,6 +6,8 @@ import type { AgentMuxHostedOutputRpcPort, AgentMuxHostedSubscription } from './
 import type { AgentMuxRpcOutputInitial } from './public-rpc.js'
 import type { AgentMuxRunDataEvent, AgentMuxEvidence } from './types.js'
 
+const REPLAY_QUIET_MS = 30_000
+
 /** One existing public output lease; its callback never joins the SDK's global event publisher. */
 export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
   ...[agentSessionId, afterByte, listener]: Parameters<AgentMuxClient['observeAgentOutput']>) {
@@ -37,8 +39,16 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
       replayFinished = true; resolveReplay()
     }
   }
+  // The replay is closed only after a quiet period with no replay bytes. A replay that keeps
+  // arriving, however slowly in total, is progress and is never cut off by a fixed whole-replay deadline.
+  let timer: ReturnType<typeof setTimeout> | undefined, waiting = false
+  const awaitNextReplayBytes = () => {
+    clearTimeout(timer)
+    if (!waiting || replayFinished || closed) return
+    timer = setTimeout(() => fail(new AgentMuxError(
+      'This output reader received no replay bytes for 30 seconds. Its observation is closed; the Run and other readers are retained.', 'CONTROL_TIMEOUT')), REPLAY_QUIET_MS)
+  }
   const ready = (async () => {
-    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       subscription = await rpc.subscribe('agent.output', { agentSessionId, afterByte, follow: true }, {
         signal: controller.signal,
@@ -78,7 +88,7 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
                 startByte: output.startByte, endByte: output.endByte, dataBytes,
                 data: decoder.decode(dataBytes, { stream: true }) }
               cursor = output.endByte
-              if (output.replay) { replay.push(data); complete() }
+              if (output.replay) { replay.push(data); complete(); awaitNextReplayBytes() }
               else publisher.publishRunEvent(data, initial.session)
               return
             }
@@ -108,13 +118,12 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
         throw new AgentMuxError('The output reader closed while its subscription was being admitted.', 'CONTROL_CANCELLED')
       }
       if (!initial) throw new AgentMuxError('Output subscription has no original attachment identity.', 'CONTROL_PROTOCOL_ERROR')
-      timer = setTimeout(() => fail(new AgentMuxError(
-        'This output reader has not received the original replay fence. Its observation is closed; the Run and other readers are retained.', 'CONTROL_TIMEOUT')), 30_000)
+      waiting = true; awaitNextReplayBytes()
       await replayComplete
       if (closed) throw new AgentMuxError('The output reader closed before its observation receipt was returned.', 'CONTROL_CANCELLED')
       return { initial, replay, close }
     } catch (error) { await close().catch(() => {}); throw error }
-    finally { clearTimeout(timer) }
+    finally { waiting = false; clearTimeout(timer) }
   })()
   return { ready, close }
 }
