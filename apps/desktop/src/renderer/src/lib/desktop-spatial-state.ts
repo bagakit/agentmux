@@ -118,6 +118,19 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
   }
   return graph;
 }
+/** One reading of which Space and Topic a Zone holds, shared by Zone bindings and the Tabs placed in it. */
+function zoneContent(graph: AgentMuxSpatialGraph, zoneId: string) {
+  const original = graph.resources[zoneKey(zoneId)];
+  const origin = original && typeof original === 'object' && !Array.isArray(original) ? original : null;
+  const relationships = graph.bindings.filter(binding => binding.zoneId === zoneId);
+  const declaredSpaceId = typeof origin?.spaceId === 'string' ? origin.spaceId : null;
+  const spaceId = declaredSpaceId ?? (relationships.length === 1 ? relationships[0]!.spaceId : null);
+  if (!spaceId)
+    return null;
+  const originalSpace = graph.spaces.find(space => space.spaceId === spaceId);
+  const topicId = typeof origin?.topicId === 'string' ? origin.topicId : originalSpace?.topicId;
+  return { spaceId, declaredSpaceId, origin, originalSpace, topicId, relationships };
+}
 export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnavailable?: (tabId: string) => void): PersistedWorkbench {
   const tabs: PersistedWorkbench['tabs'] = {};
   for (const fact of graph.tabs) {
@@ -142,17 +155,17 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
       onUnavailable?.(fact.tabId);
       continue;
     }
-    const origin = fact.zoneId === null ? null : graph.resources[zoneKey(fact.zoneId)];
-    const bindings = fact.zoneId === null ? [] : graph.bindings.filter(binding => binding.zoneId === fact.zoneId);
-    const contentSpaceId = origin && typeof origin === 'object' && !Array.isArray(origin) && typeof origin.spaceId === 'string' ? origin.spaceId : null;
-    const sourceSpaceId = contentSpaceId ?? (bindings.length === 1 ? bindings[0]!.spaceId : null);
+    const content = fact.zoneId === null ? null : zoneContent(graph, fact.zoneId);
     const descriptor = metadata.space && typeof metadata.space === 'object' && !Array.isArray(metadata.space) ? metadata.space : null;
     // Core's exact Tab→Zone survives older host descriptors. Multiple display bindings
     // never select an arbitrary Space; the original resource context remains separate.
-    const space = fact.zoneId === null ? undefined : descriptor ? { ...descriptor, ...(contentSpaceId ? { spaceId: contentSpaceId } : {}), zoneId: fact.zoneId }
-      : sourceSpaceId ? { spaceId: sourceSpaceId, zoneId: fact.zoneId } : undefined;
+    const space = fact.zoneId === null ? undefined : descriptor ? { ...descriptor, ...(content?.declaredSpaceId ? { spaceId: content.declaredSpaceId } : {}), zoneId: fact.zoneId }
+      : content?.spaceId ? { spaceId: content.spaceId, zoneId: fact.zoneId } : undefined;
+    // A Tab that Core placed in a Topic or Mote Zone belongs to that Topic even when no client
+    // wrote the binding: Core admission records only the Tab entity, never a client descriptor.
+    const topicId = typeof metadata.topicId === 'string' ? undefined : content?.topicId;
     // Unavailable host data is reported by the consumer, not fabricated here.
-    tabs[fact.tabId] = { ...metadata, space, id: fact.tabId, workspaceId: fact.workspaceId, layout, regions,
+    tabs[fact.tabId] = { ...metadata, ...(topicId ? { topicId } : {}), space, id: fact.tabId, workspaceId: fact.workspaceId, layout, regions,
       ...(fact.name === null ? {} : { name: fact.name }) } as PersistedWorkbench['tabs'][string];
   }
   return { tabs, layouts: graph.layouts };
@@ -160,15 +173,11 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
 export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph, config?: Pick<import('../../../shared/contracts').AppConfig, 'workspaces'> | null): SpaceZoneBindings {
   const result: SpaceZoneBindings = {};
   for (const zone of graph.zones) {
-    const original = graph.resources[zoneKey(zone.zoneId)];
-    const origin = original && typeof original === 'object' && !Array.isArray(original) ? original : null;
-    const relationships = graph.bindings.filter(b => b.zoneId === zone.zoneId);
-    const spaceId = typeof origin?.spaceId === 'string' ? origin.spaceId : relationships.length === 1 ? relationships[0]!.spaceId : null;
-    if (!spaceId)
+    const content = zoneContent(graph, zone.zoneId);
+    if (!content)
       continue;
-    const originalSpace = graph.spaces.find(space => space.spaceId === spaceId);
+    const { spaceId, origin, originalSpace, topicId, relationships } = content;
     const originalKind = origin?.contentKind ?? originalSpace?.kind;
-    const topicId = typeof origin?.topicId === 'string' ? origin.topicId : originalSpace?.topicId;
     const workspace = config?.workspaces.find(workspace => workspace.id === zone.workspaceId);
     // Absence of an explicit descriptor is not evidence that an updated Core path is a default.
     // The saved anchor also recognizes an older default ACK after a Workspace path rebind.
