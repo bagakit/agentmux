@@ -70,6 +70,9 @@ it('actual Mobile App welcome is editable before any Main exists and one send re
   expect(f.key).not.toBe(JSON.stringify(['draft', null])); expect((f.scene()?.textContent ?? '')).not.toMatch(/麦克风|语音|录音/)
   await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false))
   await click(button(f.scene(), 'Send'))
+  // The sent message is shown at once where the conversation shows it, in place of the greeting.
+  await wait(() => expect(f.scene()?.querySelector('.mote-start__pending .mote-first-message')?.textContent).toContain('First exact Query'))
+  expect(f.scene()?.querySelector('.mote-start__invitation')).toBeNull()
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const packet = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
