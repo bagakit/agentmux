@@ -51,9 +51,19 @@ describe('saved Browsers that still need a Profile', () => {
       { regionId: 'r3', browserId: 'b-private', data: { mode: 'private', profileId: 'profile-work' } },
       { regionId: 'r4', browserId: 'b-capsule', data: { capsuleId: 'cap', profileId: 'profile-work' } }
     ])
-    expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual(['b-work'])
-    expect(savedBrowsersUsingProfile(graph, 'profile-other')).toEqual(['b-other'])
+    expect(savedBrowsersUsingProfile(graph, 'profile-work').map(use => use.browserId)).toEqual(['b-work'])
+    expect(savedBrowsersUsingProfile(graph, 'profile-other').map(use => use.browserId)).toEqual(['b-other'])
     expect(savedBrowsersUsingProfile(graph, 'profile-none')).toEqual([])
+  })
+
+  it('ignores a normal Region without a Profile (it restores into the default) and a Region outside every Tab', () => {
+    const graph = graphWith([
+      { regionId: 'r1', browserId: 'b-default', data: {} },
+      { regionId: 'r2', browserId: 'b-work', data: { profileId: 'profile-work', title: 'Launch' } }
+    ])
+    expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual([{ browserId: 'b-work', title: 'Launch', url: 'https://example.test/' }])
+    graph.tabs[0]!.regionIds = ['r1']
+    expect(savedBrowsersUsingProfile(graph, 'profile-work')).toEqual([])
   })
 })
 
@@ -62,17 +72,25 @@ describe('Main deletion refuses a Profile a saved Browser still needs', () => {
     const deleteProfile = vi.fn(async () => {})
     let graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-work' } }])
     const handler = productionDeleteHandler({ usesProfile: () => false, read: async () => ({ graph }), deleteProfile })
-    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('saved Browser that has not been opened since restart')
+    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('still used by the saved Browser "https://example.test/". Open it and switch it to another Profile, or close it')
     expect(deleteProfile).not.toHaveBeenCalled()
     graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-other' } }])
     await handler({}, 'profile-work', approval)
     expect(deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', approval)
   })
 
-  it('deletes nothing when saved Tabs cannot be read, and says so', async () => {
+  it('sees a Browser that starts using the Profile while saved Tabs are being read', async () => {
+    const deleteProfile = vi.fn(async () => {})
+    let live = false
+    const handler = productionDeleteHandler({ usesProfile: () => live, read: async () => { live = true; return null }, deleteProfile })
+    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('still used by an open Browser')
+    expect(deleteProfile).not.toHaveBeenCalled()
+  })
+
+  it('deletes nothing when saved Tabs cannot be read, and keeps the original cause', async () => {
     const deleteProfile = vi.fn(async () => {})
     const handler = productionDeleteHandler({ usesProfile: () => false, read: async () => { throw new Error('EIO') }, deleteProfile })
-    await expect(handler({}, 'profile-work', approval)).rejects.toThrow('Nothing was deleted')
+    await expect(handler({}, 'profile-work', approval)).rejects.toMatchObject({ message: expect.stringContaining('Nothing was deleted'), cause: expect.objectContaining({ message: 'EIO' }) })
     expect(deleteProfile).not.toHaveBeenCalled()
   })
 
