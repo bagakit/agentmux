@@ -68,7 +68,7 @@ it('actual App → Focus retains the explicit non-first Tab/Group/Region occurre
   expect(previewSession.kind).toBe('agent')
   const previewResource = originalConfig.workspaces.find(item => item.id === 'workspace-demo')!
   expect(previewResource).toBeDefined()
-  // The web preview's "home//agentmux" is a preview-relative path. Arrange an
+  // The web preview's demo project lives at its own preview path. Arrange an
   // explicit absolute private resource for the existing public Space contract;
   // retain this typed preview Session's original control/Run, not a new Runtime.
   const resource = { ...previewResource, path: _hygiene_fixturePath("private/resource-a") }
