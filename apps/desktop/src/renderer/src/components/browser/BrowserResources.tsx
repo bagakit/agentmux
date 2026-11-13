@@ -95,7 +95,7 @@ export function BrowserResources({ active, directory, app, observationError }: {
   return <section className="settings-group browser-resources" data-settings-field="browser-resources">
     <header><span>Browser resources</span><small>Page actions apply immediately</small></header>
     <div className="browser-resources__overview">
-      <div><span>Pages observed</span><strong>{embedded.filter(row => row.current).length}</strong><small>{embedded.filter(row => !row.current).length} previous entries retained</small></div>
+      <div><span>Pages observed</span><strong>{embedded.filter(row => row.current).length}</strong><small>{embedded.filter(row => !row.current).length} previous entries kept</small></div>
       <div data-browser-process-total><span>Memory in use</span><strong>{readings.measured.length ? `${readings.counts.size > readings.measured.length ? '≥ ' : ''}${memory(readings.totalKib)}` : '—'}</strong>
         <small>{readings.measured.length ? `${readings.measured.length} unique processes` : 'Reading not confirmed'}</small></div>
     </div>
@@ -115,7 +115,7 @@ export function BrowserResources({ active, directory, app, observationError }: {
     </div> : null}
     {directory.notice || observationError ? <div className="browser-resources__notices">
       <div role="status"><strong>{directory.notice ? 'Page directory needs attention' : 'Memory reading unavailable'}</strong><p>Refresh to check again. Previous entries are kept.</p></div>
-      <details><summary>Observation details</summary>
+      <details data-diagnostics><summary>Observation details</summary>
         {directory.notice ? <p className="browser-resources__notice">{directory.notice}</p> : null}
         {observationError ? <p className="browser-resources__notice">Process observation unavailable: {observationError}</p> : null}
       </details>

@@ -32,7 +32,7 @@ function bytes(amount: number): string {
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(amount / divisor)} ${unit}`
 }
 function SourceIssue({ source, retained }: { source: HostRuntimeSource<unknown> | undefined; retained: HostRuntimeSource<unknown> | undefined }) {
-  return source?.state === 'unavailable' ? <p className="host-runtime__issue"><InfoIcon size={12} />
+  return source?.state === 'unavailable' ? <p className="host-runtime__issue" data-diagnostics><InfoIcon size={12} />
     <span>{source.message}{retained?.state === 'available' ? ` Last confirmed ${time(retained.readAt)}.` : ''}</span></p> : null
 }
 /** A single visible consumer of one saved route; it owns no Runtime or shared sampling clock. */
@@ -74,24 +74,24 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
   const partial = current && [current.owner, current.nativeIdentity, current.diagnostics, current.resources].some(source => source.state === 'unavailable')
   const diagnosticEvidence = diagnostic ? !busy && !failed && current?.diagnostics.state === 'available' ? 'current' : 'retained' : 'unconfirmed'
   return <section className="host-runtime" aria-label="Runtime observation" data-host-runtime={host.id}>
-    <header className="host-runtime__header"><div><strong>Runtime</strong><span>{!saved ? 'Save this connection to observe its Runtime.' :
+    <header className="host-runtime__header"><div><strong>Service status</strong><span>{!saved ? 'Save this connection to read its service status.' :
       !current ? busy ? 'Reading this environment…' : 'No confirmed observation yet' :
       `${partial || failed ? 'Some observations unavailable' : 'Observed'} · ${time(current.completedAt)}`}</span></div>
       <button type="button" className="small-button" disabled={!saved || !active || busy || !visible} onClick={() => setRevision(previous => previous + 1)} aria-label="Refresh Runtime observation"><RefreshIcon size={13} />{busy ? 'Reading…' : 'Refresh'}</button>
     </header>
-    {failed ? <p className="host-runtime__issue" role="status"><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
+    {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>
       <div className="host-runtime__resources" aria-label="Retained Runtime resources">
         <div><span>Running Runs</span><strong>{resources?.runningRuns ?? '—'}</strong><small>{resources ? `${resources.runCount} retained in total` : 'Not observed'}</small></div>
-        <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Runtime readers</small></div>
+        <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Service readers</small></div>
         <div><span>Retained output</span><strong>{resources ? bytes(resources.retainedOutputBytes) : '—'}</strong><small>In-memory payload</small></div>
       </div>
       <SourceIssue source={current?.resources} retained={retained?.resources} />
       {resources ? <p className="host-runtime__sample">Resource sample {time(resources.observedAt)} · {resources.terminatedRuns} ended Runs · {resources.terminatedUnattachedRuns} ended without readers</p> : null}
-      <div className="host-runtime__environment"><span>Core service</span><strong>{owner ? owner.availability === 'connected' ? 'Identity confirmed' : 'Connection unconfirmed' : 'Identity unconfirmed'}</strong>
+      <div className="host-runtime__environment"><span>Agent service</span><strong>{owner ? owner.availability === 'connected' ? 'Identity confirmed' : 'Connection not verified' : 'Identity not verified'}</strong>
         <span>{diagnostic ? `${diagnostic.platform} · ${diagnostic.arch} · Node ${diagnostic.nodeVersion}` : 'Platform not observed'}</span></div>
       <SourceIssue source={current?.owner} retained={retained?.owner} /><SourceIssue source={current?.diagnostics} retained={retained?.diagnostics} />
-      <details className="host-runtime__details"><summary>Runtime identities & capabilities</summary>
+      <details className="host-runtime__details" data-diagnostics><summary>Service identities &amp; capabilities</summary>
         <dl>
           <div><dt>Host route</dt><dd><code>{host.id}</code></dd></div>
           {host.kind === 'ssh' ? <div><dt>Runtime binding</dt><dd><code>{host.runtimeId ?? 'Not confirmed'}</code></dd></div> : null}

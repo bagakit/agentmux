@@ -10,7 +10,7 @@ export function HostNetworkPanel(props: HostNetworkViewProps) {
     <header className="host-network__header"><div><span className="host-network__eyebrow">LINK OBSERVATION</span><strong>Network</strong></div>
       <NetworkReadButton {...props} />
     </header>
-    {!saved ? <p className="host-network__hint">Save this connection to read its original network sources.</p> : !retained ? <p className="host-network__hint">Read this link’s owner response, SSH policy and interface addresses on demand.</p> : null}
+    {!saved ? <p className="host-network__hint">Save this connection to read its original network sources.</p> : !retained ? <p className="host-network__hint">Read this connection’s response, SSH policy and interface addresses when needed.</p> : null}
     {held?.error ? <p className="host-network__issue" role="status">{held.error}</p> : null}
     {partial ? <p className="host-network__issue">Some network sources could not be read. Last confirmed values keep their original time.</p> : null}
     {retained ? <>

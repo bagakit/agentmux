@@ -141,12 +141,12 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
         {duration('confirmedIdleWindowMs', 'Automatic recovery window', 'Recover recent sessions automatically; older or unknown activity stays on demand.')}
       </div>
       <label className="browser-automation-toggle" data-settings-field="resumeAfterExit"><input type="checkbox" aria-label="Resume after confirmed exit" checked={draft.value.resumeAfterExit} onChange={event => draft.setField('resumeAfterExit', event.target.checked)} />
-        <span><strong>Resume after confirmed exit</strong><small>Allow automatic recovery when Core confirms a Run ended or is missing. Manual Resume stays available.</small></span></label>
+        <span><strong>Resume after confirmed exit</strong><small>Allow automatic recovery after a confirmed exit or missing process. Manual Resume stays available.</small></span></label>
     </section>
     <details className="continuity-disclosure" data-continuity-retry-settings>
       <summary><span>Retry a failed recovery<small>Restore the same conversation without replaying input</small></span><span className="continuity-disclosure-value">Saved: {saved.retryMaxAttempts} retries</span></summary>
       <div className="continuity-disclosure-body">
-      <p className="continuity-hint">Retry only a confirmed failed recovery, without resending earlier input. Healthy or unconfirmed processes are not restarted.</p>
+      <p className="continuity-hint">Retry only a recovery confirmed to have failed, without resending earlier input. Running processes are kept; an unknown state does not trigger a restart.</p>
       {duration('retryInitialDelayMs', 'First retry base delay', 'Later base delays double up to the configured maximum.')}
       {duration('retryMaxDelayMs', 'Maximum retry base delay', 'Upper limit before the small scheduling offset described below.')}
       <div className="continuity-setting-row" data-settings-field="retryMaxAttempts"><label htmlFor={`${id}-retries`}><strong>Additional retries</strong><small>Attempts after the initial recovery. Zero disables automatic retries. Reaching the limit pauses recovery and keeps the original Session available.</small></label>

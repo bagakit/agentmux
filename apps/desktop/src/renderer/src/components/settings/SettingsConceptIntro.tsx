@@ -12,8 +12,8 @@ export function SurveyIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="survey" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>发现新的线索。</h3>
-      <p className="settings-concept-intro__description">从一个问题出发，浏览资料、串起线索，继续探索。</p>
+      <h3 className="settings-concept-intro__title" id={titleId}>Follow the next clue.</h3>
+      <p className="settings-concept-intro__description">Start with a question. Browse sources, connect clues and keep exploring.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={surveyArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
@@ -25,8 +25,8 @@ export function RecallIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="recall" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>把知识留在手边。</h3>
-      <p className="settings-concept-intro__description">整理笔记、页面与来源，需要时回到有用的发现。</p>
+      <h3 className="settings-concept-intro__title" id={titleId}>Keep useful knowledge close.</h3>
+      <p className="settings-concept-intro__description">Organize notes, pages and sources so you can return to what matters.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={recallArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
@@ -38,8 +38,8 @@ export function SpaceIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="space" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>让工作各就其位。</h3>
-      <p className="settings-concept-intro__description">把 Agent、文件和页面放在同一工作面，按需要并排展开。</p>
+      <h3 className="settings-concept-intro__title" id={titleId}>Give your work a place.</h3>
+      <p className="settings-concept-intro__description">Keep Agents, files and pages together. Arrange them side by side as you work.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={spaceArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
@@ -51,8 +51,8 @@ export function FocusIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="focus" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>把此刻看清楚。</h3>
-      <p className="settings-concept-intro__description">汇总正在推进和需要回应的工作，随时回到原来的上下文。</p>
+      <h3 className="settings-concept-intro__title" id={titleId}>See what needs you now.</h3>
+      <p className="settings-concept-intro__description">See work in progress and requests for your attention. Return to the same context.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={focusArt} alt="" width="1254" height="1254" loading="lazy" decoding="async" draggable={false} />
@@ -64,9 +64,9 @@ export function CapsuleIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro" data-concept="capsule" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <span className="settings-concept-intro__eyebrow">从一次产出，到随手可用</span>
-      <h3 className="settings-concept-intro__title" id={titleId}>把好用的页面，留在手边。</h3>
-      <p className="settings-concept-intro__description">Agent 做出的页面，保存为 Capsule，下次还能打开。</p>
+      <span className="settings-concept-intro__eyebrow">From a result to a useful tool</span>
+      <h3 className="settings-concept-intro__title" id={titleId}>Keep the pages that work for you.</h3>
+      <p className="settings-concept-intro__description">Save a page made by an Agent as a Capsule and open it again when you need it.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={capsuleArt} alt="" width="1536" height="1024" draggable={false} />
@@ -78,9 +78,9 @@ export function GoalsIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro" data-concept="goals" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <span className="settings-concept-intro__eyebrow">方向清楚，合作才有着落</span>
-      <h3 className="settings-concept-intro__title" id={titleId}>让想做到的事，一步步成形。</h3>
-      <p className="settings-concept-intro__description">和 Agent 一起拆解目标、推进工作，再核对结果。</p>
+      <span className="settings-concept-intro__eyebrow">A shared direction for the work</span>
+      <h3 className="settings-concept-intro__title" id={titleId}>Turn an intention into progress.</h3>
+      <p className="settings-concept-intro__description">Break down a goal with Agents, work through it and review the results.</p>
     </div>
     <div className="settings-concept-intro__art settings-concept-intro__art--goals" aria-hidden="true">
       <img src={goalsArt} alt="" width="1536" height="1024" draggable={false} />

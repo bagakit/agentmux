@@ -58,7 +58,7 @@ export function CapsuleRuntimeSettings({ active, observed }: { active: boolean; 
   const locked = attempt?.phase === 'pending' || attempt?.phase === 'unknown'
   return <section className="settings-group" data-settings-field="capsule-service" aria-label="Capsule service">
     <header><span>Page service</span><small>Runs independently of the App and its management connection.</small></header>
-    <div className="capsule-settings__actions"><span role="status">{value ? labels[value.phase] : issue ? 'Status unconfirmed' : 'Reading service status…'}</span>
+    <div className="capsule-settings__actions"><span role="status">{value ? labels[value.phase] : issue ? 'Status unknown' : 'Reading service status…'}</span>
       <button type="button" className="small-button" onClick={() => void inspect()}>{attempt?.phase === 'unknown' ? 'Check original service command' : 'Read service status'}</button>
       {value?.issue?.retry === 'start' && !value.run
         ? <button type="button" className="primary-button" disabled={locked} onClick={() => void submit('start')}>Try Start again</button>

@@ -149,8 +149,8 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
 
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}
     <section className="settings-group remote-execution-bindings" data-settings-field="bindings">
-      <header><span>Cross-device Agents</span><small>{bindings.length} retained in this client</small></header>
-      {bindings.length ? <p className="settings-group-note">Open the original work or inspect its two environments. This list reflects this client’s retained Sessions.</p> : null}
+      <header><span>Cross-device Agents</span><small>{bindings.length} saved in this app</small></header>
+      {bindings.length ? <p className="settings-group-note">Open the original work or inspect its two environments. This list shows the Sessions saved in this app.</p> : null}
       {narrow && view === 'detail' ? <button type="button" className="small-button remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to bindings</button> : null}
       {!bindings.length && !selectedId ? <p className="settings-group-note">No cross-device Agents yet.</p> : <div className="remote-execution-bindings__body">
         <div hidden={narrow && view === 'detail'} className="remote-execution-library">

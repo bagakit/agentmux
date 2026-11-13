@@ -44,25 +44,25 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
   return <div className="settings-pane-stack">
     <section className="settings-concept-intro" aria-label={promotion ? 'Promotion' : 'Topic'}>
       <div className="settings-concept-intro__copy">
-        <h3 className="settings-concept-intro__title">{promotion ? '让重要的方向，成为长期伙伴。' : '围绕一个主题，积累知识。'}</h3>
+        <h3 className="settings-concept-intro__title">{promotion ? 'Let important work become a lasting collaborator.' : 'Build knowledge around a Topic.'}</h3>
         <p className="settings-concept-intro__description">{promotion
-          ? '从已有 Topic 出发，保留其中的讨论、知识与 Agent，逐步建立 Mote 的人格与分工。'
-          : '把相关讨论、资料和发现放在同一个 Topic 中，让每次探索都有可继续的上下文。'}</p>
+          ? 'Start with a Topic. Keep its discussions, knowledge and Agents while developing a shared Mote identity and roles.'
+          : 'Bring related discussions, sources and discoveries into one Topic, with context you can return to.'}</p>
       </div>
       <div className="settings-concept-intro__art" aria-hidden="true"><img src={promotion ? promotionArt : topicArt} alt="" loading="lazy" decoding="async" draggable={false} /></div>
     </section>
     {!promotion ? <TopicInitialViewSettings config={config} /> : null}
     <section className="settings-group" data-settings-field="topic-directory">
-      <header><span>{promotion ? '从 Topic 晋升' : 'Topic 目录'}</span></header>
+      <header><span>{promotion ? 'Promote from a Topic' : 'Topic directory'}</span></header>
       <p className="settings-workflows__note">{promotion
-        ? '打开 Topic 目录，在要延续的 Topic 菜单中选择「晋升为 Mote」，查看说明后确认。'
-        : '在目录中管理分类与 Topic，继续讨论、整理知识，或打开相关文件。'}</p>
+        ? 'Open the Topic directory, choose Promote to Mote from the Topic menu, then review and confirm.'
+        : 'Manage categories and Topics, continue discussions, organize knowledge or open related files.'}</p>
       {workspace ? <button type="button" className="small-button" data-open-topic-directory onClick={() => {
         onClose()
         void openTopicDirectory(workspace).catch(useAppStore.getState().reportError)
-      }}>打开 Topic 目录<OpenIcon size={14} aria-hidden="true" /></button> : <>
-        <p className="settings-workflows__note" role="status">Topic 目录尚未就绪。可以回到 Space 查看原工作面。</p>
-        <button type="button" className="small-button" onClick={() => { onClose(); useAppStore.getState().setMainSurface('workbench') }}>打开 Space<OpenIcon size={14} aria-hidden="true" /></button>
+      }}>Open Topic directory<OpenIcon size={14} aria-hidden="true" /></button> : <>
+        <p className="settings-workflows__note" role="status">The Topic directory is not ready. Your existing work is available in Space.</p>
+        <button type="button" className="small-button" onClick={() => { onClose(); useAppStore.getState().setMainSurface('workbench') }}>Open Space<OpenIcon size={14} aria-hidden="true" /></button>
       </>}
     </section>
     {promotion ? <section className="settings-group settings-topic-configuration" data-settings-field="mote-configuration">

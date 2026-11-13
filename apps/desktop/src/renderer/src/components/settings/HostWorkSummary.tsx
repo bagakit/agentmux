@@ -25,7 +25,7 @@ export function HostSessionSummary({ sessions, active, onOpen }: {
   onOpen: (id: string) => void
 }) {
   return <section className="remote-work" aria-label="Sessions on this environment">
-    <header><strong>Sessions</strong><small>{sessions.length} retained references</small></header>
+    <header><strong>Sessions</strong><small>{sessions.length} saved references</small></header>
     {sessions.length ? <div className="remote-work__rows">{sessions.map(session => <HostSessionRow key={session.id} session={session} active={active} onOpen={onOpen} />)}</div>
       : <p className="remote-work__empty">No Session references in this client. Open a project to start working on this environment.</p>}
   </section>

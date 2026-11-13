@@ -5,28 +5,28 @@ import grownTeam from '@agentmux/client-ui/brand/illustrations/mote-origin/grown
 
 const chapters = [
   {
-    label: '按画像组建', path: '画像创建', organization: 'Mote · 有人格的团队',
-    title: '带着专长，开始合作。',
-    description: '已经知道需要什么？从 PMO 这样的专家画像建立 Mote，让其中的 Agent 分工，把事情一起做好。',
-    continuity: '团队有共同的名字与风格，成员各自承担工作。',
+    label: 'Build from a profile', path: 'From a profile', organization: 'Mote · A team with a shared identity',
+    title: 'Bring your specialties together.',
+    description: 'Know the expertise you need? Create a Mote from a profile such as PMO, then let its Agents share the work.',
+    continuity: 'The team shares a name and style. Each Agent takes on its own work.',
     image: roleTeam,
-    alt: '蓝色、琥珀色和紫色的三位 Agent 把图表、书写和观察三种专长拼入共同的团队画像。',
+    alt: 'Blue, amber and violet Agents bring charts, writing and observation into one team profile.',
   },
   {
-    label: '从 Topic 开始', path: '从事情成长 · 开始', organization: 'Topic · 一个工作方向',
-    title: '从每天一起做的一件事开始。',
-    description: '方向还新，就先建一个 Topic。让其中的 Agent 从具体任务开始，在一次次合作中积累经验、形成分工。',
-    continuity: '先有一起做的事，再发现值得长期发展的能力。',
+    label: 'Start with a Topic', path: 'Grow from the work · Start', organization: 'Topic · A direction for your work',
+    title: 'Start with something you work on together.',
+    description: 'For a new direction, start a Topic. Its Agents build experience and find their roles through real tasks.',
+    continuity: 'Start with shared work. Discover which capabilities are worth developing together.',
     image: topicWork,
-    alt: '三位 Agent 围绕同一个 Topic 工作台，汇集资料、图表和笔记，形成共同的上下文。',
+    alt: 'Three Agents gather sources, charts and notes around a shared Topic workbench.',
   },
   {
-    label: 'Promotion', path: '从事情成长 · Promotion', organization: 'Mote · 长期伙伴',
-    title: '让重要的方向，成为长期伙伴。',
-    description: '当一个 Topic 足够重要、被频繁依赖，就让它晋升为 Mote，建立团队人格。原来的 Agent 与积累一起延续。',
-    continuity: '成员继续成长：深耕专业，也可以逐渐承担协调。',
+    label: 'Promotion', path: 'Grow from the work · Promotion', organization: 'Mote · A lasting collaborator',
+    title: 'Let important work become a lasting collaborator.',
+    description: 'When a Topic becomes important and useful, promote it to a Mote with a team identity. Keep the same Agents and their accumulated work.',
+    continuity: 'Members keep growing in their specialties and can take on coordination over time.',
     image: grownTeam,
-    alt: '三位原 Agent 带着自己的专长与资料，站在连续的团队平台上；积累的 Topic 核心展开为 Mote 人格。',
+    alt: 'The same three Agents carry their expertise and sources forward as their Topic grows into a Mote.',
   },
 ] as const
 
@@ -36,14 +36,14 @@ export function MoteOriginStory() {
   const chapter = chapters[selected]!
   return <section className="mote-origin" aria-labelledby={`${id}-title`}>
     <header className="mote-origin__heading">
-      <h3 id={`${id}-title`}>伙伴从哪里来</h3>
-      <span>两条路径，一起成长</span>
+      <h3 id={`${id}-title`}>Where collaborators begin</h3>
+      <span>Two paths to growing together</span>
     </header>
-    <div className="mote-origin__choices" aria-label="伙伴来源故事">
-      <div className="mote-origin__path"><small>画像创建</small>
+    <div className="mote-origin__choices" aria-label="How collaborators begin">
+      <div className="mote-origin__path"><small>From a profile</small>
         <button type="button" aria-pressed={selected === 0} aria-controls={`${id}-chapter`} onClick={() => setSelected(0)}>{chapters[0].label}</button>
       </div>
-      <div className="mote-origin__path"><small>从事情成长</small>
+      <div className="mote-origin__path"><small>Grow from the work</small>
         {[1, 2].map(index => <button type="button" key={index} aria-pressed={selected === index} aria-controls={`${id}-chapter`} onClick={() => setSelected(index)}>{chapters[index]!.label}</button>)}
       </div>
     </div>
@@ -56,9 +56,9 @@ export function MoteOriginStory() {
       </div>
       <figure className="mote-origin__figure">
         <img src={chapter.image} alt={chapter.alt} width="1536" height="1024" />
-        <figcaption><strong>{chapter.organization}</strong><span>内部 Agent · 做事、积累、成长</span></figcaption>
+        <figcaption><strong>{chapter.organization}</strong><span>Agents · Work, learn and grow</span></figcaption>
       </figure>
     </div>
-    <p className="mote-origin__note">故事示意 · Topic / Mote 承载协作，Agent 是其中实际做事的成员。</p>
+    <p className="mote-origin__note">An illustrated guide: Topics and Motes organize collaboration. Their Agents do the work.</p>
   </section>
 }

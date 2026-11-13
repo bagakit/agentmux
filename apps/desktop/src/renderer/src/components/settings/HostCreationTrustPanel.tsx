@@ -74,7 +74,7 @@ export function HostCreationTrustPanel({ host, committed, active }: {
     {snapshot ? <>
       <div className="host-creation-trust__identities">
         {([['Source · This computer', snapshot.source], [`Target · ${host.label}`, snapshot.target.authority]] as const).map(([label, identity]) =>
-          <div key={label}><strong>{label}</strong><span>Runtime</span><code>{identity.runtimeId}</code><span>Key fingerprint</span><code>{identity.fingerprint}</code></div>)}
+          <div key={label}><strong>{label}</strong><span>Service ID</span><code>{identity.runtimeId}</code><span>Key fingerprint</span><code>{identity.fingerprint}</code></div>)}
       </div>
       <p role="status" className={conflict ? 'host-creation-trust__conflict' : 'field-hint'}>{conflict ? 'A different source key is already trusted. The original key will be retained.' : pin ? <><ThemeStatusCompletedIcon size={13} /> This source is trusted on {host.label}.</> : 'This source is not yet trusted on this target.'}</p>
       {!pin ? <label className="host-creation-trust__verify"><input type="checkbox" checked={verified} disabled={busy} onChange={event => setVerified(event.target.checked)} />I have verified the source and target fingerprints.</label> : null}

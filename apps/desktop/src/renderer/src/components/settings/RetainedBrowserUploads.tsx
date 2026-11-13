@@ -29,7 +29,7 @@ export function RetainedBrowserUploads({ active }: { active: boolean }) {
   if (!retained?.selections.length && !notice && !readIssue && !retained?.warning) return null
   return <section className="settings-group external-browser-connections">
     <header><span>Selected files</span><small>{retained ? `${retained.selectionCount} selections · ${formatBytes(retained.byteLength)}` : 'Not yet observed'}</small></header>
-    <p className="settings-group-note">Files selected for upload are kept through disconnects and restarts. Discard only after an upload finishes or is cancelled; unconfirmed documents keep their files.</p>
+    <p className="settings-group-note">Files selected for upload are kept through disconnects and restarts. Discard only after an upload finishes or is cancelled. If a document’s status is unknown, its files are kept.</p>
     <ul className="external-browser-connections__targets">{retained?.selections.map(selection => <li key={selection.id}>
       <div><strong>{selection.files.join(', ') || 'Unknown document selection'}</strong><small>{selection.status} · {formatBytes(selection.byteLength)} · {selection.browserId || 'Document owner unavailable'}</small></div>
       <button className="small-button" disabled={busy !== null} onClick={() => {
@@ -46,7 +46,7 @@ export function RetainedBrowserUploads({ active }: { active: boolean }) {
     </li>)}</ul>
     {retained ? <p className="settings-group-note">Shared staging limit: {retained.selectionLimit} selections · {formatBytes(retained.byteLimit)}.</p> : null}
     {retained?.warning ? <p className="settings-group-note" role="status">{retained.warning}</p> : null}
-    {readIssue ? <div className="browser-resources__notices" role="status"><strong>Selected-file status unavailable</strong><details><summary>Observation details</summary><p>{readIssue}</p></details></div> : null}
+    {readIssue ? <div className="browser-resources__notices" role="status"><strong>Selected-file status unavailable</strong><details data-diagnostics><summary>Observation details</summary><p>{readIssue}</p></details></div> : null}
     {notice ? <p className="settings-group-note" role="status">{notice}</p> : null}
   </section>
 }

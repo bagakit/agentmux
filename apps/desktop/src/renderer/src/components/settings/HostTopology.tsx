@@ -43,7 +43,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
         <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Client key' : host.user || 'SSH config' : 'Local route'}</code></span>
         <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'PORT OVERRIDE' : 'TRANSPORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Tailcat' : host.port ?? 'SSH config' : 'Not applicable'}</code></span>
       </span>
-      <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
+      <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Service ID</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
       <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span></span>
       <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
         <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
