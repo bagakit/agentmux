@@ -94,6 +94,22 @@ async function capture() {
   await evaluate(`mediaPlaybackProbe.theme("light")`); await frame('audio-card-light'); await evaluate(`mediaPlaybackProbe.theme("dark")`)
   await evaluate(`mediaPlaybackProbe.split("tone.m4a", "notes.md", 0.3)`); await sleep(400); await frame('audio-card-narrow-dark')
 
+  // 3b. With reduced motion, a key's feedback is still shown and held before it leaves (real engine cascade).
+  await evaluate(`mediaPlaybackProbe.open("promo.mp4")`); await wait(`mediaPlaybackProbe.player("promo.mp4")?.decode === 'ready'`)
+  win.webContents.debugger.attach('1.3')
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  await evaluate(`mediaPlaybackProbe.focusPlayer("promo.mp4")`)
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'L' }); win.webContents.sendInputEvent({ type: 'char', keyCode: 'l' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'L' })
+  await sleep(300)
+  const held = await evaluate(`mediaPlaybackProbe.indicator("promo.mp4")`)
+  await sleep(1200)
+  const after = await evaluate(`mediaPlaybackProbe.indicator("promo.mp4")`)
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] }); win.webContents.debugger.detach()
+  report.checks.reducedMotionIndicator = { held, after }
+  assert.equal(held?.text, '+10s', 'Under reduced motion the key feedback is on screen 300 ms later')
+  assert.equal(Number(held.opacity), 1, 'Under reduced motion the key feedback is fully visible, not faded')
+  assert.equal(after, null, 'Under reduced motion the key feedback still leaves once its hold ends')
+
   // 4. HLS on demand, and a live list that ffmpeg is still writing.
   await evaluate(`mediaPlaybackProbe.open("hls/index.m3u8")`); await wait(`mediaPlaybackProbe.player("hls/index.m3u8")?.decode === 'ready'`)
   const vod = await player('hls/index.m3u8'); assert.equal(vod.stream, 'on-demand'); report.checks.hlsVod = vod

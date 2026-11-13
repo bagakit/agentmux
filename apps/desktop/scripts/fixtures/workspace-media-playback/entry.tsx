@@ -74,6 +74,12 @@ const probe = {
   pause(path: string) { regionOf(path)?.querySelector<HTMLMediaElement>('video, audio')?.pause() },
   seekFraction(path: string, fraction: number) { const media = regionOf(path)!.querySelector<HTMLMediaElement>('video, audio')!; media.currentTime = media.duration * fraction },
   showControls(path: string) { regionOf(path)?.querySelector('.media-player')?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })) },
+  /** Put keyboard focus on the player itself, as tabbing to it does; the driver then sends real key input. */
+  focusPlayer(path: string) { regionOf(path)?.querySelector<HTMLElement>('.media-player')?.focus() },
+  indicator(path: string) {
+    const element = regionOf(path)?.querySelector<HTMLElement>('.media-player__indicator')
+    return element ? { text: element.textContent, opacity: getComputedStyle(element).opacity } : null
+  },
   hover(path: string, fraction: number) {
     const slider = regionOf(path)?.querySelector<HTMLInputElement>('.media-player__slider')
     if (!slider) return false
