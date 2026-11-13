@@ -89,7 +89,7 @@ describe('settings workbench shell', () => {
     expect(candidates.length, '手机宽度那一档整个不见了——设置页在窄窗口下不再收窄').toBeGreaterThan(0)
 
     // 按内容认领，不按出现顺序：总表里别的表面也有 560px 档。
-    const owned = candidates.filter((block) => block.includes('.settings-'))
+    const owned = candidates.filter((block) => block.includes('.settings-page'))
     expect(
       owned,
       `560px 这一档里没有一个在改设置页（共 ${candidates.length} 个候选）——` +
@@ -116,10 +116,13 @@ describe('settings workbench shell', () => {
     ).toEqual([])
 
     expect(panel).toContain('aria-label="Settings section"')
-    expect(panel).toContain('<DropdownMenu.RadioGroup value={active}')
+    expect(panel).toContain("<DropdownMenu.RadioGroup value={showResults ? '' : active}")
   })
 
-  it('颜色一律走 token，不在设置页硬编码十六进制', () => {
-    expect(allStyleRules(), '样式表里出现了硬编码颜色').not.toContain('background: #')
+  it('Settings shell colors consume tokens without policing embedded page or connection-code artwork', () => {
+    const rules = [...allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+    const owned = rules.filter(([, selector]) => /(?:^|[\s>+~,])\.settings-[\w-]+/u.test(selector!))
+    expect(owned.length, 'Real Settings shell rules must be collected').toBeGreaterThan(0)
+    expect(owned.filter(([, , declarations]) => /background:\s*#/u.test(declarations!)).map(([rule]) => rule)).toEqual([])
   })
 })
