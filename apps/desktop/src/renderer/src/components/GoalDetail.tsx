@@ -19,6 +19,7 @@ const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 
 
 export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, draft = {}, onDraftChange, onDraftSaved }: { draft?: Partial<Record<'title' | 'description', string>>; onDraftChange?: (field: 'title' | 'description', value: string) => void; onDraftSaved?: (field: 'title' | 'description', value: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' } | null; onRetryMote: () => void }) {
@@ -53,7 +54,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       <p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
       <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />
-      {!demand.alignment ? <section className="goals-intent-body"><div className="goals-section-heading"><h2>Goal definition</h2><span className="goals-caption">Your intent · Not outlined yet</span></div>{intentBody}</section> : null}
+      {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">Your intent · Not outlined yet</span></div>{intentBody}</section> : null}
       {saveError ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError}</span><button type="button" className="goals-button" onClick={() => void update({ ...failedPatch.current, ...(titleDirty ? { title } : {}), ...(descriptionDirty ? { description } : {}) })}>Retry save</button></div> : null}
       {!finished && !demand.grounding && demand.alignment?.confirmedAt ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={!acknowledgementFeedback.failure} /> : null}
       <GoalAlignment key={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
