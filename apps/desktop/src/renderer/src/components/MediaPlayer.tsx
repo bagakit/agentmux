@@ -195,9 +195,10 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
     run(action, 'key')
   }
 
-  // A click on the picture plays or pauses; a double click enters full screen and leaves play state as it was.
+  // A click on the picture plays or pauses. A double click arrives as two clicks, which toggle and
+  // toggle back, then the double click itself; it only enters full screen, so play state stays as it was.
   const onStageClick = () => { run({ kind: 'toggle-play' }, 'pointer'); wake() }
-  const onStageDoubleClick = () => { run({ kind: 'toggle-play' }, 'pointer'); run({ kind: 'fullscreen' }, 'pointer') }
+  const onStageDoubleClick = () => { run({ kind: 'fullscreen' }, 'pointer') }
 
   const sliderBounds = live ? facts.window : Number.isFinite(facts.duration) ? { start: 0, end: facts.duration } : null
   const span = sliderBounds ? Math.max(0, sliderBounds.end - sliderBounds.start) : 0
