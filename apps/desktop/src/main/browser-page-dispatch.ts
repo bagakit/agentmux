@@ -115,6 +115,17 @@ function quadCenter(quads: unknown): { x: number; y: number } | null {
   return null
 }
 
+/** click's options: {button: 'left'|'middle'|'right', count: 1|2}. Refused before anything is resolved, so a typo never clicks. */
+function clickOptions(raw: unknown): { button: 'left' | 'middle' | 'right'; count: 1 | 2 } {
+  if (raw === undefined) return { button: 'left', count: 1 }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new TypeError('click options are {button, count}.')
+  const { button = 'left', count = 1, ...rest } = raw as { button?: unknown; count?: unknown }
+  if (Object.keys(rest).length) throw new TypeError(`click does not take ${Object.keys(rest).map(key => JSON.stringify(key)).join(', ')}; it takes {button, count}.`)
+  if (button !== 'left' && button !== 'middle' && button !== 'right') throw new TypeError('click button is "left", "middle" or "right".')
+  if (count !== 1 && count !== 2) throw new TypeError('click count is 1 or 2.')
+  return { button, count }
+}
+
 /** waitForUrl's condition: a whole URL, a part of one, or a regex source. Anything else is refused. */
 function urlCondition(wanted: unknown): (url: string) => boolean {
   if (typeof wanted === 'string') return url => url === wanted
@@ -444,7 +455,8 @@ export function createBrowserPageDispatch(
    * only when the pointer is confirmed on the target. The page answers clicks itself, so there is no
    * exceptionDetails to read; the receipt is the acknowledged release.
    */
-  async function nativeClick(scope: BrowserPageActionScope | undefined, ref: string, press = true): Promise<undefined> {
+  async function nativeClick(scope: BrowserPageActionScope | undefined, ref: string, press = true,
+    click: { button: 'left' | 'middle' | 'right'; count: 1 | 2 } = { button: 'left', count: 1 }): Promise<undefined> {
     const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
     const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: SCROLL_INTO_VIEW,
       awaitPromise: true, returnByValue: true }) as { exceptionDetails?: { text?: string } }
@@ -480,13 +492,18 @@ export function createBrowserPageDispatch(
         }
         // Hover is the confirmed move itself; it leaves the pointer there, as a person's hover does.
         if (!press) return undefined
-        guard()
-        await mouse({ type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
-        try {
-          await mouse({ type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 })
-        } catch (error) {
-          throw new Error(`${ref} was pressed but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
-            'The click may or may not have happened; inspect the page before acting again.')
+        // A double click is two presses at the same point with rising clickCount, as Chromium counts a
+        // person's; the second carries 2, which is what fires dblclick.
+        const buttons = click.button === 'left' ? 1 : click.button === 'right' ? 2 : 4
+        for (let count = 1; count <= click.count; count++) {
+          guard()
+          await mouse({ type: 'mousePressed', x, y, button: click.button, buttons, clickCount: count })
+          try {
+            await mouse({ type: 'mouseReleased', x, y, button: click.button, buttons: 0, clickCount: count })
+          } catch (error) {
+            throw new Error(`${ref} was pressed but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
+              'The click may or may not have happened; inspect the page before acting again.')
+          }
         }
       } finally { native.end() }
     } finally { await send('Runtime.releaseObject', { objectId: target }).catch(() => {}) }
@@ -906,10 +923,13 @@ export function createBrowserPageDispatch(
       }
 
       // ── 动作（全部按 ref） ─────────────────────────────────────────────
-      case 'click':
+      case 'click': {
         // A trusted native press at the element's box, not `this.click()`: pages that ignore
-        // synthetic events (isTrusted=false) then behave as they do for a person.
-        return await nativeClick(scope, requireString(args[0], 'ref'))
+        // synthetic events (isTrusted=false) then behave as they do for a person. Options are read
+        // first, so a bad one is refused before the target is touched.
+        const options = clickOptions(args[1])
+        return await nativeClick(scope, requireString(args[0], 'ref'), true, options)
+      }
       case 'fillInput':
         // Native Input.insertText over the whole selection: React/Vue controlled inputs see a real,
         // trusted beforeinput/input pair, and change fires when focus returns, as it does for a person.
