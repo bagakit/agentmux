@@ -290,3 +290,5 @@
 .browser-profile-switcher .tab-context-menu__item > small { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
 .browser-profile-chip__failure { flex: none; color: var(--amber-text); font-size: var(--fs-meta); white-space: nowrap; }
 .browser-profile-chip__failure button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; font: inherit; cursor: pointer; }
+.browser-profile-chip__failure button[aria-label='Dismiss'] { margin-left: var(--sp-2); text-decoration: none; color: var(--text-3); }
+.browser-profile-chip--unknown { cursor: default; color: var(--text-3); padding-left: var(--sp-2); }

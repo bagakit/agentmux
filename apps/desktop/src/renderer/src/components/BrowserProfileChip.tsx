@@ -27,17 +27,22 @@ export function BrowserProfileChip({ browserId, profileId, control }: {
   const list = useBrowserProfiles()
   const settings = useContext(SettingsNavigation)
   const [pending, setPending] = useState<string | null>(null)
-  const [failure, setFailure] = useState<string | null>(null)
+  const [failure, setFailure] = useState<{ target: string; message: string } | null>(null)
   const profiles = list.profiles ?? []
-  if (profileId === null || profiles.length < 2) return null
+  if (profileId === null) return null
+  // Unknown is said, not hidden: the page still uses a Profile even when the list cannot be read.
+  if (!list.profiles) return list.error ? <span className="browser-profile-chip browser-profile-chip--unknown" role="status"
+    title={`Profile unknown: ${list.error}`} aria-label="Profile unknown">Profile unknown</span> : null
+  if (profiles.length < 2) return null
   const shown = profiles.find(profile => profile.id === (pending ?? profileId))
-  if (!shown) return null
+  if (!shown) return <span className="browser-profile-chip browser-profile-chip--unknown" role="status" aria-label="Profile unknown"
+    title="This Browser's Profile is not in the current list.">Profile unknown</span>
   const agentHolds = control?.owner === 'agent'
   const switchTo = async (target: string) => {
     if (target === profileId || pending) return
     setPending(target); setFailure(null)
     try { await api.browser.switchProfile(browserId, target) }
-    catch (cause) { setFailure(presentError(cause)) }
+    catch (cause) { setFailure({ target, message: presentError(cause) }) }
     finally { setPending(null) }
   }
   return (
@@ -73,8 +78,9 @@ export function BrowserProfileChip({ browserId, profileId, control }: {
           </Menu.Content>
         </DocumentOverlayPortal>
       </Menu.Root>
-      {failure ? <span className="browser-profile-chip__failure" role="status" title={failure}>
-        Couldn’t switch <button type="button" onClick={() => setFailure(null)}>Dismiss</button>
+      {failure ? <span className="browser-profile-chip__failure" role="status" title={failure.message}>
+        Couldn’t switch · <button type="button" onClick={() => void switchTo(failure.target)}>Retry</button>
+        <button type="button" aria-label="Dismiss" onClick={() => setFailure(null)}>×</button>
       </span> : null}
     </>
   )
