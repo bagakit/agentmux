@@ -660,17 +660,20 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!gap.part) continue
       const key = JSON.stringify([publicationPartKey(gap.part), gap.part.recordRevision])
       if (active.has(key)) continue
+      let progressed = false
       const work = Promise.resolve().then(async () => {
         for (const unit of await this.until(this.gapUnits(lane, gap), signal)) {
           const speakers = await this.speakers(reference, [unit], signal)
           const resolved = await this.until(this.resolve(reference, [unit], signal, binding, adapter, gap.part), signal)
           signal.throwIfAborted()
-          this.store.recoverPart(binding, gap, unit, resolved, () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id), adapter.replyMetadata)
+          const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, [unit]) : undefined
+          progressed = this.store.recoverPart(binding, gap, unit, resolved, () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id), adapter.replyMetadata, questions) || progressed
         }
       }).catch(() => { /* The exact original gap remains durable; no input or effect is replayed. */ })
         .finally(() => {
           active.delete(key)
-          if (!signal.aborted && this.authorized(binding)) this.wake(lane)
+          // Unchanged gaps retry through the existing Host refresh, not a self-waking read loop.
+          if (progressed && !signal.aborted && this.authorized(binding)) this.wake(lane)
         })
       active.set(key, work)
       if (active.size >= 4) break

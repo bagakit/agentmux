@@ -196,8 +196,18 @@ export class ConversationActions implements PublicationPermissionsPort {
     if (!ref || ref.binding.connectionId !== record.connectionId || !same(ref.binding.application, record.application) || ref.binding.externalConversationId !== record.externalConversationId) failure('INGRESS_AUTHORITY_REVISED')
     const grant = this.current(ref!, record.actor).find(value => same(value.actor, record.actor))
     if (!grant) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
+    // A later rendering of the same original question does not revoke an
+    // independently confirmed message. A confirmed withdrawal does retire it.
     const mapping = ref!.kind === 'question'
-      ? this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.payload.actionRef')=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.binding.bindingId, ref!.binding.revision, ref!.actionRef)
+      ? this.options.connections.database.prepare(`SELECT original.operation_json FROM connector_publication_operation original
+        WHERE original.binding_id=? AND original.binding_revision=? AND original.state='confirmed'
+          AND json_extract(original.operation_json,'$.payload.actionRef')=? AND json_extract(original.operation_json,'$.mapping.messageId')=?
+          AND json_extract(original.operation_json,'$.payload.kind')='question' AND json_extract(original.operation_json,'$.effect')='upsert'
+          AND NOT EXISTS (SELECT 1 FROM connector_publication_operation retired WHERE retired.binding_id=original.binding_id
+            AND retired.binding_revision=original.binding_revision AND retired.state='confirmed' AND retired.ordinal>original.ordinal
+            AND json_extract(retired.operation_json,'$.effect')='withdraw'
+            AND json_extract(retired.operation_json,'$.mapping.messageId')=json_extract(original.operation_json,'$.mapping.messageId'))
+        ORDER BY original.ordinal DESC LIMIT 1`).get(ref!.binding.bindingId, ref!.binding.revision, ref!.actionRef, record.sourceMessageId!)
       : this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE projection_id=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.projectionId)
     if (!mapping || JSON.parse(String(mapping.operation_json)).mapping?.messageId !== record.sourceMessageId) failure('INGRESS_AUTHORITY_REVISED')
     if (record.input && (record.input.hostId !== ref!.binding.executionHostId || record.input.agentSessionId !== ref!.binding.agentSessionId || record.input.expectedRun.runId !== ref!.run.runId ||

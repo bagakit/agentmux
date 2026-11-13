@@ -307,6 +307,12 @@ export class PublicationStore {
         WHERE state IN ('pending','dispatching','unknown','not-applied');
       CREATE INDEX IF NOT EXISTS connector_publication_audit
         ON connector_publication_operation(binding_id, binding_revision, ordinal);
+      CREATE INDEX IF NOT EXISTS connector_publication_question_message
+        ON connector_publication_operation(binding_id, binding_revision, json_extract(operation_json,'$.payload.actionRef'), json_extract(operation_json,'$.mapping.messageId'), ordinal)
+        WHERE state='confirmed' AND json_extract(operation_json,'$.payload.kind')='question' AND json_extract(operation_json,'$.effect')='upsert';
+      CREATE INDEX IF NOT EXISTS connector_publication_withdrawn_message
+        ON connector_publication_operation(binding_id, binding_revision, json_extract(operation_json,'$.mapping.messageId'), ordinal)
+        WHERE state='confirmed' AND json_extract(operation_json,'$.effect')='withdraw';
       CREATE INDEX IF NOT EXISTS connector_publication_question_candidate
         ON connector_publication_operation(binding_id, binding_revision, ordinal)
         WHERE json_extract(operation_json,'$.payload.kind')='question'
@@ -1365,7 +1371,7 @@ export class PublicationStore {
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
-  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, metadataEnabled?: true): boolean {
+  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, metadataEnabled?: true, questions?: PublicationPageOptions['questions']): boolean {
     if (!gap.anchor || !gap.part || !gap.event) return false
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
@@ -1382,7 +1388,8 @@ export class PublicationStore {
       if (!represented) return false
       const { projectionId, records, sourceProofs } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[]; sourceProofs?: PublicationOperation['sourceProofs'] }
       const before = this.latestProjection(projectionId)?.operationId
-      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], undefined, records), fragmentBytes, event, records, undefined, fragmentText, speaker, undefined, metadataEnabled, typeof JSON.parse(String(row.decision_json)).nativeRecoveryId === 'string', sourceProofs)
+      const question = plan.pieces.map(piece => questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined)
+      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], undefined, records), fragmentBytes, event, records, question, fragmentText, speaker, undefined, metadataEnabled, typeof JSON.parse(String(row.decision_json)).nativeRecoveryId === 'string', sourceProofs)
       for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
       let recovered = false
       for (const piece of plan.pieces) {
