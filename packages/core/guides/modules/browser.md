@@ -43,7 +43,13 @@ Read only the matching local help:
   cannot retarget an external document; a different object still uses its original owner,
   and a global Capsule open with several existing views requires an exact destination.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
-- amux browser task --help: saved task versions and their run/stop/inspect journey.
+- amux browser task --help: source/draft discovery, draft edit/publish, original create receipts,
+  version reliability, run, batch and stop.
+  `browser task source --browser ID` reads exact recording metadata without its body.
+  `browser task draft --browser ID --asset ID` reads a current definition without cumulative history.
+  Create with one retained Core-minted intent via `browser task create --browser ID --input FILE|-`;
+  `browser task create-inspect --browser ID --input FILE|-` checks that same original binding without writing.
+  Unknown replies never authorize a replacement identity or automatic replay.
 - amux browser open --help: open a new page only when needed.
   For durable generated content, prefer amux capsule open. The optional --capsule ID
   keeps the exact Capsule container and document policy; it cannot use private mode.

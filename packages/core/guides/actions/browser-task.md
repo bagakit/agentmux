@@ -1,7 +1,24 @@
 # browser task
 
 <!-- amux:content -->
-Edit, publish and run saved Browser task versions
+Create, edit, publish and run saved Browser tasks
+
+Read `browser task source --browser <id>` for the original current demonstration's
+id, browserId, revision, status and stepCount; raw recording arguments and input
+values are never returned. Only stopped/interrupted sources can create a task.
+Use Core `browserTaskCreateInput(source, name)` once to mint createOperationId and
+proposed assetId. Save its complete JSON (also browserId, sourceRecordingId,
+sourceRevision and name) before dispatching `browser task create --browser <id>
+--input <file|->`. This creates a draft with unreviewed steps; it grants no page
+execution or human checkpoint. The compact create receipt confirms only its original
+creation binding, not a later draft revision. Unknown replies keep that exact frozen JSON:
+`browser task create-inspect --browser <id> --input <same-file|->` reads the original
+saved binding without writing. `unknown`/`not-found` never cancels an input or
+allocates a replacement; explicitly continuing create uses the same IDs and intent.
+Reusing an operation or proposed asset for another intent is a conflict.
+Read `browser task draft --browser <id> --asset <id>` for one exact current definition
+and revision without cumulative versions/runs. This bounded projection stays usable
+when original retained history exceeds a result budget; no history is deleted.
 
 Read `browser task assets --browser <id>` to select an existing immutable version.
 To replace an existing draft, use `browser task edit --browser <id> --asset <id>
@@ -12,7 +29,7 @@ publish also reports the actual immutable version number. Definitions and retain
 history are read separately; they are never copied into a write receipt. All
 older versions and runs remain unchanged. These actions only save definitions:
 they cannot approve a human checkpoint, grant Browser access or execute a page.
-On a revision conflict or unconfirmed save, read the original assets again. A
+On a revision conflict or unconfirmed save, read the exact draft again. A
 storage failure retains the live draft with a warning; inspect before retrying.
 Use `browser task reliability --browser <id> --asset <id> --version <n>` to read
 retained version/run/outcome evidence. A completed script is not proof of a successful
