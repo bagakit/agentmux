@@ -4,6 +4,7 @@ import { demandExecutionReferences, demandHandoffDestinations, latestDemandProgr
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { goalResponsibilityBasis, observeGoalExecution, type GoalExecutionFacts, type GoalResponsibilityObservation,
   type GoalSupervisorObservation } from '@agentmux/core/goal-responsibility'
+import { goalSupervisorHost, isGoalSupervisor } from './goal-supervisor-identity.js'
 
 export interface GoalResponsibilityRuntime {
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
@@ -145,7 +146,8 @@ export class GoalResponsibilityOwner {
       const pending = this.runtime.observeGoalAgent(host, session); states.set(id, pending); return pending
     }
     let supervisor: GoalSupervisorObservation = { agentSessionId: goal.supervisorSessionId, state: 'missing', reason: 'Choose a Supervisor for this original Goal.' }
-    const supervisorRead = goal.supervisorSessionId ? this.runtime.resolveGoalAgent(goal.supervisorSessionId).then(value => {
+    const management = goal.supervisorSessionId ? goalSupervisorHost(goal, this.runtime).then(async hostId => ({ hostId, status: await status(hostId, goal.supervisorSessionId!) })) : null
+    const supervisorRead = management ? management.then(value => {
       const observed = value.status
       supervisor = { agentSessionId: goal.supervisorSessionId, hostId: value.hostId, runId: observed.run.runId,
         state: observed.run.state !== 'running' ? 'ended' : currentAgentSemanticStatus(observed.session.semanticStatus)?.state === 'error' ? 'blocked'
@@ -189,7 +191,7 @@ export class GoalResponsibilityOwner {
   async progress(goalId: string, input: DemandProgressInput, _context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<void> {
     const goal = await this.demands.get(goalId)
     if (!goal || !demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) throw new AgentMuxError('Progress requires this original Goal execution.', 'CONTROL_REQUEST_CONFLICT')
-    const manager = authority.actor.kind !== 'agent' || authority.actor.id === goal.supervisorSessionId
+    const manager = await isGoalSupervisor(goal, authority, this.runtime)
     if (!manager && (authority.actor.id !== input.execution.agentSessionId || authority.hostId !== input.execution.hostId || authority.runId !== input.execution.runId))
       throw new AgentMuxError('Progress requires the authenticated original worker Run or current management authority. Native input remains available.', 'CONTROL_PERMISSION_DENIED')
     let observed: AgentMuxAgentRuntimeStatus | undefined

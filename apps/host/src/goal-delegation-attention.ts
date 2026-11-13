@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent } from '@agentmux/core'
 import type { Demand, DemandStore, DemandStoreChanges, DemandStoreSnapshot } from '@agentmux/demand'
-import type { DemandDelegation, DemandDelegationAttention } from '@agentmux/demand/delegations'
+import { delegationWorkerHostId, type DemandDelegation, type DemandDelegationAttention } from '@agentmux/demand/delegations'
 import type { GoalDelegationOwner } from './goal-delegation-owner.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
@@ -76,10 +76,11 @@ export class GoalDelegationAttentionOwner {
       for (const delegation of goal.delegations ?? []) {
         if (delegation.collection) continue
         const ref = { goalId: goal.id, operationId: delegation.operationId }
-        add(this.workers, key(delegation.hostId, delegation.workerRunId), ref)
+        add(this.workers, key(delegationWorkerHostId(delegation), delegation.workerRunId), ref)
         if (goal.supervisorSessionId) add(this.supervisors, key(delegation.hostId, goal.supervisorSessionId), ref)
         add(this.sources, key(delegation.hostId, delegation.sourceMessageId), ref)
         add(this.hosts, delegation.hostId, ref)
+        if (delegationWorkerHostId(delegation) !== delegation.hostId) add(this.hosts, delegationWorkerHostId(delegation), ref)
         if (changed && delegation.linkedAt) queueMicrotask(() => { if (!this.controller.signal.aborted) void this.check(ref) })
       }
     }
@@ -132,7 +133,7 @@ export class GoalDelegationAttentionOwner {
       if (supervisor.kind === 'retired-agent') throw new Error('The original Supervisor is closed. Its Goal responsibility and reminder are retained; explicitly recover that Session to continue.')
       const digest = createHash('sha256').update(JSON.stringify([goal.id, delegation.operationId, delegation.sourceMessageId])).digest('hex')
       const agentMuxNote = JSON.stringify({ schema: 'agentmux.goal-attention.v1', goalId: goal.id,
-        operationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, hostId: delegation.hostId,
+        operationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, hostId: delegation.hostId, workerHostId: delegationWorkerHostId(delegation),
         originalOwnerAgentSessionId: delegation.ownerAgentSessionId, workerAgentSessionId: delegation.workerAgentSessionId,
         workerRunId: delegation.workerRunId, supervisorAgentSessionId: supervisor.agentSessionId,
         observation: ended ? observation?.workerRun?.state === 'interrupted' ? 'The original worker Run was interrupted.' : 'The original worker Run has ended.' : 'An original worker report is recorded.',
