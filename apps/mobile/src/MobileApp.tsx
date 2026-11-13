@@ -44,6 +44,7 @@ import { MobileHeaderMenuContext } from './navigation/MobileHeaderMenu'
 import { mobileNeedsYou, mobileNeedsYouElsewhere } from './navigation/needs-you'
 import { useMobileAttentionCatalog } from './navigation/use-mobile-attention-catalog'
 import './navigation/shell.css'
+import './conversation/chrome.css'
 import type { MobileSpatialContext } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWorkface } from './navigation/home-preference'
 

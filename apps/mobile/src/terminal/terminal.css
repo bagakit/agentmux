@@ -18,3 +18,15 @@
 .mobile-terminal-details dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
 .mobile-terminal-unsent { margin-top: 12px; }
 .mobile-terminal-unsent__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Fixed 7-column keypad: keys never scroll off a narrow screen, and positions stay put. */
+.mobile-app .mobile-terminal-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding: 6px 8px; overflow: visible;
+  border-bottom: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
+.mobile-app .mobile-terminal-keys > .mobile-terminal-key { min-width: 0; min-height: 44px; padding: 0; border: 0; border-radius: var(--mobile-radius);
+  background: var(--mobile-group); color: var(--text); font: 600 var(--fs-meta) var(--font-mono); letter-spacing: -.01em;
+  transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
+.mobile-app .mobile-terminal-keys > .mobile-terminal-key:active:not(:disabled) { transform: scale(.94); background: var(--mobile-group-press); }
+.mobile-app .mobile-terminal-keys > .mobile-terminal-key[data-wide] { grid-column: span 2; color: color-mix(in srgb, var(--red) 75%, var(--text)); }
+.mobile-app .mobile-terminal-keys > .mobile-terminal-key--quiet { grid-column: span 2; background: transparent; color: var(--text-3); font-family: var(--font-sans); font-weight: 500; }
+.mobile-app .mobile-terminal-keys > .mobile-terminal-key:disabled { opacity: .4; }
+@media (prefers-reduced-motion: reduce) { .mobile-app .mobile-terminal-keys > .mobile-terminal-key:active { transform: none; } }

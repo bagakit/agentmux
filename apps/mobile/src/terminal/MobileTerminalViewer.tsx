@@ -17,6 +17,14 @@ import './terminal.css'
 
 const noticeSummary = (message: string) => message.split(/[；。]/u, 1)[0]
 
+/** Fixed 7-column keypad: movement on the first row, control on the second, so Esc, the arrows,
+ * Ctrl-C and Enter keep their positions on every width. Bytes are the original terminal encodings. */
+const MOBILE_TERMINAL_KEYS = [
+  ['Esc', '\x1b', null, false], ['←', '\x1b[D', 'control.key-left', false], ['↑', '\x1b[A', 'control.key-up', false], ['↓', '\x1b[B', 'control.key-down', false],
+  ['→', '\x1b[C', 'control.key-right', false], ['Tab', '\t', null, false], ['Enter', '\r', null, false],
+  ['Ctrl-C', '\x03', null, true]
+] as const
+
 export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible, inputActive = visible, terminalPalette }: {
   client: AgentMuxHostedClient | null; agentSessionId: string | null; connection: MobileConnection
   platform: ClientUiPlatform; visible: boolean; inputActive?: boolean; terminalPalette?: ITheme | undefined
@@ -169,9 +177,10 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       <button className="mobile-terminal-reading-trigger" aria-label="终端阅读与状态" aria-haspopup="dialog" data-notice={Boolean(serviceMessage)} title={serviceMessage ? noticeSummary(serviceMessage) : '阅读设置与输出详情'} onClick={() => { if (control.current?.facts().mode === 'control') control.current.watch(); setReadingOpen(true) }}><SemanticIcon name="action.read-terminal" size={18} />{serviceMessage && <span className="mobile-terminal-reading-notice" aria-label="有待核实事项"><SemanticIcon name="status.terminal-notice" size={6} /></span>}</button>
     </div>
     {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">
-      <button aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
-      {([['Esc', '\x1b', null], ['Tab', '\t', null], ['Ctrl-C', '\x03', null], ['↑', '\x1b[A', 'control.key-up'], ['↓', '\x1b[B', 'control.key-down'], ['←', '\x1b[D', 'control.key-left'], ['→', '\x1b[C', 'control.key-right'], ['Enter', '\r', null]] as const).map(([label, data, icon]) =>
-        <button key={label} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={16} /> : label}</button>)}
+      {MOBILE_TERMINAL_KEYS.map(([label, data, icon, wide]) =>
+        <button key={label} type="button" className="mobile-terminal-key" data-wide={wide || undefined} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`}
+          onPointerDown={event => event.preventDefault()} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={18} /> : label}</button>)}
+      <button type="button" className="mobile-terminal-key mobile-terminal-key--quiet" aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>PTY 尺寸</button>
     </div>}
     {inputState.mode === 'control' && sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)

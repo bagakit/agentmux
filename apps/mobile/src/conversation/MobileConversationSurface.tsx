@@ -40,6 +40,7 @@ import { MobileMoteConversation, type MobileMoteWork, type MobileMoteDialogue } 
 import type { MoteDefaultConversation, MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { mobileMoteMainInputIssue, retainMobileMoteMain, type MobileMoteMainInput, type MobileMoteRolloverQuery } from './mote-main-input'
 import { MobileMoteSpeakerAvatar } from './MobileMoteSpeakerAvatar'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
 import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import './conversation.css'
@@ -284,14 +285,16 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     lookupAgent: id => {
       try {
         const author = session?.agentSessionId === id ? session : client?.agentSession(id)
-        return author?.agentSessionId === id ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : `${author.providerId} Agent`, providerId: author.providerId } : undefined
+        return author?.agentSessionId === id ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : agentProviderLabel(author.providerId), providerId: author.providerId } : undefined
       } catch { return undefined }
     },
-    ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
+    ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? agentProviderLabel(session.providerId), providerId: session.providerId } } : {})
     })
     const main = moteDialogue?.page?.main.current, owner = reading.pageOwner
     return (speaker, size) => {
-      const prior = original(speaker, size)
+      const resolved = original(speaker, size)
+      // The phone speaks to its owner in Chinese; the shared Desktop resolver keeps its own wording.
+      const prior = speaker.role === 'human' && resolved.name === 'You' ? { ...resolved, name: '我' } : resolved
       return moteTarget && main && owner?.client === client && owner.agentSessionId === agentSessionId && main.hostId === owner.hostId && main.sessionId === agentSessionId && speaker.role === 'agent' && speaker.id === agentSessionId
         ? { ...prior, name: moteName ?? prior.name, avatar: mainAvatar(size) } : prior
     }

@@ -1,0 +1,57 @@
+/* Conversation chrome: one floating toolbar, Mote section tabs as a segmented control and a
+ * docked composer. First-screen styling, imported by MobileApp; shared components keep their
+ * Desktop defaults and are adapted only under .mobile-app. */
+
+.mobile-app .mobile-header--session { position: relative; z-index: 3; border-bottom: 1px solid var(--mobile-hairline); }
+.mobile-app .mobile-session-toolbar { min-height: 52px; padding-block: 4px; border-bottom: 0; gap: var(--sp-1); }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin { gap: 0; min-width: 44px; padding: 0 6px 0 2px; border-radius: var(--mobile-radius); color: var(--text-2);
+  font-size: var(--fs-meta); font-weight: 500; transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin > svg { color: var(--text); }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin > span:not(.mobile-back-badge) { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin:active { transform: scale(.94); background: var(--mobile-group); }
+.mobile-app .mobile-session-toolbar .mobile-session-title { color: var(--text); font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; }
+.mobile-app .mobile-session-toolbar > .mobile-session-identity { gap: var(--sp-4); border-radius: var(--mobile-radius); transition: background-color var(--dur-fast) ease; }
+.mobile-app .mobile-session-toolbar > .mobile-session-identity:active { background: var(--mobile-group); }
+@media (max-width: 360px) { .mobile-app .mobile-session-toolbar > .mobile-session-origin > span:not(.mobile-back-badge) { display: none; } }
+
+/* Mote sections: a segmented control instead of an underline strip. */
+.mobile-app .mobile-mote-navigation { gap: var(--sp-4); min-height: 48px; padding: 6px var(--mobile-gutter); border-bottom: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
+.mobile-app .mobile-mote-navigation > button[role='tab'] { min-height: 36px; padding: 0 14px; border-radius: 999px; color: var(--text-2); font-size: var(--fs-body); font-weight: 550;
+  box-shadow: none; transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease; }
+.mobile-app .mobile-mote-navigation > button[role='tab'][aria-selected='true'] { color: var(--text); background: var(--mobile-group); box-shadow: none; font-weight: 650; }
+.mobile-app .mobile-mote-navigation > .mobile-mote-team-button { min-height: 36px; margin-left: auto; padding: 0 12px; border-radius: 999px; color: var(--text-2);
+  font-size: var(--fs-meta); font-weight: 550; }
+.mobile-app .mobile-mote-navigation > .mobile-mote-team-button:active { background: var(--mobile-group); }
+
+/* Composer dock: the measured composer geometry stays with conversation.css; the dock only adds a
+ * hairline and lets the editor read as one rounded field on the group surface. */
+.mobile-app .mobile-conversation__composer { border-top: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
+.mobile-app .mobile-conversation .composer[data-agent-composer] { border-radius: calc(var(--mobile-radius-group) + 2px); background-color: var(--mobile-group); }
+.mobile-app .mobile-conversation .composer[data-agent-composer]:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-line) 38%, transparent); }
+
+/* Reading chrome inside the conversation stays quiet: the coverage disclosure and the live work
+ * line sit on the 16px gutter at the meta tier, so speech remains the first thing read. */
+.mobile-app .mobile-conversation .conversation-coverage { padding-inline: var(--mobile-gutter); }
+.mobile-app .mobile-conversation .conversation-coverage > summary { min-height: 36px; font-size: var(--fs-micro); }
+.mobile-app .mobile-active-state { margin: 4px var(--mobile-gutter) 6px; font-size: var(--fs-micro); font-weight: 550; color: var(--green); }
+.mobile-app .mobile-active-state > svg { width: 6px; height: 6px; }
+
+/* Decision card: a request is the one thing that needs the person, so it sits above the composer
+ * with the needs-you accent, a grouped surface and full-width 48px answers. */
+.mobile-app .mobile-conversation__interaction { max-height: 45%; padding: 0 var(--sp-5) var(--sp-3); }
+.mobile-app .mobile-conversation__interaction .agent-interaction { margin: var(--sp-2) 0 0; padding: 14px var(--sp-6) var(--sp-6); border-radius: var(--mobile-radius-group);
+  background: var(--mobile-attention-wash); box-shadow: inset 3px 0 0 var(--mobile-attention), 0 0 0 1px var(--mobile-attention-line); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__heading { color: var(--mobile-attention); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__heading strong { font-size: var(--fs-lead); font-weight: 650; }
+.mobile-app .mobile-conversation__interaction .agent-interaction__heading span { font-size: var(--fs-meta); }
+.mobile-app .mobile-conversation__interaction .agent-interaction pre { max-height: 120px; border-radius: var(--mobile-radius); background: var(--mobile-page); font-size: var(--fs-meta); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__options { gap: var(--sp-3); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__options button { min-height: 48px; padding: 10px 14px; border-radius: var(--mobile-radius); font-size: var(--fs-body); }
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions button { min-height: 44px; border-radius: var(--mobile-radius); }
+
+/* Bottom sheets: one radius tier above groups, a real grab handle, a titled header. */
+.mobile-sheet { border-radius: var(--mobile-radius-sheet) var(--mobile-radius-sheet) 0 0; padding-inline: var(--mobile-gutter); background: var(--mobile-page); }
+.mobile-sheet > .mobile-sheet-title { background: var(--mobile-page); }
+.mobile-sheet-handle { width: 36px; height: 4px; margin: 2px auto 10px; border-radius: 2px; background: color-mix(in srgb, var(--text) 22%, transparent); }
+.mobile-sheet .mobile-sheet-title h2 { font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; }
+.mobile-sheet .mobile-menu-row { min-height: var(--mobile-menu-row); }
