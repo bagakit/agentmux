@@ -530,7 +530,7 @@ describe('Browser exact Agent association and trusted handoff', () => {
 describe('a retired Agent releases only its own exact Browser associations', () => {
   const agent = { hostId: 'original-host', agentSessionId: 'retiring-agent' }
   const current = { kind: 'agent' as const, ...agent, run: { runId: 'retiring-run' } }
-  const retired = { kind: 'retired-agent' as const, ...agent, run: { runId: 'retiring-run' } }
+  const retired = { kind: 'retired-agent' as const, ...agent, run: { runId: 'retiring-run' }, observedAt: 42 }
   const authority = (answer: () => Promise<unknown>) => ({ resolve: () => undefined, inspect: vi.fn(answer) }) as unknown as BrowserAgentAuthority & { inspect: ReturnType<typeof vi.fn> }
   const saved = (id: string, association: typeof agent) => ({ id, workspaceId: 'workspace-a', url: `https://example.invalid/${id}`, title: '', mode: 'normal' as const, agent: association })
 
@@ -542,7 +542,8 @@ describe('a retired Agent releases only its own exact Browser associations', () 
     await manager.returnControl('held')
     expect(manager.target('held')?.control).toMatchObject({ owner: 'agent', agent })
     const revision = manager.target('held')!.control!.revision
-    manager.releaseRetiredAgent(agent)
+    agents.inspect.mockImplementation(async () => retired)
+    await manager.releaseRetiredAgent(agent)
     expect(manager.target('held')?.control).toMatchObject({ owner: 'human', agent: null })
     expect(manager.target('held')!.control!.revision).toBeGreaterThan(revision)
     expect(manager.target('same-host-other-session')?.control?.agent).toEqual({ ...agent, agentSessionId: 'other-agent' })
@@ -582,17 +583,79 @@ describe('a retired Agent releases only its own exact Browser associations', () 
     manager.close('restored')
   })
 
+  it('a late original retirement event keeps the reopened Session and its new Browser handoff', async () => {
+    const { releaseBrowserAgentsOnRetirement } = await import('../src/main/browser-agent-authority.js')
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('reopened', async () => saved('reopened', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    const reopened = { ...current, run: { runId: 'reopened-run' } }
+    agents.inspect.mockImplementation(async () => reopened)
+    const before = manager.target('reopened')!
+    await manager.returnControl('reopened', { navigationId: before.navigationId!, expectedRevision: before.control!.revision,
+      expectedAgent: agent, agent: reopened })
+    let listener!: (hostId: string, event: unknown) => void
+    releaseBrowserAgentsOnRetirement({ observeCoreEvents: (_types: unknown, next: typeof listener) => { listener = next; return () => {} } } as never, manager)
+    const released = vi.spyOn(manager, 'releaseRetiredAgent')
+    listener(agent.hostId, { type: 'run-removed', agentSessionId: agent.agentSessionId, run: retired.run,
+      evidence: { source: 'user', observedAt: retired.observedAt, run: retired.run } })
+    expect(released).toHaveBeenCalledTimes(1)
+    await released.mock.results[0]!.value
+    expect(manager.target('reopened')?.control).toMatchObject({ owner: 'agent', agent })
+    manager.close('reopened')
+  })
+
+  it.each(['run', 'retirement-time'] as const)('a later Core retirement with a different %s cannot authorize the original event', async changed => {
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('later-retirement', async () => saved('later-retirement', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    agents.inspect.mockImplementation(async () => changed === 'run'
+      ? { ...retired, run: { runId: 'later-run' } } : { ...retired, observedAt: 84 })
+    await manager.releaseRetiredAgent(agent, { runId: retired.run.runId, observedAt: retired.observedAt })
+    expect(manager.target('later-retirement')?.control?.agent).toEqual(agent)
+    manager.close('later-retirement')
+  })
+
+  it('a retirement read returning after a new handoff cannot replace its Browser control revision', async () => {
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('handoff-during-read', async () => saved('handoff-during-read', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    let finish!: (value: unknown) => void
+    agents.inspect.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = manager.releaseRetiredAgent(agent, { runId: retired.run.runId, observedAt: retired.observedAt })
+    const reopened = { ...current, run: { runId: 'reopened-run' } }
+    agents.inspect.mockImplementation(async () => reopened)
+    await manager.returnControl('handoff-during-read')
+    const handed = manager.target('handoff-during-read')!.control
+    finish(retired)
+    await pending
+    expect(manager.target('handoff-during-read')?.control).toMatchObject({ owner: 'agent', agent, revision: handed!.revision })
+    manager.close('handoff-during-read')
+  })
+
+  it('an unavailable retirement observation keeps the original Browser association and control', async () => {
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('unknown-retirement', async () => saved('unknown-retirement', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    const before = manager.target('unknown-retirement')!.control
+    agents.inspect.mockRejectedValueOnce(new Error('Core is unreachable'))
+    await manager.releaseRetiredAgent(agent, { runId: retired.run.runId, observedAt: retired.observedAt })
+    expect(manager.target('unknown-retirement')?.control).toEqual(before)
+    expect(manager.target('unknown-retirement')?.warning).toContain('retirement could not be confirmed')
+    manager.close('unknown-retirement')
+  })
+
   it('only a retirement event that names the Session releases it', async () => {
     const { releaseBrowserAgentsOnRetirement } = await import('../src/main/browser-agent-authority.js')
     let listener!: (hostId: string, event: unknown) => void
     const observe = vi.fn((_types: readonly string[], next: typeof listener) => { listener = next; return () => {} })
-    const browsers = { releaseRetiredAgent: vi.fn() }
+    const browsers = { releaseRetiredAgent: vi.fn(async () => {}) }
     releaseBrowserAgentsOnRetirement({ observeCoreEvents: observe } as never, browsers)
     expect(observe).toHaveBeenCalledWith(['run-removed'], expect.any(Function))
     listener('original-host', { type: 'run-removed', run: { runId: 'low-level-stop' } })
     expect(browsers.releaseRetiredAgent).not.toHaveBeenCalled()
-    listener('original-host', { type: 'run-removed', agentSessionId: 'retiring-agent', run: { runId: 'retiring-run' } })
-    expect(browsers.releaseRetiredAgent).toHaveBeenCalledExactlyOnceWith(agent)
+    listener('original-host', { type: 'run-removed', agentSessionId: 'retiring-agent', run: { runId: 'retiring-run' },
+      evidence: { source: 'user', observedAt: 42 } })
+    expect(browsers.releaseRetiredAgent).toHaveBeenCalledExactlyOnceWith(agent, { runId: 'retiring-run', observedAt: 42 })
   })
 })
 
