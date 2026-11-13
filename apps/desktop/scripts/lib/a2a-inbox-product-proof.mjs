@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { isDeepStrictEqual, promisify } from 'node:util'
+import { inspect, isDeepStrictEqual, promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { listProbeProcesses, stopProbeProcesses, signalOwnedProbeProcess, runProbeProcess } from '../probe-process.mjs'
 
@@ -225,7 +225,7 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
     product.workerOutcome = outcome
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
-  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack } }
+  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack, diagnostic: inspect(error, { depth: 8 }), ...(error.probe ? { probe: error.probe } : {}) } }
   finally {
     try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
@@ -280,7 +280,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     await verifyA2aPreparedArtifact(product.preparation, { root })
     for (const [path, digest] of Object.entries(product.fixtures)) assert.equal(a2aProofSha(await readFile(join(privateRoot, path))), digest, 'Actual post-run proof fixture: ' + path)
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
-  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack } }
+  } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack, diagnostic: inspect(error, { depth: 8 }), ...(error.probe ? { probe: error.probe } : {}) } }
   finally {
     try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
