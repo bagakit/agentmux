@@ -214,3 +214,27 @@ it('validates rewrite anchors at the public input boundary', async () => {
     expect(() => parseConversationChangesInput({ ...base, rewrite })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
   expect(() => parseConversationChangesInput({ ...base, through: checkpoint, rewrite: { anchors: [valid] } })).toThrow(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
 })
+
+it('reads a Claude message resent before any reply as appended history, never as a rewrite', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([
+    { type: 'user', uuid: 'prompt-before', parentUuid: null, sessionId: 'native-main', message: { role: 'user', content: 'Earlier question' } },
+    { type: 'assistant', uuid: 'reply-before', parentUuid: 'prompt-before', sessionId: 'native-main', message: { role: 'assistant', content: [{ type: 'text', text: 'Earlier reply' }] } }
+  ]))
+  closes.push(f.close)
+  const ref = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const start = (await f.client.conversationCheckpoint(ref)).checkpoint
+  // Esc on a message nothing has answered, then the same text again: two equal prompts under one parent.
+  const sent = { type: 'user', parentUuid: 'reply-before', sessionId: 'native-main', message: { role: 'user', content: 'Check the build' } }
+  await append(f.path, [{ ...sent, uuid: 'prompt-unanswered' },
+    { type: 'user', uuid: 'interrupt-line', parentUuid: 'prompt-unanswered', sessionId: 'native-main', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }])
+  const before = await f.client.readConversationChanges({ ...ref, checkpoint: start, limit: 100 })
+  await append(f.path, [{ ...sent, uuid: 'prompt-resent' }])
+  const after = await f.client.readConversationChanges({ ...ref, checkpoint: before.checkpoint, limit: 100 })
+  expect(nativeCoverage(after).gaps).toEqual([])
+  expect(nativeCoverage(after).current).not.toBe('unavailable')
+  expect(ids(after)).toEqual(['prompt-resent'])
+  // The interrupted prompt stays in the conversation beside the resent one.
+  const whole = await f.client.readConversationChanges({ ...ref, checkpoint: start, limit: 100 })
+  expect(nativeCoverage(whole).gaps).toEqual([])
+  expect(ids(whole).filter(id => id.startsWith('prompt-'))).toEqual(['prompt-unanswered', 'prompt-resent'])
+})
