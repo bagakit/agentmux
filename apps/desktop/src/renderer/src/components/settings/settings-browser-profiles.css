@@ -1,0 +1,72 @@
+/* Browser Profiles: the shared resource library, with one Profile edited in place beside it. */
+.settings-content__scroll[data-settings-pane='browser-profiles'] {
+  container: settings-resource / inline-size;
+  padding-inline: max(var(--sp-7), calc((100% - 960px) / 2));
+  overflow: hidden;
+}
+.settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-3); }
+.settings-browser-profiles .settings-pane-toolbar > strong { margin-right: auto; font-size: var(--fs-body); font-weight: 550; }
+.settings-browser-profiles .settings-pane-toolbar > strong > span { color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+.settings-browser-profiles .settings-resource-row__mark { width: 22px; }
+.browser-profiles-settings__service { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.browser-profiles-settings__service button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; cursor: pointer; font: inherit; }
+
+.browser-profile-editor { display: flex; flex-direction: column; gap: var(--sp-5); padding-bottom: var(--sp-6); }
+.browser-profile-editor__identity { display: flex; align-items: center; gap: var(--sp-4); min-height: 48px; }
+.browser-profile-editor__mark { padding: 0; border: 0; border-radius: var(--radius); background: transparent; cursor: pointer; }
+.browser-profile-editor__mark:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.browser-profile-editor__who { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.browser-profile-editor__who h3 { margin: 0; display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.browser-profile-editor__name {
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin: 0 calc(-1 * var(--sp-2)); padding: 1px var(--sp-2); border: 0; border-radius: var(--radius-sm);
+  color: var(--text); background: transparent; font: inherit; font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; cursor: text; text-align: left;
+}
+.browser-profile-editor__name:hover { background: var(--wash-1); }
+.browser-profile-editor__name:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.browser-profile-editor__who input { font-size: var(--fs-title); font-weight: 650; }
+.browser-profile-editor__who small { color: var(--text-3); font-size: var(--fs-meta); }
+.browser-profile-editor__saved { display: inline-flex; align-items: center; gap: 3px; color: var(--green-text); font-size: var(--fs-meta); font-weight: 450; }
+
+.browser-profile-editor__hues { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: calc(-1 * var(--sp-3)); }
+.browser-profile-editor__hues > button[style] {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  background: hsl(var(--profile-hue) 52% 64%); box-shadow: var(--hl);
+}
+.browser-profile-editor__hues > button[style][aria-checked='true'] { box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 4px hsl(var(--profile-hue) 52% 64% / .7); }
+.browser-profile-editor__hues > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.browser-profile-editor__auto { min-height: 22px; padding: 0 var(--sp-3); border: 0; border-radius: 999px; color: var(--text-3); background: var(--wash-1); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.browser-profile-editor__auto[aria-checked='true'] { color: var(--text); background: var(--surface-3); }
+
+.browser-profile-editor__note {
+  align-self: flex-start; max-width: 66ch; margin: calc(-1 * var(--sp-3)) 0 0 calc(36px + var(--sp-4) - var(--sp-2));
+  padding: 2px var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-2); font: inherit; font-size: var(--fs-body); line-height: 1.5; text-align: left; white-space: pre-wrap; cursor: text;
+}
+.browser-profile-editor__note[data-empty] { color: var(--text-3); }
+.browser-profile-editor__note:hover { background: var(--wash-1); }
+.browser-profile-editor__notes {
+  margin: calc(-1 * var(--sp-3)) 0 0 calc(36px + var(--sp-4)); max-width: 66ch; min-height: 48px; padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);
+  font: inherit; font-size: var(--fs-body); line-height: 1.5; resize: vertical;
+}
+.browser-profile-editor__notes:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+
+.browser-profile-editor__section { display: grid; gap: var(--sp-3); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
+.browser-profile-editor__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
+.browser-profile-editor__quiet { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.browser-profile-editor__uses { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.browser-profile-editor__uses li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); min-height: 28px; color: var(--text-2); font-size: var(--fs-body); }
+.browser-profile-editor__uses li > svg { color: var(--text-3); }
+.browser-profile-editor__uses li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-profile-editor__uses small { color: var(--text-3); font-size: var(--fs-meta); }
+.browser-profile-editor__uses small[data-state='open'] { color: var(--green-text); }
+.browser-profile-editor__error { margin: 0; color: var(--red-text); font-size: var(--fs-meta); line-height: 1.5; }
+.browser-profile-editor__error button { border: 0; padding: 0; background: transparent; color: var(--text); text-decoration: underline; cursor: pointer; font: inherit; }
+
+.browser-profile-editor__confirm { display: grid; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--red-bg); }
+.browser-profile-editor__confirm p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }
+.browser-profile-editor__confirm p strong { color: var(--text); font-weight: 600; }
+.browser-profile-editor__confirm > div { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+.browser-profile-menu__delete { color: var(--red-text); }
+.browser-profile-menu__delete small { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }

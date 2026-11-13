@@ -4,6 +4,7 @@ import { createSettingsCatalog } from './settings-catalog'
 import { appearanceSettingsModule } from './modules/appearance'
 import { notificationsSettingsModule } from './modules/notifications'
 import { browserSettingsModule } from './modules/browser'
+import { browserProfilesSettingsModule } from './modules/browser-profiles'
 import { capsuleSettingsModule } from './modules/capsule'
 import { browserAgentControlSettingsModule } from './modules/browser-agent-control'
 import { generalSettingsModule } from './modules/general'
@@ -38,6 +39,7 @@ export const settingsModules = [
   derivedActionsSettingsModule,
   continuitySettingsModule,
   browserSettingsModule,
+  browserProfilesSettingsModule,
   capsuleSettingsModule,
   browserAgentControlSettingsModule,
   generalSettingsModule,
