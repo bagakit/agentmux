@@ -33,7 +33,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await capture('mote-start-unknown-details-390-light')
   const originalStarts = await read('mobileProductScene.facts().calls.filter(call=>["agent.open","space.mote.dialogue.setup.advance"].includes(call.method)).length')
   const originalReads = await read('mobileProductScene.facts().calls.filter(call=>call.method==="space.ls").length')
-  await button('重新核对主对话信息', '.mobile-mote-source-status')
+  await button('重新核对', '.mobile-mote-source-status')
   await until(`mobileProductScene.facts().calls.filter(call=>call.method==="space.ls").length>${originalReads}`)
   assert.equal(await read('mobileProductScene.facts().calls.filter(call=>["agent.open","space.mote.dialogue.setup.advance"].includes(call.method)).length'),originalStarts,'Checking source information never creates or advances a Main')
   await read('mobileProductScene.prepareMoteStart("policy")')

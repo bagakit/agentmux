@@ -182,14 +182,16 @@ it('an unconfirmed Mote directory read keeps the already selected healthy Main r
   expect(f.view.element.querySelector('.mobile-conversation-slot:not([hidden])')).toBeTruthy()
   const notice = f.view.element.querySelector<HTMLDetailsElement>('.mobile-mote-source-status')!
   expect(notice).toBeTruthy(); expect(notice.open).toBe(false)
-  expect(notice.querySelector('summary')?.textContent).toBe('主对话信息待核对')
+  const summary = notice.querySelector('summary')!
+  expect(summary.getAttribute('aria-label')).toMatch(/^主对话信息待核对 · \d+ 项$/)
+  expect(summary.querySelector('.mobile-mote-source-status__dot')).not.toBeNull()
   expect(notice.querySelector('dl')?.textContent).toContain('原主对话配置尚未确认')
   expect(f.view.element.querySelector('.mobile-mote-main-handoff')).toBeNull()
   expect(f.view.element.querySelector('.mote-conversation__issue')).toBeNull()
   const advances = f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance').length
   const reads = f.rpc.mock.calls.filter(([method]) => method === 'space.ls').length
   const inputs = f.host.h.inner.kernel.input.mock.calls.length
-  await click(notice.querySelector('summary')!); await click(button(notice, '重新核对主对话信息'))
+  await click(notice.querySelector('summary')!); await click(button(notice, '重新核对'))
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.ls').length).toBeGreaterThan(reads))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(original)
   expect(notice.textContent).toContain('原主对话配置尚未确认')

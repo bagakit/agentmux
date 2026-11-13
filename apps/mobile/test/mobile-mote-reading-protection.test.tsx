@@ -150,7 +150,7 @@ it('retains a cold-remounted Discussion draft when no Main role is qualified, an
   expect(f.submit).not.toHaveBeenCalled(); expect(rpc).not.toHaveBeenCalled()
   expect(editor(view.element).textContent).toBe('冷重挂仍属于 Discussion 的原稿')
   expect(button(view.element, 'Send').disabled).toBe(false)
-  await click(button(view.element, '重新核对主对话信息')); expect(source.refresh).toHaveBeenCalledOnce()
+  await click(button(view.element, '重新核对')); expect(source.refresh).toHaveBeenCalledOnce()
   expect(f.submit).not.toHaveBeenCalled(); expect(rpc).not.toHaveBeenCalled()
   await view.render(<MobileConversationSurface {...options} moteDialogue={source} moteDirectAgent />)
   await click(button(view.element, 'Send'))
