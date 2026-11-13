@@ -425,12 +425,13 @@ export async function registerIpc(args: {
   const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
-  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); mediaStreams.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
+  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
   let channelMetadata: ReturnType<typeof registerConnectorIpc> | undefined
-  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); channelMetadata?.releaseReaders() }
+  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); mediaStreams.releaseAll(); channelMetadata?.releaseReaders() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
     if (mainFrame) {
-      if (!inPlace) { controlBridge.dispose(); channelMetadata?.releaseReaders() }
+      // A same-document navigation (an anchor, pushState) keeps every playing media element, so their leases stay.
+      if (!inPlace) { controlBridge.dispose(); mediaStreams.releaseAll(); channelMetadata?.releaseReaders() }
       releaseHtmlPreviews()
     }
   }
