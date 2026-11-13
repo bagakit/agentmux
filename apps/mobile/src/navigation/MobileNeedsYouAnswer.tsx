@@ -47,7 +47,7 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, identi
   // One point read per relevant event; a projection that returns the same object still counts as new.
   const [observed, observe] = useState(0)
   const session = useMemo(() => readSession(client, agentSessionId), [client, agentSessionId, observed])
-  const [chosen, setChosen] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<{ requestKey: string | null; choiceId: string } | null>(null)
   useEffect(() => {
     if (!client) return
     return client.onStatusEvent(event => {
@@ -80,7 +80,7 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, identi
   async function choose(choice: MobileTicketChoice) {
     if (responseDisabled || sending || !request) return
     if (operation.current?.requestKey !== requestKey) operation.current = { requestKey, operationId: mintObjectId() }
-    setChosen(choice.id)
+    setChosen({ requestKey, choiceId: choice.id })
     // A refused or unknown outcome is recorded by the controller; this view only reads it back.
     const moteSource = mobileMoteInputSource(identity ?? null, agentSessionId, agentSessionId)
     await respond(choice.response, { operationId: operation.current.operationId, expectedRequest: structuredClone(request),
@@ -90,7 +90,7 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, identi
     <p className="mobile-ticket-answer__title">{plan.title}</p>
     <div className="mobile-ticket-answer__choices" role="group" aria-label={plan.title}>
       {plan.choices.map(choice => <button key={choice.id} type="button" className={choice.primary ? 'is-primary' : undefined}
-        aria-pressed={phase !== 'rejected' && chosen === choice.id} disabled={responseDisabled || sending} onClick={() => { void choose(choice) }}>{choice.label}</button>)}
+        aria-pressed={phase !== 'rejected' && chosen?.requestKey === requestKey && chosen?.choiceId === choice.id} disabled={responseDisabled || sending} onClick={() => { void choose(choice) }}>{choice.label}</button>)}
     </div>
     {phase === 'rejected' && <p className="mobile-ticket-answer__issue" role="status">没能答复，可以再试一次</p>}
   </div>
