@@ -64,6 +64,33 @@ describe('Profile query, saved views and exact metadata batches on original owne
     expect(restarted.listViews()).toEqual([]); expect(restarted.listProfiles()[0]!.id).toBe(id)
   })
 
+  it('reads semantically identical saved views after real JSON key reordering without changing original Profile data or bytes', async () => {
+    const { manager, path, id } = await fixture()
+    const other = await manager.createProfile('Retained second Profile')
+    await manager.updateProfile(id, { tags: ['Keep'], notes: 'Retain this configuration' }, selected(manager, [id])[0]!.expectedRevision)
+    const view = await manager.saveView('Unknown first', { status: 'unknown', sort: 'name' }, manager.listRevision())
+    const expectedProfiles = manager.listProfiles(), expectedPartition = manager.resolvePartition(id)
+    const original = JSON.parse(await readFile(path, 'utf8'))
+    // Both the view and its query have a different legal JSON insertion order.
+    original.views[0] = { query: { sort: 'name', status: 'unknown' }, label: view.label, id: view.id }
+    const reordered = JSON.stringify(original, null, 3) + '\n'; await writeFile(path, reordered)
+    const store = new BrowserProfileStore(path), snapshot = await store.list()
+    expect(snapshot.views).toEqual([view]); expect(snapshot.profiles).toEqual(expectedProfiles)
+    const restarted = new BrowserProfileManager(new BrowserProfileStore(path)); await restarted.initialize()
+    expect(restarted.listViews()).toEqual([view]); expect(restarted.listProfiles()).toEqual(expectedProfiles)
+    expect(restarted.resolvePartition(id)).toBe(expectedPartition)
+    expect(restarted.listProfiles().some(profile => profile.id === other.id)).toBe(true)
+    expect(await readFile(path, 'utf8')).toBe(reordered)
+    original.views[0].query.permission = 'allow'
+    const bad = JSON.stringify(original); await writeFile(path, bad)
+    await expect(new BrowserProfileStore(path).list()).rejects.toThrow()
+    expect(await readFile(path, 'utf8')).toBe(bad)
+    expect(restarted.resolvePartition(id)).toBe(expectedPartition)
+    await rm(path)
+    await expect(restarted.saveView('No empty replacement', {}, restarted.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('leaves view/folder configuration CAS and Profile tokens unchanged by activity checkpoints', async () => {
     const { manager, id } = await fixture(), revision = manager.listRevision(), token = selected(manager, [id])[0]!.expectedRevision, sequence = manager.listSequence()
     await manager.recordActivity(id, { observerId: manager.activityObserverId, previousObserverId: null, sequence: 1, unionMs: 20, observedAt: 100, lastUsedAt: 90, active: true, gaps: [] })
