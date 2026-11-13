@@ -13,7 +13,7 @@ const io = vi.hoisted(() => ({
   app: '', candidate: '', pid: 201, cutovers: 0, reads: 0,
   before: null as DesktopClientObservation | null,
   after: null as DesktopClientObservation | null,
-  failAfterRead: false, failEveryRead: false,
+  failAfterRead: false, failEveryRead: false, outgoingMisses: 0, outgoingReads: 0,
   tick: 0, nativePlan: null as any, nativeConfirmation: null as any
 }))
 const roots: string[] = []
@@ -50,7 +50,11 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
   prepareUiRuntime: async () => io.nativePlan, confirmUiRuntime: async () => io.nativeConfirmation, closeRuntimeUpgrade: async () => {},
   observeUiClient: async (app: string) => {
     expect(app).toBe(io.app)
-    if (io.pid === 201) return parseDesktopClientObservationForInstall(structuredClone(io.before))
+    if (io.pid === 201) {
+      io.outgoingReads++
+      if (io.outgoingMisses > 0) { io.outgoingMisses--; throw new Error('CONTROL_TIMEOUT') }
+      return parseDesktopClientObservationForInstall(structuredClone(io.before))
+    }
     io.reads++
     if (io.failEveryRead || io.failAfterRead && io.reads > 1) throw new Error('PRIVATE_RPC_UNAVAILABLE')
     return parseDesktopClientObservationForInstall(structuredClone(io.after))
@@ -66,7 +70,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-install-continuity-')); roots.push(root)
   const home = join(root, 'home'), app = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, tick: 0, nativePlan: null, nativeConfirmation: null })
+  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, tick: 0, nativePlan: null, nativeConfirmation: null })
   const identity = { schema: 'agentmux.package-identity.v1' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40),
     appVersion: '0.1.0', platform: process.platform, arch: process.arch }
   for (const [directory, sourceCommit] of [[app, 'a'.repeat(40)], [candidate, 'c'.repeat(40)]]) {
@@ -381,11 +385,27 @@ it('unavailable activation never invents an after observation', async () => {
   expect(error.message).toBe('PRIVATE_RPC_UNAVAILABLE')
   expect(error.transaction.ui.continuity).toEqual({ before: io.before, after: null })
 })
+it('a missed outgoing read is retried and the original workbench still installs', async () => {
+  const f = await fixture(); io.outgoingMisses = 1
+  const result = await install(f)
+  expect(io.outgoingReads).toBe(2)
+  expect(result.ui.status).toBe('committed')
+  expect(io.cutovers).toBe(1)
+})
+it('an outgoing read that stays unavailable rejects without requesting quit', async () => {
+  const f = await fixture(); io.outgoingMisses = Infinity
+  const error = await install(f).catch(error => error)
+  expect(error.message).toBe('CONTROL_TIMEOUT')
+  expect(error.transaction.ui.status).toBe('not-started')
+  expect(io.outgoingReads).toBeGreaterThan(1)
+  expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
+})
 it('outgoing qualification failure preserves the observed snapshot without requesting quit', async () => {
   const f = await fixture(); io.before!.workbench.loading = true
   const error = await install(f).catch(error => error)
   expect(error.transaction.ui.status).toBe('not-started')
   expect(error.transaction.ui.continuity).toEqual({ before: null, after: io.before })
+  expect(io.outgoingReads, 'A failed check on an actual observation is not retried').toBe(1)
   expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
 })
 
