@@ -2,6 +2,8 @@
    Over video the controls sit on a dark scrim in both themes, so they use their own ink roles. */
 .media-player { --media-ink: color-mix(in oklab, #ffffff 94%, transparent); --media-ink-2: color-mix(in oklab, #ffffff 72%, transparent);
   --media-accent: var(--green); --media-glass: color-mix(in oklab, #ffffff 10%, transparent);
+  /* Behind the picture: neutral near-black in both themes, so letterboxing never reads as content. */
+  --media-backdrop: color-mix(in srgb, var(--bg) 20%, black);
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
   padding: var(--sp-5); container-type: inline-size; outline: none; }
 :root[data-appearance="light"] .media-player { --media-accent: var(--green-text); }
@@ -12,7 +14,7 @@
 /* The stage takes the picture's own shape once it is known, so the controls always sit on the picture
    instead of on letterbox black; before that it fills the Region. */
 .media-player__stage { position: relative; width: 100%; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden;
-  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--bg) 20%, black); box-shadow: inset 0 0 0 1px var(--wash-1); }
+  border-radius: var(--radius-lg); background: var(--media-backdrop); box-shadow: inset 0 0 0 1px var(--wash-1); }
 /* The frame is the free box; the stage inside it is sized to the picture so the controls sit on it. */
 .media-player__frame { flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
 /* Audio has no picture: the frame leaves the layout, or its own display would keep an empty stage on screen. */
@@ -21,7 +23,7 @@
 .media-player__stage[data-fitted] { width: var(--media-fit-width); height: var(--media-fit-height); }
 :root[data-appearance="light"] .media-player__stage { box-shadow: var(--elev-2); }
 .media-player__stage > video { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
-.media-player[data-fullscreen] { padding: 0; background: black; }
+.media-player[data-fullscreen] { padding: 0; background: var(--media-backdrop); }
 .media-player[data-fullscreen] .media-player__stage { border-radius: 0; box-shadow: none; }
 .media-player[data-fullscreen] > .media-player__metadata { display: none; }
 .media-player--video[data-controls="hidden"] .media-player__stage > video { cursor: none; }
