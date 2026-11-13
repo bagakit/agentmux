@@ -1064,8 +1064,10 @@ export function ActivityView({
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       />
         ))}
-      <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
+      {/* The working signal is part of the readable extent: following pins to the tail
+          marker, so the indicator sits above it and stays visible at the bottom. */}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
+      <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       <div ref={readingSpaceRef} data-conversation-reading-space aria-hidden="true" />
     </div>
   ))
