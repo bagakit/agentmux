@@ -96,7 +96,11 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       drafting={Boolean(draft.trim())}
       pending={sent && sent.key === key ? <MoteFirstMessage messageId={'mote-first:' + sent.operationId} prompt={sent.prompt} name={scope.topic.title}
         stage={desktopFirstMessageStage(state.result, state.busy, sent.operationId)}
-        action={{ label: '核对', disabled: state.busy, onClick: () => state.pending.length ? state.inspect(state.pending[0]!) : state.inspect(sent.operationId) }} /> : undefined}
+        action={{ label: '核对', disabled: state.busy, onClick: () => {
+          // Check the creation request itself, never the first message's own id; with none known yet, reread.
+          const request = state.pending[0] ?? state.result?.operationId
+          if (request) state.inspect(request); else state.refresh()
+        } }} /> : undefined}
       actions={<button type="button" className="mote-start__settings" onClick={event => onConfigure(event.currentTarget)} aria-label="Mote 快捷配置">设置</button>}
       composer={<AgentComposer value={draft} disabled={false} active={active} placeholder="写下你想聊的事…"
         onChange={value => { edits.current++; useLauncherState.getState().setDraft(key, 'prompt', value) }}
