@@ -164,9 +164,14 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
   if ((self instanceof HTMLInputElement && ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'].includes(self.type)) || self instanceof HTMLSelectElement) {
     return { ok: false, picker: true, reason: 'is a picker' };
   }
+  // Checkbox, radio, file and button inputs drop inserted text too.
+  if (self instanceof HTMLInputElement && !['text', 'search', 'url', 'tel', 'email', 'password', 'number'].includes(self.type)) {
+    return { ok: false, reason: self.type === 'file' ? 'is a file input; use uploadFiles with the file' : 'is a ' + self.type + ' input, which takes a click, not text' };
+  }
   const field = self instanceof HTMLInputElement || self instanceof HTMLTextAreaElement;
   if (!editable && !field) return { ok: false, reason: 'is not a text field or editable element' };
-  if (field && (self.disabled || self.readOnly)) return { ok: false, reason: self.disabled ? 'is disabled' : 'is read-only' };
+  // :disabled also covers a field inside a disabled fieldset, which .disabled does not.
+  if (field && (self.matches(':disabled') || self.readOnly)) return { ok: false, reason: self.matches(':disabled') ? 'is disabled' : 'is read-only' };
   const previous = document.activeElement;
   self.focus();
   if (document.activeElement !== self && !(editable && self.contains(document.activeElement))) return { ok: false, reason: 'did not take focus' };
@@ -189,28 +194,44 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
 /**
  * A picker field (date, time, month, week, color, range, select) takes a value, not typed text.
  *
- * The value is checked first, so a value the field would not take changes nothing: Chromium answers
- * a malformed date by clearing the field, and an unknown option by deselecting it. A select is matched
- * by option value, then by its visible label. The value then goes through the element's own setter, and
- * input and change follow as a person's pick would fire them. Returns what the setter left (`taken`,
- * which differs from the given value only where the field normalizes it, such as a range clamped to its
- * maximum or seconds dropped from a time) and what the field holds once the page's own handlers ran (`after`).
+ * Every refusal is decided before anything changes, because Chromium answers a value it would not keep
+ * by clearing or resetting the field: a malformed date becomes empty, a range string that is not a
+ * valid floating-point number becomes the midpoint, an unknown option deselects the select.
+ *
+ * - Disabled is `:disabled`, so a field in a disabled fieldset and an option in a disabled optgroup
+ *   count. Read-only applies only to the date and time fields; HTML ignores it on range, color and
+ *   select, and a person can still change those.
+ * - A select takes one option, named by its value or its visible label. When the text names two
+ *   different options (one by value, another by label) or several by label, it is refused with the
+ *   candidates, never resolved by a guess.
+ * - The field must take focus, which a covered, inert or hidden field does not.
+ *
+ * The value then goes through the element's own setter, and input and change follow as a person's pick
+ * would fire them. Returns what the setter left (`taken`, which differs from `wanted` only where the
+ * field normalizes it, such as a range clamped to its maximum or seconds dropped from a time) and what
+ * the field holds once the page's own handlers ran (`after`).
  */
 const SET_PICKER_VALUE_DECLARATION = `function (value) {${RESTORE_FOCUS_SNIPPET}
   const self = this;
-  if (self.disabled || self.readOnly) return { ok: false, reason: self.disabled ? 'is disabled' : 'is read-only' };
   const quoted = JSON.stringify(value);
-  let next = value;
+  if (self.matches(':disabled')) return { ok: false, reason: 'is disabled' };
+  if (self.readOnly && ['date', 'time', 'datetime-local', 'month', 'week'].includes(self.type)) return { ok: false, reason: 'is read-only' };
+  let next = value, index = -1;
   if (self instanceof HTMLSelectElement) {
     const options = Array.from(self.options);
-    const option = options.find((item) => item.value === value) ?? options.find((item) => item.label.trim() === value.trim());
-    if (!option) return { ok: false, reason: 'has no option with the value or label ' + quoted };
-    if (option.disabled) return { ok: false, reason: 'has the option ' + quoted + ' turned off' };
-    next = option.value;
+    const named = options.filter((item) => item.value === value || item.label.trim() === value.trim());
+    const list = (items) => items.slice(0, 8).map((item) => JSON.stringify(item.label.trim()) + ' (value ' + JSON.stringify(item.value) + ')').join(', ') + (items.length > 8 ? ' and ' + (items.length - 8) + ' more' : '');
+    if (!named.length) return { ok: false, reason: 'has no option with the value or label ' + quoted + '; its options are ' + list(options) };
+    if (named.length > 1) return { ok: false, reason: 'has more than one option matching ' + quoted + ': ' + list(named) + '. Give the value of the one you mean' };
+    if (named[0].matches(':disabled')) return { ok: false, reason: 'has the option ' + quoted + ' turned off' };
+    index = named[0].index;
+    next = named[0].value;
   } else if (self.type === 'range') {
-    if (!value.trim() || !Number.isFinite(Number(value))) return { ok: false, reason: 'takes a number, not ' + quoted };
+    // HTML's valid floating-point number; anything else is reset to the midpoint, not refused by Chromium.
+    if (!/^-?(?:[0-9]+(?:[.][0-9]+)?|[.][0-9]+)(?:[eE][-+]?[0-9]+)?$/.test(value)) return { ok: false, reason: 'takes a number such as 7 or 2.5, not ' + quoted };
   } else if (self.type === 'color') {
     if (!/^#[0-9a-fA-F]{6}$/.test(value)) return { ok: false, reason: 'takes a color written #rrggbb, not ' + quoted };
+    next = value.toLowerCase();
   } else if (value !== '') {
     // A detached input of the same type applies the same sanitizing rule without touching the page.
     const trial = document.createElement('input');
@@ -221,12 +242,12 @@ const SET_PICKER_VALUE_DECLARATION = `function (value) {${RESTORE_FOCUS_SNIPPET}
       return { ok: false, reason: 'does not take ' + quoted + ' as a ' + self.type + '; write it like ' + (examples[self.type] ?? 'the field shows') };
     }
   }
-  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(self), 'value')?.set;
-  if (!setter) return { ok: false, reason: 'has no value to set' };
-  const before = self.value;
   const previous = document.activeElement;
   self.focus();
-  setter.call(self, next);
+  if (document.activeElement !== self) return { ok: false, reason: 'did not take focus, so it is covered, inert or hidden' };
+  const before = self.value;
+  if (index >= 0) Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex').set.call(self, index);
+  else Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(self, next);
   const taken = self.value;
   if (taken !== before) {
     self.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
@@ -733,8 +754,13 @@ export function createBrowserPageDispatch(
     guard()
     const set = await inWorld(send, target, SET_PICKER_VALUE_DECLARATION, [{ value }]) as
       { ok?: boolean; reason?: string; taken?: string; after?: string; wanted?: string } | undefined
+    // No answer may come after the setter ran, so whether the field changed is unknown.
+    if (set === undefined) {
+      throw new BrowserLocalRecoveryFailure(`${ref} did not answer after its value was sent, so whether it changed is unknown. Read the field before setting it again.`,
+        'locator-changed', 'unknown')
+    }
     // Every refusal is decided before the setter runs, so the field keeps its value.
-    if (set?.ok !== true) throw notDispatched(`${ref} ${set?.reason ?? 'could not take a value'}. Nothing changed.`)
+    if (set.ok !== true) throw notDispatched(`${ref} ${set.reason ?? 'could not take a value'}. Nothing changed.`)
     if (set.taken !== set.wanted) {
       context.note(`${ref} holds ${JSON.stringify(set.taken)} rather than ${JSON.stringify(value)}; the field normalized it. Read it before relying on it.`)
     } else if (set.after !== set.taken) {
