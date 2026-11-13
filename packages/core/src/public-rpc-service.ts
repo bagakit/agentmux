@@ -2993,8 +2993,7 @@ export class AgentMuxRpcService {
         const missing = !sources.links.some(link=>link.kind==='main'&&link.roleRevision===moteMainBindingDefaults(record).conversationRevision)
         if (missing && method==='space.mote.dialogue.setup.advance') {
           await resourceCall('space.mote.dialogue.link',{target:intent.target,operationId:intent.bindOperationId,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,source:{kind:'main'}})
-          result.issue = null
-        } else if(sources.sourceStatus==='read') result.issue=null
+        }
       }catch(error){result.issue=[result.issue,'The original saved role source remains unconfirmed: '+String(error)].filter(Boolean).join('\n')}
     }
     if(!record||!intent||!intent.deferredInput&&!intent.handover) return result
