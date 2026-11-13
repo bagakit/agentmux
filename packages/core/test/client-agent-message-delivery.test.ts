@@ -77,7 +77,7 @@ async function fixture() {
     disposals.push(async () => await owner.dispose())
   }
   await configure(client)
-  const start = vi.fn(async (_input: { args: string[]; operationKey: string }) => run()), stop = vi.fn()
+  const start = vi.fn(async (_input: { args: string[]; operationKey: string }) => run()), stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
   inner.kernel.start = start; inner.kernel.stop = stop
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43),

@@ -140,6 +140,7 @@ async function replacementAfterInitialization(origin: 'initialization' | 'fronte
   f.inner.kernel.stop = vi.fn(async (operation: { runId: string }) => {
     expect(operation.runId).toBe(successor!.runId)
     successor = { ...successor!, state: { type: 'exited', code: 0, signal: null } }
+    return { disposition: 'graceful' as const }
   })
   return { ...f, managed, historical, retained, events, successor: () => successor!, observeStart: () => { observable = true } }
 }

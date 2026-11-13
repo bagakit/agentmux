@@ -69,7 +69,7 @@ async function fixture() {
   const kernel = (h.core as any).kernel
   kernel.openInput = vi.fn(async (runId: string) => ({ run: { ...h.run(), runId }, waitWritable,
     input: (data: AgentMuxRunInputData) => native(runId, data) }))
-  kernel.stop = vi.fn()
+  kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
   const rawInvoke = async (invocation: unknown, callContext = context, originalFence = fence()) => {
     const result = await rpc.call('runtime.invoke', { fence: originalFence, consumerId: 'terminal-byte-consumer',
       invocation: invocation as AgentMuxHostedInvocation }, callContext)

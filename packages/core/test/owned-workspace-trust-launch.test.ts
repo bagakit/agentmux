@@ -53,7 +53,7 @@ beforeEach(async () => {
   start = vi.fn(async (request: { workspacePath: string }) => run(request.workspacePath))
   inner.kernel.start = start
   inner.kernel.status = async () => run(home)
-  inner.kernel.stop = vi.fn()
+  inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) },
     bindRun: async () => {}, close: async () => {} })

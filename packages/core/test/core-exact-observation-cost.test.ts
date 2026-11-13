@@ -63,7 +63,7 @@ describe('exact Core status and single confirmed Host authentication', () => {
     const inner = cold as unknown as typeof h.inner
     inner.connected = true; inner.kernel.isConnected = () => true
     inner.kernel.status = vi.fn(async (id: string) => h.run(id)); inner.kernel.identity = h.inner.kernel.identity
-    inner.kernel.stop = vi.fn()
+    inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
     try {
       expect(() => cold.agentSession('recipient')).toThrow('Unknown Agent Session')
       h.catalog.mockRejectedValue(new core.AgentMuxError('Unrelated cold inventory is unavailable.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))

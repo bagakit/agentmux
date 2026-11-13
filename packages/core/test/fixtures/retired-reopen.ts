@@ -67,7 +67,7 @@ export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex'
     const index = starts.findIndex(input => input.operationKey === operationKey)
     return index < 0 ? null : { ...run(`new-run-${index + 1}`), lifecycleOperationId: operationKey }
   })
-  inner.kernel.stop = vi.fn(async (operation: { runId: string }) => { stops.push(operation.runId) })
+  inner.kernel.stop = vi.fn(async (operation: { runId: string }) => { stops.push(operation.runId); return { disposition: 'graceful' as const } })
   inner.kernel.prepareStop = vi.fn(async (id: string) => ({ daemonInstance: 'private-daemon', operationKey: `cleanup-${id}`, runId: id }))
   inner.kernel.input = vi.fn(); inner.kernel.disconnect = vi.fn(async () => {})
   inner.hookServer.isRunning = () => true

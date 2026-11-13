@@ -38,7 +38,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     internals.kernel.identity = () => ({ daemonInstanceId: 'test', protocolVersion: 1, buildIdentity: 'test' })
     internals.kernel.status = async (id: string) => run(id)
     internals.kernel.start = async () => run('new-run')
-    const stop = vi.fn()
+    const stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
     internals.kernel.stop = stop
     internals.hookServer.isRunning = () => true
     internals.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'b'),

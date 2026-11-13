@@ -630,7 +630,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
   })
   it('keeps the legally committed new Run usable after Hook observation fails', async () => {
     const harness = await continuityHarness(); await working(harness)
-    const internals = harness.client as any, stop = vi.fn()
+    const internals = harness.client as any, stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
     internals.kernel.stop = stop
     internals.ensureTerminalHandshakeOrDegrade = async () => { throw new Error('observation failed after commit') }
     expect(await harness.client.ensureAgentContinuity(original)).toMatchObject({ kind: 'resumed', run: { runId: 'spawned-run-1' } })

@@ -50,7 +50,7 @@ function connectedClient(): {
   const kernel = internals.kernel
   kernel.isConnected = () => true
   kernel.prepareStop = async (runId: string) => ({ daemonInstance: 'daemon', operationKey: 'key', runId })
-  kernel.stop = async () => {}
+  kernel.stop = async () => ({ disposition: 'graceful' as const })
   internals.connected = true
   const events: AgentMuxClientEvent[] = []
   client.onEvent((event) => events.push(event))

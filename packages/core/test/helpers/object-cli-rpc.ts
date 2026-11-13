@@ -118,6 +118,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'agent.reopen': ['--session', ids.agent, '--retired-at', '12', '--operation-id', 'REOPEN'],
     'agent.restart': ['--session', ids.agent, '--run', 'RUN', '--operation-id', 'RESTART'],
     'agent.restart.inspect': ['--session', ids.agent, '--run', 'RUN', '--operation-id', 'RESTART'],
+    'agent.stop.inspect': ['--session', ids.agent, '--run', 'RUN', '--operation-id', 'STOP'],
     'agent.reopen.check': ['--session', ids.agent, '--retired-at', '12', '--operation-id', 'REOPEN'],
     'agent.output': ['--session', ids.agent], 'agent.send': ['--to-session', ids.agent, '--text', '--help'],
     'agent.discuss': ['--agent', 'E', '--text', 'task'], 'agent.handoff': ['--to-session', ids.agent, '--task', 'T'],

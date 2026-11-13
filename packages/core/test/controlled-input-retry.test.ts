@@ -40,7 +40,7 @@ async function fixture(plan: 'single' | 'render' | 'native' = 'single') {
     const inner = client as unknown as typeof h.inner
     await inner.registry.load('local'); inner.connected = true
     inner.kernel.isConnected = () => true; inner.kernel.identity = () => ({ daemonInstanceId: 'fixture-runtime', protocolVersion: 1, buildIdentity: 'fixture' })
-    inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), ...(plan === 'native' ? { pid: 1234 } : {}) })); inner.kernel.input = writes; inner.kernel.stop = vi.fn()
+    inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), ...(plan === 'native' ? { pid: 1234 } : {}) })); inner.kernel.input = writes; inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
     if (plan === 'single') vi.spyOn(client.providers.get('codex'), 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
     if (plan === 'native') client.providers.get('codex').prepareNativeInput = async (context, selected) => {
       expect(context.nativeActor).toEqual(nativeActor)

@@ -29,7 +29,7 @@ async function fixture(options: { creation?: boolean; native?: boolean } = {}) {
     client = value; inner = value as any
     inner.connected = true; inner.kernel.isConnected = () => true
     inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), state: backendState, pid: 123 }))
-    inner.kernel.start = vi.fn(); inner.kernel.stop = vi.fn(); inner.kernel.input = vi.fn()
+    inner.kernel.start = vi.fn(); inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const })); inner.kernel.input = vi.fn()
     inner.kernel.prepareStop = vi.fn(async (runId: string, operationKey: string) => ({ daemonInstance: 'fixture-runtime', runId, operationKey }))
     inner.kernel.observeLifecycle = vi.fn(async (_run: unknown, changed: () => void) => { readers.push(changed); return async () => {} })
     inner.queueNativeIdentityCapture = vi.fn(); inner.ensureTerminalFrontendObservation = vi.fn(async () => true)

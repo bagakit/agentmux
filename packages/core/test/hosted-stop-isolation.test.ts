@@ -54,7 +54,7 @@ async function fixture() {
   inner.kernel.detach = vi.fn(async () => {})
   inner.kernel.prepareStop = vi.fn(async (runId: string, operationKey: string) => ({ daemonInstance: 'private-stop-daemon', operationKey, runId }))
   const stopEntered = barrier(), globalEntered = barrier()
-  inner.kernel.stop = vi.fn(async (operation: { runId: string }) => { stopped.add(operation.runId); stopEntered.release() })
+  inner.kernel.stop = vi.fn(async (operation: { runId: string }) => { stopped.add(operation.runId); stopEntered.release(); return { disposition: 'graceful' as const } })
   const global = barrier(), connect = vi.spyOn(core, 'connect').mockImplementation(async () => { globalEntered.release(); await global.pending })
   const native = vi.spyOn(core, 'connectRuntime')
   const load = vi.spyOn(inner.registry, 'load')

@@ -36,6 +36,7 @@ async function fixture(kind: 'memory' | 'file', ended = false) {
   internal.kernel.stop = vi.fn(async () => {
     if (ended || !lose) exited = true
     if (lose) throw new Error('original stop receipt lost')
+    return { disposition: 'graceful' as const }
   })
   cleanup.push(() => client.dispose())
   return { client, internal, store, original, allowReceipt: () => { lose = false } }
@@ -47,7 +48,7 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).rejects.toThrow('original stop receipt lost')
     const operation = f.internal.kernel.stop.mock.calls[0][0]
     f.allowReceipt()
-    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toBeUndefined()
+    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId })
     expect(f.internal.kernel.prepareStop).toHaveBeenCalledTimes(1)
     expect(f.internal.kernel.stop.mock.calls.map((call: any[]) => call[0])).toEqual([operation, operation])
     expect(await f.store.loadMetadata()).toEqual([])
@@ -57,7 +58,7 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     const f = await fixture('file', true)
     await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).rejects.toThrow('original stop receipt lost')
     f.allowReceipt()
-    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toBeUndefined()
+    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId })
     expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1)
     expect(f.internal.kernel.prepareStop).toHaveBeenCalledTimes(1)
     expect((await f.store.loadRetiredAgentSessions())[0]?.history?.nativeHandle).toEqual(f.original.nativeHandle)
@@ -66,7 +67,7 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     const f = await fixture('memory')
     let release!: () => void
     const barrier = new Promise<void>(done => { release = done })
-    f.internal.kernel.stop.mockImplementation(async () => { await barrier })
+    f.internal.kernel.stop.mockImplementation(async () => { await barrier; return { disposition: 'graceful' as const } })
     const first = f.client.stopAgent(f.original.agentSessionId, f.original.run)
     await vi.waitFor(() => expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1))
     const second = f.client.stopAgent(f.original.agentSessionId, f.original.run)
@@ -83,7 +84,7 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     const barrier = new Promise<void>(done => { release = done })
     const events: any[] = []
     f.client.onEvent(event => events.push(event))
-    f.internal.kernel.stop.mockImplementation(async () => { await barrier })
+    f.internal.kernel.stop.mockImplementation(async () => { await barrier; return { disposition: 'graceful' as const } })
     const first = f.client.stopAgent(f.original.agentSessionId, f.original.run)
     await vi.waitFor(() => expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1))
     const observed = await f.internal.kernel.status()
@@ -108,7 +109,7 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).rejects.toThrow('Runtime observation unavailable')
     expect(await f.store.readMetadata(f.original.agentSessionId)).toEqual(f.original)
     f.allowReceipt()
-    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toBeUndefined()
+    await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId })
     expect(f.internal.kernel.prepareStop).toHaveBeenCalledTimes(1)
     expect(f.internal.kernel.stop.mock.calls.map((call: any[]) => call[0])).toEqual([operation, operation])
   })
@@ -121,9 +122,9 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     f.allowReceipt()
     const first = f.client.stopAgent(f.original.agentSessionId, f.original.run)
     await vi.waitFor(() => expect(f.internal.kernel.status).toHaveBeenCalledTimes(2))
-    try { await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toBeUndefined() }
+    try { await expect(f.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId }) }
     finally { release() }
-    await expect(first).resolves.toBeUndefined()
+    await expect(first).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId })
     expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1)
   })
   it('late readers retain confirmed retirement errors and preserve a subsequently reopened Run', async () => {
@@ -132,9 +133,9 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     let releaseStop!: () => void, releaseClose!: () => void
     const stopBarrier = new Promise<void>(done => { releaseStop = done })
     const closeBarrier = new Promise<void>(done => { releaseClose = done })
-    f.internal.kernel.stop.mockImplementation(async () => { await stopBarrier })
+    f.internal.kernel.stop.mockImplementation(async () => { await stopBarrier; return { disposition: 'graceful' as const } })
     f.internal.acp.unbind = vi.fn(async () => { await closeBarrier; throw new Error('old ACP close failed') })
-    const outcome = (promise: Promise<void>) => promise.then(() => null, error => error.message)
+    const outcome = (promise: Promise<unknown>) => promise.then(() => null, error => error.message)
     const first = outcome(f.client.stopAgent(f.original.agentSessionId, f.original.run))
     await vi.waitFor(() => expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1))
     f.internal.kernel.status.mockResolvedValue({ ...observed, state: { type: 'exited', code: 0, signal: null }, pid: null })
@@ -154,9 +155,9 @@ describe('explicit Stop retry continues the original lifecycle', () => {
       expect(f.internal.registry.get(f.original.agentSessionId).run).toEqual({ runId: 'reopened-run' })
       expect(f.internal.agentInputLanes.has(f.original.agentSessionId)).toBe(true)
       f.internal.kernel.status.mockResolvedValue({ ...observed, runId: 'reopened-run' })
-      f.internal.kernel.stop.mockImplementation(async () => {})
+      f.internal.kernel.stop.mockImplementation(async () => ({ disposition: 'graceful' as const }))
       f.internal.acp.unbind.mockImplementation(async () => {})
-      await expect(f.client.stopAgent(f.original.agentSessionId, { runId: 'reopened-run' })).resolves.toBeUndefined()
+      await expect(f.client.stopAgent(f.original.agentSessionId, { runId: 'reopened-run' })).resolves.toMatchObject({ agentSessionId: f.original.agentSessionId })
     } finally { releaseClose(); releaseStop() }
     expect(await first).toBe('Agent stopped but Agent Session cleanup failed.')
     expect(f.internal.acp.unbind).toHaveBeenCalledTimes(2)
@@ -190,13 +191,14 @@ describe('explicit Stop retry continues the original lifecycle', () => {
     const observed = await f.internal.kernel.status()
     let release!: () => void
     const barrier = new Promise<void>(done => { release = done })
-    f.internal.kernel.stop.mockImplementation(async () => { await barrier })
+    f.internal.kernel.stop.mockImplementation(async () => { await barrier; return { disposition: 'graceful' as const } })
     f.internal.acp.unbind = vi.fn(async () => {})
     const commit = f.store.commitLifecycle.bind(f.store)
     let lose = true
-    f.store.commitLifecycle = async (reservation, next) => {
-      await commit(reservation, next)
+    f.store.commitLifecycle = async (reservation, next, stop?) => {
+      const committed = await commit(reservation, next, stop)
       if (lose && reservation.kind === 'stop') { lose = false; throw new Error('Applied retirement ACK lost') }
+      return committed
     }
     const first = f.client.stopAgent(f.original.agentSessionId, f.original.run).then(() => null, error => error.code)
     await vi.waitFor(() => expect(f.internal.kernel.stop).toHaveBeenCalledTimes(1))

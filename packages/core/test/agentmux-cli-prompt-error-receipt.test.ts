@@ -100,7 +100,7 @@ async function fixture() {
       cursor = nativeRequests.get(operation.operationId)!.endByte
       return { run: run(), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
     }
-    inner.kernel.stop = async runId => { stops.push(runId) }
+    inner.kernel.stop = async runId => { stops.push(runId); return { disposition: 'graceful' as const } }
     const requests: Parameters<AgentMuxClient['submitAgentMessage']>[0][] = []
     const failures: Array<{ code: string; message: string; detail?: string; logId?: string }> = []
     const host: AgentMuxControlHost = {

@@ -62,7 +62,7 @@ async function fixture() {
     inner.kernel.identity = () => ({ daemonInstanceId: 'private-runtime', protocolVersion: 1, buildIdentity: 'controlled' })
     inner.kernel.status = vi.fn(async (id: string) => run(id))
     inner.kernel.input = writes
-    inner.kernel.stop = vi.fn()
+    inner.kernel.stop = vi.fn(async () => ({ disposition: 'graceful' as const }))
   }
   await installRuntime(client, false)
   const settled = async () => {

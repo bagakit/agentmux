@@ -51,7 +51,7 @@ beforeEach(async () => {
   inner.kernel.identity = () => ({ daemonInstanceId: 'private-adapter', protocolVersion: 18, buildIdentity: 'fixture' })
   inner.kernel.status = async () => run()
   start = vi.fn(async () => run()); inner.kernel.start = start
-  stop = vi.fn(); inner.kernel.stop = stop
+  stop = vi.fn(async () => ({ disposition: 'graceful' as const })); inner.kernel.stop = stop
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43),
     endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })

@@ -40,6 +40,7 @@ client.kernel.stop = async (operation) => {
   if (scenario === 'uncertain-running' && phase === 'first') throw new Error('fixture lost receipt before result')
   run = { ...run, pid: null, state: { type: 'exited', code: 137, signal: 'SIGKILL' } }
   if (scenario === 'uncertain-ended' && phase === 'first') throw new Error('fixture lost receipt after result')
+  return { disposition: 'graceful' }
 }
 let failure
 if (phase === 'first') {

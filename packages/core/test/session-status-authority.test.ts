@@ -80,7 +80,7 @@ async function harness(options: { provider?: string; legacy?: boolean; hookBound
   internal.kernel.input = async (_run: string, op: { data: string }) => { const startByte = inputBytes; inputBytes += Buffer.byteLength(op.data); return { run: run(), appliedByteRange: { startByte, endByte: inputBytes } } }
   internal.kernel.cancelContinuationRender = () => {}
   internal.kernel.prepareStop = async (runId: string, operationKey: string) => ({ runId, operationKey, daemonInstance: 'private-fixture-runtime' })
-  internal.kernel.stop = async () => fixture.stopPrivate()
+  internal.kernel.stop = async () => { await fixture.stopPrivate(); return { disposition: 'graceful' as const } }
   internal.kernel.start = vi.fn(async () => { throw new Error('Private counterexample forbids starting another process') })
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => events.push(event))
   const server = new AgentHookServer((event, signal) => internal.acceptHookEvent(event, signal), 0)
