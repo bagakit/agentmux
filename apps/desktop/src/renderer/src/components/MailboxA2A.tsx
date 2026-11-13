@@ -20,13 +20,22 @@ function a2aDeliveryLabel(delivery: AgentMuxMessageMetadata['delivery']): string
 
 type MessageDelivery = Pick<AgentMuxMessageMetadata, 'deliveryMode' | 'notification' | 'delivery'>
 
+/** What a saved reference still waits for, from Core's automatic path fact; absent stays generic. */
+function awaiting(message: MessageDelivery): { label: string; status: string } {
+  const automatic = message.notification?.automatic
+  return automatic === 'idle-queue' ? { label: 'Awaiting idle notification', status: 'Awaiting notification' }
+    : automatic === 'turn-end' ? { label: 'Awaiting next turn end', status: 'Awaits turn end' }
+    : automatic === 'none' ? { label: 'No automatic notification', status: 'Not notified automatically' }
+    : { label: 'Awaiting notification', status: 'Awaiting notification' }
+}
+
 /** Inbox persistence and notification input do not attest original-body reading. */
 export function a2aMessageDeliveryLabel(message: MessageDelivery): string {
   if (message.deliveryMode !== 'reference') return a2aDeliveryLabel(message.delivery)
   const state = message.notification?.state
   return state === 'submitted' ? 'Saved to inbox · Notification submitted'
     : state === 'unconfirmed' ? 'Saved to inbox · Notification unconfirmed'
-    : state === 'pending' ? message.notification?.notificationId ? 'Saved to inbox · Notification pending' : 'Saved to inbox · Awaiting idle notification' : 'Saved to inbox'
+    : state === 'pending' ? message.notification?.notificationId ? 'Saved to inbox · Notification pending' : `Saved to inbox · ${awaiting(message).label}` : 'Saved to inbox'
 }
 
 /** A short list projection of the original typed fact; complete facts remain in Info. */
@@ -34,7 +43,7 @@ function a2aMessageStatus(message: MessageDelivery): string | undefined {
   if (message.deliveryMode === 'reference') {
     const state = message.notification?.state
     return state === 'unconfirmed' ? 'Notification unconfirmed'
-      : state === 'pending' ? message.notification?.notificationId ? 'Notification pending' : 'Awaiting notification' : undefined
+      : state === 'pending' ? message.notification?.notificationId ? 'Notification pending' : awaiting(message).status : undefined
   }
   const state = message.delivery.state
   return state === 'queued' ? message.delivery.reason ? 'Delivery unconfirmed' : 'Delivery pending'
