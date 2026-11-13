@@ -1,5 +1,5 @@
-.mobile-workface-recovery { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: 12px; line-height: 1.5; }
-.mobile-workface-recovery h3 { margin: 0 0 6px; font-size: 13px; font-weight: 550; }
+.mobile-workface-recovery { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: var(--fs-meta); line-height: 1.5; }
+.mobile-workface-recovery h3 { margin: 0 0 6px; font-size: var(--fs-body); font-weight: 550; }
 .mobile-workface-recovery > p { margin: 8px 0 12px; }
 .mobile-workface-file { margin: 10px 0; }
 .mobile-workface-candidate { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--surface-1); }
