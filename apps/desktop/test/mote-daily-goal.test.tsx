@@ -1419,7 +1419,7 @@ it('Demand picker: common properties and accurate names are in the actual body; 
   await act(async () => root.render(<PickerDetail />))
   expect(container.querySelector('.goals-common-properties')).not.toBeNull()
   expect(container.querySelector('.goals-common-properties')!.compareDocumentPosition(container.querySelector('.goals-intent-body') ?? container.querySelector('.goals-alignment')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-  expect(container.querySelector('.goal-collaboration')).not.toBeNull(); expect(container.querySelector('.goals-execution')).toBeNull()
+  expect(container.querySelector('.goal-collaboration')).not.toBeNull()
   await pickerButton('Choose Goal assignees')
   expect(document.querySelector(`[data-session-id="${session.agentSessionId}"]`)?.textContent).toContain('Named original colleague')
   expect(document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.checked).toBe(true)

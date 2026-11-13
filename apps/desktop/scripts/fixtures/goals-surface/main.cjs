@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
     await size(1280); await capture('1280-list',1280)
     await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")'); await waitFor('Boolean(document.querySelector(".goals-detail"))'); await capture('1280-detail',1280)
     await click('document.querySelector(".goals-properties > summary")'); await capture('1280-properties',1280)
-    await click('document.querySelector(".goals-properties > summary")'); await click('document.querySelector(".goals-execution > summary")'); await capture('1280-execution',1280)
+    await click('document.querySelector(".goals-properties > summary")'); await click('document.querySelector(".goal-collaboration__relationships > summary")'); await capture('1280-execution',1280)
     await click(button('Back to goals')); await click(button('Board view')); await capture('1280-board',1280)
     const geometry=await evaluate('([...document.querySelectorAll(".goals-board-column")].map(e=>({top:e.getBoundingClientRect().top,left:e.getBoundingClientRect().left})))'); assert.equal(geometry.length,5); assert.equal(new Set(geometry.map(x=>x.top)).size,1,'Real board columns remain on one track')
     await click(button('List view')); await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")'); await size(620); await capture('620-detail',620)

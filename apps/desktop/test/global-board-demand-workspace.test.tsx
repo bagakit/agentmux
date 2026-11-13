@@ -25,7 +25,7 @@ describe('Goal reading workspace', () => {
     await act(async () => { row.focus(); row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
     expect(container.querySelector('.goals-list')).toBeTruthy(); expect(container.querySelector('.goals-detail')).toBeTruthy()
     expect(container.querySelector('[aria-label="Goal title"]')).toBeTruthy(); expect(container.querySelector('[aria-label="Goal description"]')).toBeTruthy()
-    expect(container.querySelector('.goals-execution__row')).toBeNull(); expect(container.querySelector('.xterm')).toBeNull(); expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(container.querySelector('.xterm')).toBeNull(); expect(useAppStore.getState().mainSurface).toBe('board')
     await act(async () => (container.querySelector('[aria-label="Back to goals"]') as HTMLButtonElement).click())
     expect(useAppStore.getState().selectedDemandId).toBeNull(); expect(document.activeElement).toBe(row)
   })

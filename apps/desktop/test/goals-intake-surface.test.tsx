@@ -357,7 +357,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     useAppStore.setState({ demands: { 'goal:one': { ...goal(), sessionIds: ['linked'] } }, sessions: [...primary, related, unrelated], selectedDemandId: 'goal:one' })
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · working')
-    expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.querySelector('.agent-topology-summary')).toBeNull()
+    expect(container.querySelector('.agent-topology-summary')).toBeNull()
     await eventually(() => expect(container.textContent).not.toContain('Checking the original continuation'))
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
     await act(async () => useAppStore.setState({ sessions: [...primary, related, { ...unrelated, latestOutputBytes: 900000, updatedAt: _reshape_fixtureEpoch(0, 0, 12) }], tabs: { ...tabs } }))

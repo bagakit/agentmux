@@ -151,11 +151,11 @@ it('main Region: actual Survey item selection updates the common main Region ins
   expect(observed.choice).toMatchObject({ workspaceId: observed.survey.active.displayWorkspaceId,
     groupId: observed.survey.active.groupId, tabId: observed.survey.active.tabId, regionId: observed.survey.active.regionId })
 })
-it('main Region: actual Goals Open in Space chooses main Mote, subsequent native Focus follows that Region', async () => {
+it('main Region: an actual Goals linked Session opens in Space on the main Mote, and native Focus follows that Region', async () => {
   await act(async () => useAppStore.setState({ demands: { 'goal-counter': { id: 'goal-counter', title: 'Retained Goal', sessionIds: [defaultAgent.id], status: 'draft' } } as any }))
   await click('Goals: show goals and progress')
-  const native = container.querySelector<HTMLButtonElement>('.goals-execution__row button')
-  expect(native?.textContent).toContain('Open in Space')
+  const native = [...container.querySelectorAll<HTMLButtonElement>('.goal-collaboration__member')].find(member => !member.disabled)
+  expect(native).toBeTruthy()
   await act(async () => native!.click())
   const global = useAppStore.getState().workbenchSpaceSelection!
   expect(global.regionId).toBe('default-region')
