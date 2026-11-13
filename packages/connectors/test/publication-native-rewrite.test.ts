@@ -13,10 +13,10 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 const assistant = (id: string, text: string) => JSON.stringify({ sessionId: 'ingress-native', uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 const tool = (id: string, input: string) => JSON.stringify({ sessionId: 'ingress-native', uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call-' + id, name: 'exec', input: { cmd: input } }] } }) + '\n'
 
-async function fixture(unknownText?: string, running = false) {
+async function fixture(unknownText?: string, running = false, snapshots = false) {
   const f = await ingressFixture(running, config, undefined, { publication: 'future-shared-conversation' }); cleanup.push(f.close)
   const dispatched: Array<{ key: string; text: string }> = []
-  const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'rewrite-v1', supportedRenderVersions: ['rewrite-v1'], fragmentBytes: 8192,
+  const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'rewrite-v1', supportedRenderVersions: ['rewrite-v1'], fragmentBytes: 8192, replyMetadata: true,
     prepare: operation => ({ adapterId: 'sample', renderVersion: 'rewrite-v1', requestKey: operation.operationId,
       request: { method: 'POST', path: '/messages', body: JSON.stringify({ text: operation.payload.kind === 'speech' ? operation.payload.text : null }) } }),
     dispatch: async (prepared, _target, _credential, _signal, mapping) => {
@@ -26,11 +26,11 @@ async function fixture(unknownText?: string, running = false) {
       return { state: 'confirmed', mapping: mapping ?? { messageId: 'message-' + prepared.requestKey } }
     } }
   const port = createPublicationConversationPort(f.coreClients), changes = port.changes.bind(port)
-  const reads: Array<{ through: unknown; cursor: unknown; rewrite: unknown }> = []
-  port.changes = async (input, signal) => { reads.push({ through: structuredClone(input.through), cursor: input.cursor, rewrite: Reflect.get(input, 'rewrite') }); return await changes(input, signal) }
+  const reads: Array<{ through: unknown; cursor: unknown; rewrite: unknown; recover: boolean }> = []
+  port.changes = async (input, signal) => { reads.push({ through: structuredClone(input.through), cursor: input.cursor, rewrite: Reflect.get(input, 'rewrite'), recover: !!input.recover }); return await changes(input, signal) }
   const open = () => createConnectionServices({ directory: join(f.root, 'rewrite-recovery'),
     adapters: [{ adapterId: 'sample', publication: adapter, ingress: { adapterId: 'sample', verify: f.verifier }, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }],
-    bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref), session: async ref => ref.hostId === 'local' ? f.client.agentSession(ref.agentSessionId) : null }, publication: port, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
+    bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint({ ...ref, ...(snapshots ? { nativeSnapshot: 'scope' as const } : {}) }), session: async ref => ref.hostId === 'local' ? f.client.agentSession(ref.agentSessionId) : null }, publication: port, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
   let services = await open()
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'rewrite-credential', secret: 'private-rewrite-credential' })
@@ -41,8 +41,16 @@ async function fixture(unknownText?: string, running = false) {
   const binding = bound.binding, input = { connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision }
   let host = services.publication!
   await vi.waitFor(async () => expect((await host.list(input)).sourceObservation?.state).toBe('ready'), { timeout: 8000 })
-  const idle = () => vi.waitFor(() => expect((Reflect.get(host, 'lanes') as Map<string, { work?: unknown }>).get(binding.bindingId)?.work).toBeUndefined())
-  const speech = () => host.store.list(binding).filter(op => op.payload.kind === 'speech')
+  const idle = () => vi.waitFor(() => expect((Reflect.get(host, 'lanes') as Map<string, { work?: unknown }>).get(binding.bindingId)?.work).toBeUndefined(), { timeout: 15_000 })
+  const speech = () => {
+    const all = []; let after: string | undefined
+    for (;;) {
+      const page = host.store.list(binding, 100, after); all.push(...page)
+      if (page.length < 100) break
+      after = page.at(-1)!.operationId
+    }
+    return all.filter(op => op.payload.kind === 'speech')
+  }
   /** Ordinary reads from the original scope through one frozen upper. */
   const recoveryReads = () => reads.filter(read => read.through !== undefined || read.rewrite !== undefined).length
   return { ...f, get host() { return host }, binding, input, dispatched, reads, idle, speech, recoveryReads, port, adapter,
@@ -241,3 +249,132 @@ it('drains an already admitted pending operation under a source gap using its or
   expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
   await unavailable(f)
 }, 30_000)
+
+it('automatically backfills independent public replies across an in-place rewrite from the exact original scope without resending confirmed replies', async () => {
+  const f = await fixture(undefined, false, true)
+  const prefix = await readFile(f.transcript)
+  await published(f, 'already-published', 'Already delivered')
+  await appendFile(f.transcript, tool('vanished-tool', 'old bytes '.repeat(100))); f.host.refresh(); await f.idle()
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('missed-before', 'Missed before old reply') + assistant('already-published', 'Already delivered') + assistant('missed-after', 'Missed after old reply'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.map(item => item.text).sort()).toEqual(['Already delivered', 'Missed before old reply', 'Missed after old reply'].sort()), { timeout: 8000 }); await f.idle()
+  expect(f.dispatched.filter(item => item.text === 'Already delivered')).toHaveLength(1)
+  expect(f.speech().every(operation => operation.state === 'confirmed')).toBe(true)
+  const checkpoint = f.host.store.retainedCheckpoint(f.binding)
+  await f.restart(); await f.idle()
+  expect(f.dispatched).toHaveLength(3)
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(checkpoint)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30_000)
+it('keeps the original unknown prepared effect while recovering an independent missed reply through the actual Core → Publication → adapter chain', async () => {
+  const f = await fixture('Unknown original', false, true), prefix = await readFile(f.transcript)
+  await appendFile(f.transcript, assistant('unknown-original', 'Unknown original')); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.state === 'unknown')).toBe(true)); await f.idle()
+  const original = structuredClone(f.speech()[0]!)
+  await appendFile(f.transcript, tool('unknown-vanished', 'old bytes '.repeat(100))); f.host.refresh(); await f.idle()
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('unknown-original', 'Unknown original') + assistant('independent-missed', 'Independent missed reply'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Independent missed reply')).toBe(true), { timeout: 8000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.filter(item => item.text === 'Unknown original')).toHaveLength(1)
+  await f.restart(); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.filter(item => item.text === 'Unknown original')).toHaveLength(1)
+}, 30_000)
+it('prechecks old effect versions before the first recovered effect and preserves a newer confirmed representation', async () => {
+  const f = await fixture(undefined, false, true), prefix = await readFile(f.transcript)
+  await published(f, 'versioned-original', 'Version one')
+  await published(f, 'versioned-original', 'Version two already delivered')
+  const original = structuredClone(f.speech()), sent = [...f.dispatched]
+  await appendFile(f.transcript, tool('obsolete-tail', 'old '.repeat(200))); f.host.refresh(); await f.idle()
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('independent-new', 'Independent recovered reply') + assistant('versioned-original', 'Version one'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Independent recovered reply')).toBe(true), { timeout: 8000 }); await f.idle()
+  expect(f.dispatched.filter(item => item.text === 'Version one')).toHaveLength(sent.filter(item => item.text === 'Version one').length)
+  expect(f.speech().filter(op => original.some(old => old.operationId === op.operationId))).toEqual(original)
+  expect(f.host.store.coverage(f.binding).gaps.some(gap => gap.code === 'CONVERSATION_RECOVERY_VERSION_UNCONFIRMED')).toBe(true)
+  expect(f.speech().filter(op => op.payload.kind === 'speech' && op.payload.text === 'Version one')).toHaveLength(original.filter(op => op.payload.kind === 'speech' && op.payload.text === 'Version one').length)
+}, 30_000)
+it('retains an unknown prepared old version while a different frozen version stays a gap and independent content progresses', async () => {
+  const f = await fixture('Unknown old version', false, true), prefix = await readFile(f.transcript)
+  await appendFile(f.transcript, assistant('same-original', 'Unknown old version')); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(op => op.state === 'unknown')).toBe(true)); await f.idle()
+  const original = structuredClone(f.speech()[0]!)
+  await appendFile(f.transcript, tool('unproven-tail', 'old '.repeat(200))); f.host.refresh(); await f.idle()
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('independent', 'Independent after unknown') + assistant('same-original', 'Unproven changed version'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Independent after unknown')).toBe(true), { timeout: 8000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.some(item => item.text === 'Unproven changed version')).toBe(false)
+  expect(f.dispatched.filter(item => item.text === 'Unknown old version')).toHaveLength(1)
+}, 30_000)
+
+it('durably stages more than one source page before effects and resumes the same frozen range after Host recreation', async () => {
+  const f = await fixture(undefined, false, true), prefix = await readFile(f.transcript)
+  await published(f, 'old-confirmed', 'Original confirmed effect')
+  const old = structuredClone(f.speech()[0]), original = f.host.store.retainedCheckpoint(f.binding)
+  const changes = f.port.changes.bind(f.port); let frozenReads = 0, held = false
+  f.port.changes = async (input, signal) => {
+    if (input.through && input.limit === 100 && ++frozenReads === 2) {
+      held = true
+      await new Promise<void>((resolve, reject) => {
+        if (signal.aborted) reject(signal.reason)
+        else signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }
+    return await changes(input, signal)
+  }
+  const wanted = Array.from({ length: 135 }, (_, n) => 'Recovered page reply ' + n)
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(wanted.map((text, n) => assistant('recovered-' + n, text)).join('') + assistant('old-confirmed', 'Original confirmed effect'))])); f.host.refresh()
+  await vi.waitFor(() => expect(held).toBe(true), { timeout: 10_000 })
+  expect(f.host.store.nativeRecovery(f.binding)?.phase).toBe('scanning')
+  expect(f.host.store.retainedCheckpoint(f.binding)?.frontier.cuts.find(c => c.kind === 'native')).toEqual(original?.frontier.cuts.find(c => c.kind === 'native'))
+  expect(f.dispatched.filter(item => wanted.includes(item.text))).toHaveLength(0)
+  await f.restart()
+  await vi.waitFor(() => expect(f.dispatched.filter(item => wanted.includes(item.text))).toHaveLength(wanted.length), { timeout: 20_000 })
+  await f.idle()
+  expect(new Set(f.dispatched.map(item => item.key)).size).toBe(f.dispatched.length)
+  expect(f.host.store.inspect(old.operationId)).toEqual(old)
+  expect(f.host.store.nativeRecovery(f.binding)?.phase).toBe('complete')
+}, 35_000)
+
+for (const field of ['phase', 'metrics'] as const) it(`retains the admitted old ${field} version of the same public text during recovery`, async () => {
+  const f = await fixture(undefined, false, true), prefix = await readFile(f.transcript)
+  const row = (phase: string, outputTokens: number) => JSON.stringify({ sessionId: 'ingress-native', uuid: 'same-metadata', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Same authored body' }], stop_reason: phase, usage: { input_tokens: 8, output_tokens: outputTokens } } }) + '\n'
+  await appendFile(f.transcript, row('end_turn', 22)); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(operation => operation.state === 'confirmed')).toBe(true)); await f.idle()
+  const original = structuredClone(f.speech()[0]); expect(original.payload).toMatchObject({ phase: 'final', replyMetadata: { metrics: { usage: { outputTokens: 22 } } } })
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(row(field === 'phase' ? 'tool_use' : 'end_turn', field === 'metrics' ? 7 : 22) + assistant('independent-metadata', 'Independent metadata recovery'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(value => value.text === 'Independent metadata recovery')).toBe(true), { timeout: 8000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.speech().filter(value => value.reference.source.kind === 'native' && value.reference.source.recordId === 'same-metadata')).toEqual([original])
+  expect((await f.host.list(f.input)).coverage?.gaps.some(gap => gap.code === 'CONVERSATION_RECOVERY_VERSION_UNCONFIRMED')).toBe(true)
+})
+
+it('keeps the event loop and unrelated binding responsive while qualifying an 18k-record 69 MB source', async () => {
+  const f = await fixture(undefined, false, true), other = await fixture(), prefix = await readFile(f.transcript)
+  await published(f, 'old-large-confirmed', 'Original large-source effect')
+  const beforeOther = other.reads.length, original = structuredClone(f.speech()[0])
+  const rows = Array.from({ length: 18_000 }, (_, n) => tool('large-private-' + n, 'x'.repeat(3650))).join('')
+  let ticks = 0, largestDelay = 0, last = performance.now()
+  const timer = setInterval(() => { const now = performance.now(); largestDelay = Math.max(largestDelay, now - last); last = now; ticks++ }, 5)
+  const started = performance.now()
+  try {
+    await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(rows + assistant('old-large-confirmed', 'Original large-source effect') + assistant('new-large-tail', 'Recovered after large private history'))])); f.host.refresh()
+    await vi.waitFor(() => expect(f.dispatched.some(value => value.text === 'Recovered after large private history')).toBe(true), { timeout: 150_000, interval: 100 })
+    await f.idle()
+  } finally { clearInterval(timer) }
+  expect(ticks).toBeGreaterThan(10); expect(largestDelay).toBeLessThan(1000)
+  expect(other.reads.length).toBeLessThanOrEqual(beforeOther + 1)
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  console.info('NATIVE_RECOVERY_COST', JSON.stringify({ records: 18_000, bytes: Buffer.byteLength(rows), ms: Math.round(performance.now() - started), ticks, largestDelay: Math.round(largestDelay), unrelatedReads: other.reads.length - beforeOther }))
+}, 165_000)
+
+it('qualifies every original effect beyond 100 identities before admitting a recovered record', async () => {
+  const f = await fixture(undefined, false, true), prefix = await readFile(f.transcript)
+  const replies = Array.from({ length: 110 }, (_, n) => assistant('original-many-' + n, 'Confirmed original ' + n))
+  await appendFile(f.transcript, replies.join('')); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().filter(value => value.state === 'confirmed')).toHaveLength(110), { timeout: 15_000 }); await f.idle()
+  const originals = structuredClone(f.speech())
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('new-many-before', 'New before complete effect inventory') + replies.slice(0, 109).join('') + assistant('original-many-109', 'Unconfirmed changed last identity') + assistant('new-many-after', 'New after complete effect inventory'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(value => value.text === 'New after complete effect inventory')).toBe(true), { timeout: 15_000 }); await f.idle()
+  for (const original of originals) expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.some(value => value.text === 'Unconfirmed changed last identity')).toBe(false)
+  expect(f.dispatched.filter(value => value.text.startsWith('Confirmed original '))).toHaveLength(110)
+}, 35_000)
