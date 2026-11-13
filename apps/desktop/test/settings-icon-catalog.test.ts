@@ -31,16 +31,16 @@ it('discovers the exact shared semantic catalog through the actual Main owner, p
   expect(discovered).toMatchObject({ resource: 'themes', iconCatalog: catalog, issues: [] })
   if (discovered.resource !== 'themes') throw new Error('Expected a theme catalog response.')
   expect(discovered.iconCatalog).toEqual(catalog)
-  const expected = { 'object.mote': 'mote-companion', 'avatar.badge-spark': 'badge-token', 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'goal-consensus', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
+  const expected = { 'object.mote': 'mote-companion', 'avatar.badge-spark': 'badge-token', 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'space-workchamber', 'navigation.focus': 'focus-workframe', 'navigation.goals': 'goal-consensus', 'navigation.recall': 'recall-fold', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
   for (const [id, defaultGlyph] of Object.entries(expected)) expect(discovered.iconCatalog.icons.find(icon => icon.id === id), `public semantic discovery: ${id}`).toMatchObject({ id, defaultGlyph, label: expect.any(String), description: expect.any(String) })
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'object.agent-creation')).toMatchObject({ id: 'object.agent-creation', defaultGlyph: 'plus', label: 'Agent creation relation' })
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'conversation.tool-result')).toMatchObject({ id: 'conversation.tool-result', defaultGlyph: 'tool-return', label: 'Tool result' })
   expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['tool-return', 'mote-mark', 'mote-identity', 'mote-companion', 'badge-token']))
-  const modules = { 'object.session-recovery': 'session-resume', 'object.capsule': 'capsule-page', 'object.user-input': 'user-input-field', 'object.agent-messaging': 'git-compare-arrows', 'object.amux-protocols': 'protocol-frame' }
+  const modules = { 'object.session-recovery': 'session-resume', 'object.capsule': 'capsule-page', 'object.user-input': 'user-input-field', 'object.agent-messaging': 'agent-message-relay', 'object.amux-protocols': 'protocol-frame' }
   const moduleRows = discovered.iconCatalog.icons.filter(icon => Object.hasOwn(modules, icon.id))
   expect(moduleRows).toHaveLength(5)
   for (const [id, defaultGlyph] of Object.entries(modules)) expect(moduleRows.find(icon => icon.id === id), id).toMatchObject({ id, groupId: 'object', defaultGlyph, label: expect.any(String), description: expect.any(String) })
-  expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['capsule-page', 'user-input-field', 'protocol-frame', 'session-resume', 'git-compare-arrows']))
+  expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['capsule-page', 'user-input-field', 'protocol-frame', 'session-resume', 'agent-message-relay']))
 
   const cli = await runCompiledObjectCli(['settings', 'themes', 'ls'], objectCliEnvironment(directory))
   expect(cli.code, cli.stderr).toBe(0)
