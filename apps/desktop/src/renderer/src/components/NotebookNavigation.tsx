@@ -21,7 +21,6 @@ const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeActionCreateSubnoteIcon = semanticIconComponent('action.create-subnote')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const NotebookIcon = semanticIconComponent('object.notebook')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const RelationshipsIcon = semanticIconComponent('object.relationships')
 
@@ -87,7 +86,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onOpe
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><ThemeActionCreateNoteIcon size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><ThemeActionSearchIcon size={14} /><TextInput aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
       {view === 'cards' ? <NotebookCards pages={visiblePages} onOpen={onOpen} onTalk={onTalk} /> : view === 'graph' ? <NotebookGraph notebookId={notebook.notebookId} pages={visiblePages} expandOnFirstView={!query.trim() && !archived} onOpen={onOpen} onOpenFile={onOpenFile} onTalk={onTalk} active={active} /> : <NotebookDirectoryContextMenu pages={visiblePages} onTalk={onTalk}><div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} data-note-id={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
-        <ThemeObjectNoteIcon size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ThemeActionOpenExternalIcon size={14} />
+        <ThemeObjectNoteIcon size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span>
       </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div></NotebookDirectoryContextMenu>} {view !== 'tree' && !rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>
 }
