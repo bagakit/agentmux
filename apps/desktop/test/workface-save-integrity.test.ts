@@ -6,7 +6,8 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { addTabOccurrence, createWorkspaceLayout, moveTab, moveTabToNewGroup } from '@agentmux/layout'
 import { parseAgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { desktopSpatialGraph, desktopWorkbenchFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopWorkbenchFromSpatial, DesktopSpatialPersistence, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
+import { reconcileSpatialGraphs } from '../src/renderer/src/lib/spatial-merge'
 import { attachLauncherAgentPosition } from '../src/main/goal-discussion-handoff'
 import { workfaceSaveRecorder } from '../src/renderer/src/lib/workface-save-diagnostics'
 import type { AgentMuxClientIncidentReport } from '@agentmux/core/client-incident'
@@ -511,6 +512,7 @@ describe('a replaced spatial owner stays quiet', () => {
     await clock.advance(SAVE_STALL_AFTER_MS * 64)
     expect(clock.pending()).toBe(0)
     expect(commits).toBe(1)
-    expect(warnings.filter(warning => (warning as { code?: string }).code === 'SPATIAL_SAVE_STALLED')).toEqual([])
+    // Not the late failure of its own save either: nobody owns that outcome any more.
+    expect(warnings).toEqual([])
   })
 })

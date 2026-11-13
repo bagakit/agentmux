@@ -11,7 +11,8 @@ import { admitSpatialAgentOpen } from '../../../packages/core/src/spatial-agent-
 import { createWorkspaceLayout, addTabOccurrence, moveTabToNewGroup } from '@agentmux/layout';
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs';
 import { projectPersistedWorkbench, restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence';
-import { desktopSpatialGraph, desktopWorkbenchFromSpatial, desktopBindingsFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state';
+import { desktopSpatialGraph, desktopWorkbenchFromSpatial, desktopBindingsFromSpatial, DesktopSpatialPersistence } from '../src/renderer/src/lib/desktop-spatial-state';
+import { reconcileSpatialGraphs } from '../src/renderer/src/lib/spatial-merge';
 import type { AppConfig } from '../src/shared/contracts';
 import { agent } from './helpers/workface-control-fixture';
 const config: AppConfig = { version: 9, hosts: [{ id: 'host', kind: 'local', label: 'Local' }], executors: {}, workspaces: [{ id: 'resource', name: 'Project', hostId: 'host', path: _hygiene_fixturePath("project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } };
