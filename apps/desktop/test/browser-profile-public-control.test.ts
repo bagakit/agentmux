@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createCipheriv, createDecipheriv } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +12,13 @@ import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
 import { createBrowserProfileUsage } from '../src/main/browser-profile-usage.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from '../src/main/browser-profile-control.js'
+import { createBrowserProfileNetworkControl } from '../src/main/browser-profile-network-control.js'
+import { createBrowserProfileProxyAuth } from '../src/main/browser-profile-proxy-auth.js'
+import { createBrowserProfileExitCheck } from '../src/main/browser-profile-exit-check.js'
+import { AgentMuxControlServer } from '../../../packages/core/src/control-host.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import { objectCliReceipt } from '../../../packages/core/test/helpers/object-cli-receipt.js'
+import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-rpc-core.js'
 
 const DEFAULT_ID = '11111111-1111-4111-8111-111111111111'
 const WORK_ID = '22222222-2222-4222-8222-222222222222'
@@ -47,7 +55,19 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
     deleteProfile: (profileId, approval) => profiles.deleteProfile(profileId, approval),
     clearPreviews
   })
-  return { profiles, usage, announced, clearPreviews, applied, route }
+  const credentialPath = join(root, 'proxy-auth.json')
+  const key = Buffer.alloc(32, 7), iv = Buffer.alloc(16, 3)
+  const crypto = { available: () => true,
+    encrypt: (text: string) => { const cipher = createCipheriv('aes-256-cbc', key, iv); return Buffer.concat([cipher.update(text), cipher.final()]) },
+    decrypt: (data: Buffer) => { const cipher = createDecipheriv('aes-256-cbc', key, iv); return Buffer.concat([cipher.update(data), cipher.final()]).toString() } }
+  const proxyAuth = createBrowserProfileProxyAuth({ path: credentialPath, crypto,
+    profileOfSession: () => WORK_ID, proxyOf: id => profiles.proxyOf(id), report: () => {} })
+  const fetch = vi.fn(async () => ({ status: 200, text: async () => '203.0.113.9' }))
+  const checkExit = createBrowserProfileExitCheck({ session: () => ({ fetch }) as never,
+    prepare: id => profiles.prepareSession(id), now: () => 1 })
+  const reconnect = vi.fn(async () => {})
+  const network = createBrowserProfileNetworkControl({ profiles, proxyAuth, checkExit, checkAddress: () => 'https://check.example/', reconnect })
+  return { root, profiles, usage, network, proxyAuth, credentialPath, fetch, reconnect, announced, clearPreviews, applied, route }
 }
 
 // Build each request with the public codec, as the Core service does before Main sees it.
@@ -65,6 +85,76 @@ async function call(ports: Awaited<ReturnType<typeof owners>>, fields: Record<st
 }
 
 describe('Public Browser Profile control runs through the Main Profile owners', () => {
+  it('runs the built CLI through the public service into the original credential and network-check owners', async () => {
+    const ports = await owners()
+    await ports.profiles.initialize()
+    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, 0)
+    const core = await privateRpcCorePort(join(ports.root, 'sessions.json'), join(ports.root, 'messages.ndjson'))
+    const server = new AgentMuxControlServer({ socketPath: join(ports.root, 'control.sock'), coreClients: core.clients,
+      execute: async (request, context) => {
+        if (!isBrowserProfileControlRequest(request)) throw new Error('Unexpected non-Profile operation')
+        return await executeBrowserProfileControl(request, ports, context?.actor)
+      } })
+    await server.start()
+    const secret = 'proxy-owner-password-sentinel'
+    const env = objectCliEnvironment(ports.root, { NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: ports.root })
+    const run = async (args: string[], stdin = '') => {
+      const output = await runCompiledObjectCli(['browser', 'profile', ...args], env, stdin)
+      expect(output.code, output.stderr).toBe(0)
+      expect(output.stdout + output.stderr).not.toContain(secret)
+      return objectCliReceipt(JSON.parse(output.stdout)).result
+    }
+    try {
+      expect(await run(['proxy-sign-in', 'set', '--profile', WORK_ID, '--input', '-'], JSON.stringify({ username: 'alice', password: secret })))
+        .toEqual({ profileId: WORK_ID, saved: true, reconnected: true })
+      expect(await ports.proxyAuth.username(WORK_ID)).toBe('alice')
+      expect(await readFile(ports.credentialPath, 'utf8')).not.toContain(secret)
+      const answer = vi.fn()
+      await expect(ports.proxyAuth.answer({ session: {}, isDestroyed: () => false } as never, { isProxy: true, host: 'proxy.example', port: 8080 }, answer)).resolves.toBe(true)
+      expect(answer).toHaveBeenCalledWith('alice', secret)
+      expect(await run(['network', 'check', '--profile', WORK_ID])).toEqual({ profileId: WORK_ID,
+        check: { status: 'reachable', httpStatus: 200, latencyMs: 0, ip: '203.0.113.9' } })
+      expect(ports.fetch).toHaveBeenCalledWith('https://check.example/', expect.objectContaining({ method: 'GET', cache: 'no-store' }))
+      expect(await run(['proxy-sign-in', 'clear', '--profile', WORK_ID])).toEqual({ profileId: WORK_ID, cleared: true, reconnected: true })
+      expect(await ports.proxyAuth.username(WORK_ID)).toBeNull()
+      expect(ports.reconnect).toHaveBeenCalledTimes(2)
+    } finally { await server.stop(); await core.dispose() }
+  }, 20_000)
+
+  it('returns the saved/cleared fact when reconnecting fails, without repeating or undoing the credential write', async () => {
+    const ports = await owners()
+    await ports.profiles.initialize()
+    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, 0)
+    ports.reconnect.mockRejectedValue(new Error('A connection could not be released.'))
+    expect(await call(ports, { operation: 'browser.profile.proxy-sign-in.set', profileId: WORK_ID, signIn: { username: 'alice', password: 'private' } }))
+      .toEqual({ profileId: WORK_ID, saved: true, reconnected: false })
+    expect(await ports.proxyAuth.username(WORK_ID)).toBe('alice')
+    expect(await call(ports, { operation: 'browser.profile.proxy-sign-in.clear', profileId: WORK_ID }))
+      .toEqual({ profileId: WORK_ID, cleared: true, reconnected: false })
+    expect(await ports.proxyAuth.username(WORK_ID)).toBeNull()
+  })
+
+  it.each([['managed Agent', agent], ['unverified caller', { kind: 'user', id: null, verified: false } as AgentMuxNameActor], ['no recorded caller', null]])(
+    'refuses proxy writes by a %s while keeping the same network check available', async (_name, actor) => {
+      const ports = await owners()
+      const set = vi.spyOn(ports.network, 'setProxySignIn')
+      for (const fields of [{ operation: 'browser.profile.proxy-sign-in.set', profileId: WORK_ID, signIn: { username: 'alice', password: 'private' } },
+        { operation: 'browser.profile.proxy-sign-in.clear', profileId: WORK_ID }]) {
+        await expect(call(ports, fields, actor)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON' })
+      }
+      expect(set).not.toHaveBeenCalled()
+      expect(await call(ports, { operation: 'browser.profile.network.check', profileId: WORK_ID }, actor)).toMatchObject({ profileId: WORK_ID, check: { status: 'reachable' } })
+    })
+
+  it('preserves an unknown network observation and rejects secret-bearing results', async () => {
+    const ports = await owners()
+    ports.fetch.mockRejectedValueOnce(new Error('net::ERR_PROXY_CONNECTION_FAILED'))
+    expect(await call(ports, { operation: 'browser.profile.network.check', profileId: WORK_ID })).toEqual({ profileId: WORK_ID,
+      check: { status: 'unknown', reason: 'ERR_PROXY_CONNECTION_FAILED', latencyMs: 0 } })
+    expect(() => parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'op-1', ok: true,
+      operation: 'browser.profile.proxy-sign-in.set', result: { profileId: WORK_ID, saved: true, reconnected: true, password: 'private' } }))
+      .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  })
   it('answers ls, inspect, create, update and set-default from the manager, each matching the GUI list', async () => {
     const ports = await owners([{ profileId: WORK_ID, browserId: 'b-open' }])
     expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, profiles: ports.profiles.listProfiles() })

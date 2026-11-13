@@ -1,7 +1,7 @@
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { privateRpcCorePort } from './helpers/private-rpc-core.js'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -74,6 +74,15 @@ describe('browser profile built CLI reaches the public Control owner', () => {
               { details: { browsers: [{ browserId: 'b-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
             profiles = profiles.filter(profile => profile.id !== request.profileId); revision += 1
             return { operation: request.operation, revision, profileId: request.profileId, deleted: true }
+          case 'browser.profile.proxy-sign-in.set':
+            find(request.profileId)
+            return { operation: request.operation, profileId: request.profileId, saved: true, reconnected: true }
+          case 'browser.profile.proxy-sign-in.clear':
+            find(request.profileId)
+            return { operation: request.operation, profileId: request.profileId, cleared: true, reconnected: true }
+          case 'browser.profile.network.check':
+            find(request.profileId)
+            return { operation: request.operation, profileId: request.profileId, check: { status: 'unknown', reason: 'No answer', latencyMs: 12 } }
           case 'open.browser': {
             const used = request.mode === 'private' ? undefined : find(request.profileId ?? profiles.find(profile => profile.isDefault)!.id)
             return { operation: request.operation, region: { tabId: 't-1', regionId: 'r-new', workspaceId: 'w-1', kind: 'browser', browserId: 'b-new',
@@ -89,11 +98,50 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   // NODE_NO_WARNINGS keeps the runtime's experimental-feature notice off stderr, where the receipt is read.
   const person = () => objectCliEnvironment(root, { NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined })
   const agent = () => objectCliEnvironment(root, { NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_AGENT_SESSION_ID: 'managed', AGENTMUX_AGENT_CAPABILITY: capability })
-  async function run(args: readonly string[], env = person()) {
-    const output = await runCompiledObjectCli(['browser', 'profile', ...args], env)
+  async function run(args: readonly string[], env = person(), stdin = '') {
+    const output = await runCompiledObjectCli(['browser', 'profile', ...args], env, stdin)
     return { ...output, body: objectCliReceipt(JSON.parse(output.code === 0 ? output.stdout : output.stderr)) }
   }
   const requests = () => seen.map(({ request: { schemaVersion: _v, requestId: _id, ...body } }) => body)
+
+  it('accepts proxy secrets only from file/stdin and keeps them out of every receipt and malformed-input error', async () => {
+    const secret = 'proxy-password-sentinel'
+    const input = JSON.stringify({ username: 'alice', password: secret })
+    const path = join(root, 'proxy-sign-in.json')
+    await writeFile(path, input)
+    for (const [file, stdin] of [[path, ''], ['-', input]]) {
+      const saved = await run(['proxy-sign-in', 'set', '--profile', WORK_ID, '--input', file!], person(), stdin)
+      expect(saved.code, saved.stderr).toBe(0)
+      expect(saved.body.result).toEqual({ profileId: WORK_ID, saved: true, reconnected: true })
+      expect(saved.stdout + saved.stderr).not.toContain(secret)
+      expect(requests().at(-1)).toEqual({ operation: 'browser.profile.proxy-sign-in.set', profileId: WORK_ID, signIn: { username: 'alice', password: secret } })
+    }
+    for (const malformed of [`{"password":"${secret}"`, JSON.stringify({ username: 'alice', password: secret, [secret]: true })]) {
+      const before = seen.length
+      const result = await run(['proxy-sign-in', 'set', '--profile', WORK_ID, '--input', '-'], person(), malformed)
+      expect(result.code).toBe(1)
+      expect(result.stdout + result.stderr).not.toContain(secret)
+      expect(seen).toHaveLength(before)
+    }
+    const args = await run(['proxy-sign-in', 'set', '--profile', WORK_ID, '--username', 'alice', '--password', secret])
+    expect(args.code).toBe(1)
+    expect(args.stdout + args.stderr).not.toContain(secret)
+    expect((await run(['proxy-sign-in', 'clear', '--profile', WORK_ID])).body.result).toEqual({ profileId: WORK_ID, cleared: true, reconnected: true })
+  }, 20_000)
+
+  it('refuses managed Agent proxy writes before Main, while returning the original network observation', async () => {
+    for (const [args, stdin] of [
+      [['proxy-sign-in', 'set', '--profile', WORK_ID, '--input', '-'], '{"username":"alice","password":"private"}'],
+      [['proxy-sign-in', 'clear', '--profile', WORK_ID], '']
+    ] as const) {
+      const refused = await run(args, agent(), stdin)
+      expect(refused.body.error.code).toBe('BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON')
+      expect(seen).toEqual([])
+    }
+    const check = await run(['network', 'check', '--profile', WORK_ID], agent())
+    expect(check.code, check.stderr).toBe(0)
+    expect(check.body.result).toEqual({ profileId: WORK_ID, check: { status: 'unknown', reason: 'No answer', latencyMs: 12 } })
+  })
 
   // Seven built-CLI processes run in sequence; each pays Node startup, so this journey gets its own deadline.
   it('lists, inspects, creates, edits and moves the default through the owner, returning only Profile facts', async () => {
@@ -263,11 +311,19 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     await server.stop()
     const top = await runCompiledObjectCli(['browser', 'profile', '--help'], person())
     expect(top.code).toBe(0)
-    for (const action of ['ls', 'inspect', 'create', 'update', 'set-default', 'delete']) expect(top.stdout).toContain(`browser profile ${action}`)
+    for (const action of ['ls', 'inspect', 'create', 'update', 'set-default', 'delete', 'proxy-sign-in', 'network']) expect(top.stdout).toContain(`browser profile ${action}`)
+    const network = await runCompiledObjectCli(['browser', 'profile', 'network', '--help'], person())
+    expect(network.stdout).toContain('browser profile network check --profile ID')
     const update = await runCompiledObjectCli(['browser', 'profile', 'update', '--help'], person())
     expect(update.stdout).toContain('--hue N | --clear-hue'); expect(update.stdout).toContain('BROWSER_PROFILE_REVISION_CONFLICT')
     const remove = await runCompiledObjectCli(['browser', 'profile', 'delete', '--help'], person())
     expect(remove.stdout).toContain('BROWSER_PROFILE_DELETE_REQUIRES_PERSON'); expect(remove.stdout).toContain('BROWSER_PROFILE_IN_USE')
+    const signIn = await runCompiledObjectCli(['browser', 'profile', 'proxy-sign-in', 'set', '--help'], person())
+    expect(signIn.stdout).toContain('--input FILE|-')
+    expect(signIn.stdout).toContain('BROWSER_PROFILE_PROXY_AUTH_REQUIRES_PERSON')
+    const skill = await runCompiledObjectCli(['browser', '--skill'], person())
+    expect(skill.stdout).toContain('browser profile proxy-sign-in set')
+    expect(skill.stdout).toContain('browser profile network check')
     expect(seen).toEqual([])
   })
 })
