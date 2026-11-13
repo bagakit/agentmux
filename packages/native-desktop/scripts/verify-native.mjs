@@ -20,7 +20,7 @@ if (args.includes('--help')) {
   process.stdout.write(`Usage: node packages/native-desktop/scripts/verify-native.mjs --source-only
        node packages/native-desktop/scripts/verify-native.mjs --source [--scratch-path PATH]
 --source-only parses Swift syntax only; no SDK typecheck, test, build or UI.
---source runs real Swift tests/build, two nonempty test-killed mutants and the production Node client against native OS dispatch.
+--source runs real Swift tests/build, nonempty test-killed mutants and the production Node client against native OS dispatch.
 It launches an isolated AppKit window, sends real input to that exact process/window and captures only its pixels.
 No application assembly, signing, installation, permission changes or user clipboard writes.
 Actual capture may show macOS consent; the runner never approves it. Missing authorization fails the requested scope.
@@ -95,6 +95,7 @@ function verifyMutations(evidence, moduleCache, testFlags) {
   const definitions = [
     { name: 'ax-unknown-must-not-fallback', file: 'NativeAXReply.swift', from: 'default: .unknown', to: 'default: .unsupported', filter: 'NativeAXReplyTests' },
     { name: 'pixels-are-mutations', file: 'NativePeerPolicy.swift', from: 'case "getAppState": includesScreenshot', to: 'case "getAppState": false', filter: 'NativePeerPolicyTests' },
+    { name: 'kernel-process-start', file: 'NativeProcessStart.swift', from: 'return Double(start.tv_sec) * 1000 + Double(start.tv_usec) / 1000', to: 'return nil', filter: 'NativeProcessStartTests' },
   ]
   assert(definitions.length > 0, 'Mutation collection must not be empty')
   return definitions.map(definition => {
