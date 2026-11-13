@@ -23,6 +23,11 @@
 .conversation-capsule__mode { display: block; margin-top: var(--sp-2); color: var(--text-3); }
 .conversation-capsule__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; }
 .conversation-capsule__actions { gap: 2px; }
+.conversation-capsule__waiting { height: 28px; display: inline-flex; align-items: center; gap: 4px; margin-right: var(--sp-1); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm);
+  background: var(--green-bg); color: var(--green-text); font: 600 var(--fs-micro) var(--font-sans); font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 120ms ease; }
+.conversation-capsule__waiting:hover { background: var(--green-bg-hover); }
+.conversation-capsule__waiting:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .conversation-capsule__waiting { transition: none; } }
 .conversation-capsule__tool { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); box-shadow: none;
   transition: background-color 120ms ease, color 120ms ease; }
 .conversation-capsule__tool:hover { background: var(--surface-2); color: var(--text); }

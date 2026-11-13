@@ -16,6 +16,11 @@
 .capsule-chrome__heading span, .capsule-chrome__empty, .capsule-chrome__notice { color: var(--text-2); }
 .capsule-chrome__heading > button { flex: none; }
 .capsule-chrome__empty, .capsule-chrome__notice { margin: var(--sp-2) 0; line-height: 1.5; }
+.capsule-chrome__issue { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.capsule-chrome__issue > svg { flex: none; }
+.capsule-chrome__issue > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.capsule-chrome__issue > .small-button { flex: none; padding: 2px var(--sp-2); background: transparent; box-shadow: none; }
+.capsule-chrome { scroll-margin-bottom: var(--sp-6); }
 .capsule-question { border-top: 1px solid var(--line-soft); padding: var(--sp-3) 0; }
 .capsule-question:first-of-type { border-top: 0; padding-top: 0; }
 .capsule-question__history > summary { cursor: pointer; color: var(--text-2); line-height: 1.5; }

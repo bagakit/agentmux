@@ -9,9 +9,14 @@ import { CapsuleQuestionReply } from './CapsuleQuestionReply'
 
 const QuestionsIcon = semanticIconComponent('object.collaboration')
 const RefreshIcon = semanticIconComponent('action.refresh')
+const IssueIcon = semanticIconComponent('status.info')
 
-export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible = true, toolbarHost, embedded = false }: {
+export type CapsuleAttention = 'pending' | 'none' | 'unconfirmed'
+
+/** openRequest: each increment opens the trusted answer panel and brings it into view, e.g. from a card header marker. */
+export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible = true, toolbarHost, embedded = false, onAttention, openRequest = 0 }: {
   capsuleId: string; browserId?: string; active: boolean; visible?: boolean; toolbarHost: HTMLElement | null; embedded?: boolean
+  onAttention?: (attention: CapsuleAttention, pending: number | undefined) => void; openRequest?: number
 }) {
   const panelId = useId()
   const [page, setPage] = useState<CapsuleInspection | null>(null)
@@ -19,6 +24,8 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
+  const [issue, setIssue] = useState('')
+  const panelRef = useRef<HTMLElement>(null)
   const generation = useRef(0)
   const refresh = useCallback(async () => {
     const observed = ++generation.current
@@ -27,8 +34,9 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
       const [inspection, result] = await Promise.allSettled([api.capsules.call('capsule.inspect', { capsuleId }), api.capsules.call('capsule.interaction.ls', { capsuleId })])
       if (generation.current !== observed) return
       const issues: string[] = []
-      if (inspection.status === 'fulfilled') setPage(inspection.value)
-      else issues.push(`Page information could not be refreshed. ${presentError(inspection.reason)}`)
+      // Page details are context for the answer; their refresh failure stays a quiet status after the questions.
+      if (inspection.status === 'fulfilled') { setPage(inspection.value); setIssue('') }
+      else setIssue(`Couldn't refresh page details. ${presentError(inspection.reason)}`)
       if (result.status === 'fulfilled') {
         setQuestions(current => {
           const known = new Map(current?.filter(question => question.capsuleId === capsuleId).map(question => [question.interactionId, question]))
@@ -48,7 +56,13 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
   // Only a question that can reach an exact recipient asks the person for an answer.
   const pending = questions?.filter(question => question.target && (question.status === 'pending' || question.reply?.phase === 'prepared')).length
   // Unread is unknown, never "nothing pending"; only the original list confirms what waits for the person.
-  const attention = pending === undefined ? 'unconfirmed' : pending > 0 ? 'pending' : 'none'
+  const attention: CapsuleAttention = pending === undefined ? 'unconfirmed' : pending > 0 ? 'pending' : 'none'
+  useEffect(() => { onAttention?.(attention, pending) }, [onAttention, attention, pending])
+  useEffect(() => {
+    if (!openRequest) return
+    setOpen(true); void refresh()
+    requestAnimationFrame(() => panelRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+  }, [openRequest]) // eslint-disable-line react-hooks/exhaustive-deps -- only an explicit new request opens the panel
   const updated = (value: CapsuleInteraction): void => setQuestions(current => current?.map(question => question.interactionId === value.interactionId && value.revision >= question.revision ? value : question) ?? [value])
   const mode = page ? page.record.mode === 'injected' ? 'Injected' : 'Isolated' : 'Capsule'
   return <>
@@ -58,7 +72,7 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
         setOpen(value => !value)
       }}><QuestionsIcon size={13} aria-hidden="true" /><span className="capsule-toolbar__name">{embedded ? attention === 'pending' ? 'Needs your answer' : 'Questions' : page?.record.title ?? 'Saved page'}</span>
       {!embedded ? <span className="capsule-toolbar__mode">{mode}</span> : null}{pending ? <span className="capsule-toolbar__count">{pending}</span> : null}</button>, toolbarHost) : null}
-    <section id={panelId} className="capsule-chrome" aria-label="Capsule page requests" hidden={!open} inert={!open || !visible}>
+    <section id={panelId} ref={panelRef} className="capsule-chrome" aria-label="Capsule page requests" hidden={!open} inert={!open || !visible}>
       <div className="capsule-chrome__heading"><span>Review your answer before sending</span>
         <button type="button" className="icon-button" aria-label={loading ? 'Refreshing…' : 'Refresh'} title="Refresh questions" disabled={loading} onClick={() => void refresh()}><RefreshIcon size={14} aria-hidden="true" /></button></div>
       {!active ? <p className="capsule-chrome__notice">Browsing another site · saved requests retained</p> : null}
@@ -66,6 +80,8 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
       {questions?.length === 0 ? <p className="capsule-chrome__empty">No saved questions. Refresh after the page creates a request.</p> : null}
       {questions === null && loading ? <p className="capsule-chrome__empty" role="status">Reading the original page requests…</p> : null}
       {questions?.map(question => <CapsuleQuestionReply key={question.interactionId} {...(browserId ? { browserId } : {})} visible={visible && open} interaction={question} onUpdated={updated} />)}
+      {issue ? <p className="capsule-chrome__issue" role="status"><IssueIcon size={13} aria-hidden="true" /><span>{issue}</span>
+        <button type="button" className="small-button" disabled={loading} onClick={() => void refresh()}>Retry</button></p> : null}
       {!embedded ? <details className="capsule-chrome__source"><summary>Page identity and source</summary><code>{formatAmuxObjectLink({ kind: 'capsule', capsuleId })}</code>
         {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details> : null}
     </section>
