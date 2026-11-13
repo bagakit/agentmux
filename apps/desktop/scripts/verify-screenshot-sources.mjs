@@ -82,7 +82,7 @@ try {
   assert.equal(result.code, 0, JSON.stringify(receipt.native.failure) + result.log)
   assert.equal(receipt.native.passed, true)
   assert.deepEqual(receipt.native.cases.map(row => row.name), ['exact-second-display-with-partial-discovery', 'same-label-application-filter-and-exact-window', 'failed-window-discovery-retries-exact-original-application', 'failed-discovery-retry-and-escape', 'pending-discovery-cancel-late-read-and-next-selection', 'delayed-capture-countdown-cancel-and-elapse'])
-  assert.deepEqual(receipt.native.screenshots.map(row => row.file), ['displays-dark.png', 'displays-narrow-dark.png', 'applications-light.png', 'applications-narrow-light.png', 'windows-narrow-light.png', 'discovery-failure-dark.png', 'countdown-dark.png', 'countdown-light.png'])
+  assert.deepEqual(receipt.native.screenshots.map(row => row.file), ['displays-dark.png', 'displays-narrow-dark.png', 'applications-light.png', 'applications-narrow-light.png', 'windows-light.png', 'windows-narrow-light.png', 'discovery-failure-dark.png', 'countdown-dark.png', 'countdown-light.png'])
   for (const [path, sha] of consumed) assert.equal(hash(await readFile(path)), sha, 'Source selection candidate changed during proof: ' + path)
   receipt.passed = true
 } finally {

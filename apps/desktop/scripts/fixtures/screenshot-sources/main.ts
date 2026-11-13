@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
@@ -21,7 +21,20 @@ const displays = [
 ]
 const apps = [{ pid: 42, processStartedAt: 102, name: 'Workspace' }, { pid: 84, processStartedAt: 208, name: 'Workspace' }]
 const windows = [{ id: 71, title: 'Research notes', width: 920, height: 640 }, { id: 72, title: 'Capture review · Delivery checklist', width: 1280, height: 800 }]
-const native = { async request(method: string, params?: unknown) {
+/** A distinct solid PNG per target, so each thumbnail shows its own exact source. */
+const colors: Record<number, string> = { 11: '#3d6f8f', 22: '#7a5c9e', 33: '#4f8a63', 71: '#9a6b3d', 72: '#3d7f86' }
+function targetPng(id: number, width: number, height: number): string {
+  const pixels = Buffer.alloc(width * height * 4), hex = colors[id] ?? '#666666'
+  for (let index = 0; index < pixels.length; index += 4) pixels.set([parseInt(hex.slice(5, 7), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(1, 3), 16), 255], index)
+  return nativeImage.createFromBitmap(pixels, { width, height }).toPNG().toString('base64')
+}
+let failThumbnail = new Set<number>()
+const native = { async captureScreenshot(target: CaptureParams) {
+  calls.push({ method: 'captureScreenshot', params: target })
+  const id = target.mode === 'display' ? target.displayId : target.mode === 'window' ? target.windowId : 0
+  if (failThumbnail.has(id)) return { state: 'failed', error: { code: 'permission', message: 'Screen Recording is not allowed for this source.' } }
+  return { state: 'captured', screenshot: { format: 'png', data: targetPng(id, 480, 300), width: 480, height: 300, scale: 1 } }
+}, async request(method: string, params?: unknown) {
   calls.push({ method, params })
   if (method === 'listDisplays') {
     if (failNextDisplay) { failNextDisplay = false; throw new Error('The private display discovery is unavailable. Retry this original selection.') }
@@ -36,7 +49,7 @@ const native = { async request(method: string, params?: unknown) {
     return { windows }
   }
   throw new Error('Unexpected native discovery: ' + method)
-} } as unknown as Pick<NativeDesktop, 'request'>
+} } as unknown as Pick<NativeDesktop, 'request' | 'captureScreenshot'>
 
 async function until<T>(label: string, read: () => Promise<T>): Promise<NonNullable<T>> {
   for (let attempt = 0; attempt < 400; attempt++) {
@@ -85,7 +98,7 @@ async function open(kind: 'display' | 'window') {
   window.webContents.debugger.attach('1.3')
   await until('production source view mounted', async () => { try { return await evaluate('!!document.querySelector(".screenshot-source")') } catch { return false } })
   await until('original main frame finishes loading', async () => !window.webContents.isLoadingMainFrame())
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotSources).sort()'), ['cancel', 'list', 'load', 'select', 'windows'])
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotSources).sort()'), ['cancel', 'list', 'load', 'select', 'thumbnail', 'windows'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full application bridge is absent')
   assert.equal(await evaluate('typeof window.screenshotEditor'), 'undefined', 'the source view has no image output authority')
   return { result, window }
@@ -95,10 +108,14 @@ async function shot(name: string, width: number, height: number) {
   await settle()
   const file = name + '.png'
   await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG())
-  const geometry = await evaluate(`(()=>{const rows=document.querySelector('.screenshot-source__choices').getBoundingClientRect();return {width:innerWidth,height:innerHeight,bodyWidth:document.body.scrollWidth,rowsHeight:rows.height,controls:[...document.querySelectorAll('button,input,footer')].map(node=>{const r=node.getBoundingClientRect();return {name:node.getAttribute('aria-label')||node.textContent.trim(),left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}})()`)
+  const geometry = await evaluate(`(()=>{const rows=document.querySelector('.screenshot-source__choices').getBoundingClientRect();return {width:innerWidth,height:innerHeight,bodyWidth:document.body.scrollWidth,rowsHeight:rows.height,controls:[...document.querySelectorAll('button,input,footer')].map(node=>{const r=node.getBoundingClientRect();return {name:node.getAttribute('aria-label')||node.textContent.trim(),card:!!node.closest('.screenshot-source__choices'),left:r.left,right:r.right,top:r.top,bottom:r.bottom}})}})()`)
   assert.ok(geometry.bodyWidth <= geometry.width, 'the actual source window has no horizontal overflow')
   assert.ok(geometry.rowsHeight > 80, 'available source rows retain a readable area')
-  assert.ok(geometry.controls.every((control: any) => control.left >= 0 && control.right <= geometry.width && control.top >= 0 && control.bottom <= geometry.height), 'each source choice and action is reachable inside the actual window')
+  // Cards past the fold scroll into view; every control must fit the window width and the first row must be visible.
+  assert.ok(geometry.controls.every((control: any) => control.left >= 0 && control.right <= geometry.width), 'each source choice and action fits the actual window width')
+  assert.ok(geometry.controls.filter((control: any) => !control.card).every((control: any) => control.top >= 0 && control.bottom <= geometry.height), 'each action outside the card grid is visible')
+  const cards = geometry.controls.filter((control: any) => control.card)
+  assert.ok(cards.length === 0 || cards.some((control: any) => control.bottom <= geometry.height), 'the first row of sources is visible')
   receipt.screenshots.push({ file, appearance, contentSize: window.getContentSize(), geometry })
 }
 
@@ -109,6 +126,9 @@ async function run() {
   process.stdout.write('source-view: first display window mounted\n')
   await textIncludes('Display 2')
   await textIncludes('Available sources remain usable')
+  await until('display thumbnails settle', async () => await evaluate(`[...document.querySelectorAll('.screenshot-source__thumbnail')].every(node=>node.dataset.state!=='loading')`))
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.screenshot-source__thumbnail')].map(node=>node.dataset.state)`), ['ready', 'ready'], 'each listed display shows its own preview')
+  assert.deepEqual(calls.filter(call => call.method === 'captureScreenshot').map(call => call.params), [{ mode: 'display', displayId: 11 }, { mode: 'display', displayId: 22 }], 'previews use the exact listed display identities')
   await shot('displays-dark', 560, 520); await shot('displays-narrow-dark', 360, 430)
   await click('Display 2', '.screenshot-source__choices button')
   process.stdout.write('source-view: exact display action dispatched\n')
@@ -125,10 +145,14 @@ async function run() {
   await shot('applications-light', 560, 520); await shot('applications-narrow-light', 360, 430)
   await filter('84')
   assert.equal(await evaluate('document.querySelectorAll(".screenshot-source__choices button").length'), 1, 'filtering keeps the intended same-label process')
+  failThumbnail = new Set([71])
   await click('Process 84', '.screenshot-source__choices button')
   await textIncludes('Capture review · Delivery checklist')
   assert.deepEqual(calls.find(call => call.method === 'listWindows')?.params, { app: 'pid:84', processStartedAt: 208 }, 'the actual native discovery request preserves the selected process incarnation')
-  await shot('windows-narrow-light', 360, 460)
+  await until('window thumbnails settle', async () => await evaluate(`[...document.querySelectorAll('.screenshot-source__thumbnail')].every(node=>node.dataset.state!=='loading')`))
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.screenshot-source__thumbnail')].map(node=>node.dataset.state)`), ['unavailable', 'ready'], 'a failed preview is a placeholder beside a healthy one')
+  await shot('windows-light', 560, 460); await shot('windows-narrow-light', 360, 460)
+  failThumbnail = new Set()
   await click('Capture review · Delivery checklist', '.screenshot-source__choices button')
   const target: CaptureParams = { mode: 'window', app: 'pid:84', processStartedAt: 208, windowId: 72 }
   assert.deepEqual(await application.result, target, 'the actual Renderer selection resolves the exact process and window')
