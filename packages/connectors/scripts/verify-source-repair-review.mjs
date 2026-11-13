@@ -19,7 +19,7 @@ const green = (result, minimum) => {
 }
 const mutations = [
   { path: 'packages/connectors/src/publication-host.ts', before: "if (input.review && (context.actor.kind === 'agent'", after: "if (false && input.review && (context.actor.kind === 'agent'", pattern: 'refuses another actor' },
-  { path: 'packages/connectors/src/publication-store.ts', before: 'if (action.digest !== review.digest ||', after: 'if (false ||', pattern: 'sends nothing before exact approval' },
+  { path: 'packages/connectors/src/publication-store.ts', before: "if ((action.action === 'approve' || action.digest !== undefined) && action.digest !== review.digest ||", after: 'if (false ||', pattern: 'sends nothing before exact approval' },
   { path: 'packages/core/dist/native-jsonl-history-reader.js', before: 'scopeStart: this.snapshotCursor.recovery?.start ?? this.snapshotLease.manifest.end', after: 'scopeStart: 0', pattern: 'new future cut rather than a zero' },
   { path: 'packages/connectors/src/publication-store.ts', before: 'unmappedEffects: review.unmappedEffects + 1', after: 'unmappedEffects: review.unmappedEffects', pattern: 'never treats an unmapped legacy unknown' },
   { path: 'packages/connectors/src/publication-store.ts', before: 'this.acceptReplyFacts(boundary, units, recovering)', after: 'this.acceptReplyFacts(boundary, units, false)', pattern: 'older nonpublic activity' },

@@ -445,6 +445,35 @@ it('owner review retains inspectable immutable evidence after the original Bindi
   expect(f.host.store.nativeReview(f.binding, review.operationId)?.acceptedDigest).toBeUndefined()
   expect(f.dispatched).toHaveLength(sent)
 })
+it.each(['ready', 'blocked'] as const)('owner review cancels a %s immutable offer without a digest and preserves exact effects', async state => {
+  const f = await fixture(state === 'blocked' ? 'Retained unknown before cancellation' : undefined), prefix = await readFile(f.transcript)
+  await published(f, 'cancel-offer-old', 'Represented before cancellation')
+  if (state === 'blocked') {
+    await appendFile(f.transcript, assistant('cancel-offer-unknown', 'Retained unknown before cancellation')); f.host.refresh()
+    await vi.waitFor(() => expect(f.speech().some(operation => operation.state === 'unknown')).toBe(true)); await f.idle()
+    const original = f.speech().find(operation => operation.state === 'unknown')!, legacy = { ...original }; delete legacy.sourceProofs
+    const database = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
+    database.prepare('UPDATE connector_publication_operation SET operation_json=? WHERE operation_id=?').run(JSON.stringify(legacy), original.operationId)
+  }
+  const originals = structuredClone(f.speech()), cut = f.host.store.retainedCheckpoint(f.binding)
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('cancel-offer-new', 'Unsent review candidate') + assistant('cancel-offer-old', 'Represented before cancellation'))])); f.host.refresh(); await unavailable(f)
+  const operationId = 'cancel-completed-offer'
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, operationId)?.state).toBe(state), { timeout: 15_000 })
+  await expect(f.host.recoverSource({ ...f.input, review: { action: 'cancel', operationId, digest: '0'.repeat(64) } }, f.owner)).rejects.toMatchObject({ code: 'PUBLICATION_SOURCE_CONFLICT' })
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'cancel', operationId } }, f.owner)).review).toMatchObject({ state: 'cancelled' })
+  await f.idle(); await f.restart(); await f.idle()
+  expect(f.host.store.nativeReview(f.binding, operationId)?.acceptedDigest).toBeUndefined()
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  for (const original of originals) expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.some(item => item.text === 'Unsent review candidate')).toBe(false)
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.binding.agentSessionId, item: { id: 'cancel-offer-live', agentSessionId: f.binding.agentSessionId,
+    kind: 'user_message', publicContent: 'confirmed', authorHuman: true, title: 'Captured input', source: 'user', status: 'complete', createdAt: 100, updatedAt: 100, content: 'Independent captured input after completed cancellation' } })
+  f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Independent captured input after completed cancellation')).toBe(true), { timeout: 8000 })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 35_000)
+
 it('owner review cancellation keeps the original cut, exact offer and independent source capability', async () => {
   const f = await fixture(), checkpoint = f.host.store.retainedCheckpoint(f.binding)
   const original = f.port.changes.bind(f.port); let release!: () => void, held = false
