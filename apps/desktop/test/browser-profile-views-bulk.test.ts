@@ -154,6 +154,7 @@ describe('Profile query, saved views and exact metadata batches on original owne
       const before = manager.listRevision(), refused = await runCompiledObjectCli(['browser', 'profile', 'bulk-update', '--items', '[]', '--action', '{"kind":"delete"}'], env)
       expect(refused.code).not.toBe(0); expect(manager.listRevision()).toBe(before)
       const help = await runCompiledObjectCli(['browser', 'profile', 'bulk-update', '--help'], env); expect(help.stdout).toContain('individually updated or failed')
+      const skill = await runCompiledObjectCli(['browser', '--skill'], env); expect(skill.stdout).toContain('profile view create/update/delete')
     } finally { await server.stop(); await core.dispose() }
     expect(native.get).not.toHaveBeenCalled()
   }, 45_000)

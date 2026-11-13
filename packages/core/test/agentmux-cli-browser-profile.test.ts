@@ -41,7 +41,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       async execute(request, nameContext): Promise<AgentMuxControlResult> {
         seen.push({ request, actor: nameContext?.actor })
         switch (request.operation) {
-          case 'browser.profile.ls': return { operation: request.operation, revision, sequence: revision, profiles, folders: [] }
+          case 'browser.profile.ls': return { operation: request.operation, revision, sequence: revision, profiles, folders: [], views: [] }
           // answerAbout lets one case model an owner that answers about a different Profile.
           case 'browser.profile.inspect': return { operation: request.operation, revision, sequence: revision, profile: find(answerAbout ?? request.profileId),
             usage: { complete: true, browsers: inUse ? [{ browserId: 'b-1', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] : [] } }
@@ -147,7 +147,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   it('lists, inspects, creates, edits and moves the default through the owner, returning only Profile facts', async () => {
     const listed = await run(['ls'])
     expect(listed.code, listed.stderr).toBe(0)
-    expect(listed.body.result).toEqual({ revision: 3, sequence: 3, profiles, folders: [] })
+    expect(listed.body.result).toEqual({ revision: 3, sequence: 3, profiles, folders: [], views: [] })
     // Counts of imported cookies are a summary; storage locations, cookie files and values never appear.
     const keys = new Set<string>()
     JSON.parse(JSON.stringify(listed.body.result), (key, value) => { keys.add(key); return value })

@@ -121,9 +121,9 @@ describe('Profile organization on the original metadata owner', () => {
     expect(parseBrowserProfileControlPayload(rename, ['operation'])).toEqual(rename)
     expect(() => parseBrowserProfileControlPayload({ ...rename, deleteProfiles: true }, ['operation'])).toThrow()
     const profile = { revision: 'source-token', id: 'profile-1', label: 'Original', createdAt: 1, isDefault: true, source: null, folderId: 'folder-1', tags: ['Work'], pinned: true }
-    expect(parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], folders: [{ id: 'folder-1', label: 'Work' }] })).toMatchObject({ folders: [{ id: 'folder-1' }] })
-    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], folders: [] })).toThrow()
-    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [{ ...profile, tags: [' Work '] }], folders: [{ id: 'folder-1', label: 'Work' }] })).toThrow()
+    expect(parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], views: [], folders: [{ id: 'folder-1', label: 'Work' }] })).toMatchObject({ folders: [{ id: 'folder-1' }] })
+    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], views: [], folders: [], views: [] })).toThrow()
+    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [{ ...profile, tags: [' Work '] }], views: [], folders: [{ id: 'folder-1', label: 'Work' }] })).toThrow()
     expect(() => assertBrowserProfileControlTarget(rename, { operation: rename.operation, revision: 3, folder: { id: 'other-folder', label: rename.label } })).toThrow()
     expect(() => assertBrowserProfileControlTarget(rename, { operation: 'browser.profile.folder.create', revision: 3, folder: { id: rename.folderId, label: rename.label } })).toThrow()
     expect(() => assertBrowserProfileControlTarget({ operation: 'browser.profile.copy', profileId: profile.id, label: 'Copy', expectedRevision: 'source-token' }, {

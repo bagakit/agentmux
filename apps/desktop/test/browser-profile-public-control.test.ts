@@ -158,7 +158,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   })
   it('answers ls, inspect, create, update and set-default from the manager, each matching the GUI list', async () => {
     const ports = await owners([{ profileId: WORK_ID, browserId: 'b-open' }])
-    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, sequence: 0, folders: [], profiles: ports.profiles.listProfiles() })
+    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, sequence: 0, folders: [], views: [], profiles: ports.profiles.listProfiles() })
     expect(await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).toEqual({ revision: 0, sequence: 0,
       profile: expect.objectContaining({ id: WORK_ID, label: 'Work', source: expect.objectContaining({ importedCookies: 4 }) }),
       usage: { complete: true, browsers: [{ browserId: 'b-open', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
@@ -171,7 +171,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
     expect(ports.profiles.defaultProfileId()).toBe(WORK_ID)
     // The manager announced every public write exactly as it does for the GUI.
     expect(ports.announced).toEqual([1, 2, 3])
-    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 3, sequence: 3, folders: [], profiles: ports.profiles.listProfiles() })
+    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 3, sequence: 3, folders: [], views: [], profiles: ports.profiles.listProfiles() })
   })
 
   it('keeps the owner refusal codes: stale revision, unknown Profile, status hue and Profile in use', async () => {

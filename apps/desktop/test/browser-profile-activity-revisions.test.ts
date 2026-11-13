@@ -395,7 +395,7 @@ describe('Profile native activity and exact configuration versions', () => {
       expect(copied.profile.activity).toBeUndefined(); expect(copied.profile.revision).not.toBe(saved.profile.revision)
       expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: f.id, expectedRevision: 0, edit: { notes: 'wrong scope' } }, ['operation'])).toThrow()
       expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: f.id, expectedRevision: saved.profile.revision, edit: { activity: { observedRunMs: 5000 } } }, ['operation'])).toThrow()
-      expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: read.revision, profiles: read.profiles, folders: [] })).toThrow()
+      expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: read.revision, profiles: read.profiles, folders: [], views: [] })).toThrow()
     } finally { await server.stop(); await core.dispose() }
   }, 40_000)
 })
