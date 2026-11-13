@@ -401,7 +401,7 @@ export async function registerIpc(args: {
   const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
   const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
     stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
-  }), configOwner, args.runtime)
+  }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-upgrade-adoptions.json'))
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
