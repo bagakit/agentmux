@@ -1,3 +1,6 @@
+import { AppCaptureSource } from './app-capture.js'
+import { AppRecordingOwner } from './app-recording.js'
+import { createAppCapturePort } from './app-capture-owner.js'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
 import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
@@ -555,6 +558,8 @@ export async function registerIpc(args: {
     if (saved.appearance !== previous.appearance) updateCapsuleThemes()
   })
   nativeTheme.on('updated', updateCapsuleThemes)
+  const appCaptureSource = new AppCaptureSource(args.workbenchWindows, browsers)
+  const appRecordings = new AppRecordingOwner({ directory: join(app.getPath('userData'), 'workface-captures'), capture: target => appCaptureSource.capture(target) })
   const browserInputContextPorts = createBrowserInputContextPorts({ hostId: deliveryAttempts.hostId,
     browsers, home: app.getPath('home'), directory: join(app.getPath('userData'), 'browser-input-context'),
     createFromBuffer: bytes => nativeImage.createFromBuffer(bytes) })
@@ -2367,6 +2372,7 @@ export async function registerIpc(args: {
       { captureSelection: () => captureSurface.captureSelection(BrowserWindow.getFocusedWindow() === null) }),
     images: screenshotPins,
     windows: args.workbenchWindows,
+    captures: createAppCapturePort(appCaptureSource, appRecordings),
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: () => args.clientIncidents! } : {}),
     clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
@@ -2443,6 +2449,7 @@ export async function registerIpc(args: {
   return async () => {
     acceptingControl = false
     await runOwnerDisposals([
+      { owner: 'app-recordings', dispose: () => appRecordings.dispose() },
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'browser-profile-contents', dispose: () => { app.off('web-contents-created', observeProfileContents); app.off('login', answerProfileProxy); disposeProfileProxyAuthSync() } },
       { owner: 'capture-surface', dispose: () => captureSurface.dispose() },
