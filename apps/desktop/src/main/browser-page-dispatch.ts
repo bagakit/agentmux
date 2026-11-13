@@ -1043,11 +1043,24 @@ export function createBrowserPageDispatch(
       // ── 逃生口 ────────────────────────────────────────────────────────
       case 'js': {
         const expression = requireString(args[0], 'expression')
-        const evaluated = (await session.sendCommand('Runtime.evaluate', {
+        // Bounded by the program's remaining time. Chromium's own timeout stops a synchronous loop but
+        // not a promise that never settles, so the await is also raced; on expiry the page's script is
+        // terminated, which leaves the page itself usable.
+        const left = context.remainingMillis ? context.remainingMillis() - WAIT_RETURN_MARGIN_MS : Infinity
+        const bounded = Number.isFinite(left)
+        const budget = Math.max(1, Math.floor(left))
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const expired = new Promise<'expired'>(resolve => { if (bounded) timer = setTimeout(() => resolve('expired'), budget) })
+        const evaluated = await Promise.race([session.sendCommand('Runtime.evaluate', {
           expression,
           awaitPromise: true,
-          returnByValue: true
-        })) as { result?: { value?: unknown }; exceptionDetails?: { text?: string } }
+          returnByValue: true,
+          ...(bounded ? { timeout: budget } : {})
+        }), expired]).finally(() => clearTimeout(timer)) as { result?: { value?: unknown }; exceptionDetails?: { text?: string } } | 'expired'
+        if (evaluated === 'expired' || evaluated.exceptionDetails?.text === 'Execution was terminated') {
+          await session.sendCommand('Runtime.terminateExecution').catch(() => {})
+          throw new Error(`js() was stopped after ${budget}ms because this program's time is almost up. Its effect on the page is unknown; take a snapshot before continuing.`)
+        }
         if (evaluated.exceptionDetails) {
           throw new Error(`The page threw: ${pageAuthoredText(evaluated.exceptionDetails.text)}`)
         }
