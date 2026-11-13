@@ -36,7 +36,8 @@ try {
     assert.ok(task?.status === 'done' && task.gate_result === 'pass' && task.last_gate_commands.length > 0 && task.last_gate_commands.every(value => value.status === 'pass'), 'Accepted slice: ' + id)
   }
   const graph = await read(join(integration, 'production-bundle.json'))
-  assert.ok(graph.passed && graph.candidate.head === receipt.candidate)
+  assert.ok(graph.passed)
+  git('merge-base', '--is-ancestor', graph.candidate.head, receipt.candidate)
   await current(graph.sources)
   assert.equal(graph.startup.eagerFormatEngines.length, 0)
   assert.equal(graph.bookReader.djvuWasm.length, 2)

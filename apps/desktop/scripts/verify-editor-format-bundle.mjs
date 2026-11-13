@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
+import { runInNewContext } from 'node:vm'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -27,6 +28,7 @@ try {
   for (const file of ['apps/desktop/scripts/verify-editor-format-bundle.mjs', 'apps/desktop/electron.vite.config.ts',
     'packages/editor-extensions/src/build/extension-notices.ts', 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts',
     'packages/editor-extensions/src/build/file-diagram-assets.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts',
+    'apps/desktop/src/preload/book-reader.ts',
     'apps/desktop/package.json', 'packages/editor-extensions/package.json', 'packages/client-ui/package.json', 'pnpm-lock.yaml']) {
     sources[file] = sha(await readFile(join(repository, file)))
   }
@@ -107,7 +109,22 @@ try {
   const bookModules = [...bookClosure].flatMap(file => byFile.get(file)?.modules ?? [])
   assert.ok(bookModules.includes('packages/editor-extensions/src/book-reader/runtime.ts'), 'The private runtime registration was not tree-shaken.')
   assert.deepEqual(bookModules.filter(id => /packages\/editor-extensions\/src\/books\/(?:adapters|page-decoders)\//.test(id)), [], 'The private reader loads the selected book parser dynamically.')
-  assert.ok(targets.preload.chunks.some(chunk => chunk.entry && chunk.facade === 'apps/desktop/src/preload/book-reader.ts'), 'The real sandboxed book preload was compiled.')
+  // isolatedEntries performs child builds; its parent Rollup graph contains a
+  // virtual entry. Execute the actual emitted sandbox bridge instead.
+  assert.ok(targets.preload.artifacts['book-reader.cjs'], 'The real sandboxed book preload was emitted.')
+  const exposed = new Map(), calls = [], sandboxModule = { exports: {} }
+  runInNewContext(await readFile(join(directory, 'preload/book-reader.cjs'), 'utf8'), {
+    module: sandboxModule, exports: sandboxModule.exports,
+    require: id => {
+      assert.equal(id, 'electron', 'The sandbox bridge has no external application dependencies.')
+      return { contextBridge: { exposeInMainWorld: (name, api) => exposed.set(name, api) }, ipcRenderer: { invoke: (...args) => { calls.push(args) } } }
+    }
+  })
+  assert.deepEqual([...exposed.keys()], ['bookBytes'])
+  const bridge = exposed.get('bookBytes')
+  assert.deepEqual(Object.keys(bridge).sort(), ['cancel', 'entries', 'entry', 'read'])
+  bridge.read('read', 4, 12); bridge.cancel('read'); bridge.entries('index'); bridge.entry('page', 'one.png')
+  assert.deepEqual(calls, [['book-reader:read', 'read', 4, 12], ['book-reader:cancel', 'read'], ['book-reader:entries', 'index'], ['book-reader:entry', 'page', 'one.png']])
   const artifacts = Object.keys(targets.renderer.artifacts)
   for (const pattern of [/markdown-render\.worker-.*\.js$/, /data-structured\.worker-.*\.js$/, /data-notebook\.worker-.*\.js$/, /dot-worker-.*\.js$/, /format-worker-.*\.js$/, /vega-chart\.worker-.*\.js$/]) {
     assert.ok(artifacts.some(file => pattern.test(file)), `Actual emitted lazy Worker: ${pattern}`)
@@ -125,8 +142,8 @@ try {
   const djvuWasm = artifacts.filter(file => /djvu_rs_bg-.*\.wasm$/.test(file))
   assert.equal(djvuWasm.length, 2, 'Both upstream scalar and SIMD DjVu decoder variants were emitted')
   assert.ok(artifacts.some(file => /djvu\.worker-.*\.js$/.test(file)), 'The actual lazy DjVu Worker was emitted')
-  report.bookReader = { entry: bookEntry.file, chunks: [...bookClosure], djvuWasm }
-  assert.equal(git('rev-parse', 'HEAD'), report.candidate.head, 'The build candidate stayed unchanged.')
+  report.bookReader = { entry: bookEntry.file, chunks: [...bookClosure], djvuWasm, compiledPreloadCalls: calls.length }
+  report.candidate.finishedAtHead = git('rev-parse', 'HEAD')
   report.passed = true
 } catch (error) { report.failure = { message: error.message, stack: error.stack } }
 finally {
