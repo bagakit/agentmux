@@ -103,8 +103,8 @@ const specifications = {
       replace: 'if (true || !previous || previous.document !== state.documentState || previous.view !== currentView || previous.size !== state.size ||',
       test: 'apps/desktop/test/browser-screenshot-workface.test.tsx', consumer: 'coalesces continuous drawing on one frame while Copy consumes all samples and the final endpoint exactly once', failure: /actual unchanged document must reuse/ },
     { label: 'edge-text-ui-clamping-omitted', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'left: Math.max(0, Math.min(size.width - textEditorWidth, view.x + pendingText.shape.at.x * scale))',
-      replace: 'left: view.x + pendingText.shape.at.x * scale',
+      find: 'left: Math.max(0, Math.min(size.width - width, view.x + at.x * scale))',
+      replace: 'left: view.x + at.x * scale',
       test: 'apps/desktop/test/image-annotation-editing.test.tsx', consumer: 'keeps an existing edge text editor inside the viewport at actual size and high zoom without changing its image coordinates or font', failure: /actual input width stays within/ }]
   },
   documents: {
