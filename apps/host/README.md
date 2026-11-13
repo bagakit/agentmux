@@ -59,9 +59,13 @@ resource and repeat its read. Avatar failure does not stop message text or Agent
 input. Desktop retains its rich appearance reader, editor, save and series
 methods with their original owners.
 
-This explicit Node startup support does not switch Desktop's default connector
-owner, move old credentials or bindings, activate live connections, or qualify
-a remote deployment. The connector hosting Host remains distinct from a
+Desktop bundles this entry and launches it through its macOS Host service with
+its configuration file and connector directory, so this Host is Desktop's
+default connector owner and Desktop Main opens no second one
+([connector Host composition](../../docs/architecture/conversation.md#连接器的-host-组合与设置路由)).
+Starting it does not convert unsupported original credentials
+([Host credential storage](credential-storage.md)), move bindings, or qualify a
+remote deployment. The connector hosting Host remains distinct from a
 binding's execution Host. Client disconnect releases its reader, without stopping
 the Host or Agent Runs. Restart the Host with the same original namespace to
 retain identities and operation receipts.
