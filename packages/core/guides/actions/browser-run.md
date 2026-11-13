@@ -25,6 +25,11 @@ Prefer several short programs to one long one. Page functions ([Current browser-
 are injected into that subprocess. The current capability registry exposes:
 [Current browser-capability-directory](../../dist/browser-page-capability.js "amux:generated browser-capability-directory")
 Elements are addressed by the refs a snapshot hands you — never coordinates.
+A page function that AgentMux itself refuses or cannot confirm throws an error with `error.kind`
+(what failed, such as `locator-changed` or `page-dialog`) and `error.effects`. `effects:
+"not-dispatched"` means nothing reached the page, so retrying is safe; `"unknown"` means the action
+may have happened, so read the page before trying again. Errors without these fields came from the
+page or your own code; decide from them only after looking.
 `cdp(method, params)` reaches this page and its frames only. A command that reaches the whole
 Profile or the browser (cookies, site storage, certificate checks, permissions, download behavior,
 creating or closing targets) is refused before it is sent, with what to use instead. Raw `Input.*`
