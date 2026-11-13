@@ -153,6 +153,47 @@ afterEach(() => {
 })
 
 describe('Desktop Control owner', () => {
+  it('keeps Profile network requests at the Main owner without opening or changing a workface', async () => {
+    const original = fixture()
+    // The initialized spatial observer first binds this fixture to its original Space.
+    await vi.waitFor(() => expect(useAppStore.getState().tabs[original.id]?.space).toBeDefined())
+    useAppStore.setState({ browserOpinionDrafts: { retained: { original: null, text: 'Keep this unsent draft', includeContext: true, pending: null } } })
+    const before = useAppStore.getState()
+    expect(before.sessions).toHaveLength(1)
+    expect(before.sessions[0]?.control.kind).toBe('agent')
+    const retained = structuredClone({ tabs: before.tabs, layouts: before.layouts, sessions: before.sessions,
+      activeWorkspaceId: before.activeWorkspaceId, drafts: before.browserOpinionDrafts, launches: before.pendingAgentLaunches })
+    const effects = [
+      vi.spyOn(api.browser, 'create'), vi.spyOn(api.browser, 'setProfileProxySignIn'), vi.spyOn(api.browser, 'checkProfileExit'),
+      vi.spyOn(api.sessions, 'launchTerminal'),
+      vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'interrupt'),
+      vi.spyOn(api.spatial, 'openAgent'), vi.spyOn(api.spatial, 'commit')
+    ]
+    const requests: AgentMuxControlRequest[] = [
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-set', operation: 'browser.profile.proxy-sign-in.set', profileId: 'default', signIn: { username: 'tester', password: 'fixture-only' } },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-clear', operation: 'browser.profile.proxy-sign-in.clear', profileId: 'default' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-check', operation: 'browser.profile.network.check', profileId: 'default' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-list', operation: 'browser.profile.ls' }
+    ]
+    expect(requests).toHaveLength(4)
+    for (const input of requests) {
+      await expect(useAppStore.getState().executeControl(input), input.operation).rejects.toMatchObject({
+        code: 'CONTROL_FAILED', message: 'Browser Profiles belong to the Main Profile owner.'
+      })
+      const after = useAppStore.getState()
+      expect(after.tabs).toBe(before.tabs)
+      expect(after.tabs[original.id]).toBe(before.tabs[original.id])
+      expect(after.layouts).toBe(before.layouts)
+      expect(after.sessions).toBe(before.sessions)
+      expect(after.activeWorkspaceId).toBe(before.activeWorkspaceId)
+      expect(after.browserOpinionDrafts).toBe(before.browserOpinionDrafts)
+      expect(after.pendingAgentLaunches).toBe(before.pendingAgentLaunches)
+      expect({ tabs: after.tabs, layouts: after.layouts, sessions: after.sessions,
+        activeWorkspaceId: after.activeWorkspaceId, drafts: after.browserOpinionDrafts, launches: after.pendingAgentLaunches }).toEqual(retained)
+    }
+    for (const effect of effects) expect(effect).not.toHaveBeenCalled()
+  })
+
   it('private public creation reaches the original createControlBrowser owner and reports the actual returned mode', async () => {
     const original = fixture()
     const create = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank', _workspaceId, _profileId, mode = 'normal') => ({
