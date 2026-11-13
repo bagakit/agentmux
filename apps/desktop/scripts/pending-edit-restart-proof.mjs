@@ -15,11 +15,19 @@ const packages = ['core', 'demand', 'client-ui', 'layout', 'relay']
 
 /** A new restart mode reuses the real harness; only its build tree is private. */
 export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
-  assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage', 'demand-collaboration', 'display-layout-set', 'prepared-resume'].includes(mode), 'Only the owning private proof modes may use this build')
+  assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage', 'demand-collaboration', 'display-layout-set', 'prepared-resume', 'agent-close-chain'].includes(mode), 'Only the owning private proof modes may use this build')
+  const agentCloseChain = mode === 'agent-close-chain'
+  assert.ok(!agentCloseChain || arguments_.every(a => a === '--agent-close-chain' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=') || a.startsWith('--agent-close-chain-source-ref=') || a.startsWith('--agent-close-chain-reuse-build=') || a.startsWith('--agent-close-chain-resume-build=')), 'Agent close chain is one bounded current-source private restart scenario')
+  const reusePath = agentCloseChain && arguments_.find(a => a.startsWith('--agent-close-chain-reuse-build='))?.slice('--agent-close-chain-reuse-build='.length)
+  const reusableBuild = reusePath ? JSON.parse(await readFile(resolve(root, reusePath), 'utf8')) : null
+  const resumePath = agentCloseChain && arguments_.find(a => a.startsWith('--agent-close-chain-resume-build='))?.slice('--agent-close-chain-resume-build='.length)
+  const resumedBuild = resumePath ? JSON.parse(await readFile(resolve(root, resumePath), 'utf8')) : null
+  if (resumedBuild) assert.ok(resumedBuild.schema === 'agentmux.pending-edit-restart-build.v1' && resumedBuild.privateRootRemoved !== true && resumedBuild.privateRoot !== root,
+    'Resume retains one original private build, never a product workspace')
   const preparedResume = mode === 'prepared-resume'
   assert.ok(!preparedResume || arguments_.every(a => a === '--prepared-resume' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=')), 'Prepared resume is one exact current-source private restart scenario')
   const displayLayoutSet = mode === 'display-layout-set'
-  const completeHostBuild = displayLayoutSet || preparedResume
+  const completeHostBuild = displayLayoutSet || preparedResume || agentCloseChain
   const inactiveWindow = completeHostBuild || arguments_.includes('--inactive-window')
   assert.ok(!inactiveWindow || mode === 'pending-edit' || completeHostBuild, 'Non-activating windows belong only to their explicit private proofs')
   const demandCollaboration = mode === 'demand-collaboration'
@@ -42,14 +50,14 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(!startupQualification || !(diagnosticOnly || typedCrossCore), 'Startup first Send is a distinct Native qualification')
   assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
   assert.ok(!(diagnosticOnly && typedCrossCore), 'Distinct bounded proof modes cannot be combined')
-  const environmentKey = preparedResume ? 'AGENTMUX_PREPARED_RESUME_BUILD_RECEIPT' : displayLayoutSet ? 'AGENTMUX_DISPLAY_LAYOUT_SET_BUILD_RECEIPT' : demandCollaboration ? 'AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT' : phaseCapture ? 'AGENTMUX_PROMPT_PREPARATION_BUILD_RECEIPT' : steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
-  const worker = preparedResume ? 'prepared-resume-restart-proof.mjs' : displayLayoutSet ? 'workspace-layout-restore-restart-proof.mjs' : phaseCapture ? 'prompt-preparation-stage-native-proof.mjs' : steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
-  const resultField = preparedResume ? 'preparedResume' : displayLayoutSet ? 'displayLayoutSet' : demandCollaboration ? 'demandCollaboration' : phaseCapture ? 'promptPreparationStage' : finalQualification ? 'steerRecoveryFinal' : startupRestoredOnly ? 'startupRestoredFirstSend' : startupFirstSend ? 'startupFirstSend' : typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
+  const environmentKey = agentCloseChain ? 'AGENTMUX_CLOSE_CHAIN_BUILD_RECEIPT' : preparedResume ? 'AGENTMUX_PREPARED_RESUME_BUILD_RECEIPT' : displayLayoutSet ? 'AGENTMUX_DISPLAY_LAYOUT_SET_BUILD_RECEIPT' : demandCollaboration ? 'AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT' : phaseCapture ? 'AGENTMUX_PROMPT_PREPARATION_BUILD_RECEIPT' : steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
+  const worker = agentCloseChain ? 'agent-close-chain-restart-proof.mjs' : preparedResume ? 'prepared-resume-restart-proof.mjs' : displayLayoutSet ? 'workspace-layout-restore-restart-proof.mjs' : phaseCapture ? 'prompt-preparation-stage-native-proof.mjs' : steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
+  const resultField = agentCloseChain ? 'agentCloseChain' : preparedResume ? 'preparedResume' : displayLayoutSet ? 'displayLayoutSet' : demandCollaboration ? 'demandCollaboration' : phaseCapture ? 'promptPreparationStage' : finalQualification ? 'steerRecoveryFinal' : startupRestoredOnly ? 'startupRestoredFirstSend' : startupFirstSend ? 'startupFirstSend' : typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
   const proofId = displayLayoutSet ? (await import('../../../packages/core/dist/object-id.js')).mintObjectId() : globalThis.crypto.randomUUID()
-  const evidence = join(root, preparedResume ? '.tmp/prepared-resume-restart' : displayLayoutSet ? '.tmp/display-layout-set-restart' : demandCollaboration ? '.tmp/demand-collaboration-native' : phaseCapture ? '.tmp/prompt-preparation-stage' : steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(proofId))
+  const evidence = resumedBuild ? dirname(resolve(root, resumePath)) : join(root, agentCloseChain ? '.tmp/agent-close-chain-restart' : preparedResume ? '.tmp/prepared-resume-restart' : displayLayoutSet ? '.tmp/display-layout-set-restart' : demandCollaboration ? '.tmp/demand-collaboration-native' : phaseCapture ? '.tmp/prompt-preparation-stage' : steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(proofId))
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
-  const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), displayLayoutSet ? 'amx-ls-' : demandCollaboration ? 'amx-dc-' : phaseCapture ? 'amx-ps-' : steerRecovery ? 'amx-sr-' : 'amx-pe-')))
+  const privateRoot = resumedBuild ? await realpath(resumedBuild.privateRoot) : await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), displayLayoutSet ? 'amx-ls-' : demandCollaboration ? 'amx-dc-' : phaseCapture ? 'amx-ps-' : steerRecovery ? 'amx-sr-' : 'amx-pe-')))
   const privateHome = join(privateRoot, 'home')
   await mkdir(evidence, { recursive: true })
   const requestedReceipt = arguments_.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
@@ -62,7 +70,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(!demandCollaboration || requestedSourceRef, 'Demand collaboration requires an immutable full integrated SourceRef')
   assert.ok(!phaseCapture || requestedSourceRef, 'Finite phase capture requires immutable complete SourceRef')
   assert.ok(!finalQualification || requestedSourceRef, 'Final GUI qualification requires an explicit complete Main SourceRef')
-  const sourceCommit = (await exec('git', ['rev-parse', '--verify', '--end-of-options', (requestedSourceRef ?? 'HEAD') + '^{commit}'], { cwd: root })).stdout.trim()
+  const sourceCommit = resumedBuild?.sourceCommit ?? (await exec('git', ['rev-parse', '--verify', '--end-of-options', (requestedSourceRef ?? 'HEAD') + '^{commit}'], { cwd: root })).stdout.trim()
   const mainAtCapture = finalQualification || demandCollaboration ? (await exec('git', ['rev-parse', 'refs/heads/main'], { cwd: root })).stdout.trim() : undefined
   if (finalQualification) assert.equal(sourceCommit, mainAtCapture, 'Final GUI qualification consumes the full current Main, never an older candidate')
   const t010ManifestArgument = arguments_.find(value => value.startsWith('--startup-first-send-product-manifest='))?.slice('--startup-first-send-product-manifest='.length)
@@ -70,7 +78,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(!finalQualification || !t010ManifestArgument && !t010ManifestSha, 'Final GUI qualification prohibits product source overlays')
   assert.ok(!t010ManifestArgument && !t010ManifestSha || startupQualification && requestedSourceRef && t010ManifestArgument && /^[0-9a-f]{64}$/.test(t010ManifestSha),
     'A T010 product candidate requires its bounded Native mode, exact full Main SourceRef and manifest hash')
-  const build = { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {}, commands: [],
+  const build = resumedBuild ?? { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {}, commands: [],
     sharedSourceWritten: false, userRunTouched: false, sourceCommit,
     sourceMode: requestedSourceRef ? 'exact-git-archive-with-test-only-overlay' : 'captured-working-source', requestedSourceRef: requestedSourceRef ?? null, ...(finalQualification || demandCollaboration ? { mainAtCapture, productOverlayProhibited: true } : {}), proofOverlays: {}, archive: null }
   let failure, outcome
@@ -81,6 +89,29 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
   }
   const command = async (name, executable, args, cwd) => {
+    const prior = resumedBuild && build.commands.findLast(command => command.name === name)
+    if (prior?.exitCode === 0 && !prior.invalidated && JSON.stringify(prior.args) === JSON.stringify(args) && prior.cwd === cwd) {
+      ;(build.resumedCommands ??= []).push(name)
+      return
+    }
+    if (reusableBuild && reusableBuild.commands.some(command => command.name === name && command.exitCode === 0)) {
+      const pkg = packages.find(pkg => name === 'private-' + pkg + '-build')
+      const prefix = pkg ? 'packages/' + pkg + '/' : null
+      const outputs = prefix ? Object.entries(reusableBuild.compiled).filter(([path]) => path.startsWith(prefix + 'dist/')) : []
+      const sources = prefix ? Object.entries(reusableBuild.sources).filter(([path]) => path.startsWith(prefix) && !path.includes('/dist/')) : []
+      const sourceMatches = sources.length > 0 && sources.every(([path, hash]) => build.sources[path] === hash)
+      let artifactsMatch = outputs.length > 0
+      for (const [path, hash] of outputs) {
+        try { if (sha(await readFile(join(root, path))) !== hash) artifactsMatch = false }
+        catch { artifactsMatch = false }
+      }
+      if (sourceMatches && artifactsMatch) {
+        for (const [path] of outputs) { await mkdir(dirname(join(privateRoot, path)), { recursive: true }); await cp(join(root, path), join(privateRoot, path)) }
+        build.commands.push({ name, executable, args, cwd, exitCode: 0, reused: { buildReceipt: resolve(root, reusePath), sourceCount: sources.length, outputs: Object.fromEntries(outputs) } })
+        return
+      }
+      ;(build.reuseRejected ??= []).push({ name, sourceMatches, artifactsMatch, outputCount: outputs.length })
+    }
     try {
       const reply = await exec(executable, args, { cwd, maxBuffer: 16 * 1024 * 1024,
         // pnpm 11 otherwise installs while running exec in a copied tree. This proof
@@ -95,6 +126,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
   }
   try {
+    if (!resumedBuild) {
     if (requestedSourceRef) {
       const archive = sourceArchivePath
       await exec('git', ['archive', '--format=tar', '--output=' + archive, sourceCommit], { cwd: root })
@@ -103,7 +135,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       await rm(archive)
       // Overlay only the two owning proof scripts from this execution tree;
       // all product code comes from the exact committed source.
-      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs', ...(displayLayoutSet ? ['apps/desktop/scripts/workspace-layout-restore-restart-proof.mjs'] : []), ...(steerRecovery ? ['apps/desktop/scripts/steer-recovery-native-proof.mjs'] : []), ...(phaseCapture ? ['apps/desktop/scripts/prompt-preparation-stage-native-proof.mjs', 'apps/desktop/scripts/fixtures/prompt-preparation-stage'] : []), ...(demandCollaboration ? ['apps/desktop/scripts/demand-collaboration-restart-proof.mjs', 'apps/desktop/scripts/verify-demand-collaboration-e2e.mjs'] : [])]) {
+      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs', ...(agentCloseChain ? ['apps/desktop/scripts/agent-close-chain-restart-proof.mjs', 'apps/desktop/scripts/verify-agent-close-chain.mjs'] : []), ...(displayLayoutSet ? ['apps/desktop/scripts/workspace-layout-restore-restart-proof.mjs'] : []), ...(steerRecovery ? ['apps/desktop/scripts/steer-recovery-native-proof.mjs'] : []), ...(phaseCapture ? ['apps/desktop/scripts/prompt-preparation-stage-native-proof.mjs', 'apps/desktop/scripts/fixtures/prompt-preparation-stage'] : []), ...(demandCollaboration ? ['apps/desktop/scripts/demand-collaboration-restart-proof.mjs', 'apps/desktop/scripts/verify-demand-collaboration-e2e.mjs'] : [])]) {
         await cp(join(root, path), join(privateRoot, path), { recursive: true });
         if (demandCollaboration) build.proofOverlays[path] = sha(await readFile(join(privateRoot, path)))
       }
@@ -148,7 +180,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
     const directories = ['apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/scripts', 'apps/desktop/brand', 'apps/host/native', 'apps/desktop/resources', 'apps/host/src', 'apps/host/scripts',
       'packages/core/src', 'packages/core/scripts', 'packages/core/guides', 'packages/core/bin', 'packages/core/vendor',
-      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/client-ui/scripts', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
+      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/client-ui/scripts', 'packages/client-ui/brand', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
       ...(demandCollaboration ? ['packages/core/test/fixtures'] : []), ...(inactiveWindow ? ['packages/core/native', 'packages/diagnostic-evidence/src', 'packages/connectors/src', 'apps/desktop/vendor/drawio/v32.4.1'] : []),
       ...(completeHostBuild ? ['packages/identity/scripts', 'packages/capsule/src', 'packages/native-desktop/src'] : [])]
     for (const directory of directories) {
@@ -159,7 +191,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       try { await record(join(privateRoot, directory), build.sources) }
       catch (error) { if (!(directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
     }
-    for (const path of ['package.json', 'tsconfig.base.json', 'tsconfig.shared.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
+    for (const path of ['package.json', 'tsconfig.base.json', 'tsconfig.shared.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'THIRD_PARTY_NOTICES.md', 'scripts/package-dependencies.mjs', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
       'apps/host/package.json', ...(completeHostBuild ? ['apps/host/tsconfig.json'] : []), ...(inactiveWindow ? ['test/fixture-values.mjs'] : []), ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
       try { const bytes = await readFile(join(requestedSourceRef ? privateRoot : root, path)); await mkdir(dirname(join(privateRoot, path)), { recursive: true }); await writeFile(join(privateRoot, path), bytes); build.sources[path] = sha(bytes) }
       catch (error) { if (error.code !== 'ENOENT') throw error }
@@ -221,13 +253,13 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       if (completeHostBuild) await symlink(join(privateRoot, 'apps/host'), join(privateRoot, directory, '@agentmux/host'), 'dir')
     }
     }
-    if (demandCollaboration) {
+    if (demandCollaboration || agentCloseChain) {
       const toolRequire = createRequire(join(privateRoot, 'packages/core/package.json'))
       build.privateBuildTools = {}
       for (const [name, bin, path] of [['typescript', 'tsc', 'bin/tsc'], ['esbuild', 'esbuild', 'bin/esbuild']]) {
         const packagePath = toolRequire.resolve(name + '/package.json'), packageBytes = await readFile(packagePath)
         const executable = join(dirname(packagePath), path)
-        for (const directory of ['node_modules', 'packages/core/node_modules']) { await mkdir(join(privateRoot, directory, '.bin'), { recursive: true }); await symlink(executable, join(privateRoot, directory, '.bin', bin)) }
+        for (const directory of ['node_modules', 'packages/core/node_modules']) { const target = join(privateRoot, directory, '.bin', bin); await mkdir(dirname(target), { recursive: true }); await rm(target, { force: true }); await symlink(executable, target) }
         build.privateBuildTools[name] = { executable, packageSha256: sha(packageBytes), executableSha256: sha(await readFile(executable)) }
       }
     }
@@ -313,6 +345,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       await writeFile(join(privateRoot, bannerPath), stdout)
       build.fixtureResourceSnapshot = { path: bannerPath, sourceCommit: build.sourceCommit, sha256: sha(stdout),
         reason: 'Concurrent shared-tree resource deletion while production imports still reference this bitmap; private fixture only, no shared restoration.' }
+    }
     }
     if (demandCollaboration || inactiveWindow) for (const [pkg, config] of [['identity', 'tsconfig.json'], ['git', 'tsconfig.build.json'], ...(inactiveWindow ? [['diagnostic-evidence', 'tsconfig.json']] : [])]) {
       await command('private-' + pkg + '-build', process.execPath, completeHostBuild && pkg === 'identity'
@@ -446,13 +479,13 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     build.privateHome = { path: privateHome, source: 'test-process-env', parentEnvironmentMutated: false,
       scope: 'Set before loading the entire worker; Core/Provider setup and all private Electron descendants inherit this HOME.' }
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    const args = arguments_.filter(value => value !== '--inactive-window' && !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref=') && !value.startsWith('--startup-first-send-product-manifest=') && !value.startsWith('--startup-first-send-product-manifest-sha='))
+    const args = arguments_.filter(value => value !== '--inactive-window' && !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref=') && !value.startsWith('--agent-close-chain-reuse-build=') && !value.startsWith('--agent-close-chain-resume-build=') && !value.startsWith('--startup-first-send-product-manifest=') && !value.startsWith('--startup-first-send-product-manifest-sha='))
     const lines = []
     const executionEnvironment = { ...process.env, HOME: privateHome, [environmentKey]: buildReceiptPath }
     delete executionEnvironment.ELECTRON_RUN_AS_NODE
     outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts', worker), ...args,
       '--probe-root=' + privateRoot, '--receipt-path=' + receiptPath], { cwd: privateRoot, temporaryRoot: privateRoot,
-      env: executionEnvironment, timeoutMs: demandCollaboration ? 600_000 : steerRecovery || phaseCapture || preparedResume ? 300_000 : 130_000, onLine: line => lines.push(line) })
+      env: executionEnvironment, timeoutMs: demandCollaboration ? 600_000 : steerRecovery || phaseCapture || preparedResume || agentCloseChain ? 300_000 : 130_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'restart.log'), lines.join('\n') + '\n')
     assert.equal(outcome.timedOut, false)
     assert.equal(outcome.exitCode, 0)
@@ -469,7 +502,7 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     }
     if (inactiveWindow) {
       const files = (await readdir(inactiveWindowDirectory)).filter(file => file.startsWith('window-') && file.endsWith('.json'))
-      assert.ok(files.length >= (preparedResume ? 2 : 3), 'Every seeded/original and restarted private App reports its window identity')
+      assert.ok(files.length >= (preparedResume || agentCloseChain ? 2 : 3), 'Every seeded/original and restarted private App reports its window identity')
       build.privateWindowObservations = await Promise.all(files.map(async file => JSON.parse(await readFile(join(inactiveWindowDirectory, file), 'utf8'))))
       assert.ok(build.privateWindowObservations.every(window => window.focusable === false && window.focusedEver === false && window.visible === true),
         'Every actual private App window stays visible without taking OS focus')
@@ -502,9 +535,12 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     if (completeHostBuild && remaining.length) {
       build.cleanup = { privateRootRetained: true, remaining }
       failure ??= new Error('Private restart leaves owned processes; retain its build and fixture tree')
+    } else if (agentCloseChain && failure) {
+      build.cleanup = { privateRootRetained: true, remaining: [], reason: 'Retain this failed private candidate for incremental repair or worker retry; no user work is present.' }
     } else {
       assert.deepEqual(remaining, [], 'Private restart leaves no processes in its build or fixture tree')
       await rm(privateRoot, { recursive: true, force: true }); build.privateRootRemoved = true
+      build.cleanup = { privateRootRetained: false, remaining: [], removed: true }
     }
     // A failed extraction can leave the reproducible committed archive; it contains no Run or
     // unsaved data. Keep its exact sourceCommit and failure receipt, not a redundant cache.
