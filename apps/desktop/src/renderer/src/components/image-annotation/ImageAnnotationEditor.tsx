@@ -40,11 +40,12 @@ let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: n
   blurRadius: number; spotlightDim: number; calloutZoom: number } = {
   tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32,
   blurRadius: DEFAULT_BLUR_RADIUS, spotlightDim: DEFAULT_SPOTLIGHT_DIM, calloutZoom: DEFAULT_CALLOUT_ZOOM }
-// The strength each pointing mark offers, in its own unit: blur radius in screen pixels, dimming opacity and zoom factor.
+// The strength each pointing mark offers, in the model's own unit and range: blur radius in image pixels, so it matches
+// the original and the export at any zoom, dimming opacity and zoom factor.
 const POINTING_STRENGTHS = {
-  blur: { property: 'radius', style: 'blurRadius', label: 'Strength', name: 'Blur strength', range: BLUR_RADIUS_RANGE, step: 1, scaled: true, unit: (value: number) => value + 'px' },
-  spotlight: { property: 'dim', style: 'spotlightDim', label: 'Dim', name: 'Spotlight dimming', range: SPOTLIGHT_DIM_RANGE, step: 0.05, scaled: false, unit: (value: number) => Math.round(value * 100) + '%' },
-  callout: { property: 'zoom', style: 'calloutZoom', label: 'Zoom', name: 'Magnifier zoom', range: CALLOUT_ZOOM_RANGE, step: 0.5, scaled: false, unit: (value: number) => value + '×' }
+  blur: { property: 'radius', style: 'blurRadius', label: 'Strength', name: 'Blur strength', range: BLUR_RADIUS_RANGE, step: 1, unit: (value: number) => value + 'px' },
+  spotlight: { property: 'dim', style: 'spotlightDim', label: 'Dim', name: 'Spotlight dimming', range: SPOTLIGHT_DIM_RANGE, step: 0.05, unit: (value: number) => Math.round(value * 100) + '%' },
+  callout: { property: 'zoom', style: 'calloutZoom', label: 'Zoom', name: 'Magnifier zoom', range: CALLOUT_ZOOM_RANGE, step: 0.5, unit: (value: number) => value + '×' }
 } as const
 type PointingKind = keyof typeof POINTING_STRENGTHS
 const isPointingKind = (kind: string): kind is PointingKind => Object.hasOwn(POINTING_STRENGTHS, kind)
@@ -500,7 +501,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           ? { id, kind: 'pixelate-brush', color, width: brushWidth / fit, blockSize: blockSize / fit, points: [at] }
           : { id, kind: 'pixelate', color, blockSize: blockSize / fit, from: at, to: at }
         : tool === 'cover' ? { id, kind: 'cover', color: '#111827', from: at, to: at }
-        : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius / fit)
+        : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius)
         : tool === 'spotlight' ? createSpotlightShape(id, '#ffffff', at, at, strengths.spotlightDim)
         : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom)
         : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: nextNoteNumber(documentState.shapes), note: '', from: at, to: at }
@@ -645,12 +646,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const strengthKind = properties ? (isPointingKind(properties.kind) ? properties.kind : null) : isPointingKind(tool) ? tool : null
   const strength = strengthKind && POINTING_STRENGTHS[strengthKind]
   const strengthValue = !strength ? 0 : properties && properties.kind === strengthKind
-    ? Number(((properties as unknown as Record<string, number>)[strength.property]! * (strength.scaled ? scale : 1)).toFixed(2)) : strengths[strength.style]
+    ? Number((properties as unknown as Record<string, number>)[strength.property]!.toFixed(2)) : strengths[strength.style]
   function setStrength(value: number) {
     if (!strength) return
     setStrengths(current => ({ ...current, [strength.style]: value }))
     if (properties && properties.kind === strengthKind) {
-      const next = { ...properties, [strength.property]: strength.scaled ? value / viewRef.current.scale : value } as ScreenshotShape
+      const next = { ...properties, [strength.property]: value } as ScreenshotShape
       edit(doc => replaceShape(doc, next))
     }
   }
