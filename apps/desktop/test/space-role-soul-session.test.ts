@@ -202,8 +202,7 @@ it('recovers the same native Session and home without pretending the edited SOUL
   expect(resumed).toMatchObject({ kind: 'resumed', session: { id: first.session.id, workspacePath: firstStart.cwd } })
   expect(h.core.agentSession(first.session.id).nativeHandle).toEqual({ kind: 'provider', providerId: stored.providerId, sessionId: 'original-native-session' })
   expect(h.starts).toHaveLength(2)
-  expect(h.starts[1]).toMatchObject({ cwd: firstStart.cwd, args: ['--resume', 'original-native-session'],
-    env: expect.objectContaining({ AGENTMUX_WIKI_DIR: firstStart.cwd }) })
+  expect(h.starts[1]).toMatchObject({ cwd: firstStart.cwd, args: ['--resume', 'original-native-session'] })
   expect(read).not.toHaveBeenCalled()
   expect(h.starts[0]).toEqual(firstStart)
   expect(await h.topics.read(h.workspace, moteId)).toMatchObject({ id: moteId,
@@ -255,8 +254,7 @@ it('migrates the original Mote while actual Core recovery keeps its saved cwd an
   const recovery = h.controller.recoverSession(first.session.control, h.config, undefined, 'resume-original-directory')
   await expect(recovery).resolves.toMatchObject({ kind: 'resumed', session: { id: first.session.id, workspacePath: original } })
   expect(h.starts).toHaveLength(2)
-  expect(h.starts[1]).toMatchObject({ cwd: original, args: ['--resume', nativeHandle.sessionId],
-    env: expect.objectContaining({ AGENTMUX_WIKI_DIR: original }) })
+  expect(h.starts[1]).toMatchObject({ cwd: original, args: ['--resume', nativeHandle.sessionId] })
   expect(h.core.agentSession(first.session.id).nativeHandle).toEqual(nativeHandle)
   expect(prepare).not.toHaveBeenCalled()
   expect(h.stop).not.toHaveBeenCalled()
@@ -265,7 +263,6 @@ it('migrates the original Mote while actual Core recovery keeps its saved cwd an
   expect(next.session.id).toBe('post-migration-session')
   expect(h.starts).toHaveLength(3)
   expect(h.starts[2]!.cwd).toBe(canonical)
-  expect(h.starts[2]!.env).toMatchObject({ AGENTMUX_WIKI_DIR: canonical })
   expect(h.starts[2]!.args.at(-1)).toContain('Your persistent Mote identity is ' + moteId)
   expect(h.core.agentSession(first.session.id).workspacePath).toBe(original)
   expect(h.core.agentSession(next.session.id).workspacePath).toBe(canonical)

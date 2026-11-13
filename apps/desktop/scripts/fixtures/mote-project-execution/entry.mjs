@@ -44,7 +44,7 @@ try {
   const create = core.createAgentWithDelivery.bind(core)
   core.createAgentWithDelivery = async input => {
     const receipt = await create(input)
-    record.creations.push({ input: { ...input, env: { CODEX_HOME: input.env.CODEX_HOME, AGENTMUX_RUNTIME_DIRECTORY: input.env.AGENTMUX_RUNTIME_DIRECTORY, AGENTMUX_WIKI_DIR: input.env.AGENTMUX_WIKI_DIR } }, receipt })
+    record.creations.push({ input: { ...input, env: { CODEX_HOME: input.env.CODEX_HOME, AGENTMUX_RUNTIME_DIRECTORY: input.env.AGENTMUX_RUNTIME_DIRECTORY } }, receipt })
     record.runs.push({ agentSessionId: receipt.session.agentSessionId, run: receipt.session.run, workspacePath: receipt.session.workspacePath })
     await save(); return receipt
   }

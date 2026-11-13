@@ -1,9 +1,7 @@
-import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { createHash, webcrypto } from 'node:crypto'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
@@ -113,17 +111,6 @@ it('an ID-less discovery issue keeps previously confirmed Mote facts and healthy
   const result=useAppStore.getState().scratchTopicSnapshots[scratch.id]!
   expect(result.topics).toEqual([fresh,previous]);expect(result.topics?.every(topic=>!topic.readError)).toBe(true)
   expect(result.error).toContain(list.issues[0])
-})
-
-it('successful current continuity applies the healthy session before persistent Wiki service explanation',async()=>{
-  const control={kind:'agent' as const,hostId:'local',agentSessionId:'agent-1',run:{runId:'run-1'}}
-  const session:import('../src/shared/contracts').SessionSnapshot={id:'agent-1',kind:'agent',hostId:'local',executorId:'codex',providerId:'codex',workspacePath:_hygiene_fixturePath("private/short-birth/motes/0123456789abcdef"),label:'Healthy',createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1),agentSessionUpdatedAt:_reshape_fixtureEpoch(0, 0, 1),processState:'running',latestOutputBytes:0,status:{state:'running',source:'run-process',observedAt:_reshape_fixtureEpoch(0, 0, 1)},capabilities:{terminal:true,timeline:'streaming',permission:'observe',providerResume:true,replyCorrelation:'none'},control}
-  const tab=createWorkbenchTab('original-agent',{kind:'agent',phase:'attached',workspaceId:scratch.id,regionId:'original-agent-region',sessionId:session.id})
-  useAppStore.setState({sessions:[session],tabs:{[tab.id]:tab},layouts:{[scratch.id]:createWorkspaceLayout('original-group',[tab.id])}})
-  vi.spyOn(api.sessions,'recover').mockResolvedValue({kind:'reattachable',session,advisory:'Wiki directory association is unconfirmed: Private stalled read. Agent input remains available.'})
-  expect(await useAppStore.getState().recoverSession(session.id)).toBe(session)
-  expect(useAppStore.getState().sessions[0]?.processState).toBe('running');expect(useAppStore.getState().sessions[0]?.status.state).toBe('running')
-  expect(useAppStore.getState().error).toMatch(/Wiki directory association/);expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
 })
 
 it('explicit confirmed retry attaches the same unbound birth Tab and preserves its edited original Region draft',async()=>{

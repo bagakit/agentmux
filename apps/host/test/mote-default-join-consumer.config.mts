@@ -6,7 +6,6 @@ import original from '../../../packages/connectors/test/vitest.mote-host.config.
 const variants = {
   'continuity-disconnect': ['apps/host/src/mote-chat-agents.ts', 'const result = await client.ensureAgentContinuity', "const result = await (async (_input: unknown) => ({ kind: 'reattachable' as const, session }))"],
   'original-executor-disconnect': ['apps/host/src/mote-resources.ts', 'const value = (executors as Record<string, unknown>)[executorId]', 'const value = undefined'],
-  'wiki-disconnect': ['apps/host/src/mote-chat.ts', 'AGENTMUX_WIKI_DIR: workspacePath', "AGENTMUX_WIKI_DIR: '/wrong-Mote-home'"],
   'guide-substitution': ['apps/host/src/mote-chat.ts', 'injectAgentMuxGuide: config.injectAgentMuxGuide', 'injectAgentMuxGuide: true'],
   'frozen-dispatch-disconnect': ['apps/host/src/mote-chat.ts', '.client.createAgentWithDelivery(prepared.input)', '.client.createAgentWithDelivery({ ...prepared.input, injectAgentMuxGuide: !prepared.input.injectAgentMuxGuide })']
 } as const

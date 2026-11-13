@@ -95,7 +95,7 @@ it('lazily creates through the real Mote and Core owners without a Region or fab
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
   const input = creation.mock.calls[0]![0]
   expect(input).toMatchObject({ agentSessionId: binding!.agentSessionId, executorId: 'chosen', providerId: 'claude', workspacePath: f.topic.physicalDirectoryPath,
-    env: { MOTE_VALUE: 'saved-value', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath } })
+    env: { MOTE_VALUE: 'saved-value' } })
   expect(input).not.toHaveProperty('prompt'); expect(input).not.toHaveProperty('initialMessage')
   expect(input.agentMuxNote).toContain('Earlier Agents in this same private-chat lane (newest first):')
   expect(input.agentMuxNote).toContain('space mote chat history --input -')

@@ -22,7 +22,7 @@ it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide
   await f.sdk.dispose(); f.services.close(); await f.client.dispose()
   await writeFile(f.configurationPath, JSON.stringify({ ...f.config, executors: { 'saved-chat': {
     label: 'Original Host chat', providerId: 'claude', command: process.execPath, args: ['--original-host-guide'],
-    env: { MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: '/not-the-validated-Mote-home' }, injectAgentMuxGuide: guide
+    env: { MOTE_VALUE: 'original-app-config' }, injectAgentMuxGuide: guide
   } } }))
   const previous = f.client as unknown as Record<string, any>
   let exitedRunId: string | undefined
@@ -256,9 +256,9 @@ it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide
     expect(creation).toHaveBeenCalledOnce()
     const input = creation.mock.calls[0]![0]
     expect(input).toMatchObject({ executorId: 'saved-chat', injectAgentMuxGuide: guide, args: ['--original-host-guide'],
-      env: { MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath } })
+      env: { MOTE_VALUE: 'original-app-config' } })
     expect(f.start).toHaveBeenCalledOnce()
-    expect(f.start.mock.calls[0]![0].env?.AGENTMUX_WIKI_DIR).toBe(f.topic.physicalDirectoryPath)
+    expect(f.start.mock.calls[0]![0].env?.MOTE_VALUE).toBe('original-app-config')
     const store = new MoteChatStore(services.database!), saved = store.generationBySession(input.agentSessionId!)!
     expect(saved.prepared).toEqual({ executionHostId: 'local', input })
     expect(saved.prepared).not.toHaveProperty('executorRevision')
@@ -290,7 +290,7 @@ it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide
         expect(continuity).toHaveBeenCalledOnce()
         expect(continuity.mock.calls[0]![0]).toMatchObject({ agentSessionId: session.agentSessionId,
           expectedRun: session.run, trigger: 'input', commandOverride: process.execPath, args: ['--original-host-guide'],
-          env: { MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath } })
+          env: { MOTE_VALUE: 'original-app-config' } })
         expect(continuity.mock.calls[0]![0]).not.toHaveProperty('input')
         expect(f.inner.kernel.input).toHaveBeenCalledTimes(2)
       } finally { release() }
@@ -304,7 +304,7 @@ it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide
       expect(launch.args).toContain('--resume')
       expect(launch.args[launch.args.indexOf('--resume') + 1]).toBe(session.nativeHandle!.sessionId)
       expect(launch.args).toContain('--original-host-guide')
-      expect(launch.env).toMatchObject({ MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath })
+      expect(launch.env).toMatchObject({ MOTE_VALUE: 'original-app-config' })
       for (const id of ['default-owner', 'recovered-one', 'recovered-two']) expect(JSON.stringify(launch.args)).not.toContain(f.message(id, actor).text)
       const resumedRecords = await records()
       expect(resumedRecords.find(row => row.ingressId === original.ingressId)!.input).toEqual(frozenInput)

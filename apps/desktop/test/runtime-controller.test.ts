@@ -1268,10 +1268,7 @@ describe('RuntimeController configuration transaction', () => {
 
       expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
         workspacePath: join(await realpath(parent), 'topics', 'topic--view--shared-work'),
-        env: expect.objectContaining({
-          EXECUTOR_SETTING: 'kept',
-          AGENTMUX_WIKI_DIR: join(await realpath(parent), 'topics', 'topic--view--shared-work')
-        }),
+        env: expect.objectContaining({ EXECUTOR_SETTING: 'kept' }),
         // Topic 说明是 AgentMux 自己的话：作为 agentMuxNote 分开传给 Core 的信封出口署名，
         // 不再被拼进用户段。用户的真实请求原样留在 prompt。
         agentMuxNote: expect.stringContaining('Inspect .agents/'),
@@ -3523,8 +3520,8 @@ it('forwards owner geometry to the attached Renderer without requesting another 
   await controller.dispose()
 })
 
-// The optional Wiki association is bounded current-cwd observation, never a library gate.
-it.each(['stalled', 'failed', 'foreign'])('short Mote Wiki recovery %s retains healthy continuity and exact advisory', async variant => {
+// A Topic directory read is never a recovery gate or a library scan.
+it.each(['stalled', 'failed', 'foreign'])('short Mote recovery with a %s Topic read retains healthy continuity', async variant => {
   const scratch: import('../src/shared/contracts').WorkspaceRecord={id:SCRATCH_WORKSPACE_ID,hostId:'local',path:_hygiene_fixturePath("private/wiki-recovery/scratch"),name:'Topics',kind:'folder'}
   const config: AppConfig={...localConfig,workspaces:[scratch],executors:{review:{id:'review',kind:'agent',providerId:'codex',label:'Review',command:'codex',args:[],env:{}}}}
   const topics=new ScratchTopics(),read=vi.spyOn(topics,'readForDirectory')
@@ -3539,8 +3536,7 @@ it.each(['stalled', 'failed', 'foreign'])('short Mote Wiki recovery %s retains h
   client.runtimeProjection.mockResolvedValue({hostId:'local',subjects:[{subjectId:'agent:local:agent-1',kind:'agent',hostId:'local',workspacePath:stored.workspacePath,providerId:'codex',executorId:'review',agentSession:stored,run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'review',agentSessionId:'agent-1',workspacePath:stored.workspacePath,pid:42,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 1),latestOutputBytes:0,acceptedInputBytes:0}}]})
   const began=Date.now(),result=await controller.recoverSession({kind:'agent',hostId:'local',agentSessionId:'agent-1',run:stored.run},config)
   expect(Date.now()-began).toBeLessThan(1000);expect(result).toMatchObject({kind:'reattachable',session:{id:'agent-1',processState:'running'}})
-  if(variant!=='foreign')expect(result).toHaveProperty('advisory',expect.stringMatching(/Wiki directory association is unconfirmed/))
-  expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('env.AGENTMUX_WIKI_DIR');expect(list).not.toHaveBeenCalled()
+  expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(list).not.toHaveBeenCalled()
   await controller.dispose();vi.restoreAllMocks()
 })
 
