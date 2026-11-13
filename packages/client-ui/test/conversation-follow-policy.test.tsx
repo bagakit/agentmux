@@ -113,6 +113,19 @@ it.each(['selection', 'focus'])('following still protects an affected original %
   else expect(x.visible.contains(document.activeElement)).toBe(true)
 })
 
+it('a focused control inside a record that only gains a new version does not freeze following', async () => {
+  const x = await shared()
+  const button = x.visible.querySelector<HTMLButtonElement>('button')!
+  button.focus(); expect(document.activeElement).toBe(button)
+  // The same record grows in place (a running turn appends to it): its keyed node stays mounted.
+  const grown = frame(page({ ...item('visible-head'), contentParts: [{ kind: 'text', text: 'visible-head and more' }] }, item('retained-tail'), item('new-original')))
+  expect(x.controller.current!.canPresent(grown, { preserveAnchor: false })).toBe(true)
+  await x.draw(grown)
+  expect(x.host.querySelector('[data-native-record-id="new-original"]')).not.toBeNull()
+  expect(x.visible.isConnected).toBe(true)
+  expect(document.activeElement).toBe(button)
+})
+
 /** Native pages and invalidations are controlled public SDK ports. Both production
  * hosts, their original Reader hooks and the common presentation transaction run.
  * This does not claim a naturally occurring 1200-record eviction or native GUI proof. */
