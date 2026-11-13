@@ -49,7 +49,7 @@ const specifications = {
       find: "'cover', 'blur', 'spotlight', 'callout'])", replace: "'cover'])", test: pointingTools,
       consumer: 'draws each pointing tool as its own kind and commits nothing for a click without travel', failure: /a click with no drag commits no zero-size mark/ },
     { label: 'callout-bubble-fixed-while-drawing', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom)', replace: 'shape.to = at', test: pointingTools,
+      find: 'currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, documentState.crop ?? originalBounds)', replace: 'shape.to = at', test: pointingTools,
       consumer: 'keeps the magnifier bubble beside its source while drawing, then drags only the bubble after release', failure: /the bubble follows the source as it grows/ },
     { label: 'callout-bubble-drags-whole-mark', source: component + 'ImageAnnotationEditor.tsx',
       find: "const bubble = !handle && shape?.kind === 'callout' && rectContains(calloutBubble(shape), at)", replace: 'const bubble = false', test: pointingTools,
@@ -65,7 +65,13 @@ const specifications = {
       consumer: 'offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', failure: /carries blur and the magnifier/ },
     { label: 'new-note-max-plus-one', source: component + 'ImageAnnotationEditor.tsx',
       find: 'number: nextNoteNumber(documentState.shapes)', replace: 'number: Math.max(0, ...notes.map(note => note.number)) + 1', test: pointingTools,
-      consumer: 'numbers a new note after every existing note when a saved original repeats a number', failure: /a new note takes the number after all existing notes/ }]
+      consumer: 'numbers a new note after every existing note when a saved original repeats a number', failure: /a new note takes the number after all existing notes/ },
+    { label: 'blur-strength-in-screen-pixels', source: component + 'ImageAnnotationEditor.tsx',
+      find: '[strength.property]: value } as ScreenshotShape', replace: '[strength.property]: value / viewRef.current.scale } as ScreenshotShape', test: pointingTools,
+      consumer: 'keeps a selected blur strength in image pixels within the model range when the fitted view is not one to one', failure: /the strongest blur stays at the model maximum/ },
+    { label: 'callout-bubble-ignores-bounds', source: component + 'drawing-model.ts',
+      find: 'at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, bounds)', replace: 'at: at ?? { x: source.x + source.width + CALLOUT_GAP, y: source.y }', test: pointing,
+      consumer: 'places a default bubble inside the image or selection: right, else left, else below or above, else clamped', failure: /flips left when the right side has no room/ }]
   },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
