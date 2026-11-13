@@ -187,6 +187,26 @@ describe('real format preview pane', () => {
     expect(container.querySelector('textarea')?.value).toContain('#EXT-X-TARGETDURATION:2')
     expect(container.querySelector('video')).toBeNull()
   })
+  it('a playlist with unsaved edits says the saved one plays, and a save plays the new file', async () => {
+    let issued = 0
+    const open = vi.spyOn(api.files, 'openMediaStream').mockImplementation(async () => ({ status: 'ready', id: `lease-list-${++issued}`, url: `http://127.0.0.1:1/lease-list-${issued}/vod.m3u8`, kind: 'playlist', mimeType: 'application/vnd.apple.mpegurl', byteLength: 40 }))
+    const release = vi.spyOn(api.files, 'releaseMediaStream').mockResolvedValue(undefined)
+    const { file, id, key } = seed('vod.m3u8', '#EXTM3U\n#EXT-X-TARGETDURATION:2\nseg0.ts\n#EXT-X-ENDLIST\n')
+    const settle = async () => { for (let attempt = 0; attempt < 20 && !container.querySelector('video'); attempt++) await render(<FileSurfaceView tabId={id} surface={file} />) }
+    await render(<FileSurfaceView tabId={id} surface={file} />); await settle()
+    expect(container.textContent).not.toContain('Playing the saved playlist')
+    await act(async () => { useAppStore.setState(state => ({ dirtyDocuments: { ...state.dirtyDocuments, [key]: true } })) })
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('Playing the saved playlist. Save to play your changes.')
+    expect(open).toHaveBeenCalledTimes(1)
+    // A save gives the File a new revision: the saved file is what plays now.
+    await act(async () => { useAppStore.setState(state => ({ dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
+      documents: { ...state.documents, [key]: { ...state.documents[key]!, revision: 'saved-again' } } })) })
+    await settle()
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(release).toHaveBeenCalledWith('lease-list-1')
+    expect(container.querySelector('video')?.getAttribute('src')).toBe('http://127.0.0.1:1/lease-list-2/vod.m3u8')
+    expect(container.textContent).not.toContain('Playing the saved playlist')
+  })
   it('a media file the lease owner cannot open states that reason with Retry, and Retry opens a new lease', async () => {
     const open = vi.spyOn(api.files, 'openMediaStream').mockResolvedValue({ status: 'deleted', message: 'This file no longer exists.' })
     const { file } = seed('gone.mp4')
