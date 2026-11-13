@@ -88,7 +88,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'click', effect: 'act', summary: 'click the element a ref points at' },
   { name: 'fillInput', effect: 'act', summary: 'replace an input value' },
   { name: 'typeText', effect: 'act', summary: 'type into the focused element' },
-  { name: 'pressKey', effect: 'act', summary: 'press one key' },
+  { name: 'pressKey', effect: 'act', summary: 'press one key or a chord such as Control+a, Shift+Tab or Meta+z on a ref' },
   { name: 'hover', effect: 'act', summary: 'move the pointer over an element' },
   { name: 'scroll', effect: 'act', summary: 'scroll the page or an element' },
   { name: 'waitForElement', effect: 'wait', summary: 'wait until an element is there; {exact: true, role} matches one name exactly' },

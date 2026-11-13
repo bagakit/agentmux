@@ -19,7 +19,7 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
 import {
-  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, POINTER_ON_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, FOCUS_FOR_KEY_DECLARATION
+  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, POINTER_ON_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, parseKeyChord, editingCommandFor, FOCUS_FOR_KEY_DECLARATION
 } from './browser-page-input-scripts.js'
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
@@ -505,7 +505,15 @@ export function createBrowserPageDispatch(
    * form), in which case the page's new focus is kept.
    */
   async function nativeKey(scope: BrowserPageActionScope | undefined, ref: string, rawKey: string): Promise<undefined> {
-    const key = nativeKeyFor(rawKey)
+    // Parsed before anything is resolved, so an unknown modifier is refused without touching the page.
+    const chord = parseKeyChord(rawKey)
+    const modifierBits = chord.modifiers.reduce((bits, modifier) => bits | modifier.bit, 0)
+    // Shift with a letter is that letter's capital, as for a person; other shifted characters are
+    // layout-dependent, so a program passes the character itself ("!", not "Shift+1").
+    const key = nativeKeyFor(modifierBits & 8 && /^[a-z]$/.test(chord.key) ? chord.key.toUpperCase() : chord.key)
+    // With Control, Alt or Meta held the key is a shortcut, not text; Shift alone still types its character.
+    const types = modifierBits === 0 || modifierBits === 8
+    const editingCommand = editingCommandFor(modifierBits, key.code)
     const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
     guard()
     if (actionFeedback) {
@@ -527,18 +535,33 @@ export function createBrowserPageDispatch(
       guard()
       const native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
       const keyEvent = (params: Record<string, unknown>) => native.input(() => send('Input.dispatchKeyEvent', {
-        key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, nativeVirtualKeyCode: key.keyCode, ...params }))
+        key: key.key, code: key.code, windowsVirtualKeyCode: key.keyCode, nativeVirtualKeyCode: key.keyCode, modifiers: modifierBits, ...params }))
+      const modifierEvent = (modifier: (typeof chord.modifiers)[number], type: 'rawKeyDown' | 'keyUp', bits: number) => native.input(() => send('Input.dispatchKeyEvent', {
+        type, key: modifier.key, code: modifier.code, windowsVirtualKeyCode: modifier.keyCode, nativeVirtualKeyCode: modifier.keyCode, modifiers: bits }))
+      const pressed: typeof chord.modifiers = []
       try {
         guard()
-        await keyEvent({ type: 'rawKeyDown' })
+        // Modifiers go down in order, each carrying the bits held so far, as a person's would.
+        for (const modifier of chord.modifiers) {
+          pressed.push(modifier)
+          await modifierEvent(modifier, 'rawKeyDown', pressed.reduce((bits, held) => bits | held.bit, 0))
+        }
+        await keyEvent({ type: 'rawKeyDown', ...(editingCommand ? { commands: [editingCommand] } : {}) })
         try {
-          if (key.text !== undefined) await keyEvent({ type: 'char', text: key.text, unmodifiedText: key.text })
+          if (key.text !== undefined && types) await keyEvent({ type: 'char', text: key.text, unmodifiedText: key.text })
           await keyEvent({ type: 'keyUp' })
         } catch (error) {
-          throw new Error(`${ref} received ${key.key === ' ' ? 'Space' : key.key} down but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
+          throw new Error(`${ref} received ${rawKey === ' ' ? 'Space' : rawKey} down but its release was not confirmed (${error instanceof Error ? error.message : String(error)}). ` +
             'The key may or may not have acted; inspect the page before pressing again.')
         }
-      } finally { native.end() }
+      } finally {
+        // Every modifier that went down comes back up, even after a failure, so none stays held for a person.
+        for (let index = pressed.length - 1; index >= 0; index--) {
+          const remaining = pressed.slice(0, index).reduce((bits, held) => bits | held.bit, 0)
+          await modifierEvent(pressed[index]!, 'keyUp', remaining).catch(() => {})
+        }
+        native.end()
+      }
     } finally {
       if (focused) await inWorld(send, target, RESTORE_TEXT_FOCUS_DECLARATION)
       if (target !== objectId) await send('Runtime.releaseObject', { objectId: target }).catch(() => {})

@@ -231,6 +231,47 @@ const NAMED_KEYS: Readonly<Record<string, { code: string; keyCode: number; text?
   Home: { code: 'Home', keyCode: 36 }, End: { code: 'End', keyCode: 35 }, PageUp: { code: 'PageUp', keyCode: 33 }, PageDown: { code: 'PageDown', keyCode: 34 }
 }
 
+/** CDP's modifier bits, and each modifier key's own native fields so it is pressed and released like a person's. */
+const MODIFIERS: Readonly<Record<string, { bit: number; key: string; code: string; keyCode: number }>> = {
+  Alt: { bit: 1, key: 'Alt', code: 'AltLeft', keyCode: 18 },
+  Control: { bit: 2, key: 'Control', code: 'ControlLeft', keyCode: 17 },
+  Meta: { bit: 4, key: 'Meta', code: 'MetaLeft', keyCode: 91 },
+  Shift: { bit: 8, key: 'Shift', code: 'ShiftLeft', keyCode: 16 }
+}
+const MODIFIER_ALIASES: Readonly<Record<string, string>> = { Ctrl: 'Control', Cmd: 'Meta', Command: 'Meta', Option: 'Alt' }
+
+/**
+ * One `pressKey` chord: modifiers in the order written, then the key, as `Control+a` or `Shift+Tab`.
+ * A lone `+` and a trailing `++` mean the plus key. Unknown modifier names are refused, so a typo is
+ * never sent as some other key.
+ */
+export function parseKeyChord(chord: string): { modifiers: { bit: number; key: string; code: string; keyCode: number }[]; key: string } {
+  const parts = chord === '+' ? ['+'] : chord.endsWith('++') ? [...chord.slice(0, -2).split('+'), '+'] : chord.split('+')
+  const key = parts.pop() ?? ''
+  if (!key) throw new TypeError(`pressKey needs a key after the modifiers in ${JSON.stringify(chord)}, as Control+a or Shift+Tab.`)
+  const modifiers = parts.map(name => {
+    const modifier = MODIFIERS[MODIFIER_ALIASES[name] ?? name]
+    if (!modifier) throw new TypeError(`${JSON.stringify(name)} is not a modifier in ${JSON.stringify(chord)}. Use Alt, Control, Meta or Shift.`)
+    return modifier
+  })
+  if (new Set(modifiers.map(modifier => modifier.bit)).size !== modifiers.length) throw new TypeError(`${JSON.stringify(chord)} names a modifier twice.`)
+  return { modifiers, key }
+}
+
+/**
+ * macOS binds its editing shortcuts in the browser, not in the page, so a native key alone does not
+ * select all or undo there; Chromium needs the editing command sent with the key (as Playwright does).
+ * Keyed by modifier bits and key code.
+ */
+const MAC_EDITING_COMMANDS: Readonly<Record<string, string>> = {
+  '4:KeyA': 'selectAll', '4:KeyC': 'copy', '4:KeyX': 'cut', '4:KeyV': 'paste', '4:KeyZ': 'undo', '12:KeyZ': 'redo'
+}
+
+/** The editing command a chord carries on this platform, if any. */
+export function editingCommandFor(modifierBits: number, code: string, platform: string = process.platform): string | undefined {
+  return platform === 'darwin' ? MAC_EDITING_COMMANDS[`${modifierBits}:${code}`] : undefined
+}
+
 /** The native key event fields for one `pressKey` key. */
 export function nativeKeyFor(key: string): { key: string; code: string; keyCode: number; text?: string } {
   const named = Object.hasOwn(NAMED_KEYS, key) ? NAMED_KEYS[key]! : undefined
