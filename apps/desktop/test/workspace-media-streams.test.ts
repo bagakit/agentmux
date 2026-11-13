@@ -192,6 +192,19 @@ describe('workspace media stream leases', () => {
     expect(f.streams.status(growing.id)).toMatchObject({ state: 'changed' })
   })
 
+  it('a failed identity probe refuses only that request: the pinned file plays again once the probe succeeds', async () => {
+    const f = await fixture(), opened = await ready(f)
+    const lease = (f.streams as unknown as { leases: Map<string, { media: { current(): Promise<string> } }> }).leases.get(opened.id)!
+    const real = lease.media.current.bind(lease.media)
+    lease.media.current = async () => { throw Object.assign(new Error('Permission denied'), { code: 'EACCES' }) }
+    expect((await get(opened.url, { Range: 'bytes=0-3' })).status).toBe(500)
+    expect(f.streams.status(opened.id)).toEqual({ state: 'read-error', path: 'clips/clip.mp4', code: 'EACCES' })
+    lease.media.current = real
+    const again = await get(opened.url, { Range: 'bytes=0-3' })
+    expect(again.status).toBe(206); expect(again.body).toEqual(f.bytes.subarray(0, 4))
+    expect(f.streams.status(opened.id)).toEqual({ state: 'active' })
+  })
+
   it('reports a deleted file as deleted', async () => {
     const f = await fixture()
     const deleted = await ready(f)
