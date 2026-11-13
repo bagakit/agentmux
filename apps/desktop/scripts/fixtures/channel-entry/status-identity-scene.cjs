@@ -34,9 +34,9 @@ module.exports = async ({ win, read, until, click, press, settle, capture, layou
   await until('document.querySelector(' + JSON.stringify(status) + ')?.textContent.includes("Delivery unconfirmed")')
   await capture('status-unknown-wide-dark'); await press('Escape'); await close()
   await show('dark', 'normal', 'ready', false, false, 'rewritten')
-  await until('document.querySelector(' + JSON.stringify(status) + ')?.textContent.includes("History rewritten · catching up")')
-  // Automatic resumption is information, not a call to action.
-  assert.equal(await read('!!document.querySelector(' + JSON.stringify(status + ' [data-source-recovery-action=recover]') + ')'), false)
+  await until('document.querySelector(' + JSON.stringify(status) + ')?.textContent.includes("Reply sync stopped · history rewritten")')
+  // A rewrite the owner could not resume keeps its one recovery action in reach.
+  assert.equal(await read('!!document.querySelector(' + JSON.stringify(status + ' [data-source-recovery-action=recover]') + ')'), true)
   await capture('status-rewritten-wide-dark'); await press('Escape'); await close()
   await show('light', 'normal', 'ended', true, true)
   await until('document.querySelector(' + JSON.stringify(status + ' [data-receiver-action=recover]') + ')')
