@@ -26,11 +26,17 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿由 Desktop 宿主文件持有，具体链路见下节。
 
-不相交编辑保留双方增量；重叠编辑保留本地可见、未保存工作。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
+合并按实体与键进行：Tab、Region、Zone、Space、绑定与资源各自独立，展示布局再细到每个 Group 的 Tab 顺序、选择与最近记录，以及分割树。不相交编辑保留双方增量。同一键被双方改成不同值时，该键保留已提交的远端值，本地意图作为该键的保留冲突持续说明；其余键照常提交，基线随提交前进，冲突不阻止后续保存，也不阻止观察其他进程的提交。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
 
 `DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
 Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/src/shared/space-addresses.ts) 写入原内容身份，Category 地址只用于导航。还原时，同一 Core Zone 资源中已确认的内容身份优先于客户端 Tab 描述，分类移动不改写它。带首句的创建先提交原 Launcher 工作面，再由 Host 注册该 Topic，避免客户端自己的待保存布局与注册争用同一图的 revision；失败仍保留原 Launcher 和草稿。
+
+### 创建即确认位置与后台保存的停滞
+
+Launcher 内创建的 Agent 由 Main 在 Core 创建回执确认后，经 [`AgentMuxSpatialStateStore.commitOwnedResource`](../../packages/core/src/spatial-state.ts) 的 `agentRegion` 在同一把锁内把原 Launcher Region 改为该 Agent 的 Region，不等 Renderer 后台补存；原 Region 已变化时只报告位置问题，不影响已创建的 Agent 与 Run。Renderer 随后的保存与之取同一值，不构成冲突。
+
+`DesktopSpatialPersistence` 记录未确认结构首次出现的时间与最后一次确认保存。未确认持续超过有界时间，或保存连续失败，即在原服务窗持续告示并自动退避重试；`app.inspect` 的 `persistence.spatial` 报告同一事实，安装器与 CLI 读同一来源。保存失败与停滞经 Main 的客户端事件档案留存有界记录（阶段、错误码、持有的 revision、未保存实体数），不含正文或路径，重启后可读。
 
 ### Desktop 用户数据与保存回执
 
