@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { resolvePackageRoot, materializePackageClosure } from '../../../scripts/package-dependencies.mjs'
+import { resolvePackageRoot, materializePackageClosure, runtimePackageSelection } from '../../../scripts/package-dependencies.mjs'
 import { inspectBrowserExtension } from './prepare-browser-extension-identity.mjs'
 import { inspectStaticAvatarRuntime } from './static-avatar-runtime.mjs'
 import { embeddedCoreCli } from './embedded-core-cli.mjs'
@@ -19,6 +19,9 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
   const demand = join(repositoryRoot, 'packages/demand'), connectors = join(repositoryRoot, 'packages/connectors')
   const manifest = JSON.parse(await readFile(join(desktop, 'package.json'), 'utf8'))
   const copies = [], generated = [], links = [], modes = []
+  // Every workspace package is read with one npm call; installed packages ship as installed.
+  const packageFiles = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'relay']
+    .map(name => join(repositoryRoot, 'packages', name)))
   const clone = (source, target) => copies.push({ source, target, clone: true })
   const copy = (source, target, recursive = false) => copies.push({ source, target, recursive })
   const json = (target, value) => generated.push({ target, contents: JSON.stringify(value, null, 2) + '\n' })
@@ -44,9 +47,9 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
   async function dependency(owner, name, target) {
     const source = await resolvePackageRoot(owner, name, repositoryRoot)
     const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-    for (const entry of await readdir(source, { withFileTypes: true })) {
-      if (entry.name !== 'node_modules') copy(join(source, entry.name), join(target, entry.name), entry.isDirectory())
-    }
+    // One owner decides which files of a dependency ship; workspace sources, tests and
+    // development files never enter the App or the remote Core taken from it.
+    for (const file of await packageFiles(source)) copy(join(source, file), join(target, file))
     await dependencies(source, pkg.dependencies ?? {}, join(target, 'node_modules'))
   }
   await dependencies(core, coreManifest.dependencies ?? {}, join(coreTarget, 'node_modules'))

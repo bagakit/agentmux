@@ -1,4 +1,4 @@
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
@@ -109,4 +109,96 @@ export async function materializePackageClosure(closure, directory, publications
     await symlink(value.target, link)
   }
   return publications.report
+}
+
+// Type declarations and source maps describe sources; an installed runtime never reads them.
+export const DEVELOPMENT_FILE = /\.(?:js\.map|d\.ts|d\.ts\.map)$/u
+
+/**
+ * The files a runtime dependency ships: an installed package (inside node_modules) ships
+ * as installed; a workspace checkout ships npm's own publication of it. Development files
+ * are dropped from both. Paths are relative to the package root. One owner decides this
+ * for the App bundle, the portable remote Core and the Linux release.
+ *
+ * `workspaceRoots` lists every workspace checkout the caller will ask about, so their
+ * publications are read with one npm call instead of one per package.
+ */
+export async function runtimePackageSelection(workspaceRoots = []) {
+  const roots = [...new Set(await Promise.all(workspaceRoots.map(root => realpath(root))))]
+  const workspaces = roots.length ? await workspacePublications(roots) : new Map()
+  return async function files(packageRoot) {
+    const root = await realpath(packageRoot)
+    if (root.split(sep).includes('node_modules')) return await installedFiles(root)
+    const selected = workspaces.get(root) ?? (await workspacePublications([root])).get(root)
+    workspaces.set(root, selected)
+    return selected
+  }
+}
+
+async function installedFiles(root) {
+  const files = []
+  const visit = async directory => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') await visit(path) }
+      else if (!DEVELOPMENT_FILE.test(entry.name)) files.push(relative(root, path))
+    }
+  }
+  await visit(root)
+  return files.sort()
+}
+
+async function workspacePublications(roots) {
+  const cache = await mkdtemp(join(tmpdir(), 'amux-package-files-'))
+  try {
+    const result = await exec('npm', ['pack', '--dry-run', '--json', '--ignore-scripts', '--offline', '--workspaces=false', ...roots],
+      { maxBuffer: 32 * 1024 * 1024, env: { ...process.env, npm_config_cache: cache, pnpm_config_verify_deps_before_run: 'false' } })
+    const packed = JSON.parse(result.stdout)
+    if (!Array.isArray(packed) || packed.length !== roots.length) throw new Error('npm did not describe every workspace package.')
+    const selected = new Map()
+    for (const [index, root] of roots.entries()) {
+      const publication = packed[index]
+      if (!publication?.files?.length) throw new Error(`npm described no published files for ${root}.`)
+      const files = []
+      for (const { path } of publication.files) {
+        const source = resolve(root, path)
+        if (isAbsolute(path) || !within(root, source) || !within(root, await realpath(source))) throw new Error('A published package file escapes its original package.')
+        if (!DEVELOPMENT_FILE.test(path)) files.push(path)
+      }
+      selected.set(root, files.sort())
+    }
+    return selected
+  } finally { await rm(cache, { recursive: true, force: true }) }
+}
+
+/**
+ * A runtime Core assembled exactly as the App bundles it: Core's own runtime entries, a
+ * dependency-free manifest, release identity, and every dependency's runtime files under
+ * nested node_modules. The portable remote Core and the Linux release are built from it.
+ */
+export async function materializeRuntimeCore(repositoryRoot, destination, release) {
+  const core = join(repositoryRoot, 'packages/core')
+  const manifest = JSON.parse(await readFile(join(core, 'package.json'), 'utf8'))
+  const files = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'relay']
+    .map(name => join(repositoryRoot, 'packages', name)))
+  const copyTree = async (source, target) => {
+    const info = await lstat(source)
+    if (info.isDirectory()) {
+      await mkdir(target, { recursive: true })
+      for (const entry of await readdir(source)) await copyTree(join(source, entry), join(target, entry))
+    } else if (!DEVELOPMENT_FILE.test(source)) { await mkdir(dirname(target), { recursive: true }); await copyFile(source, target); await chmod(target, info.mode & 0o777) }
+  }
+  for (const name of ['dist', 'vendor', 'bin']) await copyTree(join(core, name), join(destination, name))
+  await copyTree(join(core, 'src/ctxmux-artifact-contract.json'), join(destination, 'src/ctxmux-artifact-contract.json'))
+  const { name, version, type, main, exports, engines, os, cpu, license, repository, bin } = manifest
+  await writeFile(join(destination, 'package.json'), JSON.stringify({ name, version, type, main, exports, engines, os, cpu, license, repository, bin }, null, 2) + '\n')
+  await writeFile(join(destination, 'release.json'), JSON.stringify(release) + '\n')
+  const dependency = async (owner, packageName, target) => {
+    const source = await resolvePackageRoot(owner, packageName, repositoryRoot)
+    for (const file of await files(source)) await copyTree(join(source, file), join(target, file))
+    const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+    for (const child of Object.keys(pkg.dependencies ?? {}).sort()) await dependency(source, child, join(target, 'node_modules', ...child.split('/')))
+  }
+  for (const child of Object.keys(manifest.dependencies ?? {}).sort()) await dependency(core, child, join(destination, 'node_modules', ...child.split('/')))
+  return destination
 }
