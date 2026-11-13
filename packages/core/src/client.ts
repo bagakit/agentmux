@@ -3567,7 +3567,7 @@ export class AgentMuxClient {
     return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true; atRecords?: readonly string[] },
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true; atRecords?: readonly import('./session-history-changes.js').ConversationRecordAnchor[] },
     originalSource?: AgentSessionHistorySource): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
@@ -3587,10 +3587,10 @@ export class AgentMuxClient {
       const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
         command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
-        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}), ...(options.atRecords ? { atRecords: [...options.atRecords] } : {}) }))
+        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}), ...(options.atRecords ? { atRecords: options.atRecords.map(anchor => ({ ...anchor })) } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
-      const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+      const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, ...(page.digests ? { digests: page.digests } : {}), checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
       const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
       await this.observeNotificationAdoptions(items)
       return { ...normalized, items: normalizeSessionHistoryPage(source, { source, items, nextCursor: null }, limit).items }

@@ -33,7 +33,9 @@ export type ConversationRelation =
   | { kind: 'answers'; from: ConversationItemRef; question: ConversationQuestionIdentity }
   | { kind: 'observes'; from: ConversationItemRef; target: ConversationItemRef | ConversationInvocationRef }
 export type ConversationSourceOrder =
-  | { kind: 'native-page'; source: AgentSessionHistorySource; pageWitness?: string; indexInPage: number }
+  | { kind: 'native-page'; source: AgentSessionHistorySource; pageWitness?: string; indexInPage: number
+      /** sha256 of the record's exact physical bytes from a durable changes read; identifies it after a rewrite. */
+      recordDigest?: string }
   | { kind: 'captured-stream'; epoch: string; firstSequence: number }
   | { kind: 'captured-window'; revision: number; indexInWindow: number }
 export type ConversationSourceRef = ({ kind: 'native' } & AgentSessionHistorySource)

@@ -21,7 +21,7 @@ export type ConversationReaderPort = {
   captured(input: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   nativePage(cursor: string | undefined, limit: number): Promise<AgentSessionHistoryPage>
   nativeCheckpoint(position?: 'beginning'): Promise<NativeConversationCheckpoint>
-  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint, atRecords?: readonly string[]): Promise<NativeConversationChangesPage>
+  nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number, through?: NativeConversationCheckpoint, atRecords?: readonly import('./session-history-changes.js').ConversationRecordAnchor[]): Promise<NativeConversationChangesPage>
   /** Original Provider interface fact. Unsupported sources retain complete process bodies. */
   nativeRecordAvailable?: boolean
   nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
@@ -262,21 +262,14 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
         const upper = state.through?.frontier.cuts.find(c => c.kind === 'native')
         if (state.through && upper?.kind !== 'native') throw new AgentMuxError('The upper frontier lacks this original native source.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
         const anchors = state.rewrite?.anchors
-        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined, anchors?.map(anchor => anchor.recordId))
+        const page = await port.nativeChanges(cut.checkpoint, limit, upper?.kind === 'native' ? upper.checkpoint : undefined, anchors)
         if (page.agentSessionId !== ref.agentSessionId || page.hostId !== ref.hostId ||
           page.source.providerId !== source.providerId || page.source.nativeSessionId !== source.nativeSessionId ||
           page.checkpoint.agentSessionId !== ref.agentSessionId || page.checkpoint.source.providerId !== source.providerId || page.checkpoint.source.nativeSessionId !== source.nativeSessionId)
           return fail('The native primitive returned another original source. Its prior cut is retained.')
-        let items = page.items
-        if (anchors) {
-          // The Provider resumed at a still-present consumed record. Only its
-          // unchanged original revision proves this is the same consumed content.
-          const first = items[0], anchor = first && anchors.find(value => value.recordId === first.id)
-          if (!first || !anchor || conversationRevision(first) !== anchor.revision) throw new AgentMuxError('The rewritten source no longer holds an unchanged consumed record. Its original cut is retained.', 'AGENT_SESSION_HISTORY_REWRITTEN')
-          items = items.slice(1)
-        }
-        const sourceRows = items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
-          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])) }))
+        // The Provider resumed after a byte-identical consumed record; it returns only later records.
+        const sourceRows = page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
+          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])), ...(page.digests?.[item.id] ? { recordDigest: page.digests[item.id] } : {}) }))
         const nextCoverage: ConversationSourceCoverage = { ...initialCoverage(source), current: page.more ? 'partial' : 'complete-through-cut', readExtent: { from: cut.checkpoint.cursor, through: page.checkpoint.cursor } }
         rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'native', checkpoint: page.checkpoint }
         more ||= page.more; coverage[at] = nextCoverage

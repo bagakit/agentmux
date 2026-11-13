@@ -174,7 +174,8 @@ export async function readPiConversationChanges(context: ProviderConversationCha
     await validateHeader(reader, context)
     // Pi parent links decide branch continuity; a rewritten source requires a fresh selected read.
     if (context.atRecords) throw new AgentMuxError('Pi conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    await reader.seekChanges(context.after, context.tail === true)
+    try { await reader.seekChanges(context.after, context.tail === true) }
+    catch (error) { throw error instanceof AgentMuxError && error.code === 'AGENT_SESSION_HISTORY_REWRITTEN' ? new AgentMuxError('Pi conversations do not resume a rewritten source in place.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') : error }
     const previous = await reader.readBeforeChanges()
     let leaf = previous && previous.value.type !== 'session' ? entryIdentity(previous.value).id : null
     const visited = new Set(leaf === null ? [] : [leaf])

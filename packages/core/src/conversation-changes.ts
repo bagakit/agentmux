@@ -45,11 +45,12 @@ export type AgentConversationReadPage = ConversationRef & { sourceHostId: string
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
 export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
-/** One already-consumed original native record and its accepted revision, newest first. */
-export type ConversationRewriteAnchor = { recordId: string; revision: string }
-/** A reader rewrite anchor: the original native source was rewritten in place
- * before its saved cut. The read resumes at the newest of these records that is
- * still present with the same revision; its first returned record is that anchor. */
+/** One already-consumed original native record: its ID and the `order.recordDigest` its changes read returned. */
+export type ConversationRewriteAnchor = { recordId: string; digest: string }
+/** Recovery for an original native source rewritten in place before its saved
+ * cut. Anchors are newest first. The read resumes just after the newest anchor
+ * whose bytes are unchanged and returns only later records; a consumed ID with
+ * different bytes keeps the cut. */
 export type ConversationRewriteRecovery = { anchors: readonly ConversationRewriteAnchor[] }
 export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred'; rewrite?: ConversationRewriteRecovery }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
@@ -254,9 +255,9 @@ export function parseConversationChangesInput(value: unknown): ConversationChang
     if (!Array.isArray(r.anchors) || !r.anchors.length || r.anchors.length > CONVERSATION_REWRITE_MAX_ANCHORS || p.through !== undefined || p.view !== undefined ||
         checkpoint.frontier.cuts.filter(cut => cut.kind === 'native').length !== 1) return bad('A rewrite anchor requires one original native cut, no upper frontier or view, and 1 to 64 anchors.', 'INVALID_CONTROL_REQUEST')
     rewrite = { anchors: r.anchors.map(value => {
-      const a = rpcRecord(value, ['recordId', 'revision']), revision = text(a.revision)
-      if (!/^[a-f0-9]{64}$/u.test(revision)) return bad('A rewrite anchor requires an original record revision.', 'INVALID_CONTROL_REQUEST')
-      return { recordId: text(a.recordId), revision }
+      const a = rpcRecord(value, ['recordId', 'digest']), digest = text(a.digest)
+      if (!/^[a-f0-9]{64}$/u.test(digest)) return bad('A rewrite anchor requires the record digest from its original changes read.', 'INVALID_CONTROL_REQUEST')
+      return { recordId: text(a.recordId), digest }
     }) }
   }
   return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p), ...(rewrite ? { rewrite } : {}) }
@@ -326,16 +327,16 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
     const r = rpcRecord(value, ['id', 'reference', 'revision', 'order', 'original'], 'CONTROL_PROTOCOL_ERROR')
     const reference = itemRef(r.reference, ref, accepted), id = text(r.id, 131_072), version = revision(r.revision)
     if (id !== conversationRecordId(reference)) return bad()
-    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'), order = rpcRecord(r.order, ['kind', 'source', 'pageWitness', 'indexInPage', 'epoch', 'firstSequence'], 'CONTROL_PROTOCOL_ERROR')
+    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'), order = rpcRecord(r.order, ['kind', 'source', 'pageWitness', 'indexInPage', 'recordDigest', 'epoch', 'firstSequence'], 'CONTROL_PROTOCOL_ERROR')
     let result: ConversationSourceRecord
     if (original.kind === 'native' && reference.source.kind === 'native' && order.kind === 'native-page') {
       const s = parseConversationSource({ kind: 'native', ...rpcRecord(order.source) })
       if (s.kind !== 'native' || s.providerId !== reference.source.providerId || s.nativeSessionId !== reference.source.nativeSessionId || order.epoch !== undefined || order.firstSequence !== undefined) return bad()
       const item = normalizeSessionHistoryPage(s, { source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, items: [original.item], nextCursor: null }, 1).items[0]!
       if (item.id !== reference.source.recordId || !same(original.item, item)) return bad()
-      result = { id, reference, revision: version, order: { kind: 'native-page', source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, indexInPage: integer(order.indexInPage), ...(order.pageWitness === undefined ? {} : { pageWitness: text(order.pageWitness, 32_768) }) }, original: { kind: 'native', item } }
+      result = { id, reference, revision: version, order: { kind: 'native-page', source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, indexInPage: integer(order.indexInPage), ...(order.pageWitness === undefined ? {} : { pageWitness: text(order.pageWitness, 32_768) }), ...(order.recordDigest === undefined ? {} : { recordDigest: revision(order.recordDigest) }) }, original: { kind: 'native', item } }
     } else {
-      if (original.kind !== 'captured' || reference.source.kind !== 'captured' || order.kind !== 'captured-stream' || order.source !== undefined || order.pageWitness !== undefined || order.indexInPage !== undefined) return bad()
+      if (original.kind !== 'captured' || reference.source.kind !== 'captured' || order.kind !== 'captured-stream' || order.source !== undefined || order.pageWitness !== undefined || order.indexInPage !== undefined || order.recordDigest !== undefined) return bad()
       const epoch = text(order.epoch), item = normalizeAgentTimelineItem(original.item)
       if (!accepted.sources.some(s => s.kind === 'captured' && s.epoch === epoch) || item.id !== reference.source.recordId || item.agentSessionId !== ref.agentSessionId || !same(original.item, item)) return bad()
       result = { id, reference, revision: version, order: { kind: 'captured-stream', epoch, firstSequence: integer(order.firstSequence, 1) }, original: { kind: 'captured', item } }

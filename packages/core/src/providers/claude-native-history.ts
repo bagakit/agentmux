@@ -201,6 +201,7 @@ export async function readClaudeSessionHistoryRecord(context: AgentProviderSessi
 export async function readClaudeConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
-    return await readNativeConversationChanges(reader, context, (row, start) => mainRecord(row, start, context.source.nativeSessionId))
+    return await readNativeConversationChanges(reader, context, (row, start) => mainRecord(row, start, context.source.nativeSessionId),
+      (row, start) => { try { return mainRecord(row, start, context.source.nativeSessionId)?.id ?? null } catch { return null } })
   } finally { await reader.close() }
 }
