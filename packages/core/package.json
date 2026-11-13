@@ -27,6 +27,10 @@
       "types": "./dist/agent-learning.d.ts",
       "import": "./dist/agent-learning.js"
     },
+    "./agent-derived-actions": {
+      "types": "./dist/agent-derived-actions.d.ts",
+      "import": "./dist/agent-derived-actions.js"
+    },
     "./capsule": {
       "types": "./dist/capsule.d.ts",
       "import": "./dist/capsule.js"
