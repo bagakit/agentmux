@@ -361,7 +361,7 @@ describe('Settings › Browser Profiles by keyboard', () => {
   it('the color picker names each color, starts on the current choice, moves with arrows without saving, and Escape returns', async () => {
     const mark = container.querySelector<HTMLButtonElement>('.browser-profile-editor__mark')!
     await act(async () => mark.click())
-    const group = container.querySelector('[role="radiogroup"]')!
+    const group = container.querySelector('.browser-profile-editor__hues[role="radiogroup"]')!
     expect(group.getAttribute('aria-label')).toBe('Color for Personal')
     expect([...group.querySelectorAll('[role="radio"]')].map(radio => radio.getAttribute('aria-label'))).toEqual([...PROFILE_HUES.map(() => expect.any(String)), null])
     expect([...group.querySelectorAll('button[style]')].every(radio => !/^Hue \d+$/.test(radio.getAttribute('aria-label') ?? ''))).toBe(true)
@@ -370,7 +370,7 @@ describe('Settings › Browser Profiles by keyboard', () => {
     expect(document.activeElement).toBe(group.querySelector('button[style]'))
     expect(port.updateProfile).not.toHaveBeenCalled()
     await key(document.activeElement!, 'Escape')
-    expect(container.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(container.querySelector('.browser-profile-editor__hues')).toBeNull()
     expect(document.activeElement).toBe(mark)
     expect(port.updateProfile).not.toHaveBeenCalled()
   })
@@ -459,7 +459,7 @@ describe('Settings › Browser Profiles exit check', () => {
   it('offers to set a check address when none is saved, and sends nothing', async () => {
     delete store.config.browser.exitCheckUrl
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
-    expect(section().textContent).toContain('System settings')
+    expect(section().textContent).toContain('Follows the system proxy')
     expect([...section().querySelectorAll('button')].map(button => button.textContent)).toEqual(['Set a check address'])
     expect(port.checkProfileExit).not.toHaveBeenCalled()
   })
