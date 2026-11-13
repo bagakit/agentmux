@@ -223,6 +223,7 @@ export class BrowserProgramOwner {
       active.operation.summary = outcome.message; active.operation.warning = outcome.message; active.operation.finishedAt = Date.now()
       return { result: undefined, logs: [], outcome, runOperation: active.operation }
     } finally {
+      active.controller.abort()
       if (!feedbackEnded) await feedback?.end(false)
       release()
       await interrupts?.dispose()

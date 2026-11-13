@@ -22,6 +22,7 @@ import {
 } from './browser-page-input-scripts.js'
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
+import { createBrowserNetworkObservations } from './browser-network-observation.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -231,6 +232,8 @@ export function createBrowserPageDispatch(
   context: BrowserPageContext
 ): (name: string, args: unknown[], scope?: BrowserPageActionScope) => Promise<unknown> {
   const { session } = context
+  let network: ReturnType<typeof createBrowserNetworkObservations> | undefined
+  const networkObservations = () => network ??= createBrowserNetworkObservations(context)
   // 最近一张快照。ref 只在发出它的那张快照里有意义，所以这里只留一张——留多张等于允许
   // Agent 拿两轮之前的 ref 说话，而那些 ref 指向的元素早就不在了。
   let current: BrowserPageSnapshot | null = null
@@ -1077,6 +1080,18 @@ export function createBrowserPageDispatch(
 
   return async (name, args, scope) => {
     switch (name) {
+      case 'watchRequests':
+      case 'readRequests':
+      case 'waitForResponse':
+      case 'stopWatchingRequests': {
+        const maximum = name === 'watchRequests' ? 1 : name === 'stopWatchingRequests' ? 1 : name === 'readRequests' ? 2 : 3
+        if (args.length > maximum) throw new TypeError('Unexpected network observation arguments.')
+        const observation = networkObservations()
+        if (name === 'watchRequests') return await observation.watch(args[0])
+        if (name === 'readRequests') return observation.read(args[0], args[1])
+        if (name === 'waitForResponse') return await observation.waitForResponse(args[0], args[1], args[2])
+        return observation.stop(args[0])
+      }
       case 'readResult': {
         if (!context.resultArtifacts) throw new Error('Durable result reading is unavailable for this Browser.')
         const options = args[1]

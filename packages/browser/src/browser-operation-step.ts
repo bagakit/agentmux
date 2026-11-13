@@ -26,7 +26,8 @@ export function safeBrowserUrl(value: string): string {
  * the journal, so a new private argument is redacted in both or in neither.
  */
 export function isSensitiveBrowserPageCall(method: string): boolean {
-  return method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp'
+  return method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp' ||
+    method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests'
 }
 
 export function startBrowserOperationStep(operation: BrowserOperation, method: string, args: unknown[]): BrowserOperationStep {
@@ -39,7 +40,9 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
       : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
           .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
     ...(method === 'fillInput' || method === 'typeText' ? { inputKey: 'value', blockedReason: 'Sensitive input is requested again at replay time.' } : {}),
-    ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {})
+    ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {}),
+    ...(method === 'watchRequests' || method === 'readRequests' || method === 'waitForResponse' || method === 'stopWatchingRequests'
+      ? { blockedReason: 'Network readers belong to their original program and document. Start a new explicit observation; old reader handles and URL filters are not retained.' } : {})
   }
   const step: BrowserOperationStep = {
     sequence: operation.steps.length + 1,
