@@ -217,7 +217,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(original.control).toMatchObject({ owner: 'human', activeOperationId: null })
     expect(controlPayloads(f.contents).filter(payload => payload.active)).toEqual([])
 
-    const returned = f.manager.returnControl('browser-one')
+    const returned = await f.manager.returnControl('browser-one')
     expect(returned.control).toMatchObject({ owner: 'agent', activeOperationId: null })
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({
       browserId: 'browser-one', ownerId: expect.any(String), navigationId: original.navigationId, active: true
@@ -229,7 +229,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(f.contents.commands).toEqual(commands)
 
     const count = controlPayloads(f.contents).length
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     expect(controlPayloads(f.contents)).toHaveLength(count)
     preferences = { ...preferences, glowBlend: 'multiply', glowColor: '#cc3366', glowOpacity: 0.35 }
     f.manager.refreshAgentFeedback()
@@ -247,7 +247,7 @@ describe('Browser control decoration through actual Main ownership and presentat
   it('uses the first visible passive lease while native is hidden and reconciles mirror removal, remount and explicit handoff', async () => {
     const f = await managerFixture(undefined, { nativeVisible: false })
     const original = f.manager.target('browser-one')!, commands = [...f.contents.commands]
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     const hidden = f.register('initial-hidden', false)
     expect(controlPayloads(f.contents).filter(payload => payload.active)).toEqual([])
     expect(f.source.getVisible()).toBe(false); expect(f.manager.nativeOwner('browser-one')).toBeUndefined()
@@ -277,7 +277,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     f.manager.takeControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: false }))
     expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'human', activeOperationId: null })
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: true }))
     expect(f.manager.target('browser-one')).toMatchObject({ id: original.id, navigationId: original.navigationId,
       control: { owner: 'agent', activeOperationId: null } })
@@ -290,7 +290,7 @@ describe('Browser control decoration through actual Main ownership and presentat
 
   it.each(['failed', 'cancelled'] as const)('retains the original view decoration after a %s Profile candidate and a fresh Return', async outcome => {
     const f = await managerFixture()
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
     const ownerId = controlPayloads(f.contents).at(-1).ownerId
     f.manager.takeControl('browser-one')
@@ -313,7 +313,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(candidate.isDestroyed()).toBe(true); expect(f.contents.isDestroyed()).toBe(false)
     expect(f.manager.nativeOwner('browser-one')?.view).toBe(f.source)
 
-    const returned = f.manager.returnControl('browser-one')
+    const returned = await f.manager.returnControl('browser-one')
     expect(returned).toMatchObject({ profileId: 'default', control: { owner: 'agent', activeOperationId: null } })
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({
       browserId: 'browser-one', ownerId, navigationId: returned.navigationId, active: true
@@ -331,7 +331,7 @@ describe('Browser control decoration through actual Main ownership and presentat
 
   it('publishes the replacement view only after Profile commit and fences late original-view callbacks', async () => {
     const f = await managerFixture()
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
     const originalOwnerId = controlPayloads(f.contents).at(-1).ownerId
     f.manager.takeControl('browser-one')
@@ -354,7 +354,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(f.contents.isDestroyed()).toBe(false) // The original cleanup callback is deliberately still outstanding.
     expect(controlPayloads(candidate).filter(payload => payload.active)).toEqual([])
 
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(candidate).at(-1)).toMatchObject({
       browserId: 'browser-one', navigationId: switched.navigationId, active: true
     }))
@@ -366,7 +366,7 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(controlPayloads(candidate)).toHaveLength(count)
     expect(controlPayloads(candidate).at(-1)).toBe(active)
     expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId: originalOwnerId, active: false })
-    expect(f.manager.returnControl('browser-one')).toMatchObject({ profileId: 'replacement-profile', navigationId: switched.navigationId,
+    expect(await f.manager.returnControl('browser-one')).toMatchObject({ profileId: 'replacement-profile', navigationId: switched.navigationId,
       control: { owner: 'agent', activeOperationId: null } })
     expect(candidate.isDestroyed()).toBe(false); expect(actionPayloads(candidate)).toEqual([]); expect(candidate.actions).toBe(0)
     expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
@@ -381,7 +381,7 @@ describe('control decoration availability through actual Main callbacks', () => 
     const updates = () => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one')
     const current = () => updates().at(-1).browser
     native.controlDisplayFails = true
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(current().activity.warning).toContain(notice))
     expect(current().activity.operation).toBeNull()
 
@@ -441,7 +441,7 @@ describe('control decoration availability through actual Main callbacks', () => 
 
   it.each([true, false])('ignores a late old-view availability=%s result after Profile commit', async staleAvailable => {
     const f = await managerFixture()
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
     const pending: Array<() => void> = []
     const execute = f.contents.executeJavaScriptInIsolatedWorld.bind(f.contents)
@@ -456,7 +456,7 @@ describe('control decoration availability through actual Main callbacks', () => 
     const replacement = f.manager.nativeOwner('browser-one')!.view.webContents as any
     expect(replacement).not.toBe(f.contents); expect(pending.length).toBeGreaterThan(0)
     native.controlDisplayFails = staleAvailable
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     const updates = () => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one')
     const current = () => updates().at(-1).browser
     await vi.waitFor(() => {
@@ -681,7 +681,7 @@ describe('actual BrowserViewManager consumer', () => {
       f.manager.takeControl('browser-one')
       expect(currentBrowser(f)).toMatchObject({ control: { owner: 'human', inputIsolation: 'inactive' } })
       expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
-      f.manager.returnControl('browser-one')
+      await f.manager.returnControl('browser-one')
       await vi.waitFor(() => expect(currentBrowser(f)?.control?.inputIsolation).toBe('isolated'))
       expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
     }
@@ -786,7 +786,7 @@ describe('actual BrowserViewManager consumer', () => {
     let shield: any
     native.onWaiting = async () => { shield = f.manager.nativeOwner('browser-one')!.inputShield; native.deferredCloseId = shield.webContents.id }
     const original = await f.manager.runScript('browser-one', 'original delayed native close', undefined, undefined, 'original-close')
-    f.manager.takeControl('browser-one'); f.manager.returnControl('browser-one')
+    f.manager.takeControl('browser-one'); await f.manager.returnControl('browser-one')
     expect(original.runOperation?.warning).toContain('could not be fully released')
     native.onWaiting = async () => {
       const before = f.events.at(-1).browser.activity.operation
@@ -1104,7 +1104,7 @@ describe('modal presentation and Agent input demands on the original native surf
 
   it.each(['modal', 'agent'])('releasing only the %s demand preserves the other owner and exact physical barrier', async released => {
     const f = await managerFixture()
-    f.manager.returnControl('browser-one')
+    await f.manager.returnControl('browser-one')
     await vi.waitFor(() => expect(f.manager.target('browser-one')!.control!.inputIsolation).toBe('isolated'))
     const original = f.manager.nativeOwner('browser-one')!, shield = original.inputShield!
     const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())

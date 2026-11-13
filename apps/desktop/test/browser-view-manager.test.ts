@@ -256,7 +256,7 @@ describe('Browser exact Agent association and trusted handoff', () => {
     const f = fakeWindow(), manager = browserManager(f.window)
     await manager.create('unassociated', 'https://example.invalid/original', 'workspace-a')
     expect(manager.target('unassociated')?.control).toMatchObject({ owner: 'human', agent: null })
-    expect(() => manager.returnControl('unassociated')).toThrow('no associated Agent')
+    await expect(manager.returnControl('unassociated')).rejects.toThrow('no associated Agent')
     expect(manager.target('unassociated')).toMatchObject({ status: 'ready', url: 'https://example.invalid/original', control: { owner: 'human', agent: null, revision: 0 } })
     expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
     manager.close('unassociated')
@@ -272,8 +272,9 @@ describe('Browser exact Agent association and trusted handoff', () => {
     expect(manager.takeControl('handoff').control).toMatchObject({ owner: 'human', agent: identity })
     const moved = await manager.navigate('handoff', 'https://example.invalid/current')
     expect(moved.control).toMatchObject({ owner: 'human', agent: identity })
-    expect(manager.returnControl('handoff').control).toMatchObject({ owner: 'agent', agent: identity })
-    expect(read).toHaveBeenCalledTimes(1)
+    expect((await manager.returnControl('handoff')).control).toMatchObject({ owner: 'agent', agent: identity })
+    // The hand-back asks Core once more about the exact association it returns to.
+    expect(read.mock.calls).toEqual([[recipient], [identity]])
     manager.close('handoff')
   })
 
@@ -324,7 +325,7 @@ describe('Browser exact Agent association and trusted handoff', () => {
     const cold = await manager.ensure('cold', async () => descriptor)
     expect(cold.control).not.toHaveProperty('agent')
     Reflect.get(manager, 'entries').get('cold').activity.operation = { id: 'historical', operator: { id: recipient.agentSessionId, name: 'Old author' }, phase: 'completed' }
-    expect(() => manager.returnControl('cold')).toThrow('association is unconfirmed')
+    await expect(manager.returnControl('cold')).rejects.toThrow('association is unconfirmed')
     manager.close('cold')
     const restored = await manager.ensure('saved', async () => ({ ...descriptor, id: 'saved', agent: identity }))
     expect(restored.control).toMatchObject({ owner: 'human', agent: identity, revision: 0, activeOperationId: null, inputIsolation: 'inactive' })
@@ -468,6 +469,7 @@ describe('a retired Agent releases only its own exact Browser associations', () 
     expect(browsers.releaseRetiredAgent).toHaveBeenCalledExactlyOnceWith(agent)
   })
 })
+
 
 /**
  * 一个记账的应用链接宿主。`openExternal` **必须**是假的——真的 `shell.openExternal` 会在跑测试的
@@ -821,7 +823,7 @@ describe('BrowserViewManager', () => {
     await expect(manager.restore('native-cleanup', { workspaceId: 'workspace-a' })).resolves.toMatchObject({ id: 'native-cleanup' })
     expect(Reflect.get(manager, 'entries').get('native-cleanup').inputShield).toBe(shield)
     expect(manager.resourceTargets(processes)[0]?.resource?.retention).toMatchObject({ status: 'unknown', reasons: expect.arrayContaining(['close-unconfirmed']) })
-    expect(manager.returnControl('native-cleanup').activity?.warning).toContain('could not be fully released')
+    expect((await manager.returnControl('native-cleanup')).activity?.warning).toContain('could not be fully released')
     dispose.mockImplementation(() => { shieldContents.close() })
     expect(manager.takeControl('native-cleanup').control).toMatchObject({ owner: 'human', inputIsolation: 'inactive' })
     expect(manager.resourceProcessIds()).not.toContain(20)

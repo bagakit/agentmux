@@ -193,7 +193,7 @@ describe('the original initial Browser document',()=>{
     const f=fixture(),load=deferred();native.Contents.beforeLoad=()=>load.promise
     await f.manager.create('original-browser',url,'workspace',undefined,undefined,'responsive',{agent:{hostId:'original-host',agentSessionId:'original-agent'}});const document=f.entry().initialDocument
     for(let n=0;n<3;n++) {
-      f.manager.returnControl('original-browser')
+      await f.manager.returnControl('original-browser')
       const operation='stopped-observation-'+n,pending=f.manager.runScript('original-browser','return await js("document.body.innerText")',undefined,undefined,operation)
       await vi.waitFor(()=>expect(getEventListeners(document.completion.signal,'abort')).toHaveLength(1))
       await f.manager.stopOperationById(operation);expect((await pending).outcome.kind).toBe('stopped')

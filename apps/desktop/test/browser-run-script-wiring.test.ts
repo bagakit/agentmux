@@ -282,16 +282,19 @@ describe('Browser exact Agent program authority', () => {
       expect(f.manager.target('b1')?.control?.agent).toEqual(identity)
       expect(resolve).toHaveBeenCalledWith(identity.agentSessionId)
       f.manager.takeControl('b1')
-      expect(f.manager.returnControl('b1').control).toMatchObject({ owner: 'agent', agent: identity })
+      expect((await f.manager.returnControl('b1')).control).toMatchObject({ owner: 'agent', agent: identity })
       resolve.mockImplementationOnce(() => { throw new Error('Retained Core observation unavailable') })
       expect((await run('return 23')).result).toBe(23)
       expect(f.manager.target('b1')).toMatchObject({ control: { agent: identity }, warning: expect.stringContaining('identity could not be confirmed') })
       expect(f.sentEvents().at(-1)?.browser.activity.warning).toContain('identity could not be confirmed')
       f.manager.takeControl('b1')
-      expect(f.manager.returnControl('b1').control).toMatchObject({ owner: 'agent', agent: identity })
+      expect((await f.manager.returnControl('b1')).control).toMatchObject({ owner: 'agent', agent: identity })
       expect((await run('return 29')).result).toBe(29)
       expect(f.manager.target('b1')?.warning).toBeUndefined()
-      expect(inspect).not.toHaveBeenCalled()
+      // Programs never read creation. Core is asked about the exact association once when the page
+      // restores with it and once per hand-back; an unanswered read (this fake returns nothing) still
+      // hands the page back.
+      expect(inspect.mock.calls).toEqual([[{ hostId: 'original-host', agentSessionId: 'original-agent' }], [identity], [identity]])
     } finally { f.manager.dispose() }
   })
 
@@ -304,7 +307,7 @@ describe('Browser exact Agent program authority', () => {
       expect(f.manager.target('fresh-actor')?.control).not.toHaveProperty('agent')
       expect(f.manager.target('fresh-actor')?.warning).toContain('identity could not be confirmed')
       f.manager.takeControl('fresh-actor')
-      expect(() => f.manager.returnControl('fresh-actor')).toThrow('association is unconfirmed')
+      await expect(f.manager.returnControl('fresh-actor')).rejects.toThrow('association is unconfirmed')
     } finally { f.manager.dispose() }
   })
 
@@ -816,14 +819,14 @@ describe('explicit Browser control', () => {
       contents.emit('input-event', { type: 'mouseDown' })
       expect(sentEvents().at(-1)?.browser.control.owner).toBe('human')
       await expect(manager.runScript('b1', 'return 99')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
-      const returned = manager.returnControl('b1')
+      const returned = await manager.returnControl('b1')
       expect(returned).toMatchObject({ control: { owner: 'agent', activeOperationId: null }, activity: { operation: { phase: 'completed' } } })
       await vi.waitFor(() => expect(sentEvents().at(-1)?.browser.control.inputIsolation).toBe('isolated'))
       expect(inputShields.FakeInputShield.instances).toHaveLength(2)
       const freshShield = inputShields.FakeInputShield.instances[1]!
       expect(freshShield.prepare).toHaveBeenCalledTimes(1)
       expect(dispatchCalls).toEqual([])
-      manager.returnControl('b1')
+      await manager.returnControl('b1')
       expect(inputShields.FakeInputShield.instances).toEqual([originalShield, freshShield])
       expect(await manager.runScript('b1', 'return 37')).toMatchObject({ outcome: { kind: 'completed' }, result: 37 })
       expect(inputShields.FakeInputShield.instances).toEqual([originalShield, freshShield])
@@ -879,7 +882,7 @@ describe('explicit Browser control', () => {
     try {
       await ready
       expect(manager.takeControl('b1')).toMatchObject({ control: { owner: 'human', activeOperationId: null } })
-      const returned = manager.returnControl('b1')
+      const returned = await manager.returnControl('b1')
       expect(returned).toMatchObject({ control: { owner: 'agent', activeOperationId: null }, activity: { operation: null } })
       release()
       expect(await pending).toMatchObject({ outcome: { kind: 'stopped' }, runOperation: { id: 'op:admitted-before-take', phase: 'stopped' } })
@@ -994,7 +997,7 @@ describe('explicit Browser control', () => {
       for (const attempt of [1, 2, 3]) {
         await expect(manager.runScript('b1', `return ${attempt}`)).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
       }
-      manager.returnControl('b1')
+      await manager.returnControl('b1')
       expect(calls).toEqual(['click'])
       expect(stopped.runOperation.phase).toBe('stopped')
       expect(await manager.runScript('b1', 'return "fresh"')).toMatchObject({ outcome: {kind: 'completed'}, result: 'fresh' })
@@ -2149,7 +2152,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
       const edited = await f.manager.saveTaskAssetDraft('b1', saved.id, saved.revision, { ...saved.draft, name: 'New draft', steps: [] })
       expect(edited.versions).toEqual(saved.versions)
       await expect(f.manager.saveTaskAssetVersion('b1', saved.id, saved.revision, saved.draft)).rejects.toThrow('changed')
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       createDispatch.mockImplementationOnce(() => pageDispatch(async () => { await held; return true }))
       running = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       await expect.poll(() => f.sentEvents().filter(event => event.browser?.taskAssets?.runs.some((run: any) => run.status === 'running')).length).toBeGreaterThan(0)
@@ -2172,7 +2175,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
         { id: 'human-checkpoint', kind: 'checkpoint', url: f.imported.draft.url, reviewed: true },
         ...f.imported.draft.steps.map(step => ({ ...step, reviewed: true }))
       ] })
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       const paused = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       expect(paused).toMatchObject({ status: 'waiting-human', nextStep: 1, operationIds: [],
         pendingCheckpointId: 'human-checkpoint', humanCheckpoints: [] })
@@ -2219,7 +2222,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
     try {
       const saved = await version(f)
       await f.manager.create('b2', 'https://example.invalid/', 'workspace-1')
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       createDispatch.mockImplementation(context => {
         expect(context.resultArtifacts?.owner.browserId).toMatch(/^b[12]$/)
         return context.resultArtifacts!.owner.browserId === 'b1'
@@ -2286,7 +2289,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
       healthyOther = f.manager.runScript('b2', "await waitForElement('Other pending fact'); return 82")
       await otherReady
       expect(f.sentEvents().filter(event => event.browser?.id === 'b2' && event.browser.activity?.operation?.phase === 'waiting').length).toBeGreaterThan(0)
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       await expect.poll(() => preparationReached).toBe(true)
       const cursor = (await f.assets.state('b1')).runs.at(-1)!
@@ -2334,7 +2337,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
         const dispatch = pageDispatch()
         return async name => { calls.push(name); return await dispatch(name) }
       })
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       activeTask = f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       const run = await activeTask
       expect(publishedRunId).toBeTypeOf('string')
@@ -2363,7 +2366,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
     try {
       const saved = await version(f)
       createDispatch.mockImplementation(() => pageDispatch())
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       const old = await f.manager.runTaskAsset({ assetId: saved.id, version: 1, browserId: 'b1', parameters: {} })
       expect(old).toMatchObject({ status: 'completed', nextStep: 1 })
       const start = f.journal.start.bind(f.journal)
@@ -2395,7 +2398,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
         steps: [{ id: 'fill-private', kind: 'fill', url: f.imported.draft.url, reviewed: true, parameterKey: 'private-value',
           target: { role: 'text input', name: 'Private value', ordinal: 1, count: 1 } },
           ...f.imported.draft.steps.map(step => ({ ...step, reviewed: true }))] })
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       const dispatch = (context: BrowserPageContext) => {
         capturedContext = context
         return async (name: string, args: unknown[]) => {
@@ -2579,7 +2582,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       expect(f.clicks()).toBe(1)
       f.manager.takeControl('b1')
       await f.manager.navigate('b1', 'https://example.invalid/another-document')
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       f.install('none')
       const read = await f.manager.runScript('b1', `return await readDownload(${JSON.stringify(receipt.reference)}, {offset:1,maxBytes:3})`)
       expect(read.outcome).toEqual({ kind: 'completed' })
@@ -2607,7 +2610,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       f.install('none', async () => {
         f.manager.takeControl('b1')
         await f.manager.switchProfile('b1', 'another-profile')
-        f.manager.returnControl('b1')
+        await f.manager.returnControl('b1')
       })
       const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await download(page.nodes[0].ref,{path:"wrong-owner.bin",timeoutMs:100})')
       const replacement = fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents
@@ -2672,7 +2675,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       expect((await pending).outcome.kind).toBe('stopped')
       expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
       await expect(readFile(join(f.root, 'stopped.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       expect(await f.manager.runScript('b1', 'return 37')).toMatchObject({ result: 37, outcome: { kind: 'completed' } })
     } finally { await f.close() }
   }, 30_000)
@@ -2783,7 +2786,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
       await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
       f.manager.takeControl('b1')
       await f.manager.navigate('b1', 'https://example.invalid/next')
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       await vi.waitFor(async () => await expect(readFile(f.staged()[0]!)).rejects.toMatchObject({ code: 'ENOENT' }))
       expect(await f.manager.runScript('b1', 'return 31')).toMatchObject({ result: 31, outcome: { kind: 'completed' } })
     } finally { await f.close() }
@@ -2802,7 +2805,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
           if (name === 'snapshot') {
             f.manager.takeControl('b1')
             await f.manager.switchProfile('b1', 'another-profile')
-            f.manager.returnControl('b1')
+            await f.manager.returnControl('b1')
             try { context.uploads!.context() } catch (error) { rejectionFacts.push((error as Error).message) }
             try { originalSource.currentNavigationId() } catch (error) { rejectionFacts.push((error as Error).message) }
           }
@@ -2939,7 +2942,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         await f.manager.create('b2', 'https://example.invalid/healthy', f.workspace.id)
         expect(await f.manager.runScript('b2', 'return 71')).toMatchObject({result:71,outcome:{kind:'completed'}})
         await f.manager.stopOperationById(`upload-held-${boundary}`)
-        if (boundary === 'return-during-IO') f.manager.returnControl('b1')
+        if (boundary === 'return-during-IO') await f.manager.returnControl('b1')
         releaseIO()
         const report = await pending
         await vi.waitFor(() => expect(uploadSettled).toBe(true))
@@ -2948,7 +2951,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         expect(report.outcome.kind).toBe('stopped')
         expect(f.sentEvents().at(-1)?.browser.activity.control).toBe('agent')
         expect(f.contents.isDestroyed()).toBe(false)
-        f.manager.returnControl('b1')
+        await f.manager.returnControl('b1')
         expect(await f.manager.runScript('b1', 'return 67')).toMatchObject({result:67,outcome:{kind:'completed'}})
       } finally { releaseIO(); await f.close() }
     }, 30_000)
@@ -2981,7 +2984,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
       f.manager.takeControl('b1')
       await f.manager.navigate('b1','https://example.invalid/retry-cleanup')
       await vi.waitFor(() => expect(f.sentEvents().at(-1)?.browser.activity.warning).toEqual(expect.stringContaining('staging could not be fully released')))
-      f.manager.returnControl('b1')
+      await f.manager.returnControl('b1')
       expect(await f.manager.runScript('b1','return 47')).toMatchObject({result:47,outcome:{kind:'completed'}})
     } finally { await f.close() }
   }, 30_000)
