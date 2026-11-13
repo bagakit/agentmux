@@ -41,9 +41,13 @@ const executionHost = () => ({ id: 'container', kind: 'ssh', label: 'container',
     : args[0] === '-e' ? ['-e', translateNode(args[1])] : args, options) })
 const host = { id: 'container', kind: 'ssh', label: 'container', hostname: 'container.invalid',
   remoteCommand: join(server, 'bin/amux'), remoteSocketPath: socket, runtimeId: owner.runtimeId }
-// The installed release is not a git checkout: write the release identity the App build would carry.
-await (await import('node:fs/promises')).writeFile(join(release, 'release.json'), JSON.stringify({ sourceCommit: 'container-fixture' }))
-const candidate = await createPortableCoreArtifact(await mkdtemp(join(home, 'candidate-')), release).catch(error => ({ error: error.message }))
+// The candidate is a copy with its own release identity; the installed release stays exactly
+// as deployed, because the upgrade check verifies every deployed file.
+const { cp, writeFile } = await import('node:fs/promises')
+const source = join(await mkdtemp(join(home, 'candidate-source-')), 'core')
+await cp(release, source, { recursive: true, verbatimSymlinks: true })
+await writeFile(join(source, 'release.json'), JSON.stringify({ sourceCommit: 'container-fixture' }))
+const candidate = await createPortableCoreArtifact(await mkdtemp(join(home, 'candidate-')), source).catch(error => ({ error: error.message }))
 const manager = new RemoteCoreUpgradeManager({ stateDirectory: join(home, '.client-upgrades'), executionHost,
   artifact: async () => { if (candidate.error) throw new Error(candidate.error); return candidate } })
 const check = await manager.check(host)
