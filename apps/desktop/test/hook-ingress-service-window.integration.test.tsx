@@ -79,7 +79,8 @@ it('carries a retained Core failure through Hosted bootstrap, Main snapshot, Ren
   expect(dom.container.textContent).toContain('terminal input and output remain separate capabilities')
   expect(sessionServiceNotices(failed).map(value => value.id)).toContain('hook-ingress')
   expect(composerSubmitMode(failed)).toMatchObject({ canType: true, canSubmit: true })
-  const restored: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: 10 } } }
+  const restored: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'connection-state', state: 'restored',
+    observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'run-process', observedAt: 10 } } }
   await act(async () => useAppStore.getState().applyEvent(restored))
   expect(useAppStore.getState().sessions.find(value => value.id === failed.id)).toMatchObject({ hookIngressObservation: { code: 'INVALID_HOOK_BINDING' } })
   await vi.waitFor(() => expect(snapshotRead).toHaveBeenCalled())
@@ -87,8 +88,14 @@ it('carries a retained Core failure through Hosted bootstrap, Main snapshot, Ren
   const nativeStatus = f.inner.kernel.status
   f.inner.kernel.status = async () => { throw Object.assign(new Error('Private native Run observation is temporarily unavailable'), { code: 'PRIVATE_STATUS_UNAVAILABLE' }) }
   await act(async () => { await expect(controller.refresh(failed.control, composerConfig)).rejects.toThrow('Private native Run observation is temporarily unavailable') })
-  await vi.waitFor(() => expect(useAppStore.getState().sessions.find(value => value.id === failed.id)).toMatchObject({ hookIngressObservation: { code: 'PRIVATE_STATUS_UNAVAILABLE' } }))
-  expect(dom.container.textContent).toContain('Private native Run observation is temporarily unavailable')
+  await vi.waitFor(() => expect(useAppStore.getState().notificationEvents).toContainEqual(expect.objectContaining({
+    message: expect.stringContaining('Private native Run observation is temporarily unavailable'),
+    context: expect.objectContaining({ subject: failed.control })
+  })))
+  // The Run observation error is visible through its own event owner; it cannot replace the
+  // original binding failure that this exact Terminal service window still describes.
+  expect(useAppStore.getState().sessions.find(value => value.id === failed.id)).toMatchObject({ hookIngressObservation: { code: 'INVALID_HOOK_BINDING' } })
+  expect(dom.container.textContent).toContain('original Run binding')
   expect(useAppStore.getState().sessions.find(value => value.id === failed.id)?.processState).toBe('running')
   f.inner.kernel.status = nativeStatus
   const healthyBeforeRetry = useAppStore.getState().sessions.find(value => value.id === healthy.agentSessionId)

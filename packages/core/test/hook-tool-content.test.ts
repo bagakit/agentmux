@@ -13,6 +13,7 @@ import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { AgentMuxHostedTransferReader } from '../src/hosted-value.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { hostedTestOwner, hostedTestFence } from './helpers/hosted-runtime-port.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
 
 const exec = promisify(execFile)
@@ -60,17 +61,19 @@ describe('Hook tool content through durable and public consumers', () => {
         hookReceipt: { id: `long-${shape}`, toolInvocation: { toolInput: expected, nativeTranscriptPath: h.nativeHandle.transcriptPath } } })
 
       // Read the same durable file in another process, without reseeding or changing identity.
-      const storeModule = new URL('../dist/agent-session-store.js', import.meta.url).href
+      const storeModule = new URL('../src/agent-session-store.ts', import.meta.url).href
+      const sourceLoader = new URL('./fixtures/hook-delivery/source-loader.mjs', import.meta.url)
+      const registration = `import { register } from 'node:module'; register(${JSON.stringify(sourceLoader.href)}, ${JSON.stringify(import.meta.url)});`
       const reader = `import { AgentMuxFileAgentSessionStore, loadAgentSessions } from ${JSON.stringify(storeModule)};
         console.log(JSON.stringify(await loadAgentSessions(new AgentMuxFileAgentSessionStore(process.argv[1]))));`
-      const fresh = await exec(process.execPath, ['--input-type=module', '-e', reader, h.store.path], { maxBuffer: 1024 * 1024 })
+      const fresh = await exec(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(registration), '--input-type=module', '-e', reader, h.store.path], { maxBuffer: 1024 * 1024 })
       expect(JSON.parse(fresh.stdout)).toEqual(stored)
 
       await owner.start()
       const env = { ...process.env }
       delete env.AGENTMUX_AGENT_SESSION_ID; delete env.AGENTMUX_AGENT_CAPABILITY
-      const cli = await exec(process.execPath, [new URL('../bin/amux', import.meta.url).pathname,
-        '--endpoint', `unix:${owner.path}`, 'agent', 'inspect', '--session', sessionId], { env, maxBuffer: 1024 * 1024 })
+      const cli = await runSourceObjectCli(['--endpoint', `unix:${owner.path}`, 'agent', 'inspect', '--session', sessionId], env, '', 15_000, sourceLoader)
+      expect(cli.code, cli.stderr).toBe(0)
       const result = JSON.parse(cli.stdout)
       expect(result).toMatchObject({ ok: true, operation: 'agent.inspect', result: { session: {
         agentSessionId: sessionId, run: { runId: `run-${sessionId}` }, nativeHandle: h.nativeHandle,

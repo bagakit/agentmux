@@ -2,6 +2,7 @@ import { mkdtemp, open, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as SourceCore from '../src/index.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
@@ -10,17 +11,12 @@ import { AgentMuxHostedTransferReader } from '../src/hosted-value.js'
 import { sendHookReceipt, HOOK_OWNER_TIMEOUT_MS } from '../src/agent-hook-delivery.js'
 import { hostedTestOwner, hostedTestFence } from './helpers/hosted-runtime-port.js'
 import { ObjectCliProbe } from './helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { runtimeDiagnosticNotice, projectRuntimeEvent } from '../../../apps/desktop/src/renderer/src/lib/session-state.js'
 import { composerSubmitMode } from '../../../apps/desktop/src/renderer/src/lib/composer-submit-mode.js'
-import { TransientErrorNotice } from '../../../apps/desktop/src/renderer/src/components/TransientErrorNotice.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentProviderSessionStatusObservationContext } from '../src/agent-provider.js'
 import type { RuntimeEvent, SessionSnapshot } from '../../../apps/desktop/src/shared/contracts.js'
-
-// These are the first-party Desktop consumer's existing dependencies, not Core dependencies.
-const desktopModules = createRequire(new URL('../../../apps/desktop/package.json', import.meta.url))
-const { createElement } = desktopModules('react')
-const { renderToStaticMarkup } = desktopModules('react-dom/server')
 
 // Client, SQLite Store and durability Error share the same actually compiled module.
 const core: typeof SourceCore & { sendHookReceipt?: typeof sendHookReceipt,
@@ -51,7 +47,7 @@ async function fixture(observe: (context: AgentProviderSessionStatusObservationC
     id: PROVIDER, label: 'Controlled auxiliary observer', executable: 'synthetic-agent', expectedProcess: 'synthetic-agent',
     promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'synthetic-agent' },
     hookStrategy: { kind: 'native', installation: 'unmanaged' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
-    capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: false, replyCorrelation: 'none' }
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: false, replyCorrelation: 'none' }
   }, buildArgs: (_prompt, args) => [...args], hook: {
     nativeHandle: { sessionIdKeys: ['session_id'] }, rules: [
       { events: ['begin'], state: 'working', lifecycleEvent: 'turn-start' },
@@ -72,7 +68,8 @@ async function fixture(observe: (context: AgentProviderSessionStatusObservationC
     acceptedInputBytes: 0, nativeService: null })
   inner.kernel.isConnected = () => true; inner.kernel.status = vi.fn(async (id: string) => run(id))
   inner.kernel.identity = () => ({ buildIdentity: 'controlled-hook-aux', protocolVersion: 1, daemonInstanceId: 'private-daemon' })
-  for (const method of ['start', 'stop', 'connect', 'write', 'attach']) inner.kernel[method] = vi.fn(() => { throw new Error('Forbidden lifecycle/input: ' + method) })
+  inner.kernel.connect = vi.fn(async () => {})
+  for (const method of ['start', 'stop', 'write', 'attach']) inner.kernel[method] = vi.fn(() => { throw new Error('Forbidden lifecycle/input: ' + method) })
   const cancel = vi.spyOn(inner.promptSubmission, 'cancelReadiness')
   const readiness = vi.spyOn(inner.promptSubmission, 'observeReadiness').mockImplementation(() => {})
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => { events.push(event) })
@@ -88,7 +85,7 @@ async function fixture(observe: (context: AgentProviderSessionStatusObservationC
     headers: { authorization: `Bearer ${binding.endpoint.token}`, 'content-type': 'application/json' }, body: body(receiptId, eventName) })
   cleanup.push(async () => {
     await client.dispose()
-    for (const method of ['start', 'stop', 'connect', 'write', 'attach']) expect(inner.kernel[method]).not.toHaveBeenCalled()
+    for (const method of ['start', 'stop', 'write', 'attach']) expect(inner.kernel[method]).not.toHaveBeenCalled()
     await rm(root, { recursive: true, force: true })
   })
   const stored = async () => (await store.load() as readonly AgentMuxStoredAgentSession[]).find(item => item.agentSessionId === SID)!
@@ -150,8 +147,18 @@ it('keeps_readable_sqlite_receipt_unknown_after_real_commit_when_sync_fails', as
   const fault = vi.spyOn(prototype, 'sync').mockImplementation(async function(this: any) {
     const current = await this.stat()
     if (armed && current.ino === identity.ino && current.dev === identity.dev) {
-      armed = false; hits += 1
-      throw Object.assign(new Error('Controlled current SQLite sync failure'), { code: 'ENOSPC' })
+      // Native provenance can commit metadata before this receipt. Fault only the
+      // real COMMIT containing the original receipt, not an earlier auxiliary write.
+      const db = new DatabaseSync(f.path, { readOnly: true })
+      let receipt: { id: string } | undefined
+      try {
+        const row = db.prepare('SELECT json FROM sessions WHERE id=?').get(SID)
+        receipt = row ? JSON.parse(String(row.json)).hookReceipt : undefined
+      } finally { db.close() }
+      if (receipt?.id === 'sync-unconfirmed') {
+        armed = false; hits += 1
+        throw Object.assign(new Error('Controlled current SQLite sync failure'), { code: 'ENOSPC' })
+      }
     }
     return await originalSync.call(this)
   })
@@ -184,7 +191,7 @@ it('publishes_auxiliary_failure_through_hosted_desktop_and_same_owner_public_cli
     hostId: saved.hostId, workspacePath: saved.workspacePath, createdAt: saved.createdAt, updatedAt: saved.updatedAt,
     label: 'Original Agent', processState: 'running', latestOutputBytes: 12, agentSessionUpdatedAt: saved.updatedAt,
     nativeHandle: saved.nativeHandle!, semanticStatus: saved.semanticStatus!, status: saved.semanticStatus!,
-    capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: false, replyCorrelation: 'none' },
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: false, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: SID, run: { runId: RUN } } }
   const state = { sessions: [snapshot], timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
   const wrapped = { type: 'core', hostId: 'local', event: diagnostic } as RuntimeEvent
@@ -193,28 +200,33 @@ it('publishes_auxiliary_failure_through_hosted_desktop_and_same_owner_public_cli
   const reduced = projectRuntimeEvent(state, wrapped).state
   expect(reduced.sessions[0]).toBe(snapshot); expect(reduced.tabs).toBe(state.tabs); expect(reduced.layouts).toBe(state.layouts)
   expect(composerSubmitMode(snapshot)).toMatchObject({ canType: true, canSubmit: true })
-  const markup = renderToStaticMarkup(createElement(TransientErrorNotice, { error: notice.message, dismissed: false,
-    lastError: notice.message, summary: notice.summary, kind: 'indeterminate', onDismiss() {}, onReopen() {} }))
-  expect(markup).toContain('Controlled auxiliary source failure'); expect(markup).toContain('role="status"')
+  expect(notice.message).toContain('Controlled auxiliary source failure')
   expect(runtimeDiagnosticNotice(state, { ...wrapped, hostId: 'foreign' })).toBeNull()
   expect(f.inner.nativeStatusWatches.size).toBe(0); expect(dispose).toHaveBeenCalledTimes(1)
+  // Inspection is a passive read. The public refresh command retries the same failed observer.
   const inspected = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: SID } })
   expect(inspected.session.run).toEqual({ runId: RUN }); expect(inspected.status?.run.state).toBe('running')
-  expect(f.observed).toHaveBeenCalledTimes(2); expect(f.inner.nativeStatusWatches.size).toBe(1)
+  expect(f.observed).toHaveBeenCalledTimes(1); expect(f.inner.nativeStatusWatches.size).toBe(0)
   const probe = new ObjectCliProbe(request => service.call(request.method as any, request.params as any))
   await probe.start(); cleanup.push(() => probe.stop())
-  const cli = await probe.run(['agent', 'inspect', '--session', SID])
+  const cli = await runSourceObjectCli(['agent', 'refresh', '--session', SID], probe.environment(), '', 15_000,
+    new URL('./fixtures/hook-delivery/source-loader.mjs', import.meta.url))
   expect(cli.code, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result.session.run).toEqual({ runId: RUN })
-  expect(f.observed).toHaveBeenCalledTimes(2)
+  expect(f.observed).toHaveBeenCalledTimes(2); expect(f.inner.nativeStatusWatches.size).toBe(1)
   const before = await f.stored(); expect((await f.post('aux-failure')).status).toBe(204)
   expect(await f.stored()).toEqual(before)
 })
 
 it('contains_detached_provider_lookup_rejection_without_changing_confirmed_receipt', async () => {
-  const f = await fixture(async () => ({ dispose() {} })), get = f.inner.providers.get.bind(f.inner.providers)
-  vi.spyOn(f.inner.providers, 'get').mockImplementation((id: unknown) => {
-    if (f.inner.registry.get(SID).hookReceipt?.id === 'provider-rejection') throw new core.AgentMuxError('Controlled observer provider lookup rejection', 'AGENT_NATIVE_STATUS_UNAVAILABLE')
-    return get(id)
+  const f = await fixture(async () => ({ dispose() {} }))
+  const observe = f.inner.ensureNativeStatusObservation.bind(f.inner)
+  // Arm only at the detached observer boundary, after the confirmed receipt's synchronous
+  // Session projection has read the same Provider for its own legitimate work.
+  vi.spyOn(f.inner, 'ensureNativeStatusObservation').mockImplementationOnce((...args: unknown[]) => {
+    vi.spyOn(f.inner.providers, 'get').mockImplementationOnce(() => {
+      throw new core.AgentMuxError('Controlled observer provider lookup rejection', 'AGENT_NATIVE_STATUS_UNAVAILABLE')
+    })
+    return observe(...args)
   })
   await f.send('provider-rejection')
   await vi.waitFor(() => expect(f.events.some(event => event.type === 'agent-error' && event.message.includes('Controlled observer provider lookup rejection'))).toBe(true))

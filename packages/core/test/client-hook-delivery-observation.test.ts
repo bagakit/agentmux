@@ -1,10 +1,17 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { AgentMuxClient } from '../src/client.js'
 import type { AgentHookBinding, AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { hookSession, hookRun } from './helpers/hook-ingress-fixture.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 
 /**
@@ -126,3 +133,41 @@ it('a loss on another binding never appears on this Session', async () => {
   expect(f.client.agentSession(record.agentSessionId).hookDeliveryObservation).toBeUndefined()
   expect(f.published()).toHaveLength(0)
 })
+
+it('the public RPC and source CLI read and clear the loss produced by this Run\'s real Hook owner', async () => {
+  const record = { ...hookSession('public-delivery'), providerId: 'codex', executorId: 'codex',
+    nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native' } }
+  const f = await fixture(record), root = await mkdtemp(join(tmpdir(), 'hook-public-'))
+  const path = join(root, 'c.sock')
+  const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: f.client }] }, path)
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  const readCli = async () => {
+    const response = await runSourceObjectCli(['--endpoint', `unix://${path}`, 'agent', 'inspect', '--session', record.agentSessionId],
+      objectCliEnvironment(root, { AGENTMUX_TEST_HOOK_DELIVERY_CLI_LOADED: process.env.AGENTMUX_TEST_HOOK_DELIVERY_CLI_LOADED }), '', 15_000,
+      new URL('./fixtures/hook-delivery/source-loader.mjs', import.meta.url))
+    expect(response.code, response.stderr).toBe(0)
+    return JSON.parse(response.stdout).result
+  }
+  try {
+    await server.start()
+    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
+    expect((await post(f.binding, 'original-loss')).status).toBe(503)
+    expect(f.events.filter(event => event.type === 'agent-error')).toEqual([])
+    const original = f.client.agentSession(record.agentSessionId).hookDeliveryObservation
+    expect(original).toMatchObject({ run: record.run, accepted: 'unknown', code: 'HOOK_DELIVERY_FAILED' })
+    for (const result of [await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: record.agentSessionId } }), await readCli()]) {
+      expect(result.session).toMatchObject({ agentSessionId: record.agentSessionId, run: record.run,
+        nativeHandle: record.nativeHandle, hookDeliveryObservation: original })
+      expect(result.status?.session.hookDeliveryObservation).toEqual(original)
+    }
+    f.recover()
+    expect((await post(f.binding, 'newer-delivered')).status).toBe(204)
+    for (const result of [await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: record.agentSessionId } }), await readCli()]) {
+      expect(result.session).toMatchObject({ agentSessionId: record.agentSessionId, run: record.run, nativeHandle: record.nativeHandle })
+      expect(result.session.hookDeliveryObservation).toBeUndefined()
+      expect(result.status?.session.hookDeliveryObservation).toBeUndefined()
+    }
+    expect(f.events.filter(event => event.type === 'agent-error' && event.code === 'HOOK_DELIVERY_FAILED')).toEqual([])
+    expect(await loadAgentSessions(f.store)).toEqual([expect.objectContaining({ agentSessionId: record.agentSessionId, run: record.run })])
+  } finally { await rpc?.dispose(); await server.stop(); await rm(root, { recursive: true, force: true }) }
+}, 30_000)

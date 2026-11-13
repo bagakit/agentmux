@@ -21,7 +21,7 @@ export function hookRun(session: AgentMuxStoredAgentSession, running = true): Ct
 export type HookFixtureInternals = {
   connected: boolean; registry: AgentMuxAgentSessionRegistry; hookServer: AgentHookServer
   hookBindings: Map<string, unknown>; hookRestorations: Map<string, Promise<void>>
-  kernel: { isConnected(): boolean; identity(): unknown; status(id: string): Promise<CtxmuxAdapterRun>; list(): Promise<CtxmuxAdapterRun[]> }
+  kernel: { connect(): Promise<void>; isConnected(): boolean; identity(): unknown; status(id: string): Promise<CtxmuxAdapterRun>; list(): Promise<CtxmuxAdapterRun[]> }
   backfillEndedRuns(runs: readonly CtxmuxAdapterRun[]): void
   acceptKernelEvent(event: import('../../src/ctxmux-run-adapter.js').CtxmuxAdapterEvent): void
   persistActivityBoundary(): Promise<void>
@@ -37,6 +37,8 @@ export async function hookClientFixture(records: AgentMuxStoredAgentSession[]) {
   inner.hookServer = new AgentHookServer(() => {}, 0)
   await inner.registry.load('local')
   inner.connected = true; inner.kernel.isConnected = () => true
+  // This fixture supplies the Native connection port; explicit refresh must not activate a daemon.
+  inner.kernel.connect = vi.fn(async () => {})
   inner.kernel.identity = () => ({ daemonInstanceId: 'private-daemon', buildIdentity: 'private', protocolVersion: 18 })
   let runs = records.map(record => hookRun(record))
   inner.kernel.list = async () => runs

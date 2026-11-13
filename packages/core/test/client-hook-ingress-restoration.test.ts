@@ -105,7 +105,13 @@ it('retains the original Session when refresh cannot observe the native Run and 
   f.inner.kernel.status = async () => { throw Object.assign(new Error('Private native status observation unavailable'), { code: 'PRIVATE_STATUS_UNAVAILABLE' }) }
   const refreshed = await f.client.refreshAgentSession(original.agentSessionId, original.run)
   expect(refreshed).toMatchObject({ agentSessionId: before.agentSessionId, run: before.run,
-    hookIngressObservation: { run: before.run, code: 'PRIVATE_STATUS_UNAVAILABLE' } })
+    hookIngressObservation: before.hookIngressObservation })
+  // A failed Run observation is a separate service failure, not a new Hook binding fact.
+  expect(f.events.filter(event => event.type === 'agent-error')).toContainEqual(expect.objectContaining({
+    agentSessionId: original.agentSessionId, code: 'AGENT_SESSION_OBSERVATION_UNCONFIRMED',
+    message: expect.stringContaining('Private native status observation unavailable'),
+    evidence: expect.objectContaining({ run: original.run })
+  }))
   expect(refreshed.semanticStatus).toEqual(before.semanticStatus)
   expect(refreshed.terminalCapability).toEqual(before.terminalCapability)
   expect(refreshed.retiredRuns).toEqual(before.retiredRuns)
