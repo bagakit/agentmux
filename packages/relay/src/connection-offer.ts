@@ -54,17 +54,19 @@ const base64urlDecode = (text: string) => {
 /**
  * The first two base64url characters identify format 0x02 or 0x03: 'A', then an index in 32..63.
  * The rest is validated by the parser, so a truncated or polluted offer cannot become an absent offer
- * and silently select a saved connection. Other page fragments are not connection links.
+ * and silently select a saved connection. The known legacy marker also means explicit input, but
+ * its old payload is never decoded. Other page fragments are not connection links.
  */
 export function hasConnectionOffer(input: string): boolean {
   const fragment = new URL(input).hash.slice(1)
-  return /^A[g-z0-9_-]/.test(fragment)
+  return fragment.startsWith('offer=') || /^A[g-z0-9_-]/.test(fragment)
 }
 
 /** The offer in a link, or null when the link carries none. A malformed offer fragment is refused. */
 export function parseConnectionOfferUrl(input: string): ConnectionOffer | null {
   if (!hasConnectionOffer(input)) return null
   const url = new URL(input), fragment = url.hash.slice(1)
+  if (fragment.startsWith('offer=')) throw new Error('This connection link format is no longer supported. Copy a new link from the original Mac.')
   if (fragment.length > MAX_FRAGMENT) throw new Error('Invalid connection link.')
   const bytes = base64urlDecode(fragment)
   if (bytes.length < 1 + KEY_BYTES + 1 || (bytes[0]! & ~EXPLICIT_ENDPOINT) !== FORMAT) throw new Error('Invalid connection link.')
