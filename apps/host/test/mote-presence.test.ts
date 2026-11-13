@@ -1,6 +1,7 @@
 import { registerMotePreferencesIpc } from '../../desktop/src/main/mote-preferences-ipc.js'
 import { afterEach, expect, it, vi } from 'vitest'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, mkdtemp, rm, access, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import * as core from '@agentmux/core'
@@ -13,6 +14,11 @@ import { directoryIdentity, homeZoneId, SCRATCH_WORKSPACE_ID } from '../src/mote
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
 import { createHostMotePresence } from '../src/mote-presence.js'
+import { createHostContent } from '../src/content-owner.js'
+import { createHostMoteMainReader, createHostMoteDialogue } from '../src/mote-dialogue.js'
+import { HostMoteQuickPreferences } from '../src/mote-quick-preferences.js'
+import { MoteConnectionPreferences } from '../src/mote-connection-preferences.js'
+import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -140,7 +146,7 @@ async function managedFixture() {
   const snapshot:any={target,identity:{hostId:'local',moteId:'original-mote'},status:'ready',resource,documentRevision:'original-file',roleRevision:'original-role',current,issue:null}
   const main={readCurrentMoteMain:async()=>structuredClone(snapshot),assertCurrent:async(original:any)=>{expect(original.roleRevision).toBe(snapshot.roleRevision)}}
   let enabled=true,available=true
-  const files:any={read:async()=>{if(!available)throw new Error('Original private MOTE source unavailable');return {resource,result:{status:'read',document:{path:'MOTE.md',revision:'original-file',content:'---\nversion: 1\ndefaults:\n  presence:\n    enabled: '+enabled+'\n    intervalMs: 60000\n---\n'}}}}}
+  const files:any={read:async()=>{if(!available)throw new Error('Original private MOTE source unavailable');return {resource,result:{status:'read',document:{path:'MOTE.md',revision:'sha256:'+'0'.repeat(64),content:'---\nversion: 1\ndefaults:\n  presence:\n    enabled: '+enabled+'\n    intervalMs: 60000\n---\n'}}}}}
   let clock=100000,busy=false,outcome:'sent'|'unknown'='sent';const sent:any[]=[]
   const store=new ContinuousProgressLoopStore(join(f.root,'loops.json'))
   const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession('main'),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent('main',loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{await f.client.saveAgentFuturePromptIntent({agentSessionId:'main',expectedRun:f.client.agentSession('main').run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,active,continuitySource:loop.managedSource})}})
@@ -211,4 +217,41 @@ it.each([1,1000])('source observation copies only original managed prompts with 
   expect(scheduler.listManaged('selected').map(value=>value.loopId)).toEqual(['original','other-original'])
   expect(copies).toHaveBeenCalledTimes(2);copies.mockClear()
   expect(scheduler.listManaged('absent')).toEqual([]);expect(copies).not.toHaveBeenCalled()
+})
+it('a new Mote without MOTE.md is a ready empty role for every Host reader, and an unreadable MOTE.md stays unconfirmed',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'mote-without-file-')));cleanup.push(()=>rm(root,{recursive:true,force:true}))
+  const workspace={id:SCRATCH_WORKSPACE_ID,hostId:'local',name:'New Mote',path:join(root,'scratch'),kind:'folder'};await mkdir(workspace.path)
+  const topic=await new ScratchTopics().ensureMote(workspace,'view:presence-without-file'),file=join(topic.physicalDirectoryPath!,'MOTE.md')
+  await expect(access(file)).rejects.toMatchObject({code:'ENOENT'})
+  const configurationPath=join(root,'configuration.json');await writeFile(configurationPath,JSON.stringify({workspaces:[workspace]}))
+  const spaceId=directoryIdentity('local',topic.identityDirectoryPath!),zoneId=homeZoneId(spaceId)
+  const target={spaceId,zoneId,expectedResource:{hostId:'local',workspaceId:workspace.id,workspacePath:workspace.path}}
+  const spatial=new core.AgentMuxSpatialStateStore(join(root,'spatial.json'))
+  await spatial.commit({expectedRevision:0,graph:{spaces:[{spaceId,kind:'mote',name:'New Mote',hostId:'local',directoryPath:topic.physicalDirectoryPath!,projectId:null,topicId:topic.id}],zones:[{zoneId,workspaceId:workspace.id,kind:'home',hostId:'local',directoryPath:topic.physicalDirectoryPath!,branch:null}],bindings:[{spaceId,zoneId}],tabs:[],regions:[],layouts:{},tabLayouts:{},resources:{}}})
+  const files=createHostContent({configurationPath,spatial}).files!,main=createHostMoteMainReader({configurationPath,spatial,files})
+  const catalog=async()=>core.spatialCatalog((await spatial.read())!.graph)
+  const dialogue=createHostMoteDialogue({main,spatial,store:new MoteDialogueStore(join(root,'dialogue.sqlite')),clientForHost:()=>{throw new Error('No message owner was admitted')}})
+  const manager=new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root,'loops.json')),async()=>{throw new Error('No automatic delivery was authorized')},()=>100000,async()=>{throw new Error('No observation was admitted')})
+  const presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:()=>[]})
+  cleanup.push(async()=>{presence.dispose();await manager.stop()})
+  const quick=new HostMoteQuickPreferences({files,main,catalog,executors:async()=>[{id:'saved',name:'Saved',providerId:'codex'}],maintenance:value=>presence.read(value)})
+  const connection=new MoteConnectionPreferences({files,catalog,connections:async()=>{throw new Error('No connection list was admitted')}})
+  await manager.start();await manager.check(100000)
+  const empty=await main.readCurrentMoteMain(target)
+  expect(empty).toMatchObject({status:'ready',identity:{hostId:'local',moteId:topic.id},resource:{hostId:'local',workspaceId:SCRATCH_WORKSPACE_ID},documentRevision:null,roleRevision:expect.any(String),current:null,issue:null})
+  expect(empty.resource!.path.endsWith('MOTE.md')).toBe(true)
+  expect((await dialogue.read({target,kind:'main'})).main).toMatchObject({status:'ready',current:null,roleRevision:empty.roleRevision})
+  const read=await quick.read({kind:'quick',target})
+  expect(read).toMatchObject({status:'ready',issue:null,maintenance:{status:'unbound',issue:null}});expect(read.defaults).toEqual({})
+  expect(await connection.read({kind:'connection',target})).toMatchObject({status:'ready',values:{connection:null},issue:null})
+  // The first unrelated save keeps the role generation reported for the absent file.
+  const saved=await quick.save({kind:'quick',target,operationId:'first-executor',baseline:moteQuickBaseline(read)!,values:{executorId:'saved'},destination:{kind:'empty',displayWorkspaceId:workspace.id,groupId:'original-group'}})
+  expect(saved).toMatchObject({status:'saved',source:{defaults:{executorId:'saved'}}})
+  expect(await main.readCurrentMoteMain(target)).toMatchObject({status:'ready',current:null,roleRevision:empty.roleRevision})
+  // A MOTE.md that exists but cannot be read as text is not an absence.
+  await rm(file);await mkdir(file);presence.invalidate(target);await manager.check(100001)
+  expect(await main.readCurrentMoteMain(target)).toMatchObject({status:'unconfirmed',current:null,issue:expect.stringContaining('MOTE.md could not be read')})
+  expect(presence.read(target)).toMatchObject({status:'unconfirmed',issue:expect.stringContaining('MOTE.md could not be read')})
+  expect(await quick.read({kind:'quick',target})).toMatchObject({status:'unconfirmed',defaults:null})
+  expect(await connection.read({kind:'connection',target})).toMatchObject({status:'unconfirmed',values:null})
 })
