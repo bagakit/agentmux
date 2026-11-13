@@ -6272,9 +6272,13 @@ export class AgentMuxClient {
       if (session.pendingInteraction) return { key, state: 'active', source: 'interaction',
         sourceId: null, sourceNow: Date.now(), issue: null }
       const activity = session.currentActivity
-      if (activity && sameRun(activity.run, key.expectedRun)) return { key,
-        state: activity.state === 'idle' ? 'idle' : 'active', source: 'native-hook',
-        sourceId: activity.sourceId, sourceNow: Date.now(), issue: null }
+      // A Hook that reports its own activity as unknown confirms neither state; the Provider evidence below may.
+      if (activity && sameRun(activity.run, key.expectedRun)) switch (activity.state) {
+        case 'idle': case 'active': return { key, state: activity.state, source: 'native-hook',
+          sourceId: activity.sourceId, sourceNow: Date.now(), issue: null }
+        case 'unknown': break
+        default: return activity satisfies never
+      }
       if (nativeTargetSourceUnconfirmed(stored)) return unknown('The original native source is unconfirmed.')
       const provider = this.providers.get(session.providerId)
       const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
