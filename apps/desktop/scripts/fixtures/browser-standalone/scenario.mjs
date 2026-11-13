@@ -108,7 +108,15 @@ export async function standaloneScenario({ repo, bundle, work, executablePath, r
       return result.target
     })
     engineEndpoint = JSON.parse(await readFile(join(directory, 'browser-targets.json'), 'utf8')).engine.endpoint
-    if (exercise) { await exercise({one, run, cli, client, base, observe, posts: () => posts}); receipt.passed=true;return }
+    if (exercise) { await exercise({one, run, cli, client, base, observe, posts: () => posts, restartHost: async () => {
+      const originalPid = child.pid, before = JSON.parse(await readFile(join(directory, 'browser-targets.json'), 'utf8'))
+      child.kill('SIGKILL'); await once(child, 'exit'); await client.dispose(); await start()
+      const after = JSON.parse(await readFile(join(directory, 'browser-targets.json'), 'utf8'))
+      assert.equal(after.engine.endpoint, before.engine.endpoint)
+      assert.equal(after.targets.find(target => target.id === one.id).targetId, before.targets.find(target => target.id === one.id).targetId)
+      receipt.hostRestarts = [...(receipt.hostRestarts ?? []), {originalPid, exitConfirmed: true, signal: 'SIGKILL', replacementHostPid: child.pid, sameEngineEndpoint: true, sameNativeTarget: true}]
+      await persist(); return client
+    }}); receipt.passed=true;return }
     if(holdOnly) {
       await observe('original-runner-budget-refuses-overflow-hold-before-native-contact',async()=>{
         const held=await run(one.id,`const page=await snapshot();try{await longPress(page.nodes.find(n=>n.ref&&n.name==='Draft').ref,{durationMs:2147483648});return 'completed'}catch(error){return error.message}`)

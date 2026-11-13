@@ -124,6 +124,15 @@ async function fixture() {
 }
 
 describe('person-shared external Browser transport', () => {
+  it('advertises only available network functions while retaining ordinary shared-tab capabilities', async () => {
+    const f = await fixture(); const binding = await f.share()
+    const target = f.bridge.list().find(target => target.id === binding.id)!
+    expect(target.capabilities).toEqual(expect.arrayContaining(['snapshot','click','watchRequests','readRequests']))
+    for (const method of ['routeRequests','unrouteRequests','setNetworkConditions','clearNetworkConditions']) expect(target.capabilities).not.toContain(method)
+    expect(f.api.debugger.attach).not.toHaveBeenCalled()
+    expect(binding.status).toBe('ready')
+  })
+
   it.each(['withdrawal', 'disconnect'])('clears only original recorded root/child feedback contexts before detach on %s', async reason => {
     const f = await fixture(); const { session } = await f.attach()
     const original = f.api.debugger.sendCommand.getMockImplementation()!
