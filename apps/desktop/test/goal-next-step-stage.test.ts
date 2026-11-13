@@ -70,3 +70,11 @@ describe('Goal next-step stage', () => {
     }
   })
 })
+
+describe('Goal work status labels', () => {
+  it('names every status once, from the table that owns the status ids', async () => {
+    const { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS } = await import('../src/renderer/src/lib/global-demand-board')
+    expect(Object.keys(DEMAND_STATUS_LABELS).sort()).toEqual([...DEMAND_STATUS_IDS].sort())
+    expect(DEMAND_STATUS_LABELS.in_progress).toBe('In progress')
+  })
+})
