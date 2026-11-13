@@ -42,6 +42,6 @@
 .settings-survey__history > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
 .settings-survey__history > div > span { padding: var(--sp-4) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); overflow-wrap: anywhere; }
 .settings-survey__caption { margin: 0; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.settings-survey [data-settings-field='default-browser'] > p { margin-block: var(--sp-3); font-size: var(--fs-meta); line-height: 1.6; }
+.settings-survey [data-settings-field='default-browser'] > p { margin-block: var(--sp-3); font-size: var(--fs-body); line-height: 1.6; }
 .settings-survey [data-settings-field='default-browser'] .settings-workflows__inline-action { flex-wrap: wrap; gap: var(--sp-2); }
 @container (max-width: 680px) { .settings-survey__workspace { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); } }

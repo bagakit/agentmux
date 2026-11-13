@@ -34,3 +34,8 @@
 .message-tool-shortcuts > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .message-tool-shortcuts .keyboard-shortcuts { margin-top: var(--sp-4); padding-bottom: 0; }
 @media (max-width: 420px) { .message-tool-preview__tools { gap: var(--sp-2); } }
+
+[data-message-tool-settings] { container-type: inline-size; }
+.message-tool-layout-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: var(--sp-7); }
+.message-tool-layout-workspace > .settings-group { border-top: 0; padding-top: 0; }
+@container (max-width: 640px) { .message-tool-layout-workspace { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); } }

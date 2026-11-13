@@ -46,19 +46,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
     <SettingsConceptSummary icon="object.user-input" title="Your message, ready to send"
       description="Write instructions, bring in context and reuse prompts from one input."
       steps={[{ label: 'Write', detail: 'Keep your instruction in the input.' }, { label: 'Add context', detail: 'Find commands, skills, Agents and files.' }, { label: 'Send', detail: 'Review the message before submitting.' }]} />
-    <figure className="message-tool-preview" aria-label="Input preview">
-      <figcaption><span>Input preview</span><span>{draft.dirty || inputDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
-      <div className="message-tool-preview__composer" data-layout={draft.value}>
-        <span className="message-tool-preview__text">Review these changes<span aria-hidden="true" className="message-tool-preview__caret" /></span>
-        <div className="message-tool-preview__tools">
-          {completionFields.map(field => <span key={field.key} title={`${field.label}: ${inputDraft.value[field.key] || 'Off'}`} data-preview-prefix={field.key} data-disabled={!inputDraft.value[field.key] || undefined}>
-            <kbd>{inputDraft.value[field.key] || 'Off'}</kbd><small>{field.label}</small>
-          </span>)}
-          <span className="message-tool-preview__send" aria-label="Send example">↑</span>
-        </div>
-      </div>
-      <p>{draft.value === 'one-line' ? 'Input and tools share one row.' : 'A separate tool row leaves more room for your message.'} Empty prefixes turn off shortcuts; toolbar menus remain available.</p>
-    </figure>
+    <div className="message-tool-layout-workspace">
     <section className="settings-group" data-settings-field="initial-layout">
       <header><span>Initial layout</span><small>Saved: {saved === 'one-line' ? 'One line' : 'Two lines'}</small></header>
       <fieldset className="settings-reading-width message-tool-layouts">
@@ -72,6 +60,20 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
       <p className="settings-workflows__note">Applies to newly opened inputs. Your current layout and drafts stay as you left them.</p>
       <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} label="Save layout" onSave={() => void save()} />
     </section>
+    <figure className="message-tool-preview" aria-label="Input preview">
+      <figcaption><span>Input preview</span><span>{draft.dirty || inputDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
+      <div className="message-tool-preview__composer" data-layout={draft.value}>
+        <span className="message-tool-preview__text">Review these changes<span aria-hidden="true" className="message-tool-preview__caret" /></span>
+        <div className="message-tool-preview__tools">
+          {completionFields.map(field => <span key={field.key} title={`${field.label}: ${inputDraft.value[field.key] || 'Off'}`} data-preview-prefix={field.key} data-disabled={!inputDraft.value[field.key] || undefined}>
+            <kbd>{inputDraft.value[field.key] || 'Off'}</kbd><small>{field.label}</small>
+          </span>)}
+          <span className="message-tool-preview__send" aria-label="Send example">↑</span>
+        </div>
+      </div>
+      <p>{draft.value === 'one-line' ? 'Input and tools share one row.' : 'A separate tool row leaves more room for your message.'} Empty prefixes turn off shortcuts; toolbar menus remain available.</p>
+    </figure>
+    </div>
     <section className="settings-group" aria-label="Shortcut input" data-message-tool-completion>
       <header><span>Shortcut input</span></header>
       <p className="settings-workflows__note">Choose the symbols that open each menu. Leave a field empty to turn off its shortcut; toolbar menus stay available.</p>
