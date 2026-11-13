@@ -28,6 +28,8 @@ export type AgentComposerProps = ComposerCompletionProps & {
   // a SEPARATE question from whether Enter submits: a working Agent shows Stop yet still takes a steer, so
   // this must not gate the Enter handler — that was the bug where one `isWorking` flag did both jobs.
   primaryAction?: 'send' | 'stop'
+  // Accessible name for Send when its timing differs, e.g. it waits for a pending Agent request.
+  submitLabel?: string
   feedback?: ReactNode
   postureTool?: ReactNode
   // The adapter atomically updates its draft and navigation. Non-null means handled; the shell
@@ -68,6 +70,7 @@ export function AgentComposer({
   onCompletionQuery,
   completionFeedback,
   primaryAction = 'send',
+  submitLabel = 'Send',
   feedback,
   postureTool,
   onChange,
@@ -179,8 +182,8 @@ export function AgentComposer({
               className={`composer-send${primaryAction === 'stop' ? ' composer-send--working' : ''}`}
               disabled={primaryAction === 'stop' ? disabled || !onInterrupt : !canSubmit}
               onClick={primaryAction === 'stop' ? onInterrupt : onSubmit}
-              aria-label={primaryAction === 'stop' ? 'Interrupt the current turn' : 'Send'}
-              title={primaryAction === 'stop' ? 'Interrupt the current reply — keep this session' : 'Send'}
+              aria-label={primaryAction === 'stop' ? 'Interrupt the current turn' : submitLabel}
+              title={primaryAction === 'stop' ? 'Interrupt the current reply — keep this session' : submitLabel}
             >
               {primaryAction === 'stop'
                 ? <SemanticIcon name="action.stop" size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />

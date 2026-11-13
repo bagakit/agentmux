@@ -207,7 +207,10 @@ export function AgentSessionComposer({
   const completion = useComposerCandidates({ scope: JSON.stringify([sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
     active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId,
     providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
-  const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
+  // A pending request is only a timing fact for input. Every send gesture still goes through the store,
+  // which keeps it unbound in the Session queue until Core settles that exact request; nothing here
+  // reaches the open native dialog. Only the wording tells the user when it will go out.
+  const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
 
   function acceptsMoteMainInput(): boolean {
     const direct = motePresentation.moteInputIntent === 'member' || moteWorkface?.memberIntent
@@ -222,14 +225,10 @@ export function AgentSessionComposer({
   }
 
   function sendStatusPrompt(prompt: ComposerShortcut): boolean {
-    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt) || !acceptsMoteMainInput()) return false
+    if (disabled || readOnly || !submitMode.canSubmit || !acceptsMoteMainInput()) return false
     // State actions leave the independently authored Composer draft intact.
-    const accepted = queueStatusPrompt
-      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
-      : send(sessionId, prompt.body, feedback.report, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
-    if (!accepted) return false
+    if (!send(sessionId, prompt.body, feedback.report, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return false
     feedback.dismiss()
-    if (queueStatusPrompt) void useAppStore.getState().flushAgentSteerQueue(sessionId)
     return true
   }
 
@@ -363,9 +362,9 @@ export function AgentSessionComposer({
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
-        disabled={!submitMode.canType || (!submitMode.canSubmit && !queueStatusPrompt)} queue={queueStatusPrompt}
-        inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : queueStatusPrompt
-          ? 'Queue a message until the pending request is answered.' : session.processState !== 'running' || session.status.state === 'disconnected'
+        disabled={!submitMode.canSubmit}
+        inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : requestPending
+          ? 'Send after the pending request ends.' : session.processState !== 'running' || session.status.state === 'disconnected'
             ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
@@ -391,6 +390,7 @@ export function AgentSessionComposer({
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
+      {...(requestPending ? { submitLabel: 'Send after the Agent request ends' } : {})}
       onHistoryRecall={historyRecall}
       {...(historyPhase ? { historyNavigation: historyPhase } : {})}
       {...(activeFile ? { activeFile } : {})}
@@ -418,8 +418,9 @@ export function AgentSessionComposer({
       } : {})}
       {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
       // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run;
-      // it cannot be buffered or replayed through that restoration boundary.
-      {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' &&
+      // it cannot be buffered or replayed through that restoration boundary, and Core refuses it
+      // while a request is pending, so it is offered only when no request owns the input.
+      {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
       {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {

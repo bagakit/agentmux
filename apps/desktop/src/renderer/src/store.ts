@@ -785,7 +785,10 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   // This is the direct user's new producer contract, not a recovered queue tag
   // or an inference from authorHuman, current predecessor or the message body.
   const recipient = options?.browserRecipient ?? options?.browserInput?.control
-  const direct = origin === 'manual' && session?.kind === 'agent' && session.processState === 'running' &&
+  // A known pending request owns the input until Core settles it. Without a direct binding the
+  // ordered queue parks this explicit intent and wakes it on that exact request's end; binding
+  // now would only reach Core's AGENT_INTERACTION_PENDING refusal and strand a manual resend.
+  const direct = origin === 'manual' && session?.kind === 'agent' && session.processState === 'running' && !session.pendingInteraction &&
     (!recipient || recipient.hostId === session.control.hostId &&
       recipient.agentSessionId === session.control.agentSessionId && recipient.run.runId === session.control.run.runId) &&
     !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch &&

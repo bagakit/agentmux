@@ -8,7 +8,8 @@ import type { SessionSnapshot } from '../../../shared/contracts'
  *
  * - `canType`     — is the textarea writable at all? Mirrors {@link agentComposerAvailability} item-for-item.
  * - `canSubmit`   — does the surface permit a submit attempt? True while `working`, so a mid-turn steer
- *                   goes out; false while a card is pending, so steer cannot bypass it. Whether the draft
+ *                   goes out, and true while a request card is pending: the caller queues that submit
+ *                   until the request ends instead of taking Send away. Whether the draft
  *                   is non-empty is a separate UI concern the Composer ANDs in — this answers session state
  *                   only. It never predicts whether Core will *accept* the prompt (codex may fail-closed
  *                   mid-turn); it answers "does the interface allow submitting", delivery stays Core's call.
@@ -60,11 +61,12 @@ export function composerSubmitMode(
   // `working` drives both axes but answers two questions: Stop stays the primary action AND Enter still
   // submits. Only while working is Stop offered; an idle-running Agent's primary action is Send.
   const primaryAction = session.status.state === 'working' ? 'stop' : 'send'
+  // A pending question or permission is a timing fact, not a reason to take Send away. The surface still
+  // submits; the store queues that intent unbound until Core settles the exact request. Core's
+  // AGENT_INTERACTION_PENDING refusal stays the protocol boundary (RED-LINES question 2: a disabled
+  // button here guarded nothing — bare Enter already queued the same message).
   if (session.pendingInteraction) {
-    // The typed response card owns the interaction, but the Agent is still healthy. Keep the draft
-    // writable so users do not lose a steer typed while the card is pending; delivery remains gated and
-    // the draft is retained for retry/queueing after the response is acknowledged.
-    return { canType: true, canSubmit: false, primaryAction, placeholder: 'Answer the Agent request above… Draft a steer…' }
+    return { canType: true, canSubmit: true, primaryAction, placeholder: 'Answer the Agent request in its card; messages here send after it ends…' }
   }
   return { canType: true, canSubmit: true, primaryAction, placeholder: 'Ask, steer, or paste a command…' }
 }

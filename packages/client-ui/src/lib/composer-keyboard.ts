@@ -17,9 +17,9 @@ export interface ComposerKeyboardBinding {
 
 /** The Composer owns its keys. Clients project this same declaration into their shortcut inventory. */
 export const COMPOSER_KEYBOARD_BINDINGS: readonly ComposerKeyboardBinding[] = [
-  { id: 'message-tool.send', label: 'Send', description: 'Choose the focused suggestion; otherwise send normally, or queue while the Agent is working.', keyClass: 'named',
+  { id: 'message-tool.send', label: 'Send', description: 'Choose the focused suggestion; otherwise send normally, or queue while the Agent is working or a request is pending.', keyClass: 'named',
     chord: { key: 'enter', primary: false, shift: false, alt: false }, allowAlt: true },
-  { id: 'message-tool.send-immediately', label: 'Send immediately', description: 'Steer the current turn while working; start a turn when idle. Does not interrupt.', keyClass: 'named',
+  { id: 'message-tool.send-immediately', label: 'Send immediately', description: 'Steer the current turn while working; start a turn when idle; wait for a pending Agent request to end without answering it. Does not interrupt.', keyClass: 'named',
     chord: { key: 'enter', primary: true, shift: false, alt: false }, allowAlt: true },
   // This is the maintained editor's default, recorded for discovery. The Composer never handles it;
   // InlineComposer/Tiptap owns newline insertion, so this row is not a configurable editor keymap.

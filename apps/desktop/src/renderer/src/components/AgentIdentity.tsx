@@ -14,12 +14,11 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 
 type AgentSession = Extract<SessionSnapshot, { kind: 'agent' }>
 
-function AgentStateFace({ session, executorLabel, prompts, disabled, queue, inputAction, onSelect, resultReview, close }: {
+function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction, onSelect, resultReview, close }: {
   session: AgentSession
   executorLabel: string
   prompts: readonly ComposerShortcut[]
   disabled: boolean
-  queue: boolean
   inputAction: string
   onSelect(prompt: ComposerShortcut): boolean
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
@@ -41,11 +40,11 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, queue, inpu
     <div className="agent-state-face__summary">
       <strong>{meaning.label}</strong>
       {review && reviewReady ? <button type="button" className="small-button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ThemeNavigationBackIcon size={12} /><span>Back to Agent status</span></button>
-        : <p>{queue ? 'Queue a message.' : inputAction}</p>}
+        : <p>{inputAction}</p>}
     </div>
     <div className="agent-state-face__body">
       {review && reviewReady ? resultReview?.(() => close()) : <>
-        <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled} queue={queue}
+        <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled}
           disabledReason={disabled ? inputAction : undefined} onSelect={(prompt) => { if (onSelect(prompt)) close(true) }} />
         {reviewReady ? <button type="button" className="agent-state-face__review small-button" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
           <ThemeActionOpenExternalIcon size={13} aria-hidden="true" /><span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
@@ -71,14 +70,13 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, queue, inpu
 }
 
 /** The existing receiver avatar is the single state, Prompt and result entrance. */
-export function AgentIdentity({ session, name, executorLabel, appearance, prompts = [], disabled = false, queue = false, inputAction = 'Send a message to this Session.', onSelect = () => false, resultReview, visible = true }: {
+export function AgentIdentity({ session, name, executorLabel, appearance, prompts = [], disabled = false, inputAction = 'Send a message to this Session.', onSelect = () => false, resultReview, visible = true }: {
   session: AgentSession
   name: string
   executorLabel: string
   appearance?: AgentAvatarAppearance | undefined
   prompts?: readonly ComposerShortcut[]
   disabled?: boolean
-  queue?: boolean
   inputAction?: string
   onSelect?: (prompt: ComposerShortcut) => boolean
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
@@ -87,5 +85,5 @@ export function AgentIdentity({ session, name, executorLabel, appearance, prompt
   return <span className="composer-agent-identity"><AgentAvatar sessionId={session.id} executorId={session.executorId}
     providerId={session.providerId} state={session.status.state} detail={session.status.detail} label={name} appearance={appearance} visible={visible}
     actionDisclosure={({ close }) => <AgentStateFace key={session.id} session={session} executorLabel={executorLabel} prompts={prompts}
-      disabled={disabled} queue={queue} inputAction={inputAction} onSelect={onSelect} resultReview={resultReview} close={close} />} /></span>
+      disabled={disabled} inputAction={inputAction} onSelect={onSelect} resultReview={resultReview} close={close} />} /></span>
 }
