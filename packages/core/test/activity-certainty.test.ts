@@ -8,7 +8,7 @@ const NOW = fixtureEpoch(1, 28800, 0)
 const SCENE_NOW = Date.now()
 const opened: Awaited<ReturnType<typeof activityCertaintyClient>>[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(opened.splice(0).map(item => item.close())) })
-async function open(id: string, provider?: 'codex' | 'grok' | 'traex') {
+async function open(id: string, provider?: 'codex' | 'grok' | 'cursor' | 'traex') {
   const h = await activityCertaintyClient(id, provider); opened.push(h); return h
 }
 it('public Client with an actual FileStore reports bare running as unknown while keeping the exact healthy Run ready', async () => {
@@ -24,7 +24,8 @@ it('public Client with an actual FileStore reports bare running as unknown while
 it('accepted native working persisted in FileStore becomes unknown after the existing TTL without fabricating idle or done', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW - 25 * 60_000)
   const h = await open('stale', 'grok')
-  await h.hook('session_start', 'real-working', { eventName: 'session_start' })
+  // Each Hook names its native conversation with the key its Provider declares; an unnamed one changes no state.
+  await h.hook('session_start', 'real-working', { eventName: 'session_start', sessionId: 'native-stale' })
   expect((await h.sessions())[0]!.semanticStatus?.state).toBe('working')
   clock.mockReturnValue(NOW)
   const status = await h.client.statusAgent('stale')
@@ -34,10 +35,11 @@ it('accepted native working persisted in FileStore becomes unknown after the exi
 })
 it('accepted current working, Stop completion and static waiting keep distinct public meanings', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW)
-  const h = await open('confirmed')
-  await h.hook('UserPromptSubmit', 'confirmed-working')
+  // Cursor's own stop status confirms a completed turn; Codex leaves completion to its native outcome observer.
+  const h = await open('confirmed', 'cursor')
+  await h.hook('beforeSubmitPrompt', 'confirmed-working', { conversation_id: 'native-confirmed' })
   expect((await h.client.statusAgent('confirmed')).observation.semantic).toBe('active')
-  clock.mockReturnValue(NOW + 1); await h.hook('Stop', 'confirmed-done')
+  clock.mockReturnValue(NOW + 1); await h.hook('stop', 'confirmed-done', { conversation_id: 'native-confirmed', status: 'completed' })
   expect((await h.client.statusAgent('confirmed')).observation.semantic).toBe('idle')
   const waiting = await activityCertaintyClient('separate-waiting', 'codex', {
     semanticStatus: { state: 'waiting', source: 'acp', observedAt: NOW } }); opened.push(waiting)
@@ -62,10 +64,11 @@ it('actual public four-state snapshots provide exact scene inputs without a Runt
   const clock = vi.spyOn(Date, 'now').mockReturnValue(SCENE_NOW)
   const bare = await open('scene-bare')
   const stale = await activityCertaintyClient('scene-stale', 'grok', { workspacePath: bare.directory }); opened.push(stale)
-  const working = await activityCertaintyClient('scene-working', 'codex', { workspacePath: bare.directory }); opened.push(working)
-  const idle = await activityCertaintyClient('scene-idle', 'codex', { workspacePath: bare.directory }); opened.push(idle)
-  clock.mockReturnValue(SCENE_NOW - 25 * 60_000); await stale.hook('session_start', 'scene-stale-observation', { eventName: 'session_start' })
-  clock.mockReturnValue(SCENE_NOW); await working.hook('UserPromptSubmit', 'scene-working-observation'); await idle.hook('Stop', 'scene-idle-observation')
+  const working = await activityCertaintyClient('scene-working', 'cursor', { workspacePath: bare.directory }); opened.push(working)
+  const idle = await activityCertaintyClient('scene-idle', 'cursor', { workspacePath: bare.directory }); opened.push(idle)
+  clock.mockReturnValue(SCENE_NOW - 25 * 60_000); await stale.hook('session_start', 'scene-stale-observation', { eventName: 'session_start', sessionId: 'native-scene-stale' })
+  clock.mockReturnValue(SCENE_NOW); await working.hook('beforeSubmitPrompt', 'scene-working-observation', { conversation_id: 'native-scene-working' })
+  await idle.hook('stop', 'scene-idle-observation', { conversation_id: 'native-scene-idle', status: 'completed' })
   const rows = await Promise.all([bare, stale, working, idle].map(item => item.client.statusAgent(item === bare ? 'scene-bare'
     : item === stale ? 'scene-stale' : item === working ? 'scene-working' : 'scene-idle')))
   expect(rows.map(row => row.observation.semantic)).toEqual(['unknown', 'unknown', 'active', 'idle'])
@@ -73,7 +76,7 @@ it('actual public four-state snapshots provide exact scene inputs without a Runt
   expect(rows.every(row => row.session.workspacePath === bare.directory && row.run.state === 'running')).toBe(true)
   const path = process.env.AGENTMUX_ACTIVITY_CERTAINTY_SCENE_SEED
   if (path) {
-    const inputs = Object.fromEntries(await Promise.all(['agent-status-freshness.ts', 'client.ts', 'agent-session-store.ts', 'providers/grok.ts', 'providers/codex.ts'].map(async name =>
+    const inputs = Object.fromEntries(await Promise.all(['agent-status-freshness.ts', 'client.ts', 'agent-session-store.ts', 'providers/grok.ts', 'providers/cursor.ts'].map(async name =>
       ['packages/core/src/' + name, createHash('sha256').update(await readFile(new URL('../src/' + name, import.meta.url))).digest('hex')])))
     await writeFile(path, JSON.stringify({ schema: 'agentmux.activity-certainty-public-scene-seed.v1', inputs, rows,
       observerNow: SCENE_NOW, boundary: 'Actual public Client/private FileStore and accepted Hooks; isolated fixed Run transport, not Native Writer or physical Run proof.' }, null, 2) + '\n')
