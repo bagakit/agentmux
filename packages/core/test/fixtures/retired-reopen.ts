@@ -9,7 +9,7 @@ import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 
 /** Actual Provider, FileStore, Registry and Client. Only the private process/Hook seams are controlled. */
-export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex' = 'claude', historyItems = 1) {
+export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex' = 'claude', historyItems = 1, creationRunId?: string) {
   const root = await mkdtemp(join(tmpdir(), 'amx-retired-reopen-'))
   for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
   await mkdir(join(root, 'runtime'))
@@ -31,7 +31,11 @@ export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex'
   const storePath = join(root, 'sessions.json'), store = new AgentMuxFileAgentSessionStore(storePath)
   const old: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: root, run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 2,
-    hookBindingId: 'old-binding', hookToken: 'old-token', nativeHandle: { kind: 'provider', providerId, sessionId: 'native-main', transcriptPath: path } }
+    hookBindingId: 'old-binding', hookToken: 'old-token', nativeHandle: { kind: 'provider', providerId, sessionId: 'native-main', transcriptPath: path },
+    // A Session resumed before it was closed: its creation fact still names the first Run.
+    ...(creationRunId ? { retiredRuns: [{ runId: creationRunId }], creation: { createOperationId: 'original-create', initialPrompt: 'confirmed' as const,
+      createdRun: { runId: creationRunId }, initialInputKey: { kind: 'prompt' as const, agentSessionId: 'original-agent',
+        expectedRun: { runId: creationRunId }, submissionId: 'launch-prompt:original' } } } : {}) }
   await store.compareAndSwap(null, old)
   for (let index = 0; index < historyItems; index++) await store.applyTimelineMutation({ type: 'append', agentSessionId: old.agentSessionId, item: {
     id: `captured-${index + 1}`, agentSessionId: old.agentSessionId, kind: 'user_message', status: 'complete', source: 'user',

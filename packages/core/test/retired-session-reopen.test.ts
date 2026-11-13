@@ -37,6 +37,22 @@ it('continues a retired Codex identity while Runtime still retains its ended Run
   expect(launch(next, { ...run, lifecycleOperationId: 'another-lifecycle' })).toEqual(fallback)
 })
 
+it.each(['codex', 'claude'] as const)('continues a closed %s Session that was resumed before it was closed', async provider => {
+  // The creation fact names the first Run; the Session was later resumed onto original-run.
+  const f = await retiredReopenFixture(provider, 1, 'creation-run'); fixtures.push(f)
+  expect(f.retired.history?.creation?.initialInputKey?.expectedRun).toEqual({ runId: 'creation-run' })
+  const next = await f.client.reopenAgent(f.input)
+  expect(next).toMatchObject({ agentSessionId: f.old.agentSessionId, nativeHandle: f.old.nativeHandle, run: { runId: 'new-run-1' },
+    creation: { createdRun: { runId: 'creation-run' }, initialInputKey: { expectedRun: { runId: 'creation-run' } } },
+    reopenedFrom: { run: f.old.run, source: 'user', observedAt: f.retired.observedAt } })
+  // The whole Run lineage survives: creation Run first, then the Run that was closed.
+  expect(next.retiredRuns).toEqual([{ runId: 'creation-run' }, f.old.run])
+  expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(await f.store.loadRetiredAgentSessions()).toEqual([])
+  expect(await f.store.loadRetiredRuns()).toEqual([])
+  expect((await loadAgentSessions(f.store))[0]!.retiredRuns).toEqual([{ runId: 'creation-run' }, f.old.run])
+})
+
 it.each(['claude', 'pi'] as const)('continues the same retired %s native identity through the actual Provider and durable transaction', async provider => {
   const f = await fixture(provider), before = await f.client.sessionHistoryPage(f.old.agentSessionId)
   const next = await f.client.reopenAgent(f.input)
