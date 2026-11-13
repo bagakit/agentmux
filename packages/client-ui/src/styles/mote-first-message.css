@@ -3,7 +3,7 @@
 .mote-first-message { display: grid; gap: 6px; animation: mote-first-message-settle 220ms var(--ease-enter, ease-out) both; }
 @keyframes mote-first-message-settle { from { opacity: 0; translate: 0 4px; } }
 .mote-first-message__status { display: flex; align-items: center; gap: 8px; margin: 0; padding-inline: 4px; min-height: 28px;
-  color: var(--text-3); font-size: var(--fs-small, 13px); }
+  color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-first-message__mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green, currentColor); opacity: .8; }
 .mote-first-message[data-stage='unconfirmed'] .mote-first-message__mark { background: var(--text-3); opacity: .6; }
 .mote-first-message__status button { margin-inline-start: auto; min-height: 28px; padding: 2px 10px; border: 0; border-radius: var(--radius-sm, 6px);

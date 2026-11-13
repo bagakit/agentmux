@@ -38,7 +38,8 @@
   .mote-start__invitation { gap: 10px; margin-block: 20px; }
   .mote-start__portrait { width: 136px; height: 136px; }
   .mote-start__greeting h1 { font-size: 24px; }
-  .mote-start__notice details > summary, .mote-start-history > header > button, .mote-start__settings, .mote-start-history__open { min-height: 44px; }
+  .mote-start__notice details > summary, .mote-start-history > header > button, .mote-start__settings, .mote-start-history__open,
+  .mote-first-message__status button { min-height: 44px; }
 }
 /* Short panes (the 520px floating Mote, short windows): portrait beside the greeting, so the input and history stay in view. */
 @container mote-start (max-height: 620px) {
