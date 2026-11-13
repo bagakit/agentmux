@@ -5,24 +5,31 @@ import { join } from 'node:path'
 import { ScreenCapture } from '../src/main/screen-capture'
 import type { BrowserPng } from '../src/shared/contracts'
 import { readPastedImage } from '../src/main/pasted-image-read'
+import type { CaptureSurfaceOutcome, CaptureSurfaceSession } from '../src/main/capture-surface'
+import type { ScreenshotEditContext } from '../src/shared/system-screenshot-editor'
 
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6V8AAAAASUVORK5CYII=', 'base64')
 const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + bytes.toString('base64'), width: 1, height: 1, byteLength: bytes.length }
 const captured = { state: 'captured' as const, screenshot: { format: 'png' as const, data: bytes.toString('base64'), width: 1, height: 1, scale: 2 } }
 const homes: string[] = []
 afterEach(async () => { await Promise.all(homes.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+const source = { rect: { x: -1200, y: 40, width: 640, height: 360 }, scale: 2, capturedAt: 1_700_000_000_000 }
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'amux-capture-')); homes.push(home)
-  const native = { captureScreenshot: vi.fn(async () => captured), writeClipboardImage: vi.fn(async (_image: BrowserPng) => {}) }
-  const edit = vi.fn(async (_image: BrowserPng, _attach: boolean, _complete: (png: BrowserPng) => Promise<void>, _context: { initialIssue?: string; source?: unknown }) => {})
+  const native = { captureScreenshot: vi.fn(async (_target: unknown) => captured), writeClipboardImage: vi.fn(async (_image: BrowserPng) => {}) }
+  const edit = vi.fn(async (_image: BrowserPng, _attach: boolean, _complete: (png: BrowserPng) => Promise<void>, _context: ScreenshotEditContext) => {})
+  // The surface stand-in: Done delivers once, then the surface closes; Esc resolves cancelled.
+  const present = vi.fn(async (session: CaptureSurfaceSession): Promise<CaptureSurfaceOutcome> => { await session.complete(image, source, 'fixture-engine'); return { state: 'completed' } })
+  const chooseSource = vi.fn(async (mode: 'display' | 'window') => mode === 'display' ? { mode, displayId: 1 } as const : null)
   const reportIssue = vi.fn()
   const appActive = vi.fn(() => true)
-  return { home, native, edit, reportIssue, appActive, owner: new ScreenCapture({ home, native: () => native, appActive, edit, reportIssue }) }
+  return { home, native, edit, present, chooseSource, reportIssue, appActive, owner: new ScreenCapture({ home, native: () => native, appActive, edit, present, chooseSource, reportIssue }) }
 }
 
-it('copies the same final pixels and saves a durable draft image through the original pasted owner', async () => {
+it('a region capture is the capture surface; Done copies and saves the same final pixels for the original draft', async () => {
   const f = await fixture(), path = await f.owner.capture(true)
-  expect(f.native.captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
+  expect(f.present).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attachToDraft: true, expandable: true, returnFocus: false }))
+  expect(f.native.captureScreenshot, 'no native picker is involved').not.toHaveBeenCalled()
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(image)
   expect(path).toMatch(/\.agentmux\/pasted\/[a-f0-9]{64}\.png$/)
   expect(await readFile(path!)).toEqual(bytes)
@@ -38,83 +45,89 @@ it('a clipboard-only capture needs no draft, saved file or editor', async () => 
   expect(f.edit).not.toHaveBeenCalled()
 })
 
-it('treats only the native cancellation receipt as cancellation and makes no delivery', async () => {
+it('cancelling the surface makes no delivery', async () => {
   const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValueOnce({ state: 'cancelled' } as never)
+  f.present.mockResolvedValueOnce({ state: 'cancelled' })
   expect(await f.owner.capture(true)).toBeNull()
   expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
   expect(await readdir(f.home)).toEqual([])
 })
 
-it('edit intent defers all delivery until the shared editor explicitly completes its final image', async () => {
-  const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit' } as never)
-  let finish!: (image: BrowserPng) => Promise<void>, close!: () => void
+it('a failed surface start reports its reason and delivers nothing', async () => {
+  const f = await fixture(), error = Object.assign(new Error('The display layout changed'), { code: 'display_configuration_changed' })
+  f.present.mockRejectedValueOnce(error)
+  await expect(f.owner.capture(true)).rejects.toBe(error)
+  expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
+})
+
+it('⌘E opens the window editor on the full frozen frame with the marks, and its later Copy is the only delivery', async () => {
+  const f = await fixture(), handoff = { shapes: [{ id: 'mark', kind: 'rect' }] as never, crop: { x: 2, y: 2, width: 4, height: 2 }, tool: 'arrow' as const }
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff })
+  let finish!: (png: BrowserPng) => Promise<void>, close!: () => void
   f.edit.mockImplementationOnce(async (_image, _attach, complete) => { finish = complete; await new Promise<void>(resolve => { close = resolve }) })
   const pending = f.owner.capture(true)
   await vi.waitFor(() => expect(f.edit).toHaveBeenCalledOnce())
-  expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
-  expect(await readdir(f.home)).toEqual([])
+  expect(f.edit.mock.calls[0]![0]).toBe(image)
+  expect(f.edit.mock.calls[0]![3]).toEqual({ source, initialState: { shapes: handoff.shapes, crop: handoff.crop }, initialTool: 'arrow' })
+  expect(f.native.writeClipboardImage, 'nothing is delivered by expanding').not.toHaveBeenCalled()
   const editedBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
   const edited = { ...image, dataUrl: 'data:image/png;base64,' + editedBytes.toString('base64'), byteLength: editedBytes.length }
   await finish(edited); close()
-  const path = await pending
+  expect(await readFile((await pending)!)).toEqual(editedBytes)
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
-  expect(await readFile(path!)).toEqual(editedBytes)
 })
 
-it('closing the editor without completion never delivers the unedited original', async () => {
+it('closing the expanded editor without completion never delivers the frozen frame', async () => {
   const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit' } as never)
-  f.edit.mockResolvedValueOnce(undefined)
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' } })
   expect(await f.owner.capture(true)).toBeNull()
   expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
   expect(await readdir(f.home)).toEqual([])
 })
 
-it('a failed clipboard destination preserves the saved draft image and reports the partial result', async () => {
+it('a failed clipboard destination keeps the surface open, preserves the saved draft image and reports the partial result', async () => {
   const f = await fixture()
   f.native.writeClipboardImage.mockRejectedValueOnce(new Error('Original clipboard outcome unknown'))
+  f.present.mockImplementationOnce(async session => {
+    await expect(session.complete(image, source, 'fixture-engine'), 'the surface shows this reason in place').rejects.toThrow('Clipboard copy was not confirmed')
+    await session.complete(image, source, 'fixture-engine')
+    return { state: 'completed' }
+  })
   const path = await f.owner.capture(true)
   expect(await readFile(path!)).toEqual(bytes)
   expect(f.reportIssue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('Clipboard copy was not confirmed') }))
-  expect(f.native.captureScreenshot).toHaveBeenCalledOnce()
-  expect(f.native.writeClipboardImage).toHaveBeenCalledOnce()
+  expect(f.native.writeClipboardImage, 'Done retries only the unconfirmed clipboard').toHaveBeenCalledTimes(2)
+  expect((await readdir(join(f.home, '.agentmux/pasted'))).length, 'the saved draft image is not written twice').toBe(1)
 })
 
 it('a failed draft save preserves the independent clipboard result without modifying old resources', async () => {
   const f = await fixture()
   await writeFile(join(f.home, '.agentmux'), 'original user resource')
+  f.present.mockImplementationOnce(async session => {
+    await expect(session.complete(image, source, 'fixture-engine')).rejects.toThrow('The image is on the clipboard')
+    return { state: 'cancelled' }
+  })
   expect(await f.owner.capture(true)).toBeNull()
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(image)
   expect(f.reportIssue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('The image is on the clipboard') }))
   expect(await readFile(join(f.home, '.agentmux'), 'utf8')).toBe('original user resource')
 })
 
-it('does not join another draft to an in-flight physical capture', async () => {
+it('does not join another draft to an in-flight capture', async () => {
   const f = await fixture()
-  let finish!: (value: typeof captured) => void
-  f.native.captureScreenshot.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  let finish!: (value: CaptureSurfaceOutcome) => void
+  f.present.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   const pending = f.owner.capture(true)
   await expect(f.owner.capture(false)).rejects.toThrow('already in progress')
-  finish(captured); await pending
-  expect(f.native.captureScreenshot).toHaveBeenCalledOnce()
+  finish({ state: 'cancelled' }); await pending
+  expect(f.present).toHaveBeenCalledOnce()
 })
 
-it('preserves original native unknown operations and never automatically captures again', async () => {
-  const f = await fixture(), error = Object.assign(new Error('Original capture outcome is unknown'), { operation: { operationId: 'original', instanceId: 'original-instance' } })
-  f.native.captureScreenshot.mockRejectedValueOnce(error)
-  await expect(f.owner.capture(true)).rejects.toBe(error)
-  expect(f.native.captureScreenshot).toHaveBeenCalledOnce()
-  expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
-})
-
-it('closing an editor cannot erase an already submitted delivery or release its capture early', async () => {
+it('closing the surface cannot erase an already submitted delivery or release the capture early', async () => {
   const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit' } as never)
   let delivered!: () => void
   f.native.writeClipboardImage.mockImplementationOnce(() => new Promise<void>(resolve => { delivered = resolve }))
-  f.edit.mockImplementationOnce(async (_image, _attach, complete) => { void complete(image).catch(() => {}) })
+  f.present.mockImplementationOnce(async session => { void session.complete(image, source, 'fixture-engine').catch(() => {}); return { state: 'cancelled' } })
   let settled = false
   const pending = f.owner.capture(true).then(path => { settled = true; return path })
   await vi.waitFor(() => expect(f.native.writeClipboardImage).toHaveBeenCalledOnce())
@@ -127,69 +140,72 @@ it('closing an editor cannot erase an already submitted delivery or release its 
 it('recovery of a failed draft save never repeats the already successful clipboard write', async () => {
   const f = await fixture()
   await writeFile(join(f.home, '.agentmux'), 'original user resource')
-  f.edit.mockImplementationOnce(async (_image, _attach, complete, { initialIssue: issue }) => {
-    expect(issue).toContain('on the clipboard')
+  f.present.mockImplementationOnce(async session => {
+    await expect(session.complete(image, source, 'fixture-engine')).rejects.toThrow('on the clipboard')
     await rm(join(f.home, '.agentmux'))
-    await complete(image)
+    await session.complete(image, source, 'fixture-engine')
+    return { state: 'completed' }
   })
   expect(await readFile((await f.owner.capture(true))!)).toEqual(bytes)
   expect(f.native.writeClipboardImage).toHaveBeenCalledOnce()
 })
 
-it('unknown clipboard writes retain the original receipt and are not replayed from the recovery editor', async () => {
+it('unknown clipboard writes retain the original receipt and are not replayed by a second Done', async () => {
   const f = await fixture()
   const original = Object.assign(new Error('Clipboard reply lost'), { code: 'operation_unknown', operation: { state: 'unknown', operationId: 'original-copy', instanceId: 'original-native' } })
   f.native.writeClipboardImage.mockRejectedValueOnce(original)
-  f.edit.mockImplementationOnce(async (_image, _attach, complete, { initialIssue: issue }) => {
-    expect(issue).toContain('original-copy')
-    await expect(complete(image)).rejects.toMatchObject({ cause: original })
+  f.present.mockImplementationOnce(async session => {
+    await expect(session.complete(image, source, 'fixture-engine')).rejects.toThrow('original-copy')
+    await expect(session.complete(image, source, 'fixture-engine')).rejects.toMatchObject({ cause: original })
+    return { state: 'cancelled' }
   })
   expect(await readFile((await f.owner.capture(true))!)).toEqual(bytes)
   expect(f.native.writeClipboardImage).toHaveBeenCalledOnce()
-  expect(f.native.captureScreenshot).toHaveBeenCalledOnce()
 })
 
-it.each([{ state: 'captured' }, { ...captured, screenshot: { ...captured.screenshot, width: 2 } }, { state: 'unknown' }])('rejects missing or mismatched evidence %j before delivery', async result => {
+it('asks the surface to return focus only when another app was active at capture start', async () => {
   const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValueOnce(result as never)
-  await expect(f.owner.capture(true)).rejects.toThrow()
-  expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
+  await f.owner.capture(false)
+  expect(f.present.mock.calls[0]![0].returnFocus).toBe(false)
+  f.appActive.mockReturnValue(false)
+  await f.owner.capture(false)
+  expect(f.present.mock.calls[1]![0].returnFocus).toBe(true)
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' } })
+  await f.owner.capture(false)
+  expect(f.edit.mock.calls[0]![3], 'the expanded editor returns focus instead').toMatchObject({ returnFocus: true })
 })
 
-it('hands the editor the capture rectangle, scale and start time', async () => {
+it('display and window captures still use the exact native source and open the window editor with it', async () => {
   vi.useFakeTimers({ now: new Date(2026, 0, 2, 3, 4, 5), toFake: ['Date'] })
   try {
     const f = await fixture(), rect = { x: -1200, y: 40, width: 640, height: 360 }
-    f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit', selectionRect: rect } as never)
-    await f.owner.capture(false)
+    f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, selectionRect: rect } as never)
+    await f.owner.capture(false, 'display')
+    expect(f.native.captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'display', displayId: 1 })
+    expect(f.present).not.toHaveBeenCalled()
     expect(f.edit.mock.calls[0]![3]).toEqual({ source: { rect, scale: 2, capturedAt: new Date(2026, 0, 2, 3, 4, 5).getTime() } })
-    f.native.captureScreenshot.mockResolvedValueOnce({ ...captured, completionAction: 'edit' } as never)
-    await f.owner.capture(false)
-    expect(f.edit.mock.calls[1]![3], 'no source without a native rectangle').toEqual({})
+    expect(await f.owner.capture(false, 'window'), 'a dismissed source picker captures nothing').toBeNull()
+    expect(f.native.captureScreenshot).toHaveBeenCalledOnce()
   } finally { vi.useRealTimers() }
 })
 
-it('asks the editor to return focus only when another app was active at capture start', async () => {
+it.each([{ state: 'captured' }, { ...captured, screenshot: { ...captured.screenshot, width: 2 } }, { state: 'unknown' }])('rejects missing or mismatched display evidence %j before delivery', async result => {
   const f = await fixture()
-  f.native.captureScreenshot.mockResolvedValue({ ...captured, completionAction: 'edit' } as never)
-  await f.owner.capture(false)
-  expect(f.edit.mock.calls[0]![3]).not.toHaveProperty('returnFocus')
-  f.appActive.mockReturnValue(false)
-  f.native.captureScreenshot.mockImplementationOnce(async () => { f.appActive.mockReturnValue(true); return { ...captured, completionAction: 'edit' } as never })
-  await f.owner.capture(false)
-  expect(f.edit.mock.calls[1]![3], 'read before the selection takes focus').toMatchObject({ returnFocus: true })
+  f.native.captureScreenshot.mockResolvedValueOnce(result as never)
+  await expect(f.owner.capture(true, 'display')).rejects.toThrow()
+  expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
 })
 
 it('a delayed region capture waits for its countdown and a cancelled countdown captures nothing', async () => {
   const f = await fixture(), countdown = vi.fn(async (_seconds: number) => true)
-  const owner = new ScreenCapture({ home: f.home, native: () => f.native, appActive: () => true, edit: f.edit, reportIssue: f.reportIssue, countdown })
+  const owner = new ScreenCapture({ home: f.home, native: () => f.native, appActive: () => true, edit: f.edit, present: f.present, reportIssue: f.reportIssue, countdown })
   expect(await owner.capture(false, 'selection', { delaySeconds: 5 })).toBeNull()
   expect(countdown).toHaveBeenCalledExactlyOnceWith(5)
-  expect(f.native.captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
-  expect(countdown.mock.invocationCallOrder[0]).toBeLessThan(f.native.captureScreenshot.mock.invocationCallOrder[0]!)
+  expect(f.present).toHaveBeenCalledOnce()
+  expect(countdown.mock.invocationCallOrder[0]).toBeLessThan(f.present.mock.invocationCallOrder[0]!)
   countdown.mockResolvedValueOnce(false)
   expect(await owner.capture(false, 'selection', { delaySeconds: 3 })).toBeNull()
-  expect(f.native.captureScreenshot, 'a cancelled countdown starts no selection').toHaveBeenCalledOnce()
+  expect(f.present, 'a cancelled countdown starts no selection').toHaveBeenCalledOnce()
   await expect(owner.capture(false, 'display', { delaySeconds: 3 })).rejects.toThrow('region capture')
   await expect(owner.capture(false, 'selection', { delaySeconds: 4 as never })).rejects.toThrow('3, 5 or 10')
   await expect(f.owner.capture(false, 'selection', { delaySeconds: 3 })).rejects.toThrow('unavailable in this host')

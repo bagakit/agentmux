@@ -44,8 +44,9 @@ beforeEach(() => {
 })
 afterEach(() => editor.dispose())
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
-async function open(complete = vi.fn(async () => {}), attachToDraft = false, initialIssue?: string, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource, returnFocus = false) {
-  const closed = editor.edit(image, attachToDraft, complete, { ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}), ...(returnFocus ? { returnFocus } : {}) })
+type Marks = import('../src/shared/system-screenshot-editor').ScreenshotEditMarks
+async function open(complete = vi.fn(async () => {}), attachToDraft = false, marks?: Marks, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource, returnFocus = false) {
+  const closed = editor.edit(image, attachToDraft, complete, { ...(marks ?? {}), ...(source ? { source } : {}), ...(returnFocus ? { returnFocus } : {}) })
   await Promise.resolve()
   const window = native.windows.at(-1)
   const call = (action: string, params?: unknown, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
@@ -54,11 +55,12 @@ async function open(complete = vi.fn(async () => {}), attachToDraft = false, ini
   return { window, closed, input, call, complete }
 }
 
-it('loads only its independent sandboxed image window with the shared theme and exact attachment label', async () => {
-  const current = await open(undefined, true, 'Copied to clipboard. Draft attachment failed.')
+it('loads only its independent sandboxed image window with the shared theme, exact attachment label and handed-over marks', async () => {
+  const marks: Marks = { initialState: { shapes: [{ id: 'mark', kind: 'rect' }] as never, crop: { x: 0, y: 0, width: 1, height: 1 } }, initialTool: 'arrow' }
+  const current = await open(undefined, true, marks)
   expect(current.input.image).toEqual(image)
   expect(current.input.attachToDraft).toBe(true)
-  expect(current.input.initialIssue).toBe('Copied to clipboard. Draft attachment failed.')
+  expect(current.input).toMatchObject(marks)
   expect(current.input.theme.status).toBe('available')
   expect(current.window.options).toMatchObject({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
   expect(current.window.options).not.toHaveProperty('parent')
