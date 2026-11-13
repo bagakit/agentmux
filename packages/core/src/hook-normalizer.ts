@@ -505,7 +505,8 @@ function buildTimeline(
   lifecycleEvent: AgentHookLifecycleEvent | undefined,
   payload: Record<string, unknown>,
   observedAt: number,
-  subject: NativeToolSubject | undefined
+  subject: NativeToolSubject | undefined,
+  childSubject: boolean
 ): AgentTimelineMutation[] {
   const assistant = stringField(
     payload,
@@ -598,7 +599,10 @@ function buildTimeline(
       })
     }
   }
-  if (assistant) {
+  // A reply snapshot speaks for the main Agent. A declared child's last message
+  // (SubagentStop) is that child's report, not a reply in the parent conversation.
+  // An unconfirmed subject keeps its snapshot: an observation gap is not a child.
+  if (assistant && !childSubject) {
     append('assistant_message', 'Assistant response', { content: assistant })
   }
   if (timeline.length === 0) {
@@ -780,7 +784,7 @@ export function normalizeNativeHook(
     })(),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject, childSubject),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }
