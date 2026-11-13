@@ -1318,6 +1318,9 @@ export type BrowserProfileSummary = {
   createdAt: number
   isDefault: boolean
   source: BrowserProfileImportedSource | null
+  /** Identity color shown wherever this Profile appears; absent means derive one from the id. */
+  tint?: string
+  notes?: string
 }
 
 export type BrowserProfileDeleteApproval = {

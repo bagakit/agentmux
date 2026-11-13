@@ -12,7 +12,8 @@ import type {
 import {
   browserProfilePartition,
   BrowserProfileStore,
-  validateBrowserProfileLabel
+  validateBrowserProfileLabel,
+  type BrowserProfileEdit
 } from './browser-profile-store.js'
 import type { BrowserProfileResolver } from './browser-view-manager.js'
 
@@ -48,6 +49,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly importWindows = new Set<BrowserWindow>()
   private readonly activeMutations = new Set<Promise<unknown>>()
   private defaultId: string | null = null
+  private revision = 0
   private initialization: Promise<void> | null = null
   private initializationError: Error | null = null
   private disposed = false
@@ -60,7 +62,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     if (this.defaultId) return
     if (this.initialization) return await this.initialization
     const attempt = this.trackMutation((async () => {
-      const profiles = await this.store.listProfiles()
+      const { revision, profiles } = await this.store.list()
       const defaultProfile = profiles.find((profile) => profile.isDefault)
       if (!defaultProfile) throw new Error('Browser Profile metadata has no default Profile')
 
@@ -72,6 +74,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       this.profiles.clear()
       for (const profile of profiles) this.profiles.set(profile.id, cloneProfile(profile))
       this.defaultId = defaultProfile.id
+      this.revision = revision
       this.initializationError = null
     })()).catch(cause => {
       this.initializationError = new Error(`Browser Profiles could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}. Original profile data is kept. Repair the metadata or its access, then retry the Profile connection.`, { cause })
@@ -97,6 +100,31 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   listProfiles(): BrowserProfileSummary[] {
     this.assertInitialized()
     return [...this.profiles.values()].map(cloneProfile)
+  }
+
+  /** Revision of the list this Main last committed or loaded; edits must name it. */
+  listRevision(): number {
+    this.assertInitialized()
+    return this.revision
+  }
+
+  async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<BrowserProfileSummary> {
+    this.resolvePartition(profileId)
+    return await this.trackMutation((async () => {
+      const { profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
+      this.profiles.set(profile.id, cloneProfile(profile))
+      return cloneProfile(profile)
+    })())
+  }
+
+  /** Only Browsers created later without an explicit Profile use the new default. */
+  async setDefaultProfile(profileId: string, expectedRevision: number): Promise<void> {
+    this.resolvePartition(profileId)
+    await this.trackMutation((async () => {
+      await this.store.setDefaultProfile(profileId, expectedRevision)
+      for (const [id, profile] of this.profiles) this.profiles.set(id, { ...profile, isDefault: id === profileId })
+      this.defaultId = profileId
+    })())
   }
 
   async createProfile(label: string): Promise<BrowserProfileSummary> {
@@ -281,6 +309,9 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       return await operation
     } finally {
       this.activeMutations.delete(operation)
+      // Every store write advances the list revision; keep ours equal to what was committed.
+      const committed = this.store.lastCommittedRevision()
+      if (committed !== null) this.revision = committed
     }
   }
 

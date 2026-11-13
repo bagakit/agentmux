@@ -15,6 +15,7 @@ const BROWSER_PROFILE_METADATA_VERSION = 1
 const BROWSER_PROFILE_FILE_NAME = 'browser-profiles.json'
 const BROWSER_PROFILE_PARTITION_PREFIX = 'persist:agentmux-browser-profile:'
 const BROWSER_PROFILE_LABEL_MAX_LENGTH = 128
+const BROWSER_PROFILE_NOTES_MAX_LENGTH = 2000
 const PROFILE_UUID_RE = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/
 
 const profileIdSchema = z.string().refine(value => isObjectId(value) || PROFILE_UUID_RE.test(value), 'Browser Profile id must be a stored object identity')
@@ -24,6 +25,8 @@ const profileLabelSchema = z
   .max(BROWSER_PROFILE_LABEL_MAX_LENGTH)
   .refine((label) => label === label.trim(), 'Browser Profile label must not have surrounding whitespace')
 const nonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+const profileTintSchema = z.string().regex(/^#[0-9a-f]{6}$/i, 'Browser Profile tint must be a #rrggbb color')
+const profileNotesSchema = z.string().max(BROWSER_PROFILE_NOTES_MAX_LENGTH)
 
 const importedSourceSchema = z
   .object({
@@ -40,7 +43,9 @@ const profileRecordSchema = z
     id: profileIdSchema,
     label: profileLabelSchema,
     createdAt: nonNegativeSafeIntegerSchema,
-    source: importedSourceSchema.nullable()
+    source: importedSourceSchema.nullable(),
+    tint: profileTintSchema.optional(),
+    notes: profileNotesSchema.optional()
   })
   .strict()
 
@@ -55,6 +60,8 @@ const pendingImportSchema = z
 const metadataSchema = z
   .object({
     version: z.literal(BROWSER_PROFILE_METADATA_VERSION),
+    /** Advances on every committed change; readers order snapshots and writers state what they edited. */
+    revision: nonNegativeSafeIntegerSchema.optional(),
     defaultProfileId: profileIdSchema,
     profiles: z.array(profileRecordSchema).min(1),
     pendingImports: z.array(pendingImportSchema)
@@ -115,7 +122,18 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     label: profile.label,
     createdAt: profile.createdAt,
     isDefault: profile.id === defaultProfileId,
-    source: cloneImportedSource(profile.source)
+    source: cloneImportedSource(profile.source),
+    ...(profile.tint === undefined ? {} : { tint: profile.tint }),
+    ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes })
+  }
+}
+
+export type BrowserProfileEdit = { label?: string; tint?: string | null; notes?: string }
+
+export class BrowserProfileRevisionConflict extends Error {
+  readonly code = 'BROWSER_PROFILE_REVISION_CONFLICT'
+  constructor(readonly currentRevision: number) {
+    super(`Browser Profiles changed since revision was read; current revision is ${currentRevision}. Read them again and retry.`)
   }
 }
 
@@ -133,15 +151,58 @@ export function browserProfilePartition(profileId: string): string {
 
 export class BrowserProfileStore {
   private operationTail: Promise<void> = Promise.resolve()
+  private committedRevision: number | null = null
 
   constructor(
     private readonly path = join(app.getPath('userData'), BROWSER_PROFILE_FILE_NAME)
   ) {}
 
   listProfiles(): Promise<BrowserProfileSummary[]> {
+    return this.list().then(snapshot => snapshot.profiles)
+  }
+
+  list(): Promise<{ revision: number; profiles: BrowserProfileSummary[] }> {
     return this.enqueue(async () => {
       const metadata = await this.readOrInitialize()
-      return metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId))
+      return { revision: metadata.revision ?? 0,
+        profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
+    })
+  }
+
+  updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: number): Promise<{ revision: number; profile: BrowserProfileSummary }> {
+    return this.enqueue(async () => {
+      const validatedProfileId = profileIdSchema.parse(profileId)
+      const metadata = await this.readOrInitialize()
+      this.assertRevision(metadata, expectedRevision)
+      const current = metadata.profiles.find((profile) => profile.id === validatedProfileId)
+      if (!current) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
+      const updated: BrowserProfileRecord = { ...current }
+      if (edit.label !== undefined) updated.label = validateBrowserProfileLabel(edit.label)
+      if (edit.tint === null) delete updated.tint
+      else if (edit.tint !== undefined) updated.tint = profileTintSchema.parse(edit.tint)
+      if (edit.notes !== undefined) {
+        const notes = profileNotesSchema.parse(edit.notes)
+        if (notes === '') delete updated.notes
+        else updated.notes = notes
+      }
+      const next = await this.commit({
+        ...metadata,
+        profiles: metadata.profiles.map((profile) => profile.id === validatedProfileId ? updated : profile)
+      })
+      return { revision: next.revision ?? 0, profile: profileSummary(updated, next.defaultProfileId) }
+    })
+  }
+
+  setDefaultProfile(profileId: string, expectedRevision: number): Promise<{ revision: number }> {
+    return this.enqueue(async () => {
+      const validatedProfileId = profileIdSchema.parse(profileId)
+      const metadata = await this.readOrInitialize()
+      this.assertRevision(metadata, expectedRevision)
+      if (!metadata.profiles.some((profile) => profile.id === validatedProfileId)) {
+        throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
+      }
+      const next = await this.commit({ ...metadata, defaultProfileId: validatedProfileId })
+      return { revision: next.revision ?? 0 }
     })
   }
 
@@ -166,8 +227,8 @@ export class BrowserProfileStore {
         ...metadata,
         profiles: [...metadata.profiles, profile]
       })
-      await this.writeMetadata(next)
-      return profileSummary(profile, next.defaultProfileId)
+      const committed = await this.commit(next)
+      return profileSummary(profile, committed.defaultProfileId)
     })
   }
 
@@ -185,7 +246,7 @@ export class BrowserProfileStore {
         ...metadata,
         profiles: metadata.profiles.filter((profile) => profile.id !== validatedProfileId)
       })
-      await this.writeMetadata(next)
+      await this.commit(next)
     })
   }
 
@@ -202,7 +263,7 @@ export class BrowserProfileStore {
         ...metadata,
         pendingImports: [...metadata.pendingImports, pending]
       })
-      await this.writeMetadata(next)
+      await this.commit(next)
       return { ...pending }
     })
   }
@@ -228,8 +289,8 @@ export class BrowserProfileStore {
         profiles: [...metadata.profiles, profile],
         pendingImports: metadata.pendingImports.filter((item) => item.profileId !== validatedProfileId)
       })
-      await this.writeMetadata(next)
-      return profileSummary(profile, next.defaultProfileId)
+      const committed = await this.commit(next)
+      return profileSummary(profile, committed.defaultProfileId)
     })
   }
 
@@ -244,7 +305,7 @@ export class BrowserProfileStore {
         ...metadata,
         pendingImports: metadata.pendingImports.filter((item) => item.profileId !== validatedProfileId)
       })
-      await this.writeMetadata(next)
+      await this.commit(next)
     })
   }
 
@@ -270,6 +331,22 @@ export class BrowserProfileStore {
     })
     await this.writeMetadata(metadata)
     return metadata
+  }
+
+  private assertRevision(metadata: BrowserProfileMetadata, expectedRevision: number): void {
+    if (expectedRevision !== (metadata.revision ?? 0)) throw new BrowserProfileRevisionConflict(metadata.revision ?? 0)
+  }
+
+  private async commit(metadata: BrowserProfileMetadata): Promise<BrowserProfileMetadata> {
+    const next = metadataSchema.parse({ ...metadata, revision: (metadata.revision ?? 0) + 1 })
+    await this.writeMetadata(next)
+    this.committedRevision = next.revision ?? 0
+    return next
+  }
+
+  /** Revision written by the latest commit through this store, for owners that cache the list. */
+  lastCommittedRevision(): number | null {
+    return this.committedRevision
   }
 
   private createUnusedProfileId(metadata: BrowserProfileMetadata): string {
