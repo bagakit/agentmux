@@ -807,6 +807,11 @@ export async function installApplication(appPath, { intent = installIntent, home
     const stage = await lstat(next)
     assert(stage.isDirectory() && !stage.isSymbolicLink() && stage.uid === process.getuid(),
       'A prepared installer stage must be a real directory owned by this user; the application was not changed.')
+    if (previouslyInstalled) {
+      const installed = await stat(destination)
+      assert(installed.dev !== stage.dev || installed.ino !== stage.ino,
+        'A prepared installer stage must be a different real directory from the canonical application; the application was not changed.')
+    }
     assert(await realpath(next) === join(await realpath(applicationsRoot), stageName),
       'A prepared installer stage must remain inside the canonical Applications directory; the application was not changed.')
     assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))
