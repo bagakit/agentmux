@@ -247,6 +247,18 @@ const log=fs.openSync(path.join(p.stateDirectory,'core-releases',p.operationId+'
 const child=cp.spawn(p.node,[path.join(p.releaseDirectory,'dist','headless-runtime-cli.js'),'serve'],{cwd:p.cwd,env:p.env,detached:true,stdio:['ignore',log,log]});
 child.on('error',e=>{console.error(e.message);process.exitCode=1});child.on('spawn',()=>{fs.writeFileSync(lease,JSON.stringify({operationId:p.operationId,state:'started',processId:child.pid}));child.unref();console.log(JSON.stringify({processId:child.pid}));});
 `
+/** Names the release the serving Core runs, for an installed entry and its restart.
+ * Written only after the new Core is confirmed; the rename is atomic. */
+export const SELECT_CORE_RELEASE = String.raw`
+const fs=require('node:fs'),path=require('node:path');
+const p=JSON.parse(fs.readFileSync(0,'utf8')),releases=path.join(p.stateDirectory,'core-releases');
+if(!/^[a-f0-9]{64}$/.test(p.digest))throw Error('Release identity is invalid');
+if(JSON.parse(fs.readFileSync(path.join(releases,p.digest,'deployment.json'),'utf8')).digest!==p.digest)throw Error('Release identity mismatch');
+const current=path.join(releases,'current'),next=current+'.'+p.operationId+'.next';
+fs.rmSync(next,{force:true});fs.symlinkSync(p.digest,next);fs.renameSync(next,current);
+const directory=fs.openSync(releases,'r');fs.fsyncSync(directory);fs.closeSync(directory);
+console.log(JSON.stringify({current:fs.readlinkSync(current)}));
+`
 export const OWNER_GONE = String.raw`
 import os,sys,json
 p=json.loads(sys.stdin.read()); base='/proc/'+str(p['pid'])
