@@ -7,16 +7,18 @@ import '../styles/mote-conversation-start.css'
  * The backdrop is pure CSS around this Mote's portrait: no decoded artwork, no paint containment band,
  * and at most one composited layer in motion. The app brand stays a small mark beside the wordmark. */
 export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, mode = 'start', active = true, drafting = false }: {
-  name: string; portrait: ReactNode; brand?: ReactNode; composer: ReactNode; history?: ReactNode
+  name: string | undefined; portrait: ReactNode; brand?: ReactNode; composer: ReactNode; history?: ReactNode
   notice?: ReactNode; actions?: ReactNode; mode?: 'start' | 'new' | 'unconfirmed'; active?: boolean
   /** True while the host's draft has text; the scene recedes without searching the composer subtree. */
   drafting?: boolean
 }) {
-  return <section className="mote-start" data-mode={mode} data-active={active} data-drafting={drafting || undefined} aria-label={`${name} · 开始对话`}>
+  // A Topic whose title is still being read has no name yet; the scene keeps the Mote wordmark alone.
+  const label = typeof name === 'string' ? name.trim() : ''
+  return <section className="mote-start" data-mode={mode} data-active={active} data-drafting={drafting || undefined} aria-label={label ? `${label} · 开始对话` : '开始对话'}>
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
       <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}
-        <span className="mote-start__name">{name}</span>{name.trim().toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions}</header>
+        {label ? <span className="mote-start__name">{label}</span> : null}{label.toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions}</header>
       <div className="mote-start__invitation">
         <div className="mote-start__portrait"><span className="mote-start__halo" aria-hidden="true" />{portrait}</div>
         <div className="mote-start__greeting"><span className="mote-start__eyebrow">{mode === 'new' ? '同一个伙伴，新的一轮' : '你的想法，从这里开始'}</span>
