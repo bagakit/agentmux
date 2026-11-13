@@ -82,7 +82,7 @@ const mutations = [
   { name: 'producer-drops-ownership', part: 'frames', before: 'defer { withExtendedLifetime(ownership) {} }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
   { name: 'no-frame-budget', part: 'frames', before: 'guard encodedBytes <= remainingFrameBytes else {', after: 'guard true else {', kills: 'a display whose pixels overflow the response frame carries its own issue' },
   { name: 'budget-not-cumulative', part: 'frames', before: 'remainingFrameBytes -= encodedBytes', after: '_ = encodedBytes', kills: 'a display whose pixels overflow the response frame carries its own issue' },
-  { name: 'ignore-configuration-change', part: 'frames', before: 'guard display.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
+  { name: 'ignore-configuration-change', part: 'frames', before: 'guard match.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
   { name: 'enumerate-per-display', part: 'frames', before: 'content: content.get()', after: 'content: BlockingAsync.run(timeout: 10) { try await SCShareableContent.current }', kills: "one window enumeration serves every display's grab" },
   { name: 'timestamp-after-grabs', part: 'frames', before: '"capturedAt": capturedAt', after: '"capturedAt": Date().timeIntervalSince1970 * 1000', kills: 'capturedAt is taken before the first grab' },
   { name: 'lease-never-busy', part: 'lease', before: 'guard !occupied else { lock.unlock(); throw Failure.busy }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
