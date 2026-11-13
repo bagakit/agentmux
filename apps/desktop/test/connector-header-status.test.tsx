@@ -194,7 +194,7 @@ it('hidden headers add no diagnosis work and a multi-group projection is explici
   await renderHeader(bindings); await open(); await wait(() => expect(menu().querySelectorAll('time')).toHaveLength(5))
   expect(f.calls.filter(call => call.method === 'connection.diagnose')).toHaveLength(reads + 5)
   expect(menu().textContent).toContain('Only the first 5 groups are checked here')
-  expect(menu().querySelectorAll('.connector-header-menu__snapshot')[5]!.textContent).toContain('Not checked')
+  expect(menu().querySelectorAll('.connector-header-menu__receiving')[5]!.textContent).toBe('Not checked')
   expect(f.calls.filter(call => call.method === 'connection.diagnose').slice(reads).every(call => (call.input as typeof target).agentSessionId === target.agentSessionId)).toBe(true)
 }, 30_000)
 

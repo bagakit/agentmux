@@ -36,4 +36,22 @@ it('presents a rewrite the owner could not resume as stopped sync with its recov
   // A receiving connection stays online; only the reply source shows its own progress.
   expect(connectorConnectionPresentation(report('AGENT_SESSION_HISTORY_SOURCE_CHANGED')).hint).toBe('Reply sync needs checking')
   expect(connectorConnectionPresentation(report(null)).hint).toBeNull()
+  // The diagnosis states only what the code reports, never a guessed cause.
+  expect(rewritten.detail).not.toMatch(/unchanged|no message/u)
+})
+
+it('keeps the source recovery available while the receiving socket is not online', () => {
+  for (const receiver of [{ ref: 'receiver', state: 'recovering' }, { ref: 'receiver', state: 'ended' }, undefined]) {
+    const base = report('AGENT_SESSION_HISTORY_REWRITTEN') as unknown as { connection: { value: Record<string, unknown> } }
+    const value = { ...base.connection.value, receiver, transport: { state: receiver ? 'unavailable' : 'unknown' } }
+    if (!receiver) delete value.receiver
+    const model = connectorConnectionPresentation({ ...base, connection: { value, issue: null } } as unknown as GroupDiagnosis)
+    expect(model.state).not.toBe('online')
+    // Publication does not depend on receiving: its recovery stays reachable; the card leads with the receiver.
+    expect(model.sourceRecovery).toBe(true)
+    expect(model.primary).toBe('check')
+  }
+  // A known policy owns the next step instead of a source wake.
+  const paused = report('AGENT_SESSION_HISTORY_REWRITTEN') as unknown as { binding: { value: Record<string, unknown> } }
+  expect(connectorConnectionPresentation({ ...paused, binding: { value: { ...paused.binding.value, state: 'paused' }, issue: null } } as unknown as GroupDiagnosis).sourceRecovery).toBe(false)
 })

@@ -256,7 +256,7 @@ it('a first unavailable native name keeps the exact original group ID and a work
   roomRead = async () => { throw Error('Controlled native observation unavailable') }
   await f.mount()
   await menu()
-  await wait(() => expect(document.querySelector('.connector-header-menu__snapshot')?.textContent).toContain('Group name unconfirmed'))
+  await wait(() => expect(document.querySelector('.connector-header-menu__name-issue')?.textContent).toContain('Group name unconfirmed'))
   expect(trigger().getAttribute('aria-label')).toContain('oc_unavailable_header')
   expect(trigger().disabled).toBe(false)
   await openGroup('oc_unavailable_header')
@@ -358,7 +358,7 @@ it('an unavailable or mismatched room observation keeps the exact relationship u
   await api.connections.call('connection.binding.pause', { operationId: 'header-metadata-unavailable', bindingId: binding.bindingId, expectedRevision: binding.revision })
   await act(async () => invalidateConnectorTarget(target))
   await menu()
-  await wait(() => expect(document.querySelector('.connector-header-menu__snapshot')?.textContent).toContain('Group name unconfirmed'))
+  await wait(() => expect(document.querySelector('.connector-header-menu__name-issue')?.textContent).toContain('Group name unconfirmed'))
   expect(trigger().getAttribute('aria-label')).toContain('Original team')
   expect(trigger().disabled).toBe(false); expect(trigger().textContent).not.toContain('Foreign group')
   await openGroup()
