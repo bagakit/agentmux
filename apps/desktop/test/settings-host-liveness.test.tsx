@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
@@ -92,6 +92,7 @@ function observations() {
   }
 }
 function writeReport(name: string, reports: unknown[]) {
+  mkdirSync(target, { recursive: true })
   writeFileSync(resolve(target, `${name}-${mode}.json`), JSON.stringify({
     schema: 'agentmux.host-liveness-source-profiler.v1', mode, producer: 'actual Main product source / development React / happy-dom',
     noStrictMode: true, liveUserPerformanceClaimed: false, reports
