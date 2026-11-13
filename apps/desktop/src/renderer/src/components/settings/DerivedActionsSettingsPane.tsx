@@ -164,7 +164,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
               onValueChange={value => update(custom.id, { instruction: value })} />
             <small id={`${describedBy}-instruction`} className={problems.has(custom.id) ? 'settings-inline-error' : ''}>{problems.get(custom.id) ?? (custom.base === 'fork'
               ? 'Sent first to the forked conversation, exactly as written.' : 'The new Agent also gets the original Session, its records and how to read them. The original keeps running.')}</small></label>
-          {custom.base === 'new-agent' ? <div className="derived-actions__agent"><AgentExecutorPicker presentation="field" label="Default Agent" unsetLabel="Ask each time"
+          {custom.base === 'new-agent' ? <div className="derived-actions__agent"><span aria-hidden="true">Default Agent</span><AgentExecutorPicker presentation="field" label="Default Agent" unsetLabel="Ask each time"
             executors={executors} selected={custom.executorId ?? null} onSelect={id => update(custom.id, id ? { executorId: id } : { executorId: '' })} />
             <small>Listed first when you start the action. You still choose before anything starts.</small></div> : null}
           <section className="prompt-usage derived-actions__preview" aria-label="Menu preview"><header>In the Agent menu <small>Read only</small></header>

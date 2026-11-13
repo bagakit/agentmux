@@ -8,9 +8,13 @@
 .derived-actions__badge[data-status='invalid'] { color: var(--red-text); }
 .derived-actions__title { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-title); font-weight: 600; }
 .derived-actions__lead { margin: 0 0 var(--sp-6); color: var(--text-2); line-height: 1.55; }
-.derived-actions__toggle, .derived-actions__base label { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-3) 0; cursor: pointer; }
-.derived-actions__toggle input, .derived-actions__base input { flex: none; margin-top: 3px; accent-color: var(--green); }
-.derived-actions__toggle span, .derived-actions__base span { display: grid; gap: var(--sp-1); min-width: 0; }
+.derived-actions__agent > span { color: var(--text-2); font-size: var(--fs-meta); }
+/* Option rows: a mark, then a name over its explanation. Wins over the shared field-label grid. */
+.derived-actions .derived-actions__toggle, .derived-actions .agent-settings-fields .derived-actions__base label { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); cursor: pointer; color: var(--text); font-size: var(--fs-body); }
+.derived-actions .agent-settings-fields .derived-actions__base label:hover, .derived-actions .derived-actions__toggle:hover { background: var(--wash-1); }
+.derived-actions .agent-settings-fields .derived-actions__base label:has(input:checked) { background: var(--wash-2); }
+.derived-actions .agent-settings-fields .derived-actions__base input, .derived-actions .derived-actions__toggle input { flex: none; width: 14px; height: 14px; min-height: 0; margin: 3px 0 0; padding: 0; accent-color: var(--green); }
+.derived-actions .derived-actions__toggle > span, .derived-actions .agent-settings-fields .derived-actions__base label > span { display: grid; justify-content: start; gap: var(--sp-1); min-width: 0; }
 .derived-actions__toggle small, .derived-actions__base small, .derived-actions__agent small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .derived-actions__base { margin: 0; padding: 0; border: 0; }
 .derived-actions__base legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
