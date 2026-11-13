@@ -1208,7 +1208,6 @@ export type AppState = GitReadingActions & {
     plannedStartAt?: number | null
     targetAt?: number | null
     parentDemandId?: string | null
-    phaseIndex?: number | null
     activityLog?: readonly string[]
     sessionIds?: readonly string[]
     contentRefs?: readonly DemandContentReference[]
@@ -1217,7 +1216,7 @@ export type AppState = GitReadingActions & {
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
   }, controlRequestId?: string): Promise<string>
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number): Promise<void>
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number): Promise<void>
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -1874,7 +1873,6 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     plannedStartAt: demand.plannedStartAt,
     targetAt: demand.targetAt,
     parentDemandId: demand.parentDemandId,
-    phaseIndex: demand.phaseIndex,
     activityLog: demand.activities.map((activity) => `${activity.kind}: ${activity.message}`),
     delegations: [...(demand.delegations ?? [])],
     ...(retained?.delegationObservations ? { delegationObservations: retained.delegationObservations } : {}),
@@ -8186,7 +8184,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionIds: [...(input.sessionIds ?? [])], ...(contentRefs ? { contentRefs: [...contentRefs] } : {}),
       ...(input.tags ? { tags: [...input.tags] } : {}), ...(input.plannedStartAt === undefined ? {} : { plannedStartAt: input.plannedStartAt }),
       ...(input.targetAt === undefined ? {} : { targetAt: input.targetAt }), ...(input.parentDemandId === undefined ? {} : { parentDemandId: input.parentDemandId }),
-      ...(input.phaseIndex === undefined ? {} : { phaseIndex: input.phaseIndex }),
       decision: input.decisionLog?.[0] ?? { input: input.title, candidates: [], selectedProjectId: input.projectId ?? null, risk: 'low', confirmation: 'user', wikiVersion: null, recordedAt: Date.now(), sourceSessionId: null } })
     if (result.operation !== 'demand.create') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal create returned another operation.')
     const goal = hostGoalRecord(result.demand)

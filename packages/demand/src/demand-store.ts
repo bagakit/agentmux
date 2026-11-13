@@ -172,6 +172,7 @@ function parseDemand(value: unknown, label: string): Demand {
     'plannedStartAt',
     'targetAt',
     'parentDemandId',
+    // Retired: a Goal plan now carries ordering; an existing null key is dropped on read.
     'phaseIndex',
     'sessionIds',
     'assigneeSessionIds',
@@ -201,7 +202,6 @@ function parseDemand(value: unknown, label: string): Demand {
   const plannedStartAt = record.plannedStartAt === undefined || record.plannedStartAt === null ? null : timestamp(record.plannedStartAt, `${label}.plannedStartAt`)
   const targetAt = record.targetAt === undefined || record.targetAt === null ? null : timestamp(record.targetAt, `${label}.targetAt`)
   const parentDemandId = record.parentDemandId === undefined ? null : nullableString(record.parentDemandId, `${label}.parentDemandId`)
-  const phaseIndex = record.phaseIndex === undefined || record.phaseIndex === null ? null : (typeof record.phaseIndex === 'number' && Number.isSafeInteger(record.phaseIndex) && record.phaseIndex >= 0 ? record.phaseIndex : (() => { throw new Error(`${label}.phaseIndex must be a non-negative integer`) })())
   const activities = record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`))
   const sessionIds = stringArray(record.sessionIds, `${label}.sessionIds`)
   const assigneeSessionIds = record.assigneeSessionIds === undefined ? [] : stringArray(record.assigneeSessionIds, `${label}.assigneeSessionIds`)
@@ -224,7 +224,6 @@ function parseDemand(value: unknown, label: string): Demand {
     plannedStartAt,
     targetAt,
     parentDemandId,
-    phaseIndex,
     sessionIds, assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(record.discussionOperationId, `${label}.discussionOperationId`) }),
@@ -423,7 +422,7 @@ export class DemandStore {
         const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
           assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null,
           sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], tags: [...(input.tags ?? [])],
-          plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, contentRefs: input.contentRefs }
+          plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, contentRefs: input.contentRefs }
         if (Object.entries(expected).some(([key, value]) => JSON.stringify(original[key as keyof Demand]) !== JSON.stringify(value)))
           throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation is retained but its current content differs. Inspect that same Goal without creating another.')
         return { unchanged: original }
@@ -445,7 +444,6 @@ export class DemandStore {
         plannedStartAt: input.plannedStartAt ?? null,
         targetAt: input.targetAt ?? null,
         parentDemandId: input.parentDemandId ?? null,
-        phaseIndex: input.phaseIndex ?? null,
         sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])],
         assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
         supervisorSessionId: input.supervisorSessionId ?? null,
@@ -978,7 +976,6 @@ export class DemandStore {
       if (patch.plannedStartAt !== undefined) demand.plannedStartAt = patch.plannedStartAt
       if (patch.targetAt !== undefined) demand.targetAt = patch.targetAt
       if (patch.parentDemandId !== undefined) demand.parentDemandId = patch.parentDemandId
-      if (patch.phaseIndex !== undefined) demand.phaseIndex = patch.phaseIndex
       try {
         if (patch.alignment !== undefined) {
           const proposal = parseAlignmentProposal(patch.alignment)

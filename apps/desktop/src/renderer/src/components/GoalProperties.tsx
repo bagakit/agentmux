@@ -42,7 +42,6 @@ function GoalMoreProperties({ demand, onUpdate }: Props) {
     <fieldset><legend>Planning</legend><div className="goals-properties__fields">
       <label>Planned start<TextInput type="date" aria-label="Goal planned start" value={localDateInput(demand.plannedStartAt)} onChange={event => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
       <label>Target date<TextInput type="date" aria-label="Goal target date" value={localDateInput(demand.targetAt)} onChange={event => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
-      <label>Batch<TextInput type="number" min={1} aria-label="Goal batch" value={demand.phaseIndex === null || demand.phaseIndex === undefined ? '' : demand.phaseIndex + 1} onChange={event => onUpdate({ phaseIndex: event.target.value ? Math.max(0, Number(event.target.value) - 1) : null })} /></label>
     </div></fieldset>
     <fieldset><legend>Classification</legend><div className="goals-properties__fields">
       <label>Tags<TextInput aria-label="Goal tags" value={tags} onChange={event => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map(tag => tag.trim()).filter(Boolean) })} /></label>

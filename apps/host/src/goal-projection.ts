@@ -8,7 +8,7 @@ export function projectHostGoal(goal: Demand): AgentMuxDemand {
     supervisorSessionId: goal.supervisorSessionId, participations: [...goal.participations],
     ...(goal.creationOrigin ? { creationOrigin: goal.creationOrigin } : {}),
     ...(goal.discussionOperationId ? { discussionOperationId: goal.discussionOperationId } : {}), tags: [...goal.tags],
-    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex,
+    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
     ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...(goal.plan ? { plan: goal.plan } : {}),
@@ -20,11 +20,11 @@ export function projectHostGoal(goal: Demand): AgentMuxDemand {
 /** Original board facts; private Host launch context is not a client-owned fact. */
 export function hostGoalRecord(goal: AgentMuxDemand): Demand {
   if (!goal.activities || !goal.decisions || !goal.tags || goal.executorId === undefined || goal.plannedStartAt === undefined ||
-      goal.targetAt === undefined || goal.parentDemandId === undefined || goal.phaseIndex === undefined)
+      goal.targetAt === undefined || goal.parentDemandId === undefined)
     throw new Error('The original Host did not return the complete Goal record. Its retained view remains available.')
   const { source: _source, activityLog: _log, ...record } = goal
   return { ...record, activities: goal.activities, decisions: goal.decisions, tags: goal.tags, executorId: goal.executorId,
-    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex }
+    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId }
 }
 
 /** Canonical public Goal names are decoded explicitly at the client transport boundary. */

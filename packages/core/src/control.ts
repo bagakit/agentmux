@@ -445,7 +445,6 @@ export type AgentMuxDemand = {
   plannedStartAt?: number | null
   targetAt?: number | null
   parentDemandId?: string | null
-  phaseIndex?: number | null
   activityLog?: string[]
   delegations?: import('@agentmux/demand').DemandDelegation[]
   dispatches?: import('@agentmux/demand').DemandDispatch[]
@@ -494,14 +493,13 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
   plannedStartAt?: number | null
   targetAt?: number | null
   parentDemandId?: string | null
-  phaseIndex?: number | null
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'demand.update'
   expectedUpdatedAt?: number
   demandId: string
-  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
+  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding'; executorId?: string }

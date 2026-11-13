@@ -565,13 +565,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Goal planned start is invalid.') }),
       ...(source.targetAt === undefined ? {} : { targetAt: source.targetAt === null ? null : finiteNumber(source.targetAt, 'Goal target is invalid.') }),
       ...(source.parentDemandId === undefined ? {} : { parentDemandId: source.parentDemandId === null ? null : id(source.parentDemandId, 'Parent Goal is invalid.', 'INVALID_CONTROL_REQUEST') }),
-      ...(source.phaseIndex === undefined ? {} : { phaseIndex: source.phaseIndex === null ? null : finiteNumber(source.phaseIndex, 'Goal phase is invalid.') }),
       ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) })
     }
   }
   if (source.operation === 'demand.update') {
     const patchSource = object(source.patch, 'Demand patch is invalid.', 'INVALID_CONTROL_REQUEST')
-    const allowed = ['title', 'description', 'status', 'priority', 'projectId', 'projectName', 'assigneeSessionIds', 'supervisorSessionId', 'tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'activityLog', 'sessionIds', 'contentRefs', 'alignment', 'grounding']
+    const allowed = ['title', 'description', 'status', 'priority', 'projectId', 'projectName', 'assigneeSessionIds', 'supervisorSessionId', 'tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'activityLog', 'sessionIds', 'contentRefs', 'alignment', 'grounding']
     if (Object.keys(patchSource).some(key => !allowed.includes(key))) throw new AgentMuxError('Goal patch contains unsupported or owner-authored fields.', 'INVALID_CONTROL_REQUEST')
     const patch: AgentMuxControlDemandUpdateRequest['patch'] = {}
     for (const key of ['revision', 'submissionId', 'confirmedAt', 'acceptedAt']) {
@@ -596,7 +595,6 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (patchSource.plannedStartAt !== undefined) patch.plannedStartAt = patchSource.plannedStartAt === null ? null : finiteNumber(patchSource.plannedStartAt, 'Demand planned start timestamp is invalid.')
     if (patchSource.targetAt !== undefined) patch.targetAt = patchSource.targetAt === null ? null : finiteNumber(patchSource.targetAt, 'Demand target timestamp is invalid.')
     if (patchSource.parentDemandId !== undefined) patch.parentDemandId = patchSource.parentDemandId === null ? null : id(patchSource.parentDemandId, 'Parent Demand id is invalid.', 'INVALID_CONTROL_REQUEST')
-    if (patchSource.phaseIndex !== undefined) patch.phaseIndex = patchSource.phaseIndex === null ? null : finiteNumber(patchSource.phaseIndex, 'Demand phase index is invalid.')
     if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
     if (patchSource.contentRefs !== undefined) patch.contentRefs = contentReferences(patchSource.contentRefs)
     if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || (source.expectedUpdatedAt as number) < 0)) throw new AgentMuxError('Expected Goal update timestamp is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -997,7 +995,6 @@ function parseDemand(value: unknown): AgentMuxDemand {
     ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Control demand planned start timestamp is invalid.') }),
     ...(source.targetAt === undefined ? {} : { targetAt: source.targetAt === null ? null : finiteNumber(source.targetAt, 'Control demand target timestamp is invalid.') }),
     ...(source.parentDemandId === undefined ? {} : { parentDemandId: source.parentDemandId === null ? null : id(source.parentDemandId, 'Control parent Demand is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
-    ...(source.phaseIndex === undefined ? {} : { phaseIndex: source.phaseIndex === null ? null : finiteNumber(source.phaseIndex, 'Control demand phase index is invalid.') }),
     sessionIds,
     ...(source.contentRefs === undefined ? {} : { contentRefs: contentReferences(source.contentRefs) }),
     createdAt: finiteNumber(source.createdAt, 'Control demand created timestamp is invalid.'),
