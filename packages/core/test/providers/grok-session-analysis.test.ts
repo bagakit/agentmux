@@ -293,3 +293,17 @@ it('materializes one final group version per page even when native metadata alte
   expect(joined).not.toHaveBeenCalled()
   expect(readBefore.mock.calls.length).toBeLessThanOrEqual(rows.length + 10)
 }, 60000)
+
+it('reports a same-file Grok rewrite as rewritten and retains the original cut', async () => {
+  const prefix = jsonl([grokChunk(sessionId, 'p'.repeat(300), 'prior'), grokDone(sessionId, 'prior')])
+  const f = await fixture([grokChunk(sessionId, 'p'.repeat(300), 'prior'), grokDone(sessionId, 'prior')]); fixtures.push(f)
+  await appendFile(f.path, jsonl([grokChunk(sessionId, 'old', 'last')]))
+  const checkpoint = await f.changes({ tail: true })
+  const ref = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const original = await f.client.conversationCheckpoint(ref)
+  await writeFile(f.path, prefix + jsonl([grokChunk(sessionId, 'new', 'last')]))
+  const page = await f.client.readConversationChanges({ ...ref, checkpoint: original.checkpoint })
+  expect(page.coverage.find(item => item.source.kind === 'native')?.gaps).toEqual([expect.objectContaining({ code: 'AGENT_SESSION_HISTORY_REWRITTEN' })])
+  expect(page.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')).toEqual(original.checkpoint.frontier.cuts.find(cut => cut.kind === 'native'))
+  await expect(f.changes({ after: checkpoint.cursor })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_REWRITTEN' })
+})

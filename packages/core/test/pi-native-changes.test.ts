@@ -24,6 +24,7 @@ async function fixture(entries: unknown[]) {
   fixtures.push(owner)
   return { ...f, ref: { hostId: 'local', agentSessionId: f.session.agentSessionId },
     append: async (data: string) => { await appendFile(f.path, data); owner.native = Buffer.concat([owner.native, Buffer.from(data)]) },
+    rewrite: async (data: Buffer) => { await writeFile(f.path, data); owner.native = data },
     replace: async (data: string) => { await rename(f.path, f.path + '.original'); await writeFile(f.path, data); owner.native = Buffer.from(data) } }
 }
 function originalIds(page: Parameters<typeof consumeConversationWindowPage>[0]) {
@@ -192,4 +193,18 @@ it('Pi changes reject a replaced original file and cancellation without touching
   await f.replace(await readFile(f.path, 'utf8'))
   await expect(f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint }))
     .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+})
+
+it('reports a same-file rewritten cut accurately while retaining the original Pi source', async () => {
+  const f = await fixture([message('root', null, 'p'.repeat(300))])
+  const retained = (await f.bytes()).native
+  await f.append(jsonl([message('old', 'root', 'old content')]))
+  const checkpoint = await f.client.sessionHistoryCheckpoint(f.session.agentSessionId)
+  const original = await f.client.conversationCheckpoint(f.ref)
+  await f.rewrite(Buffer.concat([retained, Buffer.from(jsonl([message('new', 'root', 'new content')]))]))
+  const page = await f.client.readConversationChanges({ ...f.ref, checkpoint: original.checkpoint })
+  expect(page.coverage.find(item => item.source.kind === 'native')?.gaps).toEqual([expect.objectContaining({ code: 'AGENT_SESSION_HISTORY_REWRITTEN' })])
+  expect(page.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')).toEqual(original.checkpoint.frontier.cuts.find(cut => cut.kind === 'native'))
+  await expect(f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint }))
+    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_REWRITTEN' })
 })
