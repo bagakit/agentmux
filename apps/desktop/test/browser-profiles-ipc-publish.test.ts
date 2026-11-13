@@ -74,7 +74,7 @@ describe('Main publishes the committed Profile list after every change', () => {
     expect(await h['browser:readProfiles']!({})).toMatchObject({ revision: 0 })
     expect(sent).toHaveLength(0)
     await h['browser:createProfile']!({}, 'Client')
-    await h['browser:updateProfile']!({}, WORK_ID, { label: 'Work client' }, 1)
+    await h['browser:updateProfile']!({}, WORK_ID, { label: 'Work client' }, browserProfiles.listProfiles().find(value => value.id === WORK_ID)!.revision)
     // The default move names only its target; a stale revision argument is not forwarded.
     await h['browser:setDefaultProfile']!({}, WORK_ID, 0)
     expect(sent.map(([channel, payload]) => [channel, payload.revision])).toEqual([
@@ -86,7 +86,7 @@ describe('Main publishes the committed Profile list after every change', () => {
       [DEFAULT_ID, 'Personal', false], [WORK_ID, 'Work client', true], [expect.any(String), 'Client', false]
     ])
 
-    await expect(h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    await expect(h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 'stale-profile-token')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     await expect(h['browser:setDefaultProfile']!({}, '33333333-3333-4333-8333-333333333333')).rejects.toThrow('Unknown Browser Profile')
     expect(sent).toHaveLength(3)
 
@@ -101,8 +101,8 @@ describe('Main publishes the committed Profile list after every change', () => {
     const contents = { isDestroyed: () => false, send: () => {} }
     const h = productionWiring(['browser:readProfiles', 'browser:updateProfile', 'browser:setDefaultProfile'], { browserProfiles, contents, ipcResult })
     // Electron copies handler results with the structured clone algorithm and drops an Error's code; data survives.
-    const refused = structuredClone(await h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 7))
-    expect(refused).toEqual({ ok: false, error: { code: 'BROWSER_PROFILE_REVISION_CONFLICT', message: expect.stringContaining('current revision is 0') } })
+    const refused = structuredClone(await h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 'stale-profile-token'))
+    expect(refused).toEqual({ ok: false, error: { code: 'BROWSER_PROFILE_REVISION_CONFLICT', message: expect.stringContaining('Profile configuration changed') } })
     expect(() => unwrapIpcResult(refused as IpcResult<unknown>)).toThrowError(expect.objectContaining({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
     expect(structuredClone(await h['browser:readProfiles']!({}))).toMatchObject({ ok: true, value: { revision: 0 } })
     expect(await h['browser:setDefaultProfile']!({}, WORK_ID)).toEqual({ ok: true, value: undefined })

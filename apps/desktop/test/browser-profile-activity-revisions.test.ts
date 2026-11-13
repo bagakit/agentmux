@@ -329,6 +329,8 @@ describe('Profile native activity and exact configuration versions', () => {
     n.tick(1000); destroy(); await n.owner.flushProfileActivity()
     expect(replacement.webContents.isDestroyed()).toBe(false); expect(n.owner.target('one')?.url).toBe('https://replacement.invalid/')
     expect(f.profile(f.id).activity?.observedRunMs).toBe(4000)
+    n.tick(1000); await n.owner.flushProfileActivity()
+    expect(f.profile(f.id).activity).toMatchObject({ observedRunMs: 5000, state: 'running' })
   })
 
   it('does not count a failed Profile candidate and retains old A until exact native destruction after a committed switch', async () => {

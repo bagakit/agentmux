@@ -25,9 +25,9 @@ describe('Profile organization on the original metadata owner', () => {
   it('keeps a growing tag collection instead of treating the 65th saved name as corruption', async () => {
     const { manager, path, id } = await fixture()
     const tags = Array.from({ length: 80 }, (_, index) => `Tag ${index + 1}`)
-    const payload = parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: id, expectedRevision: manager.listRevision(), edit: { tags } }, ['operation'])
+    const payload = parseBrowserProfileControlPayload({ operation: 'browser.profile.update', profileId: id, expectedRevision: manager.listProfiles().find(value => value.id === id)!.revision, edit: { tags } }, ['operation'])
     if (payload.operation !== 'browser.profile.update') throw new Error('Expected update')
-    await manager.updateProfile(id, payload.edit, payload.expectedRevision)
+    await manager.updateProfile(id, payload.edit, manager.listProfiles().find(profile => profile.id === id)!.revision)
     const next = new BrowserProfileManager(new BrowserProfileStore(path)); await next.initialize()
     expect(next.listProfiles()[0]!.tags).toEqual(tags)
     expect(native.get).not.toHaveBeenCalled()
@@ -37,7 +37,7 @@ describe('Profile organization on the original metadata owner', () => {
     const { manager, path, id } = await fixture()
     const folder = await manager.createFolder('Research', manager.listRevision())
     const empty = await manager.createFolder('Empty folder', manager.listRevision())
-    await manager.updateProfile(id, { tags: [' Work ', 'Work', 'cafe\u0301', 'café'], folderId: folder.id, pinned: true }, manager.listRevision())
+    await manager.updateProfile(id, { tags: [' Work ', 'Work', 'cafe\u0301', 'café'], folderId: folder.id, pinned: true }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(manager.listProfiles()[0]).toMatchObject({ tags: ['Work', 'café'], folderId: folder.id, pinned: true })
     await manager.renameFolder(folder.id, 'Research renamed', manager.listRevision())
     expect(manager.listFolders()).toEqual([{ id: folder.id, label: 'Research renamed' }, empty])
@@ -51,9 +51,9 @@ describe('Profile organization on the original metadata owner', () => {
     const { manager, path, id } = await fixture()
     const work = await manager.createProfile('Work'), another = await manager.createProfile('Another'), other = await manager.createProfile('Other')
     const folder = await manager.createFolder('Assigned', manager.listRevision()), retained = await manager.createFolder('Retained', manager.listRevision())
-    await manager.updateProfile(work.id, { folderId: folder.id, tags: ['keep'], pinned: true, notes: 'Keep original purpose' }, manager.listRevision())
-    await manager.updateProfile(another.id, { folderId: folder.id }, manager.listRevision())
-    await manager.updateProfile(other.id, { folderId: retained.id }, manager.listRevision())
+    await manager.updateProfile(work.id, { folderId: folder.id, tags: ['keep'], pinned: true, notes: 'Keep original purpose' }, manager.listProfiles().find(profile => profile.id === work.id)!.revision)
+    await manager.updateProfile(another.id, { folderId: folder.id }, manager.listProfiles().find(profile => profile.id === another.id)!.revision)
+    await manager.updateProfile(other.id, { folderId: retained.id }, manager.listProfiles().find(profile => profile.id === other.id)!.revision)
     const before = JSON.parse(await readFile(path, 'utf8')), revision = manager.listRevision()
     const result = await manager.deleteFolder(folder.id, revision)
     const after = JSON.parse(await readFile(path, 'utf8'))
@@ -62,7 +62,7 @@ describe('Profile organization on the original metadata owner', () => {
     expect(after.defaultProfileId).toBe(id)
     expect(after.profiles.map((value: any) => value.id)).toEqual(before.profiles.map((value: any) => value.id))
     for (const original of before.profiles) {
-      const expected = { ...original }; if (expected.folderId === folder.id) delete expected.folderId
+      const expected = { ...original }; if (expected.folderId === folder.id) { delete expected.folderId; expected.revision = expect.any(String) }
       expect(after.profiles.find((value: any) => value.id === original.id)).toEqual(expected)
     }
     expect(manager.listFolders()).toEqual([retained])
@@ -72,8 +72,8 @@ describe('Profile organization on the original metadata owner', () => {
   it('copies tags and the same folder reference without pinning the new identity or altering the source', async () => {
     const { manager, path, id } = await fixture()
     const folder = await manager.createFolder('Shared organization', manager.listRevision())
-    await manager.updateProfile(id, { tags: ['Source tag'], folderId: folder.id, pinned: true, agentAccess: false }, manager.listRevision())
-    const source = manager.listProfiles()[0], copied = await manager.copyProfile(id, 'Copy', manager.listRevision())
+    await manager.updateProfile(id, { tags: ['Source tag'], folderId: folder.id, pinned: true, agentAccess: false }, manager.listProfiles().find(profile => profile.id === id)!.revision)
+    const source = manager.listProfiles()[0], copied = await manager.copyProfile(id, 'Copy', manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(copied).toMatchObject({ tags: ['Source tag'], folderId: folder.id, agentAccess: false })
     expect(copied.pinned).toBeUndefined(); expect(copied.id).not.toBe(id)
     expect(manager.listProfiles().find(value => value.id === id)).toEqual(source)
@@ -90,11 +90,11 @@ describe('Profile organization on the original metadata owner', () => {
     const folder = await manager.createFolder('Original', revision)
     const bytes = await readFile(path, 'utf8')
     await expect(manager.renameFolder(folder.id, 'Stale', revision)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
-    await expect(manager.updateProfile(id, { folderId: 'foreignFolder' }, manager.listRevision())).rejects.toThrow()
+    await expect(manager.updateProfile(id, { folderId: 'foreignFolder' }, manager.listProfiles().find(profile => profile.id === id)!.revision)).rejects.toThrow()
     await expect(manager.deleteFolder('foreignFolder', manager.listRevision())).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe(bytes)
-    await manager.updateProfile(id, { tags: ['Temporary'], folderId: folder.id, pinned: true }, manager.listRevision())
-    await manager.updateProfile(id, { tags: [], folderId: null, pinned: false }, manager.listRevision())
+    await manager.updateProfile(id, { tags: ['Temporary'], folderId: folder.id, pinned: true }, manager.listProfiles().find(profile => profile.id === id)!.revision)
+    await manager.updateProfile(id, { tags: [], folderId: null, pinned: false }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(manager.listProfiles()[0].tags).toBeUndefined(); expect(manager.listProfiles()[0].folderId).toBeUndefined(); expect(manager.listProfiles()[0].pinned).toBeUndefined()
   })
 
@@ -104,12 +104,12 @@ describe('Profile organization on the original metadata owner', () => {
     const original = JSON.parse(await readFile(path, 'utf8')); original.profiles[0].folderId = 'missingFolder'
     const bytes = JSON.stringify(original); await writeFile(path, bytes)
     await expect(manager.deleteFolder(folder.id, manager.listRevision())).rejects.toThrow()
-    await expect(manager.updateProfile(id, { tags: ['No substitute'] }, manager.listRevision())).rejects.toThrow()
+    await expect(manager.updateProfile(id, { tags: ['No substitute'] }, manager.listProfiles().find(profile => profile.id === id)!.revision)).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe(bytes)
     expect(manager.resolvePartition(id)).toContain(id)
     await rm(path)
     await expect(manager.createFolder('No replacement', manager.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(manager.updateProfile(id, { pinned: true }, manager.listRevision())).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(manager.updateProfile(id, { pinned: true }, manager.listProfiles().find(profile => profile.id === id)!.revision)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(native.get).not.toHaveBeenCalled()
   })
@@ -120,13 +120,13 @@ describe('Profile organization on the original metadata owner', () => {
     const rename = { operation: 'browser.profile.folder.rename' as const, folderId: 'folder-1', label: 'Same folder', expectedRevision: 2 }
     expect(parseBrowserProfileControlPayload(rename, ['operation'])).toEqual(rename)
     expect(() => parseBrowserProfileControlPayload({ ...rename, deleteProfiles: true }, ['operation'])).toThrow()
-    const profile = { id: 'profile-1', label: 'Original', createdAt: 1, isDefault: true, source: null, folderId: 'folder-1', tags: ['Work'], pinned: true }
-    expect(parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, profiles: [profile], folders: [{ id: 'folder-1', label: 'Work' }] })).toMatchObject({ folders: [{ id: 'folder-1' }] })
-    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, profiles: [profile], folders: [] })).toThrow()
-    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, profiles: [{ ...profile, tags: [' Work '] }], folders: [{ id: 'folder-1', label: 'Work' }] })).toThrow()
+    const profile = { revision: 'source-token', id: 'profile-1', label: 'Original', createdAt: 1, isDefault: true, source: null, folderId: 'folder-1', tags: ['Work'], pinned: true }
+    expect(parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], folders: [{ id: 'folder-1', label: 'Work' }] })).toMatchObject({ folders: [{ id: 'folder-1' }] })
+    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [profile], folders: [] })).toThrow()
+    expect(() => parseBrowserProfileControlResult('browser.profile.ls', { revision: 1, sequence: 1, profiles: [{ ...profile, tags: [' Work '] }], folders: [{ id: 'folder-1', label: 'Work' }] })).toThrow()
     expect(() => assertBrowserProfileControlTarget(rename, { operation: rename.operation, revision: 3, folder: { id: 'other-folder', label: rename.label } })).toThrow()
     expect(() => assertBrowserProfileControlTarget(rename, { operation: 'browser.profile.folder.create', revision: 3, folder: { id: rename.folderId, label: rename.label } })).toThrow()
-    expect(() => assertBrowserProfileControlTarget({ operation: 'browser.profile.copy', profileId: profile.id, label: 'Copy', expectedRevision: 1 }, {
+    expect(() => assertBrowserProfileControlTarget({ operation: 'browser.profile.copy', profileId: profile.id, label: 'Copy', expectedRevision: 'source-token' }, {
       operation: 'browser.profile.copy', revision: 2, sourceProfileId: profile.id, profile: { ...profile, id: 'new-profile', label: 'Copy', isDefault: false }
     })).toThrow()
   })
@@ -143,11 +143,11 @@ describe('Profile organization on the original metadata owner', () => {
       const run = async (args: string[]) => { const reply = await runCompiledObjectCli(['browser', 'profile', ...args], env); expect(reply.code, reply.stderr).toBe(0); return JSON.parse(reply.stdout).result }
       const folder = (await run(['folder', 'create', '--label', 'CLI folder', '--expected-revision', String(manager.listRevision())])).folder
       expect((await run(['ls'])).folders).toEqual([folder])
-      await run(['update', '--profile', id, '--expected-revision', String(manager.listRevision()), '--tags', '[" CLI ","CLI","Release"]', '--folder', folder.id, '--pin'])
+      await run(['update', '--profile', id, '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision, '--tags', '[" CLI ","CLI","Release"]', '--folder', folder.id, '--pin'])
       expect((await run(['inspect', '--profile', id])).profile).toMatchObject({ tags: ['CLI', 'Release'], folderId: folder.id, pinned: true })
       const renamed = await run(['folder', 'rename', '--folder', folder.id, '--label', 'Renamed folder', '--expected-revision', String(manager.listRevision())])
       expect(renamed.folder).toEqual({ id: folder.id, label: 'Renamed folder' })
-      const copy = (await run(['copy', '--profile', id, '--label', 'CLI copy', '--expected-revision', String(manager.listRevision())])).profile
+      const copy = (await run(['copy', '--profile', id, '--label', 'CLI copy', '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision])).profile
       expect(copy).toMatchObject({ folderId: folder.id, tags: ['CLI', 'Release'] }); expect(copy.pinned).toBeUndefined()
       const removed = await run(['folder', 'delete', '--folder', folder.id, '--expected-revision', String(manager.listRevision())])
       expect(removed).toMatchObject({ folderId: folder.id, deleted: true, unassignedProfileIds: [id, copy.id] })

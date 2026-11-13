@@ -14,9 +14,9 @@ import '../../../src/renderer/src/styles/index.css'
 const config = await api.config.get()
 const list = await api.browser.readProfiles()
 const personal = list.profiles[0]!
-await api.browser.updateProfile(personal.id, { label: 'Personal', notes: '' }, list.revision)
+await api.browser.updateProfile(personal.id, { label: 'Personal', notes: '' }, list.profiles.find(value => value.id === personal.id)!.revision)
 const client = await api.browser.createProfile('Northwind client')
-await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).revision)
+await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
 await api.browser.createProfile('QA de-DE')
 await api.browser.createProfile('Release review')
 const workspaceId = config.workspaces[0]!.id
@@ -28,7 +28,7 @@ const tab = (id: string, title: string, profileId: string, deferred: boolean) =>
 }
 // Agents on globally, so the Profile switch shows its own effect; one Profile keeps Agents out.
 config.browser = { ...config.browser, agentAutomation: true, exitCheckUrl: 'https://exit.example.test/' }
-await api.browser.updateProfile(client.id, { agentAccess: false }, (await api.browser.readProfiles()).revision)
+await api.browser.updateProfile(client.id, { agentAccess: false }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
 const tabs = [tab('b-launch', 'Launch board', client.id, false), tab('b-notes', 'Release notes', client.id, true), tab('b-inbox', 'Inbox', personal.id, false)]
 useAppStore.setState({ config, loading: false, tabs: Object.fromEntries(tabs.map(item => [item.id, item])) as never })
 mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
@@ -61,7 +61,7 @@ Object.assign(window, { profilesVisual: {
   },
   browser,
   async serviceNotice() {
-    await api.browser.updateProfile(client.id, { network: { mode: 'proxy', server: { scheme: 'http', host: 'gateway.example.test', port: 3128 } } }, (await api.browser.readProfiles()).revision)
+    await api.browser.updateProfile(client.id, { network: { mode: 'proxy', server: { scheme: 'http', host: 'gateway.example.test', port: 3128 } } }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
     await browser('Profile “Northwind client”: The saved proxy password could not be read from the keychain. Enter it again. Browser controls remain available. Open Settings → Browser Profiles → Northwind client → Proxy sign-in.')
   }
 } })

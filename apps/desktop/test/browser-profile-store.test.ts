@@ -66,6 +66,7 @@ describe('BrowserProfileStore', () => {
     const persisted = JSON.parse(await readFile(path, 'utf8'))
 
     expect(profiles).toEqual([{
+      revision: expect.any(String),
       id: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/),
       label: 'Default',
       createdAt: expect.any(Number),
@@ -226,6 +227,7 @@ describe('BrowserProfileStore', () => {
 
     expect(committed).toEqual({
       id: pending.profileId,
+      revision: expect.any(String),
       label: 'Imported work',
       createdAt: pending.startedAt,
       isDefault: false,
@@ -263,16 +265,16 @@ describe('BrowserProfileStore', () => {
     const { path, store } = await storeFixture()
     const [profile] = await store.listProfiles()
     const route = { mode: 'proxy' as const, server: { scheme: 'socks5' as const, host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test'] }
-    const { profile: routed } = await store.updateProfile(profile!.id, { network: route }, 0)
+    const { profile: routed } = await store.updateProfile(profile!.id, { network: route }, (await store.inspectProfile(profile!.id)).profile.revision)
     expect(routed.network).toEqual(route)
     expect(JSON.parse(await readFile(path, 'utf8')).profiles[0].network).toEqual(route)
     expect(JSON.stringify(JSON.parse(await readFile(path, 'utf8')))).not.toMatch(/password|secret/)
 
     const before = await readFile(path, 'utf8')
-    await expect(store.updateProfile(profile!.id, { network: { mode: 'proxy', server: 'http://me:pw@gw:1' } as never }, 1)).rejects.toThrow(/user name and password/)
+    await expect(store.updateProfile(profile!.id, { network: { mode: 'proxy', server: 'http://me:pw@gw:1' } as never }, (await store.inspectProfile(profile!.id)).profile.revision)).rejects.toThrow(/user name and password/)
     expect(await readFile(path, 'utf8')).toBe(before)
 
-    const { profile: system } = await store.updateProfile(profile!.id, { network: null }, 1)
+    const { profile: system } = await store.updateProfile(profile!.id, { network: null }, (await store.inspectProfile(profile!.id)).profile.revision)
     expect(system.network).toBeUndefined()
     expect(JSON.parse(await readFile(path, 'utf8')).profiles[0]).not.toHaveProperty('network')
   })
@@ -280,13 +282,13 @@ describe('BrowserProfileStore', () => {
   it('stores only a turned-off Agent switch, so an untouched Profile keeps the global answer', async () => {
     const { path, store } = await storeFixture()
     const [profile] = await store.listProfiles()
-    const { profile: guarded } = await store.updateProfile(profile!.id, { agentAccess: false }, 0)
+    const { profile: guarded } = await store.updateProfile(profile!.id, { agentAccess: false }, (await store.inspectProfile(profile!.id)).profile.revision)
     expect(guarded.agentAccess).toBe(false)
     expect(JSON.parse(await readFile(path, 'utf8')).profiles[0].agentAccess).toBe(false)
-    const { profile: open } = await store.updateProfile(profile!.id, { agentAccess: true }, 1)
+    const { profile: open } = await store.updateProfile(profile!.id, { agentAccess: true }, (await store.inspectProfile(profile!.id)).profile.revision)
     expect(open).not.toHaveProperty('agentAccess')
     expect(JSON.parse(await readFile(path, 'utf8')).profiles[0]).not.toHaveProperty('agentAccess')
-    await expect(store.updateProfile(profile!.id, { agentAccess: 'yes' as never }, 2)).rejects.toThrow('on or off')
+    await expect(store.updateProfile(profile!.id, { agentAccess: 'yes' as never }, (await store.inspectProfile(profile!.id)).profile.revision)).rejects.toThrow('on or off')
   })
 
   it('refuses metadata whose stored route the parser would not produce', async () => {

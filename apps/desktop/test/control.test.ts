@@ -174,7 +174,7 @@ describe('Desktop Control owner', () => {
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-set', operation: 'browser.profile.proxy-sign-in.set', profileId: 'default', signIn: { username: 'tester', password: 'fixture-only' } },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-clear', operation: 'browser.profile.proxy-sign-in.clear', profileId: 'default' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-check', operation: 'browser.profile.network.check', profileId: 'default' },
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-copy', operation: 'browser.profile.copy', profileId: 'default', expectedRevision: 1, label: 'Copied Profile' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-copy', operation: 'browser.profile.copy', profileId: 'default', expectedRevision: 'source-configuration-token', label: 'Copied Profile' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-create', operation: 'browser.profile.folder.create', expectedRevision: 1, label: 'Folder' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-rename', operation: 'browser.profile.folder.rename', folderId: 'folder', expectedRevision: 1, label: 'Same folder renamed' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-delete', operation: 'browser.profile.folder.delete', folderId: 'folder', expectedRevision: 1 },

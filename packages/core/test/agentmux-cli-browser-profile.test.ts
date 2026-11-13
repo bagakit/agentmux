@@ -24,8 +24,8 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     root = await mkdtemp(join(tmpdir(), 'amux-bp-cli-'))
     seen = []; revision = 3; inUse = false; answerAbout = null
     profiles = [
-      { id: DEFAULT_ID, label: 'Personal', createdAt: 1, isDefault: true, source: null },
-      { id: WORK_ID, label: 'Work', createdAt: 2, isDefault: false, source: { browserLabel: 'Chrome', profileLabel: 'Person 1', importedAt: 3, importedCookies: 4, skippedCookies: 1 }, hue: 288, notes: 'Client QA' }
+      { id: DEFAULT_ID, label: 'Personal', revision: '3', createdAt: 1, isDefault: true, source: null },
+      { id: WORK_ID, label: 'Work', revision: '3', createdAt: 2, isDefault: false, source: { browserLabel: 'Chrome', profileLabel: 'Person 1', importedAt: 3, importedCookies: 4, skippedCookies: 1 }, hue: 288, notes: 'Client QA' }
     ]
     // One managed Agent with a real capability, so the refusal below comes from an authenticated caller.
     capability = issueAgentCapability()
@@ -41,18 +41,18 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       async execute(request, nameContext): Promise<AgentMuxControlResult> {
         seen.push({ request, actor: nameContext?.actor })
         switch (request.operation) {
-          case 'browser.profile.ls': return { operation: request.operation, revision, profiles, folders: [] }
+          case 'browser.profile.ls': return { operation: request.operation, revision, sequence: revision, profiles, folders: [] }
           // answerAbout lets one case model an owner that answers about a different Profile.
-          case 'browser.profile.inspect': return { operation: request.operation, revision, profile: find(answerAbout ?? request.profileId),
+          case 'browser.profile.inspect': return { operation: request.operation, revision, sequence: revision, profile: find(answerAbout ?? request.profileId),
             usage: { complete: true, browsers: inUse ? [{ browserId: 'b-1', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] : [] } }
           case 'browser.profile.create': {
-            const created = { id: 'N3wPr0f1leXy', label: request.label, createdAt: 9, isDefault: false, source: null }
+            const created = { id: 'N3wPr0f1leXy', revision: 'new-profile-token', label: request.label, createdAt: 9, isDefault: false, source: null }
             profiles = [...profiles, created]; revision += 1
             return { operation: request.operation, revision, profile: created }
           }
           case 'browser.profile.update': {
-            if (request.expectedRevision !== revision) throw new AgentMuxError(`Browser Profiles changed since revision was read; current revision is ${revision}.`, 'BROWSER_PROFILE_REVISION_CONFLICT')
-            const next = { ...find(request.profileId), ...(request.edit.label === undefined ? {} : { label: request.edit.label }), ...(request.edit.notes === undefined ? {} : { notes: request.edit.notes }) }
+            if (request.expectedRevision !== find(request.profileId).revision) throw new AgentMuxError(`Browser Profiles changed since revision was read; current revision is ${revision}.`, 'BROWSER_PROFILE_REVISION_CONFLICT')
+            const next = { ...find(request.profileId), revision: String(revision + 1), ...(request.edit.label === undefined ? {} : { label: request.edit.label }), ...(request.edit.notes === undefined ? {} : { notes: request.edit.notes }) }
             if (request.edit.hue === null) delete next.hue; else if (request.edit.hue !== undefined) next.hue = request.edit.hue
             // The owner's two route refusals, as Main raises them, so the public client keeps their codes.
             if (request.edit.network?.mode === 'proxy' && request.edit.network.server.includes('@')) {
@@ -147,7 +147,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   it('lists, inspects, creates, edits and moves the default through the owner, returning only Profile facts', async () => {
     const listed = await run(['ls'])
     expect(listed.code, listed.stderr).toBe(0)
-    expect(listed.body.result).toEqual({ revision: 3, profiles, folders: [] })
+    expect(listed.body.result).toEqual({ revision: 3, sequence: 3, profiles, folders: [] })
     // Counts of imported cookies are a summary; storage locations, cookie files and values never appear.
     const keys = new Set<string>()
     JSON.parse(JSON.stringify(listed.body.result), (key, value) => { keys.add(key); return value })
@@ -160,7 +160,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     inUse = false
 
     expect((await run(['create', '--label', 'Release review'])).body.result).toMatchObject({ revision: 4, profile: { label: 'Release review', isDefault: false } })
-    expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '4', '--label', 'Northwind', '--hue', '300', '--notes', ''])).body.result)
+    expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '3', '--label', 'Northwind', '--hue', '300', '--notes', ''])).body.result)
       .toMatchObject({ revision: 5, profile: { id: WORK_ID, label: 'Northwind', hue: 300, notes: '' } })
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '5', '--clear-hue'])).body.result.profile).not.toHaveProperty('hue')
     expect((await run(['update', '--profile', WORK_ID, '--expected-revision', '6', '--network', 'proxy.example:8080', '--no-proxy', 'intranet.example, localhost'])).body.result.profile)
@@ -171,9 +171,9 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       { operation: 'browser.profile.ls' },
       { operation: 'browser.profile.inspect', profileId: WORK_ID },
       { operation: 'browser.profile.create', label: 'Release review' },
-      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 4, edit: { label: 'Northwind', hue: 300, notes: '' } },
-      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 5, edit: { hue: null } },
-      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 6,
+      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '3', edit: { label: 'Northwind', hue: 300, notes: '' } },
+      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '5', edit: { hue: null } },
+      { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: '6',
         edit: { network: { mode: 'proxy', server: 'proxy.example:8080', bypass: ['intranet.example', 'localhost'] } } },
       { operation: 'browser.profile.set-default', profileId: WORK_ID }
     ])
@@ -182,7 +182,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   it('sends system and direct routes as modes, and refuses --no-proxy without a proxy before contacting the Host', async () => {
     for (const mode of ['system', 'direct'] as const) {
       expect((await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', mode])).code).toBe(0)
-      expect(requests().at(-1)).toEqual({ operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: revision - 1, edit: { network: { mode } } })
+      expect(requests().at(-1)).toEqual({ operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: String(revision - 1), edit: { network: { mode } } })
     }
     const before = requests().length
     const refused = await run(['update', '--profile', WORK_ID, '--expected-revision', String(revision), '--network', 'direct', '--no-proxy', 'a.example'])
@@ -291,7 +291,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   it.each([
     [['update', '--profile', WORK_ID, '--expected-revision', '3']],
     [['update', '--profile', WORK_ID, '--expected-revision', '3', '--hue', '300', '--clear-hue']],
-    [['update', '--profile', WORK_ID, '--expected-revision', 'old', '--label', 'x']],
+    [['update', '--profile', WORK_ID, '--expected-revision', '', '--label', 'x']],
     [['update', '--profile', WORK_ID, '--expected-revision', '3', '--hue', '12.5']],
     [['inspect']], [['inspect', '--profile', 'self']], [['create']], [['delete', '--profile', WORK_ID, '--approval', '{}']]
   ])('rejects malformed syntax %j before the owner', async args => {

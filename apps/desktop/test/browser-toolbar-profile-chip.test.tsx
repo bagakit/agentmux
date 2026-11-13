@@ -6,7 +6,7 @@ import type { BrowserProfileList, BrowserProfileSummary } from '../src/shared/co
 
 const port = vi.hoisted(() => {
   const listeners = new Set<(list: BrowserProfileList) => void>()
-  let list: BrowserProfileList = { revision: 1, folders: [], profiles: [] }
+  let list: BrowserProfileList = { revision: 1, sequence: 1, folders: [], profiles: [] }
   return {
     listeners, set(next: BrowserProfileList) { list = next },
     readProfiles: vi.fn(async () => list),
@@ -20,8 +20,8 @@ import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 import { BrowserProfileChip } from '../src/renderer/src/components/BrowserProfileChip'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 
-const personal: BrowserProfileSummary = { id: 'p-personal', label: 'Personal', createdAt: 1, isDefault: true, source: null }
-const client: BrowserProfileSummary = { id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }
+const personal: BrowserProfileSummary = { revision: 'personal-token', id: 'p-personal', label: 'Personal', createdAt: 1, isDefault: true, source: null }
+const client: BrowserProfileSummary = { revision: 'client-token', id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }
 
 let root: Root, container: HTMLDivElement
 const open = vi.fn()
@@ -41,7 +41,7 @@ const items = () => [...document.querySelectorAll<HTMLElement>('.browser-profile
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   browserProfiles.reset(); port.listeners.clear(); port.switchProfile.mockClear(); open.mockClear()
-  port.set({ revision: 1, folders: [], profiles: [personal, client] })
+  port.set({ revision: 1, sequence: 1, folders: [], profiles: [personal, client] })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
@@ -55,10 +55,10 @@ describe('Browser toolbar Profile chip', () => {
   })
 
   it('stays out of the way with a single Profile, a private page or no list yet', async () => {
-    port.set({ revision: 1, folders: [], profiles: [personal] })
+    port.set({ revision: 1, sequence: 1, folders: [], profiles: [personal] })
     await mount({ profileId: 'p-personal' })
     expect(container.querySelector('.browser-profile-chip')).toBeNull()
-    browserProfiles.reset(); port.set({ revision: 2, folders: [], profiles: [personal, client] })
+    browserProfiles.reset(); port.set({ revision: 2, sequence: 2, folders: [], profiles: [personal, client] })
     await mount({ profileId: null })
     expect(container.querySelector('.browser-profile-chip')).toBeNull()
   })

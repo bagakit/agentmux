@@ -37,7 +37,7 @@ describe('copying saved Profile settings into a new identity', () => {
   it('uses one atomic metadata commit and copies configuration without import history or changing the original record', async () => {
     const { path, store, manager, id } = await fixture()
     const environment = { userAgent: 'Saved/1', acceptLanguages: ['fr-FR'] }
-    await manager.updateProfile(id, { hue: 270, notes: 'Original purpose', network: { mode: 'proxy', server: 'socks5://localhost:1080', bypass: ['localhost'] }, environment, agentAccess: false }, manager.listRevision())
+    await manager.updateProfile(id, { hue: 270, notes: 'Original purpose', network: { mode: 'proxy', server: 'socks5://localhost:1080', bypass: ['localhost'] }, environment, agentAccess: false }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     const file = JSON.parse(await readFile(path, 'utf8'))
     file.profiles[0].source = { browserLabel: 'Imported browser', profileLabel: 'Original import', importedAt: 1, importedCookies: 3, skippedCookies: 0 }
     await writeFile(path, JSON.stringify(file))
@@ -47,7 +47,7 @@ describe('copying saved Profile settings into a new identity', () => {
       profileOfSession: () => null, proxyOf: profileId => manager.proxyOf(profileId), report: vi.fn() })
     expect(await auth.username(id)).toBe('original-user')
     const before = structuredClone(file.profiles[0]), revision = file.revision
-    const { profile, snapshot } = await store.copyProfile(id, 'Independent copy', revision)
+    const { profile, snapshot } = await store.copyProfile(id, 'Independent copy', (await store.inspectProfile(id)).profile.revision)
     expect(profile).toMatchObject({ label: 'Independent copy', hue: 270, notes: 'Original purpose', network: before.network, environment, agentAccess: false, source: null, isDefault: false })
     expect(profile.id).not.toBe(id)
     expect(await auth.username(profile.id)).toBeNull()
@@ -63,26 +63,26 @@ describe('copying saved Profile settings into a new identity', () => {
 
   it('refuses stale or absent source identities before writing and preserves unreadable original bytes', async () => {
     const { path, store, id } = await fixture(), list = await store.list()
-    const attempted = await Promise.allSettled([store.copyProfile(id, 'First', list.revision), store.copyProfile(id, 'Stale second', list.revision)])
+    const attempted = await Promise.allSettled([store.copyProfile(id, 'First', (await store.inspectProfile(id)).profile.revision), store.copyProfile(id, 'Stale second', 'stale-profile-token')])
     expect(attempted[0].status).toBe('fulfilled'); expect(attempted[1]).toMatchObject({ status: 'rejected', reason: { code: 'BROWSER_PROFILE_REVISION_CONFLICT' } })
     const confirmed = await readFile(path, 'utf8')
-    await expect(store.copyProfile('foreignSource', 'Missing', (await store.list()).revision)).rejects.toThrow()
+    await expect(store.copyProfile('foreignSource', 'Missing', 'foreign-source-token')).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe(confirmed)
     await writeFile(path, 'original unknown Profile bytes')
-    await expect(store.copyProfile(id, 'No substitute', list.revision)).rejects.toThrow()
+    await expect(store.copyProfile(id, 'No substitute', list.profiles[0]!.revision)).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe('original unknown Profile bytes')
     await rm(path)
-    await expect(store.copyProfile(id, 'No substitute default', 1)).rejects.toThrow()
+    await expect(store.copyProfile(id, 'No substitute default', list.profiles[0]!.revision)).rejects.toThrow()
     await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('adopts the new identity without preparing any native session or inheriting environment application', async () => {
     const { manager, path, id } = await fixture()
-    await manager.updateProfile(id, { environment: { userAgent: 'Current/1' } }, manager.listRevision())
+    await manager.updateProfile(id, { environment: { userAgent: 'Current/1' } }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(manager.listProfiles()[0].environmentApplication?.status).toBe('applied')
     const before = manager.listProfiles()[0], calls = native.get.mock.calls.length, revision = manager.listRevision(), changed = vi.fn()
     manager.onChange(changed)
-    const copied = await manager.copyProfile(id, 'New session later', revision)
+    const copied = await manager.copyProfile(id, 'New session later', manager.listProfiles().find(profile => profile.id === id)!.revision)
     expect(native.get).toHaveBeenCalledTimes(calls)
     expect(copied.environmentApplication).toBeUndefined()
     expect(manager.listProfiles().find(value => value.id === copied.id)?.environmentApplication?.status).toBe('not-applied')
@@ -94,12 +94,12 @@ describe('copying saved Profile settings into a new identity', () => {
   })
 
   it('strictly rejects copied authority inputs and mismatched source/new identity receipts', () => {
-    const request = { operation: 'browser.profile.copy' as const, profileId: 'source-id', label: 'New', expectedRevision: 3 }
+    const request = { operation: 'browser.profile.copy' as const, profileId: 'source-id', label: 'New', expectedRevision: 'source-token' }
     expect(parseBrowserProfileControlPayload(request, ['operation'])).toEqual(request)
     for (const value of [{ ...request, expectedRevision: -1 }, { ...request, agentAccess: true }, { ...request, partition: 'persist:source' }, { ...request, environmentApplication: { status: 'applied' } }]) {
       expect(() => parseBrowserProfileControlPayload(value, ['operation'])).toThrow()
     }
-    const copied = { operation: 'browser.profile.copy' as const, revision: 4, sourceProfileId: 'source-id', profile: { id: 'new-id', label: 'New', createdAt: 2, isDefault: false, source: null } }
+    const copied = { operation: 'browser.profile.copy' as const, revision: 4, sourceProfileId: 'source-id', profile: { revision: 'new-token', id: 'new-id', label: 'New', createdAt: 2, isDefault: false, source: null } }
     expect(parseBrowserProfileControlResult(request.operation, { revision: 4, sourceProfileId: copied.sourceProfileId, profile: copied.profile })).toMatchObject({ profile: { id: 'new-id' } })
     expect(() => assertBrowserProfileControlTarget(request, copied)).not.toThrow()
     for (const value of [{ ...copied, sourceProfileId: 'wrong-source' }, { ...copied, profile: { ...copied.profile, id: request.profileId } }, { ...copied, profile: { ...copied.profile, isDefault: true } }]) {
@@ -109,7 +109,7 @@ describe('copying saved Profile settings into a new identity', () => {
 
   it('runs the compiled CLI through the public service into the original manager, with discoverable strict copy and new-profile editing', async () => {
     const { root, path, manager, id } = await fixture()
-    await manager.updateProfile(id, { notes: 'Saved original', environment: { userAgent: 'PublicCopy/1' }, agentAccess: false }, manager.listRevision())
+    await manager.updateProfile(id, { notes: 'Saved original', environment: { userAgent: 'PublicCopy/1' }, agentAccess: false }, manager.listProfiles().find(profile => profile.id === id)!.revision)
     const core = await privateRpcCorePort(join(root, 'sessions.json'), join(root, 'messages.ndjson'))
     const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: core.clients,
       execute: async (request, context) => {
@@ -120,27 +120,28 @@ describe('copying saved Profile settings into a new identity', () => {
     try {
       const env = objectCliEnvironment(root, { NODE_NO_WARNINGS: '1' })
       const run = async (args: string[]) => { const output = await runCompiledObjectCli(['browser', 'profile', ...args], env); expect(output.code, output.stderr).toBe(0); return objectCliReceipt(JSON.parse(output.stdout)).result as any }
-      const revision = manager.listRevision(), result = await run(['copy', '--profile', id, '--expected-revision', String(revision), '--label', 'Public copy'])
+      const revision = manager.listProfiles().find(value => value.id === id)!.revision, result = await run(['copy', '--profile', id, '--expected-revision', String(revision), '--label', 'Public copy'])
       expect(result).toMatchObject({ sourceProfileId: id, profile: { label: 'Public copy', notes: 'Saved original', agentAccess: false } })
       const copiedId = result.profile.id
       expect(copiedId).not.toBe(id)
       expect((await run(['ls'])).profiles.map((value: any) => value.id)).toContain(copiedId)
       expect((await run(['inspect', '--profile', copiedId])).profile).toMatchObject({ id: copiedId, environmentApplication: { status: 'not-applied' } })
-      await run(['update', '--profile', copiedId, '--expected-revision', String(manager.listRevision()), '--notes', 'Only copied Profile changes'])
+      await run(['update', '--profile', copiedId, '--expected-revision', manager.listProfiles().find(value => value.id === copiedId)!.revision, '--notes', 'Only copied Profile changes'])
       expect(manager.listProfiles().find(value => value.id === id)?.notes).toBe('Saved original')
+      await manager.updateProfile(id, { notes: 'A real source configuration change' }, manager.listProfiles().find(value => value.id === id)!.revision)
       const stale = await runCompiledObjectCli(['browser', 'profile', 'copy', '--profile', id, '--expected-revision', String(revision), '--label', 'Refused stale copy'], env)
       expect(stale.code).not.toBe(0); expect(manager.listProfiles()).toHaveLength(2)
       const help = await runCompiledObjectCli(['browser', 'profile', 'copy', '--help'], env)
-      expect(help.stdout).toContain('--profile ID --expected-revision N --label TEXT'); expect(help.stdout).toContain('No site data')
+      expect(help.stdout).toContain('--profile ID --expected-revision TOKEN --label TEXT'); expect(help.stdout).toContain('No site data')
       const groupHelp = await runCompiledObjectCli(['browser', 'profile', '--help'], env)
       expect(groupHelp.code).toBe(0); expect(groupHelp.stdout).toContain('copy')
       const skill = await runCompiledObjectCli(['browser', '--skill'], env)
       expect(skill.code).toBe(0); expect(skill.stdout).toContain('browser profile copy')
       const beforeWhitespace = await readFile(path, 'utf8'), beforeRevision = manager.listRevision()
-      const whitespace = await runCompiledObjectCli(['browser', 'profile', 'copy', '--profile', id, '--expected-revision', String(beforeRevision), '--label', ' Copy '], env)
+      const whitespace = await runCompiledObjectCli(['browser', 'profile', 'copy', '--profile', id, '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision, '--label', ' Copy '], env)
       expect(whitespace.code).not.toBe(0); expect(JSON.parse(whitespace.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
       expect(manager.listRevision()).toBe(beforeRevision); expect(await readFile(path, 'utf8')).toBe(beforeWhitespace)
-      const rejected = await runCompiledObjectCli(['browser', 'profile', 'copy', '--profile', id, '--expected-revision', String(manager.listRevision()), '--label', 'No grants', '--agent-access', 'true'], env)
+      const rejected = await runCompiledObjectCli(['browser', 'profile', 'copy', '--profile', id, '--expected-revision', manager.listProfiles().find(value => value.id === id)!.revision, '--label', 'No grants', '--agent-access', 'true'], env)
       expect(rejected.code).not.toBe(0); expect(manager.listProfiles()).toHaveLength(2)
     } finally { await server.stop(); await core.dispose() }
   }, 30_000)

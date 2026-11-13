@@ -128,7 +128,7 @@ app.whenReady().then(async () => {
     await writeFile(authFile, credentialBytes)
     receipt.credentialBoundary = 'Opaque external credential-file sentinel is byte-preserved; no native keychain or proxy-authentication claim.'
     const listed = await cli(['browser', 'profile', 'ls'])
-    const copied = await cli(['browser', 'profile', 'copy', '--profile', sourceId, '--expected-revision', String(listed.revision), '--label', 'CLI configuration copy'])
+    const copied = await cli(['browser', 'profile', 'copy', '--profile', sourceId, '--expected-revision', listed.profiles.find((value: any) => value.id === sourceId).revision, '--label', 'CLI configuration copy'])
     assert.equal(copied.sourceProfileId, sourceId); assert.notEqual(copied.profile.id, sourceId)
     const cliId = copied.profile.id
     assert.equal(copied.profile.agentAccess, false); assert.equal(copied.profile.source, null)
@@ -146,7 +146,7 @@ app.whenReady().then(async () => {
     assert.equal(await copyPage.executeJavaScript('localStorage.getItem("source-only")'), null)
     await copyPage.executeJavaScript(`document.cookie='copy-only=independent; Max-Age=3600; Path=/'`)
     await copyPage.session.cookies.flushStore(); copyPage.session.flushStorageData()
-    const revision = (await cli(['browser', 'profile', 'ls'])).revision
+    const revision = (await cli(['browser', 'profile', 'inspect', '--profile', cliId])).profile.revision
     await cli(['browser', 'profile', 'update', '--profile', cliId, '--expected-revision', String(revision), '--notes', 'Only this copy changed'])
     assert.equal(profiles.listProfiles().find(value => value.id === sourceId)!.notes, 'Saved purpose')
     receipt.cases.push('public-open-edit-and-native-empty-independent-partition')
@@ -193,7 +193,9 @@ app.whenReady().then(async () => {
     assert.equal(await page.executeJavaScript('navigator.userAgent'), sourceUa)
     assert.equal(await page.executeJavaScript('localStorage.getItem("source-only")'), 'keep original')
     assert.ok((await page.session.cookies.get({ url: urls.page })).some(value => value.name === 'source-sign-in' && value.value === 'original'))
-    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).profiles.find((value: any) => value.id === sourceId), sourceRecord)
+    const { activity: _beforeActivity, ...sourceConfiguration } = sourceRecord
+    const { activity: _afterActivity, ...currentConfiguration } = JSON.parse(await readFile(file, 'utf8')).profiles.find((value: any) => value.id === sourceId)
+    assert.deepEqual(currentConfiguration, sourceConfiguration)
     assert.equal(await readFile(authFile, 'utf8'), credentialBytes)
     assert.equal((await evaluate('copyProof.facts()')).sibling, 'Keep this sibling draft')
     receipt.identity = { sourceId, cliId, guiId, cliBrowserId }

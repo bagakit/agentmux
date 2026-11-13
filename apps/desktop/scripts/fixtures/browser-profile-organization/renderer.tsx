@@ -44,7 +44,7 @@ Object.assign(window, { organizationProof: {
     return browser
   },
   profiles() { return api.browser.readProfiles() },
-  async update(id: string, edit: any) { const list = await api.browser.readProfiles(); return api.browser.updateProfile(id, edit, list.revision) },
+  async update(id: string, edit: any) { const list = await api.browser.readProfiles(); return api.browser.updateProfile(id, edit, list.profiles.find(value => value.id === id)!.revision) },
   username(id: string) { return api.browser.readProfileProxySignIn(id) },
   async persist() { const current = await api.spatial.read(); return api.spatial.commit({ expectedRevision: current?.revision ?? 0, graph: desktopSpatialGraph(useAppStore.getState(), [], current?.graph ?? null) }) },
   settings(show: boolean) { setSettings(show) }, showBrowser(id: string) { setViewed(id); setSettings(false) },

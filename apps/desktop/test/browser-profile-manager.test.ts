@@ -108,7 +108,7 @@ const approval = (profileId: string) => ({
 } as const)
 const partition = (id: string) => `persist:agentmux-browser-profile:${id}`
 
-const defaultProfile: BrowserProfileSummary = {
+const defaultProfile: BrowserProfileSummary = { revision: 'profile-0',
   id: DEFAULT_ID,
   label: 'Default',
   createdAt: 1,
@@ -143,21 +143,22 @@ class FakeStore {
   nextCreatedId = CREATED_ID
   revision = 0
 
-  snapshot() { return { revision: this.revision, defaultProfileId: DEFAULT_ID, folders: [], profiles: structuredClone(this.profiles) } }
+  snapshot() { return { revision: this.revision, sequence: this.revision, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], profiles: structuredClone(this.profiles) } }
   commit() { this.revision += 1; return this.snapshot() }
   async listProfiles() { return structuredClone(this.profiles) }
   async list() { return this.snapshot() }
+  async inspectProfile(id: string) { return { snapshot: this.snapshot(), profile: structuredClone(this.profiles.find(value => value.id === id)!) } }
   async listPendingImports() { return structuredClone(this.pending) }
   async createProfile(label: string) {
-    const profile = { id: this.nextCreatedId, label, createdAt: 2, isDefault: false, source: null }
+    const profile = { id: this.nextCreatedId, revision: 'profile-new', label, createdAt: 2, isDefault: false, source: null }
     this.profiles.push(profile)
     return { snapshot: this.commit(), profile: structuredClone(profile) }
   }
-  async updateProfile(profileId: string, edit: { network?: unknown }, expected: number) {
-    if (expected !== this.revision) throw Object.assign(new Error('changed since'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+  async updateProfile(profileId: string, edit: { network?: unknown }, expected: string) {
+    if (expected !== this.profiles.find(value => value.id === profileId)?.revision) throw Object.assign(new Error('changed since'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     this.profiles = this.profiles.map((profile) => {
       if (profile.id !== profileId) return profile
-      const next = { ...profile } as BrowserProfileSummary
+      const next = { ...profile, revision: 'profile-' + (this.revision + 1) } as BrowserProfileSummary
       if (edit.network === null || (edit.network as { mode?: string } | undefined)?.mode === 'system') delete next.network
       else if (edit.network !== undefined) next.network = structuredClone(edit.network) as never
       return next
@@ -303,7 +304,7 @@ describe('BrowserProfileManager', () => {
     store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
     await manager.createProfile('Work')
     expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
-    expect(heard).toEqual([{ revision: 1, defaultProfileId: DEFAULT_ID, folders: [], profiles: manager.listProfiles() }])
+    expect(heard).toEqual([{ revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], profiles: manager.listProfiles() }])
     heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
     expect(manager.listProfiles()[0]!.label).toBe('Renamed elsewhere')
 
@@ -373,12 +374,12 @@ describe('BrowserProfileManager', () => {
     const update = store.updateProfile.bind(store)
     store.updateProfile = vi.fn(async (...args: Parameters<typeof update>) => { order.push('save'); return await update(...args) })
 
-    await manager.updateProfile(DEFAULT_ID, { network: PROXY }, 0)
+    await manager.updateProfile(DEFAULT_ID, { network: PROXY }, manager.listProfiles().find(profile => profile.id === DEFAULT_ID)!.revision)
     expect(order).toEqual(['apply:proxy', 'save'])
     expect(manager.listProfiles()[0]!.network).toEqual(PROXY)
 
     order.length = 0
-    await expect(manager.updateProfile(DEFAULT_ID, { network: { ...PROXY, server: { ...PROXY.server, host: 'down.corp.test' } } }, 1))
+    await expect(manager.updateProfile(DEFAULT_ID, { network: { ...PROXY, server: { ...PROXY.server, host: 'down.corp.test' } } }, manager.listProfiles().find(profile => profile.id === DEFAULT_ID)!.revision))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
     expect(order).toEqual(['apply:proxy'])
     expect(manager.listProfiles()[0]!.network).toEqual(PROXY)
@@ -388,8 +389,8 @@ describe('BrowserProfileManager', () => {
     const sessions = routeSessions(async () => {})
     const { manager } = managerFixture(new FakeStore(), sessions as never)
     await manager.initialize()
-    await expect(manager.updateProfile(DEFAULT_ID, { network: { mode: 'proxy', server: 'bad host::' } as never }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
-    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, 7)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    await expect(manager.updateProfile(DEFAULT_ID, { network: { mode: 'proxy', server: 'bad host::' } as never }, manager.listProfiles().find(profile => profile.id === DEFAULT_ID)!.revision)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
+    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, 'stale-profile-token')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     expect(sessions.apply).not.toHaveBeenCalled()
   })
 
@@ -398,7 +399,7 @@ describe('BrowserProfileManager', () => {
     const { store, manager } = managerFixture(new FakeStore(), sessions as never)
     await manager.initialize()
     store.updateProfile = vi.fn(async () => { throw new Error('EIO') }) as never
-    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, 0)).rejects.toThrow('EIO')
+    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, manager.listProfiles().find(profile => profile.id === DEFAULT_ID)!.revision)).rejects.toThrow('EIO')
     expect(sessions.apply.mock.calls.map(([, network]) => network)).toEqual([PROXY, undefined])
   })
 

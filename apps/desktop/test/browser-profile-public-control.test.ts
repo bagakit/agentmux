@@ -67,6 +67,7 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
     prepare: id => profiles.prepareSession(id), now: () => 1 })
   const reconnect = vi.fn(async () => {})
   const network = createBrowserProfileNetworkControl({ profiles, proxyAuth, checkExit, checkAddress: () => 'https://check.example/', reconnect })
+  await profiles.initialize()
   return { root, profiles, usage, network, proxyAuth, credentialPath, fetch, reconnect, announced, clearPreviews, applied, route }
 }
 
@@ -88,7 +89,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   it('runs the built CLI through the public service into the original credential and network-check owners', async () => {
     const ports = await owners()
     await ports.profiles.initialize()
-    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, 0)
+    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, ports.profiles.listProfiles().find(profile => profile.id === WORK_ID)!.revision)
     const core = await privateRpcCorePort(join(ports.root, 'sessions.json'), join(ports.root, 'messages.ndjson'))
     const server = new AgentMuxControlServer({ socketPath: join(ports.root, 'control.sock'), coreClients: core.clients,
       execute: async (request, context) => {
@@ -124,7 +125,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   it('returns the saved/cleared fact when reconnecting fails, without repeating or undoing the credential write', async () => {
     const ports = await owners()
     await ports.profiles.initialize()
-    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, 0)
+    await ports.profiles.updateProfile(WORK_ID, { network: { mode: 'proxy', server: 'proxy.example:8080' } }, ports.profiles.listProfiles().find(profile => profile.id === WORK_ID)!.revision)
     ports.reconnect.mockRejectedValue(new Error('A connection could not be released.'))
     expect(await call(ports, { operation: 'browser.profile.proxy-sign-in.set', profileId: WORK_ID, signIn: { username: 'alice', password: 'private' } }))
       .toEqual({ profileId: WORK_ID, saved: true, reconnected: false })
@@ -157,28 +158,28 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   })
   it('answers ls, inspect, create, update and set-default from the manager, each matching the GUI list', async () => {
     const ports = await owners([{ profileId: WORK_ID, browserId: 'b-open' }])
-    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, folders: [], profiles: ports.profiles.listProfiles() })
-    expect(await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).toEqual({ revision: 0,
+    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, sequence: 0, folders: [], profiles: ports.profiles.listProfiles() })
+    expect(await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).toEqual({ revision: 0, sequence: 0,
       profile: expect.objectContaining({ id: WORK_ID, label: 'Work', source: expect.objectContaining({ importedCookies: 4 }) }),
       usage: { complete: true, browsers: [{ browserId: 'b-open', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
 
     const created = await call(ports, { operation: 'browser.profile.create', label: 'Release review' })
     expect(created).toMatchObject({ revision: 1, profile: { label: 'Release review', isDefault: false } })
-    expect(await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 1, edit: { label: 'Northwind', hue: 288, notes: 'QA' } }))
+    expect(await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { label: 'Northwind', hue: 288, notes: 'QA' } }))
       .toMatchObject({ revision: 2, profile: { id: WORK_ID, label: 'Northwind', hue: 288, notes: 'QA' } })
     expect(await call(ports, { operation: 'browser.profile.set-default', profileId: WORK_ID })).toEqual({ revision: 3, profileId: WORK_ID })
     expect(ports.profiles.defaultProfileId()).toBe(WORK_ID)
     // The manager announced every public write exactly as it does for the GUI.
     expect(ports.announced).toEqual([1, 2, 3])
-    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 3, folders: [], profiles: ports.profiles.listProfiles() })
+    expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 3, sequence: 3, folders: [], profiles: ports.profiles.listProfiles() })
   })
 
   it('keeps the owner refusal codes: stale revision, unknown Profile, status hue and Profile in use', async () => {
     const ports = await owners([{ profileId: WORK_ID, browserId: 'b-open' }])
-    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 7, edit: { label: 'Late' } }))
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 'stale-profile-token', edit: { label: 'Late' } }))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     await expect(call(ports, { operation: 'browser.profile.inspect', profileId: '33333333-3333-4333-8333-333333333333' })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_NOT_FOUND' })
-    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { hue: 143 } }))
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { hue: 143 } }))
       .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST', message: expect.stringContaining('clear of status colors') })
     await expect(call(ports, { operation: 'browser.profile.delete', profileId: WORK_ID })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_IN_USE',
       details: { browsers: [expect.objectContaining({ browserId: 'b-open', state: 'open' })] } })
@@ -188,21 +189,21 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
 
   it('sets a Profile’s network route through the same manager the Settings page uses, applied before it is saved', async () => {
     const ports = await owners()
-    const proxied = await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0,
+    const proxied = await call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision,
       edit: { network: { mode: 'proxy', server: 'socks5://proxy.example:1080', bypass: ['intranet.example'] } } })
     expect(proxied).toMatchObject({ revision: 1, profile: { id: WORK_ID, network: { mode: 'proxy', server: { scheme: 'socks5', host: 'proxy.example', port: 1080 }, bypass: ['intranet.example'] } } })
     expect(ports.applied).toEqual([{ profileId: WORK_ID, network: expect.objectContaining({ mode: 'proxy' }) }])
-    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 1, edit: { network: { mode: 'system' } } }))
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { network: { mode: 'system' } } }))
       .resolves.toMatchObject({ revision: 2 })
     expect((await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID }) as { profile: object }).profile).not.toHaveProperty('network')
   })
 
   it('refuses a route line Main cannot read, and keeps the old route when the new one cannot be applied', async () => {
     const ports = await owners()
-    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } } }))
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } } }))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID', message: expect.stringContaining('Leave the user name and password out') })
     ports.route.refuse = true
-    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { network: { mode: 'direct' } } }))
+    await expect(call(ports, { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: ports.profiles.listProfiles().find(value => value.id === WORK_ID)!.revision, edit: { network: { mode: 'direct' } } }))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
     expect(ports.profiles.listProfiles().find(profile => profile.id === WORK_ID)).not.toHaveProperty('network')
     expect(ports.announced, 'nothing was saved').toEqual([])
@@ -237,6 +238,6 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   it('rejects an approval or partition smuggled into the public request before any owner runs', () => {
     expect(() => request({ operation: 'browser.profile.delete', profileId: WORK_ID, approval: { kind: 'user-confirmed' } })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
     expect(() => request({ operation: 'browser.profile.create', label: 'x', partition: 'persist:other' })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
-    expect(() => request({ operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 0, edit: { hue: 360 } })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+    expect(() => request({ operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 'profile-token', edit: { hue: 360 } })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
   })
 })

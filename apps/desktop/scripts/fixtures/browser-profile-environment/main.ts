@@ -80,7 +80,7 @@ try {
     await oldPage.executeJavaScript(`document.querySelector('input').value='original unsaved draft'`)
     let navigations = 0; oldPage.on('did-start-navigation', () => navigations++)
     const settings = { userAgent: 'Profile-A/1.0', acceptLanguages: ['fr-FR', 'de-DE'] }
-    const saved = await cli(['update', '--profile', id, '--expected-revision', String(profiles.listRevision()), '--environment', JSON.stringify(settings)])
+    const saved = await cli(['update', '--profile', id, '--expected-revision', String(profiles.listProfiles().find(value => value.id === id)!.revision), '--environment', JSON.stringify(settings)])
     assert.equal(saved.profile.environmentApplication.status, 'applied', 'Native setter receipt must be applied')
     assert.equal(saved.profile.environmentApplication.userAgent, settings.userAgent, 'Native UA setter must change the original session')
     assert.deepEqual(saved.profile.environment, settings)
@@ -101,7 +101,7 @@ try {
     assert.equal(created.language, baseline.language)
     stage('RPC sibling Profile preparing')
     const sibling = (await profileClient.call('browser.profile.create', { label: 'Separate Profile' })).profile
-    await profileClient.call('browser.profile.update', { profileId: sibling.id, expectedRevision: profiles.listRevision(),
+    await profileClient.call('browser.profile.update', { profileId: sibling.id, expectedRevision: profiles.listProfiles().find(value => value.id === id)!.revision,
       edit: { environment: { userAgent: 'Profile-B/2.0', acceptLanguages: ['ja-JP'] } } })
     const siblingId = mintObjectId(); await browsers.create(siblingId, url, 'proof-workspace', sibling.id)
     const siblingObserved = await sample(await page(siblingId))
@@ -115,7 +115,7 @@ try {
     let failure: any
     try {
       Object.defineProperty(originalSession, 'setUserAgent', { configurable: true, value: () => { throw new Error('Private native setter unavailable') } })
-      failure = { profile: await profiles.updateProfile(id, { environment: { userAgent: 'Unconfirmed/3.0', acceptLanguages: ['fr-FR'] } }, profiles.listRevision()) }
+      failure = { profile: await profiles.updateProfile(id, { environment: { userAgent: 'Unconfirmed/3.0', acceptLanguages: ['fr-FR'] } }, profiles.listProfiles().find(value => value.id === id)!.revision) }
       assert.equal(failure.profile.environmentApplication.status, 'unknown')
       assert.deepEqual(failure.profile.environment, { userAgent: 'Unconfirmed/3.0', acceptLanguages: ['fr-FR'] }, 'A saved environment is not rolled back after native failure')
       const publicTargets = (await profileClient.call('browser.targets', {})).targets
@@ -139,7 +139,7 @@ try {
       assert.equal(browsers.target(browserId)?.warning, undefined, 'A confirmed retry clears the environment warning without a page reload')
       assert.ok(events.some(event => event.type === 'updated' && event.browser.id === browserId && !event.browser.activity.warning), 'The same warning consumer receives confirmed recovery')
     }
-    await profiles.updateProfile(id, { environment: settings }, profiles.listRevision())
+    await profiles.updateProfile(id, { environment: settings }, profiles.listProfiles().find(value => value.id === id)!.revision)
     const original = browsers.targets().find(row => row.id === newId)!
     const released = await browsers.release(newId, original.navigationId!)
     stage('Browser release observed')
@@ -163,7 +163,7 @@ try {
     const recovered = await sample(await page(descriptor.id))
     assert.equal(recovered.userAgent, settings.userAgent, 'Cold Browser acquire prepares the original Profile session')
     assert.equal(recovered.headers['accept-language'], 'fr-FR,de-DE;q=0.9')
-    const cleared = await cli(['update', '--profile', descriptor.profileId, '--expected-revision', String(profiles.listRevision()), '--environment', 'null'])
+    const cleared = await cli(['update', '--profile', descriptor.profileId, '--expected-revision', profiles.listProfiles().find(value => value.id === descriptor.profileId)!.revision, '--environment', 'null'])
     assert.equal(cleared.profile.environment, undefined)
     const afterClearId = mintObjectId(); await browsers.create(afterClearId, url, 'proof-workspace', descriptor.profileId)
     const clearedPage = await sample(await page(afterClearId))

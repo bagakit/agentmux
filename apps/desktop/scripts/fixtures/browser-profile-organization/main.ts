@@ -128,7 +128,7 @@ app.whenReady().then(async () => {
     const other = await cli(['browser', 'profile', 'create', '--label', 'Other Profile'])
     const list = () => cli(['browser', 'profile', 'ls'])
     const revision = async () => String((await list()).revision)
-    const edit = async (id: string, flags: string[]) => cli(['browser', 'profile', 'update', '--profile', id, '--expected-revision', await revision(), ...flags])
+    const edit = async (id: string, flags: string[]) => cli(['browser', 'profile', 'update', '--profile', id, '--expected-revision', (await list()).profiles.find((value: any) => value.id === id).revision, ...flags])
     const folder = (await cli(['browser', 'profile', 'folder', 'create', '--label', 'CLI research', '--expected-revision', await revision()])).folder
     const empty = (await cli(['browser', 'profile', 'folder', 'create', '--label', 'Empty saved folder', '--expected-revision', await revision()])).folder
     await edit(sourceId, ['--tags', '[" Research ","Research","café"]', '--folder', folder.id, '--pin'])
@@ -188,7 +188,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(profiles.listProfiles().find(value => value.id === sourceId)!.network, { mode: 'direct' })
     receipt.cases.push('background-organization-keeps-query-selected-id-name-notes-proxy-drafts-and-pinned-reordering')
 
-    const copied = await cli(['browser', 'profile', 'copy', '--profile', sourceId, '--label', 'Organized copy', '--expected-revision', await revision()])
+    const copied = await cli(['browser', 'profile', 'copy', '--profile', sourceId, '--label', 'Organized copy', '--expected-revision', (await list()).profiles.find((value: any) => value.id === sourceId).revision])
     assert.deepEqual(copied.profile.tags, profiles.listProfiles().find(value => value.id === sourceId)!.tags)
     assert.equal(copied.profile.folderId, guiFolder.id); assert.equal(copied.profile.pinned, undefined)
     await manager!.create('organized-copy', urls.page, 'organization-workspace', copied.profile.id)
