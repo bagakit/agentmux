@@ -1,0 +1,300 @@
+{
+  "schema": "agentmux.brand-manifest.v1",
+  "realms": {
+    "note": "A realm is an App icon id. Hero art shows the saved realm’s own painting, or Origin’s (classic) when it has none. commons art belongs to every realm and is never switched."
+  },
+  "entries": [
+    {
+      "id": "app-icon.qingzhuan",
+      "kind": "app-icon",
+      "file": "app-icons/qingzhuan.png",
+      "title": "青篆 woodcut side profile",
+      "realm": "qingzhuan",
+      "origin": "generated",
+      "followsAppIcon": true
+    },
+    {
+      "id": "app-icon.huihuan",
+      "kind": "app-icon",
+      "file": "app-icons/huihuan.png",
+      "title": "回环 jade ring",
+      "realm": "huihuan",
+      "origin": "generated",
+      "followsAppIcon": true
+    },
+    {
+      "id": "app-icon.zheyu",
+      "kind": "app-icon",
+      "file": "app-icons/zheyu.png",
+      "title": "折玉 folded jade planes",
+      "realm": "zheyu",
+      "origin": "generated",
+      "followsAppIcon": true
+    },
+    {
+      "id": "app-icon.lingban",
+      "kind": "app-icon",
+      "file": "app-icons/lingban.png",
+      "title": "灵伴 ceramic companion",
+      "realm": "lingban",
+      "origin": "generated",
+      "followsAppIcon": true
+    },
+    {
+      "id": "app-icon.classic",
+      "kind": "app-icon",
+      "file": "app-icons/classic.png",
+      "title": "Classic emerald low-poly dragon (Origin)",
+      "realm": "classic",
+      "origin": "original",
+      "followsAppIcon": true
+    },
+    {
+      "id": "app-icon.classic-backplate",
+      "kind": "app-icon-part",
+      "file": "app-icons/classic-backplate.svg",
+      "title": "Retro-future backplate composed under the Classic dragon",
+      "realm": "classic",
+      "origin": "hand-authored",
+      "followsAppIcon": true
+    },
+    {
+      "id": "hero.origin.launch",
+      "kind": "hero",
+      "file": "heroes/origin-launch.avif",
+      "title": "Origin dragon, full-bleed launch art",
+      "realm": "classic",
+      "origin": "generated",
+      "followsAppIcon": true,
+      "surface": "launch"
+    },
+    {
+      "id": "hero.origin.banner",
+      "kind": "hero",
+      "file": "heroes/origin-banner.avif",
+      "title": "Origin dragon, wide banner for the Launcher and Settings Overview",
+      "realm": "classic",
+      "origin": "generated",
+      "followsAppIcon": true,
+      "surface": "banner"
+    },
+    {
+      "id": "illustration.goals.demand-dialogue",
+      "kind": "illustration",
+      "file": "illustrations/goals/demand-dialogue.png",
+      "title": "Goal clarification dialogue",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.goals.goal-custom",
+      "kind": "illustration",
+      "file": "illustrations/goals/goal-custom.png",
+      "title": "Goals: custom action",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.goals.goal-ideas",
+      "kind": "illustration",
+      "file": "illustrations/goals/goal-ideas.png",
+      "title": "Goals: turn ideas into a project",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.goals.goal-next",
+      "kind": "illustration",
+      "file": "illustrations/goals/goal-next.png",
+      "title": "Goals: suggest the next step",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.goals.goal-understand",
+      "kind": "illustration",
+      "file": "illustrations/goals/goal-understand.png",
+      "title": "Goals: understand you and advise",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.goals.goals-companions-header",
+      "kind": "illustration",
+      "file": "illustrations/goals/goals-companions-header.png",
+      "title": "Goals header companions (display-size derivative of goals-companions)",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.capsule-keepsake",
+      "kind": "illustration",
+      "file": "illustrations/concepts/capsule-keepsake.png",
+      "title": "Capsule: a page kept as a reusable tool",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.focus-workframe",
+      "kind": "illustration",
+      "file": "illustrations/concepts/focus-workframe.png",
+      "title": "Focus: the focus lens object",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.goals-companions",
+      "kind": "illustration",
+      "file": "illustrations/concepts/goals-companions.png",
+      "title": "Goals: companions around one goal",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.promotion-identity",
+      "kind": "illustration",
+      "file": "illustrations/concepts/promotion-identity.png",
+      "title": "Topic promotion: a team gains its identity",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.recall-fold",
+      "kind": "illustration",
+      "file": "illustrations/concepts/recall-fold.png",
+      "title": "Recall: the folded book",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.space-workchamber",
+      "kind": "illustration",
+      "file": "illustrations/concepts/space-workchamber.png",
+      "title": "Space: the open work chamber",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.survey-prism",
+      "kind": "illustration",
+      "file": "illustrations/concepts/survey-prism.png",
+      "title": "Survey: the exploration prism",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.concept.topic-atlas",
+      "kind": "illustration",
+      "file": "illustrations/concepts/topic-atlas.png",
+      "title": "Topics: the atlas dial",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.mote-origin.role-team",
+      "kind": "illustration",
+      "file": "illustrations/mote-origin/role-team.png",
+      "title": "Mote origin, act 1: a role brings a team",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.mote-origin.topic-work",
+      "kind": "illustration",
+      "file": "illustrations/mote-origin/topic-work.png",
+      "title": "Mote origin, act 2: work in an open Topic",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    },
+    {
+      "id": "illustration.mote-origin.grown-team",
+      "kind": "illustration",
+      "file": "illustrations/mote-origin/grown-team.png",
+      "title": "Mote origin, act 3: the grown team",
+      "realm": "commons",
+      "origin": "generated",
+      "followsAppIcon": false
+    }
+  ],
+  "external": [
+    {
+      "id": "avatar-series.mote-silhouettes",
+      "kind": "avatar-series",
+      "path": "apps/desktop/resources/avatar-series/mote-silhouettes",
+      "title": "Mote in twelve art directions; Mote’s own multiverse",
+      "owner": "Mote avatar series (read by Main at runtime)",
+      "origin": "hand-authored"
+    },
+    {
+      "id": "avatar-series.lowpoly",
+      "kind": "avatar-series",
+      "path": "apps/desktop/resources/avatar-series/lowpoly",
+      "title": "Low-poly companions: dragon, wolf, owl, panther",
+      "owner": "Mote avatar series (read by Main at runtime)",
+      "origin": "generated"
+    },
+    {
+      "id": "avatar-series.geometry",
+      "kind": "avatar-series",
+      "path": "apps/desktop/resources/avatar-series/geometry",
+      "title": "RobotExpressive 3D study",
+      "owner": "Mote avatar series (read by Main at runtime)",
+      "origin": "third-party",
+      "license": "CC0-1.0",
+      "source": "Tomás Laulhé, adapted by Don McCurdy; see geometry/SOURCE.md"
+    },
+    {
+      "id": "identity.mote",
+      "kind": "identity-mark",
+      "path": "packages/client-ui/src/theme/icon-authored.ts",
+      "title": "Mote default companion glyph (semantic object.mote)",
+      "owner": "Semantic icon catalog",
+      "origin": "hand-authored"
+    },
+    {
+      "id": "identity.providers",
+      "kind": "vendor-mark",
+      "path": "packages/client-ui/src/components/AgentProviderIcon.tsx",
+      "title": "Agent Provider marks",
+      "owner": "Each vendor; never restyled",
+      "origin": "third-party"
+    },
+    {
+      "id": "identity.connectors",
+      "kind": "vendor-mark",
+      "path": "apps/desktop/src/renderer/src/assets/connector-icons",
+      "title": "Connector marks (Lark, Discord)",
+      "owner": "Each vendor; never restyled",
+      "origin": "third-party"
+    },
+    {
+      "id": "derived.readme",
+      "kind": "derived-copy",
+      "path": "docs/assets/readme",
+      "title": "README hero, illustration and App icon copies downscaled to WebP",
+      "owner": "README",
+      "origin": "derived",
+      "derivedFrom": [
+        "heroes/origin-banner.avif",
+        "illustrations/concepts",
+        "app-icons"
+      ]
+    }
+  ]
+}
