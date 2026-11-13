@@ -164,6 +164,7 @@ describe('Goal detail reading', () => {
     await dom.render(<GlobalBoardSurface />)
     const member = [...dom.container.querySelectorAll<HTMLElement>('.goal-collaboration__member')].find(node => node.textContent?.includes('Failed'))!
     expect(member.dataset.sessionState).toBe('error')
+    expect([...member.children].filter(node => node.hasAttribute('data-semantic-icon')).map(node => node.getAttribute('data-semantic-icon'))).toEqual(['navigation.space'])
   })
 
   it('keeps the clarify request on the same line as the stage primary', async () => {

@@ -188,6 +188,7 @@ it('shared production card separates graph selection from the Reader original wo
   expect(select).toHaveBeenCalledExactlyOnceWith(sid); expect(openWorkface).not.toHaveBeenCalled()
   await act(async () => button.focus())
   await waitForAgentCardReading(() => expect(panel()?.querySelector('.agent-information-reader__open')).not.toBeNull())
+  expect(panel().querySelector('.agent-information-reader__open [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.space')
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__open')!.click())
   expect(openWorkface).toHaveBeenCalledExactlyOnceWith(sid); expect(select).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original draft')
