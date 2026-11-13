@@ -11,7 +11,8 @@ describe('Goal plan guidance reaches its readers', () => {
   it('the Goal module skill explains plan read, revision, node delegation, review and monitoring', () => {
     const skill = agentMuxModuleSkill('goal')!
     for (const fact of ['goal plan --goal ID', 'goal plan revise', 'intent.planNodeId', 'goal plan review', 'someone other than its executor',
-      'record the command, its actual result and evidence', 'same executor on the same', 'reconcile from the original', 'never accepts the Goal'])
+      'record the command, its actual result and evidence', 'same executor on the same', 'Read the original delegation receipt', 'never accepts the Goal',
+      'complete node criterion set', 'cancel it and add a', 'unchanged criteria keep their accepted work'])
       expect(skill, fact).toContain(fact)
   })
 
