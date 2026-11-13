@@ -10,6 +10,7 @@ import { MoteMainActions } from '../src/renderer/src/components/MoteMainActions'
 import { MoteConversationStart } from '../src/renderer/src/components/MoteConversationStart'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { MoteDialogueViewProvider } from '../src/renderer/src/lib/mote-dialogue-view'
+import { readMoteMainAction } from '../src/renderer/src/lib/mote-main-action'
 import { desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -61,7 +62,7 @@ async function boundMote(dialogueRead?: (input: Parameters<typeof api.moteDialog
   vi.spyOn(api.spatial, 'read').mockImplementation(() => f.spatial.read())
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   const open = vi.spyOn(api.spatial, 'openAgent').mockImplementation(input => f.rpc.call('agent.open', input))
-  await f.start('original-bound-main', 'Original human query'); await f.setup('original-bound-main')
+  await f.start('original-bound-main'); await f.setup('original-bound-main')
   const idle = await f.qualifyMainIdle(1), current = idle.snapshot.current!
   open.mockClear()
   const read = vi.spyOn(api.moteDialogue, 'read').mockImplementation(dialogueRead ?? (input => f.rpc.call('space.mote.dialogue.read', input)))
@@ -124,6 +125,9 @@ it('cold start shows the Mote at once while its Main is read, and a message sent
 
 it('the actual welcome Composer refuses to submit while the original role owner names a current Main', async () => {
   const m = await boundMote(), query = 'A question meant for the current Main'
+  const reading = await readMoteMainAction(m.scope)
+  expect(reading.issue).toBeNull(); expect(reading.pendingStarts).toEqual([])
+  expect(reading.executor?.id).toBe('saved')
   useLauncherState.getState().setDraft(m.key, 'prompt', query)
   const opened = vi.fn()
   const element = await mounted(<MoteDialogueViewProvider scope={m.scope} active><MoteConversationStart scope={m.scope} active mode="start"
@@ -152,13 +156,17 @@ it('the Main menu is the shared overlay: Escape and outside press close it and r
   expect(trigger.getAttribute('aria-expanded')).toBe('true')
   await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
   await wait(() => expect(document.querySelector('.mote-main-actions__menu')).toBeNull())
-  expect(document.activeElement).toBe(trigger)
+  await wait(() => expect(document.activeElement).toBe(trigger))
   await act(async () => trigger.click())
   await wait(() => expect(document.querySelector('.mote-main-actions__menu')).not.toBeNull())
   const outside = document.createElement('button'); document.body.append(outside); closes.push(() => outside.remove())
   // Radix registers its outside-press listener on the next task after opening.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
-  await act(async () => { outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })) })
+  await act(async () => {
+    outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+    outside.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }))
+    outside.click()
+  })
   await wait(() => expect(document.querySelector('.mote-main-actions__menu')).toBeNull())
   expect(m.open).not.toHaveBeenCalled()
 }, 60_000)
@@ -177,5 +185,5 @@ it('quick mode opened from the Main menu returns focus to the Main trigger when 
   await wait(() => expect(document.querySelector('.mote-quick-mode-dialog')).not.toBeNull())
   await act(async () => buttonIn(document.querySelector('.mote-quick-mode-dialog')!, 'Close quick mode')!.click())
   await wait(() => expect(document.querySelector('.mote-quick-mode-dialog')).toBeNull())
-  expect(document.activeElement).toBe(trigger)
+  await wait(() => expect(document.activeElement).toBe(trigger))
 }, 60_000)
