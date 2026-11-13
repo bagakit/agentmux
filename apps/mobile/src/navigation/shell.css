@@ -65,7 +65,7 @@
 .mobile-drawer .mobile-menu-row { min-height: 52px; padding: 8px 0; gap: var(--sp-5); font-size: var(--fs-body); font-weight: 550; }
 .mobile-drawer .mobile-menu-row small { font-weight: 400; }
 .mobile-drawer .mobile-home-select { min-height: 52px; font-size: var(--fs-body); font-weight: 550; }
-.mobile-drawer .mobile-home-select select { border: 0; background-color: var(--mobile-group-press); }
+.mobile-drawer .mobile-home-select select { height: 36px; min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--mobile-radius); background-color: var(--mobile-group-press); font-size: 16px; }
 
 /* Screen motion, declared by navigation only: push slides the next layer in from the right,
  * pop returns from the left. Mounted workfaces are never remounted to animate. */

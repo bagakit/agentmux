@@ -39,3 +39,8 @@
 .mobile-mote-member-references code { display: block; font: inherit; line-height: 1.5; }
 .mobile-mote-member-references button { min-height: 44px; padding: 0; color: var(--text-2); background: transparent; font-size: var(--fs-meta); }
 @media (max-width: 360px) { .mobile-mote-team-summary { padding-inline: 8px; gap: 5px; } .mobile-mote-team-trigger { gap: 3px; } .mobile-mote-recipient { gap: 3px; } }
+
+/* The member strip under the toolbar reads as one quiet line on the page surface. */
+.mobile-app .mobile-mote-team-summary { min-height: 40px; padding: 0 var(--mobile-gutter); border-bottom: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
+.mobile-app .mobile-mote-recipient strong { font-size: var(--fs-body); font-weight: 600; }
+.mobile-app .mobile-mote-needs { color: var(--mobile-attention); font-weight: 650; }

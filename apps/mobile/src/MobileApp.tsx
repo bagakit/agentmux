@@ -704,7 +704,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           {homeIssue && <MobileNotice identity={[homeIssue]} className="mobile-spatial-notice">{homeIssue}</MobileNotice>}
           {webObservation && <MobileWebUpdateSettings observation={webObservation} />}
           <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断<small>{notices?.hasDismissed ? '有已收起的提醒' : '收起或恢复原提醒'}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
-          <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
+          <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{location.host ? `${label} · ${location.host}` : label}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
         </> : sheet === 'notices' ? <>
           <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
           {webObservation && <MobileWebDiagnostics observation={webObservation} copyText={platform.copyText} />}
