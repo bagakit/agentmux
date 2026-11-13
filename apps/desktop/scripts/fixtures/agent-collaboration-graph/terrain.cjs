@@ -133,6 +133,20 @@ function visualCounterfactual({ phase, areaId }) {
       ...(folded ? { areaId: target.dataset.areaId, internalAbove: target.dataset.internalAbove === 'true' } : { subject: agent.dataset.collaborationAgent, anchorSession: anchor?.dataset.sessionId, readers: document.querySelectorAll('.agent-information-reader').length }) }
   }
   let before, mutant, restored, mutatedCssText
+  // The held name must paint above an adjacent original face. Whether a neighbour happens to
+  // sit under it depends on layout, so the paint counterfactual places the nearest real
+  // neighbouring Agent node under the name for the sample, then restores it exactly.
+  let neighbour = null, neighbourStyle = null
+  if (!folded) {
+    const name = target.querySelector('strong')?.getBoundingClientRect(), own = target.closest('.react-flow__node')
+    const nodes = [...document.querySelectorAll('.collaboration-canvas .react-flow__node-agent')].filter(node => node !== own && node.querySelector('.collaboration-agent__identity-layer:not([inert]) .agent-avatar'))
+    const centre = node => { const r = node.querySelector('.agent-avatar').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } }
+    neighbour = name && nodes.sort((a, b) => Math.hypot(centre(a).x - name.right, centre(a).y - name.y) - Math.hypot(centre(b).x - name.right, centre(b).y - name.y))[0]
+    if (!neighbour) throw Error('The held-name paint counterfactual needs an actual neighbouring original face')
+    neighbourStyle = neighbour.style.cssText
+    const face = centre(neighbour), at = { x: name.right - name.width * .2, y: name.y + name.height / 2 }
+    neighbour.style.translate = `${at.x - face.x}px ${at.y - face.y}px`
+  }
   try {
     if (!folded) target.style.setProperty('pointer-events', 'auto', 'important')
     before = sample()
@@ -141,7 +155,7 @@ function visualCounterfactual({ phase, areaId }) {
     mutant = sample()
   } finally {
     rule.style.cssText = beforeCssText
-    try { restored = sample() } finally { target.style.cssText = originalPointerStyle }
+    try { restored = sample() } finally { target.style.cssText = originalPointerStyle; if (neighbour) neighbour.style.cssText = neighbourStyle }
   }
   return { phase, ...(folded ? { areaId } : {}), rule: { selector, property, originalValue, counterfactualValue, beforeCssText, mutatedCssText, restoredCssText: rule.style.cssText }, before, mutant, restored,
     preserved: { sameMap: document.querySelector('.collaboration-map') === map, sameTarget: target.isConnected && candidates[0] === target && target.style.cssText === originalPointerStyle,

@@ -1700,7 +1700,7 @@ it('starts no preview or reading for faces swept past during a camera gesture, a
   const held = mark(), matches = held.matches.bind(held)
   vi.spyOn(held, 'matches').mockImplementation(selector => selector === ':hover' || matches(selector))
   await act(async () => captured.moveEnd!(new WheelEvent('wheel'), { x, y, zoom }))
-  await settleCollaborationCanvas(() => expect(schedule).toHaveBeenCalledTimes(1))
+  await settleCollaborationCanvas(() => { expect(schedule).toHaveBeenCalledTimes(1); expect(peek).toHaveBeenCalledWith(a.id) })
 })
 
 it('weights routes by saturated message strength and lets regions outside a selection recede', async () => {
