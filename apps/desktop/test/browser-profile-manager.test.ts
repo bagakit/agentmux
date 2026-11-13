@@ -141,6 +141,8 @@ class FakeStore {
   nextCreatedId = CREATED_ID
 
   async listProfiles() { return structuredClone(this.profiles) }
+  async list() { return { revision: 0, profiles: structuredClone(this.profiles) } }
+  lastCommittedRevision() { return null }
   async listPendingImports() { return structuredClone(this.pending) }
   async createProfile(label: string) {
     const profile = { id: this.nextCreatedId, label, createdAt: 2, isDefault: false, source: null }
