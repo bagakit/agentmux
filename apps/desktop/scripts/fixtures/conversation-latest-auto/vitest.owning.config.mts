@@ -3,11 +3,12 @@ import { resolve, relative } from 'node:path'
 import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../../../..')
-const aliases = ['core', 'relay', 'demand', 'identity', 'git', 'layout'].flatMap(pkg => {
- const manifest = JSON.parse(readFileSync(resolve(root, `packages/${pkg}/package.json`), 'utf8'))
+const aliases = ['core', 'relay', 'demand', 'identity', 'git', 'layout', 'host'].flatMap(pkg => {
+ const directory = resolve(root, pkg === 'host' ? 'apps' : 'packages', pkg)
+ const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
  return Object.entries(manifest.exports).flatMap(([key, value]) => {
   const target = (value as { import: string }).import
-  const path = resolve(root, `packages/${pkg}/src/` + target.replace(/^\.\/dist\/(src\/)?/u, '').replace(/\.js$/u, '.ts'))
+  const path = resolve(directory, 'src/' + target.replace(/^\.\/dist\/(src\/)?/u, '').replace(/\.js$/u, '.ts'))
   const name = `@agentmux/${pkg}` + (key === '.' ? '' : key.slice(1))
   return existsSync(path) ? [{ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: path }] : []
  })

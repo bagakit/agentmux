@@ -5,8 +5,8 @@ import { defineConfig } from 'vitest/config'
 const repository = resolve(import.meta.dirname, '../../../../..')
 // This bounded UI gate consumes current Source directly. It does not build or
 // claim freshness of Core's published dist, nor exercise a live Runtime/Run.
-const aliases = ['core', 'demand', 'layout', 'identity', 'client-ui'].flatMap(name => {
-  const directory = resolve(repository, 'packages', name)
+const aliases = ['core', 'demand', 'layout', 'identity', 'client-ui', 'host'].flatMap(name => {
+  const directory = resolve(repository, name === 'host' ? 'apps' : 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')) as {
     exports: Record<string, string | { import: string; browser?: string }>
   }
@@ -34,7 +34,7 @@ const aliases = ['core', 'demand', 'layout', 'identity', 'client-ui'].flatMap(na
       customResolver() { throw new Error('Generated identity runtime source requires a build-qualified consumer fixture') }
     }
     const source = name === 'identity' && subpath === './runtime' ? './src/runtime-entry.ts'
-      : target.import.replace('./dist/', name === 'core' || name === 'identity' ? './src/' : './').replace(/\.js$/, '.ts')
+      : target.import.replace('./dist/', name === 'core' || name === 'identity' || name === 'host' ? './src/' : './').replace(/\.js$/, '.ts')
     const replacement = resolve(directory, source)
     if (!existsSync(replacement)) throw new Error(`Missing current Source for ${specifier}: ${replacement}`)
     return { find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement }
