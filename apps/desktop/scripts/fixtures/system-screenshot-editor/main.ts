@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict'
 import { app, BrowserWindow, nativeImage } from 'electron'
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 import { ScreenshotOriginalFiles } from '../../../src/main/screenshot-original-files'
 import { ScreenshotPins } from '../../../src/main/screenshot-pins'
 import { exportScreenshotPng, writeScreenshotFile } from '../../../src/main/screenshot-files'
+import { ScreenCapture } from '../../../src/main/screen-capture'
 import { SystemScreenshotEditor } from '../../../src/main/system-screenshot-editor'
 
 const out = process.env.AGENTMUX_SCREENSHOT_EDITOR_OUT!
 app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
 const receipt: any = { passed: false, boundary: 'Actual independent production BrowserWindow, isolated preload, Renderer, shared ImageAnnotationEditor, trusted CDP input and real PNG composition; capture/TCC, user clipboard, Agent attachment, packaging and installation are outside this fixture.', cases: [], screenshots: [] }
-const deliveries: any[] = []
+const deliveries: any[] = [], draftDeliveries: string[] = []
+let capture: ScreenCapture, nextImage: ReturnType<typeof pngFromBytes>
 const contexts: string[] = []
 let pins: ScreenshotPins, dropPinReceipt = true
 let editor: SystemScreenshotEditor, window: BrowserWindow, appearance: 'light' | 'dark' = 'dark', failDelivery = false
@@ -54,9 +56,9 @@ async function drag(from: { x: number; y: number }, to: { x: number; y: number }
 async function shot(name: string) {
   await settle()
   await evaluate(`Promise.all([...document.querySelectorAll('[role=menu]')].flatMap(menu=>menu.getAnimations()).map(animation=>animation.finished.catch(()=>{})))`)
-  const header = await evaluate(`(()=>{const h=document.querySelector('.image-annotation-editor__header'),t=h.querySelector('.image-annotation-editor__title'),a=h.querySelector('.image-annotation-toolbar__actions'),s=t.querySelector('[role=status]'),r=t.getBoundingClientRect(),ar=a.getBoundingClientRect(),sr=s.getBoundingClientRect();return {width:innerWidth,titleRight:r.right,actionsLeft:ar.left,titleBottom:r.bottom,actionsTop:ar.top,statusRight:sr.right,fullStatus:s.title,status:s.textContent}})()`)
-  assert.ok(header.titleBottom <= header.actionsTop || header.titleRight <= header.actionsLeft, 'title and output actions never overlap')
-  assert.ok(header.statusRight <= header.titleRight && (!header.status || header.fullStatus === header.status), 'long status stays in its own column and remains fully available')
+  const header = await evaluate(`(()=>{const h=document.querySelector('.image-annotation-editor__header'),t=h.querySelector('.image-annotation-editor__title'),s=t.querySelector('[role=status]'),r=t.getBoundingClientRect(),sr=s.getBoundingClientRect();return {width:innerWidth,title:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},actions:[...h.querySelectorAll('button')].map(b=>b.getBoundingClientRect()).filter(b=>b.width&&b.height).map(b=>({left:b.left,right:b.right,top:b.top,bottom:b.bottom})),statusRight:sr.right,fullStatus:s.title,status:s.textContent}})()`)
+  assert.ok(header.actions.every(action => header.title.bottom <= action.top || header.title.top >= action.bottom || header.title.right <= action.left || header.title.left >= action.right), 'title and output actions never overlap')
+  assert.ok(header.statusRight <= header.title.right && (!header.status || header.fullStatus === header.status), 'long status stays in its own column and remains fully available')
   process.stdout.write('native-editor: capturing '+name+'\n')
   const file = name + '.png'
   await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG())
@@ -65,10 +67,8 @@ async function shot(name: string) {
 async function open(image: ReturnType<typeof pngFromBytes>, attach: boolean) {
   process.stdout.write('native-editor: allocating next image editor\n')
   const existingWindows = new Set(BrowserWindow.getAllWindows())
-  closed = editor.edit(image, attach, async result => {
-    if (failDelivery) throw new Error('The private clipboard sink is unavailable.')
-    deliveries.push(result)
-  })
+  nextImage = image
+  closed = capture.capture(attach).then(path => { if (path) draftDeliveries.push(path) })
   void closed.catch(error => { receipt.editError = String(error) })
   window = await waitFor('production editor allocated', async () => BrowserWindow.getAllWindows().find(candidate => !existingWindows.has(candidate)))
   process.stdout.write('native-editor: exact new editor allocated\n')
@@ -112,6 +112,10 @@ async function run() {
     originalFiles: () => new ScreenshotOriginalFiles({ chooseOpen: async () => join(out, 'original.json'), chooseSave: async () => join(out, 'original.json'),
       worker: { helperPath: process.env.AGENTMUX_SCREENSHOT_FILE_HELPER! } })
   })
+  capture = new ScreenCapture({ home: out, native: () => ({
+    captureScreenshot: async () => ({ state: 'captured', completionAction: 'edit', screenshot: { format: 'png', data: nextImage.dataUrl.split(',')[1]!, width: nextImage.width, height: nextImage.height, scale: 1 } }),
+    writeClipboardImage: async result => { if (failDelivery) throw new Error('The private clipboard sink is unavailable.'); deliveries.push(result) }
+  }), edit: (...args) => editor.edit(...args), reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
   const image = await sourceImage()
   const started = performance.now()
   receipt.metrics = { sourcePixels: image.width * image.height, sourcePngBytes: image.byteLength, outputLatenciesMs: {} }
@@ -182,10 +186,23 @@ async function run() {
   receipt.cases.push({ label: 'real-crop-cover-failed-delivery-keeps-editor-then-explicit-copy', width: deliveries[0].width, height: deliveries[0].height, blackPixels: black })
 
   process.stdout.write('native-editor: composed bitmap inspected\n')
+  assert.equal(draftDeliveries.length, 1, 'only the original capture receives a draft image')
+  const originalDraftBytes = await readFile(draftDeliveries[0])
+  assert.ok(originalDraftBytes.equals(Buffer.from(deliveries[0].dataUrl.split(',')[1], 'base64')), 'the actual pasted owner stores the processed original image')
   const retained = window
   assert.equal(retained.isDestroyed(), false, 'successful Copy retains the original editable window')
   appearance = 'light'; await open(image, false); window.setContentSize(420, 570); await settle()
   assert.equal(retained.isDestroyed(), false, 'a retained image does not block another capture editor')
+  const newer = window
+  window = retained; retained.show(); retained.focus(); await settle()
+  await click('Clear all'); await click('Copy')
+  await waitFor('retained editor copies a changed image independently', async () => deliveries.length === 2)
+  assert.equal(deliveries[1].width, image.width, 'the later clipboard image is independently edited')
+  assert.equal(draftDeliveries.length, 1, 'later copies do not redeliver into the original draft')
+  assert.ok((await readFile(draftDeliveries[0])).equals(originalDraftBytes), 'later editing cannot overwrite the original draft image')
+  assert.equal((await readdir(dirname(draftDeliveries[0]))).filter(name => name.endsWith('.png')).length, 1, 'the later clipboard image creates no second draft file')
+  receipt.cases.push({ label: 'actual-capture-editor-pasted-owner-delivers-original-once-and-retains-next-capture', originalDraft: draftDeliveries[0], files: 1 })
+  window = newer; newer.show(); newer.focus(); await settle()
   await shot('narrow-light')
   const layout = await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.textContent.trim()==='Copy'),r=b.getBoundingClientRect(),c=document.querySelector('canvas').getBoundingClientRect();return {body:document.body.scrollWidth,width:innerWidth,copyVisible:r.width>0&&r.x>=0&&r.right<=innerWidth,canvasHeight:c.height}})()`)
   assert.ok(layout.body <= layout.width && layout.copyVisible && layout.canvasHeight > 200, 'the narrow real window keeps Copy and a readable canvas')
@@ -196,7 +213,7 @@ async function run() {
   await click('Cancel'); await closed
   retained.close()
   process.stdout.write('native-editor: narrow Copy-only window cancelled\n')
-  assert.equal(deliveries.length, 1)
+  assert.equal(deliveries.length, 2)
   receipt.cases.push({ label: 'narrow-light-copy-only-and-cancel', layout })
 
   appearance = 'dark'; await open(image, false)
@@ -205,7 +222,7 @@ async function run() {
   await waitFor('actual PNG encoding held', async () => await evaluate('typeof window.heldPng === "function"'))
   assert.equal((await control('Cancel')).disabled, false)
   await click('Cancel'); await closed
-  assert.equal(deliveries.length, 1, 'cancelled physical renderer encoding does not deliver a new image')
+  assert.equal(deliveries.length, 2, 'cancelled physical renderer encoding does not deliver a new image')
   receipt.cases.push({ label: 'Cancel remains available during actual PNG composition' })
   editor.dispose()
   assert.equal(BrowserWindow.getAllWindows().length, 0, 'closing the original capture and references releases every owned window')

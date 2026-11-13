@@ -33,7 +33,7 @@ const inputs = [source, 'apps/desktop/src/shared/system-screenshot-editor.ts', '
   'apps/desktop/test/system-screenshot-editor.config.mts', 'apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts',
   'apps/desktop/scripts/fixtures/system-screenshot-editor/scenario.md', 'apps/desktop/scripts/verify-system-screenshot-editor.mjs',
   'packages/client-ui/src/theme/runtime.ts', 'apps/desktop/electron.vite.config.ts',
-  'apps/desktop/src/main/screenshot-original-files.ts', 'apps/desktop/src/main/screenshot-files.ts', 'apps/desktop/src/main/screenshot-pins.ts',
+  'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/pasted-image-write.ts', 'apps/desktop/src/main/screenshot-original-files.ts', 'apps/desktop/src/main/screenshot-files.ts', 'apps/desktop/src/main/screenshot-pins.ts',
   'apps/desktop/src/renderer/screenshot-editor/use-system-screenshot-original.ts', 'apps/desktop/src/renderer/src/styles/context-menu.css',
   'apps/desktop/src/renderer/src/styles/chrome.css', 'apps/desktop/src/renderer/src/lib/use-screenshot-pin.ts', 'apps/desktop/src/renderer/src/styles/base.css']
 const hashes = Object.fromEntries(await Promise.all(inputs.map(async file => [file, sha(await readFile(file))])))
@@ -90,8 +90,9 @@ try {
   await writeFile(join(appRoot, 'package.json'), JSON.stringify({ type: 'module', main: 'out/main/main.js' }))
   const alias = { react: dirname(require.resolve('react/package.json')), 'react-dom': dirname(require.resolve('react-dom/package.json')),
     '@agentmux/client-ui/theme': resolve('packages/client-ui/src/theme/index.ts'), '@agentmux/native-desktop/image': resolve('packages/native-desktop/src/image.ts') }
-  await build({ entryPoints: ['apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts'], outfile: join(mainRoot, 'main.js'), bundle: true, platform: 'node', format: 'esm',
-    external: ['electron', '@agentmux/core', '@agentmux/core/*', '@agentmux/host/*'], banner: { js: "import { createRequire as fixtureRequire } from 'node:module';const require=fixtureRequire(import.meta.url);" }, alias, logLevel: 'silent' })
+  const mainOptions = { entryPoints: ['apps/desktop/scripts/fixtures/system-screenshot-editor/main.ts'], outfile: join(mainRoot, 'main.js'), bundle: true, platform: 'node', format: 'esm',
+    external: ['electron', '@agentmux/core', '@agentmux/core/*', '@agentmux/host/*'], banner: { js: "import { createRequire as fixtureRequire } from 'node:module';const require=fixtureRequire(import.meta.url);" }, alias, logLevel: 'silent' }
+  await build(mainOptions)
   await build({ entryPoints: ['apps/desktop/src/preload/screenshot-editor.ts'], outfile: join(preloadRoot, 'screenshot-editor.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent' })
   await build({ entryPoints: ['apps/desktop/src/renderer/screenshot-editor/entry.tsx'], outfile: join(rendererRoot, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', alias,
     conditions: ['browser'], logLevel: 'silent' })
@@ -106,8 +107,27 @@ try {
   receipt.native = JSON.parse(await readFile(join(out, 'native.json'), 'utf8'))
   assert.equal(native.code, 0, JSON.stringify(receipt.native.failure) + native.log)
   assert.equal(receipt.native.passed, true)
-  assert.equal(receipt.native.cases.length, 4)
+  assert.equal(receipt.native.cases.length, 5)
   assert.equal(receipt.native.screenshots.length, 10)
+  const producerSource = 'apps/desktop/src/main/screen-capture.ts', producer = await readFile(producerSource, 'utf8')
+  assert.equal(producer.split('originalDelivered = true').length, 2, 'Mutate the exact original delivery completion once')
+  const replayed = producer.replace('originalDelivered = true', 'originalDelivered = false'), mutantOut = join(out, 'draft-redelivery')
+  await mkdir(mutantOut)
+  let producerConsumed = false
+  await build({ ...mainOptions, plugins: [{ name: 'exact-original-draft-redelivery-counterexample', setup(builder) {
+    builder.onLoad({ filter: /\/src\/main\/screen-capture\.ts$/ }, args => {
+      assert.equal(args.path, resolve(producerSource)); producerConsumed = true
+      return { contents: replayed, loader: 'ts', resolveDir: dirname(args.path) }
+    })
+  } }] })
+  assert.equal(producerConsumed, true, 'The actual capture-to-editor producer must consume its mutant')
+  const negative = await command('draft-redelivery', require('electron'), [appRoot], { AGENTMUX_SCREENSHOT_EDITOR_OUT: mutantOut,
+    AGENTMUX_SCREENSHOT_FILE_HELPER: resolve('apps/desktop/resources/bin/agentmux-workspace-move'), ELECTRON_RENDERER_URL: '' })
+  const counterexample = JSON.parse(await readFile(join(mutantOut, 'native.json'), 'utf8'))
+  assert.equal(negative.code, 1); assert.equal(counterexample.passed, false); assert.ok(counterexample.cases.length > 0)
+  assert.match(counterexample.failure?.message ?? '', /later clipboard image creates no second draft file/)
+  receipt.nativeCaptureMutation = { source: producerSource, original: sha(producer), consumed: sha(replayed),
+    result: 'owning-AssertionRED', failure: counterexample.failure.message, receipt: join(mutantOut, 'native.json') }
   for (const [file, hash] of Object.entries(hashes)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
   receipt.passed = true
 } finally {
