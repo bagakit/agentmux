@@ -122,6 +122,11 @@ describe('actual Explorer shared header and interactions', () => {
     await event(element('[data-tree-path="one.ts"] .tree-row__icon'), 'click')
     expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
     open.mockClear()
+    // A file has nothing to disclose: its leading gutter belongs to the row and exposes no unnamed button.
+    expect([...element('[data-tree-path="one.ts"]').querySelectorAll('button')].filter(button => !button.getAttribute('aria-label') && !button.textContent?.trim())).toHaveLength(0)
+    await event(element('[data-tree-path="one.ts"] .tree-row__disclosure'), 'click')
+    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
+    open.mockClear()
     await key(element('[data-tree-path="one.ts"]'), 'Enter')
     expect(open).toHaveBeenCalledTimes(1)
     expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
