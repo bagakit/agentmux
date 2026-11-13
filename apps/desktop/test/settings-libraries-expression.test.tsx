@@ -83,7 +83,10 @@ it('names the missing tool fields and writes the completed original draft withou
   const reason = () => dom.container.querySelector('.toolkit-editor__save-requirements')?.textContent
   expect(save().disabled).toBe(true)
   expect(reason()).toContain('a name')
-  expect(reason()).toContain('a fixed working directory')
+  // New tools start at the saved default; explicitly clear it to exercise the required-field boundary.
+  await fill('.toolkit-editor__directory input', '')
+  expect(dom.container.querySelector('.toolkit-editor__directory [role="status"]')?.textContent).toContain('must be a nonempty path')
+  expect(dom.container.querySelector('.toolkit-editor__directory input')?.getAttribute('aria-invalid')).toBe('true')
   await fill('.toolkit-editor__directory input', fixturePath('tool-work'))
   expect(save().disabled).toBe(true)
   expect(reason()).toContain('a name')
