@@ -5,10 +5,12 @@ import type { NativeDesktopPng } from './native-desktop-types.js'
 
 export type ImageActor = { kind: 'user' | 'device' | 'agent'; id: string }
 export type ImageParamsMap = {
-  'image.pin': { hostId: string; operationId: string; image: NativeDesktopPng }
+  /** `origin` is the on-screen rectangle (global logical points) the pixels came from; the pin opens there. */
+  'image.pin': { hostId: string; operationId: string; image: NativeDesktopPng; origin?: ImageOrigin }
   'image.inspect': { hostId: string } & ({ pinId: string; operationId?: never } | { operationId: string; pinId?: never })
   'image.close': { hostId: string; pinId: string; operationId: string }
 }
+export type ImageOrigin = { x: number; y: number; width: number; height: number }
 export type ImageMethod = keyof ImageParamsMap
 export type ImageOperation = {
   operationId: string
@@ -45,12 +47,18 @@ function identity(value: unknown, code: string): string {
   return value
 }
 export function parseImageParams<M extends ImageMethod>(method: M, value: unknown, code = 'INVALID_CONTROL_REQUEST'): ImageParamsMap[M] {
-  const p = rpcRecord(value, method === 'image.pin' ? ['hostId', 'operationId', 'image'] : ['hostId', 'operationId', 'pinId'], code)
+  const p = rpcRecord(value, method === 'image.pin' ? ['hostId', 'operationId', 'image', 'origin'] : ['hostId', 'operationId', 'pinId'], code)
   const hostId = identity(p.hostId, code)
   if (method === 'image.pin') {
     const image = parsePngImage(p.image, code)
     if (image.scale !== 1) invalid('A pinned image uses its actual PNG pixels with scale 1.', code)
-    return { hostId, operationId: identity(p.operationId, code), image } as ImageParamsMap[M]
+    if (p.origin === undefined) return { hostId, operationId: identity(p.operationId, code), image } as ImageParamsMap[M]
+    const o = rpcRecord(p.origin, ['x', 'y', 'width', 'height'], code)
+    const finite = (key: keyof ImageOrigin) => typeof o[key] === 'number' && Number.isFinite(o[key])
+    if (!(['x', 'y', 'width', 'height'] as const).every(finite) || !((o.width as number) > 0 && (o.height as number) > 0))
+      invalid('A pin origin needs finite x and y and a positive width and height.', code)
+    return { hostId, operationId: identity(p.operationId, code), image,
+      origin: { x: o.x as number, y: o.y as number, width: o.width as number, height: o.height as number } } as ImageParamsMap[M]
   }
   if (method === 'image.inspect') {
     if ((p.operationId === undefined) === (p.pinId === undefined)) invalid('Inspect one original image operation or one exact pin.', code)
