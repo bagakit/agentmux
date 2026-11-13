@@ -16,19 +16,22 @@ type SurveyOpening = { phase: 'idle' | 'opening' | 'opened' | 'unconfirmed' | 'f
  */
 export function useOpenInSurvey(url: string) {
   const openUrlInSurvey = useAppStore(state => state.openUrlInSurvey)
-  const [opening, setOpening] = useState<SurveyOpening>({ phase: 'idle', message: '' })
+  const [result, setResult] = useState<SurveyOpening & { url: string }>({ url, phase: 'idle', message: '' })
+  const opening: SurveyOpening = result.url === url ? result : { phase: 'idle', message: '' }
   // A ref, not state: two presses in the same tick both see the stale state before React re-renders.
-  const inFlight = useRef(false)
+  const inFlight = useRef<{ url: string } | null>(null)
   const available = isSystemWebUrl(url)
   async function open() {
-    if (!available || inFlight.current) return
-    inFlight.current = true
-    setOpening({ phase: 'opening', message: '' })
+    if (!available || inFlight.current?.url === url) return
+    const request = { url }
+    inFlight.current = request
+    const publish = (opening: SurveyOpening) => { if (inFlight.current === request) setResult({ ...opening, url }) }
+    publish({ phase: 'opening', message: '' })
     try {
       const outcome = await openUrlInSurvey(url)
-      setOpening(outcome.state === 'opened' ? { phase: 'opened', message: 'Opened in Survey.' } : { phase: 'unconfirmed', message: outcome.message })
-    } catch (error) { setOpening({ phase: 'failed', message: presentError(error) }) }
-    finally { inFlight.current = false }
+      publish(outcome.state === 'opened' ? { phase: 'opened', message: 'Opened in Survey.' } : { phase: 'unconfirmed', message: outcome.message })
+    } catch (error) { publish({ phase: 'failed', message: presentError(error) }) }
+    finally { if (inFlight.current === request) inFlight.current = null }
   }
   return { available, opening, open }
 }
