@@ -124,7 +124,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
       <header><span>Work on your project with another device</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
       <p className="settings-group-note">{preparedProject && config.hosts.find(host => host.id === preparedProject.hostId)?.kind !== 'local' ? `Files and commands stay on ${hostName(preparedProject.hostId)}. Choose where the Agent runs.` : 'Your task and files stay on this Mac. The Agent runs on the device you choose.'}</p>
       <div className="remote-execution-prepare__controls">
-        <label><span>{preparedProject && !localProjects.some(item => item.id === preparedProject.id) ? 'Files & tools · Advanced' : 'Project on this Mac'}</span>
+        <label><span>{preparedProject && !localProjects.some(item => item.id === preparedProject.id) ? `Project on ${hostName(preparedProject.hostId)}` : 'Project on this Mac'}</span>
           <select aria-label="Project for remote Agent" value={projectId} onChange={event => { invalidatePreparation(); setProjectId(event.target.value) }}>
             <option value="">Choose a project…</option>
             {projectId && !localProjects.some(item => item.id === projectId) ? <option value={projectId}>{preparedProject ? `${preparedProject.name} · ${hostName(preparedProject.hostId)}` : 'Selected project · unavailable'}</option> : null}
@@ -135,15 +135,15 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
         <button type="button" className="primary-button" data-remote-prepare disabled={preparing || !projectId || !agentHostId} onClick={() => void prepare()}>{preparing ? 'Preparing…' : 'Open in Launcher'}<ArrowIcon size={14} /></button>
       </div>
       {preparedProject ? <div className="remote-execution-prepare__target" aria-label="Selected project identity"><code>{preparedProject.path}</code></div> : <p className="settings-group-note">Choose a local folder to continue. A Git repository is optional.</p>}
-      <details className="remote-execution-advanced"><summary>Advanced arrangement</summary><div className="remote-execution-prepare__controls">
-        <label><span>Files & tools</span><select aria-label="Files and tools" value={projectId} onChange={event => { invalidatePreparation(); setProjectId(event.target.value) }}>
+      <details className="remote-execution-advanced"><summary>More options</summary><div className="remote-execution-prepare__controls">
+        <label><span>Project folder (any device)</span><select aria-label="Project folder" value={projectId} onChange={event => { invalidatePreparation(); setProjectId(event.target.value) }}>
           <option value="">Choose a folder…</option>{projects.map(project => <option value={project.id} key={project.id}>{hostName(project.hostId)} · {project.name} · {project.path}</option>)}
         </select></label>
-        <label><span>Agent startup directory</span><select aria-label="Agent startup directory" value={startupId} disabled={!agentHostId} onChange={event => { invalidatePreparation(); setStartupId(event.target.value) }}>
-          <option value="">{agentHostId === preparedProject?.hostId ? 'Follow project directory' : 'Device home'}</option>
+        <label><span>Agent starts in</span><select aria-label="Agent starts in" value={startupId} disabled={!agentHostId} onChange={event => { invalidatePreparation(); setStartupId(event.target.value) }}>
+          <option value="">{agentHostId === preparedProject?.hostId ? 'The project folder' : 'The device home'}</option>
           {projects.filter(project => project.hostId === agentHostId).map(project => <option value={project.id} key={project.id}>{project.name} · {project.path}</option>)}
         </select></label>
-      </div>{preparedProject ? <div className="remote-execution-prepare__target" aria-label="Files and tools identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}<p className="settings-group-note">Startup directory supplies native configuration and Skills. Files and commands use the selected project.</p></details>
+      </div>{preparedProject ? <div className="remote-execution-prepare__target" aria-label="Project identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}<p className="settings-group-note">The Agent loads its native configuration and Skills from where it starts. Files and commands use the project.</p></details>
       <p className="remote-execution-caption">Choose the Agent configuration and enter your task in the Launcher. No Agent starts here.</p>
       <RemoteExecutionGuide active={active} />
     </section>
