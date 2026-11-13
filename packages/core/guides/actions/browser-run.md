@@ -25,6 +25,10 @@ Prefer several short programs to one long one. Page functions ([Current browser-
 are injected into that subprocess. The current capability registry exposes:
 [Current browser-capability-directory](../../dist/browser-page-capability.js "amux:generated browser-capability-directory")
 Elements are addressed by the refs a snapshot hands you — never coordinates.
+`cdp(method, params)` reaches this page and its frames only. A command that reaches the whole
+Profile or the browser (cookies, site storage, certificate checks, permissions, download behavior,
+creating or closing targets) is refused before it is sent, with what to use instead. Raw `Input.*`
+counts as this program's own input, like `click()`.
 `snapshot(options)` and `snapshotText(options)` accept `scope: "page"|"viewport"`,
 `within` (a unique CSS region in the main document), `withinRef` (an issued ref's actual document),
 `interactiveOnly`, and `maxNodes` (default 200, maximum 1000). Use either within or withinRef.
