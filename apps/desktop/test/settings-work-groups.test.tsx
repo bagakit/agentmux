@@ -33,14 +33,16 @@ const open = async (id: string) => {
 }
 
 it('the real catalog and Overview expose Work and peer Mote; keyword discovery points to first-class modules', async () => {
-  expect(settingsNavGroups('').map(group => group.title)).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
-  expect(settingsNavGroups('').find(group => group.id === 'mote')?.items.map(module => module.id)).toEqual(['mote'])
-  expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals', 'survey', 'notes'])
+  const groups = settingsNavGroups('')
+  expect(groups.map(group => group.id)).toEqual(['preferences', 'agents', 'mote', 'work', 'know', 'browser-use', 'message-tool', 'remote', 'conversation-channels', 'toolkit'])
+  expect(settingsNavGroups('').find(group => group.id === 'mote')?.items.map(module => module.id)).toEqual(['mote', 'mote-promotion'])
+  expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals'])
+  expect(groups.find(group => group.id === 'know')?.items.map(module => module.id)).toEqual(['topic', 'survey', 'notes'])
   for (const [query, id] of [['SOUL', 'mote'], ['research', 'survey'], ['notebook', 'notes']])
     expect(visibleSettingsSections(query!).some(module => module.id === id)).toBe(true)
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  const groups = [...dom.container.querySelectorAll('[data-settings-overview] h3')].map(node => node.textContent)
-  expect(groups).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  const headings = [...dom.container.querySelectorAll('[data-settings-directory] .settings-overview__group > header h3')].map(node => node.textContent)
+  expect(headings).toEqual(groups.map(group => group.title))
   expect(dom.container.textContent).not.toContain('Workflows')
   expect(dom.container.textContent).not.toContain('Saved configuration')
   expect(dom.container.querySelector('[data-settings-section="notes"]')).not.toBeNull()
@@ -98,8 +100,8 @@ it('visiting the new management modules keeps the original Space draft and cause
   for (const id of ['mote', 'survey', 'notes']) await section(id)
   const trigger = dom.container.querySelector('[aria-label="Settings section"]')!
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Recall')
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Mote Club')
+  expect(document.querySelector('[role="menu"] [data-settings-target="notes"]')?.textContent).toBe('Note')
+  expect(document.querySelector('[role="menu"] [data-settings-target="mote"]')?.textContent).toBe('Club')
   const space = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent === 'Space')!
   await act(async () => space.click())
   expect(dom.container.querySelector('[data-settings-pane="space"]')).toBe(originalPane)

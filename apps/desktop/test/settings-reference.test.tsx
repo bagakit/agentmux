@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
+import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
@@ -28,7 +29,11 @@ async function scope(value: 'templates' | 'host') {
 it('sidebar: named groups and exact routes remain available through the registered Settings shell', async () => {
   const close = vi.fn()
   await dom.render(<SettingsPanel initialSection="agents" onClose={close} />)
-  expect([...dom.container.querySelectorAll('[data-settings-group]')].map(node => node.textContent)).toEqual(['Preferences', 'Message Tool', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  const groups = settingsNavGroups('')
+  expect(groups.length).toBeGreaterThan(0)
+  const toggles = [...dom.container.querySelectorAll<HTMLElement>('[data-settings-group-toggle]')]
+  expect(toggles.map(node => node.dataset.settingsGroupToggle)).toEqual(groups.map(group => group.id))
+  expect(toggles.map(node => node.textContent)).toEqual(groups.map(group => group.title))
   await dom.click('[data-settings-target="general"]')
   expect(dom.container.querySelector('.settings-page')!.getAttribute('data-settings-page')).toBe('general')
   expect(dom.container.querySelector('.settings-content__breadcrumb')!.textContent).toBe('Preferences')

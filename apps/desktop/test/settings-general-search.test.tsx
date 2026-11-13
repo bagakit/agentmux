@@ -42,9 +42,18 @@ it.each(['crash', 'log', 'recovery', 'crash log', 'Show crash log', 'Session rec
     appearance.scrollTop = 123
     const before = useAppStore.getState()
     await input('[aria-label="Search settings"]', 'diagnostics')
+    expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Search results')
+    expect(dom.container.querySelector('[data-settings-pane="general"]')).toBeNull()
+    await dom.click('[data-settings-search-section="general"]')
     const original = general()
     await input('[aria-label="Search settings"]', query)
-    expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')].map(node => node.textContent)).toEqual(['General'])
+    expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Search results')
+    expect(original.hidden).toBe(true)
+    expect(original.inert).toBe(true)
+    const result = dom.container.querySelector<HTMLButtonElement>('[data-settings-search-section="general"]')!
+    expect(result?.isConnected).toBe(true)
+    expect(result.textContent).toContain('General')
+    await act(async () => result.click())
     expect([...dom.container.querySelectorAll<HTMLElement>('[data-settings-pane]')].filter(node => !node.hidden && !node.inert).map(node => node.dataset.settingsPane)).toEqual(['general'])
     expect(dom.container.querySelector('.settings-nav-empty')).toBeNull()
     expect(general()).toBe(original)
@@ -54,6 +63,8 @@ it.each(['crash', 'log', 'recovery', 'crash log', 'Show crash log', 'Session rec
     expect(document.activeElement).toBe(search)
     expect(search.value).toBe('')
     await input('[aria-label="Search settings"]', 'host')
+    expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Search results')
+    await dom.click('[data-settings-search-section="hosts"]')
     expect(dom.container.querySelector('.settings-content__header h2')!.textContent).toBe('Hosts')
     await dom.click('[aria-label="Clear settings search"]')
     const button = [...dom.container.querySelectorAll<HTMLButtonElement>('nav[aria-label="Settings sections"] button')].find(node => node.textContent === 'Appearance')!
