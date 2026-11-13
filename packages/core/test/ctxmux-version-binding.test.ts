@@ -65,6 +65,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const coreRoot = join(here, '..')
 const repoRoot = join(coreRoot, '..', '..')
 const clientPath = join(coreRoot, 'src', 'client.ts')
+const runtimeHelpersPath = join(coreRoot, 'src', 'agent-runtime-helpers.ts')
 const adapterPath = join(coreRoot, 'src', 'ctxmux-run-adapter.ts')
 
 const ADAPTER_MODULE_SPECIFIER = './ctxmux-run-adapter.js'
@@ -73,7 +74,7 @@ const ADAPTER_MODULE_SPECIFIER = './ctxmux-run-adapter.js'
 const BINDING_SITES = [
   { path: clientPath, key: 'version', expected: 'CTXMUX_VERSION' },
   { path: clientPath, key: 'sourceCommit', expected: 'CTXMUX_COMMIT' },
-  { path: clientPath, key: 'TERM_PROGRAM_VERSION', expected: 'CTXMUX_VERSION' },
+  { path: runtimeHelpersPath, key: 'TERM_PROGRAM_VERSION', expected: 'CTXMUX_VERSION' },
   { path: adapterPath, key: 'TERM_PROGRAM_VERSION', expected: 'CTXMUX_VERSION' }
 ] as const
 
@@ -285,6 +286,8 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
     const imported = namedImportsFrom(sources.get(clientPath)!, ADAPTER_MODULE_SPECIFIER)
     expect(imported.has('CTXMUX_VERSION'), 'client.ts 没从 adapter 导入 CTXMUX_VERSION').toBe(true)
     expect(imported.has('CTXMUX_COMMIT'), 'client.ts 没从 adapter 导入 CTXMUX_COMMIT').toBe(true)
+    const runtimeImports = namedImportsFrom(sources.get(runtimeHelpersPath)!, ADAPTER_MODULE_SPECIFIER)
+    expect(runtimeImports.has('CTXMUX_VERSION'), 'terminalEnvironment 没从 adapter 导入 CTXMUX_VERSION').toBe(true)
   })
 
   it('自检：这两个常量确实是从 adapter 导出的运行时值（导入求值成功即证明可达）', () => {
