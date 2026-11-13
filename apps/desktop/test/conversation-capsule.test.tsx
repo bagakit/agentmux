@@ -295,6 +295,60 @@ it('marks a page that waits for the person and never reports an unreadable list 
   expect(chip().title).toContain('Unconfirmed')
 })
 
+it('repeats the pending answer in the card header and opens the trusted answer from there', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  inspect.mockImplementation((async (method: string, params: any) => method === 'capsule.interaction.ls'
+    ? { interactions: [{ capsuleId: params.capsuleId, interactionId: 'waiting', question: 'Which icon?', draft: '', revision: 1, status: 'pending', target: { hostId: 'local', agentSessionId: 'creator' } }], issues: [] }
+    : originalRead(method, params)) as never)
+  const scrolled = vi.fn(); HTMLElement.prototype.scrollIntoView = scrolled
+  await render(`![Icon candidates](${first})`)
+  const marker = () => container.querySelector<HTMLButtonElement>('.conversation-capsule__header [aria-label="Needs your answer"]')
+  await vi.waitFor(() => expect(marker()).not.toBeNull())
+  expect(marker()!.title).toBe('Needs your answer')
+  expect(container.querySelector<HTMLElement>('.capsule-chrome')!.hidden).toBe(true)
+  await act(async () => marker()!.click())
+  expect(container.querySelector<HTMLElement>('.capsule-chrome')!.hidden).toBe(false)
+  expect(scrolled).toHaveBeenCalled()
+  // A hidden page that still waits for the person keeps its marker; the marker brings the page back with the answer open.
+  await click('Hide page')
+  expect(marker()).not.toBeNull()
+  await act(async () => marker()!.click())
+  expect(container.querySelector('[aria-label="Hide page"]')).not.toBeNull()
+  expect(container.querySelector<HTMLElement>('.capsule-chrome')!.hidden).toBe(false)
+})
+
+it('keeps the card header free of an answer marker when nothing can be answered', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  inspect.mockImplementation((async (method: string, params: any) => method === 'capsule.interaction.ls'
+    ? { interactions: [{ capsuleId: params.capsuleId, interactionId: 'unbound', question: 'Which icon?', draft: '', revision: 1, status: 'pending' }], issues: [] }
+    : originalRead(method, params)) as never)
+  await render(`![Icon candidates](${first})`)
+  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.dataset.attention).toBe('none'))
+  expect(container.querySelector('.conversation-capsule__header [aria-label="Needs your answer"]')).toBeNull()
+})
+
+it('shows a failed page refresh as a quiet status with its own retry, after the question', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  inspect.mockImplementation((async (method: string, params: any) => {
+    if (method === 'capsule.interaction.ls') return { interactions: [{ capsuleId: params.capsuleId, interactionId: 'waiting', question: 'Which icon?', draft: '', revision: 1, status: 'pending', target: { hostId: 'local', agentSessionId: 'creator' } }], issues: [] }
+    if (method === 'capsule.inspect' && (inspect.mock.calls.length > 2)) throw new Error('Original page metadata observation is unavailable')
+    return originalRead(method, params)
+  }) as never)
+  await render(`![Icon candidates](${first})`)
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.click())
+  const panel = container.querySelector<HTMLElement>('.capsule-chrome')!
+  await vi.waitFor(() => expect(panel.querySelector('.capsule-chrome__issue')).not.toBeNull())
+  const issue = panel.querySelector<HTMLElement>('.capsule-chrome__issue')!
+  expect(issue.getAttribute('role')).toBe('status')
+  expect(issue.querySelector('svg')).not.toBeNull()
+  expect(issue.querySelector('button')?.textContent).toBe('Retry')
+  const question = panel.querySelector('.capsule-question')!
+  expect(question.compareDocumentPosition(issue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
 it('does not ask the person to answer a question that has no recipient Agent', async () => {
   mode = 'injected'
   const originalRead = inspect.getMockImplementation()!
