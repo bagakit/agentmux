@@ -95,9 +95,9 @@ it('keeps the full name accessible while moving executor and Session context int
   expect(context!.textContent).toContain(`Session: ${sessionIds[0]}`)
   expect(context!.textContent).toContain('Executor:')
   await act(async()=>details.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true})))
-  const row=menu.querySelector<HTMLElement>('.workbench-menu-row[aria-label="Copy link"]')
+  const row=menu.querySelector<HTMLElement>('.agent-region-menu__identity .workbench-menu-row[aria-label="Copy"]')
   expect(row,'compact copy shortcuts stay in the original root').not.toBeNull()
-  expect([...row!.querySelectorAll('[role="menuitem"]')].map(item=>item.getAttribute('aria-label'))).toEqual(['Copy Region Link'])
+  expect([...row!.querySelectorAll('[role="menuitem"]')].map(item=>item.getAttribute('aria-label'))).toEqual(expect.arrayContaining(['Copy Region Link']))
   expect([...row!.querySelectorAll('[role="menuitem"]')].every(item=>item.closest('[role="menu"]')===menu)).toBe(true)
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
   await select(menuItem(menu,'Copy Region Link'))
@@ -269,21 +269,24 @@ it.each(['running', 'exited'] as const)('secondary Focus Activity presentations 
 })
 
 
-it.each(['more', 'context'] as const)('the actual %s menu groups controls separately from conversation information', async entry => {
+it.each(['more', 'context'] as const)('the actual %s menu separates derived actions from the Session lifecycle', async entry => {
   await mount()
   const menu = entry === 'more' ? await menuWithRightActive() : await contextMenuWithRightActive()
-  const controls = menu.querySelector('[role="group"][aria-label="Agent controls"]')!
+  const derived = menu.querySelector('[role="group"][aria-label="Derived actions"]')!
+  const lifecycle = menu.querySelector('[role="group"][aria-label="Session lifecycle"]')!
   const conversation = menu.querySelector('[role="group"][aria-label="Conversation"]')!
-  expect(controls).not.toBeNull(); expect(conversation).not.toBeNull()
+  expect(derived).not.toBeNull(); expect(lifecycle).not.toBeNull(); expect(conversation).not.toBeNull()
   const labels = (root: ParentNode) => [...root.querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())
-  expect(labels(controls)).toEqual(['Take over', 'Pass on experience', 'Fork current conversation…', 'Restart Session…', 'Stop Agent'])
+  expect(labels(derived)).toEqual(['Take over', 'Fork current conversation…', 'Pass on experience'])
+  expect(labels(lifecycle)).toEqual(['Restart Session…', 'Stop Agent'])
   expect(labels(conversation)).toEqual(['Conversation history', 'Session details'])
-  expect(conversation.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  expect(conversation.compareDocumentPosition(derived) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  expect(derived.compareDocumentPosition(lifecycle) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
   expect(menu.querySelector('[data-terminal-menu-tools]')).toBeNull()
 })
 
 
-it('a plain terminal More menu has no empty Agent control group', async () => {
+it('a plain terminal More menu has no empty derived or lifecycle group', async () => {
   const session = useAppStore.getState().sessions[0]!
   useAppStore.setState({ sessions: [{ ...session, kind: 'terminal', providerId: null,
     control: { kind: 'terminal', hostId: session.hostId, runId: session.control.run.runId, run: session.control.run } }] })
@@ -293,7 +296,9 @@ it('a plain terminal More menu has no empty Agent control group', async () => {
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   const menu = document.querySelector<HTMLElement>('.agent-region-menu')!
   expect(menu).not.toBeNull()
-  expect(menu.querySelector('[role="group"][aria-label="Agent controls"]')).toBeNull()
-  expect(menu.querySelector('.agent-region-menu__summary')?.nextElementSibling?.getAttribute('aria-label')).toBe('Conversation')
+  expect(menu.querySelector('[role="group"][aria-label="Derived actions"]')).toBeNull()
+  expect(menu.querySelector('[role="group"][aria-label="Session lifecycle"]')).toBeNull()
+  // The identity block (name and Host) comes first; the first group after it is Conversation.
+  expect(menu.querySelector('.agent-region-menu__identity ~ [role="group"]')?.getAttribute('aria-label')).toBe('Conversation')
   expect(menuItem(menu, 'Terminal details')).toBeDefined()
 })

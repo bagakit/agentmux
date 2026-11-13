@@ -35,7 +35,8 @@ it('groups typed actions without implementation separators and exposes layout co
     { kind: 'restart', onSelect: restart }
   ])
   expect([...root.querySelectorAll('[role="menuitem"]')].map(node => (node.getAttribute('aria-label') ?? node.textContent)?.trim())).toEqual(['Conversation history', 'Session details', 'Take over', 'Restart Session…', 'Split Right', 'Move to New Tab'])
-  expect(root.querySelectorAll('[role="separator"]')).toHaveLength(2)
+  // Conversation · Derived actions · Session lifecycle · Workspace: one separator between each, none doubled.
+  expect(root.querySelectorAll('[role="separator"]')).toHaveLength(3)
   expect(item(root, 'Split Right').getAttribute('aria-haspopup')).toBeNull()
   await act(async () => item(root, 'Split Right').click())
   expect(split).toHaveBeenCalledOnce(); expect(promote).not.toHaveBeenCalled(); expect(restart).not.toHaveBeenCalled()
