@@ -75,7 +75,11 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   const { operationId, ...originalBody } = source
   const body = method.startsWith('goal.') ? goalKeys(originalBody, true) : originalBody
-  const requestId = operationId === undefined ? mintObjectId() : rpcString(operationId, 'Operation ID')
+  const explicitId = operationId === undefined ? undefined : rpcString(operationId, 'Operation ID')
+  // Inspect/stop address an existing Browser operation. Their observation/command must not
+  // occupy the in-flight run's original request slot or replace its business identity.
+  const addressesBrowserOperation = operation === 'browser.operation' || operation === 'browser.stop'
+  const requestId = explicitId === undefined || addressesBrowserOperation ? mintObjectId() : explicitId
   if (method === 'space.inspect' && body.target && typeof body.target === 'object' &&
     Object.hasOwn(body.target, 'operationId')) {
     const target = rpcRecord(body.target, ['operationId'])
