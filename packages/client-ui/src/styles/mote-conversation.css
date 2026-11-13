@@ -18,17 +18,9 @@
 .mote-work-event__summary small { display: block; margin-top: 3px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; overflow-wrap: anywhere; }
 .mote-work-event__summary > time, .mote-work-event__summary > span:last-child { flex-shrink: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-work-event__mark { color: var(--text-3); align-self: flex-start; flex-shrink: 0; margin-top: 4px; }
-.mote-work-event__thread { padding: 0 14px 12px; border-top: 1px solid var(--line-soft); font-size: var(--fs-body, 14px); line-height: 1.65; }
 .mote-work-event__thread p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mote-work-event__thread > details { margin-block: 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
-.mote-work-event__reply { padding-block: 10px; border-top: 1px solid var(--line-soft); }
-.mote-work-event__reply small { color: var(--text-3); }
-.mote-work-event__actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.mote-work-event__actions button { border-color: var(--line); color: var(--text); }
 @media (max-width: 520px) { .mote-work-event__summary { flex-wrap: wrap; gap: 6px; } .mote-work-event__summary > time { margin-inline-start: 24px; } }
 
-.mote-work-event__assignment { margin-block: 10px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
-.mote-work-event__assignment[open] { color: var(--text-2); }
 .mote-conversation__day { margin-block: 18px; }
 .mote-conversation__day > h3 { margin: 0 0 10px; font-size: var(--fs-meta, 12px); font-weight: 500; color: var(--text-3); }
 .mote-conversation__day > ol { list-style: none; padding: 0 0 0 10px; margin: 0; border-inline-start: 1px solid var(--line-soft); }
@@ -40,18 +32,60 @@
 
 .mote-work-event__summary > .mote-work-event__time { font-size: var(--fs-meta, 12px); font-weight: 400; color: var(--text-3); flex-shrink: 0; }
 
-.mote-threads__search { display: flex; align-items: center; gap: 8px; min-height: var(--mote-thread-control-height, 32px); margin-block: 4px 8px; padding-inline: 10px; border-radius: var(--radius-sm, 6px); background: var(--surface-2); color: var(--text-3); }
+/* Threads: one toolbar row, a dense list and a reading pane. Container queries decide the layout. */
+.mote-threads { container: mote-threads / inline-size; }
+.mote-threads__toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-block-end: 8px; padding-block: 8px; background: var(--surface-0); border-block-end: 1px solid var(--line-soft); }
+.mote-threads__toolbar > .mote-conversation__navigation { position: static; flex: none; margin: 0 0 0 auto; padding: 0; background: transparent; flex-wrap: nowrap; }
+.mote-threads__search { display: flex; align-items: center; gap: 6px; flex: 1 1 140px; max-width: 260px; min-width: 96px; min-height: var(--mote-thread-control-height, 30px); padding-inline: 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-3); transition: background var(--dur-fast, 120ms) ease; }
+.mote-threads__search:focus-within { background: var(--surface-3); }
 .mote-threads__search > svg { flex-shrink: 0; }
-.mote-threads__search input { flex: 1; min-width: 0; min-height: var(--mote-thread-control-height, 32px); border: 0; background: transparent; padding: 4px 0; font-size: var(--mote-thread-input-font, var(--fs-body, 14px)); }
-.mote-threads__filters { display: flex; gap: 4px; overflow-x: auto; margin-block: 0 8px; padding-block: 2px; }
-.mote-threads__filters button { appearance: none; flex-shrink: 0; min-height: var(--mote-thread-control-height, 30px); border: 1px solid transparent; border-radius: var(--radius-sm, 6px); padding: 4px 10px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
-.mote-threads__filters button[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-soft); color: var(--text); }
+.mote-threads__search input { flex: 1; min-width: 0; min-height: var(--mote-thread-control-height, 30px); border: 0; background: transparent; padding: 4px 0; font-size: var(--mote-thread-input-font, var(--fs-meta, 12px)); }
+.mote-threads__filters { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-2); overflow-x: auto; scrollbar-width: none; }
+.mote-threads__filters button { appearance: none; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: var(--mote-thread-control-height, 28px); border: 0; border-radius: 999px; padding: 0 11px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; transition: color var(--dur-fast, 120ms) ease, background var(--dur-fast, 120ms) ease; }
+.mote-threads__filters button:hover { color: var(--text); }
+.mote-threads__filters button[aria-pressed="true"] { background: var(--surface-0); color: var(--text); box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent), inset 0 0 0 1px var(--line-soft); }
+.mote-threads__filters button::after { content: attr(data-count); min-width: 1.2em; color: var(--text-3); font-size: var(--fs-micro, 11px); font-variant-numeric: tabular-nums; text-align: center; }
+.mote-threads__filters button[data-count="0"]:not([aria-pressed="true"])::after { opacity: .5; }
 .mote-threads__filters button:focus-visible, .mote-threads__search:focus-within, .mote-conversation__related > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.mote-threads__scope { margin: 4px 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; }
+.mote-threads__scope { margin: 0 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; }
+.mote-threads__back { display: none; }
 .mote-threads__list { margin: 0; padding: 0; list-style: none; }
 .mote-threads__list > li[hidden] { display: none; }
 .mote-threads__list--history > li { padding-inline-start: 10px; border-inline-start: 1px solid var(--line-soft); }
 .mote-threads__day { margin: 16px 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); font-weight: 500; }
+/* List rows: compact, one line of meta, a clear selected state. */
+.mote-threads .mote-work-event { margin-block: 2px; border: 0; border-radius: var(--radius-sm, 8px); }
+.mote-threads .mote-work-event__summary { border-radius: var(--radius-sm, 8px); transition: background var(--dur-fast, 120ms) ease; }
+.mote-threads .mote-work-event__summary:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.mote-threads .mote-work-event__disclosure { display: none; }
+/* Reading pane: the thread as a flat document, never a card inside a card. */
+.mote-work-event__thread { padding: 4px 4px 14px; border-top: 0; font-size: var(--fs-body, 14px); line-height: 1.65; }
+.mote-work-event__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 4px 12px; }
+.mote-work-event__actions button { min-height: 30px; padding-inline: 12px; border: 0; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--text); }
+.mote-work-event__actions button:hover { background: var(--surface-3); }
+.mote-work-event__assignment { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius-sm, 8px); border-inline-start: 2px solid color-mix(in srgb, var(--green) 55%, transparent); background: var(--surface-1); color: var(--text-2); }
+.mote-work-event__assignment > small { display: block; margin-block-end: 4px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__replies { margin: 0; padding: 0 0 0 14px; list-style: none; border-inline-start: 1px solid var(--line-soft); }
+.mote-work-event__reply { position: relative; padding-block: 8px; border-top: 0; }
+.mote-work-event__reply::before { content: ''; position: absolute; inset-inline-start: -18px; top: 15px; width: 7px; height: 7px; border-radius: 50%; background: var(--surface-0); box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.mote-work-event__reply > small { display: flex; align-items: baseline; gap: 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__sender { color: var(--text-2); font-weight: 550; }
+.mote-work-event__issue { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__provenance { margin: 12px 0 0; color: var(--text-3); font-size: var(--fs-micro, 11px); line-height: 1.5; overflow-wrap: anywhere; }
+/* Split (measured >= 640px): list on the left, the selected thread in its own scrolling pane on the right. */
+.mote-threads[data-layout="split"] .mote-threads__body { display: grid; grid-template-columns: minmax(220px, 36%) minmax(0, 1fr); column-gap: 0; align-items: start; }
+.mote-threads[data-layout="split"] .mote-threads__list { padding-inline-end: 12px; }
+.mote-threads__pane { position: sticky; top: 52px; min-height: 240px; max-height: calc(100vh - 160px); overflow: auto; padding: 4px 4px 20px 18px; border-inline-start: 1px solid var(--line-soft); }
+.mote-threads__pane > .mote-work-event__thread { padding: 0; animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+.mote-threads__pane-empty { margin: 40px 12px; color: var(--text-3); font-size: var(--fs-meta, 12px); text-align: center; }
+.mote-threads[data-layout="split"] .mote-threads__list > li[data-selected] > .mote-work-event > .mote-work-event__summary { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--green); }
+/* Narrow: the selected thread takes the full width with a back control; other rows step aside. */
+@container mote-threads (min-width: 0px) {
+  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--mote-thread-control-height, 32px); margin-block-end: 6px; padding: 0 8px 0 4px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
+  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__back > svg { transform: rotate(180deg); }
+  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li:not([data-selected]) { display: none; }
+  .mote-threads[data-layout="stack"][data-detail="open"] .mote-threads__list > li[data-selected] .mote-work-event__thread { animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+}
 .mote-conversation__navigation button, .mote-work-event button, .mote-conversation__link, .mote-work-event summary { min-width: var(--mote-thread-control-height, 30px); min-height: var(--mote-thread-control-height, 30px); }
 .mote-work-event summary { display: flex; align-items: center; cursor: pointer; width: fit-content; }
 .mote-work-event__disclosure { width: 14px; text-align: center; }
@@ -61,8 +95,25 @@
 .mote-conversation__related-count { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .mote-conversation__related-chevron { margin-inline-start: auto; flex-shrink: 0; }
 .mote-conversation__related[open] > summary .mote-conversation__related-chevron { transform: rotate(90deg); }
+.mote-conversation__related-chevron, .mote-conversation__source-chevron { transition: transform var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+.mote-conversation__related[open] > .mote-conversation__related-body:not([hidden]) { animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
 .mote-conversation__related-body[hidden] { display: none; }
-.mote-conversation__source { margin-block: 4px 12px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
-.mote-conversation__source > summary { cursor: pointer; padding: 8px 0; }
-.mote-conversation__source > summary span { font-size: var(--fs-micro, 11px); margin-inline-start: 8px; }
+/* A previous Main tenure reads as a hairline handover inside the one conversation.
+   Line 1 names it; line 2 carries the full range and reason and may wrap, so "未记录" is never cut. */
+.mote-conversation__source { margin-block: 12px 16px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-conversation__source > summary { display: grid; justify-items: center; gap: 2px; padding-block: 4px; cursor: pointer; list-style: none; border-radius: var(--radius-sm, 6px); }
+.mote-conversation__source > summary::-webkit-details-marker { display: none; }
+.mote-conversation__source > summary:hover .mote-conversation__source-title { color: var(--text); }
+.mote-conversation__source > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-conversation__source-line { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--mote-thread-control-height, 30px); }
+.mote-conversation__source-rule { flex: 1 1 0; min-width: 24px; height: 0; border-block-start: 1px solid var(--line-soft); }
+.mote-conversation__source-title { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--text-2); font-weight: 550; transition: color var(--dur-fast, 120ms) ease; }
+.mote-conversation__source-meta { max-width: 100%; color: var(--text-3); line-height: 1.5; text-align: center; text-wrap: balance; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mote-conversation__source[open] > summary .mote-conversation__source-chevron { transform: rotate(90deg); }
+.mote-conversation__source[open] > summary ~ * { animation: mote-conversation-reveal var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
+@keyframes mote-conversation-reveal { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .mote-conversation__related-chevron, .mote-conversation__source-chevron, .mote-conversation__source-title { transition: none; }
+  .mote-conversation__related[open] > .mote-conversation__related-body:not([hidden]), .mote-conversation__source[open] > summary ~ * { animation: none; }
+}
 .mote-conversation__source > .mote-conversation__muted { margin-top: 0; }
