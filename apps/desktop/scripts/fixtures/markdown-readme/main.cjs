@@ -34,10 +34,15 @@ async function scrollTo(selector, offset = 0) {
   await paint(); await imagesSettled()
 }
 
-async function capture(name) {
+/** Open a Markdown file and switch its FileRegion to the rendered preview through the real header control. */
+async function openPreview(name) {
   await evaluate(`filePreviewProbe.open(${JSON.stringify(name)})`)
   await wait(`Boolean(filePreviewProbe.activeRegion()?.querySelector('.editor-header'))`)
   if (!await evaluate(`Boolean(${preview})`)) await evaluate(`filePreviewProbe.activeRegion().querySelector('button[title="Preview current content"]').click()`)
+  await wait(`Boolean(${preview})`)
+}
+async function capture(name) {
+  await openPreview(name)
   await wait(`Boolean(${preview}?.querySelector('.md-alert'))`)
   const facts = await evaluate(`(()=>{const p=${preview};const prose=[...p.querySelectorAll('p,td,li,h1,h2,h3')].map(n=>[...n.childNodes].map(c=>c.nodeName==='CODE'?'':c.textContent).join('')).join('\\n');
     return {rawTags:(prose.match(/<\\/?(?:div|p|img|picture|source|table|tr|td|sub|br|b)\\b[^>]*>/g)||[]).length, alertMarker:prose.includes('[!NOTE]'),
@@ -45,6 +50,10 @@ async function capture(name) {
       centered:p.querySelectorAll('.md-container[data-align="center"],.md-paragraph[data-align="center"]').length}})()`)
   report.facts[name] = facts
   assert.equal(facts.rawTags, 0, name + ' shows no raw README HTML'); assert.equal(facts.alertMarker, false); assert.equal(facts.alerts, 1); assert.equal(facts.cards, 8)
+  // The six README badges reach the remote image port; each either loads or settles as its alternative text.
+  const badges = await evaluate(`(()=>{const p=${preview};const loaded=[...p.querySelectorAll('img.md-remote-image')].filter(i=>i.naturalWidth>0).length;const failed=[...p.querySelectorAll('.md-image-attachment--unavailable')].filter(e=>/badge|Providers|amux|JSON-RPC|Tests|Platform|Node/i.test(e.textContent)).length;return {ports:p.querySelectorAll('img.md-remote-image').length+failed,loaded,failed}})()`)
+  report.facts[name].badges = badges
+  assert.equal(badges.ports, 6, name + ' renders all six badges through the remote image port')
   const slug = name === 'README.md' ? 'readme' : 'readme-zh'
   for (const theme of ['dark', 'light']) {
     await evaluate(`filePreviewProbe.theme(${JSON.stringify(theme)})`); await paint()
@@ -86,6 +95,35 @@ app.whenReady().then(async () => { try {
   await evaluate(`document.querySelector('button[aria-label="Close reading layout"]').click()`)
   await scrollTo('h2'); await frame('readme-serif-wide-dark', { theme: 'dark' })
   win.setContentSize(760, 900); await paint(); await scrollTo('.md-html-table--layout', 80); await frame('readme-cards-narrow-dark', { theme: 'dark' })
+  // Chinese in the serif reading face, and the narrow window in the light appearance with the default layout.
+  await openPreview('README.zh-CN.md'); await paint()
+  await scrollTo('h2', 24); await frame('readme-zh-serif-narrow-dark', { theme: 'dark' })
+  await evaluate(`filePreviewProbe.theme('light')`); await paint()
+  for (const [option, label] of [['sans', 'radio'], ['standard', 'radio']]) {
+    await evaluate(`${preview}.querySelector('button[aria-label="Reading layout"]').click()`); await wait(`Boolean(document.querySelector('.md-reading__popover'))`)
+    await evaluate(`document.querySelector('[role="${label}"][data-option="${option}"]').click()`); await paint()
+    await evaluate(`document.querySelector('button[aria-label="Close reading layout"]').click()`); await paint()
+  }
+  await evaluate(`${preview}.querySelector('button[aria-label="Reading layout"]').click()`); await wait(`Boolean(document.querySelector('.md-reading__popover'))`)
+  await evaluate(`document.querySelector('button[title="Reset text size"]').click()`); await paint()
+  await evaluate(`document.querySelector('button[aria-label="Close reading layout"]').click()`); await paint()
+  await wait(`${preview}.getAttribute('data-reading-typeface')==='sans' && ${preview}.getAttribute('data-reading-width')==='standard'`)
+  await scrollTo('.md-html-table--layout', 80); await frame('readme-zh-cards-narrow-light', { theme: 'light' })
+  win.setContentSize(1280, 900); await paint()
+  // Constructs the root READMEs do not use: other alert types, details, inline marks, a 40/60 card and a failing badge.
+  await openPreview('elements.md'); await wait(`Boolean(${preview}?.querySelector('.md-alert[data-alert-type="caution"]'))`)
+  const elements = await evaluate(`(()=>{const p=${preview};return {alerts:[...p.querySelectorAll('.md-alert')].map(a=>a.dataset.alertType),details:p.querySelectorAll('details.md-details').length,
+    marks:['kbd','sub','sup','mark','ins'].map(t=>p.querySelectorAll(t+'.md-'+t).length),del:p.querySelectorAll('del').length,failedBadge:[...p.querySelectorAll('.md-image-attachment--unavailable')].some(e=>e.textContent.includes('cannot load')),
+    badgeMarkup:(p.querySelector('img[alt="Badge that cannot load"]')||p.querySelector('[title*="unreachable"]'))?.outerHTML?.slice(0,200)||null}})()`)
+  report.facts['elements.md'] = elements
+  assert.deepEqual(elements.alerts, ['tip', 'important', 'warning', 'caution']); assert.equal(elements.details, 2)
+  // A badge that cannot load settles as its alternative text once the browser reports the failure.
+  await wait(`[...${preview}.querySelectorAll('.md-image-attachment--unavailable')].some(e=>e.textContent.includes('cannot load'))`, 20000)
+  for (const theme of ['light', 'dark']) {
+    await evaluate(`filePreviewProbe.theme(${JSON.stringify(theme)})`); await paint()
+    await scrollTo('h1', 24); await frame(`elements-alerts-${theme}`, { theme, document: 'elements.md' })
+    await scrollTo('details.md-details', 24); await frame(`elements-details-cards-${theme}`, { theme, document: 'elements.md' })
+  }
   report.passed = true
 } catch (error) {
   report.failure = { name: error.name, message: error.message, stack: error.stack }
