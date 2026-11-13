@@ -39,6 +39,7 @@ describe('binding id set', () => {
     expect([...SHORTCUT_BINDINGS.map((b) => b.id)].sort()).toEqual([
       'attention.next',
       'capture.screen',
+      'capture.screen.exclude-host',
       'editor.save',
       'editor.show-commands',
       'editor.toggle-word-wrap',

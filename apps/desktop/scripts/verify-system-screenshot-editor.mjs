@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, writeFile, symlink, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, symlink, rm, readdir } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -10,9 +10,26 @@ assert.equal(process.argv.length, 2, 'This bounded verification has no optional 
 const root = process.cwd(), require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const source = 'apps/desktop/src/main/system-screenshot-editor.ts', surface = 'apps/desktop/src/main/capture-surface.ts', producer = 'apps/desktop/src/main/screen-capture.ts'
+const view = 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', editor = 'apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx'
 const sha = value => createHash('sha256').update(value).digest('hex')
-const sources = { [source]: await readFile(source, 'utf8'), [surface]: await readFile(surface, 'utf8'), [producer]: await readFile(producer, 'utf8') }
+const sources = Object.fromEntries(await Promise.all([source, surface, producer, view, editor].map(async file => [file, await readFile(file, 'utf8')])))
+const owningTests = { [source]: 'apps/desktop/test/system-screenshot-editor.test.ts', [surface]: 'apps/desktop/test/capture-surface.test.ts',
+  [producer]: 'apps/desktop/test/global-screenshot-integration.test.ts', [view]: 'apps/desktop/test/capture-surface-view.test.tsx', [editor]: 'apps/desktop/test/capture-surface-view.test.tsx' }
 const mutations = [
+  { id: 'surface-renderer-frozen-source', source: view, from: 'const frame = input.backgrounds[background]', to: 'const frame = input.backgrounds.included', expected: 'the excluded background supplies the frozen source' },
+  { id: 'surface-renderer-output-background', source: view, from: 'api.savePng(input.requestId, background, image)', to: "api.savePng(input.requestId, 'included', image)", expected: 'the excluded background supplies the frozen source' },
+  { id: 'surface-renderer-presented-loaded', source: editor, from: 'if (state.loaded && presentedSource.current !== image.dataUrl)', to: 'if (presentedSource.current !== image.dataUrl)', expected: 'reports the frame only after the shared editor loads and paints it' },
+  { id: 'surface-display-set', source: surface, from: 'if (successful.displays.length !== displays.length || (!(excluded instanceof Error) && excluded.displays.length !== displays.length))', to: 'if (false)', expected: 'rejects a missing display' },
+  { id: 'surface-current-scale', source: surface, from: ' || display.scaleFactor !== frame.scale', to: '', expected: 'rejects a scale display' },
+  { id: 'surface-issue-cannot-retarget-owner', source: surface, from: 'if (active.owner !== null || active.finishing)', to: 'if (false)', expected: 'a locked issue display cannot replace' },
+  { id: 'surface-late-delivery-recall', source: surface, from: 'if (this.active === active) this.recall = this.remember(overlay, source.rect)', to: 'this.recall = this.remember(overlay, source.rect)', expected: 'a cancelled older delivery cannot overwrite' },
+  { id: 'surface-included-host-geometry', source: surface, from: 'const included = await freeze(true)', to: 'const included = await freeze(false)', expected: 'fades visible AgentMux windows out of the grab' },
+  { id: 'surface-excluded-exposure', source: surface, from: 'active.faded.length ? await freeze(false) : included', to: 'included', expected: 'fades visible AgentMux windows out of the grab' },
+  { id: 'surface-default-background', source: surface, from: "background: session.background ?? 'included'", to: "background: session.background ?? 'excluded'", expected: 'captures every display once and opens one transparent overlay' },
+  { id: 'surface-frame-bound-output', source: surface, from: 'if (params.background !== active.background) throw', to: 'if (false) throw', expected: 'the chosen initial background delivers its own pixels' },
+  { id: 'surface-frame-timestamp', source: surface, from: 'const { image, capturedAt } = overlay.input.backgrounds[active.background]', to: 'const { image, capturedAt } = overlay.input.backgrounds.included', expected: 'the chosen initial background delivers its own pixels' },
+  { id: 'surface-frame-engine', source: surface, from: 'source, captured.engine)', to: 'source, overlay.input.backgrounds.included.engine!)', expected: 'the chosen initial background delivers its own pixels' },
+  { id: 'surface-healthy-alternate', source: surface, from: "if (included instanceof Error && excluded instanceof Error) throw", to: "if (included instanceof Error || excluded instanceof Error) throw", expected: 'a failed requested exposure preserves the original mode' },
   { id: 'exact-window', from: 'const request = this.requests.get(event.sender)', to: 'const request = this.requests.values().next().value', expected: 'rejects another window and an embedded frame' },
   { id: 'original-request', from: 'params?.requestId !== request.input.requestId', to: 'false', expected: 'refuses stale request identities' },
   { id: 'failed-delivery-retains-editor', from: "    } catch (error) {\n      return { status: 'failed', message: message(error) }", to: "    } catch (error) {\n      request.window.close(); return { status: 'failed', message: message(error) }", expected: 'keeps the original editor after a failed delivery' },
@@ -28,14 +45,14 @@ const mutations = [
   { id: 'retake-attaches-delivered-draft', source: producer, from: 'const attaching = attachToDraft && !originalDelivered', to: 'const attaching = attachToDraft', expected: 'a retake after the editor already copied keeps the same consumer' },
   { id: 'retake-editor-delivery-forgotten', source: producer, from: 'complete(final).then(() => outcome.delivered())', to: 'complete(final)', expected: 'the selection the window editor delivers is where the next capture opens' },
   { id: 'surface-editor-delivery-forgotten', source: surface, from: 'delivered: () => { this.recall = remembered } })', to: 'delivered: () => {} })', expected: 'a window editor delivery is the selection the next capture opens on' },
-  { id: 'retake-focus-leaves-editor', source: producer, from: 'returnFocus: returnFocus && !retaking, complete })', to: 'returnFocus, complete })', expected: 'gives focus back to that editor' },
+  { id: 'retake-focus-leaves-editor', source: producer, from: 'returnFocus: returnFocus && !retaking, complete, background })', to: 'returnFocus, complete, background })', expected: 'gives focus back to that editor' },
   { id: 'retake-editor-not-retakable', source: producer, from: '...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })', to: '...(returnFocus ? { returnFocus } : {}), ...(retaking ? {} : { retake: () => surface(true) }) })', expected: 'a retake that expands again replaces the old editor' },
   { id: 'retake-capture-ends-early', source: producer, from: '        for (let current = held.editor; current; current = held.editor === current ? null : held.editor) await current', to: '        if (held.editor) await held.editor', expected: 'a retake that expands again replaces the old editor' },
   { id: 'original-operation-receipt', from: 'if (existing) return await existing', to: 'if (false) return await existing', expected: 'returns the original completion receipt for duplicate operation IDs' },
   { id: 'late-delivery-isolation', from: 'request.settle()\n      return', to: 'for (const current of this.requests.values()) current.window.close()\n      request.settle()\n      return', expected: 'an earlier late result never closes the newer editor' },
   { id: 'validated-output-png', from: '    pngBytes(params.image!)\n    request.pending = true', to: '    void params.image\n    request.pending = true', expected: 'refuses stale request identities' },
   // The capture surface: one grab, one overlay per display, shown together, one selection owner, and its outputs.
-  { id: 'surface-one-grab', source: surface, from: 'const frames = await this.ports.native().captureDisplays()', to: 'await this.ports.native().captureDisplays(); const frames = await this.ports.native().captureDisplays()', expected: 'captures every display once and opens one transparent overlay' },
+  { id: 'surface-one-grab', source: surface, from: 'return await native.captureDisplays({ includeHostWindows })', to: 'await native.captureDisplays({ includeHostWindows }); return await native.captureDisplays({ includeHostWindows })', expected: 'captures every display once and opens one transparent overlay' },
   { id: 'surface-transparent-overlay', source: surface, from: "transparent: true, backgroundColor: '#00000000'", to: "transparent: false, backgroundColor: '#00000000'", expected: 'captures every display once and opens one transparent overlay' },
   { id: 'surface-raised-after-paint', source: surface, from: "window.once('ready-to-show', () => raise(window, frame.frame))", to: 'void 0', expected: 'captures every display once and opens one transparent overlay' },
   { id: 'surface-show-together', source: surface, from: 'if (active.overlays.every(row => row.presented)) this.show(active)', to: 'this.show(active)', expected: 'shows every overlay together only after each one presented' },
@@ -49,8 +66,8 @@ const mutations = [
   { id: 'surface-pin-at-selection', source: surface, from: '{ ...source.rect, width: params.image!.width / source.scale', to: '{ ...source.rect, x: 0, width: params.image!.width / source.scale', expected: 'a confirmed Pin opens on the selection' },
   { id: 'surface-pin-closes', source: surface, from: "if (pinned.recordedOperation?.state === 'completed') active.end({ state: 'completed' })", to: 'void pinned', expected: 'a confirmed Pin opens on the selection and closes the capture surface' },
   { id: 'surface-unconfirmed-pin-keeps', source: surface, from: "if (pinned.recordedOperation?.state === 'completed') active.end", to: 'active.end', expected: 'Save PNG and an unconfirmed Pin act on the selection and keep the overlays' },
-  { id: 'surface-expand-carries-marks', source: surface, from: "active.end({ state: 'expanded', image: overlay.input.image!, source, handoff, delivered:", to: "active.end({ state: 'expanded', image: overlay.input.image!, source, handoff: { ...handoff, shapes: [] }, delivered:", expected: 'expand ends the surface with the full frozen frame' },
-  { id: 'surface-issue-not-selectable', source: surface, from: 'if (overlay.input.image === undefined || (', to: 'if ((', expected: 'a display without pixels shows its issue' },
+  { id: 'surface-expand-carries-marks', source: surface, from: "active.end({ state: 'expanded', image: captured.image, source, handoff, delivered:", to: "active.end({ state: 'expanded', image: captured.image, source, handoff: { ...handoff, shapes: [] }, delivered:", expected: 'expand ends the surface with the full frozen frame' },
+  { id: 'surface-issue-not-selectable', source: surface, from: 'if (overlay.input.backgrounds[active.background].image === undefined || (', to: 'if ((', expected: 'a display without pixels shows its issue' },
   { id: 'surface-work-area-keeps', source: surface, from: "metrics.some(metric => metric !== 'workArea')", to: 'true', expected: 'a display layout change ends the capture, while a work area change keeps it' },
   { id: 'surface-crash-ends', source: surface, from: "window.webContents.once('render-process-gone',", to: "window.webContents.once('render-process-gone-unused',", expected: 'a crashed overlay renderer ends the capture' },
   { id: 'surface-fades-workbench', source: surface, from: 'for (const { window } of active.faded) window.setOpacity(0)', to: 'void 0', expected: 'fades visible AgentMux windows out of the grab' },
@@ -67,7 +84,7 @@ const mutations = [
   { id: 'surface-one-at-a-time', source: surface, from: "    if (this.active) return Promise.reject(new Error('A screen capture is already in progress.", to: "    if (false) return Promise.reject(new Error('A screen capture is already in progress.", expected: 'a second capture while one is open is refused' },
   { id: 'surface-public-captured', source: surface, from: "return outcome.state === 'completed' && result ? result : { state: 'cancelled' }", to: "return { state: 'cancelled' }", expected: 'the public selection returns the processed selection as captured' },
   // The last delivered selection: remembered on a completed primary delivery only, offered only on its unchanged display.
-  { id: 'surface-recall-on-delivery', source: surface, from: '    this.recall = this.remember(overlay, source.rect)', to: '    void this.remember(overlay, source.rect)', expected: 'the next capture opens on the last delivered selection' },
+  { id: 'surface-recall-on-delivery', source: surface, from: '    if (this.active === active) this.recall = this.remember(overlay, source.rect)', to: '    void this.remember(overlay, source.rect)', expected: 'the next capture opens on the last delivered selection' },
   { id: 'surface-recall-display-origin', source: surface, from: 'x: Math.round((last.rect.x - frame.x) * scale)', to: 'x: Math.round(last.rect.x * scale)', expected: 'the next capture opens on the last delivered selection' },
   { id: 'surface-recall-ignores-id', source: surface, from: 'last.displayId !== displayId || ', to: '', expected: 'no remembered selection: the display id changed' },
   { id: 'surface-recall-ignores-scale', source: surface, from: 'last.scale !== scale || ', to: '', expected: 'no remembered selection: the display scale changed' },
@@ -78,11 +95,11 @@ const mutations = [
 ]
 await mkdir(resolve('.local/system-screenshot-editor'), { recursive: true })
 const out = await mkdtemp(resolve('.local/system-screenshot-editor/run-'))
-const inputs = [source, surface, 'apps/desktop/src/shared/capture-surface.ts', 'apps/desktop/test/capture-surface.test.ts',
-  'apps/desktop/src/preload/capture-surface.ts', 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', 'apps/desktop/src/shared/system-screenshot-editor.ts', 'apps/desktop/src/preload/screenshot-editor.ts',
+const inputs = [source, surface, 'apps/desktop/src/shared/capture-surface.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/capture-surface-view.test.tsx',
+  'apps/desktop/src/preload/capture-surface.ts', view, 'apps/desktop/src/shared/system-screenshot-editor.ts', 'apps/desktop/src/preload/screenshot-editor.ts',
   'apps/desktop/src/renderer/screenshot-editor/entry.tsx', 'apps/desktop/src/renderer/screenshot-editor/SystemScreenshotEditorView.tsx',
   'apps/desktop/src/renderer/screenshot-editor/screenshot-editor.css', 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts',
-  'apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx', 'apps/desktop/src/renderer/src/components/image-annotation/image-annotation.css',
+  editor, 'apps/desktop/src/renderer/src/components/image-annotation/image-annotation.css',
   'apps/desktop/src/renderer/src/components/image-annotation/AnnotationToolbar.tsx', 'apps/desktop/test/system-screenshot-editor.test.ts',
   ...['drawing-model.ts', 'drawing-renderer.ts', 'geometry.ts', 'selection-geometry.ts', 'view.ts', 'canvas-render.ts', 'AnnotationNotes.tsx', 'AnnotationOriginalMenu.tsx', 'types.ts']
     .map(name => 'apps/desktop/src/renderer/src/components/image-annotation/' + name),
@@ -115,7 +132,10 @@ async function command(label, program, args, env = {}) {
 }
 async function test(label, mutation) {
   const loaded = join(out, label + '.loaded.ndjson'), json = join(out, label + '.tests.json')
-  const result = await command(label, process.execPath, [resolve('node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/system-screenshot-editor.config.mts',
+  const owner = mutation?.source ?? source
+  assert.ok(owningTests[owner], label + ': every mutation has an owning consumer')
+  const selected = mutation ? [owningTests[owner]] : []
+  const result = await command(label, process.execPath, [resolve('node_modules/vitest/vitest.mjs'), 'run', ...selected, '--config', 'apps/desktop/test/system-screenshot-editor.config.mts',
     '--reporter=json', '--outputFile=' + json], { AGENTMUX_SCREENSHOT_EDITOR_LOADED: loaded,
       AGENTMUX_SCREENSHOT_EDITOR_MUTATION: mutation ? JSON.stringify(mutation) : '' })
   const report = JSON.parse(await readFile(json, 'utf8')), assertions = report.testResults.flatMap(file => file.assertionResults)
@@ -123,7 +143,7 @@ async function test(label, mutation) {
   for (const file of report.testResults) assert.equal(file.message, '', label + ': collection failures do not prove a behavior mutation')
   assert.doesNotMatch(result.log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/)
   const consumed = (await readFile(loaded, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-  const owner = mutation?.source ?? source, mutated = consumed.filter(row => row.file === owner)
+  const mutated = consumed.filter(row => row.file === owner)
   assert.ok(mutated.length > 0 && consumed.every(row => row.original === sha(sources[row.file]) && (row.file === owner && mutation
     ? row.consumed === sha(sources[owner].replace(mutation.from, mutation.to)) && row.mutation === mutation.id : row.consumed === row.original && row.mutation === null)), label + ': actual production source must consume this exact candidate')
   if (mutation) {
@@ -134,6 +154,7 @@ async function test(label, mutation) {
   } else {
     assert.equal(result.code, 0, result.log)
     assert.ok(assertions.every(row => row.status === 'passed'))
+    for (const file of Object.keys(sources)) assert.ok(consumed.some(row => row.file === file), label + ': every production owner must be loaded: ' + file)
   }
   receipt.runs.push({ label, code: result.code, assertions: assertions.length, loaded: consumed })
   process.stdout.write(label + ': ' + (mutation ? 'AssertionRED' : 'GREEN') + '\n')
@@ -190,6 +211,23 @@ try {
   receipt.nativeCaptureMutation = { source: producerSource, original: sha(producerText), consumed: sha(replayed),
     result: 'owning-AssertionRED', failure: counterexample.failure.message, receipt: join(mutantOut, 'native.json') }
   for (const [file, hash] of Object.entries(hashes)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
+  // Reuse already executed exact-source slice proofs; source drift makes them ineligible.
+  async function consumeProof(directory, schema) {
+    for (const name of (await readdir(directory)).sort().reverse()) {
+      const file = join(directory, name, 'receipt.json')
+      let proof
+      try { proof = JSON.parse(await readFile(file, 'utf8')) } catch { continue }
+      if (!proof.passed || proof.schema !== schema || !Object.keys(proof.inputs ?? {}).length) continue
+      let matches = true
+      for (const [input, digest] of Object.entries(proof.inputs)) {
+        try { if (sha(await readFile(input)) !== digest) matches = false } catch { matches = false }
+      }
+      if (matches) return { file, inputs: proof.inputs, reused: true }
+    }
+    throw new Error('No passing exact-source proof in ' + directory + '; run its owning verifier before this gate.')
+  }
+  receipt.captureSurface = await consumeProof(resolve('.local/capture-surface'), 'agentmux.capture-surface-product-proof.v1')
+  receipt.shortcuts = await consumeProof(resolve('.local/state/screenshot-experience/shortcut'), 'agentmux.screenshot-shortcut-proof.v1')
   receipt.passed = true
 } finally {
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))

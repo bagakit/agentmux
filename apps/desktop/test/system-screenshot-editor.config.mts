@@ -5,7 +5,11 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SCREENSHOT_EDITOR_MUTATION ? JSON.parse(process.env.AGENTMUX_SCREENSHOT_EDITOR_MUTATION) : null
+const sources = ['apps/desktop/src/main/system-screenshot-editor.ts', 'apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/screen-capture.ts',
+  'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', 'apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx']
 export default defineConfig({
+  define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
+  esbuild: { jsx: 'automatic' },
   cacheDir: resolve(root, '.tmp/system-screenshot-editor-cache'),
   resolve: { alias: {
     '@agentmux/native-desktop/image': resolve(root, 'packages/native-desktop/src/image.ts'),
@@ -15,7 +19,7 @@ export default defineConfig({
     const file = relative(root, id.split('?')[0])
     // Each mutation names its production owner; the window editor is the default one.
     const owner = mutation?.source ?? 'apps/desktop/src/main/system-screenshot-editor.ts'
-    if (file !== 'apps/desktop/src/main/system-screenshot-editor.ts' && file !== owner) return
+    if (!sources.includes(file)) return
     const source = readFileSync(id.split('?')[0], 'utf8')
     const mutated = mutation && file === owner
     if (mutated && source.split(mutation.from).length !== 2) throw new Error('Non-unique production mutation: ' + mutation.id)
@@ -24,6 +28,6 @@ export default defineConfig({
       JSON.stringify({ file, original: createHash('sha256').update(source).digest('hex'), consumed: createHash('sha256').update(changed).digest('hex'), mutation: mutated ? mutation.id : null }) + '\n')
     return changed
   } }],
-  test: { include: ['apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/global-screenshot-integration.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
+  test: { include: ['apps/desktop/test/capture-surface-view.test.tsx', 'apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/global-screenshot-integration.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
     passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 10000 }
 })

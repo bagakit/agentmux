@@ -10,6 +10,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { api } from '../src/renderer/src/lib/api'
+import * as platform from '../src/renderer/src/lib/host-platform'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -202,4 +203,15 @@ it('the explicit Capture button also preserves its original document generation'
   expect(clipboard).toHaveBeenCalledOnce()
   expect(dom.draft(id)).toBe('alpha omega')
   expect(await readFile((await saved.mock.results[0]!.value)!)).toEqual(bytes)
+})
+
+it('the explicit Capture hint discovers both system shortcuts and their background choice', async () => {
+  vi.spyOn(platform, 'isMacPlatform').mockReturnValue(true)
+  connect(vi.fn())
+  await mount(false)
+  await dom.click('.composer-tool--mode')
+  const capture = dom.container.querySelector<HTMLButtonElement>('[aria-label="Capture a screen region"]')!
+  expect(capture.title).toContain('⌘⇧2 includes AgentMux')
+  expect(capture.title).toContain('⌘⌥⇧2 hides AgentMux')
+  expect(capture.title).toContain('system-wide')
 })

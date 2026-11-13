@@ -1,0 +1,204 @@
+import assert from 'node:assert/strict'
+import { app, BrowserWindow, nativeImage, screen } from 'electron'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { CaptureSurface } from '../../../src/main/capture-surface'
+import { SystemScreenshotEditor } from '../../../src/main/system-screenshot-editor'
+import type { CaptureBackground } from '../../../src/shared/capture-surface'
+import type { BrowserPng } from '../../../src/shared/contracts'
+
+const out = process.env.AGENTMUX_CAPTURE_SURFACE_OUT!
+app.setPath('userData', join(import.meta.dirname, 'user-data'))
+app.on('window-all-closed', () => {})
+const receipt: any = { passed: false, boundary: 'Production CaptureSurface, isolated preload, Renderer, shared editor and PNG composition in real Electron. Only native screen pixels/window geometry and clipboard/pin sinks are controlled; no OS screen recording, user clipboard, physical multi-monitor/TCC, packaging or installation proof.', cases: [], screenshots: [], timings: [], grabs: [] }
+const displays = [{ id: 1, bounds: { x: 0, y: 0, width: 960, height: 640 }, scaleFactor: 1, displayFrequency: 60 },
+  { id: 7, bounds: { x: 960, y: 0, width: 800, height: 600 }, scaleFactor: 1, displayFrequency: 60 }]
+let surface: CaptureSurface, editor: SystemScreenshotEditor, host: BrowserWindow, current: BrowserWindow
+const originalInfo = console.info
+console.info = (...args) => {
+  if (typeof args[0] === 'string' && args[0].startsWith('capture-surface timing ')) receipt.timings.push(JSON.parse(args[0].slice('capture-surface timing '.length)))
+  originalInfo(...args)
+}
+const sources = new Map<string, BrowserPng>(), deliveries: any[] = []
+async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNullable<T>> {
+  const started = performance.now()
+  while (performance.now() - started < 10000) {
+    const result = await read()
+    if (result) return result as NonNullable<T>
+    await new Promise(done => setTimeout(done, 20))
+  }
+  throw new Error('Timed out: ' + label)
+}
+async function evaluate<T = any>(script: string): Promise<T> { try { return await current.webContents.executeJavaScript(script) } catch (error) { process.stderr.write('Failed renderer script: '+script+'\n'); throw error } }
+async function settle() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))') }
+async function mouse(type: string, x: number, y: number, buttons = 0) {
+  await current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 })
+}
+async function key(key: string, code: string, virtual: number, modifiers = 0) {
+  await current.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: virtual, modifiers })
+  if (!current.isDestroyed()) await current.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtual, modifiers })
+}
+async function click(name: string) {
+  const point = await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b)throw Error('Missing control '+${JSON.stringify(name)});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:b.disabled}})()`)
+  assert.equal(point.disabled, false, name + ' is available')
+  await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1)
+  await mouse('mouseReleased', point.x, point.y).catch(error => { if (!current.isDestroyed()) throw error })
+  if (!current.isDestroyed() && !['Done', 'Cancel', 'Expand editor'].includes(name)) await settle()
+}
+async function sourcePoint(x: number, y: number) {
+  return await evaluate<{x:number;y:number}>(`(()=>{const c=document.querySelector('canvas'),r=c.getBoundingClientRect(),m=c.getContext('2d').getTransform(),d=c.width/r.width;return {x:r.x+(m.e+m.a*${x})/d,y:r.y+(m.f+m.d*${y})/d}})()`)
+}
+async function drag(x: number, y: number, width: number, height: number) {
+  const a = await sourcePoint(x, y), b = await sourcePoint(x + width, y + height)
+  await mouse('mouseMoved', a.x, a.y); await mouse('mousePressed', a.x, a.y, 1)
+  for (let step = 1; step <= 8; step++) await mouse('mouseMoved', a.x + (b.x-a.x)*step/8, a.y + (b.y-a.y)*step/8, 1)
+  await mouse('mouseReleased', b.x, b.y); await settle()
+}
+async function shot(name: string) {
+  process.stdout.write('capture-proof: '+name+'\n')
+  await settle()
+  const file = name + '.png'
+  await writeFile(join(out, file), (await current.webContents.capturePage()).toPNG())
+  receipt.screenshots.push({ file, contentSize: current.getContentSize() })
+}
+async function sourceImages() {
+  const drawing = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } })
+  await drawing.loadURL('data:text/html,<body><canvas></canvas>')
+  for (const display of displays) for (const background of ['included', 'excluded'] as const) {
+    const { width, height } = display.bounds
+    const dataUrl = await drawing.webContents.executeJavaScript(`(()=>{const c=document.querySelector('canvas');c.width=${width};c.height=${height};const x=c.getContext('2d');
+      x.fillStyle=${JSON.stringify(background === 'included' ? '#c9e6ef' : '#f0dfc9')};x.fillRect(0,0,c.width,c.height);
+      x.fillStyle='#334757';x.fillRect(0,0,c.width,30);x.fillStyle='#e3edf3';x.font='12px -apple-system';x.fillText('Workspace review · frozen desktop',20,20);
+      x.fillStyle='#ffffff';x.fillRect(80,92,c.width-160,c.height-170);x.fillStyle='#304c5d';x.font='600 26px -apple-system';x.fillText('Project overview',112,138);
+      x.font='15px -apple-system';x.fillStyle='#718391';x.fillText('Review findings, annotate and share.',112,166);
+      for(let i=0;i<3;i++){x.fillStyle=['#dbece8','#e0e7f5','#eee3d5'][i];x.fillRect(112+i*205,200,180,84);x.fillStyle='#38555f';x.font='600 23px -apple-system';x.fillText(['86%','24','12'][i],130+i*205,236);x.font='12px -apple-system';x.fillText(['Completion','Contributors','Validated ideas'][i],130+i*205,264)}
+      ${background === 'included' ? "x.fillStyle='#1b2630';x.fillRect(460,310,350,230);x.fillStyle='#a7bbca';x.font='600 14px -apple-system';x.fillText('AgentMux',480,340);x.fillStyle='#e4edf3';x.font='15px -apple-system';x.fillText('Capture includes this workbench',480,385);x.fillStyle='#344955';x.fillRect(480,420,310,66);x.fillStyle='#a9bdca';x.font='13px -apple-system';x.fillText('Draft remains in its original input',495,452);" : "x.fillStyle='#718391';x.font='14px -apple-system';x.fillText('Desktop without AgentMux windows',112,370);"}
+      return c.toDataURL('image/png')})()`)
+    sources.set(background + ':' + display.id, { mimeType: 'image/png', dataUrl, width, height, byteLength: Buffer.byteLength(dataUrl.split(',')[1]!, 'base64') })
+  }
+  drawing.destroy()
+}
+async function open(background: CaptureBackground, expandable = true) {
+  const before = new Set(BrowserWindow.getAllWindows()), start = performance.now(), firstGrab = receipt.grabs.length
+  const outcome = surface.present({ background, attachToDraft: false, expandable, returnFocus: false,
+    complete: async (image, source, engine) => { deliveries.push({ image, source, engine }) } })
+  void outcome.catch(error => { receipt.captureError = String(error) })
+  const overlays = await waitFor('production overlays allocated', async () => {
+    const fresh = BrowserWindow.getAllWindows().filter(candidate => !before.has(candidate))
+    return fresh.length === displays.length ? fresh : null
+  })
+  current = overlays.find(window => window.getBounds().x === 0)!
+  for (const overlay of overlays) {
+    await waitFor('every production overlay painted and shown', async () => {
+      try { return overlay.isVisible() && await overlay.webContents.executeJavaScript(`document.querySelector('img')?.naturalWidth>0&&document.querySelector('canvas')?.width>0`) } catch { return false }
+    })
+    const info = await overlay.webContents.executeJavaScript(`window.captureSurface.load()`)
+    assert.equal(info.background, background)
+    assert.equal(await overlay.webContents.executeJavaScript(`document.querySelector('img').src`), sources.get(background + ':' + info.displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
+  }
+  current.webContents.debugger.attach('1.3')
+  current.webContents.on('console-message', event => process.stdout.write('renderer: '+event.message+'\n'))
+  await evaluate(`window.captureEvents=[];for(const type of ['pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button}),true)`)
+  await settle()
+  assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'capture never receives the full application bridge')
+  assert.equal(host.getOpacity(), 0, 'the visible host remains faded while editing')
+  const grabs = receipt.grabs.slice(firstGrab)
+  assert.deepEqual(grabs.map((row: any) => row.includeHostWindows), [true, false], 'one included and one excluded exposure only')
+  assert.deepEqual(grabs.map((row: any) => row.opacity), [0.65, 0], 'included freezes before fading; excluded freezes after fading')
+  receipt.cases.push({ label: 'opened-' + background, elapsedMs: performance.now()-start, displays: overlays.length, grabs })
+  return { outcome, overlays }
+}
+async function run() {
+  await app.whenReady()
+  screen.getAllDisplays = (() => displays) as typeof screen.getAllDisplays
+  screen.getDisplayNearestPoint = (() => displays[0]) as typeof screen.getDisplayNearestPoint
+  screen.getCursorScreenPoint = () => ({ x: 200, y: 150 })
+  await sourceImages()
+  host = new BrowserWindow({ width: 640, height: 460, show: true, webPreferences: { sandbox: true, contextIsolation: true } })
+  await host.loadURL('data:text/html,<body style="font:18px -apple-system;padding:32px;background:%231b2630;color:%23e4edf3"><h2>AgentMux test workbench</h2><p>Original window opacity: 65%</p>')
+  host.setOpacity(0.65)
+  surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
+    const background: CaptureBackground = includeHostWindows ? 'included' : 'excluded', capturedAt = Date.now()
+    receipt.grabs.push({ includeHostWindows, opacity: host.getOpacity(), capturedAt, observedMs: performance.now() })
+    return { capturedAt, displays: displays.map(display => {
+      const image = sources.get(background + ':' + display.id)!
+      return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0,
+        windows: includeHostWindows ? [{ windowId: 1, frame: { x: display.bounds.x + 460, y: 310, width: 350, height: 230 } }] : [],
+        png: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, engine: 'controlled-' + background }
+    }) }
+  } }), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
+    pin: async () => { throw new Error('Pin is outside this bounded capture fixture.') }, copyText: async () => {}, returnFocus: () => {} })
+  editor = new SystemScreenshotEditor(() => ({ terminalTheme: 'graphite', appAppearance: 'dark' }), {
+    pin: async () => { throw new Error('Pin is outside this fixture.') }, inspectPin: async () => { throw new Error('No pin operation.') }, copyText: async () => {}
+  })
+  for (const background of ['included', 'excluded'] as const) {
+    const { outcome, overlays } = await open(background)
+    await shot('opened-' + background)
+    if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
+    assert.ok(await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`), 'actual drag created a crop: '+JSON.stringify(await evaluate('window.captureEvents')))
+    await click('Rectangle'); await drag(180, 300, 230, 40)
+    await shot('marked-' + background)
+    const before = deliveries.length
+    await click('Done'); assert.deepEqual(await outcome, { state: 'completed' })
+    assert.equal(deliveries.length, before + 1, 'Done invokes the production completion exactly once')
+    const delivered = deliveries.at(-1), bitmap = nativeImage.createFromDataURL(delivered.image.dataUrl), pixels = bitmap.toBitmap()
+    assert.deepEqual(bitmap.getSize(), { width: 690, height: 380 }, 'the shared composition actually crops the selected pixels')
+    let marked = 0
+    for (let offset=0;offset<pixels.length;offset+=4) if (pixels[offset+2]>180&&pixels[offset+1]<130&&pixels[offset]<130&&pixels[offset+3]>245) marked++
+    assert.ok(marked > 900, 'actual colored Rectangle stroke survives the final PNG: '+marked)
+    assert.equal(delivered.engine, 'controlled-' + background)
+    assert.equal(delivered.source.capturedAt, receipt.grabs.slice(-2).find((row: any) => row.includeHostWindows === (background === 'included')).capturedAt)
+    assert.deepEqual(delivered.source.rect, { x: 130, y: 178, width: 690, height: 380 })
+    assert.ok(overlays.every(window => window.isDestroyed()), 'a confirmed output destroys only this capture overlays')
+    assert.equal(host.getOpacity(), 0.65, 'Done restores the original host opacity')
+    await writeFile(join(out, 'composed-' + background + '.png'), bitmap.toPNG())
+    receipt.cases.push({ label: 'composed-' + background, size: bitmap.getSize(), markedPixels: marked, source: delivered.source, engine: delivered.engine })
+  }
+  const cancelled = await open('excluded')
+  await key('Escape', 'Escape', 27)
+  assert.deepEqual(await cancelled.outcome, { state: 'cancelled' })
+  assert.ok(cancelled.overlays.every(window => window.isDestroyed()))
+  assert.equal(host.getOpacity(), 0.65, 'Cancel restores each original opacity')
+  receipt.cases.push({ label: 'cancel-restores-host' })
+
+  const expanded = await open('included')
+  if (!await evaluate(`document.querySelector('.image-annotation-editor__capture-bar')!==null`)) await drag(130, 178, 690, 380)
+  await click('Rectangle'); await drag(180, 300, 230, 40)
+  const captureWindow = current
+  await key('e', 'KeyE', 69, 4)
+  const expandedOutcome = await expanded.outcome
+  assert.equal(expandedOutcome.state, 'expanded')
+  if (expandedOutcome.state !== 'expanded') throw new Error('The actual Command E must hand off its document')
+  assert.equal(expandedOutcome.handoff.shapes.length, 1, 'the actual rectangle remains editable across the handoff')
+  assert.equal(expandedOutcome.image.dataUrl, sources.get('included:1')!.dataUrl, 'the handoff retains the current full frozen source')
+  assert.ok(expanded.overlays.every(window => window.isDestroyed()))
+  const beforeEditors = new Set(BrowserWindow.getAllWindows())
+  const editing = editor.edit(expandedOutcome.image, false, async image => { deliveries.push({ image, source: expandedOutcome.source, engine: 'expanded' }) },
+    { source: expandedOutcome.source, initialState: expandedOutcome.handoff, initialTool: expandedOutcome.handoff.tool })
+  void editing.catch(error => { receipt.editorError = String(error) })
+  current = await waitFor('production expanded editor', async () => BrowserWindow.getAllWindows().find(window => !beforeEditors.has(window)))
+  current.webContents.debugger.attach('1.3')
+  await waitFor('expanded editor decoded', async () => { try { return await evaluate(`document.querySelector('img')?.naturalWidth>0&&[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`) } catch { return false } })
+  await shot('expanded-included')
+  assert.notEqual(current, captureWindow)
+  assert.equal(host.getOpacity(), 0.65)
+  await click('Copy'); await editing
+  assert.deepEqual({ width: deliveries.at(-1).image.width, height: deliveries.at(-1).image.height }, { width: 690, height: 380 })
+  current.destroy()
+  receipt.cases.push({ label: 'actual-command-e-production-window-editor-preserves-rectangle-and-crop' })
+  surface.dispose(); editor.dispose(); host.destroy()
+  assert.equal(BrowserWindow.getAllWindows().length, 0)
+  assert.equal(receipt.timings.length, 4)
+  assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => typeof value==='number'&&value>=0)))
+  receipt.passed = true
+}
+void run().catch(async error => {
+  receipt.failure = { message: error.message, stack: error.stack }
+  process.stderr.write(JSON.stringify(receipt.failure) + '\n')
+  try { if (current && !current.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); await shot('failure') } } catch {}
+}).finally(async () => {
+  surface?.dispose(); editor?.dispose()
+  for (const window of BrowserWindow.getAllWindows()) window.destroy()
+  await writeFile(join(out, 'native.json'), JSON.stringify(receipt, null, 2))
+  app.exit(receipt.passed ? 0 : 1)
+})

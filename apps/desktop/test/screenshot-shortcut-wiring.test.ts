@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
 }))
 import '../src/preload/index'
 import { registerScreenshotShortcut } from '../src/main/screenshot-shortcut'
-import { SCREENSHOT_SHORTCUT_ACCELERATOR } from '../src/shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUT_ACCELERATOR, SCREENSHOT_SHORTCUT_ALTERNATE, screenshotShortcutAccelerator } from '../src/shared/screenshot-shortcut'
 
 const homes: string[] = []
 afterEach(async () => { bridge.listeners.clear(); bridge.invoke.mockReset(); await Promise.all(homes.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -93,7 +93,7 @@ it('the actual Main callback captures and copies with no Composer, without a Ren
   expect(f.contents.send).not.toHaveBeenCalled()
   expect(await bridge.api!.ui.screenshotShortcutStatus()).toMatchObject({ state: 'registered', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR })
   f.screenshotShortcut.dispose()
-  expect(f.unregister).toHaveBeenCalledExactlyOnceWith(SCREENSHOT_SHORTCUT_ACCELERATOR)
+  expect(f.unregister.mock.calls).toEqual([[SCREENSHOT_SHORTCUT_ACCELERATOR], [screenshotShortcutAccelerator(SCREENSHOT_SHORTCUT_ALTERNATE.chord)]])
 })
 
 it('the Main native composition and actual preload retain the explicit Capture button destination', async () => {

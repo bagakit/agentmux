@@ -11,7 +11,7 @@ const clientExports = JSON.parse(readFileSync(resolve(client, 'package.json'), '
 // Renderer browser exports are the production source contract; Node's dist branch is not this candidate.
 const clientAliases = Object.entries(clientExports).sort(([left], [right]) => right.length - left.length).flatMap(([key, spec]) => {
   const target = typeof spec === 'string' ? spec : (spec as { browser?: string }).browser
-  if (!target?.startsWith('./src/')) return []
+  if (!target || !(target.startsWith('./src/') || target.startsWith('./brand/'))) return []
   const name = '@agentmux/client-ui' + (key === '.' ? '' : key.slice(1))
   const pattern = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\*', '(.+)')
   return [{ find: new RegExp(`^${pattern}$`), replacement: resolve(client, target).replace('*', '$1') }]

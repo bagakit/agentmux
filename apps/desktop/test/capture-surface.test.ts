@@ -5,7 +5,7 @@ import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT } from '../src/shared/ca
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 
 const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], workbench: [] as any[],
-  displays: [] as Array<{ id: number; bounds: { x: number; y: number; width: number; height: number }; displayFrequency?: number }>, cursor: { x: 0, y: 0 },
+  displays: [] as Array<{ id: number; bounds: { x: number; y: number; width: number; height: number }; displayFrequency?: number; scaleFactor?: number }>, cursor: { x: 0, y: 0 },
   screenListeners: new Map<string, Array<(...args: any[]) => void>>(), appListeners: new Map<string, Array<() => void>>(), focus: vi.fn(),
   focused: null as unknown, saves: [] as unknown[] }))
 vi.mock('electron', async () => {
@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   electron.handlers.clear(); electron.windows = []; electron.workbench = []; electron.screenListeners.clear(); electron.appListeners.clear(); electron.saves = []
   electron.focus.mockClear(); electron.focused = null; electron.cursor = { x: -1, y: 0 }
-  electron.displays = [{ id: 1, bounds: main }, { id: 7, bounds: side }]
+  electron.displays = [{ id: 1, bounds: main, scaleFactor: 2 }, { id: 7, bounds: side, scaleFactor: 1 }]
   ports = makePorts()
   surface = new CaptureSurface(ports)
 })
@@ -77,13 +77,13 @@ afterEach(() => { surface.dispose(); vi.useRealTimers() })
 function session(overrides: Partial<CaptureSurfaceSession> = {}): CaptureSurfaceSession {
   return { attachToDraft: true, expandable: true, returnFocus: false, complete: vi.fn(async () => {}), ...overrides }
 }
-async function opened(value = session()) {
+async function opened(value = session(), settle = 0) {
   const before = electron.windows.length, outcome = surface.present(value)
-  await vi.advanceTimersByTimeAsync(0)
+  await vi.advanceTimersByTimeAsync(settle)
   // Only this capture's overlays; an earlier capture's windows are closed.
   const overlays = await Promise.all(electron.windows.slice(before).map(async window => {
     const call = (action: string, params: Record<string, unknown> = {}, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
-      electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, action, { requestId: input.requestId, ...params })
+      electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, action, { requestId: input.requestId, background: input.background, ...params })
     const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'load')
     return { window, input, call }
   }))
@@ -105,14 +105,14 @@ it('captures every display once and opens one transparent overlay per display at
     expect(window.setBounds, 'bounds are set again after the first paint').toHaveBeenLastCalledWith(bounds)
     expect(window.setBounds).toHaveBeenCalledTimes(2)
   }
-  expect(overlays[0]!.input).toMatchObject({ frame: main, scale: 2, attachToDraft: true, expandable: true, image: { width: 8, height: 6 } })
+  expect(overlays[0]!.input).toMatchObject({ frame: main, scale: 2, attachToDraft: true, expandable: true, background: 'included', backgrounds: { included: { image: { width: 8, height: 6 } } } })
 })
 
 it('gives each overlay its windows in frozen-frame pixels, clipped to that display, front to back', async () => {
   const { overlays } = await opened()
-  expect(overlays[0]!.input.windows, 'scale 2 from the main origin; the across window is clipped and the one past the edge is dropped')
+  expect(overlays[0]!.input.backgrounds.included.windows, 'scale 2 from the main origin; the across window is clipped and the one past the edge is dropped')
     .toEqual([{ x: 2, y: 1, width: 4, height: 2 }, { x: 0, y: 0, width: 4, height: 2 }])
-  expect(overlays[1]!.input.windows, 'scale 1 from the side origin, clipped at its right and bottom').toEqual([{ x: 1, y: 0, width: 1, height: 2 }])
+  expect(overlays[1]!.input.backgrounds.included.windows, 'scale 1 from the side origin, clipped at its right and bottom').toEqual([{ x: 1, y: 0, width: 1, height: 2 }])
 })
 
 it('shows every overlay together only after each one presented, then focuses the display under the pointer', async () => {
@@ -197,7 +197,7 @@ it('expand ends the surface with the full frozen frame, the selection and the ma
   const handoff = { shapes: [{ id: 'r', kind: 'rect' }], crop: selection, tool: 'rect' }
   await overlays[0]!.call('expand', { handoff })
   expect(overlays.every(row => row.window.dead), 'the window editor replaces every overlay').toBe(true)
-  expect(await outcome).toEqual({ state: 'expanded', image: overlays[0]!.input.image, handoff, delivered: expect.any(Function),
+  expect(await outcome).toEqual({ state: 'expanded', image: overlays[0]!.input.backgrounds.included.image, handoff, delivered: expect.any(Function),
     source: { rect: { x: 1, y: 1, width: 2, height: 1 }, scale: 2, capturedAt: 1_700_000_000_000 } })
   expect(overlays.every(row => row.window.dead)).toBe(true)
   expect(ports.returnFocus, 'the window editor takes over focus').not.toHaveBeenCalled()
@@ -216,8 +216,8 @@ it('a display without pixels shows its issue, cannot select, and the others stay
   issued.displays[1] = { displayId: 7, frame: side, scale: 1, issue: 'macOS did not confirm this display' } as never
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => issued) })
   const { overlays } = await opened()
-  expect(overlays[1]!.input).toMatchObject({ issue: 'macOS did not confirm this display' })
-  expect(overlays[1]!.input.image).toBeUndefined()
+  expect(overlays[1]!.input).toMatchObject({ backgrounds: { included: { issue: 'macOS did not confirm this display' } } })
+  expect(overlays[1]!.input.backgrounds.included.image).toBeUndefined()
   expect(await overlays[1]!.call('select')).toBe(false)
   expect(await overlays[0]!.call('select')).toBe(true)
 })
@@ -249,15 +249,16 @@ it('fades visible AgentMux windows out of the grab and restores them when the su
   const workbench = shown(1), pin = shown(0.4), clear = shown(0)
   const hidden = Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => false, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() })
   electron.workbench = [workbench, pin, clear, hidden]; electron.focused = workbench
-  let opacityAtGrab: number[] = []
-  const captureDisplays = vi.fn(async () => { opacityAtGrab = [workbench.opacity, pin.opacity]; return frames() })
+  const opacityAtGrab: number[][] = []
+  const captureDisplays = vi.fn(async () => { opacityAtGrab.push([workbench.opacity, pin.opacity]); return frames() })
   ports.native.mockReturnValue({ captureDisplays })
   const outcome = surface.present(session())
   await vi.advanceTimersByTimeAsync(33)
-  expect(captureDisplays, 'the compositor gets two 60 Hz frames after the fade before the grab').not.toHaveBeenCalled()
+  expect(captureDisplays, 'the included exposure happens before fading').toHaveBeenCalledOnce()
   await vi.advanceTimersByTimeAsync(1)
-  expect(captureDisplays, 'and no more than that').toHaveBeenCalledOnce()
-  expect(opacityAtGrab, 'faded before the grab').toEqual([0, 0])
+  expect(captureDisplays, 'the excluded exposure waits only two compositor frames').toHaveBeenCalledTimes(2)
+  expect(opacityAtGrab, 'each exposure has the right host opacity').toEqual([[1, 0.4], [0, 0]])
+  expect(captureDisplays.mock.calls).toEqual([[{ includeHostWindows: true }], [{ includeHostWindows: false }]])
   expect(hidden.setOpacity, 'a hidden window is not touched').not.toHaveBeenCalled()
   expect(clear.setOpacity, 'a window already at opacity 0 is not touched').not.toHaveBeenCalled()
   await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: electron.windows[0]!.webContents, senderFrame: electron.windows[0]!.webContents.mainFrame }, 'cancel',
@@ -282,13 +283,13 @@ it('grabs at once when no AgentMux window was on screen, and waits two frames of
   expect(captureDisplays, 'nothing faded, so the grab does not wait').toHaveBeenCalledOnce()
   surface.dispose(); await first
   surface = new CaptureSurface(ports)
-  electron.displays = [{ id: 1, bounds: main, displayFrequency: 120 }, { id: 7, bounds: side, displayFrequency: 30 }]
+  electron.displays = [{ id: 1, bounds: main, scaleFactor: 2, displayFrequency: 120 }, { id: 7, bounds: side, scaleFactor: 1, displayFrequency: 30 }]
   electron.workbench = [quiet(true, false, 1)]
   const second = surface.present(session())
   await vi.advanceTimersByTimeAsync(66)
-  expect(captureDisplays, 'a 30 Hz display needs two of its own frames').toHaveBeenCalledOnce()
+  expect(captureDisplays, 'only the included exposure is ready before two 30 Hz frames').toHaveBeenCalledTimes(2)
   await vi.advanceTimersByTimeAsync(1)
-  expect(captureDisplays).toHaveBeenCalledTimes(2)
+  expect(captureDisplays).toHaveBeenCalledTimes(3)
   surface.dispose(); await second
 })
 
@@ -343,8 +344,8 @@ it('the public selection returns the processed selection as captured, or cancell
   const handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!, input = await handler(event, 'load')
   expect(input.expandable).toBe(false)
   await handler(event, 'select', { requestId: input.requestId })
-  await expect(handler(event, 'expand', { requestId: input.requestId, handoff: { shapes: [], crop: selection, tool: 'rect' } })).rejects.toThrow('returns its selection directly')
-  await handler(event, 'finish', { requestId: input.requestId, image: result, selection })
+  await expect(handler(event, 'expand', { requestId: input.requestId, background: input.background, handoff: { shapes: [], crop: selection, tool: 'rect' } })).rejects.toThrow('returns its selection directly')
+  await handler(event, 'finish', { requestId: input.requestId, background: input.background, image: result, selection })
   expect(await pending).toEqual({ state: 'captured', engine: 'fixture-engine', selectionRect: { x: 1, y: 1, width: 2, height: 1 },
     screenshot: { format: 'png', data: result.dataUrl.split(',')[1], width: 4, height: 2, scale: 2 } })
   const cancelled = surface.captureSelection(false)
@@ -421,11 +422,11 @@ it('cancel, expand, Save PNG, Pin and a failed delivery remember nothing', async
 it.each([
   ['the display moved', { id: 1, bounds: { ...main, x: 4 } }, { ...main, x: 4 }, 2],
   ['the display resized', { id: 1, bounds: { ...main, width: 5 } }, { ...main, width: 5 }, 2],
-  ['the display scale changed', { id: 1, bounds: main }, main, 1],
+  ['the display scale changed', { id: 1, bounds: main, scaleFactor: 2 }, main, 1],
   ['the display id changed', { id: 3, bounds: main }, main, 2]
 ] as const)('a changed display layout gives no remembered selection: %s', async (_case, display, frame, scale) => {
   await delivered()
-  electron.displays = [display, { id: 7, bounds: side }]
+  electron.displays = [{ ...display, scaleFactor: scale }, { id: 7, bounds: side, scaleFactor: 1 }]
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => ({ ...frames(), displays: [
     { displayId: display.id, frame, scale, windows: [], png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
     frames().displays[1]!] })) })
@@ -441,7 +442,7 @@ it('the public selection capture uses the same remembered selection', async () =
   const handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!, input = await handler(event, 'load')
   expect(input.initialCrop).toEqual(selection)
   await handler(event, 'select', { requestId: input.requestId })
-  await handler(event, 'finish', { requestId: input.requestId, image: result, selection: { x: 0, y: 0, width: 4, height: 4 } })
+  await handler(event, 'finish', { requestId: input.requestId, background: input.background, image: result, selection: { x: 0, y: 0, width: 4, height: 4 } })
   expect(window.dead, 'the delivery ended the capture').toBe(true)
   expect(await pending).toMatchObject({ state: 'captured', selectionRect: { x: 0, y: 0, width: 2, height: 2 } })
   const { overlays } = await opened()
@@ -454,4 +455,79 @@ it('the display that carries the remembered selection takes the keys', async () 
   await overlays[0]!.call('presented'); await overlays[1]!.call('presented')
   expect(overlays[0]!.window.focus, 'Enter and the arrows reach the remembered selection, not the display under the pointer').toHaveBeenCalledOnce()
   expect(overlays[1]!.window.focus).not.toHaveBeenCalled()
+})
+
+it('the chosen initial background delivers its own pixels, timestamp and engine', async () => {
+  const first = frames(), second = frames(); second.capturedAt += 50
+  second.displays[0] = { ...second.displays[0]!, png: png(8, 6).toString('base64'), engine: 'excluded-engine', windows: [] }
+  // Make a visible host so both physical exposures are needed.
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 0.7, setOpacity: vi.fn() }]
+  const captureDisplays = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+  ports.native.mockReturnValue({ captureDisplays })
+  const value = session({ background: 'excluded' }), outcome = surface.present(value)
+  await vi.advanceTimersByTimeAsync(34)
+  const window = electron.windows[0]!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+  const invoke = (action: string, params: unknown = {}) => electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, action, params)
+  const input = await invoke('load')
+  expect(input.background).toBe('excluded')
+  expect(input.backgrounds.included.windows).not.toEqual(input.backgrounds.excluded.windows)
+  await invoke('select', { requestId: input.requestId })
+  await expect(invoke('finish', { requestId: input.requestId, background: 'included', image: result, selection })).rejects.toThrow('background changed')
+  expect(value.complete).not.toHaveBeenCalled()
+  await invoke('finish', { requestId: input.requestId, background: 'excluded', image: result, selection })
+  expect(value.complete).toHaveBeenCalledExactlyOnceWith(result, expect.objectContaining({ capturedAt: second.capturedAt }), 'excluded-engine')
+  expect(await outcome).toEqual({ state: 'completed' })
+})
+
+it('a failed requested exposure preserves the original mode and offers the other usable background', async () => {
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockRejectedValueOnce(new Error('first exposure denied')).mockResolvedValueOnce(frames()) })
+  const outcome = surface.present(session())
+  void outcome.catch(() => {})
+  await vi.advanceTimersByTimeAsync(34)
+  expect(electron.windows, 'the healthy exposure still opens its overlays').toHaveLength(2)
+  const window = electron.windows[0]!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+  const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load')
+  expect(input.background, 'a failed source never silently replaces the requested exposure').toBe('included')
+  expect(await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'select', { requestId: input.requestId })).toBe(false)
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'switch-background', { requestId: input.requestId })
+  expect(window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, { kind: 'background', background: 'excluded' })
+  expect(input.backgrounds.included).toMatchObject({ issue: 'first exposure denied' })
+  expect(input.backgrounds.excluded.image).toBeDefined()
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'cancel', { requestId: input.requestId })
+  expect(await outcome).toEqual({ state: 'cancelled' })
+})
+
+it('a cancelled older delivery cannot overwrite a newer capture selection', async () => {
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const first = await opened(session({ complete: async () => held }))
+  await first.overlays[0]!.call('select')
+  const late = first.overlays[0]!.call('finish', { image: result, selection })
+  await first.overlays[0]!.call('cancel'); await first.outcome
+  const newer = { x: 0, y: 0, width: 4, height: 2 }
+  await delivered(0, newer)
+  release(); await late
+  const next = await opened()
+  expect(next.overlays[0]!.input.initialCrop, 'only the current completed capture owns remembered selection').toEqual(newer)
+})
+
+it.each(['missing', 'scale'] as const)('rejects a %s display in the current frozen layout without leaving faded windows', async kind => {
+  if (kind === 'missing') {
+    const captured = frames(); captured.displays.pop()
+    ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => captured) })
+  } else electron.displays[0]!.scaleFactor = 1
+  await expect(surface.present(session())).rejects.toMatchObject({ code: 'display_configuration_changed' })
+  expect(electron.windows, 'mismatched frames never become overlays').toHaveLength(0)
+})
+
+it('a locked issue display cannot replace the selected display background', async () => {
+  const captured = frames(); captured.displays[1] = { ...captured.displays[1]!, png: undefined, width: undefined, height: undefined, engine: undefined, issue: 'side display unavailable' } as never
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockResolvedValueOnce(captured).mockResolvedValueOnce(frames()) })
+  const { overlays } = await opened(session(), 34)
+  await overlays[0]!.call('select')
+  await overlays[1]!.call('switch-background')
+  expect(overlays[1]!.window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'notice' }))
+  expect(overlays[0]!.window.webContents.send).not.toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'background' }))
 })

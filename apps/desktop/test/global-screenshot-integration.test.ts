@@ -23,7 +23,7 @@ vi.mock('electron', async () => {
   return {
     nativeTheme: { shouldUseDarkColors: true },
     app: { focus: vi.fn(), once: vi.fn(), removeListener: vi.fn() },
-    screen: { getAllDisplays: () => [{ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } }], getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+    screen: { getAllDisplays: () => [{ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, scaleFactor: 1 }], getCursorScreenPoint: () => ({ x: 0, y: 0 }),
       getDisplayNearestPoint: () => ({ id: 1 }), getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }), on: vi.fn(), removeListener: vi.fn() },
     ipcMain: {
       handle: (channel: string, handler: (...args: any[]) => Promise<any>) => electron.handlers.set(channel, handler),
@@ -81,12 +81,12 @@ async function fixture(focused = true, fromOtherApp = false) {
   owners.push(editor, surface)
   const capture = new ScreenCapture({ home, native: () => native, appActive: () => !fromOtherApp, edit: editor.edit.bind(editor), present: surface.present.bind(surface), reportIssue })
   const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument: () => workbench,
-    capture: capture.capture.bind(capture), remindPending: () => {}, reportIssue } as never)
+    capture: (attach, background) => capture.capture(attach, 'selection', {}, background), remindPending: () => {}, reportIssue } as never)
   async function overlay(index = 0) {
     await vi.waitFor(() => expect(electron.windows.length).toBeGreaterThan(index))
     const window = electron.windows[index]
     const invoke = (action: string, params?: unknown) => electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(
-      { sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, params)
+      { sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, params && typeof params === 'object' ? { background: input.background, ...params } : params)
     const input: CaptureSurfaceInput = await invoke('load')
     await invoke('select', { requestId: input.requestId })
     return { window, invoke, input }
@@ -108,7 +108,7 @@ it('Done on the overlay delivers its processed selection through clipboard, dura
   const f = await fixture(), pending = f.action.run(), current = await f.overlay()
   expect(f.native.captureDisplays).toHaveBeenCalledOnce()
   expect(f.native.captureScreenshot, 'no native picker').not.toHaveBeenCalled()
-  expect(current.input).toMatchObject({ image: original, attachToDraft: true })
+  expect(current.input).toMatchObject({ backgrounds: { included: { image: original } }, attachToDraft: true })
   expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
   expect(f.receiver.complete).not.toHaveBeenCalled()
 
@@ -138,7 +138,7 @@ it('Done on the overlay delivers its processed selection through clipboard, dura
 
 it('a clipboard-only global screenshot copies the processed selection with no draft or saved image', async () => {
   const f = await fixture(false), pending = f.action.run(), current = await f.overlay()
-  expect(current.input).toMatchObject({ image: original, attachToDraft: false })
+  expect(current.input).toMatchObject({ backgrounds: { included: { image: original } }, attachToDraft: false })
   expect(f.frame.executeJavaScript).not.toHaveBeenCalled()
   expect(await current.invoke('finish', { requestId: current.input.requestId, image: edited, selection })).toEqual({ status: 'completed' })
   // Checked before waiting, so a delivery that never ends the surface fails here instead of timing out.
@@ -194,7 +194,7 @@ it('Retake from the window editor captures again for the same draft and returns 
   const cancelled = editor.invoke('retake', { requestId: editor.input.requestId })
   const second = await f.overlay(2)
   expect(editor.window.opacity, 'the old editor steps out of the new frozen frame').toBe(0)
-  expect(f.native.captureDisplays, 'a new frozen frame').toHaveBeenCalledTimes(2)
+  expect(f.native.captureDisplays, 'a retake with the visible editor freezes both backgrounds').toHaveBeenCalledTimes(3)
   expect(second.input, 'the same consumer: the original draft and ⌘E').toMatchObject({ attachToDraft: true, expandable: true })
   await second.invoke('cancel', { requestId: second.input.requestId })
   expect(await cancelled).toEqual({ status: 'cancelled' })

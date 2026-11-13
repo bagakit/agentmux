@@ -1,38 +1,54 @@
 import { expect, it, vi } from 'vitest'
-import { SCREENSHOT_SHORTCUT, SCREENSHOT_SHORTCUT_ACCELERATOR } from '../src/shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUTS, SCREENSHOT_SHORTCUT_ACCELERATOR, screenshotShortcutAccelerator } from '../src/shared/screenshot-shortcut'
 import { registerScreenshotShortcut } from '../src/main/screenshot-shortcut'
 import { SHORTCUT_BINDINGS, chordForPlatform } from '../src/renderer/src/lib/shortcut-registry'
 
-it('uses the shared declaration for one macOS registration and releases only its successful binding', () => {
+const included = SCREENSHOT_SHORTCUT_ACCELERATOR, excluded = screenshotShortcutAccelerator(SCREENSHOT_SHORTCUTS[1].chord)
+
+it('uses the shared declarations for both macOS registrations and releases only its successful bindings', () => {
   const register = vi.fn((_accelerator: string, _callback: () => void) => true), unregister = vi.fn(), request = vi.fn()
   const owner = registerScreenshotShortcut({ platform: 'darwin', shortcuts: { register, unregister }, request })
-  expect(SCREENSHOT_SHORTCUT.id).toBeTruthy()
-  expect(SCREENSHOT_SHORTCUT.label).toBeTruthy()
-  expect(SCREENSHOT_SHORTCUT_ACCELERATOR).toBe('Command+Shift+2')
-  expect(register).toHaveBeenCalledExactlyOnceWith(SCREENSHOT_SHORTCUT_ACCELERATOR, expect.any(Function))
-  expect(owner.status).toMatchObject({ state: 'registered', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR })
+  expect(included).toBe('Command+Shift+2')
+  expect(excluded).toBe('Command+Alt+Shift+2')
+  expect(register.mock.calls.map(call => call[0])).toEqual([included, excluded])
+  expect(owner.status).toMatchObject({ state: 'registered', accelerator: included, alternate: { state: 'registered', accelerator: excluded } })
   expect(request).not.toHaveBeenCalled()
-  register.mock.calls[0]![1]()
-  expect(request).toHaveBeenCalledOnce()
+  register.mock.calls[0]![1](); register.mock.calls[1]![1]()
+  expect(request.mock.calls).toEqual([['included'], ['excluded']])
   owner.dispose(); owner.dispose()
-  expect(unregister).toHaveBeenCalledExactlyOnceWith(SCREENSHOT_SHORTCUT_ACCELERATOR)
+  expect(unregister.mock.calls).toEqual([[included], [excluded]])
 })
 
-it.each(['declined', 'threw'] as const)('keeps a %s registration local and never unregisters another application binding', outcome => {
-  const register = vi.fn((_accelerator: string, _callback: () => void) => { if (outcome === 'threw') throw new Error('Registration transport unavailable'); return false })
+it.each(['declined', 'threw'] as const)('keeps a %s alternate registration local while the default shortcut stays usable', outcome => {
+  const register = vi.fn((accelerator: string, _callback: () => void) => {
+    if (accelerator === excluded) { if (outcome === 'threw') throw new Error('Registration transport unavailable'); return false }
+    return true
+  })
   const unregister = vi.fn(), request = vi.fn()
   const owner = registerScreenshotShortcut({ platform: 'darwin', shortcuts: { register, unregister }, request })
-  expect(owner.status).toMatchObject({ state: 'unavailable', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR })
-  expect(owner.status.message).toBeTruthy()
-  owner.dispose()
-  expect(unregister).not.toHaveBeenCalled()
-  expect(request).not.toHaveBeenCalled()
+  expect(owner.status).toMatchObject({ state: 'registered', accelerator: included, alternate: { state: 'unavailable', accelerator: excluded } })
+  expect(owner.status.alternate.message).toContain('Capture button remains available')
+  register.mock.calls[0]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('included')
+  owner.dispose(); expect(unregister.mock.calls).toEqual([[included]])
 })
 
-it('does not register an unavailable screenshot capability on another platform', () => {
+it.each(['declined', 'threw'] as const)('keeps a %s default registration local while the alternate shortcut stays usable', outcome => {
+  const register = vi.fn((accelerator: string, _callback: () => void) => {
+    if (accelerator === included) { if (outcome === 'threw') throw new Error('Registration transport unavailable'); return false }
+    return true
+  })
+  const unregister = vi.fn(), request = vi.fn()
+  const owner = registerScreenshotShortcut({ platform: 'darwin', shortcuts: { register, unregister }, request })
+  expect(owner.status).toMatchObject({ state: 'unavailable', accelerator: included, alternate: { state: 'registered', accelerator: excluded } })
+  expect(owner.status.message).toContain('Capture button remains available')
+  register.mock.calls[1]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('excluded')
+  owner.dispose(); expect(unregister.mock.calls).toEqual([[excluded]])
+})
+
+it('does not register unavailable system shortcuts on another platform', () => {
   const register = vi.fn(() => true), unregister = vi.fn(), request = vi.fn()
   const owner = registerScreenshotShortcut({ platform: 'win32', shortcuts: { register, unregister }, request })
-  expect(owner.status.state).toBe('unsupported')
+  expect(owner.status.state).toBe('unsupported'); expect(owner.status.alternate.state).toBe('unsupported')
   owner.dispose()
   expect(register).not.toHaveBeenCalled(); expect(unregister).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled()
 })

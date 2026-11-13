@@ -408,7 +408,7 @@ const specifications = {
       find: '      if (!await claim()) return false\n', replace: '      await claim()\n', test: overlay,
       consumer: 'a remembered selection whose claim another display won outputs nothing and locks this display', failure: /a lost claim delivers nothing/ },
     { label: 'capture-remembered-expand-unclaimed', source: overlayHost,
-      find: 'void claim().then(owned => owned ? api.expand(input.requestId, handoff) : undefined)', replace: 'void api.expand(input.requestId, handoff)', test: overlay,
+      find: 'void claim().then(owned => owned ? api.expand(input.requestId, background, handoff) : undefined)', replace: 'void api.expand(input.requestId, background, handoff)', test: overlay,
       consumer: 'a remembered selection whose claim another display won outputs nothing and locks this display', failure: /Command E claims before the marks move/ },
     { label: 'capture-claim-asked-per-output', source: overlayHost,
       find: '    claimed.current ??= api.select(', replace: '    claimed.current = api.select(', test: overlay,
