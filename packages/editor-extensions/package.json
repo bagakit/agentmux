@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "sideEffects": [
-    "**/*.css"
+    "**/*.css",
+    "./src/book-reader/runtime.ts"
   ],
   "exports": {
     ".": "./src/catalog.ts",
@@ -19,7 +20,10 @@
     "./format-file-bytes": "./src/format-file-bytes.ts",
     "./excalidraw-icons": "./src/ui/excalidraw-icons.ts",
     "./build/*": "./src/build/*.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./book-reader": "./src/book-reader/BookReader.tsx",
+    "./book-reader/runtime": "./src/book-reader/runtime.ts",
+    "./book-reader/protocol": "./src/book-reader/protocol.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",

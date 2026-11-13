@@ -29,7 +29,7 @@ export default defineConfig({
       externalizeDeps: false,
       isolatedEntries: true,
       rollupOptions: {
-        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), capsule: resolve(import.meta.dirname, 'src/preload/capsule.ts'), 'screenshot-editor': resolve(import.meta.dirname, 'src/preload/screenshot-editor.ts'), 'screenshot-pin': resolve(import.meta.dirname, 'src/preload/screenshot-pin.ts'), 'screenshot-source': resolve(import.meta.dirname, 'src/preload/screenshot-source.ts'), 'screenshot-countdown': resolve(import.meta.dirname, 'src/preload/screenshot-countdown.ts'), 'capture-surface': resolve(import.meta.dirname, 'src/preload/capture-surface.ts') },
+        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), 'book-reader': resolve(import.meta.dirname, 'src/preload/book-reader.ts'), capsule: resolve(import.meta.dirname, 'src/preload/capsule.ts'), 'screenshot-editor': resolve(import.meta.dirname, 'src/preload/screenshot-editor.ts'), 'screenshot-pin': resolve(import.meta.dirname, 'src/preload/screenshot-pin.ts'), 'screenshot-source': resolve(import.meta.dirname, 'src/preload/screenshot-source.ts'), 'screenshot-countdown': resolve(import.meta.dirname, 'src/preload/screenshot-countdown.ts'), 'capture-surface': resolve(import.meta.dirname, 'src/preload/capture-surface.ts') },
         output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }
@@ -39,7 +39,7 @@ export default defineConfig({
     resolve: { alias: { ...radixOverlayAliases, ...noteParsingAliases }, dedupe: ['react', 'react-dom'] },
     worker: { format: 'es' },
     plugins: [react(), pdfjsViewerAssets(), fileDiagramAssets(), editorExtensionNotices()],
-    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'workbench-window': resolve(import.meta.dirname, 'src/renderer/workbench-window.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html'), 'screenshot-editor': resolve(import.meta.dirname, 'src/renderer/screenshot-editor/index.html'), 'screenshot-pin': resolve(import.meta.dirname, 'src/renderer/screenshot-pin/index.html') } } },
+    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'workbench-window': resolve(import.meta.dirname, 'src/renderer/workbench-window.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html'), 'book-reader': resolve(import.meta.dirname, 'src/renderer/book-reader/index.html'), 'screenshot-editor': resolve(import.meta.dirname, 'src/renderer/screenshot-editor/index.html'), 'screenshot-pin': resolve(import.meta.dirname, 'src/renderer/screenshot-pin/index.html') } } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false' }
   }
 })
