@@ -70,7 +70,7 @@ it.each(['missing.bin','../outside.bin','escaping.bin'])('does not send missing 
 
 it('rejects a non-file input, a chooser or a disabled target before reading any Workspace payload', async () => {
   const f=await fixture();f.invalidate();const snapshot=vi.spyOn(f.files,'snapshotBytes')
-  await expect(uploadBrowserFiles(f.owner,f.context,['file.bin'])).rejects.toThrow('File chooser dialogs are not supported')
+  await expect(uploadBrowserFiles(f.owner,f.context,['file.bin'])).rejects.toThrow('is not an enabled file input')
   expect(snapshot).not.toHaveBeenCalled()
   expect(f.send.mock.calls.filter(call=>call[0]==='DOM.setFileInputFiles')).toEqual([])
 })

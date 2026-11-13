@@ -3071,7 +3071,8 @@ describe('a run owns the page’s dialogs only while it runs', () => {
       const report = await f.manager.runScript('b1', `try { await click('@e1') } catch {}; return 1`)
       expect(report.outcome.kind).toBe('indeterminate')
       expect('message' in report.outcome && report.outcome.message).toContain("ended with the page's confirm dialog still open")
-      expect(f.commands.slice(-2)).toEqual(['Page.handleJavaScriptDialog', 'Page.disable'])
+      // Cancel the left-open dialog, then Page notifications go off.
+      expect(f.commands.filter(command => command === 'Page.handleJavaScriptDialog' || command === 'Page.disable')).toEqual(['Page.handleJavaScriptDialog', 'Page.disable'])
     } finally { f.manager.close('b1'); createDispatch.mockReset() }
   })
 

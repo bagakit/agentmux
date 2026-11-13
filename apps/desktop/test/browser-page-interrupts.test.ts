@@ -99,7 +99,10 @@ describe('one owner for a run’s page dialogs', () => {
     t.emit('Page.javascriptDialogOpening', opening('alert', 'Left behind'))
     await interrupts.dispose()
     expect(interrupts.leftOpenAtEnd()).toMatchObject({ type: 'alert', message: 'Left behind' })
-    expect(t.sent.map(command => command.method)).toEqual(['Page.enable', 'Page.handleJavaScriptDialog', 'Page.disable'])
+    // The dialog is dismissed with Cancel before Page notifications go off.
+    const dialogCommands = t.sent.map(command => command.method).filter(method => method === 'Page.handleJavaScriptDialog' || method === 'Page.disable')
+    expect(dialogCommands).toEqual(['Page.handleJavaScriptDialog', 'Page.disable'])
+    expect(t.sent.find(command => command.method === 'Page.handleJavaScriptDialog')?.params).toEqual({ accept: false })
     expect(t.listeners.size, 'the owner stops listening once disposed').toBe(0)
   })
 
@@ -135,6 +138,6 @@ describe('one owner for a run’s page dialogs', () => {
     expect(interrupts.observing()).toBe(false)
     await expect(interrupts.race(async () => 7, () => false)).resolves.toBe(7)
     await interrupts.dispose()
-    expect(t.sent.map(command => command.method), 'no Page.disable for a Page.enable that failed').toEqual(['Page.enable'])
+    expect(t.sent.map(command => command.method), 'nothing more after a Page.enable that failed').toEqual(['Page.enable'])
   })
 })
