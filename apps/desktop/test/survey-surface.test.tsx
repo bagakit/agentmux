@@ -71,7 +71,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, workbenchSurfaces } from '../src/renderer/src/lib/workbench-tabs'
 import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { surveyInitialZoneSelection, type SurveyZoneSelection } from '../src/renderer/src/lib/survey-workface'
 import { projectWorkbenchProjection, resolveWorkbenchZone, workbenchRegionProjectionSlotId, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
@@ -1239,7 +1239,7 @@ it('uses the current exact Region slot without painting its parent Tab or siblin
   const held = { ...projection, selection: [{ ...reference, groupId: 'unconfirmed-group' }] }
   await dom.render(<WorkspaceWorkbench workspaceId={workspace.id} viewOwnership="projection" projection={held} />)
   expect(dom.container.querySelector('.workbench-region-slot')).toBeNull()
-  expect(dom.container.querySelector('.workspace-workbench')!.textContent).toContain('The selected original Tab or Region occurrence is still restoring')
+  expect(dom.container.querySelector('.workspace-workbench')!.textContent).toContain('The selected Tab or Region is still restoring')
   expect(held.selection).toEqual([{ ...reference, groupId: 'unconfirmed-group' }]); expect(held.onSelect).not.toHaveBeenCalled()
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
 })

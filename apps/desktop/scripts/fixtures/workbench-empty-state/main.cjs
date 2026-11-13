@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
     assert.equal(facts.states.length, 1, 'One coherent state replaces the banner plus empty canvas')
     assert.equal(facts.states[0].title, 'Original work surface retained')
     assert.equal(facts.states[0].busy, 'false', 'Unconfirmed placement is not active loading')
-    assert.match(facts.states[0].text, /no confirmed display occurrence/)
+    assert.match(facts.states[0].text, /no confirmed place to show here/)
     assert.equal(facts.states[0].surface, true, 'Unconfirmed workface fills the available surface')
     assert.equal(facts.states[0].waiting, false, 'Unknown placement is not active loading')
     assert.equal(facts.tabsKept, true); assert.equal(facts.layoutsKept, true); assert.equal(facts.draftsKept, true)

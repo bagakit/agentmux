@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createMoteApp, moteClick, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customTab, customAgent, customMoteId, defaultTab, defaultAgent, neighborTab, savedMoteKey } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
@@ -53,7 +53,7 @@ it('clicking an empty Mote directory loads its initial page without creating a T
 it('clicking a Mote directory loads existing unplaced members without requiring display occurrences', async () => {
   const before = useAppStore.getState()
   await openDirectory()
-  expect(main()?.textContent).not.toContain('This original entity has no confirmed display occurrence here')
+  expect(main()?.textContent).not.toContain('This original item has no confirmed place to show here')
   expect(main()?.querySelector('[data-workbench-tab-id="' + defaultTab.id + '"]')).not.toBeNull()
   expect(main()?.querySelector('[data-workbench-tab-id="' + neighborTab.id + '"]')).not.toBeNull()
   expect(main()?.querySelector('[data-mote-empty-space]')).toBeNull()
@@ -65,7 +65,7 @@ it('clicking the compact Mote entry loads the same unplaced members without chan
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: null }))
   const before = useAppStore.getState()
   await app.mount(); await moteClick(app.entry()); await settleMoteApp()
-  expect(app.panel().textContent).not.toContain('This original entity has no confirmed display occurrence here')
+  expect(app.panel().textContent).not.toContain('This original item has no confirmed place to show here')
   expect(app.panel().querySelector('[data-workbench-tab-id="' + defaultTab.id + '"]')).not.toBeNull()
   expect(app.panel().querySelector('[data-workbench-tab-id="' + neighborTab.id + '"]')).not.toBeNull()
   expectOriginalWork(before)

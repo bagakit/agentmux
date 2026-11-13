@@ -81,7 +81,8 @@ describe('original Zone workbench explicit occurrence selection', () => {
     const result = projectWorkbenchProjection(firstOnly, f.tabs, f.scope)
     expect(result.selection).toEqual([])
     expect(result.layout?.groups.map(group => group.activeTabId)).toEqual([null, null])
-    expect(result.issues.join(' ')).toContain('still restoring')
+    expect(result.issues.join(' ')).toContain('The selected Tab or Region is still restoring')
+    expect(result.issues.join(' ')).not.toMatch(/occurrence/i)
     expect(f.catalog.locations).toHaveLength(2)
   })
 

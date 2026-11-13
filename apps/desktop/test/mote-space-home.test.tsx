@@ -10,7 +10,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { beginMoteStartupRecovery } from '../src/renderer/src/lib/mote-session-recovery'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdentityPath, scratchTopicLogicalPath } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdentityPath, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
@@ -538,7 +538,7 @@ it('reveals retained unplaced original members without inventing a selected Agen
   const main = node<HTMLElement>('.workspace-workbench-slot[data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"]')
   expect(main.querySelector('button[data-workbench-tab-id="' + defaultTab.id + '"]')).not.toBeNull()
   expect(main.querySelector('button[data-workbench-tab-id="' + neighborTab.id + '"]')).not.toBeNull()
-  expect(main.textContent).not.toContain('This original entity has no confirmed display occurrence here')
+  expect(main.textContent).not.toContain('This original item has no confirmed place to show here')
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
