@@ -21,6 +21,7 @@
 .goal-patrol__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .goal-patrol__feedback { display: grid; gap: var(--sp-1); margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .goal-patrol__feedback strong { color: var(--text); font-weight: 550; }
+.goal-patrol__report-summary { color: var(--text); overflow-wrap: anywhere; }
 .goal-patrol__source { color: var(--text-3); min-width: 0; }
 .goal-patrol__source summary { cursor: pointer; }
 .goal-patrol__source dl { margin: var(--sp-2) 0; }
