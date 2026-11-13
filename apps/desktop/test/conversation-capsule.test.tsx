@@ -55,7 +55,19 @@ async function render(content: string, visible = true) {
   await act(async () => root.render(<WorkbenchDocumentContext.Provider value={{ document, window: { windowId: 'original-window', documentGeneration: 'original-document' } }}><DesktopClientUiProvider><ConversationMessage messageId="original-message" conversationSessionId="original-session" executionHostId="local" speaker={{ role: 'agent', id: 'original-agent' }} content={content} active={visible} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
 }
-const click = async (text: string) => { await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!.click()) }
+const click = async (text: string) => { await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === text || node.textContent === text)!.click()) }
+
+it('keeps the card header to the page title and quiet named icon tools, with the mode in details', async () => {
+  mode = 'injected'
+  await render(`[Icon candidates](${first})`)
+  const header = container.querySelector('.conversation-capsule__header')!
+  expect(header.querySelector('.conversation-capsule__identity')?.textContent).toBe('Icon candidates')
+  expect(header.textContent).not.toMatch(/Injected|Isolated/u)
+  const tools = [...header.querySelectorAll<HTMLButtonElement>('.conversation-capsule__actions button')]
+  expect(tools.map(tool => tool.getAttribute('aria-label'))).toEqual(['Hide page', 'Expand page', 'Open in Browser'])
+  for (const tool of tools) { expect(tool.title).toBe(tool.getAttribute('aria-label')); expect(tool.textContent?.trim()).toBe('') }
+  expect(container.querySelector('.conversation-capsule__source')?.textContent).toContain('Injected')
+})
 
 it('ordinary Markdown acquires the exact Capsule through the actual conversation and Desktop adapter while code stays literal', async () => {
   await render(`\`![literal](${first})\`\n\n\`\`\`md\n[example](${first})\n\`\`\``)
@@ -83,7 +95,7 @@ it('ordinary bare references retain their prose and share one original page with
 it('retains original native identity through hide, unknown release and return, without Close or input focus', async () => {
   await render(`![Original page](${first})`)
   const id = create.mock.calls[0]![0]
-  await click('Hide')
+  await click('Hide page')
   expect(container.querySelector('video')).toBeNull()
   expect(release).toHaveBeenCalledWith(id, 'original-navigation'); expect(close).not.toHaveBeenCalled()
   await click('Show page'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
@@ -172,7 +184,7 @@ it('releases only after a late native lease has actually been removed', async ()
   release.mockImplementation(async (browserId, navigationId) => { order.push('native release'); return { browserId, navigationId, status: 'retained', reasons: ['document-used'] } })
   await render(`![Original page](${first})`)
   await vi.waitFor(() => expect(register).toHaveBeenCalledTimes(1))
-  await click('Hide')
+  await click('Hide page')
   expect(release).not.toHaveBeenCalled()
   await act(async () => finish({ leaseId: 'late-original-lease' }))
   expect(order).toEqual(['lease removed', 'native release'])
@@ -201,7 +213,7 @@ it('retains the native release receipt when pending registration rejects after h
   register.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
   await render(`![Original page](${first})`)
   await vi.waitFor(() => expect(register).toHaveBeenCalledTimes(1))
-  await click('Hide'); expect(release).not.toHaveBeenCalled()
+  await click('Hide page'); expect(release).not.toHaveBeenCalled()
   await act(async () => reject(new Error('Original registration receipt is unavailable')))
   expect(release).toHaveBeenCalledTimes(1); expect(close).not.toHaveBeenCalled()
 })
@@ -247,7 +259,7 @@ it('preserves the trusted question editor node and unsaved bytes through Hide an
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(before, 'Unsaved trusted answer')
     before.dispatchEvent(new Event('input', { bubbles: true })); before.dispatchEvent(new Event('change', { bubbles: true }))
   })
-  await click('Hide')
+  await click('Hide page')
   expect(before.isConnected, 'Hide must keep the original trusted form mounted').toBe(true)
   expect(before.closest('[hidden][inert]')).not.toBeNull()
   await click('Show page'); expect(container.querySelector('textarea')).toBe(before); expect(before.value).toBe('Unsaved trusted answer')
@@ -256,4 +268,29 @@ it('preserves the trusted question editor node and unsaved bytes through Hide an
   await render(`![Connected result](${first})`, true)
   expect(container.querySelector('textarea')).toBe(before); expect(before.value).toBe('Unsaved trusted answer')
   expect(inspect.mock.calls.filter(([method]) => method === 'capsule.interaction.draft')).toHaveLength(0)
+})
+
+it('marks a page that waits for the person and never reports an unreadable list as nothing pending', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  let list: 'pending' | 'failed' = 'pending'
+  inspect.mockImplementation((async (method: string, params: any) => {
+    if (method !== 'capsule.interaction.ls') return originalRead(method, params)
+    if (list === 'failed') throw new Error('Questions are unreadable right now')
+    return { interactions: [{ capsuleId: params.capsuleId, interactionId: 'waiting', question: 'Which icon?', draft: '', revision: 1, status: 'pending', target: { hostId: 'local', agentSessionId: 'creator' } }], issues: [] }
+  }) as never)
+  await render(`![Icon candidates](${first})`)
+  const chip = () => container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!
+  await vi.waitFor(() => expect(chip().dataset.attention).toBe('pending'))
+  expect(chip().textContent).toContain('Needs your answer')
+  list = 'failed'
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.click())
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Refresh"]')!.click())
+  // A failed read keeps the questions already read; it does not invent an empty list.
+  expect(chip().dataset.attention).toBe('pending')
+  await act(async () => root.render(null))
+  await render(`![Icon candidates](${first})`)
+  await vi.waitFor(() => expect(chip().dataset.attention).toBe('unconfirmed'))
+  expect(chip().textContent).not.toContain('Needs your answer')
+  expect(chip().title).toContain('Unconfirmed')
 })
