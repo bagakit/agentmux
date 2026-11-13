@@ -17,7 +17,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
   'apps/desktop/test/excalidraw-preview.test.tsx','apps/desktop/test/vega-preview-lifecycle.test.tsx',
   'apps/desktop/test/vega-preview.test.ts','apps/desktop/test/notebook-file-preview-component.test.tsx',
   'apps/desktop/test/structured-data-preview-component.test.tsx','apps/desktop/test/file-format-integration.test.tsx',
-  'apps/desktop/test/file-build-controller.test.tsx',
+  'apps/desktop/test/file-build-controller.test.tsx','apps/desktop/test/file-surface-quality.test.ts','apps/desktop/test/file-preview-pane.test.tsx',
   'apps/desktop/test/excalidraw-local-fonts.test.ts','apps/desktop/test/pdfjs-viewer-assets.test.ts'
  ]}
 })
