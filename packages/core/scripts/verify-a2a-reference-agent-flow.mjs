@@ -18,6 +18,7 @@ const sourceInputs = ['packages/core/bin/amux', 'packages/core/bin/agentmux-hook
   'agent-native-process', 'agent-native-process-linux', 'native-input-adoption'
 ].map(name => `packages/core/src/${name}.ts`),
   'packages/core/scripts/verify-a2a-reference-agent-flow.mjs', 'packages/core/scripts/lib/a2a-private-model-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
+  'packages/core/test/fixtures/a2a-idle-input-proof.mjs',
   'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/package-identity.mjs',
   'apps/desktop/scripts/runtime-application-payload.mjs', 'apps/desktop/scripts/macos-application-brand.mjs',
   'packages/core/scripts/fixtures/a2a-reference-agent/coordinator.mjs',
