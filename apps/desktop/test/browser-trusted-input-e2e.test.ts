@@ -32,6 +32,11 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <button type="submit">Send</button>
   </form>
   <div id="menu" role="button" aria-label="Menu" tabindex="0" style="position:absolute;left:40px;top:200px;width:120px;height:40px;background:#ddd">Menu</div>
+  <div style="position:absolute;left:240px;top:120px">
+    <input id="when" type="date" aria-label="When">
+    <select id="fruit" aria-label="Fruit"><option value="a">Apple</option><option value="b">Banana</option></select>
+    <input id="level" type="range" min="0" max="10" value="1" aria-label="Level">
+  </div>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
   <div style="position:absolute;left:230px;top:20px;width:150px;height:60px;background:rgba(0,0,0,.4)"></div>
   <script>
@@ -101,6 +106,10 @@ app.whenReady().then(async () => {
     await act('key', 'pressKey', [ref('Name'), 'Enter'])
     await act('hover', 'hover', [ref('Menu')], () => contents.executeJavaScript('document.getElementById("menu").matches(":hover")'))
     await act('covered', 'click', [ref('Covered')])
+    await act('date', 'fillInput', [ref('When'), '2026-03-04'], () => value('when'))
+    await act('select', 'fillInput', [ref('Fruit'), 'b'], () => value('fruit'))
+    await act('range', 'fillInput', [ref('Level'), '7'], () => value('level'))
+    await act('dateRefused', 'fillInput', [ref('When'), '03/04/2026'], () => value('when'))
     report.notes = notes
     report.throttlingAfter = contents.getBackgroundThrottling()
     report.ok = true
@@ -155,7 +164,8 @@ async function probe(): Promise<Report> {
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (chunk: string) => { stderr += chunk })
   const exitCode = await new Promise<number | null>((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('trusted input probe timed out')) }, 90_000)
+    // A loaded machine can take long to start Electron; the probe's own stderr says what it was doing.
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`trusted input probe timed out. Electron stderr:\n${stderr.slice(-2000)}`)) }, 180_000)
     child.on('error', (error) => { clearTimeout(timer); reject(error) })
     child.on('exit', (code) => { clearTimeout(timer); resolve(code) })
   })
@@ -175,7 +185,7 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(result.error ?? null).toBeNull()
     expect(result.ok).toBe(true)
     expect(result.framesBefore, 'the page was still rendering, so this run does not prove hidden-page delivery').toBe(0)
-  }, 120_000)
+  }, 240_000)
 
   it('click is a trusted press, release and click on the target, all inside Main’s receipt', async () => {
     const click = (await probe()).actions.click
@@ -184,7 +194,7 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(trusted(click), JSON.stringify(click?.events)).toBe(true)
     expect(click!.own.length, 'Electron reported no input-event for the click').toBeGreaterThan(0)
     expect(click!.own.every(Boolean), 'an Agent input-event was outside Main’s receipt').toBe(true)
-  }, 120_000)
+  }, 240_000)
 
   it('fill replaces and type appends through trusted beforeinput/input, and the value is what was typed', async () => {
     const { fill, type } = (await probe()).actions
@@ -197,14 +207,22 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(trusted(type), JSON.stringify(type?.events)).toBe(true)
     // Focus returned after fill, so the field's trusted change belongs to the fill itself.
     expect([...order(fill), ...order(type)], JSON.stringify({ fill: fill?.events, type: type?.events })).toContain('change:name')
-  }, 120_000)
+    // Chromium does not report an inserted text as an Electron input-event, so most runs see none here.
+    // Whatever it does report (the focus or caret step) must be inside Main's receipt, or the takeover
+    // listener would read the Agent's typing as a person's.
+    for (const [label, action] of [['fill', fill], ['type', type]] as const) {
+      expect(action!.own.filter((own) => !own), `a ${label} input-event was outside Main’s receipt`).toEqual([])
+    }
+  }, 240_000)
 
   it('Enter is a trusted keydown/keyup that runs its default action and submits the form', async () => {
     const key = (await probe()).actions.key
     expect(key?.ok, key?.error).toBe(true)
     expect(order(key)).toEqual(expect.arrayContaining(['keydown:name', 'keyup:name', 'submit:form']))
     expect(trusted(key), JSON.stringify(key?.events)).toBe(true)
-  }, 120_000)
+    expect(key!.own.length, 'Electron reported no input-event for the key').toBeGreaterThan(0)
+    expect(key!.own.every(Boolean), 'a key input-event was outside Main’s receipt').toBe(true)
+  }, 240_000)
 
   it('hover is a trusted pointer move that leaves the target under :hover, with no press', async () => {
     const hover = (await probe()).actions.hover
@@ -213,7 +231,20 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(order(hover)).toContain('mouseover:menu')
     expect(order(hover).filter((entry) => entry.startsWith('mousedown') || entry.startsWith('click'))).toEqual([])
     expect(trusted(hover)).toBe(true)
-  }, 120_000)
+    expect(hover!.own.length, 'Electron reported no input-event for the hover').toBeGreaterThan(0)
+    expect(hover!.own.every(Boolean), 'a hover input-event was outside Main’s receipt').toBe(true)
+  }, 240_000)
+
+  it('date, select and range take a value, not typed text, and fire input and change; a malformed date is refused unchanged', async () => {
+    const { actions } = await probe()
+    for (const [label, expected, id] of [['date', '2026-03-04', 'when'], ['select', 'b', 'fruit'], ['range', '7', 'level']] as const) {
+      expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: true, value: expected })
+      const kinds = actions[label]!.events.filter(event => event.target === id).map(event => event.type)
+      expect(kinds, `${label} fired`).toEqual(expect.arrayContaining(['input', 'change']))
+      expect(kinds, `${label} was typed into`).not.toContain('beforeinput')
+    }
+    expect(actions.dateRefused).toMatchObject({ ok: false, effects: 'not-dispatched', value: '2026-03-04' })
+  }, 240_000)
 
   it('a covered target is refused before input and the page receives nothing; throttling is restored afterwards', async () => {
     const result = await probe()
@@ -223,5 +254,5 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(covered!.events).toEqual([])
     expect(covered!.own).toEqual([])
     expect(result.throttlingAfter, 'background throttling was not restored after the actions').toBe(true)
-  }, 120_000)
+  }, 240_000)
 })

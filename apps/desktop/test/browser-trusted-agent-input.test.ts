@@ -203,7 +203,9 @@ describe('Agent click is one trusted native press at the proven box', () => {
  * own prepare step made (all of it for fill, a caret at the end for type); `format` lets a test model
  * a page that rewrites what was typed, and `deaf` a field that never receives the insert.
  */
-function textPeer(options: { value?: string; format?: (value: string) => string; deaf?: boolean; readOnly?: boolean; noRange?: boolean } = {}) {
+function textPeer(options: { value?: string; format?: (value: string) => string; deaf?: boolean; readOnly?: boolean; noRange?: boolean;
+  /** The field is a picker; accept() says whether a set value sticks, and how it is normalized. */
+  picker?: { accept: (value: string) => string | null } } = {}) {
   const peer = pagePeer()
   const field = { value: options.value ?? 'old', selection: [0, 0] as [number, number], focused: false, restored: 0 }
   const send = peer.session.sendCommand
@@ -213,12 +215,22 @@ function textPeer(options: { value?: string; format?: (value: string) => string;
       const declaration = String(params.functionDeclaration)
       peer.commands.push({ method, params })
       if (declaration.includes('__agentMuxTextFocus = previous')) {
+        if (options.picker) return { result: { value: { ok: false, picker: true, reason: 'is a picker' } } }
         if (options.readOnly) return { result: { value: { ok: false, reason: 'is read-only' } } }
         field.focused = true
         const replace = params.arguments?.[0]?.value === true
         if (replace) field.selection = [0, field.value.length]
         else if (!options.noRange) field.selection = [field.value.length, field.value.length]
         return { result: { value: { ok: true, before: field.value, caret: replace || !options.noRange ? 'set' : 'end-key' } } }
+      }
+      if (declaration.includes('setter.call(self, next)')) {
+        const before = field.value, wanted = String(params.arguments?.[0]?.value ?? '')
+        const taken = options.picker!.accept(wanted)
+        // The page's own check refuses before the setter; a refused value never reaches the field.
+        if (taken === null) return { result: { value: { ok: false, reason: `does not take ${JSON.stringify(wanted)} as a date; write it like 2026-03-04` } } }
+        field.value = taken
+        field.restored += 1
+        return { result: { value: { ok: true, before, taken, after: field.value, wanted } } }
       }
       if (declaration.includes('restoreFocus(this, previous)')) { field.focused = false; field.restored += 1; return { result: { value: null } } }
       if (declaration.includes('isContentEditable ?')) return { result: { value: field.value } }
@@ -309,13 +321,15 @@ describe('Agent fill and type are trusted native text input, read back after', (
     expect(textInputs(typed.peer)).toEqual([])
   })
 
-  it('text that never reached the field is not-dispatched; a read-only field is refused before typing', async () => {
+  it('an acknowledged insert that left the value unchanged is unknown, not a safe miss; a read-only field is refused before typing', async () => {
+    // The page received the trusted insert. An editor with its own text model may have taken it without
+    // showing it in the field, so retrying could enter it twice: the effect is unknown, never not-dispatched.
     const t = textPeer({ value: 'kept', deaf: true })
     const { dispatch } = textDispatch(t)
     const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
     const failure = await dispatch('fillInput', [page.nodes[0]!.ref, 'lost']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
-    expect(failure.fact).toEqual({ kind: 'locator-changed', effects: 'not-dispatched' })
-    expect(failure.message).toMatch(/did not reach .* value is unchanged/)
+    expect(failure.fact).toEqual({ kind: 'locator-changed', effects: 'unknown' })
+    expect(failure.message).toMatch(/still shows its earlier value .* read the field before typing again/)
     expect(t.field.restored, 'focus was not returned after a failed insert').toBe(1)
 
     const r = textPeer({ readOnly: true })
@@ -326,6 +340,35 @@ describe('Agent fill and type are trusted native text input, read back after', (
     expect(refused.message).toContain('is read-only')
     expect(textInputs(r.peer)).toEqual([])
     expect(readOnly.nativeInput).not.toHaveBeenCalled()
+  })
+
+  it('a picker takes its value through its own setter, never typed text, and says when the value was refused', async () => {
+    // Date, time, color, range and select drop inserted text in Chromium; a recorded fill on them still has to work.
+    const date = textPeer({ value: '', picker: { accept: value => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null } })
+    const run = textDispatch(date)
+    const page = await run.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await run.dispatch('fillInput', [page.nodes[0]!.ref, '2026-03-04'])
+    expect(date.field.value).toBe('2026-03-04')
+    expect(textInputs(date.peer), 'a picker must not receive typed text').toEqual([])
+    expect(date.field.restored, 'focus was not returned after setting the value').toBe(1)
+
+    const refused = await run.dispatch('fillInput', [page.nodes[0]!.ref, '03/04/2026']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(refused.fact).toEqual({ kind: 'locator-changed', effects: 'not-dispatched' })
+    expect(refused.message).toMatch(/does not take "03\/04\/2026" as a date; write it like 2026-03-04\. Nothing changed/)
+    expect(date.field.value, 'a refused value must leave the field as it was').toBe('2026-03-04')
+
+    const append = await run.dispatch('typeText', [page.nodes[0]!.ref, '1']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(append.fact?.effects).toBe('not-dispatched')
+    expect(append.message).toContain('text cannot be appended')
+
+    // A range clamps to its maximum: the fill stands, and the Agent is told the value it actually holds.
+    const range = textPeer({ value: '1', picker: { accept: value => String(Math.min(Number(value), 10)) } })
+    const ranged = textDispatch(range)
+    const rangePage = await ranged.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(ranged.dispatch('fillInput', [rangePage.nodes[0]!.ref, '42'])).resolves.toBeUndefined()
+    expect(range.field.value).toBe('10')
+    expect(range.notes).toEqual([expect.stringMatching(/holds "10" rather than "42"; the field normalized it/)])
+    expect(date.notes, 'a value taken as given needs no note').toEqual([])
   })
 
   it('a page that reformats what was typed keeps the action and says the field holds a different value', async () => {
