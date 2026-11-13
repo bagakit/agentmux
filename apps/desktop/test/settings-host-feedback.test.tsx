@@ -1,3 +1,4 @@
+import { selectSettingsHost } from './helpers/settings-host-ui'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -20,25 +21,29 @@ beforeEach(() => {
   useAppStore.setState({ sessions: [], hostChecks: {}, checkHost })
   onSave.mockClear()
 })
-const mount = () => dom.render(<HostSettingsPane active={true} config={config} onSave={onSave} />)
+const select = (index: number) => selectSettingsHost(dom.container, config.hosts[index]!.id)
+const mount = async () => { await dom.render(<HostSettingsPane active={true} config={config} onSave={onSave} />); await select(1) }
 function card(index: number) {
   const found = [...dom.container.querySelectorAll<HTMLElement>('.host-settings-card')]
-  expect(found).toHaveLength(2)
-  return found[index]!
+  expect(found).toHaveLength(1)
+  expect(found[0]!.dataset.resourceEditor).toBe(config.hosts[index]!.id)
+  return found[0]!
 }
 function testButton(index: number) {
   const found = [...card(index).querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent === 'Test')
   expect(found).toHaveLength(1)
   return found[0]!
 }
-const status = (index: number) => card(index).querySelector('[role="status"]')?.textContent
+const status = (index: number) => dom.container.querySelector(`[data-host-disclosure="${config.hosts[index]!.id}"] .settings-resource-row__check`)?.textContent
+async function testHost(index: number) { await select(index); await act(async () => testButton(index).click()) }
+const hostname = () => card(1).querySelectorAll<HTMLInputElement>('.host-edit-grid--basic input')[1]!
 
 it('projects real checkHost pending and ready facts, retaining technical detail in a native disclosure', async () => {
   let resolve!: (value: HostCheckResult) => void
   const pending = new Promise<HostCheckResult>(done => { resolve = done })
   const check = vi.spyOn(api.hosts, 'check').mockReturnValue(pending)
   await mount()
-  await act(async () => testButton(0).click())
+  await testHost(0)
   expect(check).toHaveBeenCalledExactlyOnceWith(config.hosts[0])
   expect(status(0)).toBe('Testing')
   expect(testButton(0).disabled).toBe(true)
@@ -60,7 +65,7 @@ it('keeps a specific service refusal visible outside connection editing and expl
   await mount()
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   expect(connection.open).toBe(false)
-  await act(async () => testButton(1).click())
+  await testHost(1)
   expect(status(1)).toBe('Not supported')
   const detail = card(1).querySelector('.host-check-detail')
   expect(detail).not.toBeNull()
@@ -81,31 +86,31 @@ it('preserves literal long diagnostics and per-Host results without replacing th
   await mount()
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   await act(async () => { connection.open = true; connection.dispatchEvent(new Event('toggle')) })
-  const input = connection.querySelectorAll('input')[1]!
+  const input = hostname()
   input.focus()
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'authored.invalid')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  await act(async () => { testButton(1).click(); testButton(0).click() })
+  await testHost(1); await testHost(0)
+  expect([status(0), status(1)]).toEqual(['Ready', 'Not supported'])
+  await select(1)
   expect([status(0), status(1)]).toEqual(['Ready', 'Not supported'])
   expect(card(1).querySelector('.host-check-detail')?.textContent).toBe(detail)
   expect(useAppStore.getState().hostChecks.remote?.detail).toBe(detail)
   expect(useAppStore.getState().hostChecks.local?.detail).toBe(ready)
-  expect(card(1).querySelector('.host-edit-disclosure')).toBe(connection)
-  expect(connection.open).toBe(true)
-  expect(connection.querySelectorAll('input')[1]).toBe(input)
-  expect(input.value).toBe('authored.invalid')
+  expect(card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!.open).toBe(true)
+  expect(hostname().value).toBe('authored.invalid')
   expect(onSave).not.toHaveBeenCalled()
 })
 
 it('shows a thrown check reason without interpreting idle or missing facts as ready', async () => {
   vi.spyOn(api.hosts, 'check').mockRejectedValue(new Error('Check facts could not be read.'))
   await mount()
-  expect(status(0)).toBeUndefined()
+  expect(status(0)).toBe('Not tested')
   await act(async () => useAppStore.setState({ hostChecks: { local: { state: 'idle' } } }))
   expect(status(0)).toBe('Not tested')
-  await act(async () => testButton(1).click())
+  await testHost(1)
   expect(status(1)).toBe('Check failed')
   expect(useAppStore.getState().hostChecks.remote?.state).toBe('error')
   expect(useAppStore.getState().hostChecks.remote?.result).toBeUndefined()
@@ -129,9 +134,9 @@ it.each([
   expect(status(1)).toBe('Ready')
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   await act(async () => { connection.open = true; connection.dispatchEvent(new Event('toggle')) })
-  const labels = [...connection.querySelectorAll('label')]
+  const labels = [...card(1).querySelectorAll('.host-edit-grid label')]
   expect(labels).toHaveLength(8)
-  const input = labels.find(label => label.querySelector('span')!.textContent!.startsWith(field))!.querySelector('input')!
+  const input = labels.find(label => label.querySelector('span')!.textContent!.startsWith(field === 'Hostname' ? 'Host or SSH alias' : field))!.querySelector('input')!
   input.focus()
   for (let length = 1; length <= value.length; length++) {
     await fill(input, value.slice(0, length))
@@ -148,14 +153,14 @@ it('ignores a late Ready for the previous draft and preserves latest-wins when a
   const old = new Promise<HostCheckResult>(done => { oldResolve = done })
   const next = new Promise<HostCheckResult>(done => { newResolve = done })
   const check = vi.spyOn(api.hosts, 'check').mockReturnValueOnce(old).mockReturnValueOnce(next)
-  await mount(); await act(async () => testButton(1).click())
+  await mount(); await testHost(1)
   expect(status(1)).toBe('Testing')
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   await act(async () => { connection.open = true; connection.dispatchEvent(new Event('toggle')) })
-  const input = connection.querySelectorAll('input')[1]!
+  const input = hostname()
   input.focus(); await fill(input, 'new.invalid')
   expect(status(1)).toBe('Not tested'); expect(testButton(1).disabled).toBe(false)
-  await act(async () => testButton(1).click())
+  await testHost(1)
   expect(status(1)).toBe('Testing')
   const captured = check.mock.calls[1]![0]
   expect(captured).toEqual({ ...remote, hostname: 'new.invalid' })
@@ -171,10 +176,10 @@ it('ignores a late Ready for the previous draft and preserves latest-wins when a
 it('keeps a late Ready inapplicable after editing when the user has not requested another Test', async () => {
   let resolve!: (value: HostCheckResult) => void
   vi.spyOn(api.hosts, 'check').mockReturnValue(new Promise(done => { resolve = done }))
-  await mount(); await act(async () => testButton(1).click())
+  await mount(); await testHost(1)
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   await act(async () => { connection.open = true; connection.dispatchEvent(new Event('toggle')) })
-  const input = connection.querySelectorAll('input')[1]!
+  const input = hostname()
   input.focus(); await fill(input, 'changed.invalid')
   expect(status(1)).toBe('Not tested')
   await act(async () => resolve({ input: remote, outcome: 'ready', detail: 'Old connection' }))
@@ -193,6 +198,7 @@ it('does not apply a same-ID committed replacement to an old Ready in the real H
     activeWorkspaceId: 'workspace',
     agentComposerDrafts: { region: 'Preserved launcher draft' } })
   await dom.render(<HostSettingsPane active={true} config={saved} onSave={onSave} />)
+  await select(1)
   expect(status(1)).toBe('Ready')
   await dom.render(<HostSettingsPane active={true} config={changed} onSave={onSave} />)
   expect(status(1)).toBe('Not tested')

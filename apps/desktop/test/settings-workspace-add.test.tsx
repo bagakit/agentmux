@@ -1,3 +1,4 @@
+import { selectSettingsHost } from './helpers/settings-host-ui'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -48,7 +49,7 @@ function pane(id = 'remote') {
   return node!
 }
 async function select(id = 'remote', panel = 'projects') {
-  await dom.click(`[data-host-disclosure="${id}"] [data-host-panel="${panel}"]`)
+  await selectSettingsHost(dom.container, id, panel)
 }
 async function show(id = 'remote') {
   await dom.render(<View />); await select(id)
@@ -70,7 +71,7 @@ async function click(selector: string, id = 'remote') {
 async function settle() {
   for (let tries = 0; tries < 100; tries++) {
     await act(async () => { await new Promise(done => setTimeout(done, 5)) })
-    if (!dom.container.querySelector('.host-projects .spin')) return
+    if (!pane().querySelector('[data-open-folder] [data-icon-animation="spin"]')) return
   }
   throw new Error('Folder operation did not settle')
 }
@@ -208,7 +209,7 @@ it('counts Projects by original root grouping, exposes folder/worktree facts and
 })
 
 it('explains an unsaved Host and passive or hidden panes do not probe or execute', async () => {
-  await dom.render(<View />); await dom.click('.settings-pane-toolbar button')
+  await dom.render(<View />); await dom.click('[data-add-host]')
   const newHost = dom.container.querySelector<HTMLElement>('[data-resource-editor]')!.dataset.resourceEditor!
   await select(newHost)
   expect(pane(newHost).textContent).toContain('Save this connection before registering a folder')

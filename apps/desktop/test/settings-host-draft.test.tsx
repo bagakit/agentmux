@@ -1,3 +1,5 @@
+import { selectSettingsHost } from './helpers/settings-host-ui'
+import { settingsScratchTopics, settingsWorkbenchWindows, settingsWorkspaceFiles, prepareSettingsIpcDirectory } from './helpers/settings-ipc-fixture.js'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -17,8 +19,6 @@ import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progres
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig } from '../src/shared/contracts'
-import type { ScratchTopics } from '../src/main/scratch-topics'
-import type { WorkspaceFiles } from '../src/main/workspace-files'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -31,18 +31,19 @@ function deferred<T>() {
 
 const ipc = vi.hoisted(() => ({ directory: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>() }))
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => ipc.directory },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() }, app: { getAppPath: () => process.cwd() + '/apps/desktop', on: vi.fn(), off: vi.fn(), once: vi.fn(), removeListener: vi.fn(), getPath: () => ipc.directory },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
-    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+    removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { constructor(_options: { execute: (request: AgentMuxControlRequest) => Promise<AgentMuxControlResult> }) {} async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', async () => ({ BrowserViewManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserViews }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
+vi.mock('../src/main/notes-storage-owner.js', async () => ({ NotesStorageOwner: (await import('./helpers/settings-ipc-fixture.js')).SettingsNotesStorage }))
 import { registerIpc } from '../src/main/ipc'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 
@@ -59,6 +60,7 @@ async function invoke<T>(channel: string, ...values: unknown[]): Promise<T> {
 }
 beforeEach(async () => {
   ipc.directory = await mkdtemp(join(tmpdir(), 'amux-host-draft-owner-'))
+  await prepareSettingsIpcDirectory(ipc.directory)
   disk = new ConfigStore(join(ipc.directory, 'config.json'))
   config = await disk.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, remote], workspaces: [] })
   // The fixture is initialized explicitly; no unrelated default Topics bootstrap is exercised.
@@ -76,17 +78,21 @@ beforeEach(async () => {
       if (channel === CONFIG_CHANGED_CHANNEL) { config = value as AppConfig; publications.push(config); useAppStore.setState({ config }) }
     } })
   ipc.handlers.clear()
-  dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+  dispose = await registerIpc({ workbenchWindows: settingsWorkbenchWindows({ webContents: sender } as unknown as BrowserWindow), workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    configStore: disk, runtime, progressLoops, scratchTopics: settingsScratchTopics(), workspaceFiles: settingsWorkspaceFiles() })
   useAppStore.setState({ config, hostChecks: {}, checkHost: vi.fn(async () => {}), providerCatalog: await api.providers.list() })
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await invoke<AppConfig>('config:save', next, expected))
 })
 afterEach(async () => { await dispose?.(); await progressLoops?.stop(); await runtime?.dispose(); await rm(ipc.directory, { recursive: true, force: true }) })
-const mount = () => dom.render(<SettingsPanel onClose={() => {}} initialSection="hosts" />)
+const mount = async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="hosts" />)
+  await selectSettingsHost(dom.container, config.hosts.find(host => host.kind === 'ssh')!.id)
+}
 function input(field = 'Label', index = 0): HTMLInputElement {
   const labels = [...dom.container.querySelectorAll<HTMLLabelElement>('.host-edit-grid label')]
   expect(labels.length).toBeGreaterThan(0)
-  const found = labels.filter(label => label.querySelector('span')?.textContent === field)
+  const caption = field === 'Label' ? 'Name' : field === 'Hostname' ? 'Host or SSH alias' : field
+  const found = labels.filter(label => label.querySelector('span')?.textContent?.startsWith(caption))
   expect(found.length).toBeGreaterThan(index)
   return found[index]!.querySelector('input')!
 }
@@ -171,7 +177,7 @@ it('retains invalid edits without invoking Main or Runtime preparation', async (
   await save()
   expect(input('Hostname').value).toBe(''); expect(await bytes()).toBe(before); expect(api.config.save).not.toHaveBeenCalled()
   expect(runtime.prepare).toHaveBeenCalledTimes(calls)
-  expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('name and hostname')
+  expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('hostname: Expected a nonempty string')
 })
 it('does not silently recreate an externally deleted dirty Host', async () => {
   await mount(); await fill('Local draft')
@@ -183,7 +189,8 @@ it('does not silently recreate an externally deleted dirty Host', async () => {
 it('keeps config-array Host order even for integer-like stable IDs', async () => {
   await external(current => ({ ...current, hosts: [current.hosts[0]!, { ...remote, id: '10', label: 'Ten' }, { ...remote, id: '2', label: 'Two' }] }))
   await mount()
-  expect([...dom.container.querySelectorAll('.host-settings-card header strong')].map(node => node.textContent)).toEqual(['This Mac', 'Ten', 'Two'])
+  expect([...dom.container.querySelectorAll<HTMLElement>('[data-host-disclosure]')].map(node => node.dataset.hostDisclosure)).toEqual(['local', '10', '2'])
+  expect(dom.container.querySelector('.host-settings-card')?.getAttribute('data-resource-editor')).toBe('10')
   await fill('Edited ten'); await save()
   expect(config.hosts.map(host => host.id)).toEqual(['local', '10', '2'])
 })

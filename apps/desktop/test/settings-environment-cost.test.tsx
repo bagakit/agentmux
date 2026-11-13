@@ -1,3 +1,4 @@
+import { selectSettingsHost } from './helpers/settings-host-ui'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, Profiler, type ProfilerOnRenderCallback } from 'react'
@@ -40,8 +41,8 @@ it('keeps visited Projects directory work independent of unrelated Session publi
     }))
   }
   await dom.render(<View />)
-  await dom.click('[data-host-disclosure="local"] [data-host-panel="projects"]')
-  await dom.click('[data-host-disclosure="remote"] [data-host-panel="projects"]')
+  await selectSettingsHost(dom.container, 'local', 'projects')
+  await selectSettingsHost(dom.container, 'remote', 'projects')
   expect(dom.container.querySelector('[data-host-projects="local"]')!.hasAttribute('hidden')).toBe(true)
   expect(dom.container.querySelector('[data-host-projects="remote"]')!.hasAttribute('hidden')).toBe(false)
   expect(aggregate.mock.calls.some(([records]) => records.length === 128 && records.every(record => record.hostId === 'remote'))).toBe(true)
