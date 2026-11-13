@@ -13,11 +13,11 @@ file's title header first and then publishes its catalog projection. No App/page
 ### Original content and identity
 Start with amux notebook ls, then amux notebook inspect --note NOTE_ID --content.
 The content observation gives the exact resource, saved Markdown, revision, stable blockIds
-and noteProvenance from the original SQLite metadata owner. recorded/unconfirmed describes
+and noteProvenance from the original Note metadata owner. recorded/unconfirmed describes
 metadata for this exact body revision; nullable authors remain unknown. A body with
 unanchoredBlockCount > 0 is readable but its unassigned blocks are not confirmed link targets.
 An inspect without --content reads the directory/history and committed resourceChanges.
---max-bytes N is an optional per-file byte cap. Missing/unknown/invalid/identity-mismatch
+--max-bytes N is an optional per-file byte cap for --content reads. Missing/unknown/invalid/identity-mismatch
 never authorizes a replacement Note or proves there are no relationships.
 
 A minimal Note body is:
@@ -41,7 +41,7 @@ not permission to pick one copy. Inline links and note-ref/note-embed address ex
 inside its original file. A shared note-include instead addresses one independent Markdown file.
 The readable title belongs in this original header; it is not derived from the filename.
 An existing file title wins over an older catalog projection. A rename changes only this
-header, preserving body bytes and block authors. Inspect notebook --operation-id OP_ID after
+header, preserving body bytes and block authors. Inspect with amux notebook inspect --operation-id OP_ID after
 an unknown rename: committed file history, current file title and catalog projection are
 separate facts. Retrying an old committed B rename after C must keep C, not rewrite B.
 
@@ -115,7 +115,7 @@ A written receipt can return canonical content, noteAttribution and noteProvenan
 saved content/revision as the baseline while preserving newer unsaved input. The owner may add
 missing block/occurrence IDs and bind confirmed queries. Authors never come from body declarations.
 Trusted actor identity comes from the authenticated caller; creation/latest-edit records stay
-in the original SQLite metadata. External plain-text edits leave latest authors unconfirmed.
+in the original Note metadata. External plain-text edits leave latest authors unconfirmed.
 If the body is written but metadata recording fails, status remains written with attribution
 unconfirmed. Read the same Note/revision to reconcile; do not write the body again merely to retry metadata.
 A conflict requires reading the original and merging. An unknown write requires inspecting
