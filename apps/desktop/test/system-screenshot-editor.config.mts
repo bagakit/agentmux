@@ -13,14 +13,17 @@ export default defineConfig({
   } },
   plugins: [{ name: 'system-screenshot-editor-private-mutation', enforce: 'pre', load(id) {
     const file = relative(root, id.split('?')[0])
-    if (file !== 'apps/desktop/src/main/system-screenshot-editor.ts') return
+    // Each mutation names its production owner; the window editor is the default one.
+    const owner = mutation?.source ?? 'apps/desktop/src/main/system-screenshot-editor.ts'
+    if (file !== 'apps/desktop/src/main/system-screenshot-editor.ts' && file !== owner) return
     const source = readFileSync(id.split('?')[0], 'utf8')
-    if (mutation && source.split(mutation.from).length !== 2) throw new Error('Non-unique production mutation: ' + mutation.id)
-    const changed = mutation ? source.replace(mutation.from, mutation.to) : source
+    const mutated = mutation && file === owner
+    if (mutated && source.split(mutation.from).length !== 2) throw new Error('Non-unique production mutation: ' + mutation.id)
+    const changed = mutated ? source.replace(mutation.from, mutation.to) : source
     if (process.env.AGENTMUX_SCREENSHOT_EDITOR_LOADED) appendFileSync(process.env.AGENTMUX_SCREENSHOT_EDITOR_LOADED,
-      JSON.stringify({ file, original: createHash('sha256').update(source).digest('hex'), consumed: createHash('sha256').update(changed).digest('hex'), mutation: mutation?.id ?? null }) + '\n')
+      JSON.stringify({ file, original: createHash('sha256').update(source).digest('hex'), consumed: createHash('sha256').update(changed).digest('hex'), mutation: mutated ? mutation.id : null }) + '\n')
     return changed
   } }],
-  test: { include: ['apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
+  test: { include: ['apps/desktop/test/system-screenshot-editor.test.ts', 'apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/browser-screenshot-compose.test.ts', 'apps/desktop/test/browser-screenshot-context.test.ts'], environment: 'node',
     passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 10000 }
 })

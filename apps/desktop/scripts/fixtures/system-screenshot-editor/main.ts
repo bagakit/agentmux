@@ -113,9 +113,13 @@ async function run() {
       worker: { helperPath: process.env.AGENTMUX_SCREENSHOT_FILE_HELPER! } })
   })
   capture = new ScreenCapture({ home: out, appActive: () => true, native: () => ({
-    captureScreenshot: async () => ({ state: 'captured', completionAction: 'edit', screenshot: { format: 'png', data: nextImage.dataUrl.split(',')[1]!, width: nextImage.width, height: nextImage.height, scale: 1 } }),
+    captureScreenshot: async () => { throw new Error('This fixture opens the editor through a region capture only.') },
     writeClipboardImage: async result => { if (failDelivery) throw new Error('The private clipboard sink is unavailable.'); deliveries.push(result) }
-  }), edit: (...args) => editor.edit(...args), reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
+  }), edit: (...args) => editor.edit(...args),
+  // The person pressed ⌘E on the capture surface with the whole frame selected and no marks: the window editor takes over.
+  present: async () => ({ state: 'expanded', image: nextImage, source: { rect: { x: 0, y: 0, width: nextImage.width, height: nextImage.height }, scale: 1, capturedAt: Date.now() },
+    handoff: { shapes: [], crop: { x: 0, y: 0, width: nextImage.width, height: nextImage.height }, tool: 'select' } }),
+  reportIssue: issue => { (receipt.reportedIssues ??= []).push(String(issue)) } })
   const image = await sourceImage()
   const started = performance.now()
   receipt.metrics = { sourcePixels: image.width * image.height, sourcePngBytes: image.byteLength, outputLatenciesMs: {} }
