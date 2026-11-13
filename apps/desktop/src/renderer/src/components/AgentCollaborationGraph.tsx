@@ -9,7 +9,7 @@ import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInput, CollaborationPath } from '../lib/collaboration-layout-engine'
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
 import { collaborationEnvelope, collaborationVisibleRoute } from '../lib/collaboration-map-geometry'
-import { collaborationMapReadsSummary, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationMapTextBudget, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
+import { collaborationDistantFaceInk, collaborationMapReadsSummary, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationMapTextBudget, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
 import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecencyLabel, collaborationRecencyStep, collaborationAgentName, collaborationAgentGlyph, useCollaborationRecencyClock, type CollaborationRecencyStep } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
@@ -39,7 +39,7 @@ type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: st
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
-type RelationPath = { id: string; label: string; title: string; detail: string; unconfirmed: boolean; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; weight: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
+type RelationPath = { id: string; label: string; title: string; detail: string; unconfirmed: boolean; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; sourceDistant: boolean; targetDistant: boolean; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; weight: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
 const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
@@ -66,7 +66,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   const detailOpacity = heldLayer ? Number(owner === 'detail') : contentInk.detail
   const focusProxy = Boolean(heldLayer) && owner === 'detail' && detail < .5
   const glyph = collaborationAgentGlyph(agent, data.step)
-  const hull = collaborationVisibleHull(data.box, zoom, glyph.overviewRadius, glyph.pointRadius, preferences), markScale = collaborationOverviewScale(data.box, zoom, glyph.overviewRadius * 2)
+  const hull = collaborationVisibleHull(data.box, zoom, glyph.overviewRadius, glyph.pointRadius, preferences, glyph.distant), markScale = collaborationOverviewScale(data.box, zoom, glyph.overviewRadius * 2, glyph.distant)
   // Names align on the largest disc so a recency step never shifts the column.
   const identityInk = collaborationIdentityInk(hull.width, zoom, lod.identity, markScale, COLLABORATION_OVERVIEW_MARK_SIZE / 2)
   return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag`} data-collaboration-agent={agent.id} data-recency={data.step} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
@@ -109,20 +109,21 @@ function ActivityMark({ activity }: { activity: NodeActivity }) {
   return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} aria-label={label} title={label}
     style={{ animationDelay: `${delay}ms` }}><span>{pulse.kind === 'communication' ? direction === 'sent' ? 'Sent ↗' : 'Received ↙' : 'Updated'}</span></span>
 }
-/** One identity mark at every non-card scale: the Executor face sized by recency.
+/** One identity mark across scales: old distant points reveal the original Executor face.
  * Runnable members sit on a disc; confirmed-closed members drop it and recede. */
 function AgentMark({ data, label, tier, glyph, overview = false, identityProgress = 1, markScale = 1, identityInk, status = 0 }: { data: AgentData; label: string; tier: string; glyph: ReturnType<typeof collaborationAgentGlyph>; overview?: boolean; identityProgress?: number; markScale?: number; identityInk: ReturnType<typeof collaborationIdentityInk>; status?: number }) {
   const context = data.agent.context, { config } = useContext(ExecutorIdentityContext), zoom = useStore(state => state.transform[2])
   const providerId = data.agent.providerId ?? context?.providerId ?? undefined, executorId = data.agent.executorId ?? context?.executorId
   const appearance = executorId ? config?.executors[executorId]?.avatar ?? config?.appearance.agentAvatars?.[executorId] : undefined
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
-  const diameter = glyph.overviewRadius * 2
-  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: diameter, height: diameter } : undefined}
+  const diameter = glyph.overviewRadius * 2, faceInk = glyph.distant ? collaborationDistantFaceInk(zoom) : 1
+  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-distant={faceInk < 1 || undefined} data-session-id={context?.id} style={{ ...(overview ? { width: diameter, height: diameter } : {}), '--collaboration-hit-size': `${24 / (zoom * markScale)}px` } as CSSProperties}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${TIER_LABELS[tier as keyof typeof TIER_LABELS] ?? tier} · ${collaborationRecencyLabel(data.agent)}`}>
     <span className="collaboration-agent__avatar" style={{ '--collaboration-avatar-scale': markScale + (1 - markScale) * identityProgress } as CSSProperties}>
-      <ResolvedAgentAvatar label={label} providerId={providerId} executorId={executorId} appearance={appearance} size={glyph.icon} tintMark={!glyph.closed} />
+      <span aria-hidden="true" className="collaboration-agent__far-point" style={{ opacity: 1 - faceInk, width: diameter, height: diameter }} />
+      <span className="collaboration-agent__face" style={{ opacity: faceInk }}><ResolvedAgentAvatar label={label} providerId={providerId} executorId={executorId} appearance={appearance} size={glyph.icon} tintMark={!glyph.closed} />
       {tier === 'active' || tier === 'unknown' ? <span className="collaboration-agent__point" /> : null}
-      {context ? <CollaborationEssentialState context={context} /> : null}
+      {context ? <CollaborationEssentialState context={context} /> : null}</span>
     </span>{!overview && tier !== 'closed' ? <strong style={{ left: identityInk.nameLeft, opacity: identityInk.opacity, fontSize: identityInk.fontSize, transform: status > 0 ? `translateY(${-7 * status}px)` : undefined }}>{label}</strong> : null}
     {context && !overview ? <CollaborationCompactState context={context} progress={status} left={identityInk.nameLeft} opacity={identityInk.opacity} zoom={zoom} /> : null}
   </button>
@@ -326,8 +327,8 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         : collaborationRelationSummary(first.kind, first.kind === 'creation' ? connection.relations.flatMap(relation => relation.evidence) : [])
       const detail = `${from} → ${to} · ${count} original ${count === 1 ? 'record' : 'records'}`
       const label = `${title}: ${detail}`
-      const path: RelationPath = old?.route === route && old.sourceBox === sourceBox && old.targetBox === targetBox && old.label === label && old.sourceRadius === sourceRadius && old.targetRadius === targetRadius && old.sourcePointRadius === sourcePointRadius && old.targetPointRadius === targetPointRadius && old.active === (pulse?.id ?? 0) && old.weight === weight && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
-        id: connection.id, label, title, detail, unconfirmed, route, sourceBox, targetBox, sourceRadius, targetRadius, sourcePointRadius, targetPointRadius, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
+      const path: RelationPath = old?.route === route && old.sourceBox === sourceBox && old.targetBox === targetBox && old.label === label && old.sourceRadius === sourceRadius && old.targetRadius === targetRadius && old.sourcePointRadius === sourcePointRadius && old.targetPointRadius === targetPointRadius && old.sourceDistant === sourceGlyph.distant && old.targetDistant === targetGlyph.distant && old.active === (pulse?.id ?? 0) && old.weight === weight && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
+        id: connection.id, label, title, detail, unconfirmed, route, sourceBox, targetBox, sourceRadius, targetRadius, sourcePointRadius, targetPointRadius, sourceDistant: sourceGlyph.distant, targetDistant: targetGlyph.distant, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
         count, weight
       }
       next.set(connection.id, { path }); return [path]
@@ -437,10 +438,10 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   const preferences = useContext(CollaborationMapPreferences)
   // The clipped curve depends on zoom only through the two painted endpoint bodies, which hold
   // still across much of the zoom range; re-clip only when either body actually changes.
-  const sourceHull = collaborationVisibleHull(record.sourceBox, zoom, record.sourceRadius, record.sourcePointRadius, preferences)
-  const targetHull = collaborationVisibleHull(record.targetBox, zoom, record.targetRadius, record.targetPointRadius, preferences)
+  const sourceHull = collaborationVisibleHull(record.sourceBox, zoom, record.sourceRadius, record.sourcePointRadius, preferences, record.sourceDistant)
+  const targetHull = collaborationVisibleHull(record.targetBox, zoom, record.targetRadius, record.targetPointRadius, preferences, record.targetDistant)
   const hullKey = `${sourceHull.x},${sourceHull.y},${sourceHull.width},${sourceHull.height},${sourceHull.radius};${targetHull.x},${targetHull.y},${targetHull.width},${targetHull.height},${targetHull.radius}`
-  const visibleRoute = useMemo(() => collaborationVisibleRoute(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences),
+  const visibleRoute = useMemo(() => collaborationVisibleRoute(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences, record.sourceDistant, record.targetDistant),
     [record, hullKey, preferences])
   const { path, points } = visibleRoute
   const end = points.at(-1)

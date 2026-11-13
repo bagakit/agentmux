@@ -60,22 +60,25 @@ export function collaborationIdentityInk(width: number, zoom: number, progress: 
  * 16/14/12 px and runnable discs hold proportionally, so steps stay ranked and no member
  * shrinks into a speck. Like the text budget, this is ink only, never layout. */
 const overviewFloor = (diameter: number) => Math.min(diameter, 12 + (diameter - 12) * 2 / 3)
+/** Old members become quiet points in the whole-world view, then reveal their original face. */
+export const collaborationDistantFaceInk = (zoom: number) => smooth(.16, .32, zoom)
 /** An overview glyph keeps its design screen size while its slot has room: twice the short
  * side for a compact slot, the slot plus half the outline margin on each side for a point
  * slot. All steps of a slot share that room, so their ratio holds; past it, the floor holds. */
-export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number, diameter = COLLABORATION_OVERVIEW_MARK_SIZE) => {
+export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number, diameter = COLLABORATION_OVERVIEW_MARK_SIZE, distant = false) => {
   const side = Math.min(box.width, box.height), point = pointSlot(box)
   const room = (point ? side + COLLABORATION_ENVELOPE_PAD : 2 * side) / (point ? COLLABORATION_CLOSED_FACE_MAX : COLLABORATION_OVERVIEW_MARK_SIZE)
-  return Math.min(1 / zoom, Math.max(room, overviewFloor(diameter) / (diameter * zoom)))
+  const scale = Math.min(1 / zoom, Math.max(room, overviewFloor(diameter) / (diameter * zoom)))
+  return distant ? mix(4 / (diameter * zoom), scale, collaborationDistantFaceInk(zoom)) : scale
 }
 
 export type CollaborationVisibleHull = CollaborationLayoutBounds & { radius: number }
 
 /** One footprint owner for the rendered body, directed endpoints and label clearance.
  * The circle, compact identity and readable body share the original slot's center. */
-export function collaborationVisibleHull(box: CollaborationLayoutBounds, zoom: number, overviewRadius = COLLABORATION_OVERVIEW_MARK_SIZE / 2, pointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES): CollaborationVisibleHull {
+export function collaborationVisibleHull(box: CollaborationLayoutBounds, zoom: number, overviewRadius = COLLABORATION_OVERVIEW_MARK_SIZE / 2, pointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES, distant = false): CollaborationVisibleHull {
   const { identity, detail, status } = collaborationMapLod(zoom, preferences)
-  const scale = collaborationOverviewScale(box, zoom, overviewRadius * 2)
+  const scale = collaborationOverviewScale(box, zoom, overviewRadius * 2, distant)
   if (pointSlot(box)) {
     const radius = mix(overviewRadius, pointRadius, identity) * mix(scale, 1, identity)
     return { x: box.x + box.width / 2 - radius, y: box.y + box.height / 2 - radius, width: radius * 2, height: radius * 2, radius }

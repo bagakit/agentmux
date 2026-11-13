@@ -54,7 +54,7 @@ export const COLLABORATION_CLOSED_FACE_MAX = FACE.closed.recent
 export function collaborationAgentGlyph(agent: CollaborationAgent | undefined, step: CollaborationRecencyStep) {
   const closed = agent?.tier === 'closed', icon = FACE[closed ? 'closed' : 'runnable'][step]
   const radius = closed ? icon / 2 : icon / 2 + DISC / 2
-  return { icon, closed, overviewRadius: radius, pointRadius: radius }
+  return { icon, closed, distant: step === 'older' && agent?.tier !== 'active', overviewRadius: radius, pointRadius: radius }
 }
 
 /** Retirement time is a lifecycle record, not observed activity; say which one is shown. */

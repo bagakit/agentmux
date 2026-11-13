@@ -210,6 +210,11 @@
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .collaboration-agent__dot .collaboration-agent__avatar { grid-area: 1 / 1; }
+.collaboration-agent__face { display: grid; position: relative; }
+.collaboration-agent__far-point { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; background: currentColor; pointer-events: none; }
+.collaboration-agent--unknown .collaboration-agent__far-point { background: transparent; border: 1px solid currentColor; }
+.collaboration-agent__dot[data-distant]::after { content: ''; position: absolute; left: 50%; top: 50%; width: var(--collaboration-hit-size); height: var(--collaboration-hit-size); transform: translate(-50%, -50%); border-radius: 50%; }
+.focus-map-preview__far-point { position: absolute; inset: 0; border-radius: 50%; background: currentColor; }
 .collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2.5; opacity: .95; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge { opacity: .16; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge__pulse { opacity: .2; }
