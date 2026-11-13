@@ -69,14 +69,23 @@ function respond(response: ServerResponse, statusCode: number, body = ''): void 
   response.end(body)
 }
 
+/** The one synchronous native decision this receipt's original pipe may answer. */
+export type HookDecisionKind = 'permission' | 'turn-end'
+
 type HookIngressEvent = {
   receiptId: string
-  decision?: true
+  decision?: HookDecisionKind
   eventName?: string
   payload?: Record<string, unknown>
 }
 
-function isIngressEvent(value: unknown): value is HookIngressEvent {
+/** The worker's original request: it only offers to wait; ingress chooses the declared decision. */
+type HookIngressRequest = Omit<HookIngressEvent, 'decision'> & { decision?: true }
+
+/** The event owner adopts the exact original callback, or ingress releases it without a decision. */
+export type HookDecisionAdoption = { permissionCallbackAccepted?: boolean; turnEndCallbackAccepted?: boolean }
+
+function isIngressEvent(value: unknown): value is HookIngressRequest {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
   if (
@@ -104,7 +113,8 @@ export type AgentHookBinding = {
   close(): Promise<void>
 }
 
-type PermissionCallback = {
+type DecisionCallback = {
+  kind: HookDecisionKind
   response: ServerResponse
   output: Promise<Record<string, unknown> | null>
   resolve(output: Record<string, unknown> | null): void
@@ -113,7 +123,7 @@ type PermissionCallback = {
   decisionSupplied?: boolean
 }
 
-type HookReceipt = { fingerprint: string; bytes: number; expiresAt: number; response?: Promise<void>; decision?: PermissionCallback }
+type HookReceipt = { fingerprint: string; bytes: number; expiresAt: number; response?: Promise<void>; decision?: DecisionCallback }
 
 type PendingBinding = {
   token: string
@@ -155,11 +165,12 @@ export class AgentHookServer {
     private readonly onEvent: (
       event: NativeHookEnvelope,
       signal: AbortSignal
-    ) => void | { permissionCallbackAccepted: boolean } | Promise<void | { permissionCallbackAccepted: boolean }>,
+    ) => void | HookDecisionAdoption | Promise<void | HookDecisionAdoption>,
     private readonly port = defaultAgentMuxHookPort(),
     private readonly onFailure?: (failure: HookDeliveryFailure) => void,
-    private readonly supportsPermissionDecision?: (providerId: AgentProviderId, eventName: string | undefined) => boolean,
-    private readonly onPermissionCallbackClosed?: (agentSessionId: string, runId: string, receiptId: string, decided: boolean) => void
+    /** Which synchronous decision, if any, the Provider declares for this event name. */
+    private readonly decisionKind?: (providerId: AgentProviderId, eventName: string | undefined) => HookDecisionKind | undefined,
+    private readonly onDecisionCallbackClosed?: (agentSessionId: string, runId: string, receiptId: string, decided: boolean, kind: HookDecisionKind) => void
   ) {}
 
   async start(): Promise<HookServerEndpoint> {
@@ -286,33 +297,55 @@ export class AgentHookServer {
     }
   }
 
-  private permissionCallback(agentSessionId: string, runId: string, receiptId: string): PermissionCallback | undefined {
+  private decisionCallback(agentSessionId: string, runId: string, receiptId: string, kind: HookDecisionKind): DecisionCallback | undefined {
     for (const binding of this.bindings.values()) {
       if (binding.agentSessionId === agentSessionId && binding.runId === runId && !binding.closed) {
         const callback = binding.receipts.get(receiptId)?.decision
-        if (callback?.state === 'open' && !callback.response.destroyed) return callback
+        if (callback?.kind === kind && callback.state === 'open' && !callback.response.destroyed) return callback
       }
     }
     return undefined
   }
 
   hasPermissionCallback(agentSessionId: string, runId: string, receiptId: string): boolean {
-    return this.permissionCallback(agentSessionId, runId, receiptId) !== undefined
+    return this.decisionCallback(agentSessionId, runId, receiptId, 'permission') !== undefined
+  }
+
+  hasDecisionCallback(agentSessionId: string, runId: string, receiptId: string, kind: HookDecisionKind): boolean {
+    return this.decisionCallback(agentSessionId, runId, receiptId, kind) !== undefined
   }
 
   /** This writes only the original Hook response. A finish is not stdout or Native adoption. */
   async respondPermission(agentSessionId: string, runId: string, receiptId: string, output: Record<string, unknown> | null): Promise<void> {
-    const callback = this.permissionCallback(agentSessionId, runId, receiptId)
+    const callback = this.decisionCallback(agentSessionId, runId, receiptId, 'permission')
     if (!callback) throw new AgentMuxError('The original permission Hook callback is closed. Use the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
+    if (!await this.decide(callback, output)) throw new AgentMuxError('The original permission Hook response delivery is unknown; it will not be resent.', 'AGENT_INTERACTION_UNCONFIRMED')
+  }
+
+  /**
+   * Answer the original turn-end callback once. `written` means the native process received the
+   * complete response; `unknown` never means it was not applied; `closed` means nothing was sent.
+   */
+  async respondTurnEnd(agentSessionId: string, runId: string, receiptId: string, output: Record<string, unknown>): Promise<'written' | 'unknown' | 'closed'> {
+    const callback = this.decisionCallback(agentSessionId, runId, receiptId, 'turn-end')
+    if (!callback) return 'closed'
+    return await this.decide(callback, output) ? 'written' : 'unknown'
+  }
+
+  private async decide(callback: DecisionCallback, output: Record<string, unknown> | null): Promise<boolean> {
     callback.state = 'decided'
     callback.decisionSupplied = output !== null
     callback.resolve(output)
-    if (!await callback.finished) throw new AgentMuxError('The original permission Hook response delivery is unknown; it will not be resent.', 'AGENT_INTERACTION_UNCONFIRMED')
+    return await callback.finished
   }
 
   /** A locally proven pre-dispatch failure returns no decision on that exact original pipe. */
   abstainPermission(agentSessionId: string, runId: string, receiptId: string): void {
-    const callback = this.permissionCallback(agentSessionId, runId, receiptId)
+    this.abstainDecision(agentSessionId, runId, receiptId, 'permission')
+  }
+
+  abstainDecision(agentSessionId: string, runId: string, receiptId: string, kind: HookDecisionKind): void {
+    const callback = this.decisionCallback(agentSessionId, runId, receiptId, kind)
     if (callback) { callback.state = 'closed'; callback.resolve(null) }
   }
 
@@ -323,11 +356,11 @@ export class AgentHookServer {
     }
   }
 
-  private openPermissionCallback(binding: PendingBinding, event: HookIngressEvent, response: ServerResponse): PermissionCallback {
-    let resolve!: PermissionCallback['resolve'], finish!: (delivered: boolean) => void
+  private openDecisionCallback(binding: PendingBinding, event: HookIngressEvent & { decision: HookDecisionKind }, response: ServerResponse): DecisionCallback {
+    let resolve!: DecisionCallback['resolve'], finish!: (delivered: boolean) => void
     const output = new Promise<Record<string, unknown> | null>(done => { resolve = done })
     const finished = new Promise<boolean>(done => { finish = done })
-    const callback: PermissionCallback = { response, output, resolve, finished, state: 'open' }
+    const callback: DecisionCallback = { kind: event.decision, response, output, resolve, finished, state: 'open' }
     let returnedDecision = false
     response.once('finish', () => { returnedDecision = callback.state === 'decided' && callback.decisionSupplied === true; finish(true) })
     response.once('close', () => {
@@ -335,7 +368,7 @@ export class AgentHookServer {
       const receipt = binding.receipts.get(event.receiptId)
       if (receipt) receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS
       if (binding.runId) {
-        try { this.onPermissionCallbackClosed?.(binding.agentSessionId, binding.runId, event.receiptId, returnedDecision) } catch { /* Observation cannot keep the original callback alive. */ }
+        try { this.onDecisionCallbackClosed?.(binding.agentSessionId, binding.runId, event.receiptId, returnedDecision, callback.kind) } catch { /* Observation cannot keep the original callback alive. */ }
       }
     })
     if (response.destroyed) { callback.state = 'closed'; callback.resolve(null); finish(false) }
@@ -380,10 +413,11 @@ export class AgentHookServer {
     }
     // A willing stdout is not a capability declaration. Unsupported or not-yet-bound
     // candidates remain the original passive observation, never a waiting callback.
+    const decisionKind = parsed.decision && binding.runId ? this.decisionKind?.(binding.providerId, parsed.eventName) : undefined
     const event: HookIngressEvent = { receiptId: parsed.receiptId,
       ...(parsed.eventName === undefined ? {} : { eventName: parsed.eventName }),
       ...(parsed.payload === undefined ? {} : { payload: parsed.payload }),
-      ...(parsed.decision && binding.runId && this.supportsPermissionDecision?.(binding.providerId, parsed.eventName) ? { decision: true as const } : {}) }
+      ...(decisionKind ? { decision: decisionKind } : {}) }
     const existing = binding.receipts.get(parsed.receiptId)
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
@@ -431,7 +465,7 @@ export class AgentHookServer {
       this.fail(response, binding, parsed.receiptId, 'HOOK_DELIVERY_BACKPRESSURE', 'admission', false)
       return
     }
-    const decision = event.decision ? this.openPermissionCallback(binding, event, response) : undefined
+    const decision = event.decision ? this.openDecisionCallback(binding, { ...event, decision: event.decision }, response) : undefined
     binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity, ...(decision ? { decision } : {}) })
     try {
       await this.enqueue(binding, event)
@@ -527,7 +561,8 @@ export class AgentHookServer {
     }
     const envelope: NativeHookEnvelope = {
       receiptId: event.receiptId,
-      ...(event.decision ? { permissionCallback: true as const } : {}),
+      ...(event.decision === 'permission' ? { permissionCallback: true as const } : {}),
+      ...(event.decision === 'turn-end' ? { turnEndCallback: true as const } : {}),
       agentSessionId: binding.agentSessionId,
       runId: binding.runId,
       providerId: binding.providerId,
@@ -535,7 +570,7 @@ export class AgentHookServer {
       ...(event.payload === undefined ? {} : { payload: event.payload })
     }
     const controller = new AbortController()
-    let delivery: void | { permissionCallbackAccepted: boolean } | Promise<void | { permissionCallbackAccepted: boolean }>
+    let delivery: void | HookDecisionAdoption | Promise<void | HookDecisionAdoption>
     try {
       delivery = this.onEvent(envelope, controller.signal)
     } catch (error) {
@@ -546,7 +581,7 @@ export class AgentHookServer {
       const callback = binding.receipts.get(event.receiptId)?.decision
       // Receipt processing is not adoption of a reply target. An unadopted callback must
       // immediately return no decision, rather than hiding the Native reviewer for its deadline.
-      if (callback?.state === 'open' && !result?.permissionCallbackAccepted) {
+      if (callback?.state === 'open' && !(callback.kind === 'permission' ? result?.permissionCallbackAccepted : result?.turnEndCallbackAccepted)) {
         callback.state = 'closed'; callback.resolve(null)
       }
     })

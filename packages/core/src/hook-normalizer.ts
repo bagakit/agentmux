@@ -78,6 +78,17 @@ export type AgentNativeHookSpecification = {
     eventName: string
     outputs: Readonly<Record<string, Readonly<Record<string, unknown>>>>
   }
+  /**
+   * The native turn-end decision that continues one genuinely completing main turn with a
+   * platform notice. Only the Provider knows its schema; absent, the event stays an observer.
+   */
+  turnEndDecision?: {
+    eventName: string
+    /** The native turn and whether this callback is the turn's first stop; unknown abstains. */
+    readTurn(payload: Readonly<Record<string, unknown>>): { nativeTurnId: string; firstStop: boolean } | undefined
+    /** The exact native output that hands this frozen notice to the model in the same turn. */
+    output(notice: string): Readonly<Record<string, unknown>>
+  }
   rules: readonly AgentNativeHookStateRule[]
   nativeTurnIdKeys?: readonly string[]
   /** Provider protocol correlation with the immediately preceding durable Hook. */

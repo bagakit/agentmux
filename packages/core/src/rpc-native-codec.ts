@@ -896,7 +896,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (method === 'message.notify.inspect' && p.inputOrigin !== null) parseAgentInputJournalCut(p.inputOrigin)
         if (p.hostId !== input.hostId) fail()
         if (method === 'message.notify.inspect' && p.notification === null) { if (p.input !== null || p.inputOrigin !== null) fail(); break }
-        const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason', 'preparedAt', 'resultRecordedAt'])
+        const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'turnEnd', 'state', 'reason', 'preparedAt', 'resultRecordedAt'])
         const notice = validateMessageNotification(raw as unknown as import('./agent-message-notification.js').AgentMuxMessageNotification)
         if (notice.notificationId !== input.operationId || method === 'message.notify' && (notice.mode !== 'steer' || !isDeepStrictEqual(notice.messageIds, input.messageIds))) fail()
         if (p.input !== null) {

@@ -12,6 +12,12 @@ export type AgentMuxMessageIdleBoundary = { inputByte: number } & (
   | { completionId?: never; nativeEvidence: { sourceId: string; id: string } }
 )
 
+/**
+ * The original native turn-end decision this notice answered: one Stop callback receipt of one
+ * native turn. It is consumed by that callback alone, never by the Input owner or a later turn.
+ */
+export type AgentMuxMessageTurnEndBoundary = { nativeTurnId: string; hookReceiptId: string }
+
 /** A platform input referencing original Inbox records; never another A2A message. */
 export type AgentMuxMessageNotification = {
   notificationId: string
@@ -24,6 +30,8 @@ export type AgentMuxMessageNotification = {
   mode: 'idle' | 'steer'
   /** An automatic producer's exact observed opportunity, not a saved user intent. */
   idle?: AgentMuxMessageIdleBoundary
+  /** An automatic notice carried by the original native turn-end decision instead of the Input owner. */
+  turnEnd?: AgentMuxMessageTurnEndBoundary
   state: 'pending' | 'submitted' | 'unconfirmed' | 'not-applied'
   reason?: string
   /** Journal preparation time; absent in retained records that did not capture it. */
@@ -46,7 +54,8 @@ export type AgentMuxMessageNotificationStatus = {
 /** Only the original platform producer can supply a notification's input outcome. */
 export function isMessageNotificationInput(notice: AgentMuxMessageNotification, record: AgentPromptSubmissionRecord | null): record is AgentPromptSubmissionRecord {
   const admission = record?.admission, intent = admission?.intent
-  return record?.agentSessionId === notice.key.agentSessionId && isDeepStrictEqual(record.run, notice.key.expectedRun) &&
+  // A turn-end notice is carried by its native decision callback; no Input owner record can sign it.
+  return notice.turnEnd === undefined && record?.agentSessionId === notice.key.agentSessionId && isDeepStrictEqual(record.run, notice.key.expectedRun) &&
     isDeepStrictEqual(admission?.inputKey, notice.key) && admission?.submissionId === notice.notificationId &&
     isDeepStrictEqual(intent?.run, notice.key.expectedRun) && intent?.prompt === notice.wire &&
     isDeepStrictEqual(intent.message, { systemContext: notice.wire, a2aNotificationId: notice.notificationId }) &&
@@ -71,7 +80,14 @@ export function validateMessageNotification(value: AgentMuxMessageNotification):
   for (const id of value.messageIds) messageEnvelopeString(id, 'Original message ID')
   for (const at of [value.preparedAt, value.resultRecordedAt]) if (at !== undefined && (!Number.isSafeInteger(at) || at < 0)) throw new AgentMuxError(
     'The original notification journal time is invalid.', 'INVALID_A2A_NOTIFICATION')
-  if (value.mode === 'idle') {
+  if (value.mode === 'idle' && value.turnEnd !== undefined) {
+    const turnEnd = value.turnEnd
+    if (value.idle !== undefined || value.moteObservation !== undefined || !turnEnd || typeof turnEnd !== 'object' ||
+        Object.keys(turnEnd).some(key => key !== 'nativeTurnId' && key !== 'hookReceiptId')) throw new AgentMuxError(
+      'A turn-end notification names only its original native turn and decision callback.', 'INVALID_A2A_NOTIFICATION')
+    messageEnvelopeString(turnEnd.nativeTurnId, 'Native turn ID'); messageEnvelopeString(turnEnd.hookReceiptId, 'Native Hook receipt ID')
+  } else if (value.turnEnd !== undefined) throw new AgentMuxError('A manual notification cannot claim a native turn-end decision.', 'INVALID_A2A_NOTIFICATION')
+  else if (value.mode === 'idle') {
     const idle = value.idle, native = idle?.nativeEvidence
     const validOpportunity = native === undefined
       ? typeof idle?.completionId === 'string' && idle.completionId.length > 0

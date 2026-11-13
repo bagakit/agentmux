@@ -91,6 +91,19 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
   // 故不声明 transcriptPathKeys——resume 靠 session id。
   nativeHandle: {
     sessionIdKeys: ['sessionId']
+  },
+  // Grok's Stop gate can keep a genuinely completing main turn working. A non-error
+  // `additionalContext` hands the frozen notice to the model as same-turn input without
+  // reporting a hook failure. `stopHookActive` is true once a gate already continued this
+  // turn, so only the first stop of each `promptId` can carry a notice.
+  turnEndDecision: {
+    eventName: 'stop',
+    readTurn(payload) {
+      const nativeTurnId = payload.promptId, active = payload.stopHookActive
+      if (typeof nativeTurnId !== 'string' || !nativeTurnId.trim() || typeof active !== 'boolean' || payload.reason !== 'end_turn') return undefined
+      return { nativeTurnId, firstStop: !active }
+    },
+    output: notice => ({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: notice } })
   }
 }
 

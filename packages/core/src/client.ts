@@ -1019,6 +1019,8 @@ export class AgentMuxClient {
             [pending?.request, ...(pending?.additionalRequests ?? [])].some(request =>
               request?.kind === 'permission' && request.permissionHook?.receiptId === event.receiptId) }
         }
+        // Adoption follows the receipt owner. The decision itself runs outside this lane.
+        if (event.turnEndCallback) return { turnEndCallbackAccepted: this.adoptTurnEndDecision(event) }
       },
       undefined,
       failure => {
@@ -1029,8 +1031,14 @@ export class AgentMuxClient {
           message: `Native Hook ${failure.receiptId} failed during ${failure.stage}; ${failure.accepted === false ? 'owner work did not start' : 'durable delivery is unconfirmed'}. The original Session, Run and terminal capability are kept. ${failure.code === 'HOOK_BODY_TOO_LARGE' || failure.code === 'INVALID_HOOK_ENVELOPE' ? 'Refresh native Session observation to read its original source.' : 'Retry the same observation receipt after backoff; refresh native Session observation if its sender has exited.'}${failure.message === undefined ? '' : ` Cause: ${failure.message}`}`,
           evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
       },
-      (providerId, eventName) => this.providers.get(providerId).hook.permissionDecision?.eventName === eventName && eventName !== undefined,
-      (agentSessionId, runId, receiptId, decided) => {
+      (providerId, eventName) => {
+        if (eventName === undefined) return undefined
+        const hook = this.providers.get(providerId).hook
+        return hook.permissionDecision?.eventName === eventName ? 'permission'
+          : hook.turnEndDecision?.eventName === eventName ? 'turn-end' : undefined
+      },
+      (agentSessionId, runId, receiptId, decided, kind) => {
+        if (kind !== 'permission') return
         void this.closePermissionHook(agentSessionId, runId, receiptId, decided).catch(() => {
           const session = this.registry.findByRun(runRef(runId))
           if (session) this.publishSession(session)
@@ -1179,6 +1187,13 @@ export class AgentMuxClient {
         finally { if (notice.moteObservation) await this.moteInputs.revisit(notice.moteObservation.id) }
       },
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
+      answerTurnEnd: async (callback, wire) => {
+        const contribution = this.providers.get(callback.session.providerId).hook.turnEndDecision
+        if (!contribution) { this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'); return 'closed' }
+        return await this.hookServer.respondTurnEnd(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId,
+          structuredClone(contribution.output(wire)) as Record<string, unknown>)
+      },
+      abstainTurnEnd: callback => this.hookServer.abstainDecision(callback.session.agentSessionId, callback.session.run.runId, callback.hookReceiptId, 'turn-end'),
       unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
         ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',
         message: `Inbox notification is unconfirmed. Original messages and healthy manual input are retained; read the original MID or explicitly notify it. ${error instanceof Error ? error.message : String(error)}`,
@@ -6029,8 +6044,12 @@ export class AgentMuxClient {
     const session = this.projectSession(current)
     const provider = this.providers.get(session.providerId)
     const observation = { session, inputByte: run.acceptedInputBytes }
+    // A Provider's turn-end decision carries automatic notices by itself; it has no idle-input opportunity to read.
+    if (!provider.prepareNativeInput && provider.hook.turnEndDecision) return { ...observation, unavailable: new AgentMuxError(
+      'This Provider delivers automatic Inbox notifications when its current turn ends. The recipient is idle or between turns, so the notice waits for its next turn end; explicitly notify the original MID to deliver it now.',
+      'A2A_NOTIFICATION_AWAITS_TURN_END') }
     if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
-      'This Provider has not contributed the queue adapter required for automatic idle-only Inbox notifications.',
+      'This Provider has no automatic Inbox notification path. The original message is retained; explicitly notify the original MID to deliver it.',
       'AGENT_NATIVE_INPUT_UNAVAILABLE') }
     if (agentTurnCompletionIdentity(session)) return observation
     if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
@@ -7621,6 +7640,15 @@ export class AgentMuxClient {
       await this.submitNativeInteractionResponse(session, run, pending.request, response,
         digestInteractionResponse(response), input.operationId, data)
     }, { kind: 'semantic', bytes: null, work: 'interaction-response' })
+  }
+
+  /** Hook ingress hands the authenticated turn-end callback to the notification owner, which alone decides it. */
+  private adoptTurnEndDecision(event: NativeHookEnvelope): boolean {
+    const session = this.registry.findByRun(runRef(event.runId))
+    const decision = session ? this.providers.get(session.providerId).hook.turnEndDecision : undefined
+    if (!session || !decision || session.agentSessionId !== event.agentSessionId || session.providerId !== event.providerId) return false
+    return this.messageNotifications.adoptTurnEnd({ session: this.projectSession(session), receipt: session.hookReceipt,
+      receiptId: event.receiptId, decision, payload: event.payload ?? {} })
   }
 
   private async closePermissionHook(agentSessionId: string, runId: string, receiptId: string, decided: boolean): Promise<void> {

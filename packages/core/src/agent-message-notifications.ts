@@ -1,9 +1,10 @@
 import { mintObjectId } from './object-id.js'
 import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, type AgentPromptInputKey } from './agent-prompt-condition.js'
-import { agentTurnCompletionIdentity } from './agent-session-identity.js'
+import { agentTurnCompletionIdentity, sameRun } from './agent-session-identity.js'
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
+import type { AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { AgentMuxError } from './errors.js'
@@ -15,13 +16,22 @@ type Dependencies = {
   submit(notification: AgentMuxMessageNotification): Promise<void>
   inputAbsent(key: AgentPromptInputKey): Promise<boolean>
   unavailable(agentSessionId: string | undefined, error: unknown, run?: AgentMuxAgentSession['run']): void
+  /** Answer the exact original turn-end callback once with this frozen wire. */
+  answerTurnEnd?(callback: TurnEndCallback, wire: string): Promise<'written' | 'unknown' | 'closed'>
+  /** Release the exact original turn-end callback without a decision; the native turn ends unchanged. */
+  abstainTurnEnd?(callback: TurnEndCallback): void
 }
+
+/** One authenticated native turn-end callback of an exact Run's main session. */
+export type TurnEndCallback = { session: AgentMuxAgentSession; nativeTurnId: string; hookReceiptId: string }
 
 /** Event-driven wakeups over the original journal, never an input or message owner. */
 export class AgentMuxMessageNotifications {
   private readonly recipients = new Set<string>()
   private readonly drains = new Map<string, { pending: Promise<void>; requested: boolean }>()
   private readonly attempted = new Map<string, string>()
+  /** Native turns whose first stop this owner has already decided; one notice per native turn. */
+  private readonly turnEnds = new Map<string, string>()
   private readonly unconfirmedSources = new Map<string, string>()
   private readonly unavailableReads = new Map<string, string>()
   private observation: ReturnType<typeof observeMessageJournal> | undefined
@@ -125,6 +135,55 @@ export class AgentMuxMessageNotifications {
       originalInputAbsent: () => this.deps.inputAbsent({ kind: 'prompt', agentSessionId, expectedRun: condition.expectedRun, submissionId: notificationId }) })
     if (notice) await this.deps.submit(notice)
     if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); this.unavailableReads.delete(agentSessionId) }
+  }
+
+  /**
+   * Adopt one authenticated turn-end callback, or return false so ingress releases it at once and
+   * the native turn ends unchanged. Only the exact Run's main native session, on the first stop of
+   * one native turn, carries a notice; the decision itself runs outside the Hook lane.
+   */
+  adoptTurnEnd(input: { session: AgentMuxAgentSession; receipt: AgentMuxAgentSession['hookReceipt']; receiptId: string
+    decision: NonNullable<AgentNativeHookSpecification['turnEndDecision']>; payload: Readonly<Record<string, unknown>> }): boolean {
+    const { session, receipt, receiptId, decision } = input, handle = session.nativeHandle
+    if (this.disposed || receipt?.id !== receiptId || !sameRun(receipt.run, session.run) || receipt.subject?.kind !== 'main' ||
+        handle?.kind !== 'provider' || receipt.subject.nativeSessionId !== handle.sessionId) return false
+    const turn = decision.readTurn(input.payload)
+    if (!turn?.firstStop) return false
+    void this.decideTurnEnd({ session, nativeTurnId: turn.nativeTurnId, hookReceiptId: receiptId })
+      .catch(error => this.deps.unavailable(session.agentSessionId, error, session.run))
+    return true
+  }
+
+  /**
+   * Decide one genuinely completing native turn's stop. A notice is prepared only for new
+   * pending references of this exact Run, then handed to the original callback; its outcome is
+   * the callback's own write receipt. Every other path releases the callback at once, so the
+   * native turn ends unchanged without waiting for its Hook deadline.
+   */
+  private async decideTurnEnd(callback: TurnEndCallback): Promise<void> {
+    const { session, nativeTurnId, hookReceiptId } = callback, agentSessionId = session.agentSessionId
+    let notice: AgentMuxMessageNotification | null = null
+    try {
+      const turn = JSON.stringify([session.run.runId, nativeTurnId])
+      if (this.disposed || !this.deps.answerTurnEnd || this.turnEnds.get(agentSessionId) === turn) return
+      this.turnEnds.set(agentSessionId, turn)
+      notice = await this.deps.queue.prepareNotification({ agentSessionId, notificationId: `a2a-notice-${mintObjectId()}`,
+        condition: agentPromptCondition(session), turnEnd: { nativeTurnId, hookReceiptId },
+        sourceRuns: sessionSemanticResumeSourceRuns(session) })
+    } catch (error) { this.deps.unavailable(agentSessionId, error, session.run) }
+    finally { if (!notice) this.deps.abstainTurnEnd?.(callback) }
+    if (!notice) return
+    let written: 'written' | 'unknown' | 'closed'
+    try { written = await this.deps.answerTurnEnd!(callback, notice.wire) } catch { written = 'unknown' }
+    try {
+      // Written is the original connection's complete response, the same strength as an accepted
+      // input byte; it never claims that the model read the notice.
+      if (written === 'written') await this.deps.queue.recordNotificationResult(notice.notificationId, 'submitted')
+      else if (written === 'closed') await this.deps.queue.recordNotificationResult(notice.notificationId, 'not-applied',
+        'The original turn-end callback closed before this notice was written. The Inbox is retained for the next turn end or an explicit notification.')
+      else await this.deps.queue.recordNotificationResult(notice.notificationId, 'unconfirmed',
+        'The original turn-end response delivery is unknown. Its notice is retained and will not be resent.')
+    } catch (error) { this.deps.unavailable(agentSessionId, error, session.run) }
   }
 
   async dispose(): Promise<void> {

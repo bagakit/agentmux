@@ -2262,6 +2262,8 @@ export type AgentProviderForkContext = AgentProviderResumeContext
 export type NativeHookEnvelope = {
   /** Set by authenticated ingress only for the original synchronous HTTP callback. */
   permissionCallback?: true
+  /** Set by authenticated ingress only for the original synchronous turn-end decision callback. */
+  turnEndCallback?: true
   receiptId: string
   agentSessionId: string
   runId: string

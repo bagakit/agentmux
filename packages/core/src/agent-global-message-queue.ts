@@ -541,7 +541,7 @@ export class DurableAgentMuxMessageQueue {
 
   /** Freeze the bounded original reference set atomically, before entering the Input owner. */
   async prepareNotification(input: { notificationId: string; agentSessionId: string; condition: AgentPromptCondition;
-    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[]; sourceRuns?: readonly string[];
+    idle?: AgentMuxMessageNotification['idle']; turnEnd?: AgentMuxMessageNotification['turnEnd']; messageIds?: readonly string[]; sourceRuns?: readonly string[];
     originalInputAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageNotification | null> {
     return this.withLock(async () => {
       const condition = validateAgentPromptCondition(input.condition)
@@ -557,6 +557,8 @@ export class DurableAgentMuxMessageQueue {
         ORDER BY message_sequence LIMIT 100`)
         .all(input.agentSessionId, JSON.stringify(input.sourceRuns ?? [condition.expectedRun.runId]))
       if (!positions.length) {
+        // A turn-end decision only carries new references; it never answers with an earlier notice's wire.
+        if (input.turnEnd) return null
         const active = this.db.prepare(`SELECT n.notification_id FROM a2a_notifications n JOIN records original ON original.sequence=n.original_sequence
           WHERE n.recipient_id=? AND n.run_id=? AND n.active=1 AND json_extract(original.json, '$.notification.mode')='idle' ORDER BY n.original_sequence LIMIT 1`)
           .get(input.agentSessionId, condition.expectedRun.runId)
@@ -584,7 +586,8 @@ export class DurableAgentMuxMessageQueue {
       const notice: AgentMuxMessageNotification = { notificationId: input.notificationId,
         key: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: condition.expectedRun, submissionId: input.notificationId },
         messageIds: references.map(reference => reference.messageId), wire, condition,
-        mode: input.idle ? 'idle' : 'steer', ...(input.idle ? { idle: input.idle } : {}), state: 'pending' }
+        mode: input.idle || input.turnEnd ? 'idle' : 'steer', ...(input.idle ? { idle: input.idle } : {}),
+        ...(input.turnEnd ? { turnEnd: input.turnEnd } : {}), state: 'pending' }
       if (!isDeepStrictEqual(this.inputOwnerKey(notice.key), notice.key) ||
           this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
           input.originalInputAbsent && !await input.originalInputAbsent()) throw new AgentMuxError(
