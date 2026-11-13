@@ -38,11 +38,11 @@ async function command(label, executable, args, extra = {}) {
     const env = { ...process.env, ...extra }
     if (executable === require('electron')) delete env.ELECTRON_RUN_AS_NODE
     const child = spawn(executable, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
-    let log = '', timedOut = false
+    let log = '', timedOut = false, escalation
     for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes })
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM') }, 45000)
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 2000) }, 45000)
     child.once('error', error => { clearTimeout(timer); reject(error) })
-    child.once('exit', (code, signal) => { clearTimeout(timer); done({ code, signal, log, timedOut }) })
+    child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(escalation); done({ code, signal, log, timedOut }) })
   })
   await writeFile(join(out, label + '.log'), result.log)
   assert.equal(result.timedOut, false, label + ': an infrastructure timeout is not behavior proof')

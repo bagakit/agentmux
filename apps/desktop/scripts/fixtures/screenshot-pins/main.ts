@@ -99,7 +99,9 @@ async function run() {
   cases.push({ name: 'actual public CLI closes only its exact pin and preserves original creation effect' })
 
   window = dark.window
-  await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  const closingContents = window.webContents
+  await Promise.race([closingContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }),
+    new Promise<void>(resolve => closingContents.once('destroyed', resolve))])
   await until(async () => dark.window.isDestroyed(), 'production Escape close')
   const repeated = await client.call('image.pin', dark.input)
   assert.equal(repeated.state, 'closed'); assert.equal(BrowserWindow.getAllWindows().length, 0)
