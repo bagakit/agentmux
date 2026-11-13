@@ -12,13 +12,14 @@ const port = vi.hoisted(() => {
     listeners, set(next: BrowserProfileList) { list = next }, get: () => list, commit,
     readProfiles: vi.fn(async () => list),
     onProfilesChanged: vi.fn((listener: (list: BrowserProfileList) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }),
-    updateProfile: vi.fn(async (id: string, edit: { label?: string; hue?: number | null; notes?: string }, expected: number) => {
+    updateProfile: vi.fn(async (id: string, edit: { label?: string; hue?: number | null; notes?: string; agentAccess?: boolean }, expected: number) => {
       if (expected !== list.revision) throw Object.assign(new Error('Browser Profiles changed since revision was read; current revision is ' + list.revision + '. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
       const next = list.profiles.map(profile => {
         if (profile.id !== id) return profile
         const updated: BrowserProfileSummary = { ...profile, ...(edit.label === undefined ? {} : { label: edit.label }) }
         if (edit.hue === null) delete updated.hue; else if (edit.hue !== undefined) updated.hue = edit.hue
         if (edit.notes !== undefined) { if (edit.notes) updated.notes = edit.notes; else delete updated.notes }
+        if (edit.agentAccess === false) updated.agentAccess = false; else if (edit.agentAccess === true) delete updated.agentAccess
         return updated
       })
       commit(next)
@@ -36,6 +37,7 @@ const port = vi.hoisted(() => {
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
 const store = vi.hoisted(() => ({
   tabs: {} as Record<string, unknown>,
+  config: { browser: { agentAutomation: true } } as { browser: { agentAutomation: boolean } },
   layouts: {} as Record<string, { activeGroupId: string; groups: { id: string; tabOrder: string[] }[] }>,
   activeWorkspaceId: 'ws-1' as string | null,
   selectMainRegion: vi.fn((_reference: unknown) => true),
@@ -425,5 +427,25 @@ describe('Settings › Browser Profiles clears one site', () => {
     await act(async () => section().querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
     expect([...section().querySelectorAll('li')].map(li => li.textContent)).toContain('example.com1 cookieClear…')
     expect(section().querySelector('[role="alert"]')?.textContent).toContain('example.com was not cleared.')
+  })
+})
+
+describe('Settings › Browser Profiles Agents switch', () => {
+  const agents = () => container.querySelector<HTMLInputElement>('[aria-label="Agents"] input[role="switch"]')!
+
+  it('turns Agents off and on for this Profile with the list revision', async () => {
+    store.config.browser.agentAutomation = true
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    expect(agents().checked).toBe(true)
+    await act(async () => agents().click())
+    expect(port.updateProfile).toHaveBeenLastCalledWith('p-personal', { agentAccess: false }, 4)
+    expect(container.querySelector('[aria-label="Agents"] small')?.textContent).toContain('You can still run your own steps')
+  })
+
+  it('says when the global switch already keeps every Agent out', async () => {
+    store.config.browser.agentAutomation = false
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    expect(container.querySelector('[aria-label="Agents"] small')?.textContent).toContain('Agent browser automation is off in Settings › Browser')
+    store.config.browser.agentAutomation = true
   })
 })
