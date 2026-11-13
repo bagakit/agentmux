@@ -76,6 +76,7 @@ async function freshSnapshot(h: Harness) {
   // Only Runtime transport has an empty subject projection. Durable storage, public timeline,
   // Main snapshot, original recovery candidate and mounted Focus remain production consumers.
   vi.spyOn(client, 'connect').mockResolvedValue(undefined)
+  vi.spyOn(client, 'connectRuntime').mockResolvedValue(undefined)
   vi.spyOn(client, 'runtimeProjection').mockResolvedValue({ hostId: 'private-host', subjects: [] })
   vi.spyOn(client, 'runtimeIdentity').mockReturnValue({ ownership: 'verified' } as never)
   Object.assign(client, { runtimeOwnerIdentity: () => ({ runtimeId: 'isolated-transport-owner', availability: 'connected' }) })
@@ -284,6 +285,8 @@ it('a failed automatic read is reported once, retains the original Session, and 
   await h.wait(() => expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Work history could not be read'))
   expect(h.calls.timeline).toHaveBeenCalledTimes(1)
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } } })))
+  expect(h.calls.timeline).toHaveBeenCalledTimes(1)
+  await h.render(false); await h.render(true)
   expect(h.calls.timeline).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().sessions[0]?.id).toBe(SID)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Original unsent draft')

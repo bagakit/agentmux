@@ -8,7 +8,7 @@ import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-con
 import type { SessionSnapshot, AgentTimelineItem } from '../src/shared/contracts.js'
 import { RecentFocusTimeline } from '../src/renderer/src/components/RecentFocusTimeline.js'
 import { useAppStore } from '../src/renderer/src/store'
-import { focusExecution, restoreAgentFocus, EMPTY_AGENT_FOCUS, executionFocusHistory } from '../src/renderer/src/lib/agent-focus'
+import { focusExecution, restoreAgentFocus, EMPTY_AGENT_FOCUS, executionFocusHistory, type AgentFocusHistoryEntry } from '../src/renderer/src/lib/agent-focus'
 import { HOUR_MS, localDateTime } from '../src/renderer/src/lib/focus-time-window'
 
 const NOW = new Date(_hygiene_fixtureIso(23716800000, "second")).getTime()
@@ -17,6 +17,7 @@ function agent(id: string): SessionSnapshot {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: id,
     createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
     status: { state: 'working', source: 'run-process', observedAt: 1 },
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id } } } as SessionSnapshot
 }
 function message(id: string, session = 'one', createdAt = NOW - HOUR_MS, kind: AgentTimelineItem['kind'] = 'user_message'): AgentTimelineItem {
@@ -26,7 +27,9 @@ function message(id: string, session = 'one', createdAt = NOW - HOUR_MS, kind: A
 describe('Recent Focus timeline', () => {
   let root: Root, container: HTMLDivElement
   const contexts = () => createFocusProjectionSelector()({ sessions: [agent('one'), agent('two')], config: null, timelines: {}, agentNames: {}, scratchTopicSnapshots: {} }).contexts
-  const render = (onSelect = vi.fn(), entries = [{ sessionId: 'one', focusedAt: NOW - 2 * HOUR_MS }, { sessionId: 'two', focusedAt: NOW - HOUR_MS / 2 }]) => act(async () => root.render(createElement(RecentFocusTimeline, { entries, currentSessionId: 'two', contexts: contexts(), onSelect })))
+  // Visits retain the Host/project they were observed in; only matching identities share a current track.
+  const visit = (sessionId: string, focusedAt: number) => ({ sessionId, focusedAt, identity: { name: sessionId, kind: 'agent' as const, providerId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo") } })
+  const render = (onSelect = vi.fn(), entries: AgentFocusHistoryEntry[] = [visit('one', NOW - 2 * HOUR_MS), visit('two', NOW - HOUR_MS / 2)]) => act(async () => { const current = contexts(); root.render(createElement(RecentFocusTimeline, { entries, currentSessionId: 'two', currentContext: current.find(context => context.id === 'two') ?? null, contexts: current, onSelect })) })
   const click = (label: string) => act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click())
   const range = () => [Number(container.querySelector<HTMLElement>('.recent-focus')!.dataset.windowStart), Number(container.querySelector<HTMLElement>('.recent-focus')!.dataset.windowEnd)]
   const changeDate = (timestamp: number) => act(async () => { const input = container.querySelector<HTMLInputElement>('[aria-label="Focus history date and time"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, localDateTime(timestamp)); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })) })
@@ -36,7 +39,7 @@ describe('Recent Focus timeline', () => {
   it('renders source-derived tracks on the default past3h/future1h window, with true Now at 75%', async () => {
     const onSelect = vi.fn(); await render(onSelect)
     expect(range()).toEqual([NOW - 3 * HOUR_MS, NOW + HOUR_MS])
-    expect(container.querySelectorAll('[data-focus-timeline-id]').length).toBe(2)
+    expect(container.querySelectorAll('.recent-focus__track').length).toBe(2)
     expect(container.querySelector('[data-focus-timeline-id="two"] .recent-focus__segment')?.getAttribute('aria-current')).toBe('true')
     expect([...container.querySelectorAll<HTMLElement>('.recent-focus__playhead')].map(line => line.style.left)).toEqual(['75%', '75%', '75%'])
     expect(container.querySelector<HTMLButtonElement>('[data-focus-timeline-id="one"] .recent-focus__segment')!.style.width).toBe('37.5%')

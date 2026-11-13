@@ -1,6 +1,7 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false) })
 import { testAppDocumentSources } from "../helpers/app-document-fixture"
 import { testWorkbenchUserState } from '../helpers/workbench-user-state-fixture'
 import { localRuntimeConnector } from '../helpers/local-runtime-connector.js'
@@ -19,21 +20,23 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore, loadAgentSessions, type 
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionHistoryReference } from '../../src/shared/contracts'
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
-  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-focus-retired-renderer"), getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false },
-  ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
-}))
+vi.mock('electron', async () => {
+  const { EventEmitter } = await import('node:events'), { resolve } = await import('node:path')
+  return { nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+    contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
+    ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
+    app: Object.assign(new EventEmitter(), { getPath: () => _hygiene_fixturePath("private-focus-retired-renderer"), getAppPath: () => resolve('apps/desktop'), isPackaged: false }),
+    ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+    clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() } }
+})
 // Only the Electron service shell is isolated. Core/FileStore/built-in Reader,
 // Main controller, registered IPC, preload, Renderer API and mounted UI are real.
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class { async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } profileOfSession() { return undefined } } }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-renderer-journal.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} async flushProfileActivity() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { RuntimeController } from '../../src/main/runtime-controller'
 import { registerIpc } from '../../src/main/ipc'
@@ -80,14 +83,16 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
   const kernel = (client as unknown as { kernel: Record<string, (...args: unknown[]) => unknown> }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error(`Unexpected Run control ${name}`) }))
   const connect = vi.spyOn(client, 'connect').mockRejectedValue(new Error('No private Runtime'))
+  // Main observes an SSH endpoint's retained history only after its trusted connection.
+  Object.assign(client, { runtimeOwnerIdentity: () => ({ runtimeId: 'private-transport-owner', availability: 'connected' }) })
   const controller = new RuntimeController(store, localRuntimeConnector)
   controller.commit({ hosts: [{ id: 'private-host', config: { id: 'private-host', label: 'Private fixture', kind: 'ssh', hostname: 'unused.invalid' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [], executors: { 'private-claude': { providerId: 'claude', label: 'Private', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
-  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
-    configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as never })
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
+    configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
+    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
   bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args)
@@ -96,7 +101,8 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
   expect(bridge.api).not.toBeNull()
   const sources = await bridge.api!.sessions.historySources()
   expect(sources.map(source => [source.agentSessionId, source.state])).toEqual(Array.from({ length: count }, (_, i) => [`archived-${i}`, options.retire === false ? 'active' : 'retired']))
-  bridge.invoke.mockClear()
+  // Main's host commit starts the SSH endpoint's background connection; tests assert later Runtime use only.
+  bridge.invoke.mockClear(); connect.mockClear()
   const calls = { catalogue: vi.spyOn(api.sessions, 'historySources'), page: vi.spyOn(api.sessions, 'historyPage'), timeline: vi.spyOn(api.sessions, 'timeline'), projector: vi.spyOn(UserMessages, 'projectSessionUserMessages') }
   useAppStore.setState({ config, sessions: [], timelines: {}, agentFocus: EMPTY_AGENT_FOCUS, tabs: {}, layouts: {}, mainSurface: 'agents' })
   const element = document.createElement('div'); document.body.append(element); nodes.push(element)
