@@ -496,6 +496,32 @@ export class ContinuousProgressLoopManager {
   }
   /** One original cancellation batch shares a durable write, retaining each
    * loop's result and its schedule's separate Future Intent outcome. */
+  /**
+   * A person's input does not pause a standing heartbeat: its current occurrence moves one full interval
+   * after the input, so the arrangement stays active and needs no manual resume. An in-flight occurrence is
+   * cancelled; if it settles as skipped it keeps this later time, and a possibly written one still pauses as unknown.
+   */
+  async deferManaged(loopIds: readonly string[], reason: string, fence?: LoopMutationFence): Promise<PromiseSettledResult<ContinuousProgressLoop>[]> {
+    await this.start()
+    const deferred: string[] = []
+    const prepared = await Promise.allSettled(loopIds.map(async loopId => {
+      await fence?.prepare(); fence?.assertCurrent()
+      const loop = this.require(loopId)
+      if (!loop.managedSource || loop.status !== 'active' || loop.everyMs === undefined) return loop
+      const nextCheckAt = Math.max(loop.nextCheckAt, this.now() + loop.everyMs)
+      this.patch(loopId, { nextCheckAt, lastDecision: reason }); this.cancelDelivery(loopId); deferred.push(loopId)
+      return this.require(loopId)
+    }))
+    if (!deferred.length) return prepared
+    const [persistence] = await Promise.allSettled([this.saveLoops()])
+    return prepared.map(result => {
+      if (result.status === 'rejected' || !deferred.includes(result.value.loopId)) return result
+      // The deferral already holds in memory; an unsaved write is reported, never turned into a pause.
+      if (persistence!.status === 'rejected') return { status: 'rejected', reason: persistence!.reason }
+      for (const listener of this.listeners) listener(this.require(result.value.loopId))
+      return { status: 'fulfilled', value: this.require(result.value.loopId) }
+    })
+  }
   async pauseMany(loopIds: readonly string[], reason: string, context?: AgentMuxRpcCallContext, fence?: LoopMutationFence): Promise<PromiseSettledResult<ContinuousProgressLoop>[]> {
     await this.start()
     const prepared = await Promise.allSettled(loopIds.map(async loopId => {

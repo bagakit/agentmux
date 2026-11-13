@@ -6,7 +6,10 @@ export async function deliverContinuousProgress(
   runtime: Pick<GoalRuntimePort, 'observeContinuousProgress' | 'submitPrompt'>,
   loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal
 ): Promise<'sent' | 'skipped'> {
-  const observation = await runtime.observeContinuousProgress(loop, operationId, Date.now(), signal)
+  // Observation precedes any input: a read cancelled here proves this tick sent nothing.
+  let observation: Awaited<ReturnType<typeof runtime.observeContinuousProgress>>
+  try { observation = await runtime.observeContinuousProgress(loop, operationId, Date.now(), signal) }
+  catch (error) { if (signal.aborted && loop.lastOutcome !== 'unknown') return 'skipped'; throw error }
   const decision = loop.pendingCompletion?.futureIntent ? decideFutureProgress(observation, loop.pendingCompletion.futureIntent) : decideContinuousProgress(observation)
   if (!isCurrent() || !loop.pendingCompletion) return 'skipped'
   if (loop.lastOutcome !== 'unknown' && (decision.kind !== 'send' || !loop.pendingCompletion.futureIntent && decision.completionId !== loop.pendingCompletion.id)) return 'skipped'
@@ -25,7 +28,8 @@ export async function deliverContinuousProgress(
     undefined, undefined, pending.agentMuxNote)
     return 'sent'
   } catch (error) {
-    if (!pending.futureIntent && error instanceof AgentMuxError && (error.code === 'AGENT_COMPLETION_CHANGED' || error.code === 'AGENT_PROMPT_CANCELLED')) return 'skipped'
+    // Core raises these before it claims the input, so nothing was sent and the next due tick may retry.
+    if (error instanceof AgentMuxError && (error.code === 'AGENT_PROMPT_CANCELLED' || !pending.futureIntent && error.code === 'AGENT_COMPLETION_CHANGED')) return 'skipped'
     throw error
   }
 }
