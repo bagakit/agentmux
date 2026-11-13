@@ -2,12 +2,12 @@ import { NATIVE_CONVERSATION_SOURCE } from './conversation-sources.js'
 import type { AgentMessageChannel, AgentSessionUserMessageSource } from '@agentmux/core'
 
 const channelLabels: Readonly<Record<AgentMessageChannel, string>> = {
-  terminal: 'Terminal',
-  'message-tool': 'Message Tool',
-  'question-reply': 'Question reply',
+  terminal: '终端',
+  'message-tool': '消息工具',
+  'question-reply': '问题回复',
   cli: 'CLI',
   api: 'API',
-  'agent-message': 'Agent message',
+  'agent-message': 'Agent 消息',
   reaction: '快捷回复'
 }
 

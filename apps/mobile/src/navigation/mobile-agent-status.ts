@@ -23,7 +23,7 @@ const STATE_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * The phone's own words for a row's state, from the typed mark and state. The shared presentation
- * label is written for Desktop; it stays readable in the status details, never in the row.
+ * label is written for Desktop; phone rows and status details use the same local vocabulary.
  */
 export function mobileAgentStateLabel(presentation: MobileAgentPresentation | undefined): string {
   if (!presentation) return '状态未确认'
