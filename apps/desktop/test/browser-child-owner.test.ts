@@ -114,6 +114,42 @@ async function fixture(mode: 'normal' | 'private' = 'normal', previews?: Browser
 }
 
 describe('Native child pages use the ordinary Browser owner', () => {
+  it('excludes only a confirmed sole environment lease from debugger retention while preserving native DevTools and unknown consumers', async () => {
+    const f=await fixture(),resolver=(f.manager as any).profiles
+    let sole=true,devtools=false
+    ;(f.parent.debugger as any).isAttached=()=>true
+    ;(f.parent as any).isDevToolsOpened=()=>devtools
+    resolver.hasOnlyEnvironmentDebugger=vi.fn((id,contents)=>id==='normal'&&contents===f.parent&&sole)
+    const reasons=()=>f.manager.resourceTargets(null).find(row=>row.id==='original-parent')!.resource!.retention.reasons
+    expect(reasons()).not.toContain('debugger')
+    devtools=true
+    expect(reasons()).toContain('debugger')
+    devtools=false;sole=false
+    expect(reasons()).toContain('debugger')
+    delete resolver.hasOnlyEnvironmentDebugger
+    expect(reasons()).toContain('debugger')
+    expect(f.parent.isDestroyed()).toBe(false)
+  })
+  it('a late original environment preparation cannot roll back a replacement Browser with the same id', async () => {
+    const f=await fixture()
+    let complete!:()=>void
+    const pending=new Promise<void>(resolve=>{complete=resolve})
+    ;(f.manager as any).profiles.preparePageEnvironment=vi.fn().mockReturnValueOnce(pending).mockResolvedValue(undefined)
+    const opening=f.manager.create('pending-profile-page','https://first.invalid/','workspace')
+    void opening.catch(()=>{})
+    await settled()
+    f.manager.setBounds('pending-profile-page',{x:0,y:0,width:840,height:620})
+    const original=f.manager.nativeOwner('pending-profile-page')!.view.webContents as unknown as InstanceType<typeof native.Contents>
+    await f.manager.close('pending-profile-page')
+    await f.manager.create('pending-profile-page','https://replacement.invalid/','workspace')
+    complete()
+    await expect(opening).rejects.toThrow('original Browser changed')
+    f.manager.setBounds('pending-profile-page',{x:0,y:0,width:840,height:620})
+    expect(f.manager.target('pending-profile-page')?.url).toBe('https://replacement.invalid/')
+    expect(f.manager.nativeOwner('pending-profile-page')!.view.webContents.isDestroyed()).toBe(false)
+    expect(original.loadURL).not.toHaveBeenCalled()
+    expect(f.parent.isDestroyed()).toBe(false)
+  })
   it('clears an earlier host warning only after the explicit Profile candidate is attached and committed', async () => {
     const f = await fixture(), warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(f.window.contentView, 'addChildView').mockImplementationOnce(() => { throw new Error('Original host temporarily unavailable') })

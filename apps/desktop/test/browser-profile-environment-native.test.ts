@@ -148,7 +148,8 @@ describe('Native Profile session environment (real Electron behavior is verified
       expect(target().ua).toBe('Public/1.0')
       const help = await runCompiledObjectCli(['browser', 'profile', 'update', '--help'], env)
       expect(help.stdout).toContain('--environment JSON')
-      expect(help.stdout).toContain('navigator.language/languages')
+      expect(help.stdout).toContain('userAgentMetadata')
+      expect(help.stdout).toContain('subdocument, Worker and initial-script scope is unknown')
     } finally { await server.stop(); await core.dispose() }
   }, 20_000)
 })
