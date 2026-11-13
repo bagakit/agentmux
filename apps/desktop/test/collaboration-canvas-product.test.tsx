@@ -27,10 +27,19 @@ import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-ma
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'], moveEnd: undefined as ReactFlowProps['onMoveEnd'], onCommit: undefined as (() => void) | undefined }))
 /** Counts the real route clipping the edge layer performs, with the real result returned. */
-const clips = vi.hoisted(() => ({ count: 0 }))
+const clips = vi.hoisted(() => ({ count: 0, boundsReads: 0, observed: new WeakSet<object>() }))
 vi.mock('../src/renderer/src/lib/collaboration-map-geometry', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/lib/collaboration-map-geometry')>()
-  return { ...actual, collaborationVisibleRoute: (...args: Parameters<typeof actual.collaborationVisibleRoute>) => { clips.count++; return actual.collaborationVisibleRoute(...args) } }
+  return { ...actual, collaborationVisibleRoute: (...args: Parameters<typeof actual.collaborationVisibleRoute>) => {
+    clips.count++
+    const route = args[0]
+    if (!clips.observed.has(route)) {
+      clips.observed.add(route)
+      const bounds = route.bounds
+      Object.defineProperty(route, 'bounds', { configurable: true, get() { clips.boundsReads++; return bounds } })
+    }
+    return actual.collaborationVisibleRoute(...args)
+  } }
 })
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -743,6 +752,58 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
   expect(requests).toHaveLength(operations)
 })
 
+it('reveals older Executor faces from distant points without changing identity, layout or route contact', async () => {
+  const scene = scenario(3), ids = [...scene.agents.keys()]
+  scene.agents = new Map([...scene.agents].map(([id, agent], index) => [id, { ...agent,
+    tier: index === 0 ? 'active' : index === 1 ? 'unknown' : 'closed', lastActivityAt: null }]))
+  scene.areas = [{ id: 'density', name: 'Original density', kind: 'project', members: ids }]
+  scene.relations = ids.slice(1).map((target, index) => ({ id: `density-${index}`, kind: 'communication', source: ids[0]!, target, evidence: [] }))
+  await loaded(scene)
+  const original = captured.nodes.map(node => node.data.box), operations = requests.length
+  const nodes = captured.nodes.filter(node => node.type === 'agent'), buttons = nodes.map(node => nodeElement(node.id)!.querySelector('button'))
+  for (const zoom of [.1, .24, .4]) {
+    await viewport(100, 100, 10000, 10000, zoom)
+    const widths = nodes.map(node => Number.parseFloat(nodeElement(node.id)!.querySelector<HTMLElement>('.collaboration-agent__body')!.style.width) * zoom)
+    if (zoom === .1) {
+      expect(widths[1]).toBeCloseTo(4); expect(widths[2]).toBeCloseTo(4)
+      expect(widths[0]).toBeGreaterThan(20)
+    }
+    for (const node of nodes.slice(1)) {
+      const element = nodeElement(node.id)!, avatar = element.querySelector<HTMLElement>('.collaboration-agent__face')!
+      expect(Number(avatar.style.opacity)).toBeCloseTo(zoom === .1 ? 0 : zoom === .4 ? 1 : .5)
+      expect(element.querySelector('button')).toBe(buttons[nodes.indexOf(node)])
+      expect(element.querySelector('.collaboration-agent')!.getAttribute('data-collaboration-agent')).toBe(node.data.agent.id)
+    }
+    const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
+    expect(edges).toHaveLength(2)
+    for (const edge of edges) {
+      const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === edge.dataset.id)!
+      const points = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
+      for (const [id, point] of [[connection.source, points[0]!], [connection.target, points.at(-1)!]] as const) {
+        const box = renderedBox(id), body = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__body')!
+        const width = Number.parseFloat(body.style.width), height = Number.parseFloat(body.style.height), r = Number.parseFloat(body.style.borderRadius)
+        const dx = Math.abs(point.x - box.x - box.width / 2) - width / 2 + r
+        const dy = Math.abs(point.y - box.y - box.height / 2) - height / 2 + r
+        expect(Math.abs(Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - r)).toBeLessThan(1e-4)
+      }
+    }
+  }
+  const config = useAppStore.getState().config!
+  const compact = focusMapPreset(2).map(level => ({ ...level, form: 'compact' as const, information: 'identity' as const }))
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: { boundary: 'polygon', levels: compact } } } }))
+  await viewport(100, 100, 10000, 10000, .24)
+  const point = nodeElement(nodes[1]!.id)!.querySelector<HTMLElement>('.collaboration-agent__far-point')!
+  expect(point.parentElement).toHaveProperty('className', 'collaboration-agent__avatar')
+  expect(point.style.width).toBe(point.style.height)
+  expect(Number.parseFloat(point.style.width)).toBeLessThan(Number.parseFloat(nodeElement(nodes[1]!.id)!.querySelector<HTMLElement>('.collaboration-agent__body')!.style.width))
+  const levels = focusMapPreset(2).map(level => ({ ...level, form: 'point' as const, information: 'identity' as const }))
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: { boundary: 'polygon', levels } } } }))
+  await viewport(100, 100, 10000, 10000, .8)
+  expect(nodes.slice(1).map(node => nodeElement(node.id)!.querySelector<HTMLElement>('.collaboration-agent__face')!.style.opacity)).toEqual(['1', '1'])
+  expect(captured.nodes.map(node => node.data.box)).toEqual(original)
+  expect(requests).toHaveLength(operations)
+})
+
 it('re-steps a recency face on the map clock without another layout job, node move or stale endpoint', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
   try {
@@ -793,6 +854,38 @@ it('draws activity newer than the minute map clock at the most recent step', asy
     await dom.render(graph(scene, null, scene.relations, [], idle(now + 30_000)))
     expect(step()).toBe('recent')
   } finally { vi.useRealTimers() }
+})
+
+it('queries only nearby geometry while panning summary demand and original routes', async () => {
+  for (const count of [24, 96]) {
+    const scene = scenario(count), visible = vi.fn()
+    scene.agents = new Map([...scene.agents].map(([id, agent]) => [id, { ...agent, tier: 'active' as const }]))
+    await loaded(scene)
+    await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, onVisibleAgents: visible }))
+    await act(async () => new Promise(resolve => setTimeout(resolve, 180)))
+    const first = captured.nodes.find(node => node.type === 'agent')!.data.box as engine.CollaborationLayoutBox
+    let worldReads = 0
+    expect(dom.container.querySelectorAll('.collaboration-connections .react-flow__edge').length).toBeGreaterThan(0)
+    clips.boundsReads = 0
+    for (const area of scene.areas) {
+      const members = area.members
+      Object.defineProperty(area, 'members', { configurable: true, get() { worldReads++; return members } })
+    }
+    for (const path of paths.values()) {
+      const bounds = path.bounds
+      Object.defineProperty(path, 'bounds', { configurable: true, get() { worldReads++; return bounds } })
+    }
+    for (const offset of [0, 8, 16]) await viewport(-first.x + offset, -first.y, 300, 180, 1)
+    await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+    expect(worldReads).toBe(0)
+    expect(clips.boundsReads).toBe(0)
+    const expected = [...new Set(captured.nodes.filter(node => node.type === 'agent').filter(node => {
+      const box = node.data.box as engine.CollaborationLayoutBox
+      return box.x < first.x - 16 + 300 && box.x + box.width > first.x - 16 && box.y < first.y + 180 && box.y + box.height > first.y
+    }).map(node => node.data.agent.id as string))].sort()
+    expect(expected.length).toBeGreaterThan(0)
+    expect(visible.mock.calls.at(-1)?.[0]).toEqual(expected)
+  }
 })
 
 it('renders and selects an actual Worker detour while both original endpoint cards are offscreen', async () => {
