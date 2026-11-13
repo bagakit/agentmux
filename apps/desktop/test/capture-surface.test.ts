@@ -175,9 +175,9 @@ it('Save PNG and an unconfirmed Pin act on the selection and keep the overlays',
   for (const recordedOperation of [{ state: 'failed', message: 'The pin window did not open' }, { state: 'unknown', message: null }, null]) {
     ports.pin.mockResolvedValueOnce({ state: 'unknown', recordedOperation } as never)
     expect(await overlays[0]!.call('pin', { operationId: 'pin-1', image: result, selection }), 'the receipt reaches the overlay status').toMatchObject({ recordedOperation })
+    expect(overlays.some(row => row.window.dead), `a pin receipt of ${recordedOperation?.state ?? 'none'} keeps the selection`).toBe(false)
   }
   expect(ports.pin).toHaveBeenLastCalledWith(result, 'pin-1', { x: 1, y: 1, width: 2, height: 1 })
-  expect(overlays.some(row => row.window.dead), 'Save PNG and a pin without a completed receipt keep the selection').toBe(false)
 })
 
 it('a confirmed Pin opens on the selection and closes the capture surface like Done', async () => {
