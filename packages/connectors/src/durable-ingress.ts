@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { readRoomPublicationBinding, sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, observeRead, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
+import { AgentMuxRpcError } from '@agentmux/core/public-rpc-http'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, parseChannelQuoteRange, parseChannelQuoteGaps, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
@@ -103,7 +104,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
   private readonly database
   private readonly authenticators: Map<string, IngressAuthenticator>
   private readonly pending = new Map<string, IngressWork>()
-  private readonly recoveryDelay = new Map<string, { failures: number; nextAt: number }>()
+  private readonly recoveryDelay = new Map<string, { failures: number; nextAt: number; refusal?: AgentMuxError }>()
   private contextPositions: IngressContextPositions | undefined
   private readonly historyAbort = new AbortController()
   constructor(private readonly options: DurableIngressOptions) {
@@ -413,7 +414,9 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const previous = this.readPreparation(record.ingressId)
       // A consumed observation freezes its quote even if the reply or next claim was lost.
       if (previous?.quote) {
-        if (!isDeepStrictEqual(previous.target, target)) fail('INGRESS_TARGET_UNCONFIRMED')
+        // The frozen prefix fences its recipient, source and author, not a Run; the claim fences the current Run separately.
+        const { expectedRun: _observedRun, ...frozenRecipient } = previous.target, { expectedRun: _currentRun, ...currentRecipient } = target
+        if (!isDeepStrictEqual(frozenRecipient, currentRecipient)) fail('INGRESS_TARGET_UNCONFIRMED')
         return previous
       }
       const value: ContextPreparation = { revision: (previous?.revision ?? 0) + 1, observationId: mintObjectId(), phase: 'position', target,
@@ -635,10 +638,10 @@ export class DurableIngressHost implements ConnectionIngressPort {
       return { record: next, own: true as const }
     })
     if (!claimed.own) return await this.inspect({ ingressId })
-    return await this.ensureOriginalInput(claimed.record)
+    return await this.ensureOriginalInput(claimed.record, !custodyOnly)
   }
   /** Ensure custody of one frozen request; Core alone decides its original effect. */
-  private async ensureOriginalInput(record: ConnectionIngressMessage): Promise<ConnectionIngressInspection> {
+  private async ensureOriginalInput(record: ConnectionIngressMessage, surfaceRefusal = false): Promise<ConnectionIngressInspection> {
     if (!record.input?.admissionIntent) return await this.inspect({ ingressId: record.ingressId })
     const retained = this.transaction(() => {
       const current = this.read(record.ingressId)
@@ -652,10 +655,22 @@ export class DurableIngressHost implements ConnectionIngressPort {
     if (!client) return await this.inspect({ ingressId: record.ingressId })
     const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: ref.createdAt!,
       sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
+    let refusal: AgentMuxError | undefined
     try {
       await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(retained))
-    } catch { /* No reply proves neither absence nor a new effect right. Inspect this exact operation. */ }
-    return await this.inspect({ ingressId: record.ingressId })
+    } catch (error) {
+      // No reply proves neither absence nor a new effect right. Inspect this exact operation.
+      // A local transport absence never reached Core and stays unknown, as in the public RPC service; other AgentMuxErrors are stated outcomes.
+      if (error instanceof AgentMuxError && (error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE')) refusal = error
+    }
+    const inspection = await this.inspect({ ingressId: record.ingressId })
+    // Core observed no record of this exact operation, so its stated refusal is the outcome.
+    // The frozen claim stays for explicit continuation; the bounded retry keeps the same refusal visible.
+    if (surfaceRefusal && refusal && inspection.observation === 'observed' && !inspection.inputReceipt) {
+      (this.recoveryDelay.get(record.ingressId) ?? this.backOff(record.ingressId, undefined)).refusal = refusal
+      throw refusal
+    }
+    return inspection
   }
 
   /** Save the original input before asking Core to carry it through recovery. */
@@ -695,11 +710,21 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const original = await this.inspect({ ingressId }), record = original.ingress, receipt = original.inputReceipt
     // Only an exact original receipt grants continuation; silence or an absent reply never does.
     if (!record || record.kind === 'action' || !record.input || receipt?.control.state === 'stopped-before-dispatch') return original
-    if (!receipt) return await this.ensureOriginalInput(record)
+    // An unavailable observation is not Core's confirmed absence; it stays unknown and never re-ensures.
+    if (!receipt && original.observation !== 'observed') return original
     // A scan/ensure is not an explicit successor or reenable action.
-    if (receipt.status !== 'waiting' && receipt.status !== 'unknown') return original
+    if (receipt && receipt.status !== 'waiting' && receipt.status !== 'unknown') return original
     const delay = this.recoveryDelay.get(ingressId)
-    if (delay && delay.nextAt > Date.now() || signal?.aborted) return original
+    if (delay && delay.nextAt > Date.now() || signal?.aborted) {
+      // Core's stated refusal of this exact operation stays the outcome while its bounded retry waits.
+      if (!receipt && delay?.refusal && !signal?.aborted) throw delay.refusal
+      return original
+    }
+    if (!receipt) {
+      // Bound repeated confirmed-absent ensures with the same delay; a settled receipt clears it in inspect.
+      this.backOff(ingressId, delay)
+      return await this.ensureOriginalInput(record, true)
+    }
     try {
       const client = this.options.core(record.input.hostId, record.input.author.authoritySource?.executionRuntimeId)
       if (!client) fail('INGRESS_CORE_UNAVAILABLE')
@@ -710,10 +735,14 @@ export class DurableIngressHost implements ConnectionIngressPort {
       await client.rejoinAgentInputWaiting({ ref: receipt.ref, scope: 'wake-only' }, this.context(record))
     } finally {
       // Keep the original pending work while bounding repeated unavailable/not-applied attempts.
-      const failures = Math.min((delay?.failures ?? 0) + 1, 5)
-      this.recoveryDelay.set(ingressId, { failures, nextAt: Date.now() + Math.min(60_000, 5_000 * 2 ** (failures - 1)) })
+      this.backOff(ingressId, delay)
     }
     return await this.inspect({ ingressId })
+  }
+  private backOff(ingressId: string, delay: { failures: number } | undefined): { failures: number; nextAt: number; refusal?: AgentMuxError } {
+    const failures = Math.min((delay?.failures ?? 0) + 1, 5), next = { failures, nextAt: Date.now() + Math.min(60_000, 5_000 * 2 ** (failures - 1)) }
+    this.recoveryDelay.set(ingressId, next)
+    return next
   }
   private async dispatchAction(original: ConnectionIngressAction): Promise<ConnectionIngressInspection> {
     let claimed: ReturnType<ConversationActions['claim']> | undefined
