@@ -12,6 +12,9 @@ outputs come from the build.
 | `illustrations/concepts/` | Concept scenes for Settings modules, Topics and the Goals empty state | Settings and Goals introductions |
 | `illustrations/mote-origin/` | The three-act Mote origin storyboard | Mote settings and Topic promotion |
 
+`brand-manifest.json` lists every file here with its kind, realm and origin, and points at brand
+assets kept elsewhere. A test keeps it and this directory in step.
+
 Avatar series (`apps/desktop/resources/avatar-series`) stay with the Mote avatar owner, because
 Main reads them at runtime from the packaged resources. Provider and connector marks belong to
 their vendors and aren't brand assets.
