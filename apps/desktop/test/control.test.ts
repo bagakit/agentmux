@@ -153,7 +153,7 @@ afterEach(() => {
 })
 
 describe('Desktop Control owner', () => {
-  it('keeps Profile network requests at the Main owner without opening or changing a workface', async () => {
+  it('keeps Profile requests at the Main owner without opening or changing a workface', async () => {
     const original = fixture()
     // The initialized spatial observer first binds this fixture to its original Space.
     await vi.waitFor(() => expect(useAppStore.getState().tabs[original.id]?.space).toBeDefined())
@@ -165,6 +165,7 @@ describe('Desktop Control owner', () => {
       activeWorkspaceId: before.activeWorkspaceId, drafts: before.browserOpinionDrafts, launches: before.pendingAgentLaunches })
     const effects = [
       vi.spyOn(api.browser, 'create'), vi.spyOn(api.browser, 'copyProfile'), vi.spyOn(api.browser, 'setProfileProxySignIn'), vi.spyOn(api.browser, 'checkProfileExit'),
+      vi.spyOn(api.browser, 'createProfileFolder'), vi.spyOn(api.browser, 'renameProfileFolder'), vi.spyOn(api.browser, 'deleteProfileFolder'),
       vi.spyOn(api.sessions, 'launchTerminal'),
       vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'interrupt'),
       vi.spyOn(api.spatial, 'openAgent'), vi.spyOn(api.spatial, 'commit')
@@ -174,9 +175,12 @@ describe('Desktop Control owner', () => {
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-clear', operation: 'browser.profile.proxy-sign-in.clear', profileId: 'default' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-check', operation: 'browser.profile.network.check', profileId: 'default' },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-copy', operation: 'browser.profile.copy', profileId: 'default', expectedRevision: 1, label: 'Copied Profile' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-create', operation: 'browser.profile.folder.create', expectedRevision: 1, label: 'Folder' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-rename', operation: 'browser.profile.folder.rename', folderId: 'folder', expectedRevision: 1, label: 'Same folder renamed' },
+      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'folder-delete', operation: 'browser.profile.folder.delete', folderId: 'folder', expectedRevision: 1 },
       { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'profile-list', operation: 'browser.profile.ls' }
     ]
-    expect(requests).toHaveLength(5)
+    expect(requests).toHaveLength(8)
     for (const input of requests) {
       await expect(useAppStore.getState().executeControl(input), input.operation).rejects.toMatchObject({
         code: 'CONTROL_FAILED', message: 'Browser Profiles belong to the Main Profile owner.'
