@@ -44,13 +44,17 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId'], code)
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
     const target = parseSpaceControlSelector(raw, code)
     if (!Object.keys(target).length) fail('Focus requires a Space/Zone/Tab/Region identity.', code)
     return { kind: 'space', ...target }
+  }
+  if (source.kind === 'settings') {
+    fields(source, ['kind', 'sectionId'], code)
+    return { kind: 'settings', sectionId: nullableId(source.sectionId, 'Settings section ID', code) }
   }
   if (source.kind === 'goal') {
     fields(source, ['kind', 'goalId'], code)
@@ -145,9 +149,15 @@ function floating(value: unknown, code: Code): AgentMuxDesktopFloating {
     presentation: member(source.presentation, ['visible', 'hidden', 'pending', 'unknown'], 'Floating presentation', code) }
 }
 function overlays(value: unknown, code: Code): AgentMuxDesktopOverlays {
-  const source = fields(value, ['provenance', 'settings', 'quickSwitcher'], code)
+  const source = fields(value, ['provenance', 'settings', 'quickSwitcher', 'settingsPage'], code)
+  const page = Object.hasOwn(source, 'settingsPage') ? fields(source.settingsPage, ['sectionIds', 'sectionId', 'visible'], code) : null
+  const sectionIds = page ? list(page.sectionIds, value => spaceControlId(value, 'Settings section ID', code), code) : []
+  const sectionId = page ? nullableId(page.sectionId, 'Selected Settings section', code) : null
+  if (page && (!sectionIds.length || new Set(sectionIds).size !== sectionIds.length || sectionId !== null && !sectionIds.includes(sectionId) ||
+    page.visible === true && (source.settings !== true || source.provenance !== 'observed' || sectionId === null))) fail('Settings catalog and selected page disagree.', code)
   return { provenance: provenance(source.provenance, code), settings: nullableBoolean(source.settings, 'Settings', code),
-    quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code) }
+    quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code),
+    ...(page ? { settingsPage: { sectionIds, sectionId, visible: nullableBoolean(page.visible, 'Settings page visible', code) } } : {}) }
 }
 function focus(value: unknown, code: Code): AgentMuxDesktopObservation['focus'] {
   const source = fields(value, ['executionSessionId', 'pmoSessionId', 'agent'], code)
@@ -193,6 +203,9 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     if (requested.kind === 'focus-agent' && (actual.surface !== 'focus' || actual.focusView !== 'list' ||
       result.focus.agent?.hostId !== requested.hostId || result.focus.agent.agentSessionId !== requested.agentSessionId || result.focus.agent.state !== 'visible'))
       fail('Focus Agent receipt is not visibly confirmed for the exact target.', code)
+    if (requested.kind === 'settings' && (requested.sectionId === null ? result.overlays.settings !== false :
+      result.overlays.settings !== true || result.overlays.settingsPage?.sectionId !== requested.sectionId || result.overlays.settingsPage.visible !== true))
+      fail('Settings receipt is not visibly confirmed for the exact registered page.', code)
     if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'space') {
@@ -227,7 +240,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       (result.presentation.state === 'window' && observedInput.after.scope !== 'window') ||
       (result.presentation.windowId !== undefined && (observedInput.after.windowId !== result.presentation.windowId ||
         observedInput.after.documentGeneration !== result.presentation.documentGeneration)))) ||
-    (!result.partial && (navigation.state === 'rejected' || navigation.state === 'unconfirmed' || (result.presentation.state !== 'main-visible' && result.presentation.state !== 'window') ||
+    (!result.partial && (navigation.state === 'rejected' || navigation.state === 'unconfirmed' || (navigation.requested.kind !== 'settings' && result.presentation.state !== 'main-visible' && result.presentation.state !== 'window') ||
       observedInput.outcome === 'unavailable' || observedInput.outcome === 'unconfirmed'))) fail('Focus receipt confirmation is inconsistent.', code)
   const receipt = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Receipt Request', code), ok: true as const, operation: 'focus' as const, result }
   budget(receipt, code)

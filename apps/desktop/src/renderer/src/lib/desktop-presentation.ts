@@ -8,6 +8,7 @@ import { workbenchRegionProjectionSlotId } from './workbench-projection'
 export type DesktopAppPresentationOwner = {
   loading: boolean
   overlays: { settings: boolean; quickSwitcher: boolean }
+  settings?: { sectionIds: readonly string[]; open(sectionId: string): void; close(): void; read(): { sectionId: string; visible: boolean } | null }
   /** The existing Space content slot may cover its retained main workface. */
   contentExpanded?: boolean
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null; regionId?: string | null } | null
@@ -27,7 +28,21 @@ export function desktopPresentationCommitted(): void {
 /** Overlay control comes from the App owner; it does not require a DOM presentation probe. */
 export function readDesktopOverlays(): AgentMuxDesktopOverlays {
   const owner = typeof document === 'undefined' ? null : appReader?.() ?? null
-  return owner ? { provenance: 'observed', ...owner.overlays } : unknownOverlays()
+  if (!owner) return unknownOverlays()
+  const page = owner.settings?.read()
+  return { provenance: 'observed', ...owner.overlays, ...(owner.settings ? { settingsPage: {
+    sectionIds: [...owner.settings.sectionIds], sectionId: page?.sectionId ?? null, visible: page?.visible ?? false
+  } } : {}) }
+}
+
+/** Delegate only to the original App router; catalog IDs never come from titles or DOM prose. */
+export function requestDesktopSettingsNavigation(sectionId: string | null): 'requested' | 'unknown-section' | 'unavailable' {
+  const settings = appReader?.()?.settings
+  if (!settings) return 'unavailable'
+  if (sectionId === null) { settings.close(); return 'requested' }
+  if (!settings.sectionIds.includes(sectionId)) return 'unknown-section'
+  settings.open(sectionId)
+  return 'requested'
 }
 
 export function desktopElementVisible(element: HTMLElement | null): boolean {

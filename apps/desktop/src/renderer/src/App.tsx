@@ -6,7 +6,7 @@ import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
-import { settingsCatalog } from './components/settings/settings-modules'
+import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
@@ -108,11 +108,16 @@ export function App() {
   return <DesktopApp />
 }
 
+const desktopSettingsSectionIds = ['overview', ...settingsModules.map(module => module.id)]
+
 function DesktopApp() {
   const documentation = useDocumentationOwner()
   const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const navigateSettings = useCallback((request: SettingsNavigationRequest): void => {
+  const [settingsInputPolicy, setSettingsInputPolicy] = useState<'preserve' | 'target'>('target')
+  const settingsObservation = useRef<{ sectionId: string; visible: boolean } | null>(null)
+  const navigateSettings = useCallback((request: SettingsNavigationRequest, inputPolicy: 'preserve' | 'target' = 'target'): void => {
+    setSettingsInputPolicy(inputPolicy)
     setSettingsRoute(request)
     setSettingsOpen(true)
   }, [])
@@ -171,6 +176,10 @@ function DesktopApp() {
     const floating = readPmoTeamsTopicFloatingState()
     presentationRef.current = { loading, contentExpanded: spaceContent.expanded,
       overlays: { settings: settingsOpen, quickSwitcher: quickSwitchOpen },
+      settings: { sectionIds: desktopSettingsSectionIds,
+        read: () => settingsObservation.current,
+        open: sectionId => navigateSettings({ section: sectionId as SettingsPageId }, 'preserve'),
+        close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
@@ -805,6 +814,8 @@ function DesktopApp() {
       {settingsRoute ? (
         <SettingsPanel
           visible={settingsOpen}
+          observationRef={settingsObservation}
+          inputPolicy={settingsInputPolicy}
           navigationRequest={settingsRoute}
           initialSection={settingsRoute.section}
           executorId={settingsRoute.executorId}

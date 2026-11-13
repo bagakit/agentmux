@@ -32,13 +32,15 @@ function unmatchedChannel(request: SettingsNavigationRequest | undefined): strin
   return `No settings section manages ${application.domain} applications (${adapterId}) yet. Choose a section below; the original connection is unchanged.`
 }
 
-function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest }: {
+function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest, observationRef, inputPolicy = 'target' }: {
   onClose: () => void
   visible?: boolean
   initialSection?: SettingsPageId
   executorId?: string | undefined
   toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
+  inputPolicy?: 'preserve' | 'target' | undefined
+  observationRef?: { current: { sectionId: string; visible: boolean } | null } | undefined
 }) {
   const config = useAppStore((state) => state.config)
   const [active, setActive] = useState<SettingsPageId>(initialSection)
@@ -56,6 +58,14 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const [destination, setDestination] = useState<{ section: SettingsPageId; target?: string; route: object } | null>(null)
   const [targetIssue, setTargetIssue] = useState('')
   const searching = query.trim().length > 0
+  const preserveInput = inputPolicy === 'preserve'
+  const preserveInputRef = useRef(preserveInput)
+  preserveInputRef.current = preserveInput
+  useLayoutEffect(() => {
+    if (!observationRef) return
+    observationRef.current = { sectionId: active, visible: Boolean(config) && visible && !showResults }
+    return () => { observationRef.current = null }
+  }, [active, config, observationRef, showResults, visible])
 
   function originalScroll(section: SettingsPageId): HTMLElement | null {
     return section === 'overview' ? page.current?.querySelector('[data-settings-overview]') ?? null
@@ -116,7 +126,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   }, [active, searching, visible, visited])
 
   useLayoutEffect(() => {
-    if (!visible || showResults || !destination?.target || destination.route !== route || destination.section !== active) return
+    if (preserveInput || !visible || showResults || !destination?.target || destination.route !== route || destination.section !== active) return
     const pane = originalScroll(active)
     if (!pane) return // The visited editor mounts on the following render.
     const target = Array.from(pane.querySelectorAll<HTMLElement>('[data-settings-field]')).find(node => node.dataset.settingsField === destination.target)
@@ -140,23 +150,23 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       if (previousTabIndex === null) target.removeAttribute('tabindex')
       else target.setAttribute('tabindex', previousTabIndex)
     }
-  }, [active, destination, route, searching, showResults, visible, visited])
+  }, [active, destination, preserveInput, route, searching, showResults, visible, visited])
 
   useLayoutEffect(() => {
-    if (!visible) return
+    if (!visible || preserveInputRef.current) return
     // The first opener was captured before the search input's initial autoFocus.
     if (opened.current) opener.current = document.activeElement
     opened.current = true
     return () => {
-      if (opener.current instanceof HTMLElement && desktopElementVisible(opener.current)) opener.current.focus()
+      if (!preserveInputRef.current && opener.current instanceof HTMLElement && desktopElementVisible(opener.current)) opener.current.focus()
     }
   }, [visible])
   useLayoutEffect(() => {
-    if (!visible) return
+    if (!visible || preserveInput) return
     const focused = document.activeElement
     if (focused instanceof HTMLElement && focused.isConnected && searchInput.current?.closest('.settings-page')?.contains(focused) && !focused.closest('[hidden], [inert]')) return
     searchInput.current?.focus()
-  }, [active, visible])
+  }, [active, preserveInput, visible])
 
   useEffect(() => { if (!visible) setSectionMenuOpen(false) }, [visible])
 
@@ -186,7 +196,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         <header>
           <div className="settings-sidebar__identity"><BrandIcon size={22} /><strong>Settings</strong></div>
         </header>
-        <label className="settings-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search settings" />{query ? <button type="button" aria-label="Clear settings search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}</label>
+        <label className="settings-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus={!preserveInput} value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search settings" />{query ? <button type="button" aria-label="Clear settings search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false} open={visible && sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ThemeNavigationDownIcon size={13} /></button>

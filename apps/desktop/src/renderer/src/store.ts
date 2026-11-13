@@ -127,7 +127,7 @@ import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -6804,12 +6804,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const catalog = spatialCatalog(get(), topics)
       const before = captureDesktopInput(get().tabs)
       const beforeSelection = desktopSelection(get(), catalog)
+      const settingsBefore = request.target.kind === 'settings' ? readDesktopOverlays() : undefined
       let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
       try {
         requireActive()
         if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
           message: 'A newer navigation happened while the original target was being observed.', recovery: 'The later workface is kept. Inspect the client before explicitly retrying this target.' })
-        if (request.target.kind === 'goal') {
+        if (request.target.kind === 'settings') {
+          const outcome = requestDesktopSettingsNavigation(request.target.sectionId)
+          if (outcome !== 'requested') throw new DesktopFocusFailure({ step: 'target',
+            code: outcome === 'unknown-section' ? 'SETTINGS_SECTION_UNKNOWN' : 'SETTINGS_OWNER_UNAVAILABLE',
+            message: outcome === 'unknown-section' ? 'The exact Settings section is not registered by this client.' : 'The original Settings navigation owner is unavailable.',
+            recovery: 'Keep the original page and drafts. Read app inspect overlays.settingsPage.sectionIds before choosing an exact registered section.' })
+          if (request.target.sectionId === null ? settingsBefore?.settings === false : settingsBefore?.settingsPage?.visible === true && settingsBefore.settingsPage.sectionId === request.target.sectionId) navigationState = 'unchanged'
+        } else if (request.target.kind === 'goal') {
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
           // Viewing a Goal never selects its associated execution workface.
@@ -6845,7 +6853,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const expected = desktopSelection(get(), catalog)
       let caretIntentNonce: number | undefined
       const revealRequestId = request.target.kind === 'focus-agent' ? get().focusAgentReveal?.requestId : undefined
-      if (navigationState !== 'rejected' && request.target.kind !== 'focus-agent' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
+      if (navigationState !== 'rejected' && request.target.kind !== 'focus-agent' && request.target.kind !== 'settings' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
       if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.space?.tabId && expected.space.regionId) {
         const observed = readDesktopPresentation(expected, get().tabs)
         if (observed.overlays.provenance === 'observed' && !observed.presentation.blockers.length) {
@@ -6858,13 +6866,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const actual = desktopSelection(get(), catalog)
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         const observed = readDesktopPresentation(actual, get().tabs)
+        if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
+          observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true
         if (request.target.kind === 'focus-agent') return get().focusAgentReveal?.requestId !== revealRequestId ||
           observed.presentation.state === 'covered' || readFocusAgentPresentation(get().focusAgentReveal)?.state === 'visible' || !get().focusAgentReveal?.pending
         return observed.presentation.state === 'covered' ||
           ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating' || observed.presentation.state === 'window') &&
             (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
       }, signal)
-      const save = navigationState === 'rejected' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
+      const save = request.target.kind === 'settings' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
+        diskDurability: 'unconfirmed' as const, reason: 'Settings navigation is transient. The original workface selection and preferences are unchanged.' } : navigationState === 'rejected' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
       const selection = desktopSelection(get(), catalog)
       if (navigationState !== 'rejected' && (signal?.aborted || JSON.stringify(selection) !== JSON.stringify(expected))) {
@@ -6883,6 +6894,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const observed = readDesktopPresentation(selection, get().tabs)
       const focusAgent = readFocusAgentPresentation(get().focusAgentReveal)
+      if (navigationState !== 'rejected' && request.target.kind === 'settings' && (request.target.sectionId === null ? observed.overlays.settings !== false : observed.overlays.settings !== true ||
+        observed.overlays.settingsPage?.sectionId !== request.target.sectionId || observed.overlays.settingsPage.visible !== true)) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'presentation', code: 'SETTINGS_PAGE_UNCONFIRMED', message: 'The requested Settings page has not been visibly confirmed.',
+          recovery: 'The later page, drafts and input are kept. Inspect the original client before another explicit navigation.' })
+      }
       if (navigationState !== 'rejected' && request.target.kind === 'focus-agent' && (get().focusAgentReveal?.requestId !== revealRequestId ||
         focusAgent?.hostId !== request.target.hostId || focusAgent.agentSessionId !== request.target.agentSessionId || focusAgent.state !== 'visible')) {
         navigationState = 'unconfirmed'
@@ -6898,8 +6915,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (request.inputPolicy === 'target' && inputOutcome !== 'transferred' && caretIntentNonce !== undefined) {
         get().clearRegionCaretFocus(caretIntentNonce)
       }
-      const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || (observed.presentation.state !== 'main-visible' && observed.presentation.state !== 'window' && observed.presentation.state !== 'floating') ||
-        inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.clientStateWritten
+      const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || (request.target.kind !== 'settings' && observed.presentation.state !== 'main-visible' && observed.presentation.state !== 'window' && observed.presentation.state !== 'floating') ||
+        inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || request.target.kind !== 'settings' && !save.clientStateWritten
       if (partial && navigationState !== 'rejected') {
         const notice = { step: 'presentation', code: 'DESKTOP_PRESENTATION_PARTIAL',
           message: `Main selection is kept. Presentation: ${observed.presentation.state}; input: ${inputOutcome}.`,

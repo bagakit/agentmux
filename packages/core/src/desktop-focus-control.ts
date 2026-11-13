@@ -6,6 +6,7 @@ export type AgentMuxDesktopFocusView = 'list' | 'map'
 export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'survey' | 'recall'
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
+  | { kind: 'settings'; sectionId: string | null }
   | { kind: 'goal'; goalId: string }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
@@ -46,9 +47,18 @@ export type AgentMuxDesktopFloating = {
   topicId: string | null; tabId: string | null; regionId: string | null; sessionId: string | null
   presentation: 'visible' | 'hidden' | 'pending' | 'unknown'
 }
+export type AgentMuxDesktopSettingsPage = {
+  /** Registered IDs come from the mounted client's original Settings catalog. */
+  sectionIds: string[]
+  /** Actual retained Panel selection, never merely the initial navigation request. */
+  sectionId: string | null
+  visible: boolean | null
+}
 export type AgentMuxDesktopOverlays = {
   provenance: AgentMuxDesktopProvenance
   settings: boolean | null; quickSwitcher: boolean | null
+  /** Omitted only when the original client has no Settings observation owner. */
+  settingsPage?: AgentMuxDesktopSettingsPage | undefined
 }
 export type AgentMuxDesktopFocusAgent = {
   hostId: string; agentSessionId: string; presentationSessionId: string | null
