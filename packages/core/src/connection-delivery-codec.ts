@@ -1,8 +1,8 @@
-import { connectionDiagnosisSourceCodes, type ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
+import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCodes, type ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
 import { parseExternalConversationAuthor } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
+import { parseConversationCheckpoint, parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
 import type { ConversationItemRef } from './conversation.js'
 import { conversationRecordId } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
@@ -205,10 +205,11 @@ export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod
   }
   if (method === 'connection.delivery.retry') { const p = object(value, ['operationId', 'source']); return { operationId: text(p.operationId), source: parseConnectionDeliveryRetrySource(p.source) } as ConnectionDeliveryParamsMap[M] }
   if (method === 'connection.delivery.inspect') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
-  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit', 'order'])
+  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit', 'order', 'includeSourceReadEvidence'])
   const limit = p.limit === undefined ? undefined : integer(p.limit, 1); if (limit !== undefined && limit > 100) fail()
+  if (p.includeSourceReadEvidence !== undefined && typeof p.includeSourceReadEvidence !== 'boolean') fail()
   if (p.order !== undefined && p.order !== 'oldest' && p.order !== 'newest') fail()
-  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }), ...(p.order === undefined ? {} : { order: p.order }) } as ConnectionDeliveryParamsMap[M]
+  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }), ...(p.order === undefined ? {} : { order: p.order }), ...(p.includeSourceReadEvidence === undefined ? {} : { includeSourceReadEvidence: p.includeSourceReadEvidence }) } as ConnectionDeliveryParamsMap[M]
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
   if (method === 'connection.delivery.source.recover') {
@@ -218,13 +219,24 @@ export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod
       ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }) } as ConnectionDeliveryResultMap[M]
   }
   if (method === 'connection.delivery.ls') {
-    const p = object(value, ['deliveries', 'next', 'observation', 'sourceObservation', 'effectObservation', 'coverage']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
+    const p = object(value, ['deliveries', 'next', 'observation', 'sourceObservation', 'effectObservation', 'coverage', 'sourceReadEvidence']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
     if (!Array.isArray(p.deliveries) || p.deliveries.length > (expected.limit ?? 30)) fail()
     const deliveries = (p.deliveries as unknown[]).map(parseConnectionDelivery), next = p.next === null ? null : text(p.next)
     if (new Set(deliveries.map(d => d.operationId)).size !== deliveries.length || deliveries.some(d => d.target.connectionId !== expected.connectionId || d.bindingId !== expected.bindingId || d.bindingRevision !== expected.bindingRevision || d.operationId === expected.after) || next !== null && next !== deliveries.at(-1)?.operationId) fail()
     const coverage = p.coverage === undefined ? undefined : parseConnectionDeliveryCoverage(p.coverage)
     if (coverage?.origins.some(o => o.origin.connectionId !== expected.connectionId)) fail()
-    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }), ...(p.effectObservation === undefined ? {} : { effectObservation: parseConnectionDeliveryObservation(p.effectObservation) }), ...(coverage ? { coverage } : {}) } as ConnectionDeliveryResultMap[M]
+    const sourceObservation = p.sourceObservation === undefined ? undefined : parseConnectionDeliverySourceObservation(p.sourceObservation)
+    if ((expected.includeSourceReadEvidence === true) !== (p.sourceReadEvidence !== undefined)) fail()
+    let sourceReadEvidence: import('./connection-delivery-contract.js').ConnectionDeliverySourceReadEvidence | undefined
+    if (p.sourceReadEvidence !== undefined) {
+      const evidence = object(p.sourceReadEvidence, ['observation', 'checkpoint'])
+      const observation = evidence.observation === null ? null : parseConnectionDeliverySourceObservation(evidence.observation)
+      const checkpoint = evidence.checkpoint === null ? null : parseConversationCheckpoint(evidence.checkpoint)
+      if (JSON.stringify(observation) !== JSON.stringify(sourceObservation ?? null) ||
+        checkpoint && (!observation || connectionDiagnosisCheckpointKey(checkpoint) !== observation.checkpointKey)) fail()
+      sourceReadEvidence = { observation, checkpoint }
+    }
+    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(sourceObservation ? { sourceObservation } : {}), ...(p.effectObservation === undefined ? {} : { effectObservation: parseConnectionDeliveryObservation(p.effectObservation) }), ...(coverage ? { coverage } : {}), ...(sourceReadEvidence ? { sourceReadEvidence } : {}) } as ConnectionDeliveryResultMap[M]
   }
   if (method === 'connection.delivery.retry') {
     const p = object(value, ['delivery', 'continuation']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.retry']

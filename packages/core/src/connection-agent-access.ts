@@ -75,6 +75,9 @@ export async function readAgentConnectionDelivery<M extends DeliveryReadMethod>(
   const original = await binding(request.bindingId, request.bindingRevision, request.connectionId)
   const result = await owner.delivery.list(request)
   for (const delivery of result.deliveries) receipt(delivery, original)
+  const checkpoint = result.sourceReadEvidence?.checkpoint
+  if (checkpoint && (checkpoint.hostId !== session.hostId || checkpoint.agentSessionId !== session.agentSessionId ||
+    original.sourceFrontier && checkpoint.sourceHostId !== original.sourceFrontier.sourceHostId)) deny()
   return result as ConnectionDeliveryResultMap[M]
 }
 

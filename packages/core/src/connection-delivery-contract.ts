@@ -3,7 +3,7 @@ import type { ConversationItemRef } from './conversation.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
 import type { ConversationContentRef, ConversationSourceRef } from './conversation-stream.js'
-import type { ConversationVersionedAnchor } from './conversation-changes.js'
+import type { ConversationCheckpoint, ConversationVersionedAnchor } from './conversation-changes.js'
 import type { AgentSessionUserMessageAuthor } from './types.js'
 
 export type ConnectionDeliveryEvent = { id: string; revision: string }
@@ -92,7 +92,12 @@ export type ConnectionDeliveryObservation = {
   reason?: 'not-started' | 'access-unconfirmed' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'effect-unconfirmed'
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
-export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number; order?: 'oldest' | 'newest' }
+/** One original owner observation and its exact cut; null never authorizes a replacement. */
+export type ConnectionDeliverySourceReadEvidence = {
+  observation: ConnectionDeliverySourceObservation | null
+  checkpoint: ConversationCheckpoint | null
+}
+export type ConnectionDeliveryListInput = { includeSourceReadEvidence?: boolean; connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number; order?: 'oldest' | 'newest' }
 /** Wake the original publication reader; no new input, source cut or platform retry. */
 export type ConnectionDeliverySourceRecoverInput = { connectionId: string; bindingId: string; bindingRevision: number }
 export type ConnectionDeliverySourceRecoverResult = {
@@ -108,7 +113,7 @@ export type ConnectionDeliveryParamsMap = {
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
-  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; sourceObservation?: ConnectionDeliverySourceObservation; effectObservation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
+  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; sourceObservation?: ConnectionDeliverySourceObservation; sourceReadEvidence?: ConnectionDeliverySourceReadEvidence; effectObservation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
   'connection.delivery.retry': { delivery: ConnectionDelivery; continuation: ConnectionDeliveryContinuation }
   'connection.delivery.source.recover': ConnectionDeliverySourceRecoverResult
 }
