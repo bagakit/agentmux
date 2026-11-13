@@ -16,7 +16,7 @@ import { projectRailNavigation } from '../../lib/workspace-projects'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
-import { HostUpgradePanel } from './HostUpgradePanel'
+import { HostCorePanel } from './HostCorePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
@@ -330,7 +330,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             const committed = config.hosts.find(host => host.id === id)
             return draft?.kind === 'ssh' ? <div key={id}>
               <div hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
-                <div hidden={draft.transport === 'tailcat'} inert={draft.transport === 'tailcat'}><HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && draft.transport !== 'tailcat' && view === 'editor' && selectedId === id && panel === 'connection'} /></div>
+                <div hidden={draft.transport === 'tailcat'} inert={draft.transport === 'tailcat'}><HostCorePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && draft.transport !== 'tailcat' && view === 'editor' && selectedId === id && panel === 'connection'} /></div>
                 {draft.transport === 'tailcat' ? <p className="field-hint">Core upgrades here require an existing Linux x64 headless service over SSH. Install and run AgentMux on the other Mac before connecting.</p> : null}
               </div>
               <div data-host-access={id} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>

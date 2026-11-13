@@ -1,0 +1,43 @@
+.host-install { container-type: inline-size; display: grid; gap: var(--sp-4); margin-top: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); }
+.host-install__header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.host-install__eyebrow { font-size: var(--fs-micro); color: var(--text-3); letter-spacing: .1em; }
+.host-install h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-body); font-weight: 600; }
+.host-install h4 { margin: 0; font-size: var(--fs-body); font-weight: 550; }
+.host-install p { margin: 0; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+.host-install__badge { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); font-size: var(--fs-micro); }
+.host-install__actions, .host-install__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.host-install__actions > span, .host-install__confirm > span { color: var(--text-3); font-size: var(--fs-meta); }
+.host-install__confirm { justify-content: space-between; }
+.host-install__machine { display: grid; gap: var(--sp-2); padding: var(--sp-4); border-left: 2px solid var(--green); background: var(--surface-2); border-radius: var(--radius-sm); }
+.host-install__machine > strong { color: var(--text); font-size: var(--fs-body); }
+.host-install__machine > span { font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
+.host-install dl { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.host-install dl > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: var(--sp-3); }
+.host-install dt { color: var(--text-3); font-size: var(--fs-meta); }
+.host-install dd { margin: 0; color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.host-install__review { display: grid; gap: var(--sp-4); }
+.host-install__review > div > p { margin-top: var(--sp-1); }
+.host-install__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.host-install__choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; column-gap: var(--sp-2); row-gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; transition: border-color 160ms, background-color 160ms; }
+.host-install__choice[data-selected=true] { border-color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
+.host-install__choice:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
+.host-install__choice input { accent-color: var(--green); margin: 2px 0 0; }
+.host-install__choice strong { color: var(--text); font-size: var(--fs-meta); }
+.host-install__choice > span, .host-install__choice > p { grid-column: 2; }
+.host-install__choice > span { font-size: var(--fs-micro); color: var(--text-3); }
+.host-install__choice[aria-disabled=true] { opacity: .6; cursor: default; }
+.host-install__operation { display: grid; gap: var(--sp-3); }
+.host-install__steps { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.host-install__steps li { position: relative; display: flex; align-items: center; gap: var(--sp-3); min-height: 38px; color: var(--text-3); font-size: var(--fs-meta); }
+.host-install__steps li:not(:last-child)::after { content: ''; position: absolute; top: 30px; left: 11px; height: 16px; width: 1px; background: var(--line); }
+.host-install__step-mark { z-index: 1; display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid var(--line); border-radius: 50%; font-size: var(--fs-micro); background: var(--surface-1); }
+.host-install__steps li[data-state=current] { color: var(--text); }
+.host-install__steps li[data-state=current] .host-install__step-mark { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 12%, transparent); }
+.host-install__steps li[data-state=done] .host-install__step-mark { color: var(--green); border-color: var(--green); }
+.host-install__pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--green); animation: host-install-pulse 1.4s ease-in-out infinite; }
+.host-install__notice { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.host-install details { font-size: var(--fs-meta); color: var(--text-3); }
+.host-install code { font-size: var(--fs-micro); overflow-wrap: anywhere; }
+@keyframes host-install-pulse { 50% { opacity: .3; } }
+@container (max-width: 420px) { .host-install__choices { grid-template-columns: minmax(0, 1fr); } .host-install dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } }
+@media (prefers-reduced-motion: reduce) { .host-install__pulse { animation: none; } .host-install__choice { transition: none; } }

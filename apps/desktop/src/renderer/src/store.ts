@@ -6333,6 +6333,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.executors.refresh' ||
         request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' ||
+        request.operation === 'settings.hosts.install-check' || request.operation === 'settings.hosts.install' || request.operation === 'settings.hosts.install-inspect' ||
         request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' || request.operation === 'settings.hosts.upgrade-reconnect' ||
         request.operation === 'settings.browser.default.inspect' || request.operation === 'settings.browser.default.open-settings' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
