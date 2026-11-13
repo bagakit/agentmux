@@ -11,7 +11,7 @@ import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSu
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const initial = useAppStore.getState()
 const roots: ReturnType<typeof createRoot>[] = []
@@ -103,7 +103,8 @@ it('names the existing coordination attention shortcut Mote while retaining its 
   await act(async () => root.render(createElement(GlobalFocusSurface)))
   const attention = container.querySelector<HTMLButtonElement>('.focus-pmo-attention')
   expect(attention).not.toBeNull()
-  expect(attention!.textContent).toBe('Mote · 1 to review Open context ↗')
+  expect(attention!.textContent).toBe('Mote · 1 to review Open context')
+  expect(attention!.querySelector('[data-semantic-icon="action.open-external"]')).toBeNull()
   await act(async () => attention!.click())
   expect(focusPmoSession).toHaveBeenCalledExactlyOnceWith('existing-mote-session')
   expect(useAppStore.getState().sessions).toEqual([session])
