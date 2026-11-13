@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { deriveObjectId } from '@agentmux/core/object-id'
 import type { CapsuleEmbedInput } from '@agentmux/client-ui'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
@@ -113,23 +113,28 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
   }), [occurrenceId, owner.reference, active])
   const open = () => { void api.ui.openObjectLink(uri).catch(error => setNotice(presentError(error))) }
   return <section className={`conversation-capsule${expanded ? ' conversation-capsule--expanded' : ''}`} aria-label={title || 'Capsule page'} data-capsule-id={capsuleId} data-conversation-keyframe={browser?.navigationId}>
-    <header className="conversation-capsule__header"><span className="conversation-capsule__identity"><PageIcon size={15} aria-hidden="true" /><strong>{title || page?.record.title || 'Saved page'}</strong>
-      {page ? <span className="conversation-capsule__mode">{page.record.mode === 'injected' ? 'Injected' : 'Isolated'}</span> : null}</span>
+    <header className="conversation-capsule__header"><span className="conversation-capsule__identity"><PageIcon size={15} aria-hidden="true" /><strong>{title || page?.record.title || 'Saved page'}</strong></span>
       <span className="conversation-capsule__actions">
-        <button type="button" className="small-button" onClick={() => setCollapsed(value => !value)} aria-expanded={!collapsed}>{collapsed ? <ShowIcon size={13} aria-hidden="true" /> : <HideIcon size={13} aria-hidden="true" />}{collapsed ? 'Show page' : 'Hide'}</button>
-        {!collapsed ? <button type="button" className="small-button" onClick={() => setExpanded(value => !value)} aria-pressed={expanded}>{expanded ? <CompactIcon size={13} aria-hidden="true" /> : <ExpandIcon size={13} aria-hidden="true" />}{expanded ? 'Compact' : 'Expand'}</button> : null}
-        <button type="button" className="small-button" onClick={open}><OpenIcon size={13} aria-hidden="true" />Open in Browser</button>
+        <CardTool label={collapsed ? 'Show page' : 'Hide page'} onClick={() => setCollapsed(value => !value)} expanded={!collapsed}>{collapsed ? <ShowIcon size={14} aria-hidden="true" /> : <HideIcon size={14} aria-hidden="true" />}</CardTool>
+        {!collapsed ? <CardTool label={expanded ? 'Compact page' : 'Expand page'} onClick={() => setExpanded(value => !value)} pressed={expanded}>{expanded ? <CompactIcon size={14} aria-hidden="true" /> : <ExpandIcon size={14} aria-hidden="true" />}</CardTool> : null}
+        <CardTool label="Open in Browser" onClick={open}><OpenIcon size={14} aria-hidden="true" /></CardTool>
       </span>
     </header>
     {!collapsed ? <>
       {notice ? <div className="conversation-capsule__notice" role="status"><span>{notice}</span><button type="button" className="small-button" onClick={() => setRetry(value => value + 1)}>Retry original page</button></div> : null}
       {active && browser ? <CapsuleNativePage browser={browser} presentation={presentation} release={release} />
-        : <div className="conversation-capsule__placeholder" role={loading ? 'status' : undefined}>{loading ? 'Connecting saved page…' : !visible ? 'Page preview paused while outside the reading window' : 'The original page reference is kept below.'}</div>}
+        : <div className="conversation-capsule__placeholder" role={loading ? 'status' : undefined} data-loading={loading ? '' : undefined}>{loading ? 'Connecting saved page…' : !visible ? 'Page preview paused while outside the reading window' : 'The original page reference is kept below.'}</div>}
     </> : null}
     {browser?.capsuleId === capsuleId ? <div hidden={!active} inert={!active}><span className="conversation-capsule__questions" ref={setToolbar} /><CapsuleInteractionChrome embedded browserId={browser.id} capsuleId={browser.capsuleId} active={browser.capsuleActive === true} visible={active} toolbarHost={toolbar} /></div> : null}
-    <details className="conversation-capsule__source"><summary>Page reference</summary><code>{uri}</code>{browser ? <code>Browser {browser.id}</code> : null}
+    <details className="conversation-capsule__source"><summary>Page reference</summary><code>{uri}</code>{page ? <span className="conversation-capsule__mode">{page.record.mode === 'injected' ? 'Injected' : 'Isolated'} page</span> : null}{browser ? <code>Browser {browser.id}</code> : null}
       {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details>
   </section>
+}
+
+/** A quiet icon tool; its name stays readable to assistive tech and on hover. */
+function CardTool({ label, onClick, expanded, pressed, children }: { label: string; onClick(): void; expanded?: boolean; pressed?: boolean; children: ReactNode }) {
+  return <button type="button" className="icon-button conversation-capsule__tool" aria-label={label} title={label} onClick={onClick}
+    {...(expanded === undefined ? {} : { 'aria-expanded': expanded })} {...(pressed === undefined ? {} : { 'aria-pressed': pressed })}>{children}</button>
 }
 
 function CapsuleNativePage({ browser, presentation, release }: { browser: BrowserSnapshot; presentation: BrowserStagePresentation; release(): void }) {

@@ -46,14 +46,16 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
   }, [capsuleId])
   useEffect(() => { if (visible) void refresh(); return () => { generation.current++ } }, [visible, refresh])
   const pending = questions?.filter(question => question.status === 'pending' || question.reply?.phase === 'prepared').length
+  // Unread is unknown, never "nothing pending"; only the original list confirms what waits for the person.
+  const attention = pending === undefined ? 'unconfirmed' : pending > 0 ? 'pending' : 'none'
   const updated = (value: CapsuleInteraction): void => setQuestions(current => current?.map(question => question.interactionId === value.interactionId && value.revision >= question.revision ? value : question) ?? [value])
   const mode = page ? page.record.mode === 'injected' ? 'Injected' : 'Isolated' : 'Capsule'
   return <>
-    {toolbarHost ? createPortal(<button type="button" className="capsule-toolbar__button" aria-label="Page questions" aria-expanded={open} aria-controls={panelId}
+    {toolbarHost ? createPortal(<button type="button" className="capsule-toolbar__button" aria-label="Page questions" aria-expanded={open} aria-controls={panelId} data-attention={attention}
       title={`${page?.record.title ?? 'Saved page'} · ${mode} · ${pending ?? 'Unconfirmed'} pending questions`} onClick={() => {
         if (!open) void refresh()
         setOpen(value => !value)
-      }}><QuestionsIcon size={13} aria-hidden="true" /><span className="capsule-toolbar__name">{embedded ? 'Questions' : page?.record.title ?? 'Saved page'}</span>
+      }}><QuestionsIcon size={13} aria-hidden="true" /><span className="capsule-toolbar__name">{embedded ? attention === 'pending' ? 'Needs your answer' : 'Questions' : page?.record.title ?? 'Saved page'}</span>
       {!embedded ? <span className="capsule-toolbar__mode">{mode}</span> : null}{pending ? <span className="capsule-toolbar__count">{pending}</span> : null}</button>, toolbarHost) : null}
     <section id={panelId} className="capsule-chrome" aria-label="Capsule page requests" hidden={!open} inert={!open || !visible}>
       <div className="capsule-chrome__heading"><span>Review your answer before sending</span>

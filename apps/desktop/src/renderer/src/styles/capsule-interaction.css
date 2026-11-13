@@ -6,6 +6,9 @@
 .capsule-toolbar__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capsule-toolbar__mode { color: var(--text-3); font-size: var(--fs-micro); }
 .capsule-toolbar__count { min-width: 16px; padding: 0 4px; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: var(--fs-micro); text-align: center; font-variant-numeric: tabular-nums; }
+.capsule-toolbar__button[data-attention='pending'] { color: var(--green-text); font-weight: 600; }
+.capsule-toolbar__button[data-attention='pending'] > svg { color: var(--green); }
+.capsule-toolbar__button[data-attention='pending'] > .capsule-toolbar__count { color: var(--bg); background: var(--green); }
 .capsule-chrome { flex: none; min-width: 0; max-height: min(320px, 40vh); overflow: auto; overscroll-behavior: contain; padding: var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--text-1); font-size: var(--fs-meta); }
 .capsule-chrome[hidden] { display: none; }
 .capsule-chrome button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); }

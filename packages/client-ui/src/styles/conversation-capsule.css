@@ -20,19 +20,26 @@
 .conversation-capsule__identity { display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto; min-width: 0; }
 .conversation-capsule__identity > svg { flex: none; color: var(--text-2); }
 .conversation-capsule__identity > strong { min-width: 0; font-size: var(--fs-body); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.conversation-capsule__mode { flex: none; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.conversation-capsule__mode { display: block; margin-top: var(--sp-2); color: var(--text-3); }
 .conversation-capsule__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; }
-.conversation-capsule__actions > .small-button { min-height: 28px; padding: var(--sp-1) var(--sp-2); gap: var(--sp-1); background: transparent; color: var(--text-2); box-shadow: none; font-size: var(--fs-meta); font-weight: 500; white-space: nowrap; }
-.conversation-capsule__actions > .small-button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); box-shadow: none; }
-.conversation-capsule__actions > .small-button[aria-pressed='true'] { background: var(--surface-2); color: var(--text); }
-.conversation-capsule__actions > .small-button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
-.conversation-capsule .browser-presentation { height: clamp(180px, 40vh, 320px); min-height: 0; display: flex; flex-direction: column; }
-.conversation-capsule--expanded .browser-presentation { height: clamp(300px, 65vh, 700px); }
+.conversation-capsule__actions { gap: 2px; }
+.conversation-capsule__tool { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); box-shadow: none;
+  transition: background-color 120ms ease, color 120ms ease; }
+.conversation-capsule__tool:hover { background: var(--surface-2); color: var(--text); }
+.conversation-capsule__tool[aria-pressed='true'] { background: var(--surface-2); color: var(--text); }
+.conversation-capsule__tool:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .conversation-capsule__tool { transition: none; } }
+.conversation-capsule { --capsule-page-height: clamp(180px, 40vh, 320px); }
+.conversation-capsule--expanded { --capsule-page-height: clamp(300px, 65vh, 700px); }
+.conversation-capsule .browser-presentation { height: var(--capsule-page-height); min-height: 0; display: flex; flex-direction: column; }
 .conversation-capsule .browser-stage { min-height: 0; flex: 1; position: relative; overflow: hidden; }
 .conversation-capsule__notice { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); flex-wrap: wrap; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-2); }
 .conversation-capsule__notice > span { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
 .conversation-capsule__notice > .small-button { padding: var(--sp-1) var(--sp-2); background: transparent; box-shadow: none; }
-.conversation-capsule__placeholder { min-height: 160px; display: grid; place-items: center; padding: var(--sp-4); font-size: var(--fs-meta); color: var(--text-2); }
+.conversation-capsule__placeholder { height: var(--capsule-page-height); box-sizing: border-box; display: grid; place-items: center; padding: var(--sp-4); font-size: var(--fs-meta); color: var(--text-3); }
+.conversation-capsule__placeholder[data-loading] { background: linear-gradient(100deg, transparent 30%, var(--surface-1) 50%, transparent 70%) 0 0 / 220% 100% no-repeat; animation: conversation-capsule-shimmer 1.4s ease-in-out infinite; }
+@keyframes conversation-capsule-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) { .conversation-capsule__placeholder[data-loading] { animation: none; } }
 .conversation-capsule__source { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-micro); color: var(--text-3); border-top: 1px solid var(--line-soft); }
 .conversation-capsule__source > summary { cursor: pointer; width: fit-content; }
 .conversation-capsule__source > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
