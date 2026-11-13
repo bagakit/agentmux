@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
 import { APP_ICON_IDS, DEFAULT_APP_ICON } from '../../../packages/client-ui/src/lib/app-icon-catalog.ts'
+import { renderClassicAppIcon } from './lib/classic-app-icon.mjs'
 import { renderMacOSAppIcon } from './lib/macos-app-icon.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -79,9 +80,12 @@ async function main() {
   await mkdir(join(resourcesDir, 'app-icons/macos'), { recursive: true })
   for (const id of APP_ICON_IDS) {
     const target = join(sharedAssets, id + '.png')
-    await resizeTo(512, target, join(sourceDirectory, id + '.png'))
+    const sourcePath = join(sourceDirectory, id + '.png')
+    const raw = await readFile(sourcePath)
+    const source = id === 'classic' ? renderClassicAppIcon(raw) : raw
+    if (id === 'classic') await writeFile(target, renderClassicAppIcon(raw, 512))
+    else await resizeTo(512, target, sourcePath)
     await cp(target, join(resourcesDir, 'app-icons', id + '.png'))
-    const source = await readFile(join(sourceDirectory, id + '.png'))
     await writeFile(join(resourcesDir, 'app-icons/macos', id + '.png'), renderMacOSAppIcon(source, 512))
   }
   // The signed bundle has one static default. Runtime selections never rewrite it.
