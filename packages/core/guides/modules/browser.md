@@ -32,6 +32,18 @@ Read only the matching local help:
   stay under browser profile folder. Deleting a folder only unassigns its Profiles;
   no Profile, Browser or website data is deleted. Copy carries tags and the same folder
   assignment into the new identity, but does not pin it. Pinning grants no page input.
+  Query this library with profile ls --query '{"status":"unknown","sort":"name"}'
+  or --view ID. Queries may filter search, exact folderId (null means unfiled), tag,
+  observed status, saved route and lastUsed day/week/month/unknown. Missing observation
+  is unknown, never unused. The reply's filter identifies its query and observation time;
+  it is not the full catalog. A missing folder refuses that scope rather than expanding it.
+  Saved views are named queries in the original Profile catalog: profile view create/update/delete
+  use the root configuration revision. They store no selection and alter no website data.
+  Apply metadata to an explicit set with profile bulk-update --items JSON --action JSON.
+  Items freeze [{profileId,expectedRevision}] from each exact Profile token. The supported
+  actions are pin, move to folder, add-tag and remove-tag. Read every updated/failed item;
+  partial failure leaves successful items saved. New matches never join the frozen set.
+  A missing receipt is unknown: inspect the original IDs before considering another write.
   A person or device can set a proxy sign-in with browser profile proxy-sign-in set
   --profile ID --input FILE|-; the JSON contains only username and password. Never put
   a password in command arguments. Managed Agents cannot set or clear sign-ins. The
