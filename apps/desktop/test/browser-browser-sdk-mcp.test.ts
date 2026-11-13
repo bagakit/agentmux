@@ -63,7 +63,7 @@ async function fixture() {
   Object.assign(manager, { taskAssets: assets, operationJournal: journal, entries: new Map([[browserId, entry], [neighborId, neighbor]]) })
   const targets = [browserId, neighborId].map(id => ({ id, workspaceId: null, source: 'embedded' as const, status: 'ready' as const, url: 'https://sdk.invalid/', title: 'Fixture', navigationId: id+'-document', capabilities: ['snapshot', 'click'] }))
   const seen: Array<{ operation: string; actor: unknown; caller?: string }> = []
-  const methods = new Set<any>(['system.endpoint', 'system.subscription.cancel', 'browser.targets', 'browser.inspect', 'browser.stop', 'browser.follow', 'browser.task.import', 'browser.task.import-inspect', 'browser.task.draft', 'browser.task.export', 'browser.profile.ls', 'browser.profile.proxy-sign-in.clear'])
+  const methods = new Set<any>(['system.endpoint', 'system.subscription.cancel', 'browser.targets', 'browser.inspect', 'browser.stop', 'browser.follow', 'browser.task.import', 'browser.task.import-inspect', 'browser.task.draft', 'browser.task.export', 'browser.profile.ls', 'browser.profile.delete', 'browser.profile.proxy-sign-in.clear'])
   const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), exposedMethods: methods, coreClients: core.clients,
     execute: async (request, context) => {
       seen.push({ operation: request.operation, actor: context?.actor, ...(request.caller ? { caller: request.caller.agentSessionId } : {}) })
@@ -122,7 +122,7 @@ it('managed MCP credentials reach real Core authentication and cannot be downgra
   expect(f.signInWrites).not.toHaveBeenCalled()
   expect(f.seen.map(item => item.operation)).not.toContain('browser.profile.proxy-sign-in.clear') // Original Core refuses before Main writes.
   const forged = await peer.client.callTool({ name: 'browser_call', arguments: { method: 'browser.profile.proxy-sign-in.clear', params: { profileId: f.profileId, caller: { kind: 'user' } } } })
-  expect(forged.isError).toBe(true); expect(body(forged).error.code).toBe('INVALID_CONTROL_REQUEST'); expect(f.signInWrites).not.toHaveBeenCalled()
+  expect(forged.isError).toBe(true); expect(body(forged).error.code).toBe('MCP_CONTROL_FIELDS_FORBIDDEN'); expect(f.signInWrites).not.toHaveBeenCalled()
   const invalid = await mcp(f, { AGENTMUX_AGENT_SESSION_ID: 'managed-sdk-agent', AGENTMUX_AGENT_CAPABILITY: 'invalid-original-capability' })
   const unauthenticated = await invalid.client.callTool({ name: 'browser_call', arguments: { method: 'browser.profile.ls', params: {} } })
   expect(unauthenticated.isError).toBe(true); expect(body(unauthenticated).error.code).toBe('AGENT_CAPABILITY_INVALID')
@@ -162,4 +162,20 @@ it('preserves unsupported and disconnect as original service errors, leaves the 
   const partialMcp = await child([resolve('packages/browser-mcp/dist/stdio.js'), '--endpoint', 'unix:'+f.socket], environment({ AGENTMUX_AGENT_SESSION_ID: 'managed-sdk-agent' }))
   expect(partialMcp.code).not.toBe(0); expect(JSON.parse(partialMcp.stderr).error.code).toBe('MANAGED_AGENT_CONTEXT_REQUIRED')
   expect(BROWSER_RPC_METHODS).toContain('browser.input.inspect')
+}, 40_000)
+
+
+it('unmanaged MCP tool JSON cannot manufacture real Profile approval DTOs or replace caller authority before the original RPC ingress', async () => {
+  const f = await fixture(), disposable = await f.profiles.createProfile('Retained Profile'), peer = await mcp(f)
+  const accepted = vi.spyOn(f.server as any, 'accept') // Observe the real server ingress without replacing it.
+  const beforeConnections = accepted.mock.calls.length, beforeRequests = f.seen.length, bytes = await readFile(join(f.root, 'profiles.json'), 'utf8')
+  const approval: import('../src/shared/contracts.js').BrowserProfileDeleteApproval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: disposable.id }
+  for (const control of [{ approval }, { caller: { agentSessionId: 'invented-person', capability: 'invented-capability' } }, { runtimeFence: { runtimeId: 'invented-runtime' } }]) {
+    const refused = await peer.client.callTool({ name: 'browser_call', arguments: { method: 'browser.profile.delete', params: { profileId: disposable.id, ...control } } })
+    expect(refused.isError).toBe(true)
+    expect(accepted.mock.calls.length).toBe(beforeConnections); expect(f.seen).toHaveLength(beforeRequests)
+    expect(body(refused).error.code).toBe('MCP_CONTROL_FIELDS_FORBIDDEN')
+    expect(await readFile(join(f.root, 'profiles.json'), 'utf8')).toBe(bytes)
+  }
+  expect(f.signInWrites).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(f.neighborStop).not.toHaveBeenCalled()
 }, 40_000)
