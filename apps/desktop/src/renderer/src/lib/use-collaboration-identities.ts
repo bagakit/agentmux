@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { SessionHistorySourceObservation, SessionHistorySourceReference } from '../../../shared/contracts'
 import { api } from './api'
-import { collaborationSubjectKey, type CollaborationAgent, type CollaborationRelation } from './agent-collaboration'
+import { collaborationHistoryMember, collaborationSubjectKey, type CollaborationAgent, type CollaborationRelation } from './agent-collaboration'
 
 type IdentityRead = { reference: SessionHistorySourceReference; source: AgentSessionHistoryDescriptor | null; issue: string | null; loading: boolean }
 const referenceKey = (reference: SessionHistorySourceReference) => 'hostId' in reference
@@ -94,12 +94,11 @@ export function resolveCollaborationIdentities(recorded: { agents: ReadonlyMap<s
   for (const [id, read] of reads) {
     const agent = recorded.agents.get(id)
     if (!agent || !read.source) continue
-    const source = read.source, subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, canonical = collaborationSubjectKey(subject)
+    const source = read.source, member = collaborationHistoryMember(source,
+      `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · ${source.history?.providerId ?? 'Provider unrecorded'} · ${source.hostId}`), canonical = member.id
     aliases.set(id, canonical); sources.set(canonical, source)
     if (id !== canonical) agents.delete(id)
-    agents.set(canonical, { ...agent, id: canonical, subject, tier: source.state === 'retired' ? 'closed' : 'unknown', ...(source.retiredAt ? { retiredAt: source.retiredAt } : {}),
-      ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}),
-      provenance: `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · ${source.history?.providerId ?? 'Provider unrecorded'} · ${source.hostId}` })
+    agents.set(canonical, { ...agent, ...member })
   }
   const relations = new Map<string, CollaborationRelation>()
   for (const relation of recorded.relations) {

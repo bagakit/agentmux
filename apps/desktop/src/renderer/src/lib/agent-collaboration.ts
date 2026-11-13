@@ -39,6 +39,16 @@ export function collaborationAgents(contexts: readonly FocusContext[]): Map<stri
   return result
 }
 
+/** A retained history descriptor as a Map member. Every load path converts through here so a
+ * member's facts never depend on which path found it; only the provenance text differs. History
+ * observes no activity, so lastActivityAt stays absent and retiredAt remains a lifecycle record. */
+export function collaborationHistoryMember(source: AgentSessionHistoryDescriptor, provenance: string, name?: string): CollaborationAgent {
+  const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }
+  return { id: collaborationSubjectKey(subject), subject, sessionId: source.agentSessionId, ...(name === undefined ? {} : { name }),
+    ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}),
+    tier: source.state === 'retired' ? 'closed' : 'unknown', ...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance }
+}
+
 type MessageContribution = { subject: CollaborationSubject; incarnation: string | null; ref: AgentMuxMessageEventReference; events: Map<number, AgentMuxMessageEvent> }
 type CreationContribution = { subject: CollaborationSubject; record: AgentMuxSpawnRecord }
 type SourceProjection = { reading: CollaborationReading; messages: Set<string>; creations: Set<string> }

@@ -15,7 +15,7 @@ import { agentRegionExecution, useAppStore } from '../store'
 import { workspaceForSession, topicIdForSession } from '../lib/workbench-tabs'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { collaborationAgents, collaborationSubjectKey, createCollaborationProjector, visibleCollaboration, type CollaborationAgent, type CollaborationArea, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
+import { collaborationAgents, collaborationHistoryMember, collaborationSubjectKey, createCollaborationProjector, visibleCollaboration, type CollaborationAgent, type CollaborationArea, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
 import { useCollaborationReading, type CollaborationSource } from '../lib/use-collaboration-reading'
 import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
@@ -80,9 +80,9 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
       if (session.hostId === subject.hostId && !sessions.has(id)) sessions.set(id, session)
     }
     for (const source of history.sources) {
-      const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, id = collaborationSubjectKey(subject)
+      const id = collaborationSubjectKey({ hostId: source.hostId, agentSessionId: source.agentSessionId })
       descriptors.set(id, source)
-      if (!result.has(id)) result.set(id, { id, subject, sessionId: source.agentSessionId, name: facts.names[source.agentSessionId] ?? source.agentSessionId, ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}), tier: source.state === 'retired' ? 'closed' : 'unknown', lastActivityAt: null, ...(source.retiredAt ? { retiredAt: source.retiredAt } : {}), provenance: source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed' })
+      if (!result.has(id)) result.set(id, collaborationHistoryMember(source, source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed', facts.names[source.agentSessionId] ?? source.agentSessionId))
     }
     for (const id of catalogCache.current.keys()) if (!result.has(id)) catalogCache.current.delete(id)
     return { agents: result, sessions, history: descriptors }
