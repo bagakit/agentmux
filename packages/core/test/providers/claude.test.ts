@@ -31,6 +31,23 @@ import {
   CLAUDE_TURN_END_EVENT
 } from '../../src/providers/claude-native-activity.js'
 
+type NativeModHandler = (client: unknown, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+
+/** Load the generated mod from a fresh directory and hand its registered callbacks to `use`. */
+async function withNativeActivityMod(prefix: string, use: (handlers: ReadonlyMap<string, NativeModHandler>) => Promise<void>): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), prefix))
+  try {
+    const modulePath = join(directory, 'register.mjs')
+    await writeFile(modulePath, claudeNativeActivitySource())
+    const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as {
+      register(on: (name: string, handler: NativeModHandler) => void): void
+    }
+    const handlers = new Map<string, NativeModHandler>()
+    module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+    await use(handlers)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
 describe('Claude native mod activity', () => {
   it('installs an actual mod and launches it for new, resumed and forked Runs', () => {
     const provider = new AgentProviderRegistry().get('claude')
@@ -119,8 +136,6 @@ describe('Claude native mod activity', () => {
   })
 
   it.each(['throws', 'empty'])('a %s original actor capture reports a diagnostic without claiming or rebinding an actor', async failure => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-native-source-'))
-    const modulePath = join(directory, 'register.mjs')
     const calls: Array<{ stdin: string }> = []
     const sessionId = vi.fn(async () => {
       if (failure === 'throws') throw new Error('Original actor getter unavailable')
@@ -130,14 +145,7 @@ describe('Claude native mod activity', () => {
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         calls.push(init); return { exitCode: 0, stdout: '{}\n', stderr: '' }
       } }, ui: { log: vi.fn() } }
-    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
-    const handlers = new Map<string, Handler>()
-    try {
-      await writeFile(modulePath, claudeNativeActivitySource())
-      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as {
-        register(on: (name: string, handler: Handler) => void): void
-      }
-      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+    await withNativeActivityMod('agentmux-claude-native-source-', async handlers => {
       const next = (event: Record<string, unknown>) => ({ original: event })
       const sessionStart = { original: 'native session start' }
       expect(await handlers.get('session.start')!(api, sessionStart, next)).toEqual({ original: sessionStart })
@@ -169,12 +177,10 @@ describe('Claude native mod activity', () => {
       await new Promise<void>(resolve => setImmediate(resolve))
       expect(sessionId).toHaveBeenCalledTimes(1)
       expect(calls).toHaveLength(1)
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    })
   })
 
   it('generated callbacks preserve native results, serialize delivery and freeze their original actor', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-native-mod-'))
-    const modulePath = join(directory, 'register.mjs')
     const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
     // Inbox notice asks are not activity deliveries: recorded apart, answered with no notice.
     const asks: Array<Record<string, unknown>> = []
@@ -196,81 +202,66 @@ describe('Claude native mod activity', () => {
       } },
       ui: { log: vi.fn(async () => {}) }
     }
-    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
-    const handlers = new Map<string, Handler>()
-    try {
-      await writeFile(modulePath, claudeNativeActivitySource())
-      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as {
-        register(on: (name: string, handler: Handler) => void): void
-      }
-      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
-      const next = (event: Record<string, unknown>) => ({ original: event })
-      await handlers.get('session.start')!(api, {}, next)
-      const start = { turnId: 'actual-turn-A', text: 'user content' }
-      expect(handlers.get('turn.start')!(api, start, next)).toEqual({ original: start })
-      await vi.waitFor(() => expect(calls).toHaveLength(1))
-      const complete = { turnId: 'actual-turn-A', reason: 'answer', isAborted: false }
-      expect(handlers.get('turn.complete')!(api, complete, next)).toEqual({ original: complete })
-      expect(calls).toHaveLength(1)
-      release!()
-      await vi.waitFor(() => expect(calls).toHaveLength(2))
-      expect(calls.map(call => JSON.parse(call.init.stdin).sequence)).toEqual([1, 2])
-      expect(calls.map(call => JSON.parse(call.init.stdin).turnId)).toEqual(['actual-turn-A', 'actual-turn-A'])
-      expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
-      expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
-      handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(3))
-      expect(JSON.parse(calls[2]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.complete',
-        agent_id: 'child-A', turnId: 'actual-turn-A', sequence: 3 })
-      failNext = true
-      handlers.get('turn.start')!(api, { turnId: 'actual-turn-B' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(4))
-      handlers.get('turn.complete')!(api, { ...complete, turnId: 'actual-turn-B' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(5))
-      expect(JSON.parse(calls[4]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
-        reason: 'delivery-gap', sequence: 5 })
-      handlers.get('turn.start')!(api, { turnId: 'actual-turn-C' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(6))
-      expect(JSON.parse(calls[5]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.start',
-        turnId: 'actual-turn-C', sequence: 6 })
-      currentSessionId = 'new-native'
-      const reset = { hook_event_name: 'SessionStart', source: 'clear', session_id: 'new-native' }
-      expect(handlers.get('classic.SessionStart')!(api, reset, next)).toEqual({ original: reset })
-      await vi.waitFor(() => expect(calls).toHaveLength(7))
-      expect(JSON.parse(calls[6]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
-        session_id: 'original-native', reason: 'source-changed', sequence: 7 })
-      handlers.get('turn.start')!(api, { turnId: 'queued-old-turn' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(8))
-      expect(JSON.parse(calls[7]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
-        session_id: 'original-native', reason: 'source-changed', sequence: 8 })
-      currentSessionId = 'original-native'
-      handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
-      await vi.waitFor(() => expect(calls).toHaveLength(9))
-      expect(JSON.parse(calls[8]!.init.stdin).hook_event_name).toBe('AgentMuxActivityUnavailable')
-      // Only answered main turns of the original session asked; child turns and the changed source did not.
-      expect(asks).toEqual([
-        { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-A', reason: 'answer' },
-        { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-B', reason: 'answer' }])
-    } finally {
-      release?.()
-      await rm(directory, { recursive: true, force: true })
-    }
+    await withNativeActivityMod('agentmux-claude-native-mod-', async handlers => {
+      try {
+        const next = (event: Record<string, unknown>) => ({ original: event })
+        await handlers.get('session.start')!(api, {}, next)
+        const start = { turnId: 'actual-turn-A', text: 'user content' }
+        expect(handlers.get('turn.start')!(api, start, next)).toEqual({ original: start })
+        await vi.waitFor(() => expect(calls).toHaveLength(1))
+        const complete = { turnId: 'actual-turn-A', reason: 'answer', isAborted: false }
+        expect(handlers.get('turn.complete')!(api, complete, next)).toEqual({ original: complete })
+        expect(calls).toHaveLength(1)
+        release!()
+        await vi.waitFor(() => expect(calls).toHaveLength(2))
+        expect(calls.map(call => JSON.parse(call.init.stdin).sequence)).toEqual([1, 2])
+        expect(calls.map(call => JSON.parse(call.init.stdin).turnId)).toEqual(['actual-turn-A', 'actual-turn-A'])
+        expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
+        expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
+        handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(3))
+        expect(JSON.parse(calls[2]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.complete',
+          agent_id: 'child-A', turnId: 'actual-turn-A', sequence: 3 })
+        failNext = true
+        handlers.get('turn.start')!(api, { turnId: 'actual-turn-B' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(4))
+        handlers.get('turn.complete')!(api, { ...complete, turnId: 'actual-turn-B' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(5))
+        expect(JSON.parse(calls[4]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+          reason: 'delivery-gap', sequence: 5 })
+        handlers.get('turn.start')!(api, { turnId: 'actual-turn-C' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(6))
+        expect(JSON.parse(calls[5]!.init.stdin)).toMatchObject({ hook_event_name: 'turn.start',
+          turnId: 'actual-turn-C', sequence: 6 })
+        currentSessionId = 'new-native'
+        const reset = { hook_event_name: 'SessionStart', source: 'clear', session_id: 'new-native' }
+        expect(handlers.get('classic.SessionStart')!(api, reset, next)).toEqual({ original: reset })
+        await vi.waitFor(() => expect(calls).toHaveLength(7))
+        expect(JSON.parse(calls[6]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+          session_id: 'original-native', reason: 'source-changed', sequence: 7 })
+        handlers.get('turn.start')!(api, { turnId: 'queued-old-turn' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(8))
+        expect(JSON.parse(calls[7]!.init.stdin)).toMatchObject({ hook_event_name: 'AgentMuxActivityUnavailable',
+          session_id: 'original-native', reason: 'source-changed', sequence: 8 })
+        currentSessionId = 'original-native'
+        handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
+        await vi.waitFor(() => expect(calls).toHaveLength(9))
+        expect(JSON.parse(calls[8]!.init.stdin).hook_event_name).toBe('AgentMuxActivityUnavailable')
+        // Only answered main turns of the original session asked; child turns and the changed source did not.
+        expect(asks).toEqual([
+          { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-A', reason: 'answer' },
+          { hook_event_name: CLAUDE_TURN_END_EVENT, session_id: 'original-native', turnId: 'actual-turn-B', reason: 'answer' }])
+      } finally { release?.() }
+    })
   })
 
   it('reports the exact end of a main call Claude asked about, without touching native results or other tools', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-asked-end-'))
-    const modulePath = join(directory, 'register.mjs')
     const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
     const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
       process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
         calls.push({ argv, init }); return { exitCode: 0, stdout: '{}\n', stderr: '' } } },
       ui: { log: vi.fn(async () => {}) } }
-    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
-    const handlers = new Map<string, Handler>()
-    try {
-      await writeFile(modulePath, claudeNativeActivitySource())
-      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
-      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+    await withNativeActivityMod('agentmux-claude-asked-end-', async handlers => {
       await handlers.get('session.start')!(api, {}, event => event)
       const check = (event: Record<string, unknown>, decision: string) => handlers.get('tool.check')!(api, event, async () => ({ decision }))
       const call = (event: Record<string, unknown>, settle: () => Promise<unknown>) => handlers.get('tool.call')!(api, event, settle)
@@ -299,20 +290,13 @@ describe('Claude native mod activity', () => {
       await call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_question' }, async () => rejected)
       await new Promise<void>(resolve => setImmediate(resolve))
       expect(calls).toHaveLength(2)
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    })
   })
 
   it('gives Claude’s classic ask the identity of the one exact asked main call, and none when ambiguous', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-ask-identity-'))
-    const modulePath = join(directory, 'register.mjs')
     const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
       process: { run: async () => ({ exitCode: 0, stdout: '{}\n', stderr: '' }) }, ui: { log: vi.fn(async () => {}) } }
-    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
-    const handlers = new Map<string, Handler>()
-    try {
-      await writeFile(modulePath, claudeNativeActivitySource())
-      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
-      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+    await withNativeActivityMod('agentmux-claude-ask-identity-', async handlers => {
       await handlers.get('session.start')!(api, {}, event => event)
       const check = (event: Record<string, unknown>, decision: string) => handlers.get('tool.check')!(api, event, async () => ({ decision }))
       const ask = (event: Record<string, unknown>) => handlers.get('classic.PermissionRequest')!(api, event, value => value) as Record<string, unknown>
@@ -343,21 +327,14 @@ describe('Claude native mod activity', () => {
       expect(await ask({ ...classic, tool_input: { command: 'ls', description: input.description } })).toMatchObject({ tool_use_id: 'toolu_four' })
       // A native identity Claude already sent is never replaced.
       expect(await ask({ ...classic, tool_use_id: 'toolu_native' })).toEqual({ ...classic, tool_use_id: 'toolu_native' })
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    })
   })
 
   it('outside an AgentMux-launched session the observer never touches Claude’s ask or reports ends', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentmux-claude-ask-outside-'))
-    const modulePath = join(directory, 'register.mjs')
     const runs: unknown[] = []
     const api = { env: { get: async () => undefined }, session: { id: async () => 'someone-else' },
       process: { run: async (...args: unknown[]) => { runs.push(args); return { exitCode: 0, stdout: '{}\n', stderr: '' } } }, ui: { log: vi.fn(async () => {}) } }
-    type Handler = (client: typeof api, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
-    const handlers = new Map<string, Handler>()
-    try {
-      await writeFile(modulePath, claudeNativeActivitySource())
-      const module = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as { register(on: (name: string, handler: Handler) => void): void }
-      module.register((name, handler) => { handlers.set(name, handler); return { catch() {} } })
+    await withNativeActivityMod('agentmux-claude-ask-outside-', async handlers => {
       await handlers.get('session.start')!(api, {}, event => event)
       const input = { command: 'ls' }
       await handlers.get('tool.check')!(api, { tool: 'Bash', tool_use_id: 'toolu_out', input }, async () => ({ decision: 'ask' }))
@@ -366,7 +343,7 @@ describe('Claude native mod activity', () => {
       await handlers.get('tool.call')!(api, { tool: 'Bash', tool_use_id: 'toolu_out' }, async () => ({ ref: 1 }))
       await new Promise<void>(resolve => setImmediate(resolve))
       expect(runs).toEqual([])
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    })
   })
 })
 
