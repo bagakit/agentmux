@@ -55,6 +55,12 @@ Read only the matching local help:
   Create with one retained Core-minted intent via `browser task create --browser ID --input FILE|-`;
   `browser task create-inspect --browser ID --input FILE|-` checks that same original binding without writing.
   Unknown replies never authorize a replacement identity or automatic replay.
+  For portable definitions use `browser task export --browser ID --asset ID --expected-revision N [--version N]`.
+  Retain its `bundle` and Core `browserTaskImportInput(targetBrowserId, bundle)` before
+  `browser task import --browser ID --input FILE|-`; `browser task import-inspect` reads the original durable receipt.
+  Imports mint a new local asset and step identities and require review. Packages contain
+  the complete definition and parameter declarations, never runtime values, sign-ins,
+  recording bodies, Runs or human approvals. Source metadata describes package origin only.
 - amux browser open --help: open a new page only when needed.
   For durable generated content, prefer amux capsule open. The optional --capsule ID
   keeps the exact Capsule container and document policy; it cannot use private mode.
