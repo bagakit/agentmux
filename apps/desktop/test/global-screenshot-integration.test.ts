@@ -35,6 +35,7 @@ vi.mock('electron', async () => {
       visible = false; opacity = 1
       show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.visible = true }); focus = vi.fn(); setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
       setOpacity = vi.fn((value: number) => { this.opacity = value })
+      getOpacity() { return this.opacity }
       static getFocusedWindow() { return null }
       // The capture surface fades the visible windows it finds; tests that need that opt in.
       static getAllWindows() { return electron.workbench }
