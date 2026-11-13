@@ -77,6 +77,34 @@ it('⌘E opens the window editor on the full frozen frame with the marks, and it
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
 })
 
+it('after the original draft has its image, a retake that expands only copies, and the editor delivery is remembered', async () => {
+  const f = await fixture(), handoff = { shapes: [], crop: { x: 2, y: 2, width: 4, height: 2 }, tool: 'rect' as const }
+  const firstDelivered = vi.fn(), secondDelivered = vi.fn()
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff, delivered: firstDelivered })
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff, delivered: secondDelivered })
+  let firstFinish!: (png: BrowserPng) => Promise<void>, retake!: () => Promise<unknown>, closeFirst!: () => void
+  let secondAttach: boolean | undefined, secondFinish!: (png: BrowserPng) => Promise<void>, closeSecond!: () => void
+  f.edit.mockImplementationOnce(async (_image, _attach, complete, context) => {
+    firstFinish = complete; retake = context.retake!; await new Promise<void>(resolve => { closeFirst = resolve })
+  })
+  f.edit.mockImplementationOnce(async (_image, attach, complete) => {
+    secondAttach = attach; secondFinish = complete; await new Promise<void>(resolve => { closeSecond = resolve })
+  })
+  const pending = f.owner.capture(true)
+  await vi.waitFor(() => expect(f.edit).toHaveBeenCalledOnce())
+  await firstFinish(image)
+  expect(firstDelivered, 'the window editor delivery is the selection the next capture opens on').toHaveBeenCalledOnce()
+  const saved = (await readdir(f.home, { recursive: true })).filter(name => String(name).endsWith('.png')).length
+  void retake()
+  await vi.waitFor(() => expect(f.edit).toHaveBeenCalledTimes(2))
+  expect(f.present.mock.calls[1]![0].attachToDraft, 'a retaken surface does not attach to the delivered draft again').toBe(false)
+  expect(secondAttach, 'a retaken editor does not attach to the delivered draft again').toBe(false)
+  await secondFinish(image)
+  expect((await readdir(f.home, { recursive: true })).filter(name => String(name).endsWith('.png')).length, 'the draft receives no second saved image').toBe(saved)
+  expect(f.native.writeClipboardImage, 'the retake still copies').toHaveBeenCalledTimes(2)
+  closeSecond(); closeFirst(); await pending
+})
+
 it('closing the expanded editor without completion never delivers the frozen frame', async () => {
   const f = await fixture()
   f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' }, delivered: vi.fn() })
