@@ -137,7 +137,7 @@ function renderInventory() {
   if(!directory&&$('#inspector').open)$('#inspector').close();
   if(directory&&!mobile()&&!$('#inspector').open)$('#inspector').show();
   $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;$('.theme-preview-tools').hidden=mode==='brand';$('#mobile-drafts').hidden=mode==='brand';
-  $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote';
+  $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote'||mode==='brand';
   if(!directory){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
   window.history.replaceState(null,'','#'+mode);
   $('#search').placeholder=mode==='brand'?'搜索插画、头像或标志':mode==='motion'?'搜索自绘名称、静止设计、动效或用途':mode==='future'?'搜索候选名称、用途或定义来源':'搜索图标、功能、含义或语义 ID';
@@ -162,7 +162,7 @@ function renderInventory() {
     }).join('')}</tbody></table>`;
   }
 }
-const commonsLabels={goals:'Goals 行动与澄清',concepts:'概念场景',['mote-origin']:'Mote 起源故事'};
+const commonsLabels={goals:'Goals 的行动与澄清',concepts:'概念场景',['mote-origin']:'Mote 起源故事'};
 // One realm is in focus at a time; arrow keys move every column across realms together.
 let brandRealm, brandMarks;
 function renderBrand() {
@@ -192,7 +192,7 @@ function renderBrand() {
       </article>`:''}
     </section>
     <section class="brand-commons" aria-label="工坊插画"><header><h3>工坊 · 所有境共用</h3><p>所有境的 Agent 与 Mote 在这里相遇工作。插画不随所选的境切换，也不加题款。</p></header>
-      ${commons.map(({group,items})=>`<div class="brand-commons__group"><h4>${escape(commonsLabels[group]??group)}</h4><div class="brand-art-grid">${items.map(item=>`<figure class="brand-art" data-brand-entry="${escape(item.id)}"><img src="${escape(item.url??'')}" alt="" loading="lazy"><figcaption><strong>${escape(item.title)}</strong><code>${escape(item.file)}</code></figcaption></figure>`).join('')}</div></div>`).join('')||'<p class="empty">没有匹配的插画。</p>'}
+      ${commons.map(({group,items})=>`<div class="brand-commons__group"><h4>${escape(commonsLabels[group]??group)}</h4><div class="brand-art-grid">${items.map(item=>`<figure class="brand-art" data-brand-entry="${escape(item.id)}" title="${escape(item.title+' · '+item.file)}"><img src="${escape(item.url??'')}" alt="" loading="lazy"><figcaption><strong>${escape(item.title)}</strong><code>${escape(item.file.split('/').pop())}</code></figcaption></figure>`).join('')}</div></div>`).join('')||'<p class="empty">没有匹配的插画。</p>'}
     </section>
     <section class="brand-ip" aria-label="Mote 的多元宇宙"><header><h3>Mote 的多元宇宙</h3><p>同一个 Mote，十二种美术方向；头像归 Mote 自己的 owner，不并入五境。</p></header>
       <div class="brand-avatar-grid">${avatars.map(item=>`<figure class="brand-avatar"><img src="${escape(item.url??'')}" alt="" loading="lazy"><figcaption>${escape(item.title)}</figcaption></figure>`).join('')}</div>
