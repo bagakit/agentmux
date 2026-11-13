@@ -51,7 +51,8 @@ async function capture(name) {
   report.facts[name] = facts
   assert.equal(facts.rawTags, 0, name + ' shows no raw README HTML'); assert.equal(facts.alertMarker, false); assert.equal(facts.alerts, 1); assert.equal(facts.cards, 8)
   // The six README badges reach the remote image port; each either loads or settles as its alternative text.
-  const badges = await evaluate(`(()=>{const p=${preview};const loaded=[...p.querySelectorAll('img.md-remote-image')].filter(i=>i.naturalWidth>0).length;const failed=[...p.querySelectorAll('.md-image-attachment--unavailable')].filter(e=>/badge|Providers|amux|JSON-RPC|Tests|Platform|Node/i.test(e.textContent)).length;return {ports:p.querySelectorAll('img.md-remote-image').length+failed,loaded,failed}})()`)
+  // Only elements the remote image port itself rendered count: a plain fallback chip (port not wired) has no port marker.
+  const badges = await evaluate(`(()=>{const p=${preview};const port=[...p.querySelectorAll('[data-markdown-remote-image]')].filter(e=>/img\\.shields\\.io/.test(e.getAttribute('src')||e.getAttribute('title')||''));return {ports:port.length,loaded:port.filter(e=>e.tagName==='IMG'&&e.naturalWidth>0).length,failed:port.filter(e=>e.dataset.markdownRemoteImage==='failed').length}})()`)
   report.facts[name].badges = badges
   assert.equal(badges.ports, 6, name + ' renders all six badges through the remote image port')
   const slug = name === 'README.md' ? 'readme' : 'readme-zh'
@@ -113,12 +114,12 @@ app.whenReady().then(async () => { try {
   // Constructs the root READMEs do not use: other alert types, details, inline marks, a 40/60 card and a failing badge.
   await openPreview('elements.md'); await wait(`Boolean(${preview}?.querySelector('.md-alert[data-alert-type="caution"]'))`)
   const elements = await evaluate(`(()=>{const p=${preview};return {alerts:[...p.querySelectorAll('.md-alert')].map(a=>a.dataset.alertType),details:p.querySelectorAll('details.md-details').length,
-    marks:['kbd','sub','sup','mark','ins'].map(t=>p.querySelectorAll(t+'.md-'+t).length),del:p.querySelectorAll('del').length,failedBadge:[...p.querySelectorAll('.md-image-attachment--unavailable')].some(e=>e.textContent.includes('cannot load')),
-    badgeMarkup:(p.querySelector('img[alt="Badge that cannot load"]')||p.querySelector('[title*="unreachable"]'))?.outerHTML?.slice(0,200)||null}})()`)
+    marks:['kbd','sub','sup','mark','ins'].map(t=>p.querySelectorAll(t+'.md-'+t).length),del:p.querySelectorAll('del').length}})()`)
   report.facts['elements.md'] = elements
   assert.deepEqual(elements.alerts, ['tip', 'important', 'warning', 'caution']); assert.equal(elements.details, 2)
   // A badge that cannot load settles as its alternative text once the browser reports the failure.
-  await wait(`[...${preview}.querySelectorAll('.md-image-attachment--unavailable')].some(e=>e.textContent.includes('cannot load'))`, 20000)
+  await wait(`Boolean(${preview}.querySelector('[data-markdown-remote-image="failed"][title*="unreachable.invalid"]'))`, 20000)
+  report.facts['elements.md'].failedBadgeThroughPort = true
   for (const theme of ['light', 'dark']) {
     await evaluate(`filePreviewProbe.theme(${JSON.stringify(theme)})`); await paint()
     await scrollTo('h1', 24); await frame(`elements-alerts-${theme}`, { theme, document: 'elements.md' })
