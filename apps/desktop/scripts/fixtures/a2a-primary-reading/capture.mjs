@@ -8,8 +8,13 @@ import { pathToFileURL } from 'node:url'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function capturePrimaryReading({ root, evidence, scene, metadata = false }) {
-  const desktop = resolve(root, 'apps/desktop'), fixture = resolve(desktop, 'scripts/fixtures/a2a-primary-reading')
+export async function capturePrimaryReading({ root, evidence, scene, metadata = false, fixtureDirectory, transformStyles,
+  expectedFrames = metadata ? 15 : 18, requiredConsumers = [
+    'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
+    'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
+    'packages/client-ui/src/components/ConversationA2AReferences.tsx', 'packages/client-ui/src/components/ConversationNotificationDetails.tsx',
+    'packages/client-ui/src/styles/conversation-message.css'] }) {
+  const desktop = resolve(root, 'apps/desktop'), fixture = fixtureDirectory ?? resolve(desktop, 'scripts/fixtures/a2a-primary-reading')
   const require = createRequire(resolve(desktop, 'package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
   const { runProbeProcess, listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(resolve(desktop, 'scripts/probe-process.mjs')).href)
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-primary-reading-')), compiled = resolve(privateRoot, 'compiled')
@@ -23,7 +28,7 @@ export async function capturePrimaryReading({ root, evidence, scene, metadata = 
   }
   try {
     await mkdir(evidence, { recursive: true })
-    for (const name of await readdir(fixture)) { const file = resolve(fixture, name); bind(file, await readFile(file)) }
+    for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) { const file = resolve(fixture, entry.name); bind(file, await readFile(file)) }
     const alias = [candidateAlias(root, { browser: true, source: true, onManifest: bind })]
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
     const candidate = { name: 'actual-primary-reading-input', enforce: 'pre', async transform(_code, id) {
@@ -41,12 +46,11 @@ export async function capturePrimaryReading({ root, evidence, scene, metadata = 
       css: { postcss: { plugins: [{ postcssPlugin: 'actual-primary-reading-css', async Once(styles) {
         const files = new Set(); styles.walk(node => { if (node.source?.input.file) files.add(node.source.input.file.split('?')[0]) })
         for (const file of files) { const actual = candidateModule(root, file); if (actual.startsWith(root + '/') && !actual.includes('/node_modules/')) bind(actual, await readFile(actual)) }
+        if (transformStyles) { const transformed = await transformStyles(styles); if (transformed) (receipt.transforms ??= []).push(transformed) }
       } }] } },
       build: { target: 'esnext', outDir: compiled, sourcemap: false, minify: false, emptyOutDir: true, rollupOptions: { input: resolve(fixture, 'index.html') } } })
-    for (const file of ['apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
-      'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
-      'packages/client-ui/src/components/ConversationA2AReferences.tsx', 'packages/client-ui/src/components/ConversationNotificationDetails.tsx',
-      'packages/client-ui/src/styles/conversation-message.css']) assert.ok(receipt.inputs[file], 'Actual product consumer compiled: ' + file)
+    assert.ok(requiredConsumers.length > 0, 'Every private scene names its actual product consumers')
+    for (const file of requiredConsumers) assert.ok(receipt.inputs[file], 'Actual product consumer compiled: ' + file)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const lines = []
     receipt.process = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'index.html'), privateRoot, evidence, ...(metadata ? ['--metadata'] : [])],
@@ -54,7 +58,7 @@ export async function capturePrimaryReading({ root, evidence, scene, metadata = 
     await writeFile(resolve(evidence, 'process.log'), lines.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json'), 'utf8'))
     assert.equal(receipt.process.exitCode, 0, JSON.stringify(receipt.render.failure)); assert.equal(receipt.process.timedOut, false)
-    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, metadata ? 15 : 18)
+    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, expectedFrames)
     receipt.sourceIdentity = hash(JSON.stringify(Object.fromEntries(Object.entries(receipt.inputs).sort(([a], [b]) => a.localeCompare(b)))))
     receipt.completed = true
   } catch (error) { receipt.failure = String(error.stack ?? error) }

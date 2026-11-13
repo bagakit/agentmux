@@ -1,0 +1,11 @@
+/* Private host geometry; message, mailbox and interaction styles remain production-owned. */
+body { display: block; overflow: auto; }
+#root { min-height: 100vh; width: 100%; }
+.reference-reading-probe { width: min(100%, 900px); min-height: 100vh; margin-inline: auto; background: var(--surface-1); }
+.reference-reading-probe__header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+.reference-reading-probe__header span { color: var(--text-3); }
+.reference-reading-probe__reader { height: 620px; min-width: 0; overflow: auto; }
+.reference-reading-probe__reader > .activity-feed { height: 100%; }
+.reference-reading-probe__draft { display: grid; gap: 6px; padding: 12px 16px; color: var(--text-3); }
+.reference-reading-probe__draft textarea { width: 100%; height: 54px; padding: 8px; resize: none; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); font: inherit; }
+.reference-reading-probe__mail-trigger { position: fixed; bottom: 110px; right: 30px; }
