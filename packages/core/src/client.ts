@@ -212,7 +212,9 @@ import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTim
 import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, AgentCapabilitySnapshot, AgentCatalogEntry, AgentExecutorId, AgentProviderId, AgentMuxAgentPasteInput, AgentMuxAgentWriteInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentNativeActivityEvent, AgentCurrentActivity, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentPromptMessageContent, AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxObservationOrigin, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentMuxInteractionOperationIntent, AgentMuxRun, AgentMuxRunAppliedSize, AgentMuxRunAttachment, AgentMuxRunAttachmentView, AgentMuxRunDataEvent, AgentMuxRunInputAck, AgentMuxRunInputData, AgentMuxRunInputOperation, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeIdentity, AgentMuxRuntimeResourceSnapshot, AgentNativeSessionHandle, AgentNativeResumeSource, AgentNativeSessionCatalog, AgentNativeSessionCandidate, AgentNativeHistoryReadOptions, AgentProviderSessionHistoryPage, AgentNativeHistoryResourceReadOptions, AgentProviderSessionHistoryResourceReadResult, AgentSessionHistoryMetadata, AgentSessionHistoryPage, AgentSessionHistoryPageOptions, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentSessionQuestionReplyReceipt, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentSessionHistoryObservation, AgentSessionHistoryObservationOptions, AgentSessionHistoryObservationHandle, AgentTerminalCapabilityState, AgentTerminalOutputChannelState, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot, AgentStatus, NativeHookEnvelope } from './types.js'
 import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHistoryProgress } from './session-history.js'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
-import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread } from './agent-message-federation.js'
+import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
+  type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread,
+  type AgentMuxSignedDispatchEvent, type AgentMuxDispatchEventSubmission } from './agent-message-federation.js'
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
@@ -729,8 +731,60 @@ export class AgentMuxClient {
     if (!thread.source.provenance || thread.source.provenance.intentDigest !== authority.sourceIntentDigest ||
       thread.source.envelope.senderRuntimeId !== authority.source.runtimeId || thread.source.envelope.senderSessionId !== authority.source.agentSessionId) throw new AgentMuxError('The signed read does not name this original source and its participant.', 'MESSAGE_PARTICIPANT_MISMATCH')
     if (authority.source.runId !== thread.source.envelope.senderRunId || authority.reader.kind === 'agent' && authority.reader.agentSessionId !== authority.source.agentSessionId) throw new AgentMuxError('This exact signed read does not retain the original source identity.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    const identity = await this.agentMessageAuthority()
+    if (thread.source.deliveryMode !== 'reference' || thread.source.envelope.recipientRuntimeId !== identity.runtimeId) throw new AgentMuxError('Only the actual recipient Core can confirm this original inbox source.', 'MESSAGE_RECIPIENT_MISMATCH')
     const packet = (message: typeof thread.source) => parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
-    return { source: packet(thread.source), replies: thread.replies.map(packet) }
+    return { source: packet(thread.source), replies: thread.replies.map(packet), ...(thread.dispatchEvents.length ? { dispatchEvents: thread.dispatchEvents } : {}),
+      sourceReceipt: { kind: 'recipient-inbox', runtimeId: identity.runtimeId, keyFingerprint: identity.fingerprint, messageId: thread.source.envelope.messageId,
+        operationId: thread.source.envelope.operationId, intentDigest: thread.source.provenance.intentDigest, sequence: thread.source.sequence, deliveryMode: 'reference', diskDurability: 'confirmed' } }
+  }
+
+  /** A source-authorized exact thread slice, never all pending messages or another journal. */
+  async readFederatedOutbox(input: { sourceMessageId: string; caller?: { agentSessionId: string; capability: string } }) {
+    const authority = await this.prepareFederatedRead(input), thread = await this.messageQueue.readFederatedThread(input.sourceMessageId)
+    const packet = (message: typeof thread.source) => parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
+    const parsed = parseFederatedThread({ source: packet(thread.source), replies: thread.replies.map(packet), dispatchEvents: thread.dispatchEvents })
+    return { messages: parsed.replies.filter(message => message.provenance.source.runtimeId === authority.source.runtimeId),
+      dispatchEvents: (parsed.dispatchEvents ?? []).filter(event => event.provenance.source.runtimeId === authority.source.runtimeId) }
+  }
+
+  async recordFederatedDispatchEvent(input: { capability: string; callerAgentSessionId: string; sourceMessageId: string; replyMessageId: string; kind: DispatchEventKind }): Promise<AgentMuxDispatchEventSubmission> {
+    const caller = await this.currentStoredAgentSession(input.callerAgentSessionId), identity = await this.agentMessageAuthority()
+    const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
+    const [source, reply, original] = await Promise.all([this.messageQueue.readByMessageId(input.sourceMessageId), this.messageQueue.readByMessageId(input.replyMessageId),
+      this.messageQueue.readOriginalDispatchEvent(input.sourceMessageId, input.replyMessageId)])
+    if (!source?.provenance || !reply?.provenance) throw new AgentMuxError('A signed Dispatch report requires both original signed messages.', 'DISPATCH_MESSAGE_UNAVAILABLE')
+    const actor = input.kind === 'cleanup' ? source.provenance.source : source.provenance.target
+    const peer = input.kind === 'cleanup' ? source.provenance.target : source.provenance.source
+    if (actor.runtimeId !== identity.runtimeId || actor.agentSessionId !== author || original && original.kind !== input.kind) throw new AgentMuxError('Only the exact original Runtime actor can report this Dispatch fact.', 'DISPATCH_PARTICIPANT_MISMATCH')
+    let event = original?.authority
+    if (!event) {
+      if (actor.runId !== caller.run.runId) throw new AgentMuxError('The original Dispatch actor Run changed. Keep the original source and reply.', 'AGENT_CAPABILITY_STALE_RUN')
+      const payload = { schema: 'agentmux.agent-dispatch-event.v1' as const, sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId,
+        sourceIntentDigest: source.provenance.intentDigest, replyIntentDigest: reply.provenance.intentDigest, kind: input.kind, at: original?.at ?? Date.now() }
+      const provenance = await this.requireCreationAuthority().attestMessage({ agentSessionId: author, runId: caller.run.runId }, peer, dispatchEventDigest(payload),
+        input.kind === 'cleanup' ? source.provenance.targetKeyFingerprint : source.provenance.sourceKeyFingerprint)
+      event = parseSignedDispatchEvent({ ...payload, provenance })
+      await this.messageQueue.appendSignedDispatchEvent(event, async () => this.assertDispatchAdmission(input.capability, author, caller.run, [source.envelope, reply.envelope]))
+      this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: input.sourceMessageId, ownerAgentSessionId: source.provenance.source.agentSessionId,
+        workerAgentSessionId: source.provenance.target.agentSessionId, threadId: source.envelope.threadId,
+        event: { kind: event.kind, replyMessageId: event.replyMessageId, at: event.at, authority: event }, evidence: { source: 'agentmux', observedAt: Date.now(), run: caller.run } })
+    }
+    return { kind: 'dispatch-event-submission', sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId, event, diskDurability: 'confirmed' }
+  }
+
+  async intakeFederatedDispatchEvent(value: AgentMuxSignedDispatchEvent): Promise<AgentMuxDispatchEventSubmission> {
+    const event = parseSignedDispatchEvent(value), identity = await this.agentMessageAuthority()
+    if (event.provenance.target.runtimeId !== identity.runtimeId) throw new AgentMuxError('This signed Dispatch fact belongs to another target Runtime.', 'MESSAGE_RECIPIENT_MISMATCH')
+    const original = await this.messageQueue.readOriginalDispatchEvent(event.sourceMessageId, event.replyMessageId)
+    if (!original?.authority) await this.requireCreationAuthority().verifyMessageProof(event.provenance)
+    await this.messageQueue.appendSignedDispatchEvent(event, async () => {})
+    if (original?.authority) return { kind: 'dispatch-event-submission', sourceMessageId: event.sourceMessageId, replyMessageId: event.replyMessageId, event, diskDurability: 'confirmed' }
+    const source = await this.messageQueue.readByMessageId(event.sourceMessageId)
+    this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: event.sourceMessageId, ownerAgentSessionId: source!.envelope.senderSessionId!,
+      workerAgentSessionId: source!.envelope.recipientSessionId!, threadId: source!.envelope.threadId,
+      event: { kind: event.kind, replyMessageId: event.replyMessageId, at: event.at, authority: event }, evidence: { source: 'agentmux', observedAt: Date.now(), run: { runId: event.provenance.source.runId } } })
+    return { kind: 'dispatch-event-submission', sourceMessageId: event.sourceMessageId, replyMessageId: event.replyMessageId, event, diskDurability: 'confirmed' }
   }
 
   async attestAgentCreation(input: { caller: { agentSessionId: string; capability: string }; target: { runtimeId: string; intentDigest: string } }) {

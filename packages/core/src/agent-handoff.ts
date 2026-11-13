@@ -1,5 +1,6 @@
 import type { AgentMuxMessageEnvelope, DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import { AgentMuxError } from './errors.js'
+import type { AgentMuxSignedDispatchEvent, AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 
 /** A caller's declared communication handoff; this does not transfer an external Task. */
 export type HandoffResult = {
@@ -30,6 +31,7 @@ export type DispatchEvent = {
   /** The actual reply is the event identity; separate questions remain separate events. */
   readonly replyMessageId: string
   readonly at: number
+  readonly authority?: AgentMuxSignedDispatchEvent
 }
 
 /** Communication supervision only. Delivery/consumption never settles this waiting fact. */
@@ -54,6 +56,7 @@ export type DispatchIdentityDiagnostic = {
 }
 
 export type DispatchObservation = {
+  readonly remoteSource?: AgentMuxRecipientInboxReceipt
   readonly dispatch: Dispatch
   /** Original immutable journal records, including their original delivery facts. */
   readonly source: DurableAgentMuxMessage
@@ -103,7 +106,8 @@ export function recordDispatchEvent(
   dispatch: Dispatch,
   reply: AgentMuxMessageEnvelope,
   kind: DispatchEventKind,
-  at: number
+  at: number,
+  authority?: AgentMuxSignedDispatchEvent
 ): Dispatch {
   assertDispatchEventKind(kind)
   assertDispatchMessage(reply)
@@ -124,6 +128,6 @@ export function recordDispatchEvent(
   return Object.freeze({
     ...dispatch,
     originAwaits: kind === 'worker_done' ? false : dispatch.originAwaits,
-    events: Object.freeze([...dispatch.events, Object.freeze({ kind, replyMessageId: reply.messageId, at })])
+    events: Object.freeze([...dispatch.events, Object.freeze({ kind, replyMessageId: reply.messageId, at, ...(authority ? { authority } : {}) })])
   })
 }

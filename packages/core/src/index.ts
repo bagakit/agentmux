@@ -224,7 +224,7 @@ export type { AgentInputMoteBinding, AgentInputMoteResolver, MoteInputInspection
 export * from './public-rpc-image.js'
 export { parsePngImage, pngImageDimensions } from './png-image.js'
 
-export type { AgentMuxMessageAuthorityIdentity, AgentMuxMessageTrustInput, AgentMuxMessageTrust, AgentMuxMessageProvenance, AgentMuxMessageParticipant, AgentMuxSignedMessage, AgentMuxMessageReadAuthority, AgentMuxFederatedThread, AgentMuxMessageTransport } from './agent-message-federation.js'
+export type { AgentMuxMessageAuthorityIdentity, AgentMuxMessageTrustInput, AgentMuxMessageTrust, AgentMuxMessageProvenance, AgentMuxMessageParticipant, AgentMuxSignedMessage, AgentMuxMessageReadAuthority, AgentMuxFederatedThread, AgentMuxMessageTransport, AgentMuxSignedDispatchEvent, AgentMuxDispatchEventSubmission, AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 export type { AgentMuxMessageApplication, AgentMuxMessageJson } from './agent-message-envelope.js'
 
 export * from './app-capture.js'

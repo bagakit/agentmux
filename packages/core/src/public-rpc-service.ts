@@ -1,4 +1,4 @@
-import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread } from './agent-message-federation.js'
+import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
 import { parseMessageApplication } from './agent-message-envelope.js'
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
@@ -160,7 +160,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
+  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     remoteTransportObservation?: import('./hosted-client-contract.js').AgentMuxHostedClient['remoteTransportObservation']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
@@ -415,6 +415,7 @@ const NATIVE_FIELDS = {
   'message.read': ['operationId', 'messageId', 'notificationId', 'field', 'cursor', 'maxBytes', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
   'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
+  'message.federation.dispatch-intake': ['event'],
   'message.federation.intake': ['packet'],
   'message.federation.export': ['authority'],
   'message.dispatch.sync': ['sourceMessageId', 'hostId'],
@@ -2641,7 +2642,10 @@ export class AgentMuxRpcService {
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'message.read' && hostId === 'local') {
           const route = await (await this.messageRouteJournal()).readMessageRoute(messageSelector!.operationId, messageSelector!.messageId)
-          const localOriginal = route && caller ? await caller.client.readMessage({ ...messageSelector!, field: undefined, caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } }) : null
+          const localOwners = route && !caller ? (await this.clients()).filter(scope => scope.hostId === 'local') : []
+          const sourceOwner = caller?.client ?? (localOwners.length === 1 ? localOwners[0]!.client : undefined)
+          const localOriginal = route && sourceOwner ? await sourceOwner.readMessage({ ...messageSelector!, field: undefined,
+            ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }) : null
           if (route && !localOriginal?.provenance) {
             const remote = await this.messageRouteOwner(route)
             if (caller && caller.client !== remote.client) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
@@ -2692,10 +2696,13 @@ export class AgentMuxRpcService {
           generation: rpcCount(p.generation, -1), readerRun: { runId: rpcString(rpcRecord(p.readerRun, ['runId']).runId, 'Reader Run ID') } })
         else {
           const input = { ...auth, sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID') }
-          result = method === 'message.dispatch.open' ? await owner.client.openDispatch(input)
-            : method === 'message.dispatch.inspect' ? await owner.client.showDispatch(input)
-            : await owner.client.recordDispatchEvent({ ...input, replyMessageId: rpcString(p.replyMessageId, 'Reply message ID'),
-              kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
+          if (method === 'message.dispatch.open') result = await owner.client.openDispatch(input)
+          else if (method === 'message.dispatch.inspect') result = await owner.client.showDispatch(input)
+          else {
+            const report = { ...input, replyMessageId: rpcString(p.replyMessageId, 'Reply message ID'), kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] }
+            const source = await owner.client.readMessage({ messageId: input.sourceMessageId, caller: { agentSessionId: owner.agentSessionId, capability: owner.capability } })
+            result = source?.provenance ? await owner.client.recordFederatedDispatchEvent(report) : await owner.client.recordDispatchEvent(report)
+          }
         } break
       }
       case 'goal.participation.confirm': {
@@ -2841,6 +2848,11 @@ export class AgentMuxRpcService {
           : await scope.client.rejoinAgentInputWaiting({ ref, ...author }, inputContext)
         break
       }
+      case 'message.federation.dispatch-intake': {
+        const event = parseSignedDispatchEvent(p.event), local = (await this.clients()).filter(scope => scope.hostId === 'local')
+        if (local.length !== 1) throw new AgentMuxError('The exact receiving Dispatch Core is unavailable. Original facts are retained.', 'CONTROL_UNAVAILABLE')
+        result = await local[0]!.client.intakeFederatedDispatchEvent(event); break
+      }
       case 'message.federation.intake': {
         const packet = parseSignedMessage(p.packet), local = (await this.clients()).filter(scope => scope.hostId === 'local')
         if (local.length !== 1) throw new AgentMuxError('The exact receiving Core is unavailable. Keep the signed message.', 'CONTROL_UNAVAILABLE')
@@ -2863,9 +2875,27 @@ export class AgentMuxRpcService {
         const routes = (await this.clients()).filter(scope => scope.hostId === hostId)
         if (routes.length !== 1 || !routes[0]!.client.forwardRpc || this.endpointUnverified(routes[0]!.client) || routes[0]!.client.runtimeOwnerIdentity?.()?.runtimeId !== authority.targetRuntimeId) throw new AgentMuxError('The original remote thread Runtime is unavailable or changed. No alternate owner was read.', 'CONTROL_UNAVAILABLE')
         const exported = parseFederatedThread(await routes[0]!.client.forwardRpc('message.federation.export', { authority }, { ...(context.signal ? { signal: context.signal } : {}) }))
-        if (exported.source.envelope.messageId !== sourceMessageId || exported.source.provenance.intentDigest !== authority.sourceIntentDigest) throw new AgentMuxError('The remote export belongs to another original source.', 'MESSAGE_RECIPIENT_MISMATCH')
+        if (exported.source.envelope.messageId !== sourceMessageId || exported.source.provenance.intentDigest !== authority.sourceIntentDigest || !exported.sourceReceipt) throw new AgentMuxError('The remote export does not confirm this exact original recipient inbox source.', 'MESSAGE_RECIPIENT_MISMATCH')
+        // The target's successful exact-source read comes first. It never uploads
+        // an absent original dispatch or blindly repeats an unknown native input.
+        const outbox = await owner.client.readFederatedOutbox({ sourceMessageId, ...auth })
+        const remoteMessages = new Map(exported.replies.map(message => [message.envelope.messageId, message]))
+        for (const packet of outbox.messages) {
+          const original = remoteMessages.get(packet.envelope.messageId)
+          if (original) {
+            if (!isDeepStrictEqual(original, packet)) throw new AgentMuxError('The original remote reply has different frozen signed facts.', 'MESSAGE_ID_CONFLICT')
+          } else await routes[0]!.client.forwardRpc('message.federation.intake', { packet }, { ...(context.signal ? { signal: context.signal } : {}) })
+        }
+        const remoteEvents = new Map((exported.dispatchEvents ?? []).map(event => [event.replyMessageId, event]))
+        for (const event of outbox.dispatchEvents) {
+          const original = remoteEvents.get(event.replyMessageId)
+          if (original) {
+            if (!isDeepStrictEqual(original, event)) throw new AgentMuxError('The original remote Dispatch event has different signed facts.', 'DISPATCH_EVENT_CONFLICT')
+          } else await routes[0]!.client.forwardRpc('message.federation.dispatch-intake', { event }, { ...(context.signal ? { signal: context.signal } : {}) })
+        }
         for (const reply of exported.replies) if (reply.provenance.target.runtimeId === authority.source.runtimeId) await owner.client.intakeFederatedMessage(reply)
-        result = { ...await owner.client.readDispatch({ sourceMessageId, ...auth }), hostId: 'local' }; break
+        for (const event of exported.dispatchEvents ?? []) if (event.provenance.target.runtimeId === authority.source.runtimeId) await owner.client.intakeFederatedDispatchEvent(event)
+        result = { ...await owner.client.readDispatch({ sourceMessageId, ...auth }), remoteSource: exported.sourceReceipt, hostId: 'local' }; break
       }
       case 'agent.send': result = await this.send(p, caller, context); break
       case 'agent.broadcast': result = await this.broadcast(p, caller, context); break

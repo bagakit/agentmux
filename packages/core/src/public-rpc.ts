@@ -317,6 +317,7 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'message.read': import('./agent-message-query.js').AgentMuxMessageReadRequest & { hostId?: string }
   'message.events': Omit<import('./agent-message-events.js').AgentMuxMessageEventsQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
+  'message.federation.dispatch-intake': { event: import('./agent-message-federation.js').AgentMuxSignedDispatchEvent }
   'message.federation.intake': { packet: import('./agent-message-federation.js').AgentMuxSignedMessage }
   'message.federation.export': { authority: import('./agent-message-federation.js').AgentMuxMessageReadAuthority }
   'message.dispatch.sync': { sourceMessageId: string; hostId: string }
@@ -421,6 +422,7 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
     { hostId: string; message: null; field: import('./agent-message-query.js').AgentMuxMessageFieldPage | null }
   'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
   'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
+  'message.federation.dispatch-intake': import('./agent-message-federation.js').AgentMuxDispatchEventSubmission
   'message.federation.intake': AgentMuxMessageReceipt
   'message.federation.export': import('./agent-message-federation.js').AgentMuxFederatedThread
   'message.dispatch.sync': import('./agent-handoff.js').DispatchObservation & { hostId: string }
@@ -428,7 +430,7 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
   'message.dispatch.ls': Awaited<ReturnType<AgentMuxClient['listDispatches']>> & { hostId: string }
-  'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
+  'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>> | import('./agent-message-federation.js').AgentMuxDispatchEventSubmission
   'app.search': import('./search-contract.js').AgentMuxSearchPage
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
@@ -498,7 +500,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
-  'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
+  'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long'

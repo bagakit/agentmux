@@ -1,4 +1,4 @@
-import { parseSignedMessage, parseFederatedThread } from './agent-message-federation.js'
+import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
 import { parseAgentStopInspection, type AgentMuxAgentStopIdentity } from './agent-stop-receipt.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
@@ -296,14 +296,18 @@ function dispatch(value: unknown, params: Record<string, unknown>): void {
   for (const key of ['sourceMessageId', 'ownerAgentSessionId', 'workerAgentSessionId', 'threadId']) string(p[key])
   if (p.ownerRuntimeId !== undefined) string(p.ownerRuntimeId); if (p.workerRuntimeId !== undefined) string(p.workerRuntimeId)
   count(p.openedAt); bool(p.originAwaits)
-  array(p.events, value => { const event = record(value, ['kind', 'replyMessageId', 'at']); assertDispatchEventKind(event.kind); string(event.replyMessageId); count(event.at) })
+  array(p.events, value => { const event = record(value, ['kind', 'replyMessageId', 'at', 'authority']); assertDispatchEventKind(event.kind); string(event.replyMessageId); count(event.at)
+    if (event.authority !== undefined) { const authority = parseSignedDispatchEvent(event.authority); if (authority.kind !== event.kind || authority.replyMessageId !== event.replyMessageId || authority.at !== event.at) fail() }
+  })
   if (params.replyMessageId !== undefined && !(p.events as Array<Record<string, unknown>>).some(event => event.replyMessageId === params.replyMessageId && event.kind === params.kind)) fail()
 }
 function dispatchObservation(value: unknown, params: Record<string, unknown>): void {
-  const p = record(value, ['dispatch', 'source', 'replies', 'identityDiagnostics', 'hostId'])
+  const p = record(value, ['dispatch', 'source', 'replies', 'identityDiagnostics', 'hostId', 'remoteSource'])
   string(p.hostId); if (params.hostId !== undefined && p.hostId !== params.hostId) fail()
   dispatch(p.dispatch, params)
   const supervision = p.dispatch as Record<string, unknown>, source = message(p.source)
+  const packet = (value: unknown) => { const original = record(value); return parseSignedMessage({ envelope: original.envelope, execution: original.execution, sourceChannel: original.sourceChannel, provenance: original.provenance }) }
+  if (p.remoteSource !== undefined) parseRecipientInboxReceipt(p.remoteSource, packet(p.source))
   if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
     source.recipientSessionId !== supervision.workerAgentSessionId || source.threadId !== supervision.threadId || source.senderRuntimeId !== supervision.ownerRuntimeId || source.recipientRuntimeId !== supervision.workerRuntimeId) fail()
   const events = supervision.events as Array<Record<string, unknown>>
@@ -340,6 +344,10 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
     if (!reply || reply.replyTo !== source.messageId ||
       reply.senderSessionId !== (cleanup ? supervision.ownerAgentSessionId : supervision.workerAgentSessionId) ||
       reply.recipientSessionId !== (cleanup ? supervision.workerAgentSessionId : supervision.ownerAgentSessionId)) fail()
+    if (event.authority !== undefined) {
+      const original = (p.replies as unknown[]).find(value => (value as { envelope: { messageId: string } }).envelope.messageId === event.replyMessageId)
+      assertSignedDispatchLineage(packet(p.source), packet(original), parseSignedDispatchEvent(event.authority))
+    }
   }
   array(p.identityDiagnostics, value => {
     const diagnostic = record(value, ['agentSessionId', 'runId', 'code', 'message'])
@@ -929,7 +937,16 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         else { count(p.nextGeneration); array(p.acknowledgedMessageIds, item => string(item)) }
         break
       }
-      case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
+      case 'message.federation.dispatch-intake': case 'message.dispatch.report': {
+        if (p.kind !== 'dispatch-event-submission') { if (method === 'message.federation.dispatch-intake') fail(); dispatch(p, input); break }
+        record(p, ['kind', 'sourceMessageId', 'replyMessageId', 'event', 'diskDurability'])
+        const event = parseSignedDispatchEvent(p.event)
+        if (p.diskDurability !== 'confirmed' || p.sourceMessageId !== event.sourceMessageId || p.replyMessageId !== event.replyMessageId ||
+          method === 'message.dispatch.report' && (p.sourceMessageId !== input.sourceMessageId || p.replyMessageId !== input.replyMessageId || event.kind !== input.kind || credentials && event.provenance.source.agentSessionId !== credentials.agentSessionId) ||
+          method === 'message.federation.dispatch-intake' && !isDeepStrictEqual(p.event, input.event)) fail()
+        break
+      }
+      case 'message.dispatch.open': case 'message.dispatch.inspect': dispatch(p, input); break
       case 'message.notify': case 'message.notify.inspect': {
         record(p, method === 'message.notify.inspect' ? ['hostId', 'notification', 'input', 'inputOrigin'] : ['hostId', 'notification', 'input'])
         if (method === 'message.notify.inspect' && p.inputOrigin !== null) parseAgentInputJournalCut(p.inputOrigin)
@@ -990,7 +1007,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (entry.sequence === 0 || (entry.sequence as number) >= previous || (entry.bodyPreview as string).length > 240) fail()
           previous = entry.sequence as number
           const metadata = record(entry.envelope, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient',
-            'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId'])
+            'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'senderRuntimeId', 'recipientRuntimeId'])
           record(metadata.sender, ['kind', 'agentSessionId']); record(metadata.recipient, ['kind', 'agentSessionId'])
           const envelope = validateAgentMuxMessageEnvelope({ ...metadata, body: '' })
           notificationStatus(entry, envelope)

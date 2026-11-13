@@ -1,4 +1,4 @@
-import { parseSignedMessage, parseMessageProvenance, type AgentMuxMessageProvenance, type AgentMuxMessageTransport } from './agent-message-federation.js'
+import { parseSignedMessage, parseMessageProvenance, parseSignedDispatchEvent, assertSignedDispatchLineage, type AgentMuxSignedDispatchEvent, type AgentMuxMessageProvenance, type AgentMuxMessageTransport } from './agent-message-federation.js'
 import { assertAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseAgentInputHandoff, type AgentInputCarrier } from './agent-input-handoff.js'
 import { parseMoteDialogueInputRoute, moteDialogueInputScope, type MoteDialogueInputRoute } from './mote-dialogue-contract.js'
@@ -157,7 +157,7 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
   | { readonly kind: 'consumer-check'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
   | { readonly kind: 'dispatch-open'; readonly sequence: number; readonly sourceMessageId: string; readonly at: number }
-  | { readonly kind: 'dispatch-event'; readonly sequence: number; readonly sourceMessageId: string; readonly replyMessageId: string; readonly eventKind: DispatchEventKind; readonly at: number }
+  | { readonly kind: 'dispatch-event'; readonly sequence: number; readonly sourceMessageId: string; readonly replyMessageId: string; readonly eventKind: DispatchEventKind; readonly at: number; readonly authority?: AgentMuxSignedDispatchEvent }
   | { readonly kind: 'consumer-ack'; readonly sequence: number; readonly consumerId: string; readonly readerRun: AgentMuxRunRef; readonly generation: number; readonly deliveryIds: readonly string[] }
 type JournalMessage = Extract<AgentMuxMessageJournalRecord, { kind: 'message' }>
 type JournalDelivery = Extract<AgentMuxMessageJournalRecord, { kind: 'delivery' }>
@@ -1096,7 +1096,7 @@ export class DurableAgentMuxMessageQueue {
     const events = this.db.prepare(`SELECT r.json FROM dispatch_events e JOIN records r
       ON r.sequence=e.event_sequence WHERE e.source_message_id=? ORDER BY e.event_sequence`).all(sourceMessageId)
       .map(value => JSON.parse(String(value.json)) as Extract<JournalRecord, {kind: 'dispatch-event'}>)
-      .map(event => ({ kind: event.eventKind, replyMessageId: event.replyMessageId, at: event.at }))
+      .map(event => ({ kind: event.eventKind, replyMessageId: event.replyMessageId, at: event.at, ...(event.authority ? { authority: parseSignedDispatchEvent(event.authority) } : {}) }))
     return { sourceMessageId, openedAt: original.at, events }
   }
 
@@ -1183,16 +1183,24 @@ export class DurableAgentMuxMessageQueue {
       if (record.kind === 'dispatch-open') {
         this.db.prepare('INSERT OR IGNORE INTO dispatches VALUES (?, ?)').run(sourceMessageId, record.sequence)
       } else {
-        if (!this.db.prepare('SELECT 1 FROM dispatches WHERE source_message_id=?').get(sourceMessageId)) {
+        if (!record.authority && !this.db.prepare('SELECT 1 FROM dispatches WHERE source_message_id=?').get(sourceMessageId)) {
           throw new AgentMuxError('Dispatch event has no open fact.', 'MESSAGE_QUEUE_UNAVAILABLE')
         }
         nonEmpty(record.replyMessageId, 'Dispatch reply message id'); assertDispatchEventKind(record.eventKind)
+        if (record.authority) {
+          const event = parseSignedDispatchEvent(record.authority), source = this.message(sourceMessageId), reply = this.message(record.replyMessageId)
+          if (!source?.provenance || !reply?.provenance || event.kind !== record.eventKind || event.at !== record.at) throw new AgentMuxError('Signed Dispatch event does not preserve its original source facts.', 'DISPATCH_MESSAGE_INVALID')
+          const packet = (message: DurableAgentMuxMessage) => parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
+          assertSignedDispatchLineage(packet(source), packet(reply), event)
+        }
         const previous = this.db.prepare(`SELECT r.json FROM dispatch_events e JOIN records r
           ON r.sequence=e.event_sequence WHERE e.source_message_id=? AND e.reply_message_id=?`).get(sourceMessageId, record.replyMessageId)
         if (previous && (JSON.parse(String(previous.json)) as Extract<JournalRecord, {kind: 'dispatch-event'}>).eventKind !== record.eventKind) {
           throw new AgentMuxError('Dispatch journal event identity conflicts.', 'MESSAGE_QUEUE_UNAVAILABLE')
         }
-        this.db.prepare('INSERT OR IGNORE INTO dispatch_events VALUES (?, ?, ?)').run(sourceMessageId, record.replyMessageId, record.sequence)
+        const previousAuthority = previous && (JSON.parse(String(previous.json)) as Extract<JournalRecord, {kind: 'dispatch-event'}>).authority
+        if (previousAuthority && JSON.stringify(previousAuthority) !== JSON.stringify(record.authority)) throw new AgentMuxError('The original signed Dispatch authority is frozen.', 'DISPATCH_EVENT_CONFLICT')
+        this.db.prepare(record.authority ? 'INSERT INTO dispatch_events VALUES (?, ?, ?) ON CONFLICT(source_message_id, reply_message_id) DO UPDATE SET event_sequence=excluded.event_sequence' : 'INSERT OR IGNORE INTO dispatch_events VALUES (?, ?, ?)').run(sourceMessageId, record.replyMessageId, record.sequence)
       }
     } else if (record.kind === 'consumer-check' || record.kind === 'consumer-ack') {
       const identity = reader(record); assertGeneration(record.generation)
@@ -1785,7 +1793,7 @@ export class DurableAgentMuxMessageQueue {
     for (const event of facts.events) {
       const reply = this.dispatchMessage(event.replyMessageId)
       messages.push(reply)
-      dispatch = recordDispatchEvent(dispatch, reply, event.kind, event.at)
+      dispatch = recordDispatchEvent(dispatch, reply, event.kind, event.at, event.authority)
     }
     return { dispatch, messages }
   }
@@ -1878,12 +1886,42 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Exact signed thread export uses the existing reply index without a second queue. */
-  async readFederatedThread(sourceMessageId: string): Promise<{ source: DurableAgentMuxMessage; replies: readonly DurableAgentMuxMessage[] }> {
+  async readFederatedThread(sourceMessageId: string): Promise<{ source: DurableAgentMuxMessage; replies: readonly DurableAgentMuxMessage[]; dispatchEvents: AgentMuxSignedDispatchEvent[] }> {
     return this.withLock(async () => {
       const source = this.message(nonEmpty(sourceMessageId, 'Original source message'))
       if (!source?.provenance) throw new AgentMuxError('The original signed source is unavailable. Keep its identity.', 'MESSAGE_NOT_FOUND')
-      return structuredClone({ source, replies: this.dispatchReplies(openDispatch(source.envelope, source.envelope.createdAt)) })
+      const events = this.db.prepare('SELECT r.json FROM dispatch_events e JOIN records r ON r.sequence=e.event_sequence WHERE e.source_message_id=? ORDER BY e.event_sequence').all(sourceMessageId)
+        .flatMap(row => { const record = JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'dispatch-event' }>; return record.authority ? [parseSignedDispatchEvent(record.authority)] : [] })
+      return structuredClone({ source, replies: this.dispatchReplies(openDispatch(source.envelope, source.envelope.createdAt)), dispatchEvents: events })
     })
+  }
+
+  async readOriginalDispatchEvent(sourceMessageId: string, replyMessageId: string): Promise<DispatchEvent | null> {
+    return this.withLock(async () => {
+      const row = this.db.prepare('SELECT r.json FROM dispatch_events e JOIN records r ON r.sequence=e.event_sequence WHERE e.source_message_id=? AND e.reply_message_id=?').get(sourceMessageId, replyMessageId)
+      if (!row) return null
+      const event = JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'dispatch-event' }>
+      return { kind: event.eventKind, replyMessageId, at: event.at, ...(event.authority ? { authority: parseSignedDispatchEvent(event.authority) } : {}) }
+    })
+  }
+
+  /** A worker fact can precede a local owner-open projection; it never invents that open. */
+  async appendSignedDispatchEvent(value: AgentMuxSignedDispatchEvent, reauthorize: () => Promise<void>): Promise<AgentMuxSignedDispatchEvent> {
+    const event = parseSignedDispatchEvent(value)
+    return this.withLock(async () => {
+      const source = this.message(event.sourceMessageId), reply = this.message(event.replyMessageId)
+      if (!source?.provenance || !reply?.provenance) throw new AgentMuxError('The original signed Dispatch messages are unavailable. Keep the event and its exact messages.', 'DISPATCH_MESSAGE_UNAVAILABLE')
+      const packet = (message: DurableAgentMuxMessage) => parseSignedMessage({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance })
+      assertSignedDispatchLineage(packet(source), packet(reply), event)
+      await reauthorize()
+      const row = this.db.prepare('SELECT r.json FROM dispatch_events e JOIN records r ON r.sequence=e.event_sequence WHERE e.source_message_id=? AND e.reply_message_id=?').get(event.sourceMessageId, event.replyMessageId)
+      const previous = row && JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'dispatch-event' }> | undefined
+      if (previous && (previous.eventKind !== event.kind || previous.at !== event.at || previous.authority && JSON.stringify(previous.authority) !== JSON.stringify(event))) throw new AgentMuxError('The original Dispatch event already has different frozen facts.', 'DISPATCH_EVENT_CONFLICT')
+      if (previous?.authority) return parseSignedDispatchEvent(previous.authority)
+      await this.appendRecord({ kind: 'dispatch-event', sequence: this.nextSequence, sourceMessageId: event.sourceMessageId,
+        replyMessageId: event.replyMessageId, eventKind: event.kind, at: event.at, authority: event })
+      return structuredClone(event)
+    }, true)
   }
 
   /** No cursor or consumption mutation. Only the original participants may use Agent authority. */
