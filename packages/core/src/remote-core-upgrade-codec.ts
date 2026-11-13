@@ -85,11 +85,11 @@ export function parseRemoteCoreUpgradeExpected(value: unknown): RemoteCoreUpgrad
     ...(p.nativeReplacement === undefined ? {} : { nativeReplacement: { endingRunIds: runIds(record(p.nativeReplacement, ['endingRunIds']).endingRunIds) } }) }
 }
 function replacementPlan(value: unknown): RemoteCoreNativeReplacement {
-  const p = record(value, ['ending', 'stateBytes'])
+  const p = record(value, ['ending'])
   if (!Array.isArray(p.ending)) throw new AgentMuxError('Native replacement plan is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const ending = p.ending.map(item => { const run = record(item, ['runId', 'agentSessionId']); return { runId: text(run.runId), agentSessionId: run.agentSessionId === null ? null : text(run.agentSessionId) } })
   runIds(ending.map(run => run.runId))
-  return { ending, stateBytes: count(p.stateBytes) }
+  return { ending }
 }
 function replacementReceipt(value: unknown): NonNullable<RemoteCoreUpgradeReceipt['nativeReplacement']> {
   const p = record(value, ['stateCopy', 'endedRunIds', 'survivingProcessIds'])

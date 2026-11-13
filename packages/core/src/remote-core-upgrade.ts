@@ -26,12 +26,10 @@ export type RemoteCoreUpgradeExpected = {
   /** Present only for a reviewed Native replacement: the running Runs the user accepted ending. */
   nativeReplacement?: { endingRunIds: string[] }
 }
-/** What a Native replacement ends and keeps, read from the serving Native and its owner. */
+/** What a Native replacement ends, read from the serving Native and its owner. */
 export type RemoteCoreNativeReplacement = {
   /** Running Runs of the serving Native; each ends when the Native is replaced. */
   ending: { runId: string; agentSessionId: string | null }[]
-  /** Bytes of the Native state copied aside before the replacement. */
-  stateBytes: number
 }
 export type RemoteCoreUpgradeCandidate = Pick<PortableCoreArtifact, 'digest' | 'sourceCommit' | 'version' | 'ownerProtocolVersion' | 'requiredNativeProtocolVersion'>
 export type RemoteCoreCurrentObservation =
@@ -260,12 +258,13 @@ export class RemoteCoreUpgradeManager {
       } catch (planError) { return { ...base, eligible: false, reason: 'unverified', detail: `Native 替换条件未确认：${errorText(planError)}` } }
     }
   }
-  /** The running Runs a replacement ends, with their Session owners, and the free space it needs. */
+  /** The running Runs a replacement ends, with their Session owners. The remote program also
+   * confirms the exact Native process and room for the state copy. */
   private async replacementPlan(input: RemoteCoreUpgradeHost, observed: Observed): Promise<RemoteCoreNativeReplacement> {
+    const ready = await this.program<{ ready?: unknown }>(input, observed.launch.node, ['-e', REPLACE_NATIVE], this.replacementInput(observed, false, ''))
+    if (ready.ready !== true) throw new AgentMuxError('The Native replacement conditions are unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     const owners = new Map(observed.bootstrap.sessions.map(session => [session.run.runId, session.agentSessionId]))
-    const space = await this.program<{ stateBytes?: unknown }>(input, observed.launch.node, ['-e', REPLACE_NATIVE], this.replacementInput(observed, false, ''))
-    if (!Number.isSafeInteger(space.stateBytes) || (space.stateBytes as number) < 0) throw new AgentMuxError('The Native state size is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-    return { stateBytes: space.stateBytes as number, ending: observed.nativeRuns.filter(run => run.state === 'running').map(run => ({ runId: run.runId, agentSessionId: owners.get(run.runId) ?? null })) }
+    return { ending: observed.nativeRuns.filter(run => run.state === 'running').map(run => ({ runId: run.runId, agentSessionId: owners.get(run.runId) ?? null })) }
   }
   private replacementInput(observed: Observed, stop: boolean, copyDirectory: string) {
     return { pid: observed.launch.nativeProcessId, startTicks: observed.launch.nativeStartTicks, nativeSha256: observed.launch.nativeSha256,
@@ -387,6 +386,8 @@ export class RemoteCoreUpgradeManager {
   private async execute(input: RemoteCoreUpgradeHost, expected: RemoteCoreUpgradeExpected, operationId: string): Promise<RemoteCoreUpgradeReceipt> {
     const value: RetainedOperation = { receipt: { input, expected, operationId, status: 'running', stage: 'preparing', detail: '正在准备离线 Core 候选。', updatedAt: Date.now() } }
     let mutation = false
+    /** The remote program confirmed the candidate never started; the operation simply did not apply. */
+    let notApplied = false
     let lease: FileHandle | undefined
     let admitted = false
     try {
@@ -454,9 +455,10 @@ export class RemoteCoreUpgradeManager {
           this.replacementInput(current, true, copyDirectory))
         if (replaced.outcome === 'refused' || replaced.outcome === 'copy-failed') {
           // Confirmed before the candidate started: bring back the original Core on its original release.
+          notApplied = true
           const restored = await this.restoreOriginal(input, current, operationId)
-          throw Object.assign(new AgentMuxError(`${typeof replaced.detail === 'string' ? replaced.detail : 'The Native replacement did not proceed.'} ` +
-            (replaced.outcome === 'refused' ? '原 Native 未停止；' : '原 Native 已停止且其运行中的进程已结束；') + restored, 'CORE_UPGRADE_UNAVAILABLE'), { restored: true })
+          throw new AgentMuxError(`${typeof replaced.detail === 'string' ? replaced.detail : 'The Native replacement did not proceed.'} ` +
+            (replaced.outcome === 'refused' ? '原 Native 未停止；' : '原 Native 已停止且其运行中的进程已结束；') + restored, 'CORE_UPGRADE_UNAVAILABLE')
         }
         if (replaced.outcome !== 'replaced' || replaced.stateCopy !== copyDirectory || !Array.isArray(replaced.survivingProcessIds) || !replaced.survivingProcessIds.every(pid => Number.isSafeInteger(pid) && pid > 0)) {
           throw new AgentMuxError('The original Native stop or its state copy is unconfirmed; no new Native was started.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
@@ -482,9 +484,10 @@ export class RemoteCoreUpgradeManager {
         : 'Core 已升级，原 Runtime、Session 和运行进程已保留。'
     } catch (error) {
       if (!admitted) throw error
-      const restored = (error as { restored?: boolean }).restored === true
-      value.receipt.status = mutation && !restored ? 'unknown' : 'failed'
-      value.receipt.detail = errorText(error) + (restored ? '' : mutation ? ' 原操作不会自动重放；请复查此操作。' : ' 原 Core 和运行进程未停止。')
+      value.receipt.status = mutation && !notApplied ? 'unknown' : 'failed'
+      // A stop that may have happened with no candidate started leaves this Host without a Core.
+      const coreStopped = value.receipt.stage === 'replacing-native' ? ' 原 Core 已停止；请在该 Host 上用原启动方式重新启动 Core，再复查此操作。' : ''
+      value.receipt.detail = errorText(error) + (notApplied ? '' : mutation ? ' 原操作不会自动重放；请复查此操作。' + coreStopped : ' 原 Core 和运行进程未停止。')
     } finally {
       try { if (admitted) await this.save(value) }
       finally { await lease?.close() }
@@ -497,8 +500,6 @@ export class RemoteCoreUpgradeManager {
     const { nativeReplacement: _accepted, ...pinned } = expected, { nativeReplacement: _current, ...actual } = this.expected(input, artifact, observed)
     if (JSON.stringify(actual) !== JSON.stringify(pinned)) throw new AgentMuxError('The checked owner or candidate changed. Check again before upgrading.', 'CONFIG_CONFLICT')
     if (!expected.nativeReplacement) return
-    try { assertAgentMuxRuntimeCompatibility(observed.nativeRuntime); throw new AgentMuxError('The original Native now satisfies the candidate. Check again for an upgrade that keeps its Runs.', 'CONFIG_CONFLICT') }
-    catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_OWNER_IDENTITY_UNPROVEN') throw error }
     const accepted = new Set(expected.nativeReplacement.endingRunIds)
     const unreviewed = observed.nativeRuns.filter(run => run.state === 'running' && !accepted.has(run.runId))
     if (unreviewed.length) throw new AgentMuxError(`${unreviewed.length} running process${unreviewed.length === 1 ? '' : 'es'} started after the review. Check again and review what ends; nothing was stopped.`, 'CONFIG_CONFLICT')
@@ -522,24 +523,22 @@ export class RemoteCoreUpgradeManager {
   /** A cold Native replacement keeps the durable Runtime, every Session binding and retained
    * history. The original running Runs end; their processes are not adopted. Returns them. */
   private verifyReplacement(previous: Observed, next: Observed, digest: string): string[] {
+    // A cold start keeps the durable runtime ID and always begins a new daemon instance.
     if (next.launch.deploymentDigest !== digest || next.owner.runtimeId !== previous.owner.runtimeId || next.owner.ownerInstanceId === previous.owner.ownerInstanceId ||
-        next.nativeRuntime.runtimeId !== previous.nativeRuntime.runtimeId || next.nativeRuntime.daemonInstanceId === previous.nativeRuntime.daemonInstanceId ||
-        next.launch.nativeProcessId === previous.launch.nativeProcessId && next.launch.nativeStartTicks === previous.launch.nativeStartTicks) {
+        next.nativeRuntime.runtimeId !== previous.nativeRuntime.runtimeId || next.nativeRuntime.daemonInstanceId === previous.nativeRuntime.daemonInstanceId) {
       throw new AgentMuxError('The replaced Native did not keep the original durable Runtime.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     }
     assertAgentMuxRuntimeCompatibility(next.nativeRuntime)
     this.verifySessions(previous, next)
-    const ended: string[] = []
-    for (const before of previous.nativeRuns) {
-      const after = next.nativeRuns.find(run => run.runId === before.runId)
+    for (const run of previous.nativeRuns) {
+      const after = next.nativeRuns.find(candidate => candidate.runId === run.runId)
       // History already made durable stays readable; a running Run ends without an owner.
-      if (!after || before.durableOutputBytes !== null && after.outputBytes < before.durableOutputBytes ||
-          after.state === 'running' || before.state !== 'running' && after.state !== before.state) {
-        throw new AgentMuxError(`Original Run ${before.runId} history or state after the Native replacement is unconfirmed.`, 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+      if (!after || run.durableOutputBytes !== null && after.outputBytes < run.durableOutputBytes ||
+          after.state === 'running' || run.state !== 'running' && after.state !== run.state) {
+        throw new AgentMuxError(`Original Run ${run.runId} history or state after the Native replacement is unconfirmed.`, 'CORE_UPGRADE_RESPONSE_UNKNOWN')
       }
-      if (before.state === 'running') ended.push(before.runId)
     }
-    return ended
+    return previous.nativeRuns.filter(run => run.state === 'running').map(run => run.runId)
   }
   /** Points the remote restart entry at the confirmed release; a lost reply stays unknown. */
   private async select(input: RemoteCoreUpgradeHost, launch: Launch, digest: string, operationId: string): Promise<void> {
