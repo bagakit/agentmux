@@ -60,6 +60,9 @@
 .browser-profile-editor__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
 .browser-profile-editor__quiet { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-profile-editor__skips { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+/* The Agents switch reuses the shared toggle; inside the editor it sits on the section's edge, not in a card. */
+.browser-profile-editor__agents { padding: 0; }
+.browser-profile-editor__agents:has(input:disabled) { cursor: default; opacity: .55; }
 .browser-profile-editor__link { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .browser-profile-editor__link:hover:not(:disabled) { color: var(--text); }
 .browser-profile-editor__link:disabled { color: var(--text-3); cursor: default; }

@@ -94,6 +94,8 @@ function detailLine(profile: BrowserProfileSummary): string {
 export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { active: boolean; onClose?: () => void }) {
   const list = useBrowserProfiles()
   const tabs = useAppStore(state => state.tabs)
+  // The Profile switch only narrows the global one, so the editor says when the global switch already keeps Agents out.
+  const automation = useAppStore(state => state.config?.browser?.agentAutomation === true)
   const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab)
     .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
   const profiles = list.profiles ?? []
@@ -165,7 +167,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
-            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode}
+            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
             onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setNotice(pending) }} />
@@ -176,7 +178,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, editName, onNameEdited, onDeleted, onShow, onOpen }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, editName, onNameEdited, onDeleted, onShow, onOpen }: {
   profile: BrowserProfileSummary
   revision: number
   uses: Use[]
@@ -184,6 +186,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
   run: Run
   error: string | null
   errorCode: string | null
+  /** Settings › Browser › Agent browser automation. */
+  automation: boolean
   editName: boolean
   onNameEdited(): void
   /** `pending` names site data that is still being cleared after the Profile was deleted. */
@@ -294,6 +298,20 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
         </button>}
 
       {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onClick={() => void browserProfiles.refresh()}>Reload</button></> : null}</p> : null}
+
+      <section className="browser-profile-editor__section" aria-label="Agents">
+        <h4>Agents</h4>
+        <label className="browser-automation-toggle browser-profile-editor__agents">
+          <input type="checkbox" role="switch" checked={profile.agentAccess !== false} disabled={busy !== null}
+            onChange={event => void commit({ agentAccess: event.target.checked })} />
+          <span>
+            <strong>Let agents use Browsers in this Profile</strong>
+            <small>{!automation ? 'Agent browser automation is off in Settings › Browser, so no agent uses any Profile right now.'
+              : profile.agentAccess === false ? 'Agents are refused here. You can still run your own steps.'
+              : 'Agents may read and act on pages in this Profile’s Browsers, with its sign-ins.'}</small>
+          </span>
+        </label>
+      </section>
 
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
