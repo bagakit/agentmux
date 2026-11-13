@@ -4,8 +4,8 @@ import { parseAgentProgressParams } from '../../../packages/core/src/agent-progr
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
+import { ContinuousProgressLoopStore } from '../../host/src/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -100,6 +100,28 @@ const observedDone = async (_loop: unknown, tickId: string) => ({
     run: { runId: 'r' }, semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: _historyFixtureEpoch(0, 0, 1) } },
   inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state: 'done', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, _historyFixtureEpoch(0, 0, 0)),
   tickId, now: _historyFixtureEpoch(0, 0, 0)
+})
+it('skips and retries a tick whose observation fails before anything is sent, but pauses an unknown send', async () => {
+  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-predispatch-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+  let now = _historyFixtureEpoch(0, 0, 0), fail = true, sends = 0
+  const observe = async (loop: unknown, tickId: string) => {
+    if (fail) throw new Error('AgentMux client is not connected.')
+    return await observedDone(loop, tickId)
+  }
+  const manager = new ContinuousProgressLoopManager(store, async () => { sends++; throw new Error('Input receipt lost') }, () => now, observe)
+  try {
+    await store.save([{ loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), intervalMs: 10, prompt: 'x', nextCheckAt: now, status: 'active' }])
+    await manager.start(); await manager.check(now)
+    // Nothing was handed to the input owner: the arrangement stays active, unclaimed and retryable.
+    expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped', lastDecision: 'AgentMux client is not connected.' })
+    expect(manager.list()[0]?.pendingCompletion).toBeUndefined()
+    expect((await store.load())[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped' })
+    expect(sends).toBe(0)
+    // Once a pending send was saved and attempted, a failure is unknown: pause and keep the operation.
+    fail = false; now = _historyFixtureEpoch(0, 0, 10); await manager.check(now)
+    expect(sends).toBe(1)
+    expect(manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: { prompt: 'x' } })
+  } finally { await manager.stop(); await rm(dir, { recursive: true, force: true }) }
 })
 it('restores an interrupted claim as unknown and resumes using the original operation identity', async () => {
   const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-interrupted-loop-'))
