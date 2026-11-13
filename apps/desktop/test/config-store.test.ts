@@ -1551,6 +1551,26 @@ describe('DEFAULT_CONFIG built-in Provider coverage', () => {
     }
   })
 
+  it('never pre-selects a danger-tier launch posture in a default Executor', () => {
+    // 权限姿态是 Provider 声明的启动项，在 Launcher 里显式选择；写进默认 args 就成了每次启动都静默生效。
+    // danger 档的 argv 同样从 Core 现取，不在测试里手抄 flag。
+    const contains = (args: readonly string[], argv: readonly string[]) =>
+      argv.length > 0 && args.some((_, start) => argv.every((token, offset) => args[start + offset] === token))
+    const providers = new Map(BUILT_IN_AGENT_PROVIDERS.map((provider) => [provider.id, provider]))
+    let dangerChoices = 0
+    for (const [executorId, executor] of Object.entries(DEFAULT_CONFIG.executors)) {
+      const provider = providers.get(executor.providerId)!
+      for (const option of provider.catalog.launchOptions) {
+        for (const choice of option.choices.filter((value) => value.tier === 'danger')) {
+          dangerChoices++
+          const argv = provider.resolveLaunchArgv({ [option.id]: choice.id })
+          expect(contains(executor.args, argv), `${executorId} pre-selects ${option.id}=${choice.id}`).toBe(false)
+        }
+      }
+    }
+    expect(dangerChoices, 'Core 未声明任何 danger 档启动项，这条测试已无对象可守').toBeGreaterThan(0)
+  })
+
   // 上面两条只看**静态默认表**。它们对「磁盘上已有一份缺几家的旧配置」完全失明——那份配置走
   // `get()` 的 parse 分支原样返回，而 `executors` 是无数量约束的 record，于是「只有 9 家」合法通过，
   // 界面上照旧缺席。实测过这个假绿：补默认表而不动 version 时，这两条全绿而存量用户一家都没多。
