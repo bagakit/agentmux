@@ -59,6 +59,9 @@
 .mote-cooperation__search:focus-within { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 .mote-cooperation__popover .mote-new-discussion { flex: 1 1 100%; }
 .mote-cooperation__popover .mote-new-discussion > summary { width: 100%; justify-content: space-between; }
+.mote-cooperation__empty button { appearance: none; margin-inline-start: 4px; padding: 4px 6px; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
+.mote-cooperation__empty button:hover { color: var(--text); background: var(--surface-2); }
+.mote-cooperation__empty button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @keyframes mote-conversation-picker-enter { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .mote-cooperation__popover[data-state="open"] { animation: none; }
