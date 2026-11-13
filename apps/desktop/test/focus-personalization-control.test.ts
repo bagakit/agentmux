@@ -8,7 +8,7 @@ import { ConfigStore } from '../src/main/config-store.js'
 import { resolveFocusPreferences } from '../src/shared/focus-preferences.js'
 import { applyConfigEdit } from '../src/shared/config-edit.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
-import { parseSettingsCommand } from '../../../packages/core/src/settings-cli.js'
+import { settingsCliCommand as parseSettingsCommand } from '../../../packages/core/test/helpers/settings-command.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 
 const principal = { transport: 'unix', principal: { kind: 'user', id: 'focus-preferences-test' } } as const

@@ -201,7 +201,7 @@ it('strictly validates exact home results, params and the discoverable CLI while
     expect(() => parseHostSettingsResult('settings.hosts.home', value, { hostId: 'selected' })).toThrow()
   }
   expect(() => parseHostSettingsParams('settings.hosts.home', { hostId: 'selected', command: 'echo ~' })).toThrow()
-  expect(await parseSettingsCommand(['hosts', 'home', '--host', 'selected'])).toEqual({ method: 'settings.hosts.home', params: { hostId: 'selected' } })
+  expect(await parseSettingsCommand(['hosts', 'home', '--host', 'selected'])).toEqual({ hostId: 'selected' })
   await expect(parseSettingsCommand(['hosts', 'home'])).rejects.toBeDefined()
   expect(agentMuxCommandHelp('settings.hosts.home')).toContain('settings hosts home --host <id>')
 })

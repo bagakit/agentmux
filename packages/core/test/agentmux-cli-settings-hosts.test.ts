@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlRequest } from '../src/control.js'
-import { parseSettingsCommand } from '../src/settings-cli.js'
+import { settingsCliCommand as parseSettingsCommand } from './helpers/settings-command.js'
 
 const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 let root: string, server: AgentMuxControlServer

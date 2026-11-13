@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest'
 vi.mock('electron', async () => { const { tmpdir } = await import('node:os'); return { app: { getPath: () => tmpdir() } } })
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
-import { parseSettingsCommand } from '../../../packages/core/src/settings-cli.js'
+import { settingsCliCommand as parseSettingsCommand } from '../../../packages/core/test/helpers/settings-command.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { ConfigStore } from '../src/main/config-store.js'
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
