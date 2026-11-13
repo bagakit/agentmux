@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderDot } from '../src/renderer/src/lib/file-formats/dot-engine'
+import { renderDot } from '@agentmux/editor-extensions/engines/dot-engine'
 
 describe('real Graphviz WASM', () => {
   it('renders actual nodes/edges and reports invalid DOT without a fabricated SVG', async () => {

@@ -2,8 +2,8 @@
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotebookFilePreview } from '../src/renderer/src/components/file-preview/NotebookFilePreview'
-import { createNotebookReader, type NotebookPreview, type NotebookReply, type NotebookRequest } from '../src/renderer/src/lib/file-formats/data-notebook'
+import { NotebookFilePreview } from '@agentmux/editor-extensions/ui/NotebookFilePreview'
+import { createNotebookReader, type NotebookPreview, type NotebookReply, type NotebookRequest } from '@agentmux/editor-extensions/engines/data-notebook'
 
 const source = (cells: unknown[]) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { language_info: { name: 'python' } }, cells })
 const codeCell = (text: string, outputs: unknown[] = []) => ({ cell_type: 'code', id: 'code', metadata: {}, source: text, execution_count: 2, outputs })
@@ -12,7 +12,8 @@ const workers: TestWorker[] = []
 const intersections: TestIntersectionObserver[] = []
 class TestIntersectionObserver {
   target: Element | null = null
-  disconnect = vi.fn()
+  disconnected = vi.fn()
+  disconnect = () => this.disconnected()
   constructor(readonly callback: IntersectionObserverCallback) { intersections.push(this) }
   observe(target: Element) { this.target = target; this.emit(true) }
   emit(visible: boolean) {
@@ -79,7 +80,7 @@ describe('Notebook current-buffer reader', () => {
     await act(async () => { observer.emit(true); await vi.dynamicImportSettled() })
     expect(container.querySelector('iframe')?.srcdoc).toContain('original draft')
     await render(node('current draft'))
-    expect(observer.disconnect).toHaveBeenCalledOnce()
+    expect(observer.disconnected).toHaveBeenCalledOnce()
     expect(container.querySelector('iframe')?.srcdoc).toContain('current draft')
     expect(container.querySelector('iframe')?.srcdoc).not.toContain('original draft')
   })

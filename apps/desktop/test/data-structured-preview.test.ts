@@ -1,10 +1,10 @@
 import { fixtureClock as _hygiene_fixtureClock } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
-import * as config from '../src/renderer/src/lib/file-formats/data-config'
-import { readStructuredPreview } from '../src/renderer/src/lib/file-formats/data-parse'
-import { readJsonLines } from '../src/renderer/src/lib/file-formats/data-jsonl'
-import { readYamlPreview, readTomlPreview } from '../src/renderer/src/lib/file-formats/data-config'
-import { DATA_PREVIEW_MAX_BYTES } from '../src/renderer/src/lib/file-data-preview'
+import * as config from '@agentmux/editor-extensions/engines/data-config'
+import { readStructuredPreview } from '@agentmux/editor-extensions/engines/data-parse'
+import { readJsonLines } from '@agentmux/editor-extensions/engines/data-jsonl'
+import { readYamlPreview, readTomlPreview } from '@agentmux/editor-extensions/engines/data-config'
+import { DATA_PREVIEW_MAX_BYTES } from '@agentmux/editor-extensions/engines/file-data-preview'
 
 describe('JSON Lines independent records', () => {
   it('keeps good neighbours, exact scalar spelling, physical lines and local error columns', () => {

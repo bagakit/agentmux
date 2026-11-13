@@ -16,17 +16,17 @@ assert.ok(output, 'An explicit local evidence --output=FILE is required.')
 const evidence = resolve(output), directory = await mkdtemp(join(tmpdir(), 'amx-editor-bundle-'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, targets = {}
-const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)viz|@plantuml(?:\/|\+)core|@excalidraw(?:\/|\+)excalidraw|vega(?:-lite|-interpreter)?|katex|highlight\.js|prettier|smol-toml|yaml)(?:@|\/)/
+const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)viz|@plantuml(?:\/|\+)core|@excalidraw(?:\/|\+)excalidraw|vega(?:-lite|-interpreter)?|katex|highlight\.js|prettier|smol-toml|yaml|pdfjs-dist|djvu-rs|fflate|@zip\.js(?:/|\+)zip\.js)(?:@|\/)/
 const report = { passed: false, sources, targets }
 try {
   for (const file of ['apps/desktop/scripts/verify-editor-format-bundle.mjs', 'apps/desktop/electron.vite.config.ts',
-    'apps/desktop/scripts/file-diagram-assets.ts', 'apps/desktop/scripts/excalidraw-local-fonts.ts',
-    'apps/desktop/package.json', 'packages/client-ui/package.json', 'pnpm-lock.yaml']) {
+    'packages/editor-extensions/src/build/file-diagram-assets.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts',
+    'apps/desktop/package.json', 'packages/editor-extensions/package.json', 'packages/client-ui/package.json', 'pnpm-lock.yaml']) {
     sources[file] = sha(await readFile(join(repository, file)))
   }
   // Copied assets do not pass through Rollup transforms, so bind their original
   // bytes separately from the compiled module graph.
-  for (const root of [join(desktop, 'vendor/drawio/v32.4.1'),
+  for (const root of [join(repository, 'packages/editor-extensions/vendor/drawio/v32.4.1'),
     join(dirname(require.resolve('@excalidraw/excalidraw')), 'fonts')]) {
     for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
       const file = join(entry.parentPath, entry.name)
@@ -92,7 +92,7 @@ try {
   if (sharedYaml.length) for (const file of ['apps/desktop/src/shared/mote-behavior.ts', 'apps/desktop/src/shared/mote-quick-mode.ts']) {
     assert.ok(modules.includes(file), `Existing shared YAML consumer: ${file}`)
   }
-  assert.deepEqual(modules.filter(id => /\/file-formats\/(?:data-config|data-parse|vega-spec|mermaid-engine|dot-engine|drawio-engine|plantuml-engine|format-content)\.ts$/.test(id)), [], 'File parser/compiler implementations stay outside startup.')
+  assert.deepEqual(modules.filter(id => /\/engines\/(?:data-config|data-parse|vega-spec|mermaid-engine|dot-engine|drawio-engine|plantuml-engine|format-engine)\.ts$/.test(id)), [], 'File parser/compiler implementations stay outside startup.')
   const artifacts = Object.keys(targets.renderer.artifacts)
   for (const pattern of [/markdown-render\.worker-.*\.js$/, /data-structured\.worker-.*\.js$/, /data-notebook\.worker-.*\.js$/, /dot-worker-.*\.js$/, /format-worker-.*\.js$/, /vega-chart\.worker-.*\.js$/]) {
     assert.ok(artifacts.some(file => pattern.test(file)), `Actual emitted lazy Worker: ${pattern}`)
@@ -104,6 +104,10 @@ try {
   for (const [file, digest] of Object.entries(sources)) assert.equal(sha(await readFile(join(repository, file))), digest, `Final source identity: ${file}`)
   report.startup = { entry: entry.file, chunks: [...closure], moduleCount: modules.length, eagerFormatEngines: isolated,
     sharedDependencies: sharedYaml.length ? [{ package: 'yaml', reason: 'Existing startup Mote preference consumers', modules: sharedYaml }] : [] }
+  for (const file of ['licenses/editor-extensions/djvu-rs/LICENSE', 'licenses/editor-extensions/djvu-rs/THIRD_PARTY_NOTICES', 'licenses/editor-extensions/pdfjs/LICENSE', 'licenses/editor-extensions/foliate-js/LICENSE']) {
+    assert.ok(targets.renderer.artifacts[file], `Actual packaged upstream notice: ${file}`)
+  }
+  assert.ok(artifacts.some(file => /djvu_rs_bg-.*\.wasm$/.test(file)), 'Actual lazily fetched DjVu decoder WASM was emitted')
   report.passed = true
 } catch (error) { report.failure = { message: error.message, stack: error.stack } }
 finally {

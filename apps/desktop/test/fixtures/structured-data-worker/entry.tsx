@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { StructuredDataPreview } from '../../../src/renderer/src/components/file-preview/StructuredDataPreview'
+import { StructuredDataPreview } from '@agentmux/editor-extensions/ui/StructuredDataPreview'
 const root = createRoot(document.getElementById('root')!), NativeWorker = window.Worker
 const workers: Array<{ terminated: boolean }> = []
 window.Worker = class extends NativeWorker {

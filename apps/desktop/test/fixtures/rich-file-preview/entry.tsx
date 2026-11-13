@@ -1,9 +1,9 @@
 import { createRoot } from 'react-dom/client'
-import { ExcalidrawFilePreview } from '../../../src/renderer/src/components/file-preview/ExcalidrawFilePreview'
-import { createVegaPreview } from '../../../src/renderer/src/lib/file-formats/vega-worker'
+import { ExcalidrawFilePreview } from '@agentmux/editor-extensions/ui/ExcalidrawFilePreview'
+import { createVegaPreview } from '@agentmux/editor-extensions/engines/vega-worker'
 import * as Vega from 'vega'
 import { expressionInterpreter } from 'vega-interpreter'
-import { compileVegaRuntime } from '../../../src/renderer/src/lib/file-formats/vega-spec'
+import { compileVegaRuntime } from '@agentmux/editor-extensions/engines/vega-spec'
 
 const target = document.getElementById('root')!, root = createRoot(target)
 const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))

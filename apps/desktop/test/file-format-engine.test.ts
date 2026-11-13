@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import Papa from 'papaparse'
-import { formatFileContent } from '../src/renderer/src/lib/file-formats/format-engine'
+import { formatFileContent } from '@agentmux/editor-extensions/engines/format-engine'
 
 describe('real source format engines', () => {
   it('loads real Prettier plugins for script, markup, style, Markdown and YAML', async () => {

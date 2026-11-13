@@ -9,7 +9,7 @@ import { ComposerLayoutToggle } from '../../../packages/client-ui/src/components
 import { PromptReactionIconView } from '../../../packages/client-ui/src/components/ConversationReactionActions'
 import { InlineObjectLink } from '../src/renderer/src/components/InlineObjectLink'
 import { AgentTopologySummary } from '../src/renderer/src/components/AgentTopologySummary'
-import { FileDataPreview } from '../src/renderer/src/components/FileDataPreview'
+import { FileDataPreview } from '@agentmux/editor-extensions/ui/FileDataPreview'
 import { FocusContextStateMark } from '../src/renderer/src/components/FocusContextState'
 import { SessionConnectingSurface } from '../src/renderer/src/components/SessionConnectingSurface'
 import { SessionRecoveryActions } from '../src/renderer/src/components/SessionRecoveryActions'

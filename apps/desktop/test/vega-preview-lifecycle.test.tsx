@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { VegaFilePreview } from '../src/renderer/src/components/file-preview/VegaFilePreview'
-import type { ChartSnapshot } from '../src/renderer/src/lib/file-formats/vega-chart-protocol'
+import type { ChartSnapshot } from '@agentmux/editor-extensions/engines/vega-chart-protocol'
 import { previewVisibility } from './helpers/preview-visibility'
 
 const ports = vi.hoisted(() => ({
@@ -13,7 +13,7 @@ const ports = vi.hoisted(() => ({
   loaders: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>
 }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: (selector: (state: unknown) => unknown) => selector({ config: { workspaces: [ports.workspace] } }) }))
-vi.mock('../src/renderer/src/lib/file-formats/vega-worker', () => ({ createVegaPreview: (content: string, _mode: string, _loader: unknown, signal: AbortSignal, callbacks: any) => {
+vi.mock('@agentmux/editor-extensions/engines/vega-worker', () => ({ createVegaPreview: (content: string, _mode: string, _loader: unknown, signal: AbortSignal, callbacks: any) => {
   const job = { content, signal, callbacks, dispose: vi.fn(), event: vi.fn(), setSignal: vi.fn(), resize: vi.fn() }; ports.jobs.push(job); return job
 } }))
 vi.mock('../src/renderer/src/lib/file-formats/workspace-vega-loader', () => ({ createWorkspaceVegaLoader: () => {

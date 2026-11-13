@@ -5,8 +5,8 @@ import { dirname, join, resolve } from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { transformWithEsbuild, type UserConfig } from 'vite'
-import { EXCALIDRAW_LOCAL_FONTS_VERSION, localizeExcalidrawFontUrls } from '../scripts/excalidraw-local-fonts'
-import { fileDiagramAssets } from '../scripts/file-diagram-assets'
+import { EXCALIDRAW_LOCAL_FONTS_VERSION, localizeExcalidrawFontUrls } from '@agentmux/editor-extensions/build/excalidraw-local-fonts'
+import { fileDiagramAssets } from '@agentmux/editor-extensions/build/file-diagram-assets'
 
 const require = createRequire(import.meta.url)
 const packageRoot = dirname(dirname(dirname(require.resolve('@excalidraw/excalidraw'))))
@@ -43,7 +43,7 @@ describe('bundled official Excalidraw fonts', () => {
   })
 
   it('applies the same official change through the product Vite transform and actual dev optimizer', async () => {
-    const plugin = fileDiagramAssets(resolve(import.meta.dirname, '..'))
+    const plugin = fileDiagramAssets()
     const directory = join(packageRoot, 'dist/prod')
     const id = readdirSync(directory).map(file => join(directory, file)).find(file => file.endsWith('.js') && readFileSync(file, 'utf8').includes('ASSETS_FALLBACK_URL'))!
     const code = readFileSync(id, 'utf8')

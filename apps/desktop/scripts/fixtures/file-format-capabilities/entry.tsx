@@ -12,7 +12,7 @@ URL.revokeObjectURL = url => { blobs.delete(url); revokeUrl(url) }
 // Observe before any product module or the shell's top-level startup can create resources.
 const { useAppStore } = await import('../../../src/renderer/src/store')
 const { addWorkbenchRegion } = await import('../../../src/renderer/src/lib/workbench-tabs')
-const { workspaceFileFormat } = await import('../../../src/shared/workspace-file-format')
+const { workspaceFileFormat } = await import('@agentmux/editor-extensions/catalog')
 await import('../file-surface-quality/visual/entry')
 const probe = (window as any).filePreviewProbe
 function snapshot() {

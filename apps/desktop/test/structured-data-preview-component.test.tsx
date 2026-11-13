@@ -2,11 +2,11 @@
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StructuredDataPreview } from '../src/renderer/src/components/file-preview/StructuredDataPreview'
-import * as parsers from '../src/renderer/src/lib/file-formats/data-structured-request'
-import { readStructuredPreview } from '../src/renderer/src/lib/file-formats/data-parse'
-import { readJsonLines } from '../src/renderer/src/lib/file-formats/data-jsonl'
-import type { StructuredPreview } from '../src/renderer/src/lib/file-formats/data-model'
+import { StructuredDataPreview } from '@agentmux/editor-extensions/ui/StructuredDataPreview'
+import * as parsers from '@agentmux/editor-extensions/engines/data-structured-request'
+import { readStructuredPreview } from '@agentmux/editor-extensions/engines/data-parse'
+import { readJsonLines } from '@agentmux/editor-extensions/engines/data-jsonl'
+import type { StructuredPreview } from '@agentmux/editor-extensions/engines/data-model'
 
 let root: Root, container: HTMLDivElement
 async function render(node: ReactNode) { await act(async () => root.render(node)); await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); await vi.dynamicImportSettled() }) }

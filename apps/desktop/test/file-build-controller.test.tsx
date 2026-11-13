@@ -9,7 +9,7 @@ import { buildFileRegion, cancelFileRegionBuild, inspectFileRegionBuild, readFil
 
 const calls = vi.hoisted(() => ({ build: vi.fn(), inspectBuild: vi.fn(), cancelBuild: vi.fn(), releaseBuild: vi.fn() }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { files: calls } }))
-vi.mock('../src/renderer/src/components/PdfContent', () => ({ PdfContent: ({ data }: { data: Uint8Array }) => <div data-testid="build-pdf">PDF bytes {data.byteLength}</div> }))
+vi.mock('@agentmux/editor-extensions/pdf', () => ({ PdfReader: ({ source }: { source: {size:number} }) => <div data-testid="build-pdf">PDF bytes {source.size}</div> }))
 const cleanups: Array<() => void> = []
 let container: HTMLDivElement, root: Root
 async function waitFor(assert: () => void) { for (let i = 0; i < 100; i++) { try { assert(); return } catch (error) { if (i === 99) throw error; await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }) } } }

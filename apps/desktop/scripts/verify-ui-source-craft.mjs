@@ -41,7 +41,7 @@ async function compile(name) {
       if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return
       const source=await readFile(path,'utf8'),relative=path.slice(root.length+1),leaf=path.split('/').at(-1)
       if(owned.includes(relative))loaded[relative]=hash(source)
-      if(['DiagramFilePreview.tsx','DotFilePreview.tsx','DrawioFilePreview.tsx','EditorPane.tsx','GitBranchDiffPane.tsx','FileSourceEditor.tsx','PdfContent.tsx','ExcalidrawFilePreview.tsx','GitDiffCanvas.tsx','ToolkitScriptEditor.tsx'].includes(leaf)){
+      if(['DiagramFilePreview.tsx','DotFilePreview.tsx','DrawioFilePreview.tsx','EditorPane.tsx','GitBranchDiffPane.tsx','FileSourceEditor.tsx','PdfReader.tsx','ExcalidrawFilePreview.tsx','GitDiffCanvas.tsx','ToolkitScriptEditor.tsx'].includes(leaf)){
         receipt.excludedPaintLeaves.push({file:relative,sourceSha256:hash(source),reason:'Unopened paint leaf outside this request/source scenario'});return{contents:`export function ${leaf.slice(0,-4)}(){throw new Error('Uncovered paint leaf invoked')}`,loader:'js'}
       }
       return{contents:source,loader:path.endsWith('tsx')?'tsx':path.endsWith('ts')?'ts':'js'}

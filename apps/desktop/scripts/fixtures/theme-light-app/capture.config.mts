@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig } from 'vite'
 import base from '../../../vite.web.config'
-import { fileDiagramAssets } from '../../../scripts/file-diagram-assets'
+import { fileDiagramAssets } from '@agentmux/editor-extensions/build/file-diagram-assets'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -22,7 +22,7 @@ export default mergeConfig(base, defineConfig({ root: import.meta.dirname, worke
     }
     if (!item) throw Error('Unmapped shared production entry ' + source)
     return resolve(sourceRoot, packagePath, typeof item === 'string' ? item : item.browser || item.import)
-  } }, fileDiagramAssets(resolve(import.meta.dirname, '../../..')), { name: 'light-app-source-binding', enforce: 'pre', transform(code,id) {
+  } }, fileDiagramAssets(), { name: 'light-app-source-binding', enforce: 'pre', transform(code,id) {
     if (id.endsWith('/theme-light-app/entry.tsx')) code = code.replaceAll("'../../../src/", "'" + sourceRoot + '/apps/desktop/src/')
     if(!id.includes('node_modules')&&!id.startsWith('\0')) inputs[id] = createHash('sha256').update(code).digest('hex')
     return {code,map:null}

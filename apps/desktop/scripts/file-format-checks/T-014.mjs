@@ -1,5 +1,5 @@
 export const tests = ['apps/desktop/test/vega-preview.test.ts', 'apps/desktop/test/vega-preview-lifecycle.test.tsx', 'apps/desktop/test/workspace-vega-loader.test.ts']
-export const sources = ['apps/desktop/src/renderer/src/lib/file-formats/vega-spec.ts', 'apps/desktop/src/renderer/src/lib/file-formats/vega-worker.ts', 'apps/desktop/src/renderer/src/lib/file-formats/vega-chart.worker.ts', 'apps/desktop/src/renderer/src/lib/file-formats/vega-chart-protocol.ts', 'apps/desktop/src/renderer/src/components/file-preview/VegaFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/file-formats/workspace-vega-loader.ts']
+export const sources = ['packages/editor-extensions/src/engines/vega-spec.ts', 'packages/editor-extensions/src/engines/vega-worker.ts', 'packages/editor-extensions/src/engines/vega-chart.worker.ts', 'packages/editor-extensions/src/engines/vega-chart-protocol.ts', 'apps/desktop/src/renderer/src/components/file-preview/VegaFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/file-formats/workspace-vega-loader.ts']
 export const mutations = [
   { label: 'vega-ast-removed', file: sources[0], before: '{ ast: true }', after: '{ ast: false }' },
   { label: 'vega-worker-termination-removed', file: sources[1], before: 'worker.terminate()', after: 'void worker' },

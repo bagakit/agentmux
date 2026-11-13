@@ -6,10 +6,10 @@ import { defaultExclude, defineConfig } from 'vitest/config'
 import original from '../../../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const rules: Record<string, readonly [string, string, string]> = {
-  'routing': ['apps/desktop/src/shared/workspace-file-format.ts', "path.endsWith(NOTE_FILE_EXTENSION) ? 'note'", "false ? 'note'"],
-  'json-grammar': ['apps/desktop/src/renderer/src/lib/file-json-preview.ts', 'disallowComments: !comments', 'disallowComments: false'],
-  'json-precision': ['apps/desktop/src/renderer/src/components/FileDataPreview.tsx', 'content.slice(node.offset, node.offset + node.length)', 'String(node.value)'],
-  'tsv-grammar': ['apps/desktop/src/renderer/src/lib/file-delimited-preview.ts', '{ delimiter, preview:', "{ delimiter: ',', preview:"],
+  'routing': ['packages/editor-extensions/src/catalog.ts', "path.endsWith(NOTE_FILE_EXTENSION) ? 'note'", "false ? 'note'"],
+  'json-grammar': ['packages/editor-extensions/src/engines/file-json-preview.ts', 'disallowComments: !comments', 'disallowComments: false'],
+  'json-precision': ['packages/editor-extensions/src/ui/FileDataPreview.tsx', 'content.slice(node.offset, node.offset + node.length)', 'String(node.value)'],
+  'tsv-grammar': ['packages/editor-extensions/src/engines/file-delimited-preview.ts', '{ delimiter, preview:', "{ delimiter: ',', preview:"],
   'media-readiness': ['apps/desktop/src/renderer/src/components/FilePreviewPane.tsx', 'const element = player.current', "setState('loading'); const element = player.current"],
   'image-visibility': ['apps/desktop/src/renderer/src/components/WorkspaceImage.tsx', 'useWorkspaceFilePreview(workspaceId, path, visible)', 'useWorkspaceFilePreview(workspaceId, path, true)'],
   'draft-owner': ['apps/desktop/src/renderer/src/components/FileSurfaceView.tsx', 'content={doc.content} kind={dataKind}', 'content="{}" kind={dataKind}'],

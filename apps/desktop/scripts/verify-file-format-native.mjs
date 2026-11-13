@@ -32,8 +32,8 @@ const roots = [
 const singleFiles = ['apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/monaco.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/html-file-previews.ts',
   'apps/desktop/src/main/file-diagram-renderer.ts', 'apps/desktop/src/main/file-builds.ts', 'apps/desktop/src/main/ipc.ts',
-  'apps/desktop/scripts/file-diagram-assets.ts', 'apps/desktop/scripts/excalidraw-local-fonts.ts',
-  'apps/desktop/scripts/pdfjs-viewer-assets.ts', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/verify-file-format-native.mjs',
+  'packages/editor-extensions/src/build/file-diagram-assets.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts',
+  'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/verify-file-format-native.mjs',
   'apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/test/helpers/pdf-reader-fixture.ts',
   'apps/desktop/package.json', 'packages/client-ui/package.json', 'packages/core/package.json', 'packages/identity/package.json',
   'packages/layout/package.json', 'packages/git/package.json', 'packages/demand/package.json', 'packages/relay/package.json', 'pnpm-lock.yaml',
@@ -89,7 +89,7 @@ try {
   const loaded = {}
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
-    plugins: [{ name: 'private-static-markup-mutation', enforce: 'pre', load(id) { if (staticUriMutation && id === staticMarkupFile) return loadedStaticMarkup } }, pdfjsViewerAssets(), fileDiagramAssets(desktop), { name: 'format-native-actual-source', enforce: 'pre', async transform(_bytes, id) { const clean = id.split('?')[0]; if (clean === staticMarkupFile) { assert.equal(sha(_bytes), sha(loadedStaticMarkup), 'Actual source bytes consumed by the native Notebook'); result.staticMarkupLoaded = { file: clean.slice(repository.length + 1), sha256: sha(_bytes), mutated: staticUriMutation }; await writeFile(join(evidence, 'loaded-static-markup.ts'), _bytes) } if (clean.startsWith(repository + '/') && !clean.includes('/node_modules/') && !id.includes('?')) loaded[clean.slice(repository.length + 1)] = sha(await readFile(clean)) } }],
+    plugins: [{ name: 'private-static-markup-mutation', enforce: 'pre', load(id) { if (staticUriMutation && id === staticMarkupFile) return loadedStaticMarkup } }, pdfjsViewerAssets(), fileDiagramAssets(), { name: 'format-native-actual-source', enforce: 'pre', async transform(_bytes, id) { const clean = id.split('?')[0]; if (clean === staticMarkupFile) { assert.equal(sha(_bytes), sha(loadedStaticMarkup), 'Actual source bytes consumed by the native Notebook'); result.staticMarkupLoaded = { file: clean.slice(repository.length + 1), sha256: sha(_bytes), mutated: staticUriMutation }; await writeFile(join(evidence, 'loaded-static-markup.ts'), _bytes) } if (clean.startsWith(repository + '/') && !clean.includes('/node_modules/') && !id.includes('?')) loaded[clean.slice(repository.length + 1)] = sha(await readFile(clean)) } }],
     build: { outDir: renderer, emptyOutDir: true } })
   // The production isolated diagram entry retains its real renderer-relative asset address.
   await build({ configFile: false, root: join(desktop, 'src/renderer'), base: './', logLevel: 'error',

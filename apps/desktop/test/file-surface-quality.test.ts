@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { workspaceFileFormat } from '../src/shared/workspace-file-format'
-import { readJsonPreview } from '../src/renderer/src/lib/file-json-preview'
-import { readDelimitedPreview } from '../src/renderer/src/lib/file-delimited-preview'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
+import { readJsonPreview } from '@agentmux/editor-extensions/engines/file-json-preview'
+import { readDelimitedPreview } from '@agentmux/editor-extensions/engines/file-delimited-preview'
 import { fileSupportsInlinePreview } from '../src/renderer/src/lib/file-region-presentation'
 
 describe('shared file capabilities and mature data grammars', () => {

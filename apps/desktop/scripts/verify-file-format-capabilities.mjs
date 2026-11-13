@@ -18,10 +18,10 @@ if (task !== 'T-001') {
   sources: ['apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/test/helpers/workface-monaco-fixture.ts',
     'apps/desktop/test/helpers/workface-control-fixture.ts', 'apps/desktop/test/helpers/workface-file-fixture.ts',
     'apps/desktop/test/helpers/spatial-control-owner-fixture.ts', 'apps/desktop/test/helpers/startup-observation-api-fixture.ts',
-    'apps/desktop/src/shared/workspace-file-format.ts', 'apps/desktop/src/renderer/src/lib/workface-file-view.ts',
+    'packages/editor-extensions/src/catalog.ts', 'apps/desktop/src/renderer/src/lib/workface-file-view.ts',
     'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx', 'apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx'],
   mutations: [
-    { label: 'html-preview-disconnected', file: 'apps/desktop/src/shared/workspace-file-format.ts', before: "extensions: ['html', 'htm']", after: "extensions: ['not-html']" },
+    { label: 'html-preview-disconnected', file: 'packages/editor-extensions/src/catalog.ts', before: "extensions: ['html', 'htm']", after: "extensions: ['not-html']" },
     { label: 'renderer-claim-available', file: 'apps/desktop/src/renderer/src/lib/workface-file-view.ts', before: "format.previewConfirmation === 'renderer'", after: 'false' }
   ]
 })

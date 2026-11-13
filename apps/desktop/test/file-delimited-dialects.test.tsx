@@ -4,8 +4,8 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import type * as Monaco from 'monaco-editor'
-import { FileDataPreview } from '../src/renderer/src/components/FileDataPreview'
-import { readDelimitedPreview } from '../src/renderer/src/lib/file-delimited-preview'
+import { FileDataPreview } from '@agentmux/editor-extensions/ui/FileDataPreview'
+import { readDelimitedPreview } from '@agentmux/editor-extensions/engines/file-delimited-preview'
 import { delimitedTokens, DelimitedState, registerFileFormatLanguages } from '../src/renderer/src/lib/monaco-languages/register-file-formats'
 afterEach(() => vi.unstubAllGlobals())
 

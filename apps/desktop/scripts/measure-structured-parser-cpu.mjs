@@ -8,7 +8,7 @@ const { build } = createRequire(desktop.resolve('vite'))('esbuild')
 const temporary = await mkdtemp(_hygiene_fixturePath("tmp/amx-data-cpu-")), entry = join(temporary,'entry.ts'), readers = join(temporary,'readers.cjs')
 const rows = []
 try {
-  await writeFile(entry, `export {readYamlPreview,readTomlPreview} from ${JSON.stringify(join(root,'apps/desktop/src/renderer/src/lib/file-formats/data-config.ts'))};export {readJsonLines} from ${JSON.stringify(join(root,'apps/desktop/src/renderer/src/lib/file-formats/data-jsonl.ts'))};`)
+  await writeFile(entry, `export {readYamlPreview,readTomlPreview} from ${JSON.stringify(join(root,'packages/editor-extensions/src/engines/data-config.ts'))};export {readJsonLines} from ${JSON.stringify(join(root,'packages/editor-extensions/src/engines/data-jsonl.ts'))};`)
   await symlink(join(root,'apps/desktop/node_modules'),join(temporary,'node_modules'),'dir')
   await build({ entryPoints: [entry], outfile: readers, bundle: true, packages: 'external', platform: 'node', format: 'cjs', logLevel: 'error' })
   for (const kind of ['yaml-keys','yaml-documents','toml-keys','jsonl-records','jsonl-one-object']) {

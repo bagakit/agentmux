@@ -18,10 +18,10 @@ const compiledFiles = [style, 'packages/client-ui/src/components/DiagramImage.ts
   'packages/client-ui/src/lib/diagram-svg-image.ts',
   'packages/client-ui/src/theme/runtime.ts', 'packages/client-ui/src/theme/icon-sprite.ts',
   'packages/client-ui/src/styles/conversation-image.css', 'packages/client-ui/src/components/AgentMarkdown.tsx', 'packages/client-ui/src/components/MarkdownCodeBlock.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/DiagramFilePreview.tsx', 'apps/desktop/src/renderer/src/components/file-preview/DotFilePreview.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/DrawioFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/file-formats/dot-worker.ts',
-  'apps/desktop/src/renderer/src/lib/file-formats/dot-engine.ts']
-const engineFiles = ['apps/desktop/src/renderer/file-diagram/entry.ts', ...['mermaid-engine', 'drawio-engine', 'plantuml-engine', 'diagram-script'].map(file => `apps/desktop/src/renderer/src/lib/file-formats/${file}.ts`)]
+  'apps/desktop/src/renderer/src/components/file-preview/DiagramFilePreview.tsx', 'packages/editor-extensions/src/ui/DotFilePreview.tsx',
+  'packages/editor-extensions/src/ui/DrawioFilePreview.tsx', 'packages/editor-extensions/src/engines/dot-worker.ts',
+  'packages/editor-extensions/src/engines/dot-engine.ts']
+const engineFiles = ['apps/desktop/src/renderer/file-diagram/entry.ts', ...['mermaid-engine', 'drawio-engine', 'plantuml-engine', 'diagram-script'].map(file => `packages/editor-extensions/src/engines/${file}.ts`)]
 const sourceFiles = [...compiledFiles, ...engineFiles, ...consumerFiles, 'apps/desktop/src/main/file-diagram-renderer.ts']
 const fixtureFiles = ['verify-diagram-preview.mjs', ...(await readdir(fixture)).map(file => `fixtures/diagram-preview/${file}`)].map(file => `apps/desktop/scripts/${file}`)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -74,7 +74,7 @@ try {
   const assets = join(engineOut, 'diagram-assets')
   await mkdir(assets, { recursive: true })
   // Official fixed assets are referenced in place; never copy a vendor tree for each phase.
-  await symlink(join(desktop, 'vendor/drawio/v32.4.1'), join(assets, 'drawio'))
+  await symlink(join(root, 'packages/editor-extensions/vendor/drawio/v32.4.1'), join(assets, 'drawio'))
   await symlink(dirname(require.resolve('@plantuml/core/package.json')), join(assets, 'plantuml'))
   const native = join(temporary, 'native.mjs')
   await bundle({ entryPoints: [join(desktop, 'src/main/file-diagram-renderer.ts')], outfile: native, bundle: true, platform: 'node', format: 'esm', external: ['electron'], logLevel: 'error' })

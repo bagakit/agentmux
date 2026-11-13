@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const jobs = vi.hoisted(() => ({ render: vi.fn(), cancel: vi.fn(async () => {}) }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { files: { renderDiagram: jobs.render, cancelDiagram: jobs.cancel } } }))
 import { DiagramFilePreview } from '../src/renderer/src/components/file-preview/DiagramFilePreview'
-import { DotFilePreview } from '../src/renderer/src/components/file-preview/DotFilePreview'
+import { DotFilePreview } from '@agentmux/editor-extensions/ui/DotFilePreview'
 let observers: { target?: Element; callback: (entries: any[]) => void; disconnect: ReturnType<typeof vi.fn> }[]
 let container: HTMLDivElement, root: Root
 const workers: any[] = []
@@ -82,6 +82,23 @@ describe('current visible diagram consumers', () => {
     await act(async () => viewport(true))
     expect(jobs.render.mock.calls[2][0].theme).toBe('light')
     expect(container.querySelector('img')).toBeNull()
+  })
+  it('subscribes to theme only while the existing viewport authorizes work', async () => {
+    jobs.render.mockImplementation(async request => ({ id: request.id, svg: '<svg />' }))
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe')
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+    const themeCalls = () => observe.mock.calls.map((args, index) => ({args, instance: observe.mock.contexts[index]}))
+      .filter(({args}) => args[0] === document.documentElement && args[1]?.attributeFilter?.includes('data-appearance'))
+    await act(async () => root.render(<DiagramFilePreview kind="mermaid" content="A" />))
+    expect(themeCalls()).toHaveLength(0)
+    await act(async () => viewport(true))
+    expect(themeCalls()).toHaveLength(1)
+    const subscribed = themeCalls()[0]!.instance
+    await act(async () => viewport(false))
+    expect(disconnect.mock.contexts).toContain(subscribed)
+    await act(async () => { document.documentElement.dataset.appearance = 'dark'; await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(themeCalls()).toHaveLength(1)
+    expect(jobs.render).toHaveBeenCalledTimes(1)
   })
   it('terminates the DOT Worker on source change, hidden viewport and completion', async () => {
     await act(async () => root.render(<DotFilePreview content="digraph { A->B }" />))

@@ -56,7 +56,7 @@ try {
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); const component = path.slice(path.lastIndexOf('/') + 1)
-      if ((!tabActionsOnly && component === 'TerminalView.tsx') || ['EditorPane.tsx', 'GitBranchDiffPane.tsx', 'ExcalidrawFilePreview.tsx', 'PdfContent.tsx'].includes(component)) {
+      if ((!tabActionsOnly && component === 'TerminalView.tsx') || ['EditorPane.tsx', 'GitBranchDiffPane.tsx', 'ExcalidrawFilePreview.tsx', 'PdfReader.tsx'].includes(component)) {
         const code = `export function ${component.slice(0, -4)}(){return null}`
         transformations.push({ path: relative(root, path), sourceSHA256: hash(source), loadedSHA256: hash(code), isolated: 'Native PTY and unused editor/media paint only; no Store, identity, Toolbar, navigation, Composer or Mote owner substitution' })
         return { contents: code, loader: 'js' }

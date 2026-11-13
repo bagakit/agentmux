@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { workspaceFileFormat } from '../src/shared/workspace-file-format'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import { detectLanguage } from '../src/renderer/src/lib/language-detect'
 
 describe('lightweight File format capabilities', () => {

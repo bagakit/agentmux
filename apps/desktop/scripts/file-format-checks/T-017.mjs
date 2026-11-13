@@ -1,10 +1,10 @@
 export const owningConfig = 'apps/desktop/test/file-format-integration.config.mts'
 export const tests = ['apps/desktop/test/file-format-integration.test.tsx', 'apps/desktop/test/probe-process-cleanup.test.ts', 'apps/desktop/test/probe-process-identity.test.ts']
-export const sources = ['apps/desktop/src/renderer/src/components/FileSurfaceView.tsx', 'apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx', 'apps/desktop/src/shared/workspace-file-format.ts',
+export const sources = ['apps/desktop/src/renderer/src/components/FileSurfaceView.tsx', 'apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx', 'packages/editor-extensions/src/catalog.ts',
   'apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/test/helpers/composer-dom-fixture.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/StructuredDataPreview.tsx', 'apps/desktop/src/renderer/src/components/file-preview/NotebookFilePreview.tsx',
-  'apps/desktop/src/renderer/src/lib/file-formats/data-structured-request.ts', 'apps/desktop/src/renderer/src/lib/file-formats/data-structured.worker.ts',
-  'apps/desktop/src/renderer/src/lib/file-formats/data-notebook.ts', 'apps/desktop/src/renderer/src/lib/file-formats/data-notebook.worker.ts',
+  'packages/editor-extensions/src/ui/StructuredDataPreview.tsx', 'packages/editor-extensions/src/ui/NotebookFilePreview.tsx',
+  'packages/editor-extensions/src/engines/data-structured-request.ts', 'packages/editor-extensions/src/engines/data-structured.worker.ts',
+  'packages/editor-extensions/src/engines/data-notebook.ts', 'packages/editor-extensions/src/engines/data-notebook.worker.ts',
   'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/test/probe-process.test.ts']
 export const mutations = [
   { label: 'structured-production-dispatch-disconnected', file: sources[1], before: 'return <StructuredDataPreview content={content} kind={kind} visible={visible} ownerKey={`${workspaceId}:${path}`} />', after: 'return null' },

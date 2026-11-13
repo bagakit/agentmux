@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { deflateRawSync } from 'node:zlib'
 
-const desktop = resolve(import.meta.dirname, '..'), require = createRequire(join(desktop, 'package.json'))
+const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..'), require = createRequire(join(desktop, 'package.json'))
 const { build, createServer } = await import(pathToFileURL(require.resolve('vite')).href)
 const { build: bundle } = createRequire(require.resolve('vite/package.json'))('esbuild')
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-rich-engines-"))
@@ -15,12 +15,12 @@ const pluginModule = join(desktop, '.tmp', `rich-assets-${process.pid}.mjs`)
 let child, devServer
 try {
   await mkdir(dirname(pluginModule), { recursive: true })
-  await bundle({ entryPoints: [join(desktop, 'scripts/file-diagram-assets.ts')], outfile: pluginModule, bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
+  await bundle({ entryPoints: [join(repository, 'packages/editor-extensions/src/build/file-diagram-assets.ts')], outfile: pluginModule, bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   const { fileDiagramAssets } = await import(pathToFileURL(pluginModule).href)
   const out = join(privateRoot, 'renderer')
   await build({ configFile: false, root: join(desktop, 'src/renderer'), base: './', logLevel: 'error',
     build: { outDir: out, emptyOutDir: true, rollupOptions: { input: join(desktop, 'src/renderer/file-diagram/index.html') } } })
-  await cp(join(desktop, 'vendor/drawio/v32.4.1'), join(out, 'diagram-assets/drawio'), { recursive: true })
+  await cp(join(repository, 'packages/editor-extensions/vendor/drawio/v32.4.1'), join(out, 'diagram-assets/drawio'), { recursive: true })
   const plantuml = join(out, 'diagram-assets/plantuml')
   await mkdir(plantuml, { recursive: true })
   for (const file of ['plantuml.js', 'viz-global.js', 'themes.js', 'emoji.js', 'openiconic.js', 'LICENSE']) {
@@ -34,10 +34,10 @@ try {
   await symlink(join(desktop, 'node_modules/electron'), join(privateRoot, 'node_modules/electron'))
   const sceneOut = join(privateRoot, 'scene-renderer')
   await build({ configFile: false, root: join(desktop, 'test/fixtures/rich-file-preview'), base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
-    plugins: [fileDiagramAssets(desktop)],
+    plugins: [fileDiagramAssets()],
     build: { outDir: sceneOut, emptyOutDir: true } })
   devServer = await createServer({ configFile: false, root: join(desktop, 'test/fixtures/rich-file-preview'), cacheDir: join(privateRoot, 'dev-cache'), logLevel: 'error',
-    esbuild: { jsx: 'automatic' }, plugins: [fileDiagramAssets(desktop)], server: { host: '127.0.0.1', port: 0 } })
+    esbuild: { jsx: 'automatic' }, plugins: [fileDiagramAssets()], server: { host: '127.0.0.1', port: 0 } })
   await devServer.listen()
   const devUrl = `http://127.0.0.1:${devServer.httpServer.address().port}/`
   const model = label => `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" value="${label}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc" vertex="1" parent="1"><mxGeometry x="40" y="40" width="200" height="80" as="geometry"/></mxCell></root></mxGraphModel>`

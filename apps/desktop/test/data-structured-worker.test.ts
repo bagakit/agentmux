@@ -2,12 +2,12 @@ import { beforeAll, expect, it } from 'vitest'
 import { Worker } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
-import type { StructuredPreview } from '../src/renderer/src/lib/file-formats/data-model'
+import type { StructuredPreview } from '@agentmux/editor-extensions/engines/data-model'
 
 let code: string
 beforeAll(async () => {
   const result = await build({ configFile: false, logLevel: 'error', build: { write: false, minify: false,
-    lib: { entry: fileURLToPath(new URL('../src/renderer/src/lib/file-formats/data-structured.worker.ts',import.meta.url)), formats: ['es'] },
+    lib: { entry: fileURLToPath(new URL('../../../packages/editor-extensions/src/engines/data-structured.worker.ts',import.meta.url)), formats: ['es'] },
     rollupOptions: { output: { inlineDynamicImports: true } } } })
   const outputs = Array.isArray(result) ? result : [result]
   const chunk = outputs.flatMap(item => 'output' in item ? item.output : []).find(item => item.type === 'chunk')

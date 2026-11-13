@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { render } from '../src/renderer/src/lib/file-formats/drawio-engine'
+import { render } from '@agentmux/editor-extensions/engines/drawio-engine'
 
 const port = vi.hoisted(() => ({ load: vi.fn(async (_url: URL) => {}) }))
-vi.mock('../src/renderer/src/lib/file-formats/diagram-script', () => ({ loadDiagramScript: port.load }))
+vi.mock('@agentmux/editor-extensions/engines/diagram-script', () => ({ loadDiagramScript: port.load }))
 afterEach(() => { vi.unstubAllGlobals(); port.load.mockClear(); document.body.replaceChildren() })
 
 it('drawio passes the current model and requested page to the official viewer, exports and releases it', async () => {

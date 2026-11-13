@@ -13,7 +13,7 @@ const component = 'apps/desktop/src/renderer/src/components/file-preview/StaticM
 const inputs = [producer, runner, component, 'apps/desktop/scripts/fixtures/file-format-capabilities/main.cjs',
   'apps/desktop/scripts/fixtures/file-format-capabilities/entry.tsx', 'apps/desktop/scripts/fixtures/file-format-capabilities/documents.mjs',
   'apps/desktop/scripts/fixtures/file-surface-quality/visual/entry.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/NotebookFilePreview.tsx', 'apps/desktop/scripts/probe-process.mjs']
+  'packages/editor-extensions/src/ui/NotebookFilePreview.tsx', 'apps/desktop/scripts/probe-process.mjs']
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [file, sha(await readFile(join(repository, file)))])))
 const anchor = "FORBID_ATTR: ['srcdoc', 'srcset', 'target', 'action', 'formaction', 'autofocus']"

@@ -1,11 +1,11 @@
 export const owningConfig = 'apps/desktop/test/diagram-format.config.mts'
 export const tests = ['apps/desktop/test/file-diagram-renderer.test.ts', 'apps/desktop/test/diagram-file-preview.test.tsx']
 export const sources = [
-  'apps/desktop/src/shared/file-diagram.ts', 'apps/desktop/src/main/file-diagram-renderer.ts',
+  'packages/editor-extensions/src/protocols/diagram.ts', 'apps/desktop/src/main/file-diagram-renderer.ts',
   'apps/desktop/src/renderer/file-diagram/index.html', 'apps/desktop/src/renderer/file-diagram/entry.ts',
-  'apps/desktop/src/renderer/src/lib/file-formats/mermaid-engine.ts',
+  'packages/editor-extensions/src/engines/mermaid-engine.ts',
   'apps/desktop/src/renderer/src/components/file-preview/DiagramFilePreview.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/DotFilePreview.tsx',
+  'packages/editor-extensions/src/ui/DotFilePreview.tsx',
   'packages/client-ui/src/lib/use-visible-work.ts', 'packages/client-ui/src/platform.tsx',
   'apps/desktop/src/renderer/src/lib/theme-contract.ts'
 ]

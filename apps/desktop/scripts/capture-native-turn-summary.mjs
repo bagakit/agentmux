@@ -16,7 +16,7 @@ try {
   const sourceBinding = { name: 'actual-turn-summary-source', setup(builder) { builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
     if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
     const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); const name = path.slice(path.lastIndexOf('/') + 1)
-    if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSourceEditor.tsx', 'PdfContent.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx'].includes(name)) {
+    if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSourceEditor.tsx', 'PdfReader.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx'].includes(name)) {
       const code = `export function ${name.slice(0, -4)}(){return null}`; receipt.transformations.push({ file: relative(root, path), sourceSHA256: hash(source), loadedSHA256: hash(code), reason: 'Unused PTY/file/Monaco paint leaf; this preview only reads Activity.' }); return { contents: code, loader: 'js' }
     }
     return { contents: source, loader: path.endsWith('tsx') ? 'tsx' : path.endsWith('ts') ? 'ts' : 'js' }

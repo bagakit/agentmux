@@ -5,9 +5,9 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('monaco-editor', () => ({}))
-import { MediaPlayer, type MediaLease } from '../src/renderer/src/components/MediaPlayer'
+import { MediaPlayer, type MediaLease } from '@agentmux/editor-extensions/ui/MediaPlayer'
 import { api } from '../src/renderer/src/lib/api'
-import { classifyStream, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '../src/renderer/src/lib/media-player'
+import { classifyStream, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
 import { readStyleSheet, stripCssComments } from './helpers/styles'
 
 function ranges(...pairs: [number, number][]): TimeRanges {
@@ -124,7 +124,7 @@ describe('mounted player', () => {
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
   it('plays the lease URL with its own chrome: no native controls, no autoplay, metadata preload', async () => {
-    await render(<MediaPlayer lease={lease()} name="clips/promo.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clips/promo.mp4" onRetry={() => {}} />)
     const video = media()
     expect(video.tagName).toBe('VIDEO'); expect(video.getAttribute('src')).toBe(lease().url)
     expect(video.hasAttribute('controls')).toBe(false); expect(video.hasAttribute('autoplay')).toBe(false)
@@ -135,7 +135,7 @@ describe('mounted player', () => {
   })
 
   it('the rendered timeline is the one the player step drives', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { duration: 600 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     const timeline = container.querySelector<HTMLInputElement>('.media-player__slider')!, volume = container.querySelector<HTMLInputElement>('.media-player__volume')!
@@ -146,7 +146,7 @@ describe('mounted player', () => {
 
   it('keys pressed inside the player act on it; the same key elsewhere does not', async () => {
     const outside = document.createElement('textarea'); document.body.append(outside)
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { paused: true, ended: false })
     await act(async () => { outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true })) })
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
@@ -159,7 +159,7 @@ describe('mounted player', () => {
   })
 
   it('an input indicator leaves when its own animation ends, not on a separate timer', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { paused: true, ended: false, duration: 60 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     const group = container.querySelector<HTMLElement>('[role="group"]')!
@@ -173,7 +173,7 @@ describe('mounted player', () => {
   })
 
   it('a live stream shows the live badge, never a duration, and goes back to live when behind', async () => {
-    await render(<MediaPlayer lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
     const video = media()
     let current = 158
     define(video, { duration: Number.POSITIVE_INFINITY, seekable: ranges([100, 160]), buffered: ranges([100, 160]), paused: false, ended: false })
@@ -192,7 +192,7 @@ describe('mounted player', () => {
   })
 
   it('keeps an unreported live position unknown while playback remains available', async () => {
-    await render(<MediaPlayer lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('playlist')} name="live/index.m3u8" onRetry={() => {}} />)
     define(media(), { duration: Number.POSITIVE_INFINITY, seekable: ranges(), paused: true })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     const badge = () => container.querySelector<HTMLButtonElement>('.media-player__live')!
@@ -207,7 +207,7 @@ describe('mounted player', () => {
   })
 
   it('cycles every speed by pointer and keeps keyboard speed changes clamped', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { duration: 60 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     for (const rate of [1.25, 1.5, 2, 0.5, 0.75, 1]) {
@@ -227,7 +227,7 @@ describe('mounted player', () => {
   it('explains a failure by the lease owner fact, not by the media error code alone', async () => {
     const status = vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'deleted', path: 'clip.mp4' })
     const retry = vi.fn()
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={retry} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={retry} />)
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     expect(status).toHaveBeenCalledWith('lease-video')
@@ -241,18 +241,18 @@ describe('mounted player', () => {
     let answer!: (value: { state: 'deleted'; path: string }) => void
     vi.spyOn(api.files, 'mediaStreamStatus').mockImplementation(() => new Promise(resolve => { answer = resolve }))
     const first = lease(), next = { ...lease(), id: 'lease-next', url: 'http://127.0.0.1:1/lease-next/clip' }
-    await render(<MediaPlayer lease={first} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={first} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     // The same player instance is handed a new lease before the old lease's reason comes back.
-    await render(<MediaPlayer lease={next} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={next} name="clip.mp4" onRetry={() => {}} />)
     await act(async () => { answer({ state: 'deleted', path: 'clip.mp4' }) })
     expect(container.querySelector('[role="alert"]')).toBeNull()
   })
 
   it('an active lease with code 4 reads as an unsupported format', async () => {
     vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
-    await render(<MediaPlayer lease={lease()} name="clip.mov" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mov" onRetry={() => {}} />)
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Format not supported')
@@ -260,7 +260,7 @@ describe('mounted player', () => {
 
   it('a playlist that fails before any frame with an active record offers Retry, never an unsupported-format verdict', async () => {
     vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
-    await render(<MediaPlayer lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Playback failed')
@@ -269,7 +269,7 @@ describe('mounted player', () => {
 
   it('a live stream that stalls after playing says it stopped, not that the format is unsupported', async () => {
     vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
-    await render(<MediaPlayer lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
     define(media(), { videoWidth: 1280, videoHeight: 720, duration: Number.POSITIVE_INFINITY })
     await act(async () => { media().dispatchEvent(new Event('loadeddata')) })
     define(media(), { error: { code: 4 } })
@@ -283,7 +283,7 @@ describe('mounted player', () => {
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback) } observe() {} disconnect() {} })
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000)
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1000)
-    await render(<MediaPlayer lease={lease()} name="wide.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="wide.mp4" onRetry={() => {}} />)
     define(media(), { videoWidth: 1920, videoHeight: 1080, duration: 30 })
     await act(async () => { media().dispatchEvent(new Event('loadedmetadata')) })
     const stage = container.querySelector<HTMLElement>('.media-player__stage')!
@@ -294,7 +294,7 @@ describe('mounted player', () => {
   })
 
   it('video with no decodable picture says so and moves to the audio card without reloading the element', async () => {
-    await render(<MediaPlayer lease={lease()} name="voice.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="voice.mp4" onRetry={() => {}} />)
     const video = media()
     define(video, { videoWidth: 0, videoHeight: 0, duration: 30 })
     await act(async () => { video.dispatchEvent(new Event('loadeddata')) })
@@ -311,7 +311,7 @@ describe('mounted player', () => {
     Object.defineProperty(HTMLMediaElement.prototype, 'videoWidth', { configurable: true, get() { return facts.videoWidth } })
     Object.defineProperty(HTMLMediaElement.prototype, 'videoHeight', { configurable: true, get() { return facts.videoHeight } })
     try {
-      await render(<MediaPlayer lease={lease()} name="cached.mp4" onRetry={() => {}} />)
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="cached.mp4" onRetry={() => {}} />)
       expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
     } finally {
       if (original) Object.defineProperty(HTMLMediaElement.prototype, 'readyState', original); else delete (HTMLMediaElement.prototype as { readyState?: number }).readyState
@@ -320,7 +320,7 @@ describe('mounted player', () => {
   })
 
   it('a double click on the picture enters full screen and leaves play state as it was', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     const video = media()
     let paused = true
     define(video, { ended: false })
@@ -343,7 +343,7 @@ describe('mounted player', () => {
     Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', { configurable: true, get() { return time }, set(value: number) { time = value } })
     try {
       const resume = { current: { time: 321, volume: 0.3, muted: true, rate: 2 } }
-      await render(<MediaPlayer lease={lease()} name="cached.mp4" onRetry={() => {}} resume={resume} />)
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="cached.mp4" onRetry={() => {}} resume={resume} />)
       expect(time).toBe(321); expect(media().muted).toBe(true); expect(media().playbackRate).toBe(2)
       expect(resume.current).toBeNull()
     } finally {
@@ -353,36 +353,36 @@ describe('mounted player', () => {
   })
 
   it('an audio file uses the always-visible card with a primary play disc', async () => {
-    await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
     expect(media().tagName).toBe('AUDIO')
     expect(container.querySelector('.media-player__card')).not.toBeNull()
     expect(container.querySelector('.media-player__primary')?.getAttribute('aria-label')).toBe('Play')
   })
 
   it('an audio player keeps no empty picture stage on screen', async () => {
-    await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
     // The element hidden for audio is the one whose own display rule must yield to [hidden].
     const hidden = [...container.querySelectorAll<HTMLElement>('[hidden]')].filter(element => element.querySelector('.media-player__stage'))
     expect(hidden).toHaveLength(1)
     const owner = [...hidden[0]!.classList].find(name => name.startsWith('media-player__'))!
-    const rules = stripCssComments(readStyleSheet('./media-player.css'))
+    const rules = stripCssComments(readStyleSheet('@agentmux/editor-extensions/styles/media-player.css'))
     expect(rules).toMatch(new RegExp(`\\.${owner}\\[hidden\\]\\s*\\{\\s*display:\\s*none;?\\s*\\}`))
   })
 
   it('a narrow Region never hides part of the time readout, which would run the two clocks together', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { duration: 90 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     const time = container.querySelector('.media-player__time')!
     expect(time.textContent).toBe('0:00 / 1:30')
     const parts = new Set([...time.querySelectorAll('*')].flatMap(element => [...element.classList]))
-    const rules = stripCssComments(readStyleSheet('./media-player.css'))
+    const rules = stripCssComments(readStyleSheet('@agentmux/editor-extensions/styles/media-player.css'))
     const hidden = [...rules.matchAll(/([^{}]+)\{[^{}]*display:\s*none/g)].flatMap(match => match[1]!.split(',').map(selector => selector.trim()))
     for (const selector of hidden) for (const part of parts) expect(selector, `${selector} hides ${part}`).not.toMatch(new RegExp(`\\.${part}(?![\\w-])`))
   })
 
   it('leaving stops reading: pause, drop the source and reload the empty element', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     const video = media()
     await act(async () => root.render(<></>))
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
@@ -391,7 +391,7 @@ describe('mounted player', () => {
   })
 
   it('the timeline lives inside the bar, so there is no empty capsule beside the controls', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { duration: 90 })
     await act(async () => { media().dispatchEvent(new Event('durationchange')) })
     const bar = container.querySelector('.media-player__bar')!
@@ -402,7 +402,7 @@ describe('mounted player', () => {
   })
 
   it('a paused player past its first frame still shows the play disc, not a blank stage', async () => {
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     const video = media()
     let paused = true
     define(video, { ended: false, duration: 30 })
@@ -421,7 +421,7 @@ describe('mounted player', () => {
 
   it('a failure surfaces a solid primary Retry button, not a small inline one', async () => {
     vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'deleted', path: 'clip.mp4' })
-    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     const retry = container.querySelector('.media-player__retry')

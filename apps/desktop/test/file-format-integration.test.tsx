@@ -12,8 +12,8 @@ import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
-import { readStructuredPreview } from '../src/renderer/src/lib/file-formats/data-parse'
-import { createNotebookReader } from '../src/renderer/src/lib/file-formats/data-notebook'
+import { readStructuredPreview } from '@agentmux/editor-extensions/engines/data-parse'
+import { createNotebookReader } from '@agentmux/editor-extensions/engines/data-notebook'
 
 const initial = useAppStore.getState(), workers: TestWorker[] = []
 class TestWorker {

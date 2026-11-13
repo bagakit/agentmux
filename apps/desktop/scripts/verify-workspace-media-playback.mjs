@@ -23,10 +23,10 @@ const receiptOnly = process.argv.includes('--receipt')
 // Every file whose change can alter playback or a captured frame, so a review is never reused across them.
 const sourceFiles = ['apps/desktop/src/main/workspace-media-streams.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/preview-paths.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/index.html',
-  'apps/desktop/src/renderer/src/components/MediaPlayer.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
-  'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/media-player.ts',
+  'packages/editor-extensions/src/ui/MediaPlayer.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
+  'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'packages/editor-extensions/src/engines/media-player.ts',
   'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'apps/desktop/src/renderer/src/styles/media-player.css',
-  'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'apps/desktop/src/shared/workspace-file-format.ts',
+  'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'packages/editor-extensions/src/catalog.ts',
   'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts',
   'apps/desktop/scripts/verify-workspace-media-playback.mjs', 'apps/desktop/scripts/package-smoke-context.mjs',
   'apps/desktop/scripts/fixtures/workspace-media-playback/main.cjs', 'apps/desktop/scripts/fixtures/workspace-media-playback/entry.tsx',

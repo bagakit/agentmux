@@ -35,7 +35,7 @@ try {
     'drawing.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="640" height="400" fill="#dce9e4"/><circle cx="320" cy="190" r="110" fill="#598c82"/><text x="180" y="350" font-family="sans-serif" font-size="22" fill="#273b42">Original file preview</text></svg>' }
   for (const [path, content] of Object.entries(files)) await writeFile(join(workspace, path), content)
   const pluginFile = join(temporary, 'pdf-assets.mjs')
-  await esbuild.build({ entryPoints: [join(desktop, 'scripts/pdfjs-viewer-assets.ts')], outfile: pluginFile, platform: 'node', format: 'esm', bundle: true, logLevel: 'error' })
+  await esbuild.build({ entryPoints: [join(root, 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts')], outfile: pluginFile, platform: 'node', format: 'esm', bundle: true, logLevel: 'error' })
   const { pdfjsViewerAssets } = await import(pluginFile)
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     plugins: [pdfjsViewerAssets(dirname(require.resolve('pdfjs-dist/package.json'))), { name: 'activation-source-binding', enforce: 'pre', async generateBundle() {
@@ -50,7 +50,7 @@ try {
   await symlink(join(desktop, 'node_modules'), join(temporary, 'node_modules'), 'dir')
   await esbuild.build({ entryPoints: [join(fixture, 'preload.ts')], outfile: join(temporary, 'preload.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'error' })
   await copyFile(join(fixture, 'main.cjs'), join(temporary, 'main.cjs'))
-  for (const path of ['apps/desktop/scripts/capture-file-explorer-activation.mjs', 'apps/desktop/scripts/fixtures/file-surface-quality/visual/main.cjs', 'apps/desktop/scripts/fixtures/file-surface-quality/visual/preload.ts', 'apps/desktop/scripts/pdfjs-viewer-assets.ts', 'pnpm-lock.yaml']) report.sourceHashes[path] = sha(await readFile(join(root, path)))
+  for (const path of ['apps/desktop/scripts/capture-file-explorer-activation.mjs', 'apps/desktop/scripts/fixtures/file-surface-quality/visual/main.cjs', 'apps/desktop/scripts/fixtures/file-surface-quality/visual/preload.ts', 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts', 'pnpm-lock.yaml']) report.sourceHashes[path] = sha(await readFile(join(root, path)))
   const spatial = fileURLToPath(import.meta.resolve('@agentmux/core/spatial-state')); report.sourceHashes[relative(root, spatial)] = sha(await readFile(spatial))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const phase of ['activation', 'activation-restart']) {

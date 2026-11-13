@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { Worker } from 'node:worker_threads'
 import { build } from 'vite'
 import { fileURLToPath } from 'node:url'
-import { createNotebookReader, notebookText, type NotebookReply } from '../src/renderer/src/lib/file-formats/data-notebook'
+import { createNotebookReader, notebookText, type NotebookReply } from '@agentmux/editor-extensions/engines/data-notebook'
 
 const cell = (source: unknown, extra = {}) => ({ cell_type: 'code', metadata: {}, source, execution_count: null, outputs: [], ...extra })
 const notebook = (cells: unknown[], extra = {}) => JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { language_info: { name: 'python' } }, cells, ...extra })
@@ -62,7 +62,7 @@ describe('Notebook readonly page adapter', () => {
 describe('production notebook Worker', () => {
   let code: string
   beforeAll(async () => {
-    const output = await build({ configFile: false, logLevel: 'silent', build: { write: false, minify: false, lib: { entry: fileURLToPath(new URL('../src/renderer/src/lib/file-formats/data-notebook.worker.ts', import.meta.url)), formats: ['es'] } } })
+    const output = await build({ configFile: false, logLevel: 'silent', build: { write: false, minify: false, lib: { entry: fileURLToPath(new URL('../../../packages/editor-extensions/src/engines/data-notebook.worker.ts', import.meta.url)), formats: ['es'] } } })
     const outputs = Array.isArray(output) ? output : [output]
     const chunk = outputs.flatMap(item => 'output' in item ? item.output : []).find(item => item.type === 'chunk')
     if (!chunk || chunk.type !== 'chunk') throw new Error('Production Worker bundle not found')

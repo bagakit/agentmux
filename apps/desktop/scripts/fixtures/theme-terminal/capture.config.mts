@@ -2,11 +2,11 @@ import { defineConfig, mergeConfig } from 'vite'
 import base from '../../../vite.web.config'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { fileDiagramAssets } from '../../../scripts/file-diagram-assets'
+import { fileDiagramAssets } from '@agentmux/editor-extensions/build/file-diagram-assets'
 const inputs: Record<string, { source: string, transformed: string }> = {}
 const mutant = process.env.TERMINAL_THEME_MUTANT
 export default mergeConfig(base, defineConfig({ root: import.meta.dirname, worker: { format: 'es' }, resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: resolve(import.meta.dirname, 'xterm-instrumented.ts') }] },
-  plugins: [fileDiagramAssets(resolve(import.meta.dirname, '../../..')), { name: 'terminal-theme-source-binding', enforce: 'pre', transform(code, id) {
+  plugins: [fileDiagramAssets(), { name: 'terminal-theme-source-binding', enforce: 'pre', transform(code, id) {
     const original = code
     if (id.endsWith('/components/TerminalView.tsx')) {
       if (mutant === 'disconnected') code = code.replace('terminalRef.current.options.theme = terminalTheme(themeId)', 'terminalRef.current.options.theme = terminalTheme(\'graphite\')')

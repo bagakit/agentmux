@@ -67,7 +67,7 @@ try {
     name:'candidate-source-binding', enforce:'pre',
     async generateBundle(){for(const file of this.getWatchFiles()) if(file.startsWith(root+'/') && !file.includes('/node_modules/') && /\.(?:tsx?|css|html)$/.test(file)) report.sourceHashes[relative(root,file)]=sha(await readFile(file))}
   }],define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true}})
-  report.sourceHashes['apps/desktop/scripts/pdfjs-viewer-assets.ts']=sha(await readFile(join(desktop,'scripts/pdfjs-viewer-assets.ts')))
+  report.sourceHashes['packages/editor-extensions/src/build/pdfjs-viewer-assets.ts']=sha(await readFile(join(desktop,'scripts/pdfjs-viewer-assets.ts')))
   report.sourceHashes['apps/desktop/src/renderer/index.html']=sha(await readFile(join(desktop,'src/renderer/index.html')))
   report.sourceHashes['apps/desktop/scripts/fixtures/file-surface-quality/visual/main.cjs']=sha(await readFile(join(fixture,'main.cjs')))
   const nativeModule=join(temporary,'workspace-files.mjs')

@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'n
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
-const sources = ['apps/desktop/src/shared/workspace-file-format.ts', 'apps/desktop/src/shared/note-format.ts', 'apps/desktop/src/shared/note-document.ts',
+const sources = ['packages/editor-extensions/src/catalog.ts', 'apps/desktop/src/shared/note-format.ts', 'apps/desktop/src/shared/note-document.ts',
   ...['components/FileSurfaceView.tsx', 'components/FilePreviewPane.tsx', 'components/FileDataPreview.tsx', 'components/WorkspaceImage.tsx', 'lib/file-json-preview.ts',
     'lib/file-delimited-preview.ts', 'lib/use-workspace-file-preview.ts'].map(path => 'apps/desktop/src/renderer/src/' + path)]
 const fixture = 'apps/desktop/scripts/fixtures/file-surface-quality/vitest.owning.config.mts'

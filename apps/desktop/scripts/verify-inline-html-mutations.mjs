@@ -14,7 +14,7 @@ const cases = [
   ['current-buffer', router, 'path={surface.path} content={doc.content} />', 'path={surface.path} content="" />', paneTest, 'previews the current'],
   ['opaque-page', component, 'sandbox="allow-scripts"', 'sandbox="allow-scripts allow-same-origin"', paneTest, 'previews the current'],
   ['late-resource-release', component, 'if (cancelled || !owner.valid || resourceKey(workspaceId) !== owner.resource)', 'if (false)', paneTest, 'releases a late HTML response'],
-  ['html-public-mode', 'apps/desktop/src/shared/workspace-file-format.ts', "html: 'html', htm: 'html',", "html: null, htm: null,", 'apps/desktop/test/workface-file-view-control.test.tsx', 'reports page.html reader support'],
+  ['html-public-mode', 'packages/editor-extensions/src/catalog.ts', "html: 'html', htm: 'html',", "html: null, htm: null,", 'apps/desktop/test/workface-file-view-control.test.tsx', 'reports page.html reader support'],
   ['asset-resource-identity', 'apps/desktop/src/main/html-file-previews.ts', 'return !this.disposed && this.previews.get(id) === preview && this.workspaceMatches(preview)', 'return !this.disposed && this.previews.get(id) === preview', 'apps/desktop/test/html-file-preview.test.ts', 'does not leak late asset bytes'],
   ['main-frame-admission', 'apps/desktop/src/main/ipc.ts', "if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')\n    return await htmlPreviews.open", 'return await htmlPreviews.open', 'apps/desktop/test/html-preview-ipc.test.ts', 'refuses an untrusted sender or subframe']
 ]

@@ -1,5 +1,5 @@
 export const tests = ['apps/desktop/test/excalidraw-preview.test.tsx', 'apps/desktop/test/excalidraw-local-fonts.test.ts']
-export const sources = ['apps/desktop/src/renderer/src/components/file-preview/ExcalidrawFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/file-formats/excalidraw-scene.ts', 'apps/desktop/src/renderer/src/lib/file-data-preview.ts', 'apps/desktop/scripts/excalidraw-local-fonts.ts', 'apps/desktop/scripts/file-diagram-assets.ts']
+export const sources = ['packages/editor-extensions/src/ui/ExcalidrawFilePreview.tsx', 'packages/editor-extensions/src/engines/excalidraw-scene.ts', 'packages/editor-extensions/src/engines/file-data-preview.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts', 'packages/editor-extensions/src/build/file-diagram-assets.ts']
 export const mutations = [
   { label: 'excalidraw-view-mode-removed', file: sources[0], before: 'viewModeEnabled zenModeEnabled', after: 'viewModeEnabled={false} zenModeEnabled' },
   { label: 'excalidraw-files-validation-removed', file: sources[1], before: "value.type !== 'excalidraw'", after: 'false' },

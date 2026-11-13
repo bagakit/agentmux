@@ -7,8 +7,8 @@ import original from '../../../vitest.config'
 
 const root = resolve(import.meta.dirname, '../../..')
 const changes = {
-  'unknown-live': ['apps/desktop/src/renderer/src/lib/media-player.ts', "if (!window) return 'unknown'", "if (!window) return 'at-live'"],
-  'pointer-speed': ['apps/desktop/src/renderer/src/components/MediaPlayer.tsx', 'direction: 1, wrap: true', 'direction: 1, wrap: false']
+  'unknown-live': ['packages/editor-extensions/src/engines/media-player.ts', "if (!window) return 'unknown'", "if (!window) return 'at-live'"],
+  'pointer-speed': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'direction: 1, wrap: true', 'direction: 1, wrap: false']
 } as const
 
 export default defineConfig({ ...original,

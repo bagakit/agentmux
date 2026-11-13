@@ -19,7 +19,7 @@ const rendererModules = ['components/HtmlFilePreview.tsx', 'components/FileSurfa
   'lib/workbench-tabs.ts', 'lib/file-workbench-state.ts', 'lib/workface-file-view.ts', 'lib/api.ts', 'store.ts', 'styles/file-preview.css']
 const productionFiles = [...rendererModules.map(file => 'apps/desktop/src/renderer/src/' + file), 'apps/desktop/src/main/html-file-previews.ts',
   'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
-  'apps/desktop/src/shared/workspace-file-format.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts', 'apps/desktop/src/renderer/index.html',
+  'packages/editor-extensions/src/catalog.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts', 'apps/desktop/src/renderer/index.html',
   'apps/host/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']
 async function bindings() {
   const sources = {}

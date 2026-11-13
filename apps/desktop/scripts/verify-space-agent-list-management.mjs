@@ -80,7 +80,7 @@ try {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source))
       const component = path.slice(path.lastIndexOf('/') + 1)
-      if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSurfaceView.tsx', 'FileSourceEditor.tsx', 'PdfContent.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx'].includes(component)) {
+      if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSurfaceView.tsx', 'FileSourceEditor.tsx', 'PdfReader.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx'].includes(component)) {
         const code = `export function ${component.slice(0, -4)}(){return null}`
         receipt.transformations.push({ path: relative(root, path), sourceSHA256: hash(source), loadedSHA256: hash(code),
           isolated: 'Unrelated Native PTY, editor and file-preview paint only; original Agent list, Store, preference, shared Focus card/menu/board and confirmation untouched' })

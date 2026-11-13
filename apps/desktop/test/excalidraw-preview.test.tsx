@@ -2,8 +2,8 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { validateExcalidrawScene } from '../src/renderer/src/lib/file-formats/excalidraw-scene'
-import { ExcalidrawFilePreview } from '../src/renderer/src/components/file-preview/ExcalidrawFilePreview'
+import { validateExcalidrawScene } from '@agentmux/editor-extensions/engines/excalidraw-scene'
+import { ExcalidrawFilePreview } from '@agentmux/editor-extensions/ui/ExcalidrawFilePreview'
 import { previewVisibility } from './helpers/preview-visibility'
 
 const engine = vi.hoisted(() => ({ load: vi.fn(async (blob: Blob) => JSON.parse(await blob.text())), props: vi.fn(), wait: undefined as Promise<void> | undefined, importing: false }))

@@ -1,8 +1,8 @@
 import { View } from 'vega'
 import { expressionInterpreter } from 'vega-interpreter'
 import { afterEach, expect, it, vi } from 'vitest'
-import { compileVegaRuntime } from '../src/renderer/src/lib/file-formats/vega-spec'
-import { createVegaPreview } from '../src/renderer/src/lib/file-formats/vega-worker'
+import { compileVegaRuntime } from '@agentmux/editor-extensions/engines/vega-spec'
+import { createVegaPreview } from '@agentmux/editor-extensions/engines/vega-worker'
 
 const denied = async (): Promise<never> => { throw new Error('Unexpected resource') }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -82,7 +82,7 @@ it('the actual worker runs official dataflow, emits SVG and finalizes the owned 
   vi.stubGlobal('Image', undefined)
   vi.stubGlobal('OffscreenCanvas', class { getContext() { return { pixelRatio: 1, setTransform() {} } } })
   const engine = await import('vega'), finalize = vi.spyOn(engine.View.prototype, 'finalize')
-  await import('../src/renderer/src/lib/file-formats/vega-chart.worker')
+  await import('@agentmux/editor-extensions/engines/vega-chart.worker')
   port.onmessage!({ data: { action: 'start', content: JSON.stringify({ $schema: 'https://vega.github.io/schema/vega/v6.json', width: 420, height: 220, signals: [{ name: 'answer', update: '40+2' }, { name: 'level', value: 2, bind: { input: 'range', min: 0, max: 5 } }, { name: 'measured', value: 0, on: [{ events: 'container:resize', update: 'containerSize()[0]' }] }], marks: [{ type: 'text', encode: { update: { text: { signal: "answer + ':' + level + ':' + measured" } } } }] }), mode: 'vega', serial: 1 } })
   for (let i = 0; i < 100 && !messages.some(message => message.snapshot || message.error); i++) await new Promise(resolve => setTimeout(resolve, 2))
   expect(messages.find(message => message.error)).toBeUndefined()

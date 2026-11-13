@@ -37,7 +37,7 @@ try {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const bytes = await readFile(path, 'utf8'), file = relative(root, path), name = basename(path)
       loaded[file] = hash(bytes)
-      if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSourceEditor.tsx', 'PdfContent.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx', 'DiagramFilePreview.tsx', 'DotFilePreview.tsx', 'DrawioFilePreview.tsx'].includes(name)) {
+      if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'FileSourceEditor.tsx', 'PdfReader.tsx', 'ExcalidrawFilePreview.tsx', 'GitDiffCanvas.tsx', 'ToolkitScriptEditor.tsx', 'DiagramFilePreview.tsx', 'DotFilePreview.tsx', 'DrawioFilePreview.tsx'].includes(name)) {
         const symbol = name.slice(0, -4), code = `export function ${symbol}(){throw new Error('Uncovered paint leaf invoked')};export default ${symbol}`
         transformations.push({ file, original: hash(bytes), consumed: hash(code), reason: 'Unopened editor, PTY or diagram paint leaf; no switcher or file-discovery implementation replaced.' })
         return { contents: code, loader: 'js' }

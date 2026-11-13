@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { pdfjsViewerAssets } from '../scripts/pdfjs-viewer-assets'
+import { pdfjsViewerAssets } from '@agentmux/editor-extensions/build/pdfjs-viewer-assets'
 
 const observed = vi.hoisted(() => ({ streams: [] as ReadStream[] }))
 vi.mock('node:fs', async importOriginal => {

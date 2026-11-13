@@ -43,7 +43,7 @@ try {
         transformations.push({ path: relative(root, path), mutation, occurrences: 1, sourceSHA256: hash(source), loadedSHA256: hash(code) })
         return { contents: code, loader: 'tsx' }
       }
-      if (['SessionPane.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'NewTabSurface.tsx', 'ExcalidrawFilePreview.tsx', 'PdfContent.tsx', 'monaco.ts'].includes(component)) {
+      if (['SessionPane.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'NewTabSurface.tsx', 'ExcalidrawFilePreview.tsx', 'PdfReader.tsx', 'monaco.ts'].includes(component)) {
         const code = component === 'monaco.ts' ? 'export {}' : `export function ${component.slice(0, -4)}(){return null}`
         transformations.push({ path: relative(root, path), isolated: 'Unmounted native/editor/Launcher paint; no product state, navigation or reading owner replaced', sourceSHA256: hash(source), loadedSHA256: hash(code) })
         return { contents: code, loader: 'js' }
