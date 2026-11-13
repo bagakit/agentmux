@@ -1,6 +1,6 @@
 import { isAgentActivityStatusSource } from '../agent-status-freshness.js'
 import { unconfirmedExecutableObservation } from '../executable-observation.js'
-import type { AgentMuxAgentSession, AgentMuxRun } from '../types.js'
+import type { AgentMuxAgentSession, AgentMuxRun, AgentMuxStoredAgentSession } from '../types.js'
 import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityPolicy, type AgentMuxContinuityTrigger,
   type AgentMuxContinuityPendingReason, type AgentMuxAgentContinuityRunEvidence, type AgentMuxAgentContinuityFacts,
   type AgentMuxAgentContinuityDecision } from './continuity-contract.js'
@@ -45,6 +45,22 @@ function runEvidence(run: AgentMuxRun | null, observedAt: number): AgentMuxAgent
   if (!run) return { kind: 'run-missing', observedAt }
   if (run.state === 'running') return { kind: 'run-running', observedAt: run.observedAt }
   return { kind: 'run-ended', state: run.state, observedAt: run.observedAt }
+}
+
+/**
+ * The one owner of "this ended Session has no native conversation to continue".
+ *
+ * True only when nothing about a Provider identity was ever observed for this Session: no handle,
+ * no observed handle, no candidates awaiting selection, and its stored identity is durably
+ * confirmed. A confirmed ID without its locator, an unconfirmed save or several candidates are
+ * different facts and keep the existing identity and recheck paths. The caller has already
+ * established that the Run is not running; an unknown Runtime state never reaches here.
+ */
+export function agentSessionHasNoNativeConversation(
+  session: Pick<AgentMuxStoredAgentSession, 'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation'>,
+  durabilityConfirmed: boolean
+): boolean {
+  return durabilityConfirmed && !session.nativeHandle && !session.observedNativeHandle && !session.nativeSourceObservation
 }
 
 /**
@@ -146,7 +162,7 @@ export function decideAgentSessionContinuity(
       kind: 'unavailable',
       agentSessionId: facts.agentSessionId,
       previousRun,
-      reason: 'native-handle-unavailable',
+      reason: facts.nativeConversationAbsent ? 'native-conversation-absent' : 'native-handle-unavailable',
       evidence
     }
   }

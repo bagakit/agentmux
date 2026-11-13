@@ -20,7 +20,7 @@ import { AgentMuxError } from '../errors.js'
 import { executorUnavailableError } from '../executable-probe.js'
 import { agentLifecycleOperationIdentity } from '../agent-session-store.js'
 import { normalizeAgentContinuityMessageInput, normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
-import { decideAgentSessionContinuity, agentContinuityAdmission } from './continuity-policy.js'
+import { decideAgentSessionContinuity, agentContinuityAdmission, agentSessionHasNoNativeConversation } from './continuity-policy.js'
 import type { AgentCapabilitySnapshot, AgentMuxRun, AgentMuxStoredAgentSession } from '../types.js'
 import { safeId, terminalEnvironment } from '../agent-runtime-helpers.js'
 import type { AgentSessionRecoveryPorts } from './ports.js'
@@ -439,6 +439,10 @@ export async function performAgentContinuity(
     : { kind: 'run-missing' as const, observedAt: now }
   const catalog = current ? ports.providers.providers.get(current.providerId).catalog : null
   let admission: ReturnType<typeof agentContinuityAdmission> | undefined
+  // Core's one answer to "was there ever a native conversation here". An ended Run with none is a
+  // final fact for this operation, decided before automatic admission could park it as idle-unknown.
+  const nativeConversationAbsent = Boolean(current && run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
+    agentSessionHasNoNativeConversation(current, !ports.sessions.registry.isDurabilityUnconfirmed(current.agentSessionId)))
   if (current && run?.state !== 'running') {
     if (prior?.kind === 'reattachable' && prior.frontendReconnect?.frontendId) throw new AgentMuxError(
       'The original frontend reconnection completed. This ended Run needs a new explicit recovery operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
@@ -472,7 +476,8 @@ export async function performAgentContinuity(
       }
     }
     const lastActivityAt = agentContinuityLastActivityAt(current)
-    if (receipt.intentOperationId) {
+    if (nativeConversationAbsent) admission = undefined
+    else if (receipt.intentOperationId) {
       const root = current.continuityOperations?.[receipt.intentOperationId]
       if (!root?.supervision || root.supervision.activeAttemptOperationId !== receipt.operationId ||
         ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)) {
@@ -485,7 +490,7 @@ export async function performAgentContinuity(
     } else admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
       admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
       ...(lastActivityAt === undefined ? {} : { lastActivityAt }) })
-    if (admission.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
+    if (admission?.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
   }
   const handle = current?.nativeHandle
   const canProbe = run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
@@ -548,7 +553,7 @@ export async function performAgentContinuity(
   const decision = decideAgentSessionContinuity({ agentSessionId: input.agentSessionId,
     hostId: current?.hostId ?? retirement?.hostId ?? 'local', expectedRun: input.expectedRun, observedAt: now,
     session: current ? ports.events.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
-    run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }) })
+    run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }), nativeConversationAbsent })
   if (decision.kind === 'reattachable' && current) {
     if (prior && (prior.errorCode === 'AGENT_NOT_FOUND' || ['provider-unavailable', 'provider-unverified'].includes(prior.reason))) {
       delete receipt.error; delete receipt.errorCode

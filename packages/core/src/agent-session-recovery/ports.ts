@@ -20,7 +20,7 @@ import type { AgentMuxHostExecutorOwner } from '../executor-owner.js'
 export type AgentSessionRecoveryPorts = {
   sessions: {
     readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readFuturePromptIntent" | "readContinuityControlReceipt" | "recordRestartAdmission" | "recordResumeResolutionFailure" | "releaseResumeResolutionOwner" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession">;
-    readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "admitResumeResolution" | "handoffResumeResolution" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle">;
+    readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "isDurabilityUnconfirmed" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "admitResumeResolution" | "handoffResumeResolution" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle">;
     resolveRawAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     updateExactAgentSession(

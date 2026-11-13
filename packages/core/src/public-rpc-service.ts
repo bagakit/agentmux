@@ -663,6 +663,9 @@ export class AgentMuxRpcService {
       if (prior?.action === 'restart' || prior?.launchInput || prior?.messageInput) throw new AgentMuxError('The original operation belongs to another lifecycle or input request.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
       const restored = await selected.client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: prior?.previousRun ?? original.run,
         operationId: request.requestId, trigger: 'manual' })
+      if (restored.kind === 'unavailable' && restored.reason === 'native-conversation-absent') throw new AgentMuxError(
+        'This Session has no native conversation to continue: its Run ended before the Provider held one. The original Session and its history are kept; start a new conversation instead.',
+        'AGENT_RESUME_UNAVAILABLE', JSON.stringify(restored))
       if (restored.kind !== 'resumed' && restored.kind !== 'reattachable') throw new AgentMuxError(
         restored.continuity?.error ?? `The original Resume is ${restored.kind}. Inspect this Session and retry the same operation.`,
         restored.continuity?.errorCode ?? 'AGENT_CONTINUITY_PENDING', JSON.stringify(restored))

@@ -118,6 +118,15 @@ export function classifyContinuityFailure(
         remedy: { kind: 'refresh' },
         actionLabel: 'Re-read original'
       }
+    case 'native-conversation-absent':
+      // Core's own final fact: nothing to re-read or retry. Say only what Core knows, and offer
+      // the one action that works; the original Session stays readable beside the new one.
+      return {
+        title: 'No conversation to continue',
+        reason: 'This Session ended before it had a conversation to continue. Its Tab and draft are kept.',
+        remedy: { kind: 'start-new' },
+        actionLabel: 'Start a new conversation here'
+      }
     case 'provider-unavailable':
       return {
         title: 'Provider unavailable on this Host',

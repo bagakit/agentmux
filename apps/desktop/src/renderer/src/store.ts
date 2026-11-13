@@ -1881,6 +1881,8 @@ function continuityFailureDetail(
       return 'Core has no current or retired binding for this Agent Session.'
     case 'native-handle-unavailable':
       return 'This Agent Session has no verified Provider handle for native resume.'
+    case 'native-conversation-absent':
+      return 'This Session has no native conversation to continue: its Run ended before the Provider held one.'
     case 'provider-resume-unsupported':
       return 'This Provider does not support native session resume.'
     case 'provider-unavailable':
