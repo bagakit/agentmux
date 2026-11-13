@@ -31,9 +31,12 @@ type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; han
 // Region marks need travel; a press that moves less than this many screen pixels creates none of them.
 // An output callback may resolve true once the host has kept that exact output; closing then needs no confirmation.
 type AnnotationOutput = (input: ImageAnnotationInput) => void | Promise<boolean | void>
+// The last tool and style carry over to the next editor in this Renderer.
+let lastStyle: { tool: AnnotationTool; color: string; width: number; fontSize: number; blockSize: number; pixelateMode: 'region' | 'brush'; brushWidth: number } = {
+  tool: 'rect', color: DEFAULT_SCREENSHOT_COLOR, width: DEFAULT_SCREENSHOT_WIDTH, fontSize: DEFAULT_SCREENSHOT_FONT_SIZE, blockSize: 16, pixelateMode: 'region', brushWidth: 32 }
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
 
-export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, documentStatus,
+export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel = 'Copy PNG', busyLabel = 'Copying…',
   onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onEdited, onError }: {
   image: AnnotationImage
@@ -41,6 +44,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   copied?: string | null
   active?: boolean
   initialState?: Pick<ScreenshotDocument, 'shapes' | 'crop'>
+  /** Opens with this tool instead of the remembered one. */
+  initialTool?: AnnotationTool
   documentStatus?: string | null
   ownerDocument?: Document
   title?: string
@@ -73,13 +78,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const [imageError, setImageError] = useState(false)
   const [documentState, setDocumentState] = useState<ScreenshotDocument>(() => ({ ...createScreenshotDocument(), ...initialState }))
   const [pendingText, setPendingText] = useState<TextDraft | null>(null)
-  const openingTool = useRef<AnnotationTool>('pen').current
+  const openingTool = useRef(initialTool ?? lastStyle.tool).current
   // The opening document is already kept by its owner; only later edits need a discard confirmation.
   const [exported, setExported] = useState(documentState), [discarding, setDiscarding] = useState(false)
   const [tool, setTool] = useState<AnnotationTool>(openingTool), [selectedId, setSelectedId] = useState<string | null>(null)
-  const [color, setColor] = useState(DEFAULT_SCREENSHOT_COLOR), [width, setWidth] = useState(DEFAULT_SCREENSHOT_WIDTH)
-  const [fontSize, setFontSize] = useState(DEFAULT_SCREENSHOT_FONT_SIZE), [blockSize, setBlockSize] = useState(16)
-  const [pixelateMode, setPixelateMode] = useState<'region' | 'brush'>('region'), [brushWidth, setBrushWidth] = useState(32)
+  const [color, setColor] = useState(lastStyle.color), [width, setWidth] = useState(lastStyle.width)
+  const [fontSize, setFontSize] = useState(lastStyle.fontSize), [blockSize, setBlockSize] = useState(lastStyle.blockSize)
+  const [pixelateMode, setPixelateMode] = useState(lastStyle.pixelateMode), [brushWidth, setBrushWidth] = useState(lastStyle.brushWidth)
   const [textRows, setTextRows] = useState(2)
   const [noteDraft, setNoteDraft] = useState(''), [noteEditor, setNoteEditor] = useState<string | null>(null), [panHeld, setPanHeld] = useState(false)
   const [view, setView] = useState<AnnotationView>({ scale: 1, x: 0, y: 0 }), [fitted, setFitted] = useState(true)
@@ -182,6 +187,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
   useEffect(() => { if (active && pendingText) { const frame = ownerWindow.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => ownerWindow.cancelAnimationFrame(frame) } }, [active, pendingText, ownerWindow])
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
+  useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth])
 
   function fitImage() { resetGesture(); setFitted(true); requestView(fitImageView(size.width, size.height, image.width, image.height)) }
   function zoomTo(next: number, anchor = { x: size.width / 2, y: size.height / 2 }) {
@@ -235,7 +241,13 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomTo(viewRef.current.scale * 1.25); return }
       if (event.key === '-') { event.preventDefault(); zoomTo(viewRef.current.scale / 1.25); return }
       if (busy) return
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
+      const command = event.metaKey || event.ctrlKey, key = event.key.toLowerCase()
+      if (!textDraftRef.current && !noteEditorRef.current) {
+        if (event.key === 'Enter' && !command && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); complete(); return }
+        if (command && key === 'c') { event.preventDefault(); complete(); return }
+        if (command && key === 's' && onSavePng) { event.preventDefault(); complete('save-png'); return }
+      }
+      if (command && key === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); return }
       if (selected && target === canvasRef.current && event.key.startsWith('Arrow')) {
         const delta = event.shiftKey ? 10 : 1
@@ -251,7 +263,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const onKeyUp = (event: KeyboardEvent) => { if (event.key === ' ') releaseSpace() }
     ownerWindow.addEventListener('keydown', onKeyDown); ownerWindow.addEventListener('keyup', onKeyUp); ownerWindow.addEventListener('blur', releaseSpace)
     return () => { ownerWindow.removeEventListener('keydown', onKeyDown); ownerWindow.removeEventListener('keyup', onKeyUp); ownerWindow.removeEventListener('blur', releaseSpace) }
-  }, [active, busy, selected, selectedId, tool, pendingText, confirmingDiscard, unexported, onCancel, redo, undo, edit, resetGesture, requestView, size, fitted])
+  }, [active, busy, selected, selectedId, tool, pendingText, confirmingDiscard, unexported, documentState, loaded, noteDraft, onCancel, onComplete, onSavePng, redo, undo, edit, resetGesture, requestView, size, fitted])
 
   function localPoint(event: { clientX: number; clientY: number }): ScreenshotPoint {
     const rect = canvasRef.current?.getBoundingClientRect()
