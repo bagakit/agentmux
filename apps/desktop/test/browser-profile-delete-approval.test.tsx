@@ -103,8 +103,8 @@ function productionDeleteHandler(dependencies: {
   const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 }
   }).outputText
-  return new Function('browsers', 'browserProfiles', compiled)(
-    dependencies.browsers, dependencies.browserProfiles
+  return new Function('browsers', 'spatialState', 'savedBrowsersUsingProfile', 'browserProfiles', 'browserRecoveryPreviews', compiled)(
+    dependencies.browsers, { read: async () => null }, () => [], dependencies.browserProfiles, { clearProfile: async () => ({ status: 'cleared' }) }
   ) as ReturnType<typeof productionDeleteHandler>
 }
 
