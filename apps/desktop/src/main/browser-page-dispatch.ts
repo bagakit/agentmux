@@ -992,14 +992,22 @@ export function createBrowserPageDispatch(
       }
       case 'waitForLoad': {
         const timeoutMs = typeof args[0] === 'number' ? args[0] : DEFAULT_WAIT_MS
+        // "Loaded" belongs to one document. A readyState read is only kept when the page Main reports
+        // is the same before and after it, so a navigation during the read cannot pass for the new page.
+        let loaded: { url: string; navigationId: string } | null = null
         await until('the page to finish loading', timeoutMs, async () => {
+          const before = context.pageInfo()
           const state = (await session.sendCommand('Runtime.evaluate', {
             expression: 'document.readyState',
             returnByValue: true
           })) as { result?: { value?: unknown } }
-          return state.result?.value === 'complete'
+          const after = context.pageInfo()
+          if (state.result?.value !== 'complete' || after.navigationId !== before.navigationId) return false
+          loaded = { url: after.url, navigationId: after.navigationId }
+          return true
         })
-        return null
+        // The page that finished, so a program can tell which document it now acts on.
+        return loaded
       }
       case 'waitForNetworkIdle': {
         const timeoutMs = typeof args[0] === 'number' ? args[0] : DEFAULT_WAIT_MS
