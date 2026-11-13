@@ -91,16 +91,16 @@ if (task === 'T-004') {
       oracle = 'Actual offscreen running/moving animation work'
     } else {
       assert.equal(rendered.failure?.stage, 'agent-operation-fork-pointer')
-      assert.ok(rendered.failure.message.includes('Trusted native Fork activation reaches its original operation controller'), 'The original real Fork consumer assertion failed')
+      assert.ok(rendered.failure.message.includes('Opening its tooltip preserves the shown host through the native pointer sequence'), 'The original native host-preservation assertion failed')
       const pointer = rendered.agentOperations?.forkNativePointer
       assert.equal(pointer?.hit?.destination, 'right', 'The physical native destination hit is the original Right button')
       const events = pointer.after?.events ?? []
-      const down = events.find(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
-      assert.ok(down, 'A trusted native pointerdown reached the exact destination')
-      assert.ok(events.some(event => event.type === 'beforetoggle' && event.oldState === 'open' && event.newState === 'closed' && event.at >= down.at && event.target?.className?.split(/\s+/).includes('window-overlay-host')), 'The native overlay host closed during the actual pointer activation')
-      assert.equal(pointer.after.submitted, false, 'Reordering lost the real Fork activation rather than launching another operation')
-      assert.ok(!events.some(event => event.type === 'click' && event.trusted && event.target?.destination === 'right'), 'The destination pointerup/click was cancelled by the real host reorder')
-      oracle = 'Trusted exact Right pointerdown interrupted by native host beforetoggle closed, with no Fork submission'
+      const down = events.findIndex(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
+      const activation = events.findIndex(event => event.type === 'click' && event.trusted && event.target?.destination === 'right')
+      assert.ok(down >= 0 && activation > down, 'The exact destination received a trusted native pointerdown and click')
+      assert.ok(events.slice(down, activation).some(event => event.type === 'beforetoggle' && event.oldState === 'open' && event.newState === 'closed' && event.target?.className?.split(/\s+/).includes('window-overlay-host')), 'The native overlay host closed between the actual pointerdown and click')
+      assert.equal(pointer.after.submitted, true, 'This host-preservation negative proof retains the original Fork submission')
+      oracle = 'Native overlay host closes between trusted exact Right pointerdown and click while the original Fork still submits'
     }
     assert.equal(native.sourceMutations.length, 1)
     const inputs = native.sourceMutations
@@ -120,7 +120,14 @@ if (task === 'T-004') {
   for (const input of allNativeInputs) assert.equal(restored.sourceBefore[input.file], input.source, 'Restored GREEN binds the same exact source as RED')
   const isolation = restored.processes[0].rendered.agentOperations.isolationObservations
   assert.ok(isolation.length >= 2 && isolation.every(observation => observation.beforeRunning + observation.afterRunning === 0 && !observation.moving))
-  assert.equal(restored.processes[0].rendered.agentOperations.forkNativePointer.after.submitted, true, 'Restored native trusted Fork activation reaches its original controller')
+  const restoredPointer = restored.processes[0].rendered.agentOperations.forkNativePointer
+  assert.equal(restoredPointer.hit.destination, 'right')
+  assert.equal(restoredPointer.after.submitted, true, 'Restored native trusted Fork activation reaches its original controller')
+  const restoredEvents = restoredPointer.after.events
+  const restoredDown = restoredEvents.findIndex(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
+  const restoredActivation = restoredEvents.findIndex(event => event.type === 'click' && event.trusted && event.target?.destination === 'right')
+  assert.ok(restoredDown >= 0 && restoredActivation > restoredDown)
+  assert.ok(!restoredEvents.slice(restoredDown, restoredActivation).some(event => event.type === 'beforetoggle' && event.newState === 'closed'), 'The same restored native pointer sequence preserves the shown host')
   runs.push({ name: 'native-animation-work-restored', outcome: 'GREEN', command: [process.execPath, ...restoredArgs], evidence: join(candidateDirectory, 'receipt.json'), reusedExactCandidateAllowed: true })
   process.stdout.write('T-004 actual native work and pointer oracles: RED → restored GREEN\n')
 }
