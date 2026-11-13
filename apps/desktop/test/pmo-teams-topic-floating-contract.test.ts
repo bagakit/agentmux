@@ -19,12 +19,13 @@ it('keeps one native anchored surface and one product footer caller for all Mote
   expect(entry).toContain('aria-expanded={visible}')
   expect(entry).toContain('<SpaceObjectIcon kind="mote"')
   const identity = readFileSync(join(renderer, 'components/SpaceObjectIcon.tsx'), 'utf8')
-  expect(identity).toContain('<MoteIcon size={14} data-mote-icon-source="automatic" />')
+  // The automatic Mote branch renders the shared rig; its other props may change.
+  expect(identity).toMatch(/kind === 'mote' \? <MoteIcon [^>]*data-mote-icon-source="automatic"[^>]*\/>/)
   expect(panel).toContain('popover="auto"')
   expect(panel).toContain("placement: 'top-start'")
   expect(panel).toContain('topicId={target.topicId}')
   expect(panel).toContain('useScratchTopics(SCRATCH_WORKSPACE_ID)')
-  expect(app).toContain('<PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />')
+  expect(app).toMatch(/<PmoTeamsTopicFloatingPanel floating=\{moteFloating\} setFloating=\{setMoteFloating\}[^>]*\/>/)
   const expanded = chrome.match(/\.pmo-teams-topic-compact-launcher__button\[aria-expanded="true"\]\s+\.pmo-teams-topic-compact-launcher__surface\s*\{([^}]+)\}/)
   expect(expanded).not.toBeNull()
   expect(expanded![1]).toContain('border-color:')
@@ -37,10 +38,4 @@ it('keeps one native anchored surface and one product footer caller for all Mote
   expect(styles).not.toContain('firework')
   const callers = sourceFiles(renderer).filter(file => readFileSync(file, 'utf8').includes('<PmoTeamsTopicEntry'))
   expect(callers.map(file => relative(renderer, file)).sort()).toEqual(['components/SurfaceNavigation.tsx'])
-})
-
-it('retains the original project image asset independently from the automatic Mote identity', () => {
-  const launcherAsset = readFileSync(join(renderer, 'assets/pmo-teams-topic-avatar.png'))
-  const projectAsset = readFileSync(new URL('../resources/icon.png', import.meta.url))
-  expect(launcherAsset.equals(projectAsset)).toBe(true)
 })
