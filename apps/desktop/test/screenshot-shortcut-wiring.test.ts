@@ -60,17 +60,19 @@ async function mainFixture() {
   const frame = { executeJavaScript: vi.fn(async (code: string) => new Function('window', 'return ' + code)({ agentmuxScreenshotAttachment: receiver })) }
   const contents = { isDestroyed: () => destroyed, mainFrame: frame,
     send: vi.fn((channel: string, ...args: unknown[]) => { for (const listener of bridge.listeners.get(channel) ?? []) listener({}, ...args) }) }
-  const nativeWindow = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false }
+  const nativeWindow = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false, hide: vi.fn(), minimize: vi.fn(), close: vi.fn() }
+  const editorOptions: Array<{ returnFocus?(): void }> = [], application = { getPath: () => home, hide: vi.fn() }, pins = { hasOpenPins: vi.fn(() => false) }
   const body = statements.join('\n') + '\n' + nativeRegistration[0]!.getText(source.file) + '\n' + statusHandlers[0]!.getText(source.file)
   const original = new Function('ScreenCapture', 'GlobalScreenshot', 'SystemScreenshotEditor', 'registerScreenshotShortcut', 'registerNativeDesktopIpc', 'process', 'globalShortcut',
-    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent', 'importMeta', 'pinScreenshot', 'inspectScreenshotPin',
+    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent', 'importMeta', 'pinScreenshot', 'inspectScreenshotPin', 'screenshotPins',
     transpile(body) + '\nreturn { screenshotShortcut, globalScreenshot }')(
-    ScreenCapture, GlobalScreenshot, class { edit = vi.fn(); notice = vi.fn(); dispose = vi.fn() }, registerScreenshotShortcut, registerNativeDesktopIpc,
-    { platform: 'darwin' }, { register, unregister }, { getPath: () => home, hide: vi.fn() }, () => native, contents,
+    ScreenCapture, GlobalScreenshot, class { constructor(_appearance: unknown, options: { returnFocus?(): void }) { editorOptions.push(options) } edit = vi.fn(); notice = vi.fn(); dispose = vi.fn() },
+    registerScreenshotShortcut, registerNativeDesktopIpc, { platform: 'darwin' }, { register, unregister }, application, () => native, contents,
     { workbenchWindows: { windowForDocument: () => nativeWindow } }, { getFocusedWindow: () => nativeWindow }, { appearance: {} },
-    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler), { dirname: home }, vi.fn(), vi.fn())
+    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler), { dirname: home }, vi.fn(), vi.fn(), pins)
   bridge.invoke.mockImplementation((channel: string) => Promise.resolve(handlers.get(channel)!({ sender: trusted })))
-  return { ...original, register, unregister, native, receiver, contents, home, bytes, handlers, markDestroyed: () => { destroyed = true } }
+  return { ...original, register, unregister, native, receiver, contents, home, bytes, handlers, nativeWindow, application, pins,
+    returnFocus: () => editorOptions[0]!.returnFocus!(), markDestroyed: () => { destroyed = true } }
 }
 
 it('the actual Main callback captures and copies with no Composer, without a Renderer shortcut dependency', async () => {
@@ -110,4 +112,17 @@ it('the actual trusted startup installs the optional attachment receiver once', 
   const install = vi.fn(), host = {}
   new Function('installScreenshotAttachmentReceiver', 'window', transpile(calls[0]!.getText(source.file)))(install, host)
   expect(install).toHaveBeenCalledExactlyOnceWith(host)
+})
+
+it('focus return is the app-wide macOS ⌘H: it hides AgentMux, including the workbench, and keeps it when a pin is open', async () => {
+  const f = await mainFixture()
+  f.returnFocus()
+  expect(f.application.hide, 'one app.hide(), the same as ⌘H').toHaveBeenCalledOnce()
+  // app.hide() hides every AgentMux window, so a visible but unfocused workbench is hidden too and returns from the Dock.
+  // No window is hidden, minimized or closed one by one.
+  expect(f.nativeWindow.hide).not.toHaveBeenCalled(); expect(f.nativeWindow.minimize).not.toHaveBeenCalled(); expect(f.nativeWindow.close).not.toHaveBeenCalled()
+  f.pins.hasOpenPins.mockReturnValue(true)
+  f.returnFocus()
+  expect(f.application.hide, 'an open pin keeps AgentMux on screen').toHaveBeenCalledOnce()
+  f.screenshotShortcut.dispose()
 })
