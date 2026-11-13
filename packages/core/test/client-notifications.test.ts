@@ -30,6 +30,10 @@ describe('client notifications public diagnostic boundary', () => {
       .toMatchObject({ target: { notificationId }, includeRaw: true })
     for (const extra of [['--recent'], ['--logid', 'original'], ['--notification-id', notificationId, '--unread'], ['--limit', '0'], ['--category', 'invented']])
       await expect(parseAgentMuxCliInvocation([...args, ...extra])).rejects.toThrow()
+    // A caller's out-of-range page size is an argument error, not a broken evidence contract.
+    for (const limit of ['0', '33', '50', '2.5']) await expect(parseAgentMuxCliInvocation([...args, '--limit', limit]))
+      .rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT', message: expect.stringContaining('from 1 to 32') })
+    expect((await parseAgentMuxCliInvocation([...args, '--limit', '32'])).params).toMatchObject({ target: { list: { limit: 32 } } })
     await expect(parseAgentMuxCliInvocation(['system', 'diagnostics', 'inspect', '--domain', 'client.incident', '--host-id', 'local', '--recent', '--unread'])).rejects.toThrow()
   })
   it('keeps the internal client envelope separate from inspect.client and rejects wrong target and raw leakage', () => {
