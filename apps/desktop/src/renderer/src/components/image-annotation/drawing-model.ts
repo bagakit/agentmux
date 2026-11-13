@@ -50,10 +50,27 @@ export function createBlurShape(id: string, color: string, from: ScreenshotPoint
 export function createSpotlightShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, dim = DEFAULT_SPOTLIGHT_DIM): SpotlightShape {
   return { id, color, kind: 'spotlight', from, to, dim: clamp(dim, SPOTLIGHT_DIM_RANGE) }
 }
-/** Without `at`, the bubble starts to the right of the source with a small gap. */
-export function createCalloutShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, zoom = DEFAULT_CALLOUT_ZOOM, at?: ScreenshotPoint): CalloutShape {
-  const source = normalizeRect(from, to)
-  return { id, color, kind: 'callout', from, to, zoom: clamp(zoom, CALLOUT_ZOOM_RANGE), at: at ?? { x: source.x + source.width + 16, y: source.y } }
+const CALLOUT_GAP = 16
+/** Without `at`, the bubble goes beside the source within `bounds` (the image, or a capture's selection): right, else
+ * left, else below, else above, and if none fits it is clamped inside so the export never crops it. */
+export function createCalloutShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, zoom = DEFAULT_CALLOUT_ZOOM,
+  at?: ScreenshotPoint, bounds?: NormalizedRect): CalloutShape {
+  const source = normalizeRect(from, to), scale = clamp(zoom, CALLOUT_ZOOM_RANGE)
+  return { id, color, kind: 'callout', from, to, zoom: scale, at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, bounds) }
+}
+
+function calloutPlacement(source: NormalizedRect, width: number, height: number, bounds?: NormalizedRect): ScreenshotPoint {
+  const right = { x: source.x + source.width + CALLOUT_GAP, y: source.y }
+  if (!bounds) return right
+  const fits = (at: ScreenshotPoint) => at.x >= bounds.x && at.y >= bounds.y && at.x + width <= bounds.x + bounds.width && at.y + height <= bounds.y + bounds.height
+  const centredX = source.x + source.width / 2 - width / 2
+  const candidates = [right, { x: source.x - CALLOUT_GAP - width, y: source.y },
+    { x: centredX, y: source.y + source.height + CALLOUT_GAP }, { x: centredX, y: source.y - CALLOUT_GAP - height }]
+  // Without a full fit, the first place whose width fits is kept and only moved vertically, so it stays beside or below the source.
+  const sideways = (at: ScreenshotPoint) => at.x >= bounds.x && at.x + width <= bounds.x + bounds.width
+  const chosen = candidates.find(fits) ?? candidates.find(sideways) ?? right
+  const inside = (value: number, start: number, length: number, size: number) => Math.max(start, Math.min(start + length - size, value))
+  return { x: inside(chosen.x, bounds.x, bounds.width, width), y: inside(chosen.y, bounds.y, bounds.height, height) }
 }
 export function calloutBubble(shape: CalloutShape): NormalizedRect {
   const source = normalizeRect(shape.from, shape.to)

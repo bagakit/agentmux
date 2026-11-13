@@ -503,7 +503,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         : tool === 'cover' ? { id, kind: 'cover', color: '#111827', from: at, to: at }
         : tool === 'blur' ? createBlurShape(id, '#111827', at, at, strengths.blurRadius)
         : tool === 'spotlight' ? createSpotlightShape(id, '#ffffff', at, at, strengths.spotlightDim)
-        : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom)
+        : tool === 'callout' ? createCalloutShape(id, color, at, at, strengths.calloutZoom, undefined, documentState.crop ?? originalBounds)
         : tool === 'note' ? { id, kind: 'note', color, width: stroke / 2, radius: 12 / fit, number: nextNoteNumber(documentState.shapes), note: '', from: at, to: at }
         : { id, kind: tool, color, width: stroke, from: at, to: at }
     }
@@ -532,7 +532,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         if (!last || last.x !== at.x || last.y !== at.y) shape.points.push(at)
       } else if (shape.kind === 'callout') {
         // While its source is drawn, the bubble keeps the default place beside it; after release it moves on its own.
-        currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom)
+        currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, documentState.crop ?? originalBounds)
       } else shape.to = constrained && (shape.kind === 'rect' || shape.kind === 'ellipse' || shape.kind === 'arrow')
         ? constrainedEndpoint(shape.kind, shape.from, at) : at
     }
