@@ -7,6 +7,7 @@ export const BROWSER_PAGE_MEMORY_MAX_URL_LENGTH = 8 * 1024
 export const BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH = 1024
 export const BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH = 96 * 1024
 export const BROWSER_PAGE_MEMORY_MAX_RECORD_BYTES = 640 * 1024
+export const BROWSER_LAST_SEEN_FAVICON_BATCH = 256
 
 const address = z.string().min(1).max(BROWSER_PAGE_MEMORY_MAX_URL_LENGTH)
 export const browserPageMemoryEntrySchema = z.object({

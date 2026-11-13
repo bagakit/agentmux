@@ -746,6 +746,7 @@ const api: AgentMuxPreloadApi = {
   },
   browser: {
     getRecoveryPreview: id => ipcRenderer.invoke('browser:getRecoveryPreview', id),
+    getLastSeenFavicons: ids => ipcRenderer.invoke('browser:getLastSeenFavicons', ids),
     captureInputContext: browserId => ipcRenderer.invoke('browser:captureInputContext', browserId),
     captureInputFrame: browserId => ipcRenderer.invoke('browser:captureInputFrame', browserId),
     prepareInputSelection: input => ipcRenderer.invoke('browser:prepareInputSelection', input),

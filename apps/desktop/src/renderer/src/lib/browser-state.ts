@@ -14,6 +14,28 @@ export type BrowserProjectionState = {
   layouts: Record<string, WorkspaceLayout>
 }
 
+export type BrowserLastSeenFavicon = { url: string; faviconDataUrl: string }
+
+/** A parked page without an icon shows Main's last-seen icon only while it is still at that address. */
+export function rememberBrowserFavicons(tabs: Record<string, WorkbenchTab>,
+  found: Readonly<Record<string, BrowserLastSeenFavicon>>): Record<string, WorkbenchTab> {
+  let next = tabs
+  for (const [tabId, tab] of Object.entries(tabs)) {
+    let regions = tab.regions
+    for (const surface of Object.values(tab.regions)) {
+      if (surface.kind !== 'browser' || surface.faviconDataUrl || !(surface.nativeOwnerDeferred || surface.nativeOwnerReleased)) continue
+      const memory = Object.hasOwn(found, surface.browserId) ? found[surface.browserId] : undefined
+      if (!memory || memory.url !== surface.url) continue
+      if (regions === tab.regions) regions = { ...regions }
+      regions[surface.regionId] = { ...surface, faviconDataUrl: memory.faviconDataUrl, faviconRemembered: true }
+    }
+    if (regions === tab.regions) continue
+    if (next === tabs) next = { ...tabs }
+    next[tabId] = { ...tab, regions }
+  }
+  return next
+}
+
 /** Keep native lifecycle boundaries in order while coalescing only their own snapshot segment. */
 export function createBrowserProjectionEventQueue() {
   let events: BrowserEvent[] = []

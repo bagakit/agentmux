@@ -230,6 +230,7 @@ import { createBrowserProfileExitCheck } from './browser-profile-exit-check.js'
 import { createBrowserProfileProxyAuth } from './browser-profile-proxy-auth.js'
 import { BrowserSitePermissions } from './browser-site-permissions.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
+import { BROWSER_LAST_SEEN_FAVICON_BATCH } from '../shared/browser-page-memory.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
@@ -580,18 +581,19 @@ export async function registerIpc(args: {
     if (saved.capsuleId) saved = resolveCapsuleColdDocument(saved, await capsuleClient.call('capsule.inspect', { capsuleId: saved.capsuleId }))
     return saved
   }, input)
+  const savedRecoveryPreviewScope = (graph: Parameters<typeof browserColdDescriptor>[0], id: string): BrowserRecoveryPreviewScope | null => {
+    const saved = browserColdDescriptor(graph, id)
+    if (saved.mode === 'normal' && !saved.profileId) return null
+    return saved.mode === 'private'
+      ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
+      : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
+  }
   const resolveRecoveryPreviewScope = async (id: string): Promise<BrowserRecoveryPreviewScope | null> => {
     const original = browsers.recoveryPreviewScope(id)
     if (original) return original
     const savedState = await spatialState.read()
     // A live/released owner created during the disk read remains the identity authority.
-    const current = browsers.recoveryPreviewScope(id)
-    if (current) return current
-    const saved = browserColdDescriptor(savedState?.graph ?? null, id)
-    if (saved.mode === 'normal' && !saved.profileId) return null
-    return saved.mode === 'private'
-      ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
-      : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
+    return browsers.recoveryPreviewScope(id) ?? savedRecoveryPreviewScope(savedState?.graph ?? null, id)
   }
   // One automation gate: decided by who asks (an Agent caller or a person), not by which handler runs.
   const browserAutomation = createBrowserAutomationGate({
@@ -2042,6 +2044,32 @@ export async function registerIpc(args: {
     } catch {
       return { status: 'unavailable', warning: 'The original Browser preview could not be read. The page and Retry remain available.' }
     }
+  })
+  handleWithEvent('browser:getLastSeenFavicons', async (_event, ids: unknown) => {
+    if (!Array.isArray(ids) || ids.length > BROWSER_LAST_SEEN_FAVICON_BATCH || ids.some(id => typeof id !== 'string' || !id)) {
+      throw new TypeError(`Last-seen Browser icons are read for at most ${BROWSER_LAST_SEEN_FAVICON_BATCH} Browser ids.`)
+    }
+    const scopes = new Map<string, BrowserRecoveryPreviewScope>()
+    const unresolved = (ids as string[]).filter(id => {
+      const scope = browsers.recoveryPreviewScope(id)
+      if (scope) scopes.set(id, scope)
+      return !scope
+    })
+    if (unresolved.length) {
+      const graph = (await spatialState.read())?.graph ?? null
+      for (const id of unresolved) {
+        // An unconfirmed saved owner only leaves that page without a remembered icon.
+        let scope = browsers.recoveryPreviewScope(id)
+        try { scope ??= savedRecoveryPreviewScope(graph, id) } catch { scope = null }
+        if (scope) scopes.set(id, scope)
+      }
+    }
+    const found = await Promise.all([...scopes].map(async ([id, scope]) => {
+      const page = await browserRecoveryPreviews.readPage(scope)
+      return page.status === 'available' && page.memory.favicon
+        ? [[id, { url: page.memory.url, faviconDataUrl: page.memory.favicon.dataUrl }] as const] : []
+    }))
+    return Object.fromEntries(found.flat())
   })
   handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
     await ensureBrowser(id)

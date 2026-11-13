@@ -4,6 +4,7 @@ import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } fro
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
+import { observeLastSeenBrowserFavicons } from './lib/browser-last-seen-favicons'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
 import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
@@ -102,6 +103,7 @@ function useStableWorkbenchViewTargets(current: WorkbenchViewTargets): Workbench
 
 export function App() {
   useEffect(() => observeNotebookLibrary(), [])
+  useEffect(() => observeLastSeenBrowserFavicons(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
   if (workflowComponentGallery) return <WorkflowComponentGallery />

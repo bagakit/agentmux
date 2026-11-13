@@ -2103,6 +2103,8 @@ export type AgentMuxDesktopApi = {
   browser: {
     /** Historical appearance only; never acquires or restores a native page. */
     getRecoveryPreview(id: string): Promise<import('./browser-recovery-preview').BrowserRecoveryPreviewReadResult>
+    /** Last-seen icons with the address they were seen at; absent Browsers have none or are unconfirmed. */
+    getLastSeenFavicons(ids: readonly string[]): Promise<Record<string, { url: string; faviconDataUrl: string }>>
     captureInputContext(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputScene>
     captureInputFrame(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputFrameResult>
     prepareInputSelection(input: import('./browser-input-context-capture').BrowserInputSelectionPrepare): Promise<import('./browser-input-context-capture').BrowserInputSelectionReceipt>
