@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import { addTabOccurrence, createWorkspaceLayout } from '@agentmux/layout'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { addTabOccurrence, createWorkspaceLayout, moveTab, moveTabToNewGroup } from '@agentmux/layout'
+import { parseAgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
 import { attachLauncherAgentPosition } from '../src/main/goal-discussion-handoff'
 import { workfaceSaveRecorder } from '../src/renderer/src/lib/workface-save-diagnostics'
@@ -19,11 +20,15 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'host', kind: 'local', lab
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const fileTab = (id: string) => createWorkbenchTab(id, { regionId: id + '-region', kind: 'file', workspaceId: 'project', path: id + '.md' })
 
-/** The Renderer's own derivation of a workbench with these Tabs in one display Group. */
-function derive(ids: string[], titles: Record<string, string> = {}) {
+/** The Renderer's own derivation of a workbench with these Tabs, in one display Group unless a layout is given. */
+function derive(ids: string[], titles: Record<string, string> = {}, layout = createWorkspaceLayout('group', ids)) {
   const tabs = Object.fromEntries(ids.map(id => [id, { ...fileTab(id), ...(titles[id] ? { title: titles[id] } : {}) }]))
-  return desktopSpatialGraph({ config, sessions: [], tabs, layouts: { project: createWorkspaceLayout('group', ids) },
-    spaceZoneBindings: {}, spatialRequests: {} } as never, [])
+  return desktopSpatialGraph({ config, sessions: [], tabs, layouts: { project: layout }, spaceZoneBindings: {}, spatialRequests: {} } as never, [])
+}
+/** Tabs no display Group of the merged graph shows: they would exist but appear nowhere. */
+const unshown = (graph: AgentMuxSpatialGraph) => {
+  const shown = new Set(Object.values(graph.layouts).flatMap(layout => layout.groups.flatMap(group => group.tabOrder)))
+  return graph.tabs.map(tab => tab.tabId).filter(id => !shown.has(id))
 }
 
 const directories: string[] = []
@@ -110,6 +115,40 @@ describe('display layouts merge per Group', () => {
     expect(merged.conflicts).toEqual([])
   })
 
+  it('keeps a reorder made on one side while the other side opens a Tab or changes the selection', () => {
+    const base = derive(['a', 'b', 'c'])
+    const local = structuredClone(base)
+    local.layouts.project = moveTab(local.layouts.project!, 'c', 'group', 'group', 0)
+    const opened = derive(['a', 'b', 'c', 'd'])
+    expect(reconcileSpatialGraphs(base, local, opened).graph.layouts.project!.groups[0]!.tabOrder).toEqual(['c', 'a', 'b', 'd'])
+    const selected = structuredClone(base)
+    selected.layouts.project!.groups[0]!.activeTabId = 'b'
+    const merged = reconcileSpatialGraphs(base, local, selected)
+    expect(merged.graph.layouts.project!.groups[0]).toMatchObject({ tabOrder: ['c', 'a', 'b'], activeTabId: 'b' })
+  })
+
+  it('closes a Tab one side closed while the other side reordered the Group', () => {
+    const base = derive(['a', 'b', 'c'])
+    const local = derive(['a', 'c'])
+    const remote = structuredClone(base)
+    remote.layouts.project = moveTab(remote.layouts.project!, 'c', 'group', 'group', 0)
+    expect(reconcileSpatialGraphs(base, local, remote).graph.layouts.project!.groups[0]!.tabOrder).toEqual(['c', 'a'])
+    const reordered = structuredClone(base), closed = structuredClone(base)
+    reordered.layouts.project = moveTab(reordered.layouts.project!, 'c', 'group', 'group', 0)
+    closed.layouts.project!.groups[0]!.tabOrder = ['a', 'c']
+    expect(reconcileSpatialGraphs(base, reordered, closed).graph.layouts.project!.groups[0]!.tabOrder).toEqual(['c', 'a'])
+  })
+
+  it('names the order when both sides moved the same Tabs differently, keeping every Tab', () => {
+    const base = derive(['a', 'b', 'c'])
+    const local = structuredClone(base), remote = derive(['a', 'b', 'c', 'd'])
+    local.layouts.project = moveTab(local.layouts.project!, 'c', 'group', 'group', 0)
+    remote.layouts.project = moveTab(remote.layouts.project!, 'a', 'group', 'group', 2)
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['layout:project:group:order'])
+    expect(merged.graph.layouts.project!.groups[0]!.tabOrder).toEqual(remote.layouts.project!.groups[0]!.tabOrder)
+  })
+
   it('keeps the remote selection and both occurrences when only the selection conflicts', () => {
     const base = derive(['a', 'b'])
     const local = structuredClone(base), remote = structuredClone(base)
@@ -120,6 +159,82 @@ describe('display layouts merge per Group', () => {
     const merged = reconcileSpatialGraphs(base, local, remote)
     expect(merged.graph.layouts.project!.groups[0]).toMatchObject({ activeTabId: 'a', tabOrder: ['a', 'b'] })
     expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['layout:project:group:selection'])
+  })
+})
+
+describe('a merge never hides a Tab or produces a graph Core rejects', () => {
+  it('keeps a Tab this window moved into a new Group when another writer changed the split tree', () => {
+    const base = derive(['a', 'b'])
+    const local = structuredClone(base)
+    local.layouts.project = moveTabToNewGroup(local.layouts.project!, 'b', 'group', 'group', 'right', 'mine')
+    const remote = derive(['a', 'b', 'c'], {}, moveTabToNewGroup(createWorkspaceLayout('group', ['a', 'b', 'c']), 'c', 'group', 'group', 'down', 'theirs'))
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    // The tree conflict keeps the remote tree, which has no Group for b; b stays shown in a remaining Group.
+    expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['layout:project:tree'])
+    expect(unshown(merged.graph)).toEqual([])
+    expect(() => parseAgentMuxSpatialGraph(merged.graph)).not.toThrow()
+  })
+
+  it('keeps a Tab this window added to a Group another writer closed', () => {
+    const split = derive(['a', 'b'], {}, moveTabToNewGroup(createWorkspaceLayout('group', ['a', 'b']), 'b', 'group', 'group', 'right', 'side'))
+    const local = derive(['a', 'b', 'c'], {}, structuredClone(split.layouts.project!))
+    local.layouts.project!.groups.find(group => group.id === 'side')!.tabOrder.push('c')
+    const remote = structuredClone(split)
+    remote.layouts.project = moveTab(remote.layouts.project!, 'b', 'side', 'group', 1)
+    const merged = reconcileSpatialGraphs(split, local, remote)
+    expect(merged.graph.layouts.project!.groups.map(group => [group.id, group.tabOrder])).toEqual([['group', ['a', 'b', 'c']]])
+    expect(unshown(merged.graph)).toEqual([])
+  })
+
+  it('still closes a Tab that one side closed', () => {
+    const base = derive(['a', 'b'])
+    const local = derive(['a'])
+    const remote = structuredClone(base)
+    remote.layouts.project!.groups[0]!.activeTabId = 'b'
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    expect(merged.graph.tabs.map(tab => tab.tabId)).toEqual(['a'])
+    expect(merged.graph.layouts.project!.groups[0]!.tabOrder).toEqual(['a'])
+  })
+
+  it('keeps an intentionally removed display occurrence removed while the Tab itself stays', () => {
+    const base = derive(['a', 'b'])
+    // This window unbinds b from the display; the Tab entity remains, shown nowhere on purpose.
+    const local = derive(['a', 'b'], {}, createWorkspaceLayout('group', ['a']))
+    const remote = structuredClone(base)
+    remote.layouts.project!.groups[0]!.activeTabId = 'b'
+    remote.layouts.project!.groups[0]!.recentTabIds = ['b']
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    expect(merged.graph.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
+    expect(merged.graph.layouts.project!.groups[0]!.tabOrder).toEqual(['a'])
+  })
+
+  it('keeps a Tab’s Regions equal to its merged split tree when another writer changed the Tab itself', () => {
+    const base = derive(['a'])
+    const tab = addWorkbenchRegion(fileTab('a'), 'a-region', 'right', { regionId: 'a-notes', kind: 'file', workspaceId: 'project', path: 'notes.md' })
+    const local = desktopSpatialGraph({ config, sessions: [], tabs: { a: tab }, layouts: { project: createWorkspaceLayout('group', ['a']) },
+      spaceZoneBindings: {}, spatialRequests: {} } as never, [])
+    const remote = structuredClone(base)
+    remote.tabs[0]!.zoneId = null
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    // The split lands and the remote Zone change is kept; Core accepts the graph instead of refusing every later save.
+    expect(merged.conflicts).toEqual([])
+    expect(merged.graph.tabs[0]).toMatchObject({ zoneId: null, regionIds: ['a-region', 'a-notes'] })
+    expect(() => parseAgentMuxSpatialGraph(merged.graph)).not.toThrow()
+    expect(Object.keys(desktopWorkbenchFromSpatial(merged.graph).tabs.a!.regions)).toEqual(['a-region', 'a-notes'])
+  })
+
+  it('keeps a Region this window closed while another writer’s winning split tree still shows it', () => {
+    const tab = addWorkbenchRegion(fileTab('a'), 'a-region', 'right', { regionId: 'a-notes', kind: 'file', workspaceId: 'project', path: 'notes.md' })
+    const base = desktopSpatialGraph({ config, sessions: [], tabs: { a: tab }, layouts: { project: createWorkspaceLayout('group', ['a']) },
+      spaceZoneBindings: {}, spatialRequests: {} } as never, [])
+    const local = derive(['a'])
+    const remote = structuredClone(base), root = remote.tabLayouts.a!.root
+    if (root.type !== 'split') throw new Error('The fixture Tab must be split')
+    root.ratio = 0.8
+    const merged = reconcileSpatialGraphs(base, local, remote)
+    expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['tabLayout:a:tree'])
+    expect(() => parseAgentMuxSpatialGraph(merged.graph)).not.toThrow()
+    expect(Object.keys(desktopWorkbenchFromSpatial(merged.graph).tabs.a!.regions)).toEqual(['a-region', 'a-notes'])
   })
 })
 
