@@ -11,7 +11,7 @@ import { useAppStore } from '../store'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionRevealFileIcon = semanticIconComponent('action.reveal-file')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
@@ -113,7 +113,7 @@ export function createWorkspaceRowMenuModel(input: {
 const WORKSPACE_ROW_MENU_ICONS: Record<WorkspaceRowActionId, typeof ThemeActionCopyIcon> = {
   'copy-path': ThemeActionCopyIcon,
   'copy-branch': ThemeObjectBranchIcon,
-  reveal: ThemeActionOpenExternalIcon,
+  reveal: ThemeActionRevealFileIcon,
   'open-terminal': ThemeObjectTerminalIcon,
   remove: ThemeLayoutCloseLeftIcon
 }

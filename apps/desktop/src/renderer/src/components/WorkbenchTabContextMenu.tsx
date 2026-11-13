@@ -19,6 +19,7 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
 const ThemeActionCopyRelativePathIcon = semanticIconComponent('action.copy-relative-path')
 const ThemeActionRevealFileIcon = semanticIconComponent('action.reveal-file')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectFolderLinkIcon = semanticIconComponent('object.folder-link')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -225,7 +226,7 @@ export function WorkbenchTabContextMenu({
           // already decline that, and the tab strip is the one place where the jump is visible.
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          {onOpenWindow ? <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpenWindow}><ThemeActionRevealFileIcon size={14} /><span>Open original Tab in window</span></ContextMenu.Item> : null}
+          {onOpenWindow ? <ContextMenu.Item className="tab-context-menu__item" onSelect={onOpenWindow}><ThemeActionOpenExternalIcon size={14} /><span>Open original Tab in window</span></ContextMenu.Item> : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameTab}>
             <ThemeActionEditIcon size={14} />
             <span>{renameLabel}</span>
