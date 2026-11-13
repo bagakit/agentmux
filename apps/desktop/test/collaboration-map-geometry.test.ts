@@ -54,7 +54,12 @@ it('joins visible overview points to the original directed route without moving 
   expect(Math.hypot(numbers[0]!-125, numbers[1]!-47)).toBeCloseTo(56)
   expect(Math.hypot(numbers.at(-2)!-625, numbers.at(-1)!-247)).toBeCloseTo(24)
   expect(route).toEqual(original)
-  expect(collaborationOverviewScale(member('closed', 0, 0, 14, 14), .05)).toBe(1)
+  // A point slot's largest face holds its screen size only until it spans twice the
+  // slot, so neighbours a layout gap apart never overlap; nearer, it is world-sized.
+  const closed = member('closed', 0, 0, 24, 24)
+  expect(collaborationOverviewScale(closed, .05) * 17).toBeCloseTo(48)
+  expect(collaborationOverviewScale(closed, .9)).toBeCloseTo(1 / .9)
+  expect(collaborationOverviewScale(closed, 1)).toBe(1)
 })
 
 

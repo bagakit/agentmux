@@ -15,7 +15,7 @@ import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-pr
 import { CollaborationBoundsIndex, collaborationBoundsOverlap } from '../src/renderer/src/lib/collaboration-spatial-index'
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
-import { COLLABORATION_ACTIVITY_MS, collaborationAgentGlyph } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationAgentGlyph, type CollaborationRecencyStep } from '../src/renderer/src/lib/collaboration-map-presentation'
 import { collaborationVisiblePath } from '../src/renderer/src/lib/collaboration-map-geometry'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
@@ -216,8 +216,9 @@ function curvePoints(path: string) {
 function expectAnchoredVisibleCurve(rawPath: engine.CollaborationPath, curve: ReturnType<typeof curvePoints>, offset: { x: number; y: number }) {
   const connection = requests.flatMap(request => request.type === 'route' ? request.connections : request.input.connections).find(connection => connection.id === rawPath.id)!
   expect(connection).toBeDefined()
-  const sourceGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.source)!.data.agent as CollaborationAgent)
-  const targetGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.target)!.data.agent as CollaborationAgent)
+  // Read the product's own per-node recency step; the endpoint must share it.
+  const glyphOf = (id: string) => { const data = captured.nodes.find(node => node.id === id)!.data as { agent: CollaborationAgent; step: CollaborationRecencyStep }; return collaborationAgentGlyph(data.agent, data.step) }
+  const sourceGlyph = glyphOf(connection.source), targetGlyph = glyphOf(connection.target)
   const projected = curvePoints(collaborationVisiblePath(rawPath, boxes.get(connection.source)!, boxes.get(connection.target)!, 1,
     sourceGlyph.overviewRadius, targetGlyph.overviewRadius, sourceGlyph.pointRadius, targetGlyph.pointRadius))
   expect(curve).toHaveLength(projected.length)
@@ -672,11 +673,14 @@ it('passes the effective Motion preference to explicit camera intent and cancels
 })
 
 it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometry unchanged by selection', async () => {
-  vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
-  const scene = scenario(5), tiers = ['active', 'idle', 'unknown', 'closed', 'unknown'] as const
+  const now = 1_000_000_000, hour = 3_600_000
+  vi.spyOn(Date, 'now').mockReturnValue(now)
+  // Every tier, one Provider-less member, and all three recency steps (live, retired, unknown time).
+  const scene = scenario(6), tiers = ['active', 'idle', 'unknown', 'closed', 'unknown', 'closed'] as const
+  const times = [{ lastActivityAt: now - 2 * hour }, { lastActivityAt: now - 10 * 60_000 }, { lastActivityAt: now - 5 * hour }, { lastActivityAt: null, retiredAt: now - 3 * hour }, { lastActivityAt: null }, { lastActivityAt: null, retiredAt: now - 30 * 24 * hour }]
   scene.agents = new Map<string, CollaborationAgent>([...scene.agents].map(([id, agent], index) => {
     const { providerId: _providerId, ...withoutProvider } = agent
-    return [id, { ...(index === 4 ? { ...withoutProvider, context: { ...agent.context!, providerId: null } } : agent), tier: tiers[index]!, lastActivityAt: 999_000 }]
+    return [id, { ...(index === 4 ? { ...withoutProvider, context: { ...agent.context!, providerId: null } } : agent), tier: tiers[index]!, ...times[index]! }]
   }))
   scene.areas = [{ id: 'tiers', name: 'All original tiers', kind: 'project', members: [...scene.agents.keys()] }]
   scene.relations = [...scene.agents.keys()].slice(1).map((target, index) => ({ id: `tier-${index}`, kind: 'communication', source: [...scene.agents.keys()][0]!, target, evidence: [] }))
@@ -689,25 +693,32 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
     const y = Math.abs(point.y - box.y - Number.parseFloat(body.style.top) - height / 2) - height / 2 + radius
     return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) - radius
   }
-  let previousGlyphs: { avatar: boolean; point: number }[] | undefined
+  const step = (id: string) => (captured.nodes.find(node => node.id === id)!.data as { step: string }).step
+  const agentNodes = () => captured.nodes.filter(node => node.type === 'agent')
+  expect(agentNodes().map(node => step(node.id))).toEqual(['recent', 'recent', 'today', 'today', 'older', 'older'])
+  let previousGlyphs: { avatar: number; disc: boolean; title: string }[] | undefined
   for (const zoom of [.319, .321, .44, .46, .69, .71, .9]) {
     await viewport(60, 60, 4000, 4000, zoom)
-    const glyphs = captured.nodes.filter(node => node.type === 'agent').map(node => {
-      const element = nodeElement(node.id)!
-      return { avatar: Boolean(element.querySelector('.agent-avatar')), point: Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent__point')!.style.width) }
+    const glyphs = agentNodes().map(node => {
+      const element = nodeElement(node.id)!, avatar = element.querySelector<HTMLElement>('.agent-avatar')
+      return { avatar: avatar ? Number.parseFloat(avatar.style.getPropertyValue('--agent-avatar-size')) : 0,
+        disc: Boolean(element.querySelector('.collaboration-agent__point')), title: element.querySelector('button')!.title }
     })
-    expect(glyphs.map(glyph => glyph.avatar)).toEqual([true, true, true, false, false])
-    if (zoom === .319) for (const node of captured.nodes.filter(node => node.type === 'agent')) {
+    // Every member is an identified face; only runnable members carry the disc's tier badge.
+    expect(glyphs.every(glyph => glyph.avatar > 0)).toBe(true)
+    expect(glyphs.map(glyph => glyph.disc)).toEqual([true, true, true, false, true, false])
+    // Size ranks recency: same step, same face; a fresher step is strictly larger.
+    expect(glyphs[0]!.avatar).toBe(glyphs[1]!.avatar); expect(glyphs[1]!.avatar).toBeGreaterThan(glyphs[2]!.avatar); expect(glyphs[2]!.avatar).toBeGreaterThan(glyphs[4]!.avatar)
+    expect(glyphs[3]!.avatar).toBeGreaterThan(glyphs[5]!.avatar)
+    // A retirement time is presented as closure, never as observed activity.
+    expect(glyphs[3]!.title).toContain('Closed '); expect(glyphs[3]!.title).not.toContain('Last activity')
+    expect(glyphs[4]!.title).toContain('Activity time unknown')
+    if (zoom === .319) for (const node of agentNodes()) {
       const element = nodeElement(node.id)!, dot = element.querySelector<HTMLElement>('.collaboration-agent__dot')!
       const body = element.querySelector<HTMLElement>('.collaboration-agent__body')!
-      const visibleDiameter = element.querySelector('.agent-avatar') ? Number.parseFloat(dot.style.width)
-        : Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent__point')!.style.width)
-      expect(Number.parseFloat(body.style.width)).toBeCloseTo(visibleDiameter * Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent')!.style.getPropertyValue('--collaboration-mark-scale')))
+      expect(Number.parseFloat(body.style.width)).toBeCloseTo(Number.parseFloat(dot.style.width) * Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent')!.style.getPropertyValue('--collaboration-mark-scale')))
     }
-    if (zoom === .321) {
-      expect(glyphs.map(glyph => glyph.avatar)).toEqual(previousGlyphs!.map(glyph => glyph.avatar))
-      expect(Math.abs(glyphs[3]!.point - previousGlyphs![3]!.point)).toBeLessThan(.01)
-    }
+    if (zoom === .321) expect(glyphs).toEqual(previousGlyphs)
     previousGlyphs = glyphs
     for (const edge of dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')) {
       const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === edge.dataset.id)!
@@ -722,6 +733,40 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
   }
   expect(captured.nodes.map(node => node.data.box)).toEqual(originalNodes.map(node => node.data.box))
   expect(requests).toHaveLength(operations)
+})
+
+it('re-steps a recency face on the map clock without another layout job, node move or stale endpoint', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+  try {
+    const now = 2_000_000_000, hour = 3_600_000; vi.setSystemTime(now)
+    const scene = scenario(2), [first, second] = [...scene.agents.keys()] as [string, string]
+    scene.agents = new Map([[first, { ...scene.agents.get(first)!, tier: 'idle' as const, lastActivityAt: now - 50 * 60_000 }], [second, { ...scene.agents.get(second)!, tier: 'idle' as const, lastActivityAt: now - 40 * hour }]])
+    scene.areas = [{ id: 'clock', name: 'Clock', kind: 'project', members: [first, second] }]
+    scene.relations = [{ id: 'clock-link', kind: 'communication', source: first, target: second, evidence: [] }]
+    await loaded(scene)
+    const id = collaborationAgentNode('clock', first), operations = requests.length, box = renderedBox(id)
+    // Overview, where the painted body is the recency-sized disc itself.
+    await viewport(-box.x * .2 + 200, -box.y * .2 + 200, 800, 600, .2)
+    const face = () => Number.parseFloat(nodeElement(id)!.querySelector<HTMLElement>('.agent-avatar')!.style.getPropertyValue('--agent-avatar-size'))
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const gap = () => {
+      const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
+      const start = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)[0]!
+      const radius = Number.parseFloat(nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__body')!.style.width) / 2
+      return { radius, error: Math.abs(Math.hypot(start.x - center.x, start.y - center.y) - radius) }
+    }
+    const recent = face(), before = gap()
+    expect(nodeElement(id)!.querySelector('[data-recency]')?.getAttribute('data-recency')).toBe('recent')
+    expect(before.error).toBeLessThan(1e-3)
+    // Eleven minutes later the hour boundary has passed: one coarse tick re-steps the face.
+    await act(async () => { vi.advanceTimersByTime(11 * 60_000) })
+    expect(nodeElement(id)!.querySelector('[data-recency]')?.getAttribute('data-recency')).toBe('today')
+    expect(face()).toBeLessThan(recent)
+    expect(renderedBox(id)).toEqual(box); expect(requests).toHaveLength(operations)
+    // The route follows the smaller painted body in the same commit: no gap after the step.
+    const after = gap()
+    expect(after.radius).toBeLessThan(before.radius); expect(after.error).toBeLessThan(1e-3)
+  } finally { vi.useRealTimers() }
 })
 
 it('renders and selects an actual Worker detour while both original endpoint cards are offscreen', async () => {
