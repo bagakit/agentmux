@@ -61,7 +61,7 @@ function assertDiscovery({ records, nativeId, wire, messageId, originalBody, mes
 }
 try {
   await mkdir(evidence, { recursive: true, mode: 0o700 }); await recordOwnership()
-  const coreRoot = config.coreRoot ?? join(repository, 'packages/core'), core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
+  const coreRoot = config.coreRoot, core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
   const { nativeProcessBirth } = await import(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)
   const { agentMuxModuleSkill } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-module-skills.js')).href)
   const messageModule = agentMuxModuleSkill('message'); assert.ok(messageModule)
