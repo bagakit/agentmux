@@ -291,13 +291,13 @@ async function advancedAnnotationEdits() {
   await click('Fit image', true)
   const textAt = { x: width * .2, y: height * .12 }
   await click('Text', true); await drag(await point(textAt.x, textAt.y), await point(textAt.x, textAt.y), 1)
-  await fillField('Screenshot text', 'Original editable text'); await key('Enter', 'Enter', 13); await settle()
+  await fillField('Screenshot text', 'Original editable text'); await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
   await click('Select', true); await drag(await point(textAt.x + 4, textAt.y + 4), await point(textAt.x + 4, textAt.y + 4), 1)
   const originalText = (await context()).annotations.find((shape: any) => shape.kind === 'text')
   assert.ok(originalText, 'Existing text has an original annotation identity before editing')
   await click('Edit text', true); await fillField('Screenshot text', 'Edited existing text')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-existing-text')
-  await key('Enter', 'Enter', 13); await settle()
+  await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
   await click('Color #ffffff', true)
   await drag(await point(textAt.x + 4, textAt.y + 4), await point(width - 8, height - 8))
   const edgeText = (await context()).annotations.find((shape: any) => shape.id === originalText.id)
@@ -328,7 +328,7 @@ async function advancedAnnotationEdits() {
   assert.deepEqual(edgeUi.scroll, [{ left: 0, top: 0 }, { left: 0, top: 0 }], 'Actual field focus never scrolls the hidden viewport')
   assert.deepEqual((await facts()).imageView, edgeView, 'Pending text focus preserves the painted view transform')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-edge-existing-text-light')
-  await key('Enter', 'Enter', 13); await settle()
+  await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
   assert.deepEqual((await context()).annotations.find((shape: any) => shape.id === originalText.id), edgeText,
     'UI input clamping retains the original object identity and processed image coordinates')
   receipt.edgeText = { ui: edgeUi, originalAnnotation: edgeText, paintedView: edgeView }

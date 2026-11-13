@@ -34,13 +34,13 @@ function button(editor: HTMLElement, name: string): HTMLButtonElement {
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
 async function mount(shapes: ScreenshotShape[] = [], source = image) {
-  const props = { image: source, busy: false, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn(), onCopyContext: vi.fn(), onSaveOriginal: vi.fn(), onOpenOriginal: vi.fn(), onEdited: vi.fn() }
+  const props = { image: source, busy: false, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete: vi.fn(), onCopyContext: vi.fn(), onSaveOriginal: vi.fn(), onOpenOriginal: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onEdited: vi.fn() }
   await act(async () => root.render(<ImageAnnotationEditor {...props} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
   expect(editor).not.toBeNull(); canvas.setPointerCapture = vi.fn()
   await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load'))); await frame()
-  const pointer = (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, {
-    bubbles: true, pointerId: 1, button: 0, buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1, clientX: x, clientY: y
+  const pointer = (type: string, x: number, y: number, shiftKey = false) => canvas.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, pointerId: 1, button: 0, shiftKey, buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1, clientX: x, clientY: y
   }))
   const click = async (name: string) => {
     if (name === 'Open original' || name === 'Save original') {
@@ -51,7 +51,7 @@ async function mount(shapes: ScreenshotShape[] = [], source = image) {
     } else await act(async () => button(editor, name).click())
     await frame()
   }
-  const output = async (action = 'Copy PNG') => { await click(action); const callback = action === 'Save original' ? props.onSaveOriginal : action === 'Copy context' ? props.onCopyContext : props.onComplete
+  const output = async (action = 'Copy PNG') => { await click(action); const callback = action === 'Save original' ? props.onSaveOriginal : action === 'Copy context' ? props.onCopyContext : action === 'Save PNG' ? props.onSavePng : action === 'Pin image' ? props.onPin : props.onComplete
     expect(callback).toHaveBeenCalled(); return callback.mock.lastCall![0] }
   return { editor, canvas, pointer, click, output, props }
 }
@@ -63,6 +63,58 @@ function change(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 
 describe('standalone image annotation editing consumers', () => {
+  it('draws one brush mask in original pixels and undoes the whole gesture while all output actions consume the same edited snapshot', async () => {
+    const { editor, pointer, click, output } = await mount([], { ...image, width: 800, height: 600 })
+    await click('Pixelate'); await click('Brush')
+    expect(editor.querySelector('[aria-label="Pixelation brush width"]')).not.toBeNull()
+    await act(async () => { pointer('pointerdown', 30, 40); pointer('pointermove', 90, 40); pointer('pointerup', 90, 120) })
+    const copied = await output()
+    expect(copied.shapes, 'actual brush gesture must reach the original-pixel output').toEqual([expect.objectContaining({ kind: 'pixelate-brush', width: 64, blockSize: 32,
+      points: [{ x: 60, y: 80 }, { x: 180, y: 80 }, { x: 180, y: 240 }] })])
+    expect((await output('Save PNG')).shapes).toEqual(copied.shapes)
+    expect((await output('Pin image')).shapes).toEqual(copied.shapes)
+    expect((await output('Save original')).shapes).toEqual(copied.shapes)
+    await click('Undo'); expect((await output()).shapes).toEqual([])
+    await click('Redo'); expect((await output()).shapes).toEqual(copied.shapes)
+  })
+
+  it('applies Shift constraints through real pointer gestures and releases them without changing the image scale', async () => {
+    const { pointer, click, output } = await mount([], { ...image, width: 800, height: 600 })
+    await click('Rectangle')
+    await act(async () => { pointer('pointerdown', 30, 40); pointer('pointermove', 100, 75, true); pointer('pointerup', 100, 75, true) })
+    expect((await output()).shapes, 'actual Shift rectangle must be equal-sided in original image pixels').toEqual([expect.objectContaining({ kind: 'rect', from: { x: 60, y: 80 }, to: { x: 200, y: 220 } })])
+    await click('Ellipse')
+    await act(async () => { pointer('pointerdown', 130, 40); pointer('pointerup', 190, 70, true) })
+    expect((await output()).shapes[1]).toMatchObject({ kind: 'ellipse', from: { x: 260, y: 80 }, to: { x: 380, y: 200 } })
+    await click('Arrow')
+    await act(async () => { pointer('pointerdown', 50, 100); pointer('pointerup', 110, 120, true) })
+    const arrow = (await output()).shapes[2]
+    expect(arrow).toMatchObject({ kind: 'arrow', from: { x: 100, y: 200 }, to: { y: 200 } })
+    await act(async () => { pointer('pointerdown', 50, 100); pointer('pointermove', 110, 120, true); pointer('pointerup', 110, 140) })
+    expect((await output()).shapes[3], 'releasing Shift restores the exact free endpoint').toMatchObject({ kind: 'arrow', from: { x: 100, y: 200 }, to: { x: 220, y: 280 } })
+    expect(view().view.scale).toBe(.5)
+  })
+
+  it('keeps Enter for multiline input and commits exact custom-colored text only on modifier Enter', async () => {
+    const { editor, pointer, click, output } = await mount()
+    await click('Text')
+    const color = editor.querySelector<HTMLInputElement>('[aria-label="Custom color"]')!
+    await act(async () => change(color, '#123456'))
+    await act(async () => { pointer('pointerdown', 50, 60); pointer('pointerup', 50, 60) }); await frame()
+    const field = editor.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
+    expect(field.tagName).toBe('TEXTAREA')
+    const newline = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    await act(async () => { change(field, 'First\n  Second'); field.dispatchEvent(newline) })
+    expect(newline.defaultPrevented, 'ordinary Enter must remain a native newline').toBe(false)
+    expect(editor.querySelector('[aria-label="Screenshot text"]')).toBe(field)
+    const pending = await output('Save PNG')
+    expect(pending.shapes).toEqual([expect.objectContaining({ kind: 'text', text: 'First\n  Second', color: '#123456' })])
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))); await frame()
+    expect(editor.querySelector('[aria-label="Screenshot text"]')).toBeNull()
+    expect((await output()).shapes, 'actual multiline commit must retain its full explicit content and color').toEqual(pending.shapes)
+    await click('Undo'); expect((await output()).shapes).toEqual([])
+  })
+
   it('resizes an existing rectangle and arrow endpoint through real handles and preserves their IDs through Undo', async () => {
     const { pointer, click, output } = await mount([rectangle, arrow])
     await click('Select')
@@ -102,15 +154,15 @@ describe('standalone image annotation editing consumers', () => {
     const { editor, canvas, pointer, click, output } = await mount([text])
     await click('Select'); await act(async () => { pointer('pointerdown', 55, 65); pointer('pointerup', 55, 65) })
     await click('Edit text')
-    let field = editor.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    let field = editor.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
     expect(field.value).toBe('Original text')
     await act(async () => { change(field, 'Discarded edit'); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
     await frame(); expect((await output()).shapes).toEqual([text])
     expect(button(editor, 'Undo').disabled).toBe(true)
     await act(async () => canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 55, clientY: 65 }))); await frame()
-    field = editor.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    field = editor.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
     expect(field.value).toBe('Original text')
-    await act(async () => { change(field, 'Updated text'); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) }); await frame()
+    await act(async () => { change(field, 'Updated text'); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect((await output()).shapes, 'actual existing text must be replaced in place').toEqual([{ ...text, text: 'Updated text' }])
     await click('Undo'); expect((await output()).shapes).toEqual([text])
     await click('Redo'); expect((await output()).shapes).toEqual([{ ...text, text: 'Updated text' }])
@@ -141,7 +193,7 @@ describe('standalone image annotation editing consumers', () => {
     for (const zoomed of [false, true]) {
       if (zoomed) for (let count = 0; count < 6; count++) await click('Zoom in')
       await click('Edit text')
-      const field = editor.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+      const field = editor.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
       const box = { left: parseFloat(field.style.left), top: parseFloat(field.style.top), width: parseFloat(field.style.width), height: parseFloat(field.style.height) }
       // happy-dom has no CSS layout. Consume the production-assigned UI geometry here;
       // the native fixture separately checks the actual browser rectangle and scrolling.
@@ -152,7 +204,7 @@ describe('standalone image annotation editing consumers', () => {
       expect(parseFloat(field.style.fontSize)).toBeLessThanOrEqual(32)
       expect(field.style.color, 'the editing control uses readable theme text while the annotation stays white').toBe('var(--text)')
       expect(document.activeElement).toBe(field); expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
-      await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))); await frame()
+      await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))); await frame()
       expect((await output()).shapes, 'UI clamping must preserve the original object and font in output').toEqual([text])
     }
   })

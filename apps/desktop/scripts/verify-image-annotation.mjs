@@ -14,11 +14,31 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const specifications = {
+  enhancements: {
+    tests: ['apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    mutations: [{ label: 'brush-note-filter-omitted', source: component + 'drawing-model.ts',
+      find: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'",
+      replace: "return shape.kind === 'pixelate' || shape.kind === 'cover'",
+      test: 'apps/desktop/test/image-annotation-enhancements.test.ts',
+      consumer: 'filters only notes touched by the actual brush corridor from processed Agent context and retains editable originals', failure: /actual brush filtering must omit/ },
+    { label: 'gesture-constraint-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: '? constrainedEndpoint(shape.kind, shape.from, at) : at', replace: '? at : at',
+      test: 'apps/desktop/test/image-annotation-editing.test.tsx',
+      consumer: 'applies Shift constraints through real pointer gestures and releases them without changing the image scale', failure: /actual Shift rectangle must be equal-sided/ },
+    { label: 'multiline-newline-intercepted', source: component + 'ImageAnnotationEditor.tsx',
+      find: "event.key === 'Enter' && (event.metaKey || event.ctrlKey)", replace: "event.key === 'Enter'",
+      test: 'apps/desktop/test/image-annotation-editing.test.tsx',
+      consumer: 'keeps Enter for multiline input and commits exact custom-colored text only on modifier Enter', failure: /ordinary Enter must remain a native newline/ },
+    { label: 'save-png-callback-omitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: "else if (action === 'save-png') onSavePng?.(input)", replace: "else if (action === 'save-png') void input",
+      test: 'apps/desktop/test/image-annotation-editing.test.tsx',
+      consumer: 'draws one brush mask in original pixels and undoes the whole gesture while all output actions consume the same edited snapshot', failure: /called at least once/ }]
+  },
   'text-preservation': {
     tests: ['apps/desktop/test/image-annotation-text-preservation.test.tsx'],
     mutations: [{ label: 'text-commit-truncated', source: component + 'ImageAnnotationEditor.tsx',
@@ -176,13 +196,13 @@ try {
   }
   await run('source')
   if (mutations) { for (const mutation of specification.mutations) await run(mutation.label, mutation); await run('restored-source') }
-  if (slice === 'editing') {
+  if (slice === 'editing' || slice === 'enhancements') {
     const result = await new Promise((done, reject) => {
       const child = spawn(process.execPath, ['apps/desktop/scripts/verify-browser-screenshot-model.mjs', ...(mutations ? ['--mutations'] : [])], { cwd: process.cwd(), env: process.env, stdio: 'inherit' })
-      let expired = false, escalation
-      const timer = setTimeout(() => { expired = true; child.kill('SIGTERM'); escalation = setTimeout(() => child.kill('SIGKILL'), 1000) }, 120000)
-      child.once('error', error => { clearTimeout(timer); clearTimeout(escalation); reject(error) })
-      child.once('exit', code => { clearTimeout(timer); clearTimeout(escalation); expired ? reject(new Error('The exact native Canvas proof runner timed out and exited')) : done(code) })
+      // Each finite native case owns its timeout and cleanup. A shared total
+      // cannot shrink the available time as the actual mutation set grows.
+      child.once('error', reject)
+      child.once('exit', done)
     })
     assert.equal(result, 0, 'The actual Electron Canvas proof completes with its own source mutations')
     const path = '.local/browser-screenshot-workface/model-proof/receipt.json', bytes = await readFile(path), receipt = JSON.parse(bytes)

@@ -17,6 +17,8 @@ const fixture = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/renderer/src/store', () => ({
+  compareAndSwapCapsuleQuestionEditor: vi.fn(),
+  flushCapsuleQuestionEditors: vi.fn(),
   useAppStore: Object.assign(
     (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
     { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }
@@ -203,15 +205,15 @@ describe('original Browser screenshot workface', () => {
     await act(async () => { pointer('pointerdown', 85, 90); pointer('pointerup', 85, 90) })
     await flushFrames()
     const canvas = opened.querySelector('canvas')!
-    const field = opened.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    const field = opened.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
     expect(field).not.toBeNull()
     await act(async () => {
       field.focus()
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Markup text')
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Markup text')
       field.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(document.activeElement).toBe(field)
-    const finish = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    const finish = new KeyboardEvent('keydown', { key, ctrlKey: key === 'Enter', bubbles: true, cancelable: true })
     await act(async () => field.dispatchEvent(finish))
     await flushFrames()
     expect(finish.defaultPrevented).toBe(true)
@@ -238,11 +240,11 @@ describe('original Browser screenshot workface', () => {
     await act(async () => button(opened, 'Text').click())
     await act(async () => { pointer('pointerdown', 85, 90); pointer('pointerup', 85, 90) })
     await flushFrames()
-    const field = opened.querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
+    const field = opened.querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
     expect(field).not.toBeNull()
     await act(async () => {
       field.focus()
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Text committed on blur')
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Text committed on blur')
       field.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(document.activeElement).toBe(field)

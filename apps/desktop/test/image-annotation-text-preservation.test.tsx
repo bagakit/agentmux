@@ -74,7 +74,7 @@ async function mount(shapes: ScreenshotShape[]) {
   return { pointer, output }
 }
 async function editExistingText(pointer: () => Promise<void>) { await click('Select'); await pointer(); await click('Edit text')
-  const field = editor().querySelector<HTMLInputElement>('[aria-label="Screenshot text"]'); expect(field).not.toBeNull(); return field! }
+  const field = editor().querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]'); expect(field).not.toBeNull(); return field! }
 async function submitOriginal(path: string) {
   const modal = document.querySelector<HTMLElement>('.annotation-file-dialog')!; expect(modal).not.toBeNull()
   await act(async () => change(modal.querySelector('input')!, path))
@@ -88,7 +88,7 @@ describe('complete editable annotation text', () => {
       const field = await editExistingText(pointer)
       expect(field.value).toBe(text.text)
       await act(async () => method === 'Enter'
-        ? field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+        ? field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))
         : field.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
       await frame()
       expect((await output())[0], 'unchanged original text remains exact').toEqual(text)
@@ -99,7 +99,7 @@ describe('complete editable annotation text', () => {
   it('keeps untouched control-normalized text in pending Copy and Save snapshots', async () => {
     const multiline = { ...text, text: '  Original\r\nsecond\rthird\n  ' }, { pointer, output } = await mount([multiline])
     const field = await editExistingText(pointer)
-    expect(field.value, 'the actual single-line control normalizes the loaded value').toBe(multiline.text.replace(/[\r\n]/g, ''))
+    expect(field.value.replace(/\r\n?/g, '\n'), 'the multiline control retains explicit line breaks').toBe(multiline.text.replace(/\r\n?/g, '\n'))
     expect(await output('Copy PNG'), 'pending untouched text keeps its original string').toEqual([multiline])
     expect(await output('Copy context')).toEqual([multiline])
     expect(await output('Save original')).toEqual([multiline])
@@ -136,7 +136,7 @@ describe('complete editable annotation text', () => {
     const { pointer, output } = await mount([{ ...text, text: 'Before' }, { ...note, from: { x: .6, y: .6 }, to: { x: .9, y: .9 }, note: 'Before note' }])
     const field = await editExistingText(pointer)
     expect(field.hasAttribute('maxlength'), 'the text control admits the document format').toBe(false)
-    await act(async () => { change(field, text.text); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) }); await frame()
+    await act(async () => { change(field, text.text); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect((await output())[0], 'explicit text edit remains exact').toEqual(text)
     await click('Undo'); expect((await output())[0]).toEqual({ ...text, text: 'Before' }); await click('Redo')
     await click('Note 7'); const draft = editor().querySelector<HTMLTextAreaElement>('[aria-label="Note text"]')!
@@ -150,15 +150,15 @@ describe('complete editable annotation text', () => {
   it('preserves an unchanged whitespace original and only removes text after an explicit clear', async () => {
     const whitespace = { ...text, text: '  \t  ' }, { pointer, output } = await mount([whitespace])
     let field = await editExistingText(pointer)
-    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))); await frame()
+    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))); await frame()
     expect(await output()).toEqual([whitespace]); expect(button(editor(), 'Undo').disabled).toBe(true)
     field = await editExistingText(pointer)
-    await act(async () => { change(field, ''); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) }); await frame()
+    await act(async () => { change(field, ''); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect(await output()).toEqual([])
     await click('Undo'); expect(await output()).toEqual([whitespace])
     await click('Text'); await pointer()
-    field = editor().querySelector<HTMLInputElement>('[aria-label="Screenshot text"]')!
-    await act(async () => { change(field, ' \t '); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) }); await frame()
+    field = editor().querySelector<HTMLTextAreaElement>('[aria-label="Screenshot text"]')!
+    await act(async () => { change(field, ' \t '); field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })) }); await frame()
     expect(await output(), 'blank new text creates no annotation').toEqual([whitespace])
   })
 })
