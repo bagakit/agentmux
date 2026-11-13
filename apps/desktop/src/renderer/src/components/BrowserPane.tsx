@@ -1710,6 +1710,7 @@ function BrowserPaneContent({
           {taskAsset && tab.demonstration?.draft && !pendingTaskSource ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
             disabled={taskBusy || demonstrationBusy || tab.demonstration.draft.status === 'recording'} onClick={event => void importTaskAsset(event)}>Edit current demonstration</button> : null}
           <BrowserTaskAssetEditor
+            dialogTypes={tab.dialogTypes}
             asset={taskAsset}
             {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
             onReviewRequestConsumed={() => setTaskAssetReview(null)}

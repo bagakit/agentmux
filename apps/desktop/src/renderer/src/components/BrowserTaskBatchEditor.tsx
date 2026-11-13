@@ -1,3 +1,4 @@
+import { browserTaskStepParameterKeys } from '../../../shared/browser-task-assets'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState, type MouseEvent } from 'react'
@@ -29,7 +30,7 @@ export function BrowserTaskBatchEditor({ version, batch, runs, busy, onRun, onSt
   useEffect(() => { setItems(original?.items.map(item => ({ id: item.id, parameters: {} })) ?? [{ id: mintObjectId(), parameters: {} }]); setFresh({}); setError(undefined) }, [version.version, original?.id])
   useEffect(() => { setStartNew(false) }, [version.version, batch?.id])
   const currentRun = runs.find(run => run.id === original?.items[original.nextItem]?.runId)
-  const required = new Set(browserTaskSegment(version.steps, currentRun?.nextStep ?? 0).flatMap(step => step.parameterKey ? [step.parameterKey] : []))
+  const required = new Set(browserTaskSegment(version.steps, currentRun?.nextStep ?? 0).flatMap(browserTaskStepParameterKeys))
   const secrets = version.parameters.filter(parameter => parameter.secret && required.has(parameter.key))
   const editable = !busy && (!original || original.status === 'ready' || original.status === 'waiting-human')
   const status = (value: BrowserTaskAssetRun['status']) => value === 'completed' ? 'steps completed' : value

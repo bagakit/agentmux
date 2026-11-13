@@ -19,6 +19,8 @@ export function browserTaskStepSummary(step: BrowserTaskStep): string {
     return `Assert ${ASSERT_LABEL[fact.kind]} · ${subject}`
   }
   const target = step.target?.name ?? 'Target needs location'
+  if (step.kind === 'upload') return `Upload · ${target} · ${(step.parameterKeys ?? []).join(', ') || 'Fresh files needed'}`
+  if (step.kind === 'click' && step.dialog) return `Click · ${target} · ${step.dialog.action} ${step.dialog.type}`
   if (step.kind === 'drag') return `Drag · ${target} → ${step.destination?.name ?? 'Drop target needs location'}`
   if (step.kind === 'swipe') return `Swipe · ${target} → ${step.destination?.name ?? 'End target needs location'}`
   if (step.kind === 'tap') return `Tap · ${target}`
