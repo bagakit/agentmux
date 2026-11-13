@@ -167,3 +167,14 @@ it('storage inspection does not call an equal current graph aligned while its or
     await f.prepareRendererUpdate('quit')
   }
 })
+
+it('storage inspection reports a stalled workface save and the installer names it while refusing only this update', async () => {
+  const f = await fixture(), observed = await f.inspect()
+  expect(observed.workbench.persistence?.spatial).toMatchObject({ stalled: false, pendingSince: null, conflicts: 0 })
+  const stalled = structuredClone(observed)
+  stalled.workbench.persistence!.spatial = { ...stalled.workbench.persistence!.spatial, aligned: false,
+    pendingSince: Date.UTC(2000, 0, 1), stalled: true, lastFailureCode: 'EIO' }
+  expect(parseDesktopClientObservation(stalled).workbench.persistence?.spatial.stalled).toBe(true)
+  expect(() => requireOutgoingWorkbenchStorage(stalled)).toThrow(/unsaved since .*last failure EIO/)
+  expect(f.api.sessions.stop).not.toHaveBeenCalled()
+})

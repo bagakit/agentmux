@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { addTabOccurrence, createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { desktopSpatialGraph, DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { AppConfig } from '../src/shared/contracts'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
@@ -117,5 +117,84 @@ describe('display layouts merge per Group', () => {
     const merged = reconcileSpatialGraphs(base, local, remote)
     expect(merged.graph.layouts.project!.groups[0]).toMatchObject({ activeTabId: 'a', tabOrder: ['a', 'b'] })
     expect(merged.conflicts.map(conflict => conflict.key)).toEqual(['layout:project:group:selection'])
+  })
+})
+
+/** A controllable clock: timers fire only when the test advances time. */
+function testClock(start = 1_000_000) {
+  let now = start, next = 0
+  const timers = new Map<number, { at: number; run: () => void }>()
+  return {
+    now: () => now,
+    setTimeout: (run: () => void, delay: number) => { const id = ++next; timers.set(id, { at: now + delay, run }); return id },
+    clearTimeout: (id: unknown) => { timers.delete(id as number) },
+    pending: () => timers.size,
+    /** Fire every timer due by the new time, including ones armed while firing. */
+    async advance(ms: number) {
+      now += ms
+      for (;;) {
+        const due = [...timers].filter(([, timer]) => timer.at <= now).sort((a, b) => a[1].at - b[1].at)[0]
+        if (!due) return
+        timers.delete(due[0]); due[1].run()
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+    }
+  }
+}
+
+describe('a stalled or failing background save is visible while the user works', () => {
+  it('announces a save that never answers within the bound, without any further edit', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), warnings: unknown[] = []
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(), commit: () => new Promise(() => {}),
+      onChange: listener => store.subscribe(listener) }, error => warnings.push(error), clock)
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(warnings).toEqual([])
+    await clock.advance(SAVE_STALL_AFTER_MS)
+    expect(warnings).toEqual([expect.objectContaining({ code: 'SPATIAL_SAVE_STALLED' })])
+    expect(persistence.saveObservation).toMatchObject({ stalled: true, pendingSince: 1_000_000 })
+    // Repeated checks do not repeat the same announcement.
+    await clock.advance(SAVE_STALL_AFTER_MS * 2)
+    expect(warnings).toHaveLength(1)
+    persistence.dispose()
+  })
+
+  it('retries a failed save in the background and reports recovery once it is confirmed', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), warnings: unknown[] = []
+    let offline = true, recovered = 0
+    const persistence = new DesktopSpatialPersistence({ read: () => store.read(),
+      commit: input => offline ? Promise.reject(Object.assign(new Error('Disk unavailable'), { code: 'EIO' })) : store.commit(input),
+      onChange: listener => store.subscribe(listener) }, error => warnings.push(error), clock)
+    persistence.onRecovered = () => { recovered++ }
+    await persistence.read()
+    persistence.stage(derive(['a', 'b']))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a'])
+    await clock.advance(SAVE_STALL_AFTER_MS)
+    expect(warnings.at(-1)).toMatchObject({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' })
+    // Storage comes back. No user edit happens; the background retry saves the Tab.
+    offline = false
+    for (let step = 0; step < 4; step++) await clock.advance(SAVE_STALL_AFTER_MS * 8)
+    await expect.poll(async () => (await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a', 'b'])
+    expect(recovered).toBe(1)
+    expect(persistence.saveObservation).toMatchObject({ stalled: false, pendingSince: null, lastFailureCode: null })
+    expect(clock.pending()).toBe(0)
+    persistence.dispose()
+  })
+
+  it('adds no timer or save work for a stage that repeats the confirmed graph', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: derive(['a']) })
+    const clock = testClock(), persistence = new DesktopSpatialPersistence({ read: () => store.read(),
+      commit: input => store.commit(input), onChange: listener => store.subscribe(listener) }, () => {}, clock)
+    await persistence.read()
+    persistence.stage(derive(['a']))
+    expect(clock.pending()).toBe(0)
+    expect(persistence.pendingChanges).toBe(false)
   })
 })

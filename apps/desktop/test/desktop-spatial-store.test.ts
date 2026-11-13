@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state';
 import { createWorkspaceLayout } from '@agentmux/layout';
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs';
-import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state';
+import { desktopSpatialGraph, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state';
 import { api } from '../src/renderer/src/lib/api';
 import { useAppStore } from '../src/renderer/src/store';
 import type { AppConfig, SessionSnapshot, RuntimeSnapshot, AgentTimelineSnapshot } from '../src/shared/contracts';
@@ -320,5 +320,32 @@ describe('a conflict on one workface item never stalls the actual Store', () => 
     // A checkpoint is a confirmed save of every other change, so Quit is not paused by the conflict.
     const { checkpointSpatialWorkbench } = await import('../src/renderer/src/store')
     await expect(checkpointSpatialWorkbench()).resolves.toBeUndefined()
+  })
+})
+describe('a stalled workface save in the actual Store', () => {
+  it('raises the existing unsaved warning while working and clears it after the background retry saves', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const store = await fixture()
+      vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => store.retainDisplayLabels(values))
+      const work = workbench('Original')
+      await store.commit({ expectedRevision: 0, graph: desktopSpatialGraph(work, []) })
+      useAppStore.setState({ ...work, restoredWorkbench: { tabs: work.tabs, layouts: work.layouts } })
+      const ready = useAppStore.getState().initialize()
+      await vi.runOnlyPendingTimersAsync()
+      disposers.push(await ready)
+      let offline = true
+      vi.mocked(api.spatial.commit).mockImplementation(input => offline ? Promise.reject(new Error('Disk unavailable')) : store.commit(input))
+      const second = createWorkbenchTab('second', { regionId: 'second-region', kind: 'file', workspaceId: 'resource', path: 'second.md' })
+      useAppStore.setState(state => ({ tabs: { ...state.tabs, second }, layouts: { resource: createWorkspaceLayout('group', ['file', 'second']) } }))
+      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS)
+      expect(useAppStore.getState().workbenchSaveWarning).toContain('have not reached storage')
+      offline = false
+      // Fire the backoff retry, then let the real file write and its acknowledgement settle.
+      await vi.advanceTimersByTimeAsync(SAVE_STALL_AFTER_MS * 8)
+      vi.useRealTimers()
+      await vi.waitFor(async () => expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toContain('second'))
+      await vi.waitFor(() => expect(useAppStore.getState().workbenchSaveWarning).toBeNull())
+    } finally { vi.useRealTimers() }
   })
 })
