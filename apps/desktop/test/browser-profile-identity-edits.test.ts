@@ -42,7 +42,8 @@ describe('Browser Profile identity edits', () => {
     expect(await readFile(path, 'utf8')).toBe(existingFile)
 
     const renamed = await store.updateProfile(WORK_ID, { label: 'Northwind client', hue: 288, notes: 'Launch QA' }, 0)
-    expect(renamed.revision).toBe(1)
+    expect(renamed.snapshot.revision).toBe(1)
+    expect(renamed.snapshot.profiles.find(p => p.id === WORK_ID)).toMatchObject({ label: 'Northwind client', hue: 288, notes: 'Launch QA' })
     expect(renamed.profile).toMatchObject({ id: WORK_ID, label: 'Northwind client', hue: 288, notes: 'Launch QA', isDefault: false })
     expect(renamed.profile.source).toMatchObject({ importedCookies: 10 })
     expect(browserProfilePartition(WORK_ID)).toBe(`persist:agentmux-browser-profile:${WORK_ID}`)
@@ -79,15 +80,22 @@ describe('Browser Profile identity edits', () => {
     expect(await readFile(path, 'utf8')).toBe(existingFile)
   })
 
-  it('moves the default without touching any Profile record, and every write advances the revision', async () => {
+  it('moves the default without touching any Profile record, and every write returns the whole committed list', async () => {
     const { store } = await fixture()
-    expect((await store.setDefaultProfile(WORK_ID, 0)).revision).toBe(1)
-    const after = await store.list()
-    expect(after.profiles.map(p => [p.id, p.isDefault])).toEqual([[DEFAULT_ID, false], [WORK_ID, true]])
-    await store.createProfile('Third')
-    await store.deleteProfile(DEFAULT_ID)
-    expect((await store.list()).revision).toBe(3)
+    // Moving the default names its target only; an older list cannot make it conflict.
+    await store.updateProfile(WORK_ID, { label: 'Work client' }, 0)
+    const moved = await store.setDefaultProfile(WORK_ID)
+    expect(moved).toEqual({ revision: 2, defaultProfileId: WORK_ID, profiles: (await store.list()).profiles })
+    expect(moved.profiles.map(p => [p.id, p.label, p.isDefault])).toEqual([[DEFAULT_ID, 'Default', false], [WORK_ID, 'Work client', true]])
+    const created = await store.createProfile('Third')
+    expect(created.snapshot.revision).toBe(3)
+    expect(created.snapshot.profiles.map(p => p.id)).toEqual([DEFAULT_ID, WORK_ID, created.profile.id])
+    const deleted = await store.deleteProfile(DEFAULT_ID)
+    expect(deleted).toEqual(await store.list())
+    expect(deleted.revision).toBe(4)
     await expect(store.deleteProfile(WORK_ID)).rejects.toThrow('default Browser Profile cannot be deleted')
+    await expect(store.setDefaultProfile('33333333-3333-4333-8333-333333333333')).rejects.toThrow('Unknown Browser Profile')
+    expect((await store.list()).revision).toBe(4)
   })
 })
 
@@ -104,7 +112,7 @@ describe('Main Browser Profile owner', () => {
     expect(manager.listRevision()).toBe(1)
     expect(manager.listProfiles().find(p => p.id === WORK_ID)?.label).toBe('Northwind client')
 
-    await manager.setDefaultProfile(WORK_ID, 1)
+    await manager.setDefaultProfile(WORK_ID)
     expect(manager.defaultProfileId()).toBe(WORK_ID)
     expect(manager.listProfiles().map(p => [p.id, p.isDefault])).toEqual([[DEFAULT_ID, false], [WORK_ID, true]])
     expect(manager.listRevision()).toBe(2)
@@ -113,6 +121,33 @@ describe('Main Browser Profile owner', () => {
     expect(manager.listRevision()).toBe(3)
     await expect(manager.updateProfile(created.id, { label: 'Late' }, 2)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     expect(manager.listProfiles().find(p => p.id === created.id)?.label).toBe('Fresh')
-    await expect(manager.setDefaultProfile('33333333-3333-4333-8333-333333333333', 3)).rejects.toThrow('Unknown Browser Profile')
+    await expect(manager.setDefaultProfile('33333333-3333-4333-8333-333333333333')).rejects.toThrow('Unknown Browser Profile')
+  })
+
+  it('announces each committed list once, in revision order, and never for a read or a refused write', async () => {
+    const { store } = await fixture()
+    const manager = new BrowserProfileManager(store)
+    const heard: Array<{ revision: number; defaultProfileId: string; profiles: { id: string; label: string; isDefault: boolean }[] }> = []
+    manager.onChange(snapshot => heard.push(snapshot))
+    await manager.initialize()
+    expect(manager.listProfiles()).toHaveLength(2)
+    expect(heard).toEqual([])
+
+    await manager.updateProfile(WORK_ID, { label: 'Northwind client' }, 0)
+    await manager.setDefaultProfile(WORK_ID)
+    const created = await manager.createProfile('Fresh')
+    await expect(manager.updateProfile(WORK_ID, { label: 'Late' }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    await manager.deleteProfile(created.id, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: created.id })
+
+    expect(heard.map(snapshot => snapshot.revision)).toEqual([1, 2, 3, 4])
+    // Each announcement is the whole committed list, exactly what a fresh read returns at that revision.
+    expect(heard[1]).toEqual({ revision: 2, defaultProfileId: WORK_ID, profiles: [
+      expect.objectContaining({ id: DEFAULT_ID, label: 'Default', isDefault: false }),
+      expect.objectContaining({ id: WORK_ID, label: 'Northwind client', isDefault: true })] })
+    expect(heard[2]!.profiles.map(p => p.id)).toEqual([DEFAULT_ID, WORK_ID, created.id])
+    const last = heard.at(-1)!
+    expect({ revision: last.revision, profiles: last.profiles }).toEqual(await store.list().then(({ revision, profiles }) => ({ revision, profiles })))
+    expect(manager.listProfiles()).toEqual(last.profiles)
+    expect(manager.listRevision()).toBe(4)
   })
 })

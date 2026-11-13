@@ -1,57 +1,83 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { URL as NodeURL } from 'node:url'
 import ts from 'typescript'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// Compile the production Profile handlers from ipc.ts with their collaborators replaced.
-function productionHandlers(names: string[], scope: Record<string, unknown>): Record<string, (...args: unknown[]) => Promise<unknown>> {
+vi.mock('electron', () => ({ app: { getPath: () => tmpdir() }, session: { fromPartition: () => ({ clearStorageData: async () => {}, flushStorageData: async () => {} }) }, BrowserWindow: class {} }))
+
+import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
+import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
+
+const DEFAULT_ID = '11111111-1111-4111-8111-111111111111'
+const WORK_ID = '22222222-2222-4222-8222-222222222222'
+const roots: string[] = []
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+
+// Compile the production Profile handlers and the one change subscription from ipc.ts.
+function productionWiring(names: string[], scope: Record<string, unknown>): Record<string, (...args: unknown[]) => Promise<unknown>> {
   const source = readFileSync(new NodeURL('../src/main/ipc.ts', import.meta.url), 'utf8')
   const parsed = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
   const found: Record<string, string> = {}
-  let publish = ''
+  const subscriptions: string[] = []
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'handleWithEvent' && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && names.includes(node.arguments[0].text)) {
       found[node.arguments[0].text] = node.arguments[1]!.getText(parsed)
     }
-    if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'publishProfiles' && node.initializer) publish = node.initializer.getText(parsed)
+    if (ts.isCallExpression(node) && node.expression.getText(parsed) === 'browserProfiles.onChange') subscriptions.push(node.getText(parsed))
     ts.forEachChild(node, visit)
   }
   visit(parsed)
   expect(Object.keys(found).sort()).toEqual([...names].sort())
-  expect(publish).not.toBe('')
-  const body = `const publishProfiles = ${publish}; return { ${names.map(n => `${JSON.stringify(n)}: ${found[n]}`).join(', ')} };`
+  expect(subscriptions, 'ipc.ts subscribes to Profile changes exactly once').toHaveLength(1)
+  const body = `${subscriptions[0]}; return { ${names.map(n => `${JSON.stringify(n)}: ${found[n]}`).join(', ')} };`
   const compiled = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   return new Function(...Object.keys(scope), compiled)(...Object.values(scope))
 }
 
+async function manager() {
+  const root = await mkdtemp(join(tmpdir(), 'agentmux-browser-profiles-publish-'))
+  roots.push(root)
+  const path = join(root, 'browser-profiles.json')
+  await writeFile(path, JSON.stringify({ version: 1, defaultProfileId: DEFAULT_ID, pendingImports: [], profiles: [
+    { id: DEFAULT_ID, label: 'Personal', createdAt: 1, source: null }, { id: WORK_ID, label: 'Work', createdAt: 2, source: null }] }))
+  const profiles = new BrowserProfileManager(new BrowserProfileStore(path))
+  await profiles.initialize()
+  return profiles
+}
+
 describe('Main publishes the committed Profile list after every change', () => {
-  it('sends the list once per create, update, default move and import, and never for reads or failures', async () => {
-    let revision = 0
-    const profiles = [{ id: 'p1', label: 'Personal', createdAt: 1, isDefault: true, source: null }]
-    const commit = <T>(value: T) => async () => { revision += 1; return value }
-    const browserProfiles = {
-      initialize: vi.fn(async () => {}),
-      listRevision: () => revision, listProfiles: () => profiles,
-      createProfile: vi.fn(commit({ id: 'p2' })), updateProfile: vi.fn(commit({ id: 'p1' })),
-      setDefaultProfile: vi.fn(commit(undefined)), importProfile: vi.fn(commit({ id: 'p3' })),
-      deleteProfile: vi.fn(commit(undefined))
-    }
-    const sent: Array<[string, unknown]> = []
-    const contents = { isDestroyed: () => false, send: (channel: string, payload: unknown) => sent.push([channel, payload]) }
-    const h = productionHandlers(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile', 'browser:importProfile'], {
-      browserProfiles, contents
-    })
-    expect(await h['browser:readProfiles']!({})).toEqual({ revision: 0, profiles })
+  it('sends the manager list once per committed create, update and default move, and never for reads or refusals', async () => {
+    const browserProfiles = await manager()
+    const sent: Array<[string, { revision: number; profiles: { id: string; label: string; isDefault: boolean }[] }]> = []
+    let destroyed = false
+    const contents = { isDestroyed: () => destroyed, send: (channel: string, payload: never) => sent.push([channel, payload]) }
+    const h = productionWiring(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile'], { browserProfiles, contents })
+
+    expect(await h['browser:readProfiles']!({})).toMatchObject({ revision: 0 })
     expect(sent).toHaveLength(0)
-    await h['browser:createProfile']!({}, 'Work')
-    await h['browser:updateProfile']!({}, 'p1', { label: 'Me' }, 1)
-    await h['browser:setDefaultProfile']!({}, 'p1', 2)
-    await h['browser:importProfile']!({}, 'token', 'Imported')
-    expect(sent.map(([channel, payload]) => [channel, (payload as { revision: number }).revision])).toEqual([
-      ['browser:profilesChanged', 1], ['browser:profilesChanged', 2], ['browser:profilesChanged', 3], ['browser:profilesChanged', 4]
+    await h['browser:createProfile']!({}, 'Client')
+    await h['browser:updateProfile']!({}, WORK_ID, { label: 'Work client' }, 1)
+    // The default move names only its target; a stale revision argument is not forwarded.
+    await h['browser:setDefaultProfile']!({}, WORK_ID, 0)
+    expect(sent.map(([channel, payload]) => [channel, payload.revision])).toEqual([
+      ['browser:profilesChanged', 1], ['browser:profilesChanged', 2], ['browser:profilesChanged', 3]
     ])
-    browserProfiles.updateProfile.mockRejectedValueOnce(Object.assign(new Error('changed'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
-    await expect(h['browser:updateProfile']!({}, 'p1', { label: 'Late' }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
-    expect(sent).toHaveLength(4)
+    // Each push is the whole list a fresh read returns, never a field-by-field copy.
+    expect(sent.at(-1)![1]).toEqual(await h['browser:readProfiles']!({}))
+    expect(sent.at(-1)![1].profiles.map(p => [p.id, p.label, p.isDefault])).toEqual([
+      [DEFAULT_ID, 'Personal', false], [WORK_ID, 'Work client', true], [expect.any(String), 'Client', false]
+    ])
+
+    await expect(h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    await expect(h['browser:setDefaultProfile']!({}, '33333333-3333-4333-8333-333333333333')).rejects.toThrow('Unknown Browser Profile')
+    expect(sent).toHaveLength(3)
+
+    destroyed = true
+    await h['browser:createProfile']!({}, 'After close')
+    expect(sent).toHaveLength(3)
+    await browserProfiles.dispose()
   })
 })

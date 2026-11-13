@@ -147,7 +147,7 @@ describe('BrowserProfileStore', () => {
     const { path, store } = await storeFixture()
     await store.listProfiles()
 
-    const [first, second] = await Promise.all([
+    const [{ profile: first }, { profile: second }] = await Promise.all([
       store.createProfile('Research'),
       store.createProfile('Development')
     ])
@@ -164,7 +164,7 @@ describe('BrowserProfileStore', () => {
   it('deletes a non-default Profile and rejects default or unknown Profile deletion', async () => {
     const { path, store } = await storeFixture()
     const [defaultProfile] = await store.listProfiles()
-    const created = await store.createProfile('Temporary')
+    const { profile: created } = await store.createProfile('Temporary')
 
     await store.deleteProfile(created.id)
 
@@ -186,17 +186,17 @@ describe('BrowserProfileStore', () => {
 
     expect(await readFile(path, 'utf8')).toBe(before)
     expect(await readdir(root)).toEqual(['browser-profiles.json'])
-    await expect(store.createProfile('After failure')).resolves.toMatchObject({ label: 'After failure' })
+    await expect(store.createProfile('After failure')).resolves.toMatchObject({ profile: { label: 'After failure' } })
   })
 
   it('commits a pending fresh import as one Profile transition without persisting private source data', async () => {
     const { path, store } = await storeFixture()
-    const pending = await store.beginPendingImport('Imported work')
+    const { pending } = await store.beginPendingImport('Imported work')
 
     expect(await store.listPendingImports()).toEqual([pending])
     expect(await store.listProfiles()).toHaveLength(1)
 
-    const committed = await store.commitImportedProfile(pending.profileId, importedSource)
+    const { profile: committed } = await store.commitImportedProfile(pending.profileId, importedSource)
     const persisted = JSON.parse(await readFile(path, 'utf8'))
 
     expect(committed).toEqual({
@@ -221,7 +221,7 @@ describe('BrowserProfileStore', () => {
 
   it('aborts a pending fresh import without publishing a Profile', async () => {
     const { path, store } = await storeFixture()
-    const pending = await store.beginPendingImport('Discarded import')
+    const { pending } = await store.beginPendingImport('Discarded import')
 
     await store.abortPendingImport(pending.profileId)
 
@@ -233,7 +233,7 @@ describe('BrowserProfileStore', () => {
 
   it('rejects unknown transitions and imported-source extra fields without mutating the journal', async () => {
     const { path, store } = await storeFixture()
-    const pending = await store.beginPendingImport('Protected import')
+    const { pending } = await store.beginPendingImport('Protected import')
     const before = await readFile(path, 'utf8')
 
     await expect(store.commitImportedProfile(PROFILE_ID, importedSource)).rejects.toThrow(

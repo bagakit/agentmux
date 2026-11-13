@@ -135,27 +135,31 @@ const importedSource: BrowserProfileImportedSource = {
   skippedCookies: 2
 }
 
+// Mirrors the store contract: every write advances the revision and returns the whole committed list.
 class FakeStore {
   profiles: BrowserProfileSummary[] = [structuredClone(defaultProfile)]
   pending: Array<{ profileId: string; label: string; startedAt: number }> = []
   nextCreatedId = CREATED_ID
+  revision = 0
 
+  snapshot() { return { revision: this.revision, defaultProfileId: DEFAULT_ID, profiles: structuredClone(this.profiles) } }
+  commit() { this.revision += 1; return this.snapshot() }
   async listProfiles() { return structuredClone(this.profiles) }
-  async list() { return { revision: 0, profiles: structuredClone(this.profiles) } }
-  lastCommittedRevision() { return null }
+  async list() { return this.snapshot() }
   async listPendingImports() { return structuredClone(this.pending) }
   async createProfile(label: string) {
     const profile = { id: this.nextCreatedId, label, createdAt: 2, isDefault: false, source: null }
     this.profiles.push(profile)
-    return structuredClone(profile)
+    return { snapshot: this.commit(), profile: structuredClone(profile) }
   }
   async deleteProfile(profileId: string) {
     this.profiles = this.profiles.filter((profile) => profile.id !== profileId)
+    return this.commit()
   }
   async beginPendingImport(label: string) {
     const pending = { profileId: IMPORT_ID, label, startedAt: 3 }
     this.pending.push(pending)
-    return structuredClone(pending)
+    return { snapshot: this.commit(), pending: structuredClone(pending) }
   }
   async commitImportedProfile(profileId: string, source: BrowserProfileImportedSource) {
     const pending = this.pending.find((item) => item.profileId === profileId)!
@@ -168,12 +172,13 @@ class FakeStore {
     }
     this.pending = this.pending.filter((item) => item.profileId !== profileId)
     this.profiles.push(profile)
-    return structuredClone(profile)
+    return { snapshot: this.commit(), profile: structuredClone(profile) }
   }
   async abortPendingImport(profileId: string) {
     const before = this.pending.length
     this.pending = this.pending.filter((item) => item.profileId !== profileId)
     if (before === this.pending.length) throw new Error('Unknown pending Browser Profile')
+    return this.commit()
   }
 }
 
@@ -264,6 +269,41 @@ describe('BrowserProfileManager', () => {
     expect(store.profiles).toEqual([defaultProfile])
     expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).toHaveBeenCalledOnce()
     await expect(manager.deleteProfile(DEFAULT_ID, approval(DEFAULT_ID))).rejects.toThrow('default Browser Profile cannot be deleted')
+  })
+
+  it('replaces its whole cache with each committed list and announces it, never a stale or local copy', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    const heard: Array<{ revision: number; profiles: BrowserProfileSummary[] }> = []
+    manager.onChange(snapshot => heard.push(snapshot))
+    // Another writer of the same file committed a rename; the next commit through this Main carries it.
+    store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
+    await manager.createProfile('Work')
+    expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
+    expect(heard).toEqual([{ revision: 1, defaultProfileId: DEFAULT_ID, profiles: manager.listProfiles() }])
+    heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
+    expect(manager.listProfiles()[0]!.label).toBe('Renamed elsewhere')
+
+    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
+    expect(heard.map(snapshot => [snapshot.revision, snapshot.profiles.map(profile => profile.id)])).toEqual([[1, [DEFAULT_ID, CREATED_ID]], [2, [DEFAULT_ID]]])
+    expect(manager.listRevision()).toBe(2)
+  })
+
+  it('keeps a deleting Profile out of a list committed while its partition is cleared', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    await manager.createProfile('Work')
+    let releaseClear!: () => void
+    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockImplementationOnce(
+      async () => await new Promise<void>((resolve) => { releaseClear = resolve })
+    )
+    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
+    store.nextCreatedId = PENDING_ID
+    await manager.createProfile('Meanwhile')
+    expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
+    releaseClear()
+    await deleting
+    expect(manager.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID, PENDING_ID])
   })
 
   it('makes a Profile unavailable before its destructive partition clear can yield', async () => {
