@@ -1,20 +1,39 @@
-import { constrainedEndpoint, normalizeRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { CALLOUT_ZOOM_RANGE, calloutBubble, constrainedEndpoint, normalizeRect, type CalloutShape, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
 
-export type SelectionHandleId = 'nw' | 'ne' | 'se' | 'sw' | 'from' | 'to'
+type Corner = 'nw' | 'ne' | 'se' | 'sw'
+/** `zoom-*` are the corners of a callout bubble; they change its zoom, not its source. */
+export type SelectionHandleId = Corner | `zoom-${Corner}` | 'from' | 'to'
 export type SelectionHandle = { id: SelectionHandleId; point: ScreenshotPoint }
 
 /** Geometry stays in original image pixels; callers choose a tolerance that
  * keeps hit targets and painted handles consistent with their view scale. */
 export function selectionHandles(shape: ScreenshotShape): SelectionHandle[] {
   if (shape.kind === 'arrow') return [{ id: 'from', point: shape.from }, { id: 'to', point: shape.to }]
+  if (shape.kind === 'callout') return [...corners(normalizeRect(shape.from, shape.to)),
+    ...corners(calloutBubble(shape)).map(handle => ({ ...handle, id: `zoom-${handle.id}` as const }))]
   if (shape.kind !== 'rect' && shape.kind !== 'ellipse' && shape.kind !== 'note' && shape.kind !== 'pixelate' && shape.kind !== 'cover' && shape.kind !== 'blur' && shape.kind !== 'spotlight') return []
-  const rect = normalizeRect(shape.from, shape.to)
+  return corners(normalizeRect(shape.from, shape.to))
+}
+
+function corners(rect: NormalizedRect): { id: Corner; point: ScreenshotPoint }[] {
   return [
     { id: 'nw', point: { x: rect.x, y: rect.y } },
     { id: 'ne', point: { x: rect.x + rect.width, y: rect.y } },
     { id: 'se', point: { x: rect.x + rect.width, y: rect.y + rect.height } },
     { id: 'sw', point: { x: rect.x, y: rect.y + rect.height } }
   ]
+}
+
+/** The opposite bubble corner stays fixed; the larger proportional reach sets the zoom. */
+function resizeCalloutBubble(original: CalloutShape, corner: Corner, point: ScreenshotPoint): CalloutShape {
+  const source = normalizeRect(original.from, original.to), bubble = calloutBubble(original)
+  if (source.width <= 0 || source.height <= 0) return original
+  const left = corner === 'nw' || corner === 'sw', top = corner === 'nw' || corner === 'ne'
+  const fixed = { x: left ? bubble.x + bubble.width : bubble.x, y: top ? bubble.y + bubble.height : bubble.y }
+  const reach = Math.max((left ? fixed.x - point.x : point.x - fixed.x) / source.width, (top ? fixed.y - point.y : point.y - fixed.y) / source.height)
+  const zoom = Math.min(CALLOUT_ZOOM_RANGE.max, Math.max(CALLOUT_ZOOM_RANGE.min, reach))
+  const width = source.width * zoom, height = source.height * zoom
+  return { ...original, zoom, at: { x: left ? fixed.x - width : fixed.x, y: top ? fixed.y - height : fixed.y } }
 }
 
 export function hitSelectionHandle(shape: ScreenshotShape, point: ScreenshotPoint, tolerance: number): SelectionHandleId | null {
@@ -40,8 +59,9 @@ export function resizeShapeFromHandle(original: ScreenshotShape, handle: Selecti
     if (handle === 'to') return { ...original, to: { ...point } }
     return original
   }
-  if (original.kind !== 'rect' && original.kind !== 'ellipse' && original.kind !== 'note' && original.kind !== 'pixelate' && original.kind !== 'cover' && original.kind !== 'blur' && original.kind !== 'spotlight') return original
-  if (handle === 'from' || handle === 'to') return original
+  if (original.kind === 'callout' && handle.startsWith('zoom-')) return resizeCalloutBubble(original, handle.slice(5) as Corner, point)
+  if (original.kind !== 'rect' && original.kind !== 'ellipse' && original.kind !== 'note' && original.kind !== 'pixelate' && original.kind !== 'cover' && original.kind !== 'blur' && original.kind !== 'spotlight' && original.kind !== 'callout') return original
+  if (handle === 'from' || handle === 'to' || handle.startsWith('zoom-')) return original
   const from = { ...original.from }, to = { ...original.to }
   const left = handle === 'nw' || handle === 'sw'
   const top = handle === 'nw' || handle === 'ne'

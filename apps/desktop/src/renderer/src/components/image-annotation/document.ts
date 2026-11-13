@@ -1,4 +1,4 @@
-import { BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, shapeBounds, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { BLUR_RADIUS_RANGE, CALLOUT_ZOOM_RANGE, SPOTLIGHT_DIM_RANGE, shapeBounds, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
 import type { AnnotationImage } from './types'
 
 export type AnnotationHistoricalSource = {
@@ -104,7 +104,7 @@ function image(value: unknown, limits: AnnotationDocumentLimits): AnnotationImag
 }
 
 function shape(value: unknown): ScreenshotShape {
-  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim'])
+  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim', 'zoom'])
   const kind = text(base.kind), id = text(base.id), color = text(base.color)
   if (!id || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) invalid('Annotation IDs must be nonempty and colors must be opaque hexadecimal colors.')
   const common = { id, color }
@@ -139,6 +139,10 @@ function shape(value: unknown): ScreenshotShape {
   if (kind === 'spotlight') {
     record(value, [...fields, 'from', 'to', 'dim'])
     return { ...common, kind, from: point(base.from), to: point(base.to), dim: inRange(base.dim, SPOTLIGHT_DIM_RANGE, 'The spotlight dimming is out of range.') }
+  }
+  if (kind === 'callout') {
+    record(value, [...fields, 'from', 'to', 'at', 'zoom'])
+    return { ...common, kind, from: point(base.from), to: point(base.to), at: point(base.at), zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.') }
   }
   if (kind === 'cover') {
     record(value, [...fields, 'from', 'to'])

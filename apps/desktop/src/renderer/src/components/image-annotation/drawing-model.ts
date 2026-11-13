@@ -21,8 +21,10 @@ export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to:
 export type BlurShape = ShapeBase & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
 /** Darkens everything outside from/to by `dim` (0..1 opacity). It points, it does not redact. */
 export type SpotlightShape = ShapeBase & { kind: 'spotlight'; from: ScreenshotPoint; to: ScreenshotPoint; dim: number }
+/** from/to is the source region; the bubble's top-left is `at` and its size is the source size × zoom. */
+export type CalloutShape = ShapeBase & { kind: 'callout'; from: ScreenshotPoint; to: ScreenshotPoint; at: ScreenshotPoint; zoom: number }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape | CalloutShape
 export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape | BlurShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
@@ -38,6 +40,8 @@ export const BLUR_RADIUS_RANGE = { min: 2, max: 64 } as const
 export const DEFAULT_BLUR_RADIUS = 12
 export const SPOTLIGHT_DIM_RANGE = { min: 0.3, max: 0.85 } as const
 export const DEFAULT_SPOTLIGHT_DIM = 0.6
+export const CALLOUT_ZOOM_RANGE = { min: 1.5, max: 6 } as const
+export const DEFAULT_CALLOUT_ZOOM = 2.5
 
 const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, value))
 export function createBlurShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, radius = DEFAULT_BLUR_RADIUS): BlurShape {
@@ -45,6 +49,26 @@ export function createBlurShape(id: string, color: string, from: ScreenshotPoint
 }
 export function createSpotlightShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, dim = DEFAULT_SPOTLIGHT_DIM): SpotlightShape {
   return { id, color, kind: 'spotlight', from, to, dim: clamp(dim, SPOTLIGHT_DIM_RANGE) }
+}
+/** Without `at`, the bubble starts to the right of the source with a small gap. */
+export function createCalloutShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, zoom = DEFAULT_CALLOUT_ZOOM, at?: ScreenshotPoint): CalloutShape {
+  const source = normalizeRect(from, to)
+  return { id, color, kind: 'callout', from, to, zoom: clamp(zoom, CALLOUT_ZOOM_RANGE), at: at ?? { x: source.x + source.width + 16, y: source.y } }
+}
+export function calloutBubble(shape: CalloutShape): NormalizedRect {
+  const source = normalizeRect(shape.from, shape.to)
+  return { x: shape.at.x, y: shape.at.y, width: source.width * shape.zoom, height: source.height * shape.zoom }
+}
+/** The leader joins the closest pair of edge midpoints of the source and the bubble. */
+export function calloutLeader(shape: CalloutShape): { from: ScreenshotPoint; to: ScreenshotPoint } {
+  const midpoints = (rect: NormalizedRect) => [{ x: rect.x + rect.width / 2, y: rect.y }, { x: rect.x + rect.width, y: rect.y + rect.height / 2 },
+    { x: rect.x + rect.width / 2, y: rect.y + rect.height }, { x: rect.x, y: rect.y + rect.height / 2 }]
+  let best = { from: shape.from, to: shape.at }, distance = Infinity
+  for (const from of midpoints(normalizeRect(shape.from, shape.to))) for (const to of midpoints(calloutBubble(shape))) {
+    const next = Math.hypot(to.x - from.x, to.y - from.y)
+    if (next < distance) { best = { from, to }; distance = next }
+  }
+  return best
 }
 
 export function screenshotTextLines(text: string): string[] { return text.split(/\r\n|\r|\n/) }
@@ -159,6 +183,8 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
       return { ...shape, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'text':
       return { ...shape, fontSize: shape.fontSize * scale, at: scalePoint(shape.at, scale) }
+    case 'callout':
+      return { ...shape, at: scalePoint(shape.at, scale), from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
   }
 }
 
@@ -171,6 +197,8 @@ export function moveShape(shape: ScreenshotShape, dx: number, dy: number): Scree
       return { ...shape, points: shape.points.map(move) }
     case 'text':
       return { ...shape, at: move(shape.at) }
+    case 'callout':
+      return { ...shape, at: move(shape.at), from: move(shape.from), to: move(shape.to) }
     case 'arrow':
     case 'rect':
     case 'ellipse':
@@ -197,6 +225,10 @@ export function shapeBounds(shape: ScreenshotShape, textWidth?: (shape: TextShap
     return { x: left - padding, y: top - padding, width: right - left + padding * 2, height: bottom - top + padding * 2 }
   }
   const rect = normalizeRect(shape.from, shape.to)
+  if (shape.kind === 'callout') {
+    const bubble = calloutBubble(shape), x = Math.min(rect.x, bubble.x), y = Math.min(rect.y, bubble.y)
+    return { x, y, width: Math.max(rect.x + rect.width, bubble.x + bubble.width) - x, height: Math.max(rect.y + rect.height, bubble.y + bubble.height) - y }
+  }
   if (shape.kind === 'note') {
     const radius = shape.radius
     const x = Math.min(rect.x, shape.from.x - radius), y = Math.min(rect.y, shape.from.y - radius)
@@ -216,7 +248,7 @@ export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedR
  * pixels. A spotlight paints last so it dims every other mark outside it. */
 export function screenshotOutputLayer(shape: ScreenshotShape): number {
   if (isScreenshotMask(shape)) return 1
-  return shape.kind === 'spotlight' ? 3 : 0
+  return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0
 }
 
 /** Both PNG and textual handoff consume this list. A cropped-away number or a
@@ -304,6 +336,12 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
     if (shape.kind === 'spotlight') {
       // Its interior holds the marks it points at; only the frame selects it.
       if (nearRectEdge(point, normalizeRect(shape.from, shape.to), tolerance, tolerance + 1)) return shape
+      continue
+    }
+    if (shape.kind === 'callout') {
+      const bubble = calloutBubble(shape), leader = calloutLeader(shape)
+      if (nearRectEdge(point, normalizeRect(shape.from, shape.to), tolerance, tolerance + 1) || distanceToSegment(point, leader.from, leader.to) <= tolerance + 1 ||
+        (point.x >= bubble.x - tolerance && point.x <= bubble.x + bubble.width + tolerance && point.y >= bubble.y - tolerance && point.y <= bubble.y + bubble.height + tolerance)) return shape
       continue
     }
     if (shape.kind === 'note' && Math.hypot(point.x - shape.from.x, point.y - shape.from.y) <= shape.radius + tolerance) return shape

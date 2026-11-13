@@ -3,6 +3,8 @@
 
 import {
   arrowHeadGeometry,
+  calloutBubble,
+  calloutLeader,
   highlightWidth,
   normalizeRect,
   HIGHLIGHT_ALPHA,
@@ -20,6 +22,7 @@ import {
   type CoverShape,
   type BlurShape,
   type SpotlightShape,
+  type CalloutShape,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -51,6 +54,7 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
       case 'cover': drawCover(context, shape); break
       case 'blur': drawBlur(context, shape); break
       case 'spotlight': drawSpotlight(context, shape); break
+      case 'callout': drawCallout(context, shape); break
       default: { const unhandled: never = shape; throw new Error('Unsupported screenshot mark: ' + (unhandled as ScreenshotShape).kind) }
     }
   } finally { context.restore() }
@@ -267,3 +271,45 @@ function drawSpotlight(context: CanvasRenderingContext2D, shape: SpotlightShape)
   context.strokeRect(rect.x, rect.y, rect.width, rect.height)
 }
 
+
+/** The bubble enlarges what is already painted, so it shows processed mask
+ * pixels and never the original under a mask. */
+function drawCallout(context: CanvasRenderingContext2D, shape: CalloutShape): void {
+  const source = normalizeRect(shape.from, shape.to), bubble = calloutBubble(shape), leader = calloutLeader(shape)
+  if (source.width <= 0 || source.height <= 0) return
+  const transform = context.getTransform(), canvas = context.canvas
+  const left = Math.max(0, Math.floor(source.x * transform.a + transform.e))
+  const top = Math.max(0, Math.floor(source.y * transform.d + transform.f))
+  const right = Math.min(canvas.width, Math.ceil((source.x + source.width) * transform.a + transform.e))
+  const bottom = Math.min(canvas.height, Math.ceil((source.y + source.height) * transform.d + transform.f))
+  let sample: HTMLCanvasElement | null = null
+  if (right > left && bottom > top) {
+    sample = canvas.ownerDocument.createElement('canvas')
+    sample.width = right - left; sample.height = bottom - top
+    const copy = sample.getContext('2d')
+    if (!copy) throw new Error('Screenshot callout requires a 2D canvas')
+    copy.drawImage(canvas, left, top, sample.width, sample.height, 0, 0, sample.width, sample.height)
+  }
+  context.lineWidth = 2 / Math.hypot(transform.a, transform.b)
+  context.beginPath(); context.moveTo(leader.from.x, leader.from.y); context.lineTo(leader.to.x, leader.to.y); context.stroke()
+  context.strokeRect(source.x, source.y, source.width, source.height)
+  const radius = Math.min(10 / Math.hypot(transform.a, transform.b), bubble.width / 2, bubble.height / 2)
+  context.save()
+  context.shadowColor = 'rgba(0,0,0,0.35)'
+  context.shadowBlur = 12
+  context.shadowOffsetY = 3
+  context.beginPath(); context.roundRect(bubble.x, bubble.y, bubble.width, bubble.height, radius); context.fill()
+  context.restore()
+  context.save()
+  context.beginPath(); context.roundRect(bubble.x, bubble.y, bubble.width, bubble.height, radius); context.clip()
+  if (sample) {
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    const scaleX = bubble.width / source.width, scaleY = bubble.height / source.height
+    context.drawImage(sample, 0, 0, sample.width, sample.height,
+      bubble.x + ((left - transform.e) / transform.a - source.x) * scaleX, bubble.y + ((top - transform.f) / transform.d - source.y) * scaleY,
+      sample.width / transform.a * scaleX, sample.height / transform.d * scaleY)
+  }
+  context.restore()
+  context.beginPath(); context.roundRect(bubble.x, bubble.y, bubble.width, bubble.height, radius); context.stroke()
+}
