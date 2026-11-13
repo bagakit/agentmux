@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { classifyStream, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
   type MediaFailureView, type MediaPlayerAction, type SeekableWindow } from '../lib/media-player'
 import type { WorkspaceMediaStreamKind } from '../../../shared/workspace-media-stream'
-import { formatFileBytes } from './FilePreviewPane'
+import { formatFileBytes } from '../lib/format-file-bytes'
 
 const PlayIcon = semanticIconComponent('control.media-play')
 const PauseIcon = semanticIconComponent('control.media-pause')

@@ -11,6 +11,7 @@ import { useWorkspaceMediaStream } from '../lib/use-workspace-media-stream'
 import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
 import { FilePathLabel } from './FilePathLabel'
 import { FilePreviewState } from './FilePreviewState'
+import { formatFileBytes } from '../lib/format-file-bytes'
 
 const ThemeActionZoomOutIcon = semanticIconComponent('action.zoom-out')
 const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
@@ -22,13 +23,6 @@ const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 const PdfContent = lazy(async () => ({ default: (await import('./PdfContent')).PdfContent }))
 const MediaPlayer = lazy(async () => ({ default: (await import('./MediaPlayer')).MediaPlayer }))
 
-export function formatFileBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB']
-  let value = bytes / 1024, unit = 0
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[unit]}`
-}
 
 /** Image viewing only. Decode, zoom and failure state belong to one content mount;
  * both file routes key it by source URL. Native load can finish before passive effects. */
