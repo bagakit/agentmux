@@ -276,17 +276,12 @@ export function normalizeTerminalInteraction(
   // 消费 adapter 已得到的 normalized.eventName（通过内部解析后的信封传递），不重新看 payload 字段猜名。
   const eventName = envelope.eventName
   const toolName = boundedText(payload.tool_name) ?? boundedText(payload.toolName)
-  if (
-    eventName &&
-    protocol.questionEvents.includes(eventName) &&
-    toolName &&
-    protocol.questionTools.includes(toolName.toLowerCase())
-  ) {
-    return questionRequest(
-      envelope,
-      observedAt,
-      payload.tool_input ?? payload.toolInput ?? payload.input
-    )
+  if (toolName && protocol.questionTools.includes(toolName.toLowerCase())) {
+    // A question tool's other stages (a native permission ask for the same call) are not a second
+    // request and not a permission: only the declared question event opens it.
+    return eventName && protocol.questionEvents.includes(eventName)
+      ? questionRequest(envelope, observedAt, payload.tool_input ?? payload.toolInput ?? payload.input)
+      : undefined
   }
   // Only the exact Provider's normalized lifecycle may establish a permission request.
   if (lifecycleEvent === 'permission-request') {
