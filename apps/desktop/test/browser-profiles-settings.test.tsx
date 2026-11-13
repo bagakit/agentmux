@@ -228,6 +228,27 @@ describe('Settings › Browser Profiles deletion', () => {
     expect(port.deleteProfile).toHaveBeenCalledExactlyOnceWith('p-client', { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: 'p-client' })
   })
 
+  it('a delete whose site data is still clearing leaves the editor and keeps saying so', async () => {
+    store.tabs = {}
+    port.deleteProfile.mockImplementationOnce(async () => {
+      port.commit(port.get().profiles.filter(profile => profile.id !== 'p-client'))
+      throw Object.assign(new Error('Northwind client was deleted, but clearing its sign-ins and site data did not finish. AgentMux clears it again when it next starts.'),
+        { code: 'BROWSER_PROFILE_DATA_CLEAR_PENDING' })
+    })
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await select('Northwind client')
+    await openMore()
+    await act(async () => deleteItem().click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="alertdialog"] .danger-button')!.click())
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(container.querySelector('.browser-profile-editor__name')?.textContent).toBe('Personal')
+    expect(container.querySelector('.browser-profile-editor__error')).toBeNull()
+    const notice = container.querySelector('.browser-profiles-settings__service[role="status"]')
+    expect(notice?.textContent).toContain('clears it again when it next starts')
+    await act(async () => notice!.querySelector<HTMLButtonElement>('button')!.click())
+    expect(container.querySelector('.browser-profiles-settings__service')).toBeNull()
+  })
+
   it('keeps the Profile and Main’s reason when Main refuses the delete', async () => {
     store.tabs = {}
     port.deleteProfile.mockRejectedValueOnce(new Error('Browser Profile is still used by the saved Browser "Release notes". Open it and switch it to another Profile, or close it, then delete again.'))

@@ -139,6 +139,7 @@ const importedSource: BrowserProfileImportedSource = {
 class FakeStore {
   profiles: BrowserProfileSummary[] = [structuredClone(defaultProfile)]
   pending: Array<{ profileId: string; label: string; startedAt: number }> = []
+  pendingDeletes: string[] = []
   nextCreatedId = CREATED_ID
   revision = 0
 
@@ -154,7 +155,13 @@ class FakeStore {
   }
   async deleteProfile(profileId: string) {
     this.profiles = this.profiles.filter((profile) => profile.id !== profileId)
+    this.pendingDeletes.push(profileId)
     return this.commit()
+  }
+  async listPendingDeletes() { return [...this.pendingDeletes] }
+  async finishDelete(profileId: string) {
+    if (!this.pendingDeletes.includes(profileId)) throw new Error('Unknown deleted Browser Profile')
+    this.pendingDeletes = this.pendingDeletes.filter((id) => id !== profileId)
   }
   async beginPendingImport(label: string) {
     const pending = { profileId: IMPORT_ID, label, startedAt: 3 }
@@ -289,6 +296,56 @@ describe('BrowserProfileManager', () => {
     expect(manager.listRevision()).toBe(2)
   })
 
+  it('writes the deletion before clearing site data, so a failed write keeps the Profile and its sign-ins', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    await manager.createProfile('Work')
+    const clear = electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData
+    const order: string[] = []
+    const write = store.deleteProfile.bind(store)
+    store.deleteProfile = vi.fn(async (id: string) => { order.push('write'); return await write(id) })
+    clear.mockImplementation(async () => { order.push('clear') })
+    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
+    expect(order).toEqual(['write', 'clear'])
+    expect(store.pendingDeletes).toEqual([])
+
+    store.nextCreatedId = PENDING_ID
+    await manager.createProfile('Kept')
+    clear.mockClear()
+    store.deleteProfile = vi.fn(async () => { throw new Error('EIO') })
+    await expect(manager.deleteProfile(PENDING_ID, approval(PENDING_ID))).rejects.toThrow('EIO')
+    expect(clear).not.toHaveBeenCalled()
+    expect(electronMocks.sessionFor(partition(PENDING_ID)).clearStorageData).not.toHaveBeenCalled()
+    expect(manager.resolvePartition(PENDING_ID)).toBe(partition(PENDING_ID))
+  })
+
+  it('a clear that fails after the deletion is written says so by code and is retried at the next start', async () => {
+    const { store, manager } = managerFixture()
+    await manager.initialize()
+    await manager.createProfile('Work')
+    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockRejectedValueOnce(new Error('EBUSY'))
+    await expect(manager.deleteProfile(CREATED_ID, approval(CREATED_ID))).rejects.toMatchObject({
+      code: 'BROWSER_PROFILE_DATA_CLEAR_PENDING', message: expect.stringContaining('Work was deleted')
+    })
+    expect(manager.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID])
+    expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
+    expect(store.pendingDeletes).toEqual([CREATED_ID])
+
+    const restarted = new BrowserProfileManager(store as never)
+    await restarted.initialize()
+    expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).toHaveBeenCalledTimes(2)
+    expect(store.pendingDeletes).toEqual([])
+  })
+
+  it('a retried clear that fails again at start keeps the record and does not stop Profiles from loading', async () => {
+    const { store, manager } = managerFixture()
+    store.pendingDeletes.push(CREATED_ID)
+    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockRejectedValueOnce(new Error('EBUSY'))
+    await manager.initialize()
+    expect(manager.defaultProfileId()).toBe(DEFAULT_ID)
+    expect(store.pendingDeletes).toEqual([CREATED_ID])
+  })
+
   it('keeps a deleting Profile out of a list committed while its partition is cleared', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
@@ -318,6 +375,8 @@ describe('BrowserProfileManager', () => {
     const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
 
     expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
+    // The clear starts only after the list is written.
+    await vi.waitFor(() => expect(releaseClear).toBeTypeOf('function'))
     releaseClear()
     await deleting
   })

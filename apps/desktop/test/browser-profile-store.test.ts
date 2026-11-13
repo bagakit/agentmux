@@ -176,6 +176,31 @@ describe('BrowserProfileStore', () => {
     await expect(store.deleteProfile(created.id)).rejects.toThrow(`Unknown Browser Profile: ${created.id}`)
   })
 
+  it('records a deleted Profile until its site data is confirmed cleared, and never reuses its id', async () => {
+    const { path, store } = await storeFixture()
+    const { profile: created } = await store.createProfile('Temporary')
+
+    await store.deleteProfile(created.id)
+    expect(await store.listPendingDeletes()).toEqual([created.id])
+    expect(JSON.parse(await readFile(path, 'utf8')).pendingDeletes).toEqual([created.id])
+    expect((await store.list()).profiles.map((profile) => profile.id)).not.toContain(created.id)
+
+    const revision = (await store.list()).revision
+    await store.finishDelete(created.id)
+    expect((await store.list()).revision, 'the list did not change, so its revision must not either').toBe(revision)
+    expect(await store.listPendingDeletes()).toEqual([])
+    expect(JSON.parse(await readFile(path, 'utf8'))).not.toHaveProperty('pendingDeletes')
+    await expect(store.finishDelete(created.id)).rejects.toThrow(`Unknown deleted Browser Profile: ${created.id}`)
+  })
+
+  it('refuses metadata that lists a Profile it also records as deleted', async () => {
+    const { path, store } = await storeFixture()
+    const [defaultProfile] = await store.listProfiles()
+    const raw = JSON.parse(await readFile(path, 'utf8'))
+    await writeFile(path, JSON.stringify({ ...raw, pendingDeletes: [defaultProfile!.id] }))
+    await expect(store.listProfiles()).rejects.toThrow('Deleted Browser Profile is still listed')
+  })
+
   it('keeps the prior metadata and removes its temp file when atomic rename fails', async () => {
     const { root, path, store } = await storeFixture()
     await store.listProfiles()
