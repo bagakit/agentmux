@@ -14,13 +14,14 @@ import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
 import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, DEFAULT_SCREENSHOT_COLOR,
   DEFAULT_SCREENSHOT_FONT_SIZE, DEFAULT_SCREENSHOT_WIDTH, redoShape, SCREENSHOT_COLORS, SCREENSHOT_FONT_SIZES,
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
-  shapeBounds, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
+  shapeBounds, intersectRect, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
 import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
 import { selectionHandles, hitSelectionHandle, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
+import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE, type SnapFeatures, type SnapLines } from './snapping'
 import { fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport } from './view'
 import type { AnnotationImage, ImageAnnotationInput, ImageAnnotationOutputResult } from './types'
 import './image-annotation.css'
@@ -64,6 +65,9 @@ const CROP_HANDLE_HIT = 8, CROP_HANDLE_SIZE = 8
 const LOUPE_CELLS = 15, LOUPE_CELL = 8, LOUPE_GRID = LOUPE_CELLS * LOUPE_CELL, LOUPE_CENTRE = (LOUPE_CELLS - 1) / 2
 type LoupeSample = { x: number; y: number; hex: string; rgb: [number, number, number] }
 const hexByte = (value: number) => value.toString(16).padStart(2, '0').toUpperCase()
+// The editor's accent, the faint fill of the window a click would select, and how long that window's highlight fades in.
+const ACCENT = '#3b82f6', WINDOW_FILL = 'rgba(59, 130, 246, .12)', WINDOW_FADE_MS = 90
+const NO_WINDOWS: readonly NormalizedRect[] = []
 
 type EditorBase = {
   image: AnnotationImage
@@ -93,7 +97,7 @@ type WindowPresentation = {
   onSavePng?: AnnotationOutput
   onPin?: AnnotationOutput
   onCheckPin?(): void
-  pixelRatio?: never; origin?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
+  pixelRatio?: never; origin?: never; windows?: never; onCopyColor?: never; onExpand?: never; onSelect?: never; locked?: never
 }
 /**
  * One display's full frozen frame at a fixed one-to-one pixel scale, filling a transparent capture overlay. The
@@ -107,13 +111,15 @@ type CapturePresentation = {
   pixelRatio: number
   /** The global point of the frame's top-left, for the loupe's pt coordinates. Defaults to 0, 0. */
   origin?: ScreenshotPoint
+  /** The application windows on this frame when it froze, front to back, in image pixels: hover lights the one a click selects, and gestures snap to their edges. */
+  windows?: readonly NormalizedRect[]
   /** Plain C while the loupe shows: the host copies this exact sampled color. */
   onCopyColor?(hex: string): void
   onSavePng: AnnotationOutput
   onPin: AnnotationOutput
   /** ⌘E or Expand: the host reopens these marks in a separate window editor as initialState and initialTool. */
   onExpand(handoff: CaptureAnnotationHandoff): void
-  /** A drag made a new selection on this display, once per new selection; the host claims the request's one selection for this display. Moving, resizing or a click claims nothing. */
+  /** A drag or a click on a window made a new selection on this display, once per new selection; the host claims the request's one selection for this display. Moving, resizing or a click off every window claims nothing. */
   onSelect(): void
   /** Another display owns the request's selection: this frame keeps only its dimmed freeze and Cancel, and anything begun here is dropped. */
   locked?: boolean
@@ -122,7 +128,7 @@ type CapturePresentation = {
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
-  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 },
+  ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS,
   locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onCopyColor, onSelect, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
@@ -135,6 +141,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const panRef = useRef<{ start: ScreenshotPoint; view: AnnotationView; fitted: boolean } | null>(null)
   const textDraftRef = useRef<TextDraft | null>(null), noteEditorRef = useRef<string | null>(null), paintFrame = useRef(0), spaceHeld = useRef(false)
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null), samplerRef = useRef<HTMLCanvasElement | null>(null)
+  // Capture only: the window a click would select with the paint time its fade began, and the snap lines engaged now.
+  const litWindowRef = useRef<{ rect: NormalizedRect; since: number | null } | null>(null), guidesRef = useRef<SnapLines | null>(null)
   const barRef = useRef<HTMLDivElement>(null), chipRef = useRef<HTMLSpanElement>(null), loupeRef = useRef<HTMLCanvasElement>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') committedLayerRef.current = document.createElement('canvas')
   const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 })
@@ -200,7 +208,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   const schedulePaint = useCallback(() => {
     if (paintFrame.current) return
-    paintFrame.current = ownerWindow.requestAnimationFrame(() => {
+    paintFrame.current = ownerWindow.requestAnimationFrame(time => {
       paintFrame.current = 0
       const canvas = canvasRef.current, committed = committedLayerRef.current, state = live.current, currentView = viewRef.current
       if (!state.active || !canvas || !committed || !state.size.width || !state.size.height) return
@@ -220,8 +228,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         if (!context) return
         const fit = currentView.scale
         const crop = shownSelection(cropRef.current, state.documentState.crop, { x: 0, y: 0, width: image.width, height: image.height })
+        let fading = false
         context.save()
-        if (capture) paintCaptureSelection(context, crop, fit)
+        if (capture) fading = paintCaptureSelection(context, crop, fit, time)
         else if (crop) {
           context.fillStyle = 'rgba(8, 13, 20, .58)'
           context.fillRect(0, 0, image.width, crop.y); context.fillRect(0, crop.y + crop.height, image.width, image.height - crop.y - crop.height)
@@ -231,7 +240,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         }
         if (state.selected && !state.pendingText) {
           const shape = currentGestureRef.current ?? state.selected, box = shapeBounds(shape, measureText)
-          context.strokeStyle = '#3b82f6'; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
+          context.strokeStyle = ACCENT; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
           context.strokeRect(box.x - 4 / fit, box.y - 4 / fit, box.width + 8 / fit, box.height + 8 / fit)
           context.setLineDash([]); context.fillStyle = '#ffffff'
           for (const handle of selectionHandles(shape)) {
@@ -239,16 +248,28 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             context.strokeRect(handle.point.x - 4 / fit, handle.point.y - 4 / fit, 8 / fit, 8 / fit)
           }
         }
+        // While a gesture snaps, each engaged line runs 1 px across the frame.
+        const guides = capture ? guidesRef.current : null
+        if (guides) {
+          context.fillStyle = ACCENT
+          for (const x of guides.x) context.fillRect(x - .5 / fit, 0, 1 / fit, image.height)
+          for (const y of guides.y) context.fillRect(0, y - .5 / fit, image.width, 1 / fit)
+        }
         context.restore()
+        // The window highlight's fade paints only its own few frames.
+        if (fading) schedulePaint()
         setView(current => current === currentView ? current : currentView)
       } catch (error) { onError?.(error) }
     })
   }, [image.width, image.height, onError, ownerWindow, capture])
-  /** Dims the frozen frame outside the selection, or all of it before one exists, and draws its border and handles. */
-  function paintCaptureSelection(context: CanvasRenderingContext2D, crop: NormalizedRect | null, fit: number) {
+  /**
+   * Dims the frozen frame outside the selection and draws its border and handles. Before one exists it dims all of it
+   * and lights the window a click would select; true while that highlight still fades in.
+   */
+  function paintCaptureSelection(context: CanvasRenderingContext2D, crop: NormalizedRect | null, fit: number, time: number): boolean {
     const unit = 1 / fit
     context.fillStyle = 'rgba(0, 0, 0, .28)'
-    if (!crop) { context.fillRect(0, 0, image.width, image.height); return }
+    if (!crop) { context.fillRect(0, 0, image.width, image.height); return paintLitWindow(context, unit, time) }
     context.fillRect(0, 0, image.width, crop.y); context.fillRect(0, crop.y + crop.height, image.width, image.height - crop.y - crop.height)
     context.fillRect(0, crop.y, crop.x, crop.height); context.fillRect(crop.x + crop.width, crop.y, image.width - crop.x - crop.width, crop.height)
     // A white line between two dark hairlines reads on any frozen content, white windows included.
@@ -263,11 +284,25 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (column === 1 && row === 1) continue
       context.beginPath(); context.arc(x, y, CROP_HANDLE_SIZE / 2 * unit, 0, Math.PI * 2); context.fill(); context.stroke()
     }
+    return false
+  }
+  /** A faint fill and a 1 px accent outline, eased in over 90 ms from the first frame that paints it. */
+  function paintLitWindow(context: CanvasRenderingContext2D, unit: number, time: number): boolean {
+    const lit = litWindowRef.current
+    if (!lit) return false
+    lit.since ??= time
+    const progress = Math.min(1, (time - lit.since) / WINDOW_FADE_MS), { x, y, width, height } = lit.rect
+    context.globalAlpha = 1 - (1 - progress) ** 2
+    context.fillStyle = WINDOW_FILL; context.fillRect(x, y, width, height)
+    context.strokeStyle = ACCENT; context.lineWidth = unit; context.setLineDash([])
+    context.strokeRect(x + unit / 2, y + unit / 2, width - unit, height - unit)
+    context.globalAlpha = 1
+    return progress < 1
   }
   const requestView = useCallback((next: AnnotationView) => { viewRef.current = next; schedulePaint() }, [schedulePaint])
   const resetGesture = useCallback(() => {
     currentGestureRef.current = null; transformRef.current = null; cropRef.current = null; eraseRef.current = null
-    lastErasePoint.current = null; panRef.current = null; downRef.current = null; setGesture(null)
+    lastErasePoint.current = null; panRef.current = null; downRef.current = null; guidesRef.current = null; litWindowRef.current = null; setGesture(null)
   }, [])
   const edit = useCallback((update: (current: ScreenshotDocument) => ScreenshotDocument) => { onEdited?.(); setDocumentState(update) }, [onEdited])
   const undo = useCallback(() => { resetGesture(); edit(undoShape); schedulePaint() }, [edit, resetGesture, schedulePaint])
@@ -514,7 +549,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     }
     schedulePaint()
   }
-  function updateGesture(at: ScreenshotPoint, constrained = false) {
+  /** `unsnapped`: ⌘ is held, so a capture gesture follows the pointer exactly. */
+  function updateGesture(at: ScreenshotPoint, constrained = false, unsnapped = false) {
+    guidesRef.current = null
+    if (capture && !unsnapped) at = snapPoint(at, constrained)
     const transform = transformRef.current
     if (transform) currentGestureRef.current = transform.handle ? resizeShapeFromHandle(transform.original, transform.handle, at, constrained)
       : transform.bubble && transform.original.kind === 'callout'
@@ -543,14 +581,53 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     }
     schedulePaint()
   }
+  /**
+   * Lands what the gesture moves on a window edge, the selection's edges or another mark's edges or centre within 6 screen
+   * points: a moved selection's or mark's edges and centre, a resized selection's moving edges, a mark's dragged handle,
+   * or the moving corner of a new selection or region mark. Returns the shifted pointer and keeps the engaged lines as guides.
+   */
+  function snapPoint(at: ScreenshotPoint, constrained: boolean): ScreenshotPoint {
+    const transform = transformRef.current, crop = cropRef.current, drawn = currentGestureRef.current
+    const offset = (rect: NormalizedRect, start: ScreenshotPoint) => ({ ...rect, x: rect.x + at.x - start.x, y: rect.y + at.y - start.y })
+    // Shift reshapes a handle's or a new mark's end after it would snap, so a constrained end follows the pointer.
+    const end = constrained ? null : pointFeatures(at)
+    let features: SnapFeatures | null = null
+    if (transform) {
+      const box = transform.bubble && transform.original.kind === 'callout' ? calloutBubble(transform.original) : shapeBounds(transform.original, measureText)
+      features = transform.handle ? end : rectFeatures(offset(box, transform.start), null)
+    } else if (crop) features = crop.mode === 'create' || !crop.original ? pointFeatures(at) : rectFeatures(offset(crop.original, crop.start), crop.mode === 'move' ? null : crop.mode)
+    else if (drawn && REGION_KINDS.has(drawn.kind)) features = end
+    if (!features) return at
+    // The selection being made or adjusted moves its own edges, and a moved mark its own, so neither is a line to itself.
+    const own = transform?.original.id
+    const marks = documentState.shapes.flatMap(shape => shape.id === own ? [] : [shapeBounds(shape, measureText)])
+    const snapped = snap(features, snapLines(windows, crop ? null : documentState.crop, marks), SNAP_DISTANCE / viewRef.current.scale)
+    if (snapped.guides.x.length || snapped.guides.y.length) guidesRef.current = snapped.guides
+    // A capture works in whole image pixels; a mark's centre may sit on a half pixel.
+    return { x: at.x + Math.round(snapped.dx), y: at.y + Math.round(snapped.dy) }
+  }
+  /** The topmost window containing the point. */
+  function windowAt(at: ScreenshotPoint): NormalizedRect | null { return windows.find(window => rectContains(window, at)) ?? null }
+  /** Lights the window a click would select, repainting only when that window changes; reduced motion shows it at once. */
+  function lightWindow(rect: NormalizedRect | null) {
+    if (rect === (litWindowRef.current?.rect ?? null)) return
+    litWindowRef.current = rect && { rect, since: ownerWindow.matchMedia('(prefers-reduced-motion: reduce)').matches ? -Infinity : null }
+    schedulePaint()
+  }
   // The loupe follows the pointer before a selection exists and while one is made or adjusted. At rest a move reads no
   // frozen pixels, since each read is a canvas readback, and only sets the cursor for what a press would do.
   function track(event: { clientX: number; clientY: number }) {
     if (locked) return
     const at = localPoint(event), crop = documentState.crop
     setHover(cropRef.current || !crop ? { at, sample: sampleLoupe(at) } : null)
-    if (cropRef.current || currentGestureRef.current || eraseRef.current) return
+    if (cropRef.current || currentGestureRef.current || eraseRef.current) {
+      // A press keeps showing the window its release selects until the pointer travels into a drag.
+      const down = downRef.current
+      if (!down || Math.hypot(at.x - down.at.x, at.y - down.at.y) >= CLICK_DISTANCE) lightWindow(null)
+      return
+    }
     const spot = point(event), handle = crop ? hitCropHandle(crop, spot, CROP_HANDLE_HIT / viewRef.current.scale) : null
+    lightWindow(crop ? null : windowAt(spot))
     setCursor(!crop ? 'crosshair' : handle ? CROP_CURSORS[handle] : !rectContains(crop, spot) ? documentState.shapes.length ? 'default' : 'crosshair' : tool === 'select' ? 'move' : 'crosshair')
   }
   /** Right-click outside the selection clears it while there are no marks to lose; with no selection it cancels. */
@@ -566,18 +643,20 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (capture) track(event)
     const pan = panRef.current
     if (pan) { const at = localPoint(event); requestView({ ...pan.view, x: pan.view.x + at.x - pan.start.x, y: pan.view.y + at.y - pan.start.y }); return }
-    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey)
+    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey, event.metaKey)
   }
   function onPointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
     if (panRef.current) { onPointerMove(event); resetGesture(); return }
-    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey)
+    if (currentGestureRef.current || cropRef.current || eraseRef.current) updateGesture(point(event), event.shiftKey, event.metaKey)
     const finished = currentGestureRef.current, transform = transformRef.current, crop = cropRef.current, erased = eraseRef.current
     const down = downRef.current, up = localPoint(event)
     const click = down !== null && Math.hypot(up.x - down.at.x, up.y - down.at.y) < CLICK_DISTANCE
     resetGesture()
     if (crop) {
-      const box = cropGestureRect(crop, originalBounds)
-      if (box && !(crop.mode === 'create' && click) && JSON.stringify(box) !== JSON.stringify(crop.original)) {
+      // Before any selection, a click without travel selects the window under it as this display shows it.
+      const target = crop.mode === 'create' && click && !crop.original ? windowAt(crop.start) : null
+      const box = target ? intersectRect(target, originalBounds) : cropGestureRect(crop, originalBounds)
+      if (box && !(crop.mode === 'create' && click && !target) && JSON.stringify(box) !== JSON.stringify(crop.original)) {
         edit(doc => setCrop(doc, box)); if (crop.mode === 'create') onSelect?.()
       }
     }
@@ -721,7 +800,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             onError={() => { setLoaded(false); setImageError(true); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
           <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? locked ? 'default' : cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? selected ? 'move' : 'default' : 'crosshair' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
-            onPointerLeave={capture ? () => setHover(null) : undefined} onContextMenu={onContextMenu}
+            onPointerLeave={capture ? () => { setHover(null); lightWindow(null) } : undefined} onContextMenu={onContextMenu}
             onLostPointerCapture={() => { if (currentGestureRef.current || cropRef.current || eraseRef.current || panRef.current) cancelGesture() }}
             onDoubleClick={event => {
               if (busy) return

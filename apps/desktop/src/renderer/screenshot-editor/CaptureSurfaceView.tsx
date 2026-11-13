@@ -72,7 +72,7 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
   </main>
   if (!decoded) return <main className="capture-surface" />
   return <main className="capture-surface">
-    <ImageAnnotationEditor presentation="capture" image={input.image} busy={busy} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }}
+    <ImageAnnotationEditor presentation="capture" image={input.image} busy={busy} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }} windows={input.windows}
       locked={locked} onSelect={claim}
       completeLabel="Done" busyLabel="Copying…" documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       onComplete={edit => output(edit, 'finish')} onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')}
