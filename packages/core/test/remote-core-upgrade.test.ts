@@ -474,6 +474,35 @@ it('strict public check codec rejects mixed or admission-bearing unavailable can
   ]) expect(() => parseRemoteCoreUpgradeCheck(invalid)).toThrow()
 })
 
+it('an empty or unattributable operation record is refused by its own ID without hiding current Core facts or blocking another Host', async () => {
+  const f = await fixture(); await f.manager.check(host)
+  const { mkdir } = await import('node:fs/promises'); await mkdir(join(f.root, 'operations'), { recursive: true })
+  await writeFile(join(f.root, 'operations', 'interrupted.json'), '')
+  await writeFile(join(f.root, 'operations', 'partial.json'), '{"receipt":')
+  const checked = await f.manager.check(host)
+  expect(checked).toMatchObject({ eligible: true, reason: 'ready', current: { state: 'available', ownerInstanceId: 'original' } })
+  expect(checked.unreadableOperations).toEqual(['interrupted', 'partial'])
+  expect(parseRemoteCoreUpgradeCheck(checked)).toMatchObject({ current: { state: 'available' }, unreadableOperations: ['interrupted', 'partial'] })
+  expect(() => parseRemoteCoreUpgradeCheck({ ...checked, unreadableOperations: ['../outside'] })).toThrow('unreadable operation IDs')
+  await expect(f.manager.inspect(host, 'interrupted')).rejects.toMatchObject({ code: 'CORE_UPGRADE_OPERATION_UNREADABLE' })
+  expect((await f.manager.upgrade(host, checked.expected!, 'after-damage')).status).toBe('completed')
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+})
+
+it('reserves an operation ID atomically, never leaving an empty record or a staging file', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  const fs = await import('node:fs/promises')
+  const probe = await fs.open(join(f.root, 'probe'), 'w'), handlePrototype = Object.getPrototypeOf(probe) as { writeFile: () => Promise<void> }; await probe.close()
+  const empty = vi.spyOn(handlePrototype, 'writeFile')
+  empty.mockRejectedValueOnce(new Error('interrupted before the reservation was written'))
+  await expect(f.manager.upgrade(host, check.expected!, 'interrupted-reservation')).rejects.toThrow('interrupted before the reservation')
+  empty.mockRestore()
+  expect((await fs.readdir(join(f.root, 'operations'))).filter(name => name.startsWith('interrupted-reservation'))).toEqual([])
+  expect(await f.manager.inspect(host, 'interrupted-reservation')).toBeNull()
+  expect(f.effects).toEqual([])
+  expect((await f.manager.check(host))).toMatchObject({ eligible: true, reason: 'ready' })
+})
+
 it('public CLI checks an SSH Host that keeps an unused empty Tailcat target, and still rejects an empty one in use', async () => {
   const f = await fixture()
   const residual: RemoteCoreUpgradeHost = { ...host, transport: 'ssh', tailcat: { address: '', keyFile: '' } }
