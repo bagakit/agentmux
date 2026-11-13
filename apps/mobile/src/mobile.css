@@ -199,9 +199,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-terminal-actions { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--mobile-border); }
 .mobile-terminal-actions button, .mobile-terminal-size button, .mobile-terminal-notice button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid var(--mobile-border); border-radius: var(--mobile-radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); }
 .mobile-terminal-actions button:disabled, .mobile-terminal-size button:disabled { opacity: .45; }
-.mobile-terminal-keys { display: flex; gap: 4px; padding: 4px 12px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--mobile-border); }
-.mobile-terminal-keys button { flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 0 8px; border: 1px solid var(--mobile-border); border-radius: var(--mobile-radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta) var(--font-mono); }
-.mobile-terminal-keys button:disabled { opacity: .45; }
 .mobile-terminal-size { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--mobile-border); }
 .mobile-terminal-size label { display: flex; gap: 5px; align-items: center; font-size: var(--fs-meta); color: var(--text-2); }
 .mobile-terminal-size input { width: 54px; min-height: 44px; padding: 5px; border: 1px solid var(--mobile-border); border-radius: var(--mobile-radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
@@ -411,10 +408,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-conversation .mote-conversation__handoff > span { min-width: 0; overflow-wrap: anywhere; }
 /* Earlier Main tenures share the conversation's 12px reading gutter instead of touching the screen edge. */
 .mobile-conversation .mote-conversation__source { margin-inline: 12px; }
-/* Short Mote chat uses the reader's remaining space; long history keeps its natural scroll height. */
-.mobile-conversation__reading:has(> .mote-conversation) { display: flex; flex-direction: column; }
-.mobile-conversation__reading > .mote-conversation { flex: 1 0 auto; display: flex; flex-direction: column; }
-.mobile-conversation__reading > .mote-conversation > .mote-conversation__messages { margin-block-start: auto; }
 /* The sticky quick-settings title covers the sheet's padding band while content scrolls underneath. */
 .mobile-sheet:has(.mobile-mote-quick-editor) { overflow-x: hidden; isolation: isolate; }
 .mobile-sheet:has(.mobile-mote-quick-editor) > .mobile-sheet-title::before { content: ""; position: absolute; inset: -6px -12px 0; z-index: -1; border-radius: var(--mobile-radius-group) var(--mobile-radius-group) 0 0; background: var(--surface-1); pointer-events: none; }

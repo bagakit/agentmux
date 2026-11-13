@@ -53,11 +53,11 @@
 .mobile-sheet { border-radius: var(--mobile-radius-sheet) var(--mobile-radius-sheet) 0 0; padding-inline: var(--mobile-gutter); background: var(--mobile-page); }
 .mobile-sheet > .mobile-sheet-title { background: var(--mobile-page); }
 .mobile-sheet-handle { width: 36px; height: 4px; margin: 2px auto 10px; border-radius: 2px; background: color-mix(in srgb, var(--text) 22%, transparent); }
-/* The handle is a real grab target: a taller invisible hit area around the visible bar. Dragging
+/* The handle owns a full touch box inside the sheet; the small bar is centred within it. Dragging
  * moves the sheet with the finger (translate composes with the centring transform) and fades the
  * scrim; a release that does not close springs back. Reduced motion keeps the close, not the travel. */
-.mobile-sheet-handle[data-draggable] { position: relative; touch-action: none; cursor: grab; }
-.mobile-sheet-handle[data-draggable]::before { content: ''; position: absolute; inset: -14px -48px; }
+.mobile-sheet-handle[data-draggable] { position: relative; width: 132px; max-width: 100%; height: 44px; margin: 0 auto; background: transparent; touch-action: none; cursor: grab; }
+.mobile-sheet-handle[data-draggable]::before { content: ''; position: absolute; width: 36px; height: 4px; top: 20px; left: calc(50% - 18px); border-radius: 2px; background: color-mix(in srgb, var(--text) 22%, transparent); pointer-events: none; }
 .mobile-sheet { transition: translate var(--dur-enter) var(--ease-spring); }
 .mobile-sheet[data-sheet-drag='tracking'] { translate: 0 var(--mobile-sheet-drag, 0px); transition: none; }
 .mobile-sheet-backdrop:has(+ .mobile-sheet[data-sheet-drag='tracking']) { opacity: .6; transition: opacity var(--dur-fast) ease; }
@@ -75,15 +75,12 @@
 .mobile-app .mobile-conversation__reading > .mote-conversation > :first-child { margin-top: auto; }
 .mobile-app .mobile-conversation .conversation-native-thread { padding: var(--sp-3) var(--mobile-gutter) var(--sp-4); }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { margin-block: var(--sp-3); padding: 0; border-radius: 0; }
-.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] { grid-template-columns: 28px minmax(0, 1fr); column-gap: var(--sp-4); }
-.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] > .log-turn__node { --conversation-message-avatar-size: 28px; width: 28px; height: 28px; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] > .log-turn__body { font-size: var(--fs-body); line-height: 1.6; }
 /* The person's message is the one bubble: right-aligned, no avatar column, soft group surface. */
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) {
-  grid-template-columns: minmax(0, 1fr); max-width: 86%; margin-inline-start: auto; padding: 8px 12px 10px;
+  max-width: 86%; margin-inline-start: auto; padding: 8px 12px 10px;
   border-radius: var(--mobile-radius-group) var(--mobile-radius-group) var(--mobile-radius-sm) var(--mobile-radius-group);
   background: var(--mobile-group); box-shadow: none; }
-.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='external'] > .log-turn__node { display: none; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) > .log-turn__body { line-height: 1.55; }
 /* Copy and details stay reachable but quiet on touch: one trailing group, secondary ink, no colour. */
 @media (hover: none) {
