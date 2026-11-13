@@ -19,10 +19,14 @@ a new page is wanted. Preserve material ambiguity and the user's exact target/to
 Read only the matching local help:
 - amux browser profile --help: original Profile identities, routes and usage.
   Use browser profile copy to create a new identity from the source's saved settings,
-  naming its exact ID and the revision read from ls or inspect. It keeps the original
+  naming its exact ID and its opaque `profile.revision` token read from ls or inspect. Activity observations and edits to another Profile do not invalidate this token. It keeps the original
   Profile and pages; site data, sign-ins, proxy passwords, human approvals and prior
   runtime history do not move. Use the returned new Profile ID to inspect, edit or
   open it. A missing reply leaves creation unknown; do not automatically repeat it.
+  The root `revision` is the configuration collection stamp used by folder actions;
+  `sequence` orders complete snapshots including confirmed activity checkpoints.
+  Neither root stamp is the per-Profile configuration token. Activity is read-only: observed
+  Browser time counts overlapping pages once, and partial or interrupted history is unknown.
   Tags, folder assignment and pinned state are organization metadata, edited through
   profile update. Discover the stable folder IDs in profile ls; folder create/rename/delete
   stay under browser profile folder. Deleting a folder only unassigns its Profiles;
