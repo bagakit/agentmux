@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, renameSync, writeFileSync } from 'node:fs'
-import { a2aPrivateMainPaths, stopPrivateA2aMains } from '../../lib/a2a-inbox-product-proof.mjs'
+import { a2aPrivateMainPaths, stopPrivateA2aMains, stopPrivateA2aHostService } from '../../lib/a2a-inbox-product-proof.mjs'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -49,6 +49,7 @@ const initialStore = await stat(storePath).then(() => 'present', error => { if (
 assert.equal(initialStore, 'absent', 'The private product must start with no original Session store')
 const execution = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_EXECUTION, 'utf8'))
 assert.ok(['source-build', 'prepared-artifact'].includes(execution.kind))
+const hostServiceOwner = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_HOST_SERVICE, 'utf8'))
 const coreRoot = execution.coreRoot
 assert.ok(coreRoot.startsWith(root + '/'))
 const core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
@@ -271,10 +272,16 @@ finally {
     try { await client.dispose() } catch {}
   }
   try { await rpc?.dispose() } catch {}
-  for (const child of [...children].reverse()) { try { await stop(child, 'SIGKILL') } catch (error) { facts.cleanup.processError ??= error.message } }
   try { facts.cleanup.mainStop = await stopPrivateA2aMains(root); mainExitConfirmed = true }
   catch (error) { facts.cleanup.mainStopError = error.message; failure ??= error; facts.error ??= { message: error.message, stack: error.stack } }
   facts.cleanup.mainExitConfirmed = mainExitConfirmed
+  if (mainExitConfirmed) {
+    try { facts.cleanup.hostService = await stopPrivateA2aHostService(hostServiceOwner) }
+    catch (error) { facts.cleanup.hostServiceError = error.message; failure ??= error; facts.error ??= { message: error.message, stack: error.stack } }
+  }
+  if (mainExitConfirmed && !facts.cleanup.hostServiceError) {
+    for (const child of [...children].reverse()) { try { await stop(child, 'SIGKILL') } catch (error) { facts.cleanup.processError ??= error.message } }
+  }
   for (const launch of facts.homeIsolation.launches) {
     try {
       const clipboard = JSON.parse(await readFile(launch.presentationOverlay.clipboardGuardPath, 'utf8'))

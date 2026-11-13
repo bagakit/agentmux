@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { inspect, isDeepStrictEqual, promisify } from 'node:util'
@@ -70,6 +70,49 @@ export async function stopPrivateA2aMains(root) {
   }
   return { stopFence: paths.stop, stopped }
 }
+const hostServiceSource = 'apps/host/src/macos-service.ts'
+function privateHostServiceModule(source, coreRoot) {
+  const specifier = "from '@agentmux/core'"
+  assert.equal(source.split(specifier).length, 2, 'The existing platform owner has one original Core dependency')
+  return stripTypeScriptTypes(source, { mode: 'strip' }).replace(specifier, 'from ' + JSON.stringify(pathToFileURL(join(coreRoot, 'dist/index.js')).href))
+}
+async function preparePrivateHostService({ root, privateRoot, execution, sourceCommit }) {
+  const bytes = await readFile(join(root, hostServiceSource))
+  const fixed = (await exec('git', ['show', sourceCommit + ':' + hostServiceSource], { cwd: root, encoding: 'buffer' })).stdout
+  assert.equal(a2aProofSha(bytes), a2aProofSha(fixed), 'Use the existing platform owner from the selected product source')
+  const modulePath = join(privateRoot, 'private-host-service.mjs'), contents = privateHostServiceModule(bytes.toString(), execution.coreRoot)
+  await writeFile(modulePath, contents)
+  const owner = await import(pathToFileURL(modulePath).href)
+  const runtime = join(privateRoot, 'runtime'), userData = join(privateRoot, 'user-data')
+  const service = owner.macosHostService({ executable: execution.executable,
+    entrypoint: join(execution.desktopRoot, 'out/main/agentmux-host.js'), storePath: join(userData, 'agent-sessions.json'),
+    socketPath: join(runtime, 'control.sock'), mobileBuildDirectory: join(execution.desktopRoot, 'out/mobile'),
+    configuration: { path: join(userData, 'agentmux.config.json'), connectorDirectory: join(userData, 'connectors') },
+    workspaceMoveHelper: join(execution.desktopRoot, 'resources/bin/agentmux-workspace-move'), environment: {
+      AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'state'),
+      AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), AGENTMUX_SPATIAL_STATE_STORE: join(runtime, 'state/spatial-state.json') } })
+  assert.equal(await owner.macosHostServiceRegistration(service), null, 'The exact private Host service must be absent before launch')
+  return { source: hostServiceSource, coreRoot: execution.coreRoot, sourceSHA256: a2aProofSha(bytes), modulePath, moduleSHA256: a2aProofSha(contents),
+    transformation: 'Node stripTypeScriptTypes for the harness owner only; not an original product compiler event', service }
+}
+export async function stopPrivateA2aHostService(record) {
+  assert.equal(a2aProofSha(await readFile(record.modulePath)), record.moduleSHA256)
+  const owner = await import(pathToFileURL(record.modulePath).href), service = record.service, privateRoot = dirname(record.modulePath)
+  assert.equal(service.storePath, join(privateRoot, 'user-data/agent-sessions.json'))
+  assert.equal(service.socketPath, join(privateRoot, 'runtime/control.sock'))
+  assert.deepEqual({ label: service.label, target: service.target }, owner.macosHostServiceAddress(service.socketPath))
+  assert.equal(service.plistPath, join(privateRoot, 'user-data', service.label + '.plist'))
+  assert.ok(record.coreRoot.startsWith(privateRoot + '/'))
+  let original = null
+  if (await owner.macosHostServiceRegistration(service)) {
+    original = await owner.inspectMacosHostService(service)
+    await owner.stopMacosHostService(service, original)
+  }
+  assert.equal(await owner.macosHostServiceRegistration(service), null, 'The private Host service must stay unregistered')
+  const { probeSocketLiveness } = await import(pathToFileURL(join(record.coreRoot, 'dist/index.js')).href)
+  assert.equal(await probeSocketLiveness(service.socketPath), 'dead', 'The private Host endpoint exit must be confirmed')
+  return { label: service.label, target: service.target, storePath: service.storePath, owner: original, status: 'unregistered', endpoint: 'confirmed-dead' }
+}
 const packages = ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors']
 const assets = ['packages/core/vendor', 'apps/desktop/vendor', 'apps/desktop/native', 'apps/desktop/brand', 'apps/desktop/browser-extension']
 const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/desktop/package.json',
@@ -81,7 +124,7 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
   ...assets, ...packages.flatMap(name => ['src', 'package.json', 'tsconfig.json', 'tsconfig.build.json'].map(path => 'packages/' + name + '/' + path))]
 const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
-  'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs']
+  'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', hostServiceSource]
 const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
@@ -213,11 +256,14 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     product.execution = { kind: 'source-build', desktopRoot: join(privateRoot, 'apps/desktop'), coreRoot: join(privateRoot, 'packages/core'),
       mainEntry: join(privateRoot, 'apps/desktop/out/main/index.js'), executable: require('electron'), argv: [join(privateRoot, 'apps/desktop')],
       cli: { executable: join(privateRoot, 'packages/core/bin/amux'), argv: [] } }
+    product.hostServiceOwner = await preparePrivateHostService({ root, privateRoot, execution: product.execution, sourceCommit: product.sourceCommit })
+    await writeFile(join(privateRoot, 'host-service.json'), JSON.stringify(product.hostServiceOwner))
     await writeFile(join(privateRoot, 'execution.json'), JSON.stringify(product.execution))
     const workerEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
     workerEnvironment.HOME = join(privateRoot, 'home'); await mkdir(workerEnvironment.HOME)
     workerEnvironment.AGENTMUX_A2A_PROOF_BUILD = privateRoot
     workerEnvironment.AGENTMUX_A2A_PROOF_EXECUTION = join(privateRoot, 'execution.json')
+    workerEnvironment.AGENTMUX_A2A_PROOF_HOST_SERVICE = join(privateRoot, 'host-service.json')
     workerEnvironment.AGENTMUX_A2A_PROOF_CLIPBOARD = clipboardPath
     const lines = [], workerPath = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
     const outcome = await runProbeProcess(process.execPath, [workerPath, evidence], { cwd: privateRoot, temporaryRoot: privateRoot, env: workerEnvironment, timeoutMs: 360_000, onLine: line => { lines.push(line); if (line.startsWith('a2a_private_main_exit_unconfirmed=')) throw new Error(line) }, beforeStop: async () => { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot) } })
@@ -227,7 +273,7 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
   } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack, diagnostic: inspect(error, { depth: 8 }), ...(error.probe ? { probe: error.probe } : {}) } }
   finally {
-    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
+    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); if (product.hostServiceOwner) product.cleanup.outerHostService = await stopPrivateA2aHostService(product.hostServiceOwner); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
     product.cleanup.buildRetained = true
     product.cleanup.privateRoot = privateRoot
@@ -248,7 +294,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
   let failure
   try {
     const { prepareA2aArtifact, verifyA2aPreparedArtifact } = await import('./a2a-prepared-artifact.mjs')
-    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...new Set([...requiredLoaded, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts', ...Object.keys(testInputs)])] })
+    product.preparation = await prepareA2aArtifact({ root, input: resolve(input), privateRoot, sourcePaths: [...new Set([...requiredLoaded, 'packages/core/src/agent-message-render.ts', 'packages/core/src/conversation-provenance.ts', 'packages/core/src/types.ts', hostServiceSource, ...Object.keys(testInputs)])] })
     product.sourceCommit = product.preparation.identity.sourceCommit; product.sources = product.preparation.sourceSnapshot.files
     product.execution = product.preparation.execution
     if (!isolationOnly) assert.ok(Object.keys(testInputs).length > 0, 'Actual owning-test production inputs are required')
@@ -259,6 +305,8 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     }
     await writeFile(join(privateRoot, 'package.json'), JSON.stringify({ type: 'module', private: true }))
     await symlink(join(product.execution.desktopRoot, 'node_modules'), join(privateRoot, 'node_modules'))
+    product.hostServiceOwner = await preparePrivateHostService({ root, privateRoot, execution: product.execution, sourceCommit: product.sourceCommit })
+    await writeFile(join(privateRoot, 'host-service.json'), JSON.stringify(product.hostServiceOwner))
     await writeFile(join(privateRoot, 'execution.json'), JSON.stringify(product.execution))
     const vendor = join(product.execution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch)
     const manifestBytes = await readFile(join(vendor, 'manifest.json')), manifest = JSON.parse(manifestBytes)
@@ -268,7 +316,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     product.ctxmux = { manifest: a2aProofSha(manifestBytes), sdkArchive: manifest.sdk.archive.sha256, source: manifest.source }
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
     Object.assign(env, { HOME: join(privateRoot, 'home'), AGENTMUX_A2A_PROOF_BUILD: privateRoot,
-      AGENTMUX_A2A_PROOF_EXECUTION: join(privateRoot, 'execution.json'), AGENTMUX_A2A_PROOF_CLIPBOARD: join(evidence, 'clipboard.json') })
+      AGENTMUX_A2A_PROOF_EXECUTION: join(privateRoot, 'execution.json'), AGENTMUX_A2A_PROOF_HOST_SERVICE: join(privateRoot, 'host-service.json'), AGENTMUX_A2A_PROOF_CLIPBOARD: join(evidence, 'clipboard.json') })
     await mkdir(env.HOME)
     const lines = [], worker = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
     const outcome = await runProbeProcess(process.execPath, [worker, evidence, ...(isolationOnly ? ['--isolation-only'] : [])],
@@ -282,7 +330,7 @@ async function runPreparedReferenceProduct({ root, evidence, input, isolationOnl
     product.prepared = true; product.reviewPath = join(evidence, 'review.json')
   } catch (error) { failure = error; product.error = { message: error.message, stack: error.stack, diagnostic: inspect(error, { depth: 8 }), ...(error.probe ? { probe: error.probe } : {}) } }
   finally {
-    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
+    try { product.cleanup.mainStop = await stopPrivateA2aMains(privateRoot); if (product.hostServiceOwner) product.cleanup.outerHostService = await stopPrivateA2aHostService(product.hostServiceOwner); await stopProbeProcesses(-1, privateRoot); assert.deepEqual(await listProbeProcesses(-1, privateRoot), []); product.cleanup.outerProcessesReaped = true }
     catch (error) { product.cleanup.outerError = error.message; failure ??= error; product.prepared = false }
     product.cleanup.buildRetained = true; product.cleanup.privateRoot = privateRoot
     await writeFile(product.receiptPath, JSON.stringify(product, null, 2) + '\n')
@@ -323,6 +371,12 @@ async function verifyProductBuild(product, { root }) {
   assert.ok(Object.keys(product.testSourceJoin).length > 0)
   for (const [path, digest] of Object.entries(product.testSourceJoin)) assert.equal(product.sources[path], digest, 'Same owning-test and actual product source: ' + path)
   assert.equal(a2aProofSha(await readFile(join(retainedExecution.coreRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
+  assert.equal(product.hostServiceOwner.sourceSHA256, product.fixtures[hostServiceSource])
+  assert.equal(product.hostServiceOwner.moduleSHA256, a2aProofSha(privateHostServiceModule(await readFile(join(root, hostServiceSource), 'utf8'), product.execution.coreRoot)))
+  assert.equal(product.hostServiceOwner.coreRoot, product.execution.coreRoot)
+  assert.equal(product.cleanup.hostService.endpoint, 'confirmed-dead'); assert.equal(product.cleanup.outerHostService.endpoint, 'confirmed-dead')
+  assert.equal(product.cleanup.outerHostService.status, 'unregistered'); assert.equal(product.cleanup.outerHostService.label, product.hostServiceOwner.service.label)
+  assert.equal(product.cleanup.hostService.status, 'unregistered'); assert.equal(product.cleanup.hostService.label, product.hostServiceOwner.service.label)
   assert.equal(product.cleanup.mainExitConfirmed, true); assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
   assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
   assert.equal(product.homeIsolation.initialSessionStore, 'absent')
