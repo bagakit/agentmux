@@ -10,7 +10,7 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
   const calls: Array<{ method: string; path: string; body: string; contentType: string }> = [], messages = new Map<string, Record<string, unknown>>()
   const sessions: Array<{ op: number; data: Record<string, unknown> }> = [], sockets = new Set<WebSocket>()
   const paused = new Set<WebSocket>(); let pauseHello = false
-  const uploads: Buffer[] = []
+  const uploads: Buffer[] = [], ownReactions = new Set<string>()
   const history = new Map<string, Record<string, unknown>>()
   const historyMessage = (id: string, content: string, observation: Record<string, unknown> = {}) => {
     const message = { id, channel_id: discordRoomId, guild_id: '500', type: 0, content, timestamp: new Date(Number(id)).toISOString(), author: { id: discordUserId, username: 'original-user', global_name: 'Original person', avatar: 'native_avatar' }, mentions: [{ id: discordBotId }], attachments: [], embeds: [], ...observation }
@@ -30,7 +30,7 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
     }
     read(value); return count <= 40 && characters <= 4000
   }
-  let sequence = 0, nextMessage = 1000, dropNextResponse = false, suppressNextEcho = false, dropCallback = false
+  let sequence = 0, nextMessage = 1000, dropNextResponse = false, suppressNextEcho = false, dropCallback = false, dropReaction: 'PUT' | 'DELETE' | undefined
   const dispatches: Array<{ sequence: number; raw: string }> = []
   const emit = (event: string, data: unknown) => { const payload = JSON.stringify({ op: 0, t: event, s: ++sequence, d: data }); dispatches.push({ sequence, raw: payload }); for (const socket of sockets) if (socket.readyState === 1) socket.send(payload); return sequence }
   const server = createServer(async (request, response) => {
@@ -64,6 +64,15 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
       result = { ...parsed, components: nativeComponents(parsed.components), id, channel_id: discordRoomId, author: { id: discordBotId, bot: true }, attachments: [] }
       messages.set(id, result as Record<string, unknown>); if (!suppressNextEcho) emit('MESSAGE_CREATE', result); suppressNextEcho = false
       if (dropNextResponse) { dropNextResponse = false; request.socket.destroy(); return }
+    } else if (/^\/channels\/300\/messages\/[0-9]+\/reactions\/[^/]+\/@me$/u.test(path) && ['PUT', 'DELETE'].includes(request.method!)) {
+      const [, , , , messageId, , emoji] = path.split('/')
+      if (!history.has(messageId!) && !messages.has(messageId!)) { status = 404; result = { code: 10008 } }
+      else {
+        const identity = messageId + ':' + decodeURIComponent(emoji!)
+        if (request.method === 'PUT') ownReactions.add(identity); else ownReactions.delete(identity)
+        if (dropReaction === request.method) { dropReaction = undefined; request.socket.destroy(); return }
+        status = 204
+      }
     } else if (path.startsWith(`/channels/${discordRoomId}/messages/`)) {
       const id = path.split('/').at(-1)!, original = messages.get(id) ?? (request.method === 'GET' ? history.get(id) : undefined)
       if (!original) { status = 404; result = { message: 'Unknown Message', code: 10008 } }
@@ -96,7 +105,7 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
     if (original.origin !== 'https://discord.com') throw Error('Unexpected native Discord API origin')
     return await nativeFetch(origin + original.pathname + original.search, init as RequestInit)
   } }
-  return { origin, http, calls, sessions, messages, emit, uploads,
+  return { origin, http, calls, sessions, messages, emit, uploads, ownReactions,
     get pausedConnections() { return paused.size },
     disconnect() { pauseHello = true; for (const socket of sockets) if (socket.readyState === 1) socket.close(4000) },
     resumeGateway() { pauseHello = false; for (const socket of paused) if (socket.readyState === 1) socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 60000 } })); paused.clear() },
@@ -110,6 +119,7 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
     message(id = '700', content = 'Original Discord input\nEvery line', observation: Record<string, unknown> = {}) { const message = historyMessage(id, content, observation); emit('MESSAGE_CREATE', message); return message },
     loseNextMessageResponse(witness = true) { dropNextResponse = true; suppressNextEcho = !witness },
     loseNextCallbackResponse() { dropCallback = true },
+    loseNextReactionResponse(method: 'PUT' | 'DELETE') { dropReaction = method },
     async close() { for (const socket of sockets) socket.terminate(); websocket.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
   }
 }
