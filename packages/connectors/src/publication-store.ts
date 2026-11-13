@@ -127,8 +127,8 @@ const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item &&
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
 const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) => encode([source.providerId, source.nativeSessionId])
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
-/** Newest accepted native parts read for rewrite anchors; bounded and only on a rewritten source. */
-const REWRITE_ANCHOR_SCAN = 256
+/** The retained rewrite anchors share the frontier row's Binding key, beside the 'unified' cut. */
+const REWRITE_ANCHOR_KEY = 'rewrite-anchors'
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 /** A neighboring observation revision does not replace an unchanged original image effect. */
@@ -588,30 +588,33 @@ export class PublicationStore {
   private saveDecision(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, id: string, revision: string, value: unknown): void {
     this.decisionWrite.run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
-  /** Newest native records this exact Binding revision already accepted, newest first,
-   * each with its accepted revision. Only a rewritten source consults this; ordinary
-   * reads never do. These are reading anchors, not delivery or publication receipts. */
+  /** Newest native records this exact Binding revision has accepted, newest first, as
+   * Provider ID plus the digest of their exact physical bytes. They are written in the
+   * same transaction that advances the durable cut and read only when that source was
+   * rewritten in place. Reading anchors, not delivery or publication receipts. */
   rewriteAnchors(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): ConversationRewriteAnchor[] {
-    // Captured activity can follow the last native record by thousands of decisions,
-    // so select native parts directly rather than scanning a fixed window of rows.
-    // Scope decisions freeze excluded parts and representations freeze published
-    // parts, each with its exact record and accepted revision.
-    const rows = this.database.prepare(`SELECT id, revision FROM (
-        SELECT d.rowid AS ordinal, json_extract(e.value,'$.record.source.recordId') AS id, json_extract(e.value,'$.recordRevision') AS revision
-        FROM connector_publication_decision d, json_each(d.decision_json,'$.excluded') e
-        WHERE d.binding_id=? AND d.binding_revision=? AND json_extract(d.decision_json,'$.kind')='scope' AND json_extract(e.value,'$.record.source.kind')='native'
-        UNION ALL
-        SELECT d.rowid, json_extract(d.decision_json,'$.part.record.source.recordId'), json_extract(d.decision_json,'$.part.recordRevision')
-        FROM connector_publication_decision d
-        WHERE d.binding_id=? AND d.binding_revision=? AND json_extract(d.decision_json,'$.kind')='representation' AND json_extract(d.decision_json,'$.part.record.source.kind')='native'
-      ) ORDER BY ordinal DESC LIMIT ?`).all(...scopeKey(boundary), ...scopeKey(boundary), REWRITE_ANCHOR_SCAN)
-    const anchors: ConversationRewriteAnchor[] = [], seen = new Set<string>()
-    for (const row of rows) {
-      if (typeof row.id !== 'string' || typeof row.revision !== 'string' || seen.has(row.id)) continue
-      seen.add(row.id); anchors.push({ recordId: row.id, revision: row.revision })
-      if (anchors.length === CONVERSATION_REWRITE_MAX_ANCHORS) break
+    const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), REWRITE_ANCHOR_KEY)
+    if (!row) return []
+    const saved = JSON.parse(String(row.checkpoint_json)) as unknown
+    return Array.isArray(saved) ? saved.filter((value): value is ConversationRewriteAnchor => !!value && typeof value.recordId === 'string' && typeof value.digest === 'string' && /^[a-f0-9]{64}$/u.test(value.digest)) : []
+  }
+  /** Prepend this page's accepted native records to the retained anchors, bounded. */
+  private advanceRewriteAnchors(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, units: readonly ConversationUnit[]): void {
+    const page: ConversationRewriteAnchor[] = []
+    for (const record of units.flatMap(unit => unit.records)) {
+      if (record.reference?.source.kind === 'native' && record.order.kind === 'native-page' && record.order.recordDigest)
+        page.push({ recordId: record.reference.source.recordId, digest: record.order.recordDigest })
     }
-    return anchors
+    if (!page.length) return
+    // Units arrive oldest first; anchors are kept newest first without duplicate IDs.
+    const merged: ConversationRewriteAnchor[] = [], seen = new Set<string>()
+    for (const anchor of [...page.reverse(), ...this.rewriteAnchors(boundary)]) {
+      if (seen.has(anchor.recordId)) continue
+      seen.add(anchor.recordId); merged.push(anchor)
+      if (merged.length === CONVERSATION_REWRITE_MAX_ANCHORS) break
+    }
+    this.database.prepare('INSERT INTO connector_publication_frontier VALUES (?, ?, ?, ?) ON CONFLICT(binding_id, binding_revision, source_key) DO UPDATE SET checkpoint_json=excluded.checkpoint_json')
+      .run(...scopeKey(boundary), REWRITE_ANCHOR_KEY, encode(merged))
   }
   /** Reuse only this accepted original part's exact derived image; no second resource cache. */
   retainedDiagram(boundary: PublicationBoundary, part: ConversationContentRef, text: string,
@@ -907,6 +910,7 @@ export class PublicationStore {
       this.accountInputAliases(boundary, units)
       for (const projectionId of replyProjections) this.refreshReplyMetadata(boundary, projectionId, options.fragmentText)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
+      this.advanceRewriteAnchors(boundary, units)
     })
   }
   /** A public captured span represents only its exact accepted native text wrapper. */
