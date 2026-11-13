@@ -391,7 +391,7 @@ it('retains invalid reconnect replay separately from continuation absence and ke
     cols: 80, rows: 24, observedAt: 2, latestOutputBytes: 8, acceptedInputBytes: 0 }
   await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', agentSessionId: session.id,
     afterByte: 8, run, terminal: { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 8, resizeRevision: 3,
-      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
       restoreBytes: new Uint8Array(), resizes: [] }, replay: [], gap: null, resizeRevision: 4 } }))
   await vi.waitFor(() => expect(sent.mock.calls.some(([, report]) => report.kind === 'terminal-replay-failed')).toBe(true))
   expect(sent.mock.calls.find(([, report]) => report.kind === 'terminal-replay-failed')![1]).toMatchObject({ stage: 'replay-failed', code: 'CTXMUX_EVENT_INVALID' })
@@ -426,7 +426,7 @@ it('retains typed connection observations without upgrading unknown continuation
       agentSessionId: session.id, workspacePath: session.workspacePath, pid: 123, state: 'running', cols: 80, rows: 24, observedAt: 3,
       latestOutputBytes: 8, acceptedInputBytes: 0 }, terminal: { type: 'basic-vt', checkpoint: { runId: session.control.run.runId,
         throughByte: 8, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
-        restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('original'), resizes: [] },
+        historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('original'), resizes: [] },
     replay: [], gap: null, resizeRevision: 0 } }
   await act(async () => fixture.receive!(continued))
   await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(4))

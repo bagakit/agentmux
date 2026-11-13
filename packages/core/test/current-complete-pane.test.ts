@@ -14,7 +14,7 @@ const result = (promise: Promise<unknown>) => promise.then(value => ({ value }),
 function fixture(checkpoint = false, bytes = raw, variant = '') {
   let emit!: (event: any) => void
   const restore = Buffer.from(drawing), fence = bytes.length
-  const cp = { runId: 'original-run', throughByte: fence, resizeRevision: 1, size: { cols: 81, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: restore.length }
+  const cp = { runId: 'original-run', throughByte: fence, resizeRevision: 1, size: { cols: 81, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: restore.length }
   const observeOutput = vi.fn(async (_run: string, _byte: number, accept: (event: any) => void) => {
     emit = accept
     return { run: { runId: 'original-run', cols: checkpoint ? 81 : 80, rows: 24, latestOutputBytes: fence }, resizeRevision: checkpoint ? variant === 'geometry' ? 2 : 1 : 0,

@@ -53,7 +53,7 @@ function owner(onYield?: (count: number) => void) {
 const enc = new TextEncoder()
 function attachment(data: Uint8Array, resizes: Array<{ throughByte: number; resizeRevision: number; size: { cols: number; rows: number } }> = []) {
   return { run: { runId: 'original', latestOutputBytes: data.length }, resizeRevision: resizes.length,
-    terminal: { type: 'basic-vt', checkpoint: { runId: 'original', throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 1 }, restoreBytes: enc.encode('R'), resizes },
+    terminal: { type: 'basic-vt', checkpoint: { runId: 'original', throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 1 }, restoreBytes: enc.encode('R'), resizes },
     replay: data.length ? [{ startByte: 0, endByte: data.length, dataBytes: data }] : [] }
 }
 

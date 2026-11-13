@@ -22,7 +22,7 @@ const snapshot = (): AgentMuxRunAttachment => ({ run: { ...session.run, nativeSe
   providerId: session.providerId, executorId: session.executorId, workspacePath: session.workspacePath,
   pid: 1, state: 'running', cols, rows, observedAt: _tailRefreshFixtureEpoch(0, 0, 1), latestOutputBytes: cursor, acceptedInputBytes: accepted }, replay: [], gap: null,
   resizeRevision, terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: cursor, resizeRevision,
-    size: { cols, rows }, restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+    size: { cols, rows }, restoreSize: { cols, rows }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: encoder.encode('\x1b[0m'), resizes: [] } })
 function output(text: string) {
   const dataBytes = encoder.encode(text), startByte = cursor; cursor += dataBytes.length

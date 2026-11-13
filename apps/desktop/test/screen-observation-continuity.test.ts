@@ -17,7 +17,7 @@ it('routes a real Desktop attachment resize to the public Client and continues i
   }
   owner.kernel.replay = async () => ({ run: { latestOutputBytes: 0 }, gap: null, replay: [] })
   owner.kernel.observeOutput = async () => ({ run: { runId: 'desktop-run', cols, rows, latestOutputBytes: 0 }, resizeRevision: revision, gap: null, replay: [], close: async () => {},
-    terminal: { type: 'basic-vt', checkpoint: { runId: 'desktop-run', throughByte: 0, resizeRevision: revision, size: { cols, rows }, restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: Buffer.from('\x1bc'), resizes: [] } })
+    terminal: { type: 'basic-vt', checkpoint: { runId: 'desktop-run', throughByte: 0, resizeRevision: revision, size: { cols, rows }, restoreSize: { cols, rows }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: Buffer.from('\x1bc'), resizes: [] } })
   const control = { kind: 'agent', hostId: 'local', agentSessionId: session.agentSessionId, run: session.run }
   const controller = { sessionAttachmentLeases: new Map([['lease', { webContentsId: 42, key: 'original' }]]),
     sessionAttachmentOwners: new Map([['original', { attachmentIds: new Set(['lease']), control }]]),

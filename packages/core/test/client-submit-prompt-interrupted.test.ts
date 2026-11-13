@@ -113,7 +113,7 @@ async function submitClient(
   state.kernel.observeOutput = async (): Promise<CtxmuxAdapterOutputObservation> => {
     observeCalls += 1
     return { run: runProjection(0), replay: [], gap: null, resizeRevision: 0, close: async () => {},
-      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: 0,
+      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: 0,
         resizeRevision: 0, size: { cols: 80, rows: 24 } },
         restoreBytes: new TextEncoder().encode('\u001bc'), resizes: [] } }
   }

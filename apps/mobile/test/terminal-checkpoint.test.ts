@@ -32,6 +32,39 @@ function headlessCanvas(terminal: HeadlessTerminal, facts: unknown[], held?: Arr
 }
 async function write(terminal: HeadlessTerminal, data: Uint8Array) { await new Promise<void>(done => terminal.write(data, done)) }
 
+it('keeps absent policy explicit, preserves known canvas tail, and releases unused prior owner capacity', async () => {
+  const original = session(), reports: MobileTerminalReading[] = [], terminal = new Terminal({cols:80,rows:24,scrollback:5000,allowProposedApi:true})
+  let snapshot: AgentMuxRunAttachment = {
+    run:{...original.run,nativeService:null,kind:'agent',agentSessionId:original.agentSessionId,providerId:'codex',executorId:'local',workspacePath:fixturePath('private/policy'),pid:1,state:'running',cols:80,rows:24,observedAt:1,latestOutputBytes:10,acceptedInputBytes:0},
+    replay:[],gap:null,resizeRevision:0,terminal:{type:'basic-vt',checkpoint:{runId:original.run.runId,throughByte:10,resizeRevision:0,size:{cols:80,rows:24},restoreSize:{cols:80,rows:24},restoreScrollbackRows:null,resizeAfterRestoreBytes:0},restoreBytes:encode('\x1bcPOISON'),resizes:[]}
+  }
+  const canvas=headlessCanvas(terminal,[]), reset=vi.spyOn(canvas,'reset')
+  const reader=createMobileTerminalReader({client:{agentSession:()=>original,onEvent:()=>()=>{},reattachAgent:async()=>({session:original,attachment:snapshot}),readRunReplay:async()=>snapshot,releaseRunAttachment:async()=>{}},agentSessionId:original.agentSessionId,canvas,report:value=>reports.push(value)})
+  try {
+    reader.setVisible(true)
+    await vi.waitFor(()=>expect(reader.facts().cursor).toBe(10))
+    expect(reset).not.toHaveBeenCalled();expect(contents(terminal).map(line=>line.text).join('')).not.toContain('POISON')
+    expect(reports.at(-1)?.notice).toContain('did not provide')
+    if(snapshot.terminal.type!=='basic-vt')throw Error('Expected checkpoint')
+    snapshot.terminal.restoreBytes=encode('\x1bcORIGINAL');snapshot.terminal.checkpoint.historyPolicy={status:'observed',scrollbackRows:8000}
+    await reader.retry()
+    expect(terminal.options.scrollback).toBe(8000)
+    snapshot={...snapshot,run:{...snapshot.run,latestOutputBytes:14},replay:[{type:'data',runId:original.run.runId,startByte:10,endByte:14,dataBytes:encode('TAIL'),data:'TAIL'}],terminal:{...snapshot.terminal,checkpoint:{...snapshot.terminal.checkpoint}}}
+    if(snapshot.terminal.type!=='basic-vt')throw Error('Expected checkpoint')
+    delete snapshot.terminal.checkpoint.historyPolicy
+    const resetCount=reset.mock.calls.length
+    await reader.retry()
+    expect(reset).toHaveBeenCalledTimes(resetCount)
+    expect(contents(terminal).map(line=>line.text).join('')).toContain('ORIGINALTAIL')
+    expect(reader.facts().cursor).toBe(14);expect(reports.at(-1)?.notice).toContain('did not provide')
+    snapshot={...snapshot,replay:[],terminal:{...snapshot.terminal,checkpoint:{...snapshot.terminal.checkpoint,throughByte:14,historyPolicy:{status:'observed',scrollbackRows:7}},restoreBytes:encode('\x1bcORIGINAL')}}
+    await reader.retry()
+    expect(terminal.options.scrollback).toBe(7)
+    expect(contents(terminal).map(line=>line.text).join('')).toContain('ORIGINAL')
+    expect(reports.at(-1)?.notice).toBeNull()
+  }finally{await reader.dispose();terminal.dispose()}
+})
+
 it('restores the authoritative old grid, split seed boundary and temporary history capacity before acknowledging its original byte fence', async () => {
   const prefix = '\x1bc' + Array.from({ length: 20 }, (_, index) => `old-${index.toString().padStart(2, '0')}:abcdef\r\n`).join('') + '0123456789ABC', suffix = '\r\nfinal-seed\x1b[6n'
   const restore = encode(prefix + suffix), ownScrollback = 500
@@ -40,7 +73,7 @@ it('restores the authoritative old grid, split seed boundary and temporary histo
       state: 'running', cols: 6, rows: 4, observedAt: 1, latestOutputBytes: 9_001, acceptedInputBytes: 0 },
     replay: [], gap: null, resizeRevision: 3,
     terminal: { type: 'basic-vt', checkpoint: { runId: original.run.runId, throughByte: 9_001, resizeRevision: 3,
-      restoreSize: { cols: 12, rows: 6 }, size: { cols: 6, rows: 4 }, restoreScrollbackRows: 17, resizeAfterRestoreBytes: encode(prefix).length }, restoreBytes: restore, resizes: [] }
+      restoreSize: { cols: 12, rows: 6 }, size: { cols: 6, rows: 4 }, restoreScrollbackRows: 17, resizeAfterRestoreBytes: encode(prefix).length, historyPolicy: { status: 'observed', scrollbackRows: 400 } }, restoreBytes: restore, resizes: [] }
   }
   const terminal = new Terminal({ cols: 80, rows: 24, scrollback: ownScrollback, allowProposedApi: true }), reference = new Terminal({ cols: 12, rows: 6, scrollback: 17, allowProposedApi: true })
   const writes: unknown[] = [], held: Array<() => void> = [], reports: MobileTerminalReading[] = [], forbidden: string[] = [], queries: string[] = []
@@ -58,12 +91,12 @@ it('restores the authoritative old grid, split seed boundary and temporary histo
     expect(reader.facts().cursor).toBe(0)
     held.shift()!()
     await vi.waitFor(() => expect(held).toHaveLength(1))
-    expect(writes).toEqual([{ cols: 12, rows: 6, scrollback: 17, bytes: prefix }, { cols: 6, rows: 4, scrollback: 17, bytes: suffix }])
+    expect(writes).toEqual([{ cols: 12, rows: 6, scrollback: 17, bytes: prefix }, { cols: 6, rows: 4, scrollback: 400, bytes: suffix }])
     expect(reader.facts().cursor).toBe(0)
     held.shift()!()
     await vi.waitFor(() => expect(reader.facts().cursor).toBe(9_001))
-    expect(terminal.options.scrollback).toBe(ownScrollback)
-    await write(reference, encode(prefix)); reference.resize(6, 4); await write(reference, encode(suffix)); reference.options.scrollback = ownScrollback
+    expect(terminal.options.scrollback).toBe(400)
+    await write(reference, encode(prefix)); reference.options.scrollback = 400; reference.resize(6, 4); await write(reference, encode(suffix)); reference.options.scrollback = 400
     expect(contents(terminal).length).toBeGreaterThan(terminal.rows)
     expect(contents(terminal)).toEqual(contents(reference))
     expect([terminal.buffer.active.cursorX, terminal.buffer.active.cursorY]).toEqual([reference.buffer.active.cursorX, reference.buffer.active.cursorY])
@@ -85,7 +118,7 @@ it('restores the local history policy on a failed parser write and leaves the or
       state: 'running', cols: 6, rows: 4, observedAt: 1, latestOutputBytes: 42, acceptedInputBytes: 0 },
     replay: [], gap: null, resizeRevision: 0,
     terminal: { type: 'basic-vt', checkpoint: { runId: original.run.runId, throughByte: 42, resizeRevision: 0,
-      restoreSize: { cols: 12, rows: 6 }, size: { cols: 6, rows: 4 }, restoreScrollbackRows: 17, resizeAfterRestoreBytes: prefix.length }, restoreBytes: prefix, resizes: [] }
+      restoreSize: { cols: 12, rows: 6 }, size: { cols: 6, rows: 4 }, restoreScrollbackRows: 17, resizeAfterRestoreBytes: prefix.length, historyPolicy: { status: 'observed', scrollbackRows: 400 } }, restoreBytes: prefix, resizes: [] }
   }
   const terminal = new Terminal({ cols: 80, rows: 24, scrollback: 500, allowProposedApi: true }), reports: MobileTerminalReading[] = [], writes: unknown[] = []
   const canvas = headlessCanvas(terminal, writes)
@@ -95,7 +128,7 @@ it('restores the local history policy on a failed parser write and leaves the or
   try {
     reader.setVisible(true)
     await vi.waitFor(() => expect(reports.at(-1)?.message).toContain('Actual local parser write failure'))
-    expect(terminal.options.scrollback).toBe(500)
+    expect(terminal.options.scrollback).toBe(400)
     expect(reader.facts().cursor).toBe(0)
     expect(reports.at(-1)?.message).toContain('当前画面保留。这不代表终端已退出')
   } finally { await reader.dispose(); terminal.dispose() }

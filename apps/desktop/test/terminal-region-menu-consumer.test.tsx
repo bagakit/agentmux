@@ -251,7 +251,7 @@ it('modal isolation and live output keep the original open terminal tools availa
     expect(control).toEqual(original.control)
     return { ...attachment(original), terminal: { type: 'basic-vt', checkpoint: { runId: original.control.run.runId,
       throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
-      restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\u001b[H'), resizes: [] } }
+      historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\u001b[H'), resizes: [] } }
   })
   const terminal = await mount(), opened = await openBody()
   const source = container.querySelector<HTMLElement>('.terminal-context-source')!

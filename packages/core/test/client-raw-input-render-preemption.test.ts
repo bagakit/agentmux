@@ -118,7 +118,7 @@ function blankTerminalObservation(run: CtxmuxAdapterRun, close: () => Promise<vo
   return {
     run, replay: [], gap: null, resizeRevision: 0, close,
     // An owner-confirmed blank checkpoint restores a screen without advancing original output.
-    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: run.cols, rows: run.rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: run.runId, throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: run.cols, rows: run.rows }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: run.runId, throughByte: 0,
       resizeRevision: 0, size: { cols: run.cols, rows: run.rows } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] }
   }

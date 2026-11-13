@@ -964,7 +964,7 @@ function renderedComposerObservation(content: string): PromptObservation {
     gap: null,
     // The Runtime fixture owns a fresh blank screen at original byte zero plus the exact replay tail.
     // Restore bytes are synthetic and do not advance that original byte cursor.
-    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
       resizeRevision: 0, size: { cols: 80, rows: 24 } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
     resizeRevision: 0,
@@ -979,7 +979,7 @@ function silentObservation(): PromptObservation {
     replay: [],
     gap: null,
     // This Run has emitted no output or resize; its owner-confirmed empty checkpoint is still valid.
-    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'prompt-run', throughByte: 0,
       resizeRevision: 0, size: { cols: 80, rows: 24 } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
     resizeRevision: 0,

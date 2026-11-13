@@ -40,7 +40,7 @@ function attachment(seed: string, tail = '', throughByte = fence, resizes: Agent
   return { attachmentId: 'reading-attachment', session: { ...session, latestOutputBytes },
     currentSize: resizes.at(-1)?.size ?? { cols: 80, rows: 24 }, gap: null, resizeRevision: resizes.at(-1)?.resizeRevision ?? 3,
     terminal: { type: 'basic-vt', checkpoint: { runId: session.control.run.runId, throughByte, resizeRevision: 3,
-      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
       restoreBytes: encoder.encode(seed), resizes },
     replay: bytes.length ? [{ type: 'data', runId: session.control.run.runId, startByte: throughByte,
       endByte: latestOutputBytes, dataBytes: bytes, data: tail }] : [] }

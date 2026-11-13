@@ -128,7 +128,7 @@ function continuation(seed: string, tail = '', resizes: Extract<AgentMuxTerminal
     attachmentId:'wheel-attachment', session:{...session, latestOutputBytes:endByte},
     currentSize:resizes.at(-1)?.size ?? {cols:80,rows:24}, gap:null, resizeRevision:resizes.at(-1)?.resizeRevision ?? 3,
     terminal:{type:'basic-vt',checkpoint:{runId:session.control.run.runId,throughByte:fence,resizeRevision:3,size:{cols:80,rows:24},
-      restoreSize:{cols:80,rows:24},restoreScrollbackRows:null,resizeAfterRestoreBytes:0},
+      restoreSize:{cols:80,rows:24},restoreScrollbackRows:null,resizeAfterRestoreBytes:0,historyPolicy:{status:'observed',scrollbackRows:10_000}},
       restoreBytes:encoder.encode(seed),resizes},
     replay:dataBytes.length ? [{type:'data',runId:session.control.run.runId,startByte:fence,endByte,dataBytes,data:tail}] : []
   }
@@ -155,13 +155,14 @@ it('imports prefix and suffix at their distinct owner grids with temporary scrol
   result.terminal.checkpoint.resizeAfterRestoreBytes = encoder.encode(prefix).length
   const terminal = await ready(result)
   expect(fixture.writeFacts.slice(0, 2)).toEqual([
-    { cols: 12, rows: 6, scrollback: 31 }, { cols: 80, rows: 24, scrollback: 31 }
+    { cols: 12, rows: 6, scrollback: 31 }, { cols: 80, rows: 24, scrollback: 10_000 }
   ])
-  expect(terminal.options.scrollback).toBe(5_000)
+  expect(terminal.options.scrollback).toBe(10_000)
   const actual = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   const reference = new actual.Terminal({ cols: 12, rows: 6, scrollback: 31 })
   try {
     await new Promise<void>(resolve => reference.write(prefix, resolve))
+    reference.options.scrollback = 10_000
     reference.resize(80, 24)
     await new Promise<void>(resolve => reference.write(suffix, resolve))
     reference.options.scrollback = terminal.options.scrollback!
@@ -491,24 +492,24 @@ it('preserves the same history reading line through ordered row shrink and growt
 
 
 it('tracks retained reading and selection coordinates when a full normal buffer trims during row resize', async () => {
-  const history = Array.from({ length: 6000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
+  const history = Array.from({ length: 11000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
   const terminal = await ready(continuation(history))
-  expect(terminal.buffer.active.length).toBe(5024)
+  expect(terminal.buffer.active.length).toBe(10024)
   expect(terminal.markers).toEqual([])
   await act(async () => terminal.scrollToLine(300))
   const anchor = terminal.buffer.active.getLine(300)!.translateToString(true)
   expect(anchor).toBe('LONG1277')
   await render(session, false)
-  vi.spyOn(terminal, 'getSelectionPosition').mockReturnValue({ start: { x: 0, y: 300 }, end: { x: 8, y: 300 } })
+  vi.spyOn(terminal, 'getSelectionSnapshot').mockReturnValue({ mode: 'normal', selectAll: false, anchor: { x: 0, y: 300 }, active: { x: 8, y: 300 } })
   // open() omits DOM SelectionService; only selection API delivery is a fixture boundary.
   // The public parser, markers, trim and reading viewport remain real.
-  const selected = vi.spyOn(terminal, 'select').mockImplementation(() => {})
+  const selected = vi.spyOn(terminal, 'restoreSelection').mockImplementation(() => {})
   await delivered(resized(fence, 4, 80, 9))
   expect(terminal.rows).toBe(9)
-  expect(terminal.buffer.active.length).toBe(5009)
+  expect(terminal.buffer.active.length).toBe(10009)
   expect(terminal.buffer.active.viewportY).toBe(285)
   expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe(anchor)
-  expect(selected).toHaveBeenCalledExactlyOnceWith(0, 285, 8)
+  expect(selected).toHaveBeenCalledExactlyOnceWith({ mode: 'normal', selectAll: false, anchor: { x: 0, y: 285 }, active: { x: 8, y: 285 } })
   await render(session, true)
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
   expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)!.translateToString(true)).toBe(anchor)
@@ -517,9 +518,9 @@ it('tracks retained reading and selection coordinates when a full normal buffer 
 })
 
 it('keeps the tracked reading line when a successful observation refresh applies a full-buffer row resize', async () => {
-  const history = Array.from({ length: 6000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
+  const history = Array.from({ length: 11000 }, (_, i) => `LONG${String(i).padStart(4, '0')}\r\n`).join('')
   const terminal = await ready(continuation(history))
-  expect(terminal.buffer.active.length).toBe(5024)
+  expect(terminal.buffer.active.length).toBe(10024)
   await act(async () => terminal.scrollToLine(300))
   expect(terminal.buffer.active.getLine(300)!.translateToString(true)).toBe('LONG1277')
   vi.spyOn(api.sessions, 'refresh').mockResolvedValue({ ...session, latestOutputBytes: fence })
@@ -608,4 +609,118 @@ it('actual retained backfill writer reports history and preserves the original c
   expect(contents(terminal)).toContain('seedGAPLIVE')
   expect(observed.mock.calls.filter(call => call[3].instanceId === instance).map(call => call[3].cause)).toEqual(['checkpoint', 'history', 'live'])
   expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it.each([['normal', null], ['alternate', null], ['normal', 6000], ['alternate', 6000]] as const)('retained seed prefix stays readable after restore in %s with policy %s', async (mode, restoreRows) => {
+  const seed = Array.from({length:6000},(_,i)=>`ORIGINAL-${String(i).padStart(4,'0')}\r\n`).join('')
+    + (mode==='alternate'?'\x1b[?1049h\x1b[1;1HALTERNATE-ORIGINAL':'')
+  const result=continuation(seed)
+  if(result.terminal.type!=='basic-vt')throw Error('Original ABI fixture needs a checkpoint')
+  result.terminal.checkpoint.restoreScrollbackRows=restoreRows
+  result.terminal.checkpoint.historyPolicy={status:'observed',scrollbackRows:7331}
+  const terminal=await ready(result)
+  expect(terminal.buffer.normal.getLine(0)?.translateToString(true),'Original imported normal history prefix is retained').toBe('ORIGINAL-0000')
+  expect(terminal.options.scrollback).toBe(7331)
+  expect(attach).toHaveBeenCalledExactlyOnceWith(session.control,0)
+  expect(write).not.toHaveBeenCalled()
+})
+
+it.each(['unavailable', 'absent'] as const)('keeps %s policy observation separate from a byte Gap, preserves input and refreshes the same original history', async observation => {
+  const seed='\x1bc'+Array.from({length:6000},(_,i)=>`ORIGINAL-${String(i).padStart(4,'0')}\r\n`).join('')
+  const result=continuation(seed)
+  if(result.terminal.type!=='basic-vt')throw Error('Expected original checkpoint')
+  if(observation==='absent') delete result.terminal.checkpoint.historyPolicy
+  else result.terminal.checkpoint.historyPolicy={status:'unavailable',message:'Original policy read was cancelled'}
+  const terminal=await ready(result)
+  expect(fixture.writes).toEqual([])
+  expect(container.textContent).toContain('Confirming the original terminal history policy')
+  expect(container.textContent).not.toContain('Runtime reported a history gap')
+  await delivered(output(fence,'LIVE'))
+  expect(contents(terminal)).toContain('LIVE')
+  await act(async()=>terminal.input('z'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user',expect.objectContaining({source:'user'}))
+  vi.spyOn(api.sessions,'refresh').mockResolvedValue({...session,latestOutputBytes:fence+4})
+  const refreshed=vi.spyOn(api.sessions,'refreshAttachment').mockResolvedValue(continuation(seed,'LIVE'))
+  await act(async()=>{await refreshObservation!()})
+  expect(refreshed).toHaveBeenCalledExactlyOnceWith(session.control,'wheel-attachment',fence+4)
+  expect(fixture.terminals).toEqual([terminal])
+  expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  expect(contents(terminal).match(/LIVE/g)).toHaveLength(1)
+  expect(container.textContent).not.toContain('Confirming the original terminal history policy')
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('retains the imported normal prefix when the suffix parser fails, then recovers the same attachment explicitly', async () => {
+  const prefix='\x1bc'+Array.from({length:6000},(_,i)=>`ORIGINAL-${String(i).padStart(4,'0')}\r\n`).join('')
+  const result=continuation(prefix+'suffix')
+  if(result.terminal.type!=='basic-vt')throw Error('Expected original checkpoint')
+  result.terminal.checkpoint.restoreScrollbackRows=6000
+  result.terminal.checkpoint.resizeAfterRestoreBytes=encoder.encode(prefix).length
+  let failedWrite:MockInstance<BrowserTerminal['write']>|undefined
+  fixture.beforeCallback=()=>{fixture.beforeCallback=null;failedWrite=vi.spyOn(fixture.terminals[0]!,'write').mockImplementation(()=>{throw Error('Original suffix parser failed')})}
+  state(result.session);attach.mockResolvedValue(result);await render(result.session)
+  await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain('Original suffix parser failed'))})
+  const terminal=fixture.terminals[0]!
+  expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  expect(terminal.buffer.normal.length).toBe(6001)
+  expect(terminal.options.scrollback).toBe(10_000)
+  failedWrite!.mockRestore()
+  vi.spyOn(api.sessions,'refresh').mockResolvedValue({...session,latestOutputBytes:fence})
+  const refreshed=vi.spyOn(api.sessions,'refreshAttachment').mockResolvedValue(result)
+  await act(async()=>{await refreshObservation!()})
+  expect(refreshed).toHaveBeenCalledExactlyOnceWith(session.control,'wheel-attachment',0)
+  expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  expect(contents(terminal)).toContain('suffix')
+  expect(fixture.terminals).toEqual([terminal])
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('cancels the View after actual prefix parsing without clipping its normal buffer, and reattaches the same original', async () => {
+  const prefix='\x1bc'+Array.from({length:6000},(_,i)=>`ORIGINAL-${String(i).padStart(4,'0')}\r\n`).join('')
+  const result=continuation(prefix+'suffix')
+  if(result.terminal.type!=='basic-vt')throw Error('Expected original checkpoint')
+  result.terminal.checkpoint.restoreScrollbackRows=6000
+  result.terminal.checkpoint.resizeAfterRestoreBytes=encoder.encode(prefix).length
+  fixture.holdCallbacks=true
+  state(result.session);attach.mockResolvedValue(result);await render(result.session)
+  await act(async()=>{await vi.waitFor(()=>expect(fixture.callbacks).toHaveLength(1))})
+  const cancelled=fixture.terminals[0]!
+  expect(cancelled.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  await act(async()=>root.render(null))
+  await act(async()=>{fixture.holdCallbacks=false;fixture.callbacks.splice(0).forEach(complete=>complete());await Promise.resolve()})
+  expect(cancelled.buffer.normal.length).toBe(6001)
+  expect(cancelled.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  expect(cancelled.options.scrollback).toBe(10_000)
+  await render(result.session)
+  await act(async()=>{await vi.waitFor(()=>expect(readTerminalViewObservation({regionId:origin.regionId,sessionId:session.id,runId:session.control.run.runId})).toMatchObject({liveReady:true}))})
+  expect(attach.mock.calls).toEqual([[session.control,0],[session.control,0]])
+  expect(fixture.terminals[1]!.buffer.normal.getLine(0)?.translateToString(true)).toBe('ORIGINAL-0000')
+  expect(write).not.toHaveBeenCalled();expect(recover).not.toHaveBeenCalled()
+})
+
+it.each(['unavailable', 'absent'] as const)('continues an already authoritative canvas from original tail bytes when optional policy is %s', async observation => {
+  const terminal=await ready(continuation('original-canvas'))
+  const refresh=continuation('\x1bcPOISON-REPLACEMENT','TAIL')
+  if(refresh.terminal.type!=='basic-vt')throw Error('Expected original checkpoint')
+  if(observation==='absent') delete refresh.terminal.checkpoint.historyPolicy
+  else refresh.terminal.checkpoint.historyPolicy={status:'unavailable',message:'This optional policy reader failed'}
+  vi.spyOn(api.sessions,'refresh').mockResolvedValue({...session,latestOutputBytes:fence+4})
+  vi.spyOn(api.sessions,'refreshAttachment').mockResolvedValue(refresh)
+  await act(async()=>{await refreshObservation!()})
+  expect(contents(terminal)).toContain('original-canvasTAIL')
+  expect(contents(terminal)).not.toContain('POISON-REPLACEMENT')
+  expect(fixture.terminals).toEqual([terminal])
+  expect(container.textContent).toContain('Confirming the original terminal history policy')
+  expect(recover).not.toHaveBeenCalled()
+  await act(async()=>terminal.input('z'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user',expect.objectContaining({source:'user'}))
+})
+
+it('releases unused local default capacity to the current owner policy without clipping actual normal history', async () => {
+  const result=continuation('\x1bcORIGINAL')
+  if(result.terminal.type!=='basic-vt')throw Error('Expected original checkpoint')
+  result.terminal.checkpoint.historyPolicy={status:'observed',scrollbackRows:7}
+  const terminal=await ready(result)
+  expect(terminal.options.scrollback).toBe(7)
+  expect(contents(terminal)).toContain('ORIGINAL')
 })

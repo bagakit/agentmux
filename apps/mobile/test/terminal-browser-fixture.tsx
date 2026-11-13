@@ -33,7 +33,7 @@ const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'private-
 const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, nativeService: null, kind: 'agent', agentSessionId: session.agentSessionId, providerId: 'codex', executorId: 'local', workspacePath: session.workspacePath,
   pid: 1, state: 'running', cols, rows, observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: raw.length, acceptedInputBytes: 0 }, replay: [], gap: null, resizeRevision,
   terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: raw.length, resizeRevision, size: { cols, rows },
-    restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+    restoreSize: { cols, rows }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: raw.length ? new Uint8Array(raw) : encoder.encode('\x1b[0m'), resizes: [] } })
 const finite = {
   // Optional public read transport is absent in this bounded terminal SDK fixture.

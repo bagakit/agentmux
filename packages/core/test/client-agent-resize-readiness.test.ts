@@ -168,7 +168,7 @@ async function resizeClient(
       run: runProjection(size.cols, size.rows, latestOutputBytes),
       replay: [],
       gap: null,
-      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { ...size }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: latestOutputBytes,
+      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { ...size }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: latestOutputBytes,
         resizeRevision, size: { ...size } }, restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
       resizeRevision,
       close: async () => {}

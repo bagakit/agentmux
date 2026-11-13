@@ -100,7 +100,7 @@ describe('Hosted independent public output observer', () => {
     const f = fixture(2), client = await connectHostedAgentMux({ rpc: f.port })
     const terminal: AgentMuxRpcOutputInitial['terminal'] = { type: 'basic-vt',
       checkpoint: { runId: f.original.run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 },
-        restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+        restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
       restoreBytes: Uint8Array.of(27, 99, 0xff),
       resizes: [{ throughByte: 2, resizeRevision: 7, size: { cols: 100, rows: 30 } }] }
     f.behavior.initial = { ...f.original, terminal, resizeRevision: 7 }

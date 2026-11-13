@@ -9,7 +9,7 @@ const session = { kind: 'agent', agentSessionId: 'native-attributes', providerId
 const drawing = (marker: string, text: string) => Buffer.from(`\x1b[2J\x1b[12;1H${marker} \x1b[2m${text}\x1b[22m\x1b[12;3H`)
 const frame = (marker: string, text: string) => Buffer.concat([Buffer.from('\x1b[?2026h'), drawing(marker, text), Buffer.from('\x1b[?2026l')])
 const options = { timeoutMs: 100, timeoutMessage: 'private attribute timeout', terminalMessage: 'private exit', requireCompleteFrame: true }
-const checkpoint = (throughByte: number) => ({ runId: 'private', throughByte, resizeRevision: 5, size: { cols: 100, rows: 30 }, restoreSize: { cols: 100, rows: 30 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 })
+const checkpoint = (throughByte: number) => ({ runId: 'private', throughByte, resizeRevision: 5, size: { cols: 100, rows: 30 }, restoreSize: { cols: 100, rows: 30 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 })
 
 it.each([['>', 'placeholder'], ['›', 'dim native hint']])('restores checkpoint attributes after historical resize for %s and preserves drafts after the cursor', async (marker, text) => {
  const origin = 1_000_000, seed = drawing(marker, text), original = frame(marker, text), close = vi.fn(async () => {}), listeners: Array<(event: CtxmuxAdapterObservationEvent) => void> = []

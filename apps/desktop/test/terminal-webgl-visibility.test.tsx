@@ -566,7 +566,7 @@ function continuedAttachment(text: string) {
   return { attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
     session: { ...session, latestOutputBytes: dataBytes.byteLength }, resizeRevision: 0, gap: null,
     terminal: { type: 'basic-vt' as const, checkpoint: { runId: session.control.run.runId, throughByte: 0, resizeRevision: 0,
-      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
       restoreBytes: new TextEncoder().encode('\u001b[0m'), resizes: [] },
     replay: [{ runId: session.control.run.runId, data: text, dataBytes, startByte: 0, endByte: dataBytes.byteLength }] }
 }

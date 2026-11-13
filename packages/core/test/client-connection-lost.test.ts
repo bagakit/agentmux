@@ -431,7 +431,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
         // 「屏幕永不再变」在生产上就是这个形状。
         replay: [] as CtxmuxAdapterObservationEvent[],
         gap: null,
-        terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'readiness-run', throughByte: 0,
+        terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'readiness-run', throughByte: 0,
           resizeRevision: 0, size: { cols: 80, rows: 24 } },
           restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
         resizeRevision: 0,

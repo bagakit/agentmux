@@ -44,7 +44,8 @@ async function fixture() {
     size = { ...requested }; revision++
     return { run: info(), receipt: { type: 'resize' as const, applied_size: { ...size } } }
   })
-  ;(adapter as unknown as { client: unknown }).client = { attach, resize, status: async () => info() }
+  ;(adapter as unknown as { client: unknown }).client = { attach, resize, status: async () => info(),
+    observeStorage: async (runId: string) => ({ observation: { run_id: runId, policy: { terminal_history_rows: 10_000 } } }) }
   h.inner.kernel = adapter as unknown as Record<string, unknown>
   const observed = vi.spyOn(h.client, 'observeAgentOutput'), stop = vi.spyOn(adapter, 'stop'), replace = vi.spyOn(adapter, 'attach')
   const reattach = vi.spyOn(h.client, 'reattachAgent'), replay = vi.spyOn(h.client, 'readRunReplay')
@@ -102,7 +103,7 @@ describe('output opening keeps one original Attachment', () => {
     expect(opening.terminal.type).toBe('basic-vt')
     if (opening.terminal.type !== 'basic-vt') throw new Error('The original terminal scope was lost')
     expect(opening.terminal.restoreBytes).toBeInstanceOf(Uint8Array); expect(opening.terminal.restoreBytes).toEqual(f.restore)
-    expect(opening.terminal.checkpoint).toEqual({ runId: 'run-output-agent', throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 }, restoreSize: { cols: 91, rows: 9 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 })
+    expect(opening.terminal.checkpoint).toEqual({ runId: 'run-output-agent', throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 }, restoreSize: { cols: 91, rows: 9 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 })
     expect(opening.terminal.resizes).toEqual([{ throughByte: 2, resizeRevision: 7, size: { cols: 80, rows: 24 } }])
     expect(frames[0]).toMatchObject({ result: { initial: { resizeRevision: 7, terminal: { restoreBytes: encodeHostedValue(f.restore) } } } })
     expect(events.filter(event => event.type === 'output').flatMap(event => [...Buffer.from(event.data.dataBase64, 'base64')])).toEqual([0xe4, 0xb8, 0xad])
@@ -113,7 +114,7 @@ describe('output opening keeps one original Attachment', () => {
   it('rejects missing, fabricated or foreign terminal facts instead of filling unknown with zero or not-requested', async () => {
     const f = await fixture(), session = f.client.agentSession('output-agent'), run = (await f.client.statusAgent('output-agent')).run
     const basic = { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 0, resizeRevision: 6, size: { cols: 80, rows: 24 },
-      restoreSize: { cols: 91, rows: 9 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 },
+      restoreSize: { cols: 91, rows: 9 }, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: 31, resizeAfterRestoreBytes: 3 },
       restoreBytes: encodeHostedValue(f.restore), resizes: [{ throughByte: 2, resizeRevision: 7, size: { cols: 80, rows: 24 } }] }
     const cases = [
       { terminal: { type: 'not-requested' } }, { resizeRevision: 7 },
@@ -125,7 +126,7 @@ describe('output opening keeps one original Attachment', () => {
       { terminal: { ...basic, restoreBytes: { 0: 27, 1: 99 } }, resizeRevision: 7 },
       { terminal: { ...basic, checkpoint: { ...basic.checkpoint, resizeAfterRestoreBytes: f.restore.length + 1 } }, resizeRevision: 7 },
       { terminal: { ...basic, checkpoint: { ...basic.checkpoint, restoreSize: { cols: 0, rows: 9 } } }, resizeRevision: 7 },
-      { terminal: { ...basic, checkpoint: { ...basic.checkpoint, restoreScrollbackRows: -1 } }, resizeRevision: 7 }
+      { terminal: { ...basic, checkpoint: { ...basic.checkpoint, historyPolicy: { status: 'observed' as const, scrollbackRows: 10_000 }, restoreScrollbackRows: -1 } }, resizeRevision: 7 }
     ]
     expect(cases).toHaveLength(12)
     for (const [index, facts] of cases.entries()) {
