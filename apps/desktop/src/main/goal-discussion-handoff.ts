@@ -49,6 +49,29 @@ export function launcherCreationSpatialIntent(input: import('../shared/contracts
   return matches.length === 1 ? { ...address, executionWorkspaceId: matches[0]!.id } : undefined
 }
 
+/**
+ * Record an ordinary Launcher Agent's exact position with Core at creation, so it never depends on
+ * the Renderer's background layout save. Goal discussions keep their own owned binding commit.
+ * A changed or missing Launcher Region is a placement issue; the created Agent and Run are retained.
+ */
+export async function attachLauncherAgentPosition(input: import('../shared/contracts.js').AgentLaunchInput,
+  result: import('../shared/contracts.js').AgentLaunchResult, captured: Awaited<ReturnType<typeof captureGoalDiscussionLauncherLaunch>>,
+  workspaces: import('../shared/contracts.js').AppConfig['workspaces'],
+  spatial: Pick<import('@agentmux/core/spatial-state').AgentMuxSpatialStateStore, 'attachLauncherAgent'>): Promise<string | undefined> {
+  if (!input.launcher || captured) return undefined
+  const intent = launcherCreationSpatialIntent(input, workspaces), created = result.created, receipt = result.creation ?? created.creation
+  if (!intent || created.agentSessionId !== input.agentSessionId || receipt?.createOperationId !== input.createOperationId || !receipt.createdRun) return undefined
+  try {
+    await spatial.attachLauncherAgent({ tabId: intent.tabId, regionId: intent.regionId, agentSessionId: created.agentSessionId,
+      runId: receipt.createdRun.runId, execution: { hostId: created.hostId, cwd: input.workspacePath },
+      resource: { workspaceId: intent.executionWorkspaceId, phase: 'attached',
+        agentPresentation: { sessionId: created.agentSessionId, agentSessionId: created.agentSessionId, hostId: created.hostId } } })
+    return undefined
+  } catch (error) {
+    return 'The Agent was created, but its Launcher position is not yet recorded: ' + (error instanceof Error ? error.message : String(error))
+  }
+}
+
 /** Captured by the authenticated original native creation call before it enters Runtime. */
 export async function captureGoalDiscussionLauncherLaunch(input: import('../shared/contracts.js').AgentLaunchInput, ports: {
   spatial: Parameters<typeof contributeGoalDiscussionBinding>[0]['spatial']

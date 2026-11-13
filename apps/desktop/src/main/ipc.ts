@@ -5,7 +5,7 @@ import { ExecutionBindingReaders } from './execution-binding-readers.js'
 import { AgentExecutionBindingService } from '@agentmux/core'
 import { preparePublicUserProfile } from '@agentmux/host/author-profile'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
-import { captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
+import { attachLauncherAgentPosition, captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
@@ -1579,6 +1579,8 @@ export async function registerIpc(args: {
       if (issue) result.placementIssue = issue
     }
     catch (error) { result.placementIssue = 'The original discussion binding is unconfirmed: ' + (error instanceof Error ? error.message : String(error)) }
+    const placementIssue = await attachLauncherAgentPosition(input, result, capturedLauncher, config.workspaces, spatialState)
+    if (placementIssue) result.placementIssue = placementIssue
     if (!result.placementIssue) delete result.placementIssue
     const creation = result.creation
     if (goalPmo && creation && result.created.agentSessionId === input.agentSessionId && creation.createOperationId === input.createOperationId && creation.initialPrompt === 'confirmed') {
