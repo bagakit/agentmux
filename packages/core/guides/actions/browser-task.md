@@ -18,6 +18,12 @@ fresh stdin JSON {parameters: {...}, items: [{id: "one", parameters: {...}}]} an
 `--batch <id>` to continue the original eligible group. Each of 1–16 unique items uses
 its own original task run. Values are transient; retained item results have run identities
 and statuses. Group limits are 256 operations and 120 seconds of execution.
+Saved versions may also contain testing steps: `wait` (an element or URL within its
+timeout), `assert` (element present/absent, URL or text), `press`, `hover` and `scroll`.
+A page step may declare `retry` 0–3 and `onFail` stop, continue or goto a later step.
+Only a known `script-failed` attempt that sent no page action is retried, each with its
+own operation id. After continue or goto the run records `failedSteps` with the failed
+operation and ends `failed`, never `completed`; stopped and unknown results are not handled.
 Unknown actions or human checkpoints stop continuation; no automatic approval or replay.
 `browser task batch-stop --browser <id> --batch <id>` stops preparation and current
 execution while preserving original progress. This does not reclaim human input.
