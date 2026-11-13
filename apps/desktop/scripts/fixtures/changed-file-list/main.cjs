@@ -27,20 +27,30 @@ app.whenReady().then(async () => {
       receipt.screenshots.push({ name, file: name + '.png', width, height })
     }
     const mounted = () => evaluate('document.querySelectorAll(".git-workbench__files > li").length')
+    // The real pointer would otherwise hover whatever row lies under it; park it, or put it on one row on purpose.
+    const pointAt = async (x, y) => { await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); await wait(150) }
+    const hoverRow = async name => {
+      const point = await evaluate(`(()=>{const row=[...document.querySelectorAll('.git-workbench__files button')].find(e=>e.querySelector('.git-workbench__file-name')?.textContent===${JSON.stringify(name)});const r=row.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+      await pointAt(point.x, point.y)
+    }
     const type = async text => {
       await evaluate('document.querySelector(\'input[aria-label="Filter changed files"]\').focus()')
       await win.webContents.debugger.sendCommand('Input.insertText', { text }); await wait(300)
     }
     await win.loadFile(process.env.CHANGED_FILE_LIST_HTML)
     win.showInactive()
+    await pointAt(1, 1)
     await ready('Boolean(document.querySelector(\'input[aria-label="Filter changed files"]\') && document.querySelectorAll(".git-workbench__files > li").length > 0)')
     await capture('large-commit-top-dark', 760, 900)
+    await hoverRow('glyph-0005.svg')
+    await capture('large-commit-selected-and-hover-dark', 760, 900)
+    await pointAt(1, 1)
     receipt.measurements.mountedAtTop = await mounted()
     await evaluate('document.querySelector(".git-workbench__details").scrollTop = 36 * 2400')
     await wait(300)
     await capture('large-commit-scrolled-dark', 760, 900)
     receipt.measurements.mountedScrolled = await mounted()
-    receipt.measurements.firstVisibleScrolled = await evaluate('[...document.querySelectorAll(".git-workbench__file-name")].map(e=>e.textContent).find(t=>t)')
+    receipt.measurements.firstVisibleScrolled = await evaluate(`(()=>{const top=document.querySelector('.git-workbench__details').getBoundingClientRect().top;return [...document.querySelectorAll('.git-workbench__files > li')].filter(e=>e.getBoundingClientRect().top>=top).sort((a,b)=>a.getBoundingClientRect().top-b.getBoundingClientRect().top)[0]?.querySelector('.git-workbench__file-name')?.textContent ?? null})()`)
     await evaluate('document.querySelector(".git-workbench__details").scrollTop = 0')
     await type('features/git/FileList')
     await capture('large-commit-filtered-dark', 760, 900)
@@ -50,6 +60,9 @@ app.whenReady().then(async () => {
     await evaluate('document.querySelector(\'button[aria-label="Clear file filter"]\').click()'); await wait(300)
     await evaluate('changedFileListVisual.appearance("light")')
     await capture('large-commit-top-light-narrow', 420, 820)
+    await hoverRow('glyph-0005.svg')
+    await capture('large-commit-selected-and-hover-light-narrow', 420, 820)
+    await pointAt(1, 1)
     await win.loadFile(process.env.CHANGED_FILE_LIST_HTML, { search: 'scene=small' })
     await ready('document.querySelectorAll(".git-workbench__files > li").length === 3')
     receipt.measurements.smallCommitHasFilter = await evaluate('Boolean(document.querySelector(\'input[aria-label="Filter changed files"]\'))')
