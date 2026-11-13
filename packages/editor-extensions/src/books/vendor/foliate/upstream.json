@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/johnfactotum/foliate-js",
+  "commit": "78914aef4466eb960965702401634c2cb348e9b1",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "epub.js",
+      "upstreamSha256": "dfe347495039e9b5991478986ec6b7713cf9efbcd8f475a77ef7b967c5176298",
+      "adaptedSha256": "7b64eb83b37f3221352983d0e7529c45db0798913c34bb7719eb2472762c23af"
+    },
+    {
+      "path": "epubcfi.js",
+      "upstreamSha256": "e1a688ad5c84bf31f33cef467f92c7a6d060a0f17ec37c1d3c048e9c7b1cf645",
+      "adaptedSha256": "e1a688ad5c84bf31f33cef467f92c7a6d060a0f17ec37c1d3c048e9c7b1cf645"
+    },
+    {
+      "path": "mobi.js",
+      "upstreamSha256": "016526df13a9f11ee6671a8c74346e1cf41fe6bdfe50165fdcbf744f015694f3",
+      "adaptedSha256": "c1b370d69c2e15fefcd66042a4d26e66414157e27f9c2e0f17a81db088200b46"
+    },
+    {
+      "path": "fb2.js",
+      "upstreamSha256": "09a7890bf191f1b6c6dd435fae2868b86c75e73e00731b0051c02f2a998a180a",
+      "adaptedSha256": "7738ae24b7c4f01e8e264e2621606858e0ce21625efcd2f8e1b953ad8bd8b9ce"
+    },
+    {
+      "path": "comic-book.js",
+      "upstreamSha256": "7f3bf77561ca77300d5244015fcb1f73805787db246928074dc49fb56c88762e",
+      "adaptedSha256": "277a5f59ef5883f1d978ddde2f98e01f9763072fc169c65984cbc2228a945501"
+    }
+  ]
+}
