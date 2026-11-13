@@ -58,7 +58,7 @@ async function original(initialPage = dialogue(), nativePending = false, unrelat
   let setupExecutor: string | null = 'configured-original', loseCreation = false, pendingBinding = false, setupRecord: any = null
   const rpc = vi.fn(async (method: string, input: any) => {
     if (method === 'space.ls' || method === 'space.inspect') return { catalog: facts }
-    if (method === 'space.mote.dialogue.read') { if (readFailure) throw Error('原主对话读取失败，旧来源保留'); return structuredClone(input.kind === 'main' ? { ...page, main: { ...page.main, documentRevision: 'sha256:' + 'a'.repeat(64) } } : page) }
+    if (method === 'space.mote.dialogue.read') { if (readFailure) throw Error('原主对话读取失败，旧来源保留'); return structuredClone(input.kind === 'main' ? { ...page, links: page.links.filter(link => link.kind === 'main'), main: { ...page.main, documentRevision: 'sha256:' + 'a'.repeat(64) } } : page) }
     if (method === 'space.state') return { state: { graph: { resources: setupRecord ? { 'core:agent-open': { schema: 'agentmux.spatial-agent-open.v1', requests: { [setupRecord.requestId]: setupRecord } } } : {} } } }
     if (method === 'space.mote.preferences.read') return { kind: 'quick', target, status: 'ready', source: { resource: file, result: { status: 'read', document: { path: 'MOTE.md', content: '# original', revision: 'sha256:' + 'a'.repeat(64) } } },
       defaults: { ...(setupExecutor ? { executorId: setupExecutor } : {}), ...(page.main.current ? { conversation: page.main.current, conversationRevision: page.main.roleRevision } : {}) },
@@ -198,11 +198,11 @@ it('returns to the original dialogue reader main after a role change instead of 
   const f = await original(), replacement = { ...main, sessionId: 'peer', tabId: 'replacement-tab', regionId: 'replacement-region' }
   f.setPage({ ...dialogue(), main: { ...dialogue().main, roleRevision: 'replacement-role', current: replacement } })
   await refreshMote(f)
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换'))
-  expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换')
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换'))
+  expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换')
   await click(button(f.view.element, 'Discussion'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe('peer'))
-  expect(f.view.element.querySelector('.mobile-mote-main-handoff')).toBeNull()
+  expect(f.view.element.querySelector('.mobile-mote-source-status')).toBeNull()
   expect(f.submit).not.toHaveBeenCalled()
 })
 
@@ -242,7 +242,7 @@ it('inspects an original unknown main operation after A to B without resubmittin
   const originalPacket = structuredClone(f.rpc.mock.calls.find(([method]) => method === 'space.mote.dialogue.input.submit')![1])
   f.setPage({ ...dialogue(), main: { ...dialogue().main, roleRevision: 'role-B', current: { ...main, sessionId: worker, regionId: 'worker-region' } } })
   await refreshMote(f)
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换'))
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换'))
   const pendingStatus = f.view.element.querySelector<HTMLElement>('.mobile-send-status')
   if (pendingStatus) await click(button(pendingStatus, '核对原主对话输入'))
   await wait(() => expect(f.owner.snapshot().record.conversation.attempts[0]?.[1].phase).toBe('confirmed'))
@@ -257,7 +257,7 @@ it('retains a new logical Main draft after known A to B and never silently sends
   const originalEditor = editor(f.view.element)
   f.setPage({ ...dialogue(), main: { ...dialogue().main, roleRevision: 'role-B', current: { ...main, sessionId: worker, regionId: 'worker-region' } } })
   await refreshMote(f)
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换'))
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换'))
   await click(button(f.view.element, 'Send'))
   expect(editor(f.view.element)).toBe(originalEditor)
   expect(editor(f.view.element).textContent).toBe('应由当前 Mote 承接的新输入')
@@ -301,7 +301,7 @@ it('keeps explicit member navigation generic even if that exact member later bec
   await click(button(f.view.element.querySelector<HTMLElement>('[aria-label="Mote Threads"]')!, '打开原成员 · 资料研究员'))
   f.setPage({ ...dialogue(), main: { ...dialogue().main, roleRevision: 'role-worker', current: { ...main, sessionId: worker, regionId: 'worker-region' } } })
   await refreshMote(f)
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')).toBeNull())
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')).toBeNull())
   await f.view.render(null); await f.view.render(f.render())
   await wait(() => expect(f.view.element.textContent).toContain('原 Agent 对话'))
   await paste(f.view.element, '明确给原成员的输入'); await click(button(f.view.element, 'Send'))
@@ -340,7 +340,7 @@ it('retains a pending main intake across cold remount and only inspects its orig
   const packet = structuredClone(f.owner.snapshot().record.conversation.attempts[0]![1])
   f.setPage({ ...dialogue(), main: { ...dialogue().main, roleRevision: 'role-B', current: { ...main, sessionId: worker, regionId: 'worker-region' } } })
   await f.view.render(null); await f.view.render(f.render())
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换'))
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换'))
   const pendingStatus = f.view.element.querySelector<HTMLElement>('.mobile-send-status')
   if (pendingStatus) await click(button(pendingStatus, '核对原主对话输入'))
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.input.inspect').length).toBeGreaterThan(0))
@@ -357,7 +357,7 @@ it('shows the same static Mote identity for exact previous and current main sour
     roleRevision: 'original-role', reference: main, range: 'whole-session' as const, file: { resource: file, revision: 'original-file-revision' } }
   f.setPage({ ...dialogue(), links: [work, prior], main: { ...dialogue().main, roleRevision: 'role-B', current: { ...main, sessionId: worker, regionId: 'worker-region' } } })
   await refreshMote(f)
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-main-handoff')?.textContent).toContain('主 Agent 已更换'))
+  await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')?.textContent).toContain('主 Agent 已更换'))
   await click(button(f.view.element, 'Discussion'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(worker))
   const source = f.view.element.querySelector<HTMLDetailsElement>('.mote-conversation__source')!
@@ -460,6 +460,19 @@ it('actual Mobile Main setup preserves an unrelated Host draft without taking aw
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
 })
 
+
+it('actual Mobile Profile rotation without a Query hands over from the original bound Main', async () => {
+  const f = await original()
+  await click(f.view.element.querySelector('.mobile-mote-heading')!)
+  await wait(() => expect(button(document.body, '新建并轮转 Main Agent')).toBeDefined())
+  await click(button(document.body, '新建并轮转 Main Agent'))
+  await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'agent.open')).toBe(true))
+  const create = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
+  expect(create.moteMain.baseline.defaults.conversation).toEqual(dialogue().main.current)
+  expect(create.moteMain.handover).toBe(true)
+  expect(create.moteMain.deferredInput).toBeUndefined()
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
+})
 
 it('retains a confirmed rotation creation with unknown binding across Profile remount and inspects the same Core follow-up', async () => {
   const f = await original(); f.setup('configured-original', false, true)
