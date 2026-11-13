@@ -758,6 +758,8 @@ const api: AgentMuxPreloadApi = {
     listProfileSites: (profileId: string) => ipcRenderer.invoke('browser:listProfileSites', profileId),
     clearProfileSite: (profileId: string, site: string, approval: BrowserProfileClearSiteApproval) => ipcRenderer.invoke('browser:clearProfileSite', profileId, site, approval),
     checkProfileExit: (profileId: string) => ipcRenderer.invoke('browser:checkProfileExit', profileId),
+    readProfileProxySignIn: (profileId: string) => ipcRenderer.invoke('browser:readProfileProxySignIn', profileId),
+    setProfileProxySignIn: (profileId: string, signIn: { username: string; password: string } | null) => ipcRenderer.invoke('browser:setProfileProxySignIn', profileId, signIn),
     detectProfileImportSources: () => ipcRenderer.invoke('browser:detectProfileImportSources'),
     importProfile: (sourceToken: string, label: string) =>
       ipcRenderer.invoke('browser:importProfile', sourceToken, label),

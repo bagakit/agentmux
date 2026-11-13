@@ -350,6 +350,8 @@ const mockDefaultBrowserProfile: BrowserProfileSummary = {
   source: null
 }
 let mockBrowserProfiles: BrowserProfileSummary[] = [mockDefaultBrowserProfile]
+// Preview-only proxy sign-ins, user names only, exactly what the real Main hands back.
+const mockProxySignIns = new Map<string, string>()
 // Preview-only sites with sign-ins per Profile, so the clear flow can be seen without a real session.
 const mockBrowserProfileSites = new Map<string, BrowserProfileSite[]>([[mockDefaultBrowserProfile.id, [
   { site: 'github.com', cookies: 14 }, { site: 'figma.com', cookies: 9 }, { site: 'example.com', cookies: 2 }]]])
@@ -1459,6 +1461,8 @@ const mockApi: AgentMuxDesktopApi = {
       publishMockBrowserProfiles()
     },
     listProfileSites: async (profileId) => structuredClone(mockBrowserProfileSites.get(profileId) ?? []),
+    readProfileProxySignIn: async (profileId) => mockProxySignIns.has(profileId) ? { username: mockProxySignIns.get(profileId)! } : null,
+    setProfileProxySignIn: async (profileId, signIn) => { if (signIn) mockProxySignIns.set(profileId, signIn.username.trim()); else mockProxySignIns.delete(profileId) },
     // Preview: a fixed answer through the Profile's route, so the check line can be seen without a network.
     checkProfileExit: async (profileId) => {
       if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)

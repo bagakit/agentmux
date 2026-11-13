@@ -2017,6 +2017,24 @@ export async function registerIpc(args: {
     prepare: profileId => browserProfiles.prepareSession(profileId),
     now: () => performance.now()
   })
+  handleWithEvent('browser:readProfileProxySignIn', (event, profileId: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    browserProfiles.resolvePartition(profileId)
+    const username = await profileProxyAuth.username(profileId)
+    return username === null ? null : { username }
+  }))
+  handleWithEvent('browser:setProfileProxySignIn', (event, profileId: string, signIn: { username: string; password: string } | null) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    browserProfiles.resolvePartition(profileId)
+    if (signIn === null) return await profileProxyAuth.clear(profileId)
+    if (!browserProfiles.proxyOf(profileId)) {
+      throw Object.assign(new Error('Set this Profile’s network to a proxy first; a sign-in is kept only for its own proxy.'), { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
+    }
+    if (!signIn || typeof signIn.username !== 'string' || typeof signIn.password !== 'string') throw Object.assign(new Error('Enter a user name and a password for the proxy.'), { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
+    await profileProxyAuth.set(profileId, signIn)
+    // Pages already waiting on the proxy reconnect and are asked again with the new sign-in.
+    await session.fromPartition(browserProfiles.resolvePartition(profileId)).closeAllConnections()
+  }))
   handleWithEvent('browser:checkProfileExit', (event, profileId: string) => ipcResult(async () => {
     await browserProfiles.initialize()
     return await profileExitCheck(profileId, config.browser.exitCheckUrl ?? '')

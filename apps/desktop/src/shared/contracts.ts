@@ -2081,6 +2081,10 @@ export type AgentMuxDesktopApi = {
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>
     clearProfileSite(profileId: string, site: string, approval: BrowserProfileClearSiteApproval): Promise<void>
+    /** The user name of this Profile's proxy sign-in, or null; the password never comes back. */
+    readProfileProxySignIn(profileId: string): Promise<{ username: string } | null>
+    /** Keep or forget this Profile's proxy sign-in. The password goes to Main once and is encrypted there. */
+    setProfileProxySignIn(profileId: string, signIn: { username: string; password: string } | null): Promise<void>
     /** One request through this Profile's own session to the saved check address. */
     checkProfileExit(profileId: string): Promise<BrowserProfileExitCheck>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>

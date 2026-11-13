@@ -67,6 +67,8 @@
 .browser-profile-editor__route > span:first-child { color: var(--text); }
 .browser-profile-editor__route > button { margin-left: auto; }
 .browser-profile-editor__route-unknown { color: var(--text-3); }
+.browser-profile-editor__sign-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); }
+@container settings-resource (width < 720px) { .browser-profile-editor__sign-in { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .browser-profile-editor__link { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .browser-profile-editor__link:hover:not(:disabled) { color: var(--text); }
 .browser-profile-editor__link:disabled { color: var(--text-3); cursor: default; }

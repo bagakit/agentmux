@@ -317,7 +317,10 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
         </label>
       </section>
 
-      <ProfileExitCheck key={profile.id} profile={profile} address={exitCheckUrl} />
+      {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
+      {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
+
+      <ProfileExitCheck profile={profile} address={exitCheckUrl} />
 
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
@@ -356,6 +359,49 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
         </div>
       </div> : null}
     </article>
+  )
+}
+
+/**
+ * The sign-in for this Profile's proxy. Only the user name is ever read back; the password field
+ * starts empty, is sent to Main once on Save and cleared, and Main encrypts it with the keychain.
+ */
+function ProfileProxySignIn({ profile }: { profile: BrowserProfileSummary }) {
+  const [saved, setSaved] = useState<string | null | undefined>(undefined)
+  const [editing, setEditing] = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [state, setState] = useState<{ kind: 'idle' | 'saving' } | { kind: 'failed'; message: string }>({ kind: 'idle' })
+  useEffect(() => {
+    let live = true
+    api.browser.readProfileProxySignIn(profile.id).then(result => { if (live) setSaved(result?.username ?? null) }, () => { if (live) setSaved(null) })
+    return () => { live = false }
+  }, [profile.id])
+  const save = async (signIn: { username: string; password: string } | null) => {
+    setState({ kind: 'saving' })
+    try {
+      await api.browser.setProfileProxySignIn(profile.id, signIn)
+      setSaved(signIn ? signIn.username.trim() : null); setEditing(false); setPassword(''); setState({ kind: 'idle' })
+    } catch (cause) { setPassword(''); setState({ kind: 'failed', message: presentError(cause) }) }
+  }
+  return (
+    <section className="browser-profile-editor__section" aria-label="Proxy sign-in">
+      <h4>Proxy sign-in</h4>
+      {editing ? <form className="browser-profile-editor__sign-in" onSubmit={event => { event.preventDefault(); void save({ username, password }) }}
+        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(false); setPassword('') } }}>
+        <TextInput aria-label="Proxy user name" autoComplete="off" autoFocus value={username} maxLength={256} onChange={event => setUsername(event.target.value)} />
+        <TextInput aria-label="Proxy password" type="password" autoComplete="new-password" value={password} maxLength={1024} onChange={event => setPassword(event.target.value)} />
+        <button type="button" className="small-button" onClick={() => { setEditing(false); setPassword('') }}>Cancel</button>
+        <button type="submit" className="primary-button" disabled={state.kind === 'saving' || !username.trim() || !password}>Save</button>
+      </form> : <p className="browser-profile-editor__route">
+        <span>{saved === undefined ? 'Reading…' : saved ? `Signs in as ${saved}` : 'No sign-in'}</span>
+        <button type="button" className="small-button" disabled={saved === undefined} onClick={() => { setUsername(saved ?? ''); setEditing(true) }}>{saved ? 'Change' : 'Add sign-in'}</button>
+        {saved ? <button type="button" className="small-button" disabled={state.kind === 'saving'} onClick={() => void save(null)}>Forget</button> : null}
+      </p>}
+      <p className={state.kind === 'failed' ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={state.kind === 'failed' ? 'alert' : undefined}>
+        {state.kind === 'failed' ? state.message : 'Used only when this Profile’s own proxy asks. The password is kept in the system keychain and never shown again.'}
+      </p>
+    </section>
   )
 }
 
