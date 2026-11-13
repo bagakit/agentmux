@@ -294,6 +294,7 @@ const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
 const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could not be fully released. The page and operation are retained; use Return to Agent to retry release, then inspect the page before starting a fresh program.'
 const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available. Use Take control before editing manually, or submit a fresh Agent program to retry isolation.'
 const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
+const ASSOCIATION_OPERATOR_NOTICE = 'This program started with a different operator from the Browser’s associated Agent. The original association and message recipient were retained.'
 function appendWarning(current: string | undefined, warning: string): string {
   return current && (`\n${current}\n`).includes(`\n${warning}\n`) ? current : [current, warning].filter(Boolean).join('\n')
 }
@@ -2379,7 +2380,7 @@ export class BrowserViewManager {
         // The admitted program's actor is recorded on the operation. Its existing automation
         // permission does not silently replace the page's collaborator or message recipient.
         entry.agentWarning = entry.agent
-          ? 'This program has a different operator from this Browser’s associated Agent. The existing association and message recipient are retained. Take control and choose Switch Agent to change the collaborator.'
+          ? ASSOCIATION_OPERATOR_NOTICE
           : 'This program’s operator is confirmed, but the original Browser Agent association is still unknown. The program and page remain usable; check the original association before handing over or sending a new opinion.'
       }
       else {
@@ -2422,7 +2423,7 @@ export class BrowserViewManager {
         operation.phase = 'stopped'
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = Date.now()
-        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the current page and control state before continuing.'
+        operation.warning = appendWarning(operation.warning, 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the current page and control state before continuing.')
         entry.activity = { operation, control: entry.activity.control, warning: [entry.activity.warning, operation.warning].filter(Boolean).join('\n') }
         stopController.abort()
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
@@ -3228,6 +3229,7 @@ export class BrowserViewManager {
       throw Object.assign(new Error('The Agent associated with this Browser has retired, so it can no longer take control. You keep control; choose another Agent or create a new Agent on its right to hand it over.'), { code: 'STALE_AGENT_SESSION_BINDING' })
     }
     // An unconfirmed read is not a stopped Agent: the association still stands and the hand-back proceeds.
+    this.clearAgentWarning(entry)
     entry.agentWarning = original === 'unconfirmed'
       ? 'The associated Agent’s current Core status could not be confirmed. Its original association and Browser control remain available; reconnect its Core owner or inspect the original Agent to confirm its status.'
       : undefined
@@ -3259,7 +3261,7 @@ export class BrowserViewManager {
       if (!same(entry.agent)) continue
       if (this.agentOwnsInput(entry)) { entry.activeRun?.stop(); this.yieldControl(entry.id) }
       entry.agent = null
-      entry.agentWarning = undefined
+      this.clearAgentWarning(entry)
       ++entry.controlRevision
       this.emit(entry)
     }
@@ -3287,8 +3289,18 @@ export class BrowserViewManager {
     }
     if (!matches()) throw Object.assign(new Error('This Browser changed while Core confirmed the Agent. The original page and selected Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
     entry.agent = { hostId: agent.hostId, agentSessionId: agent.agentSessionId }
-    entry.agentWarning = undefined
+    this.clearAgentWarning(entry)
     return this.applyAgentControl(entry)
+  }
+
+  /** A confirmed handoff resolves the current notice, not its original operation history. */
+  private clearAgentWarning(entry: BrowserEntry): void {
+    const previous = entry.agentWarning
+    entry.agentWarning = undefined
+    if (!previous || !entry.activity.warning) return
+    const next = removeWarning(entry.activity.warning, previous)
+    const { warning: _warning, ...activity } = entry.activity
+    entry.activity = { ...activity, ...(next ? { warning: next } : {}) }
   }
 
   private applyAgentControl(entry: BrowserEntry): BrowserSnapshot {
