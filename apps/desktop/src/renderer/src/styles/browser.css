@@ -261,12 +261,14 @@
 .profile-mark {
   --profile-hue: 288;
   flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-sm);
-  color: hsl(var(--profile-hue) 58% 74%); background: hsl(var(--profile-hue) 42% 60% / .18);
+  color: hsl(var(--profile-hue) 62% 80%); background: hsl(var(--profile-hue) 46% 60% / .24);
   font-size: var(--fs-meta); font-weight: 650; line-height: 1;
   transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 .profile-mark[data-size='large'] { width: 36px; height: 36px; border-radius: var(--radius); font-size: var(--fs-title); box-shadow: var(--hl); }
-:root[data-appearance='light'] .profile-mark { color: hsl(var(--profile-hue) 46% 32%); background: hsl(var(--profile-hue) 40% 46% / .14); }
+.profile-mark[data-tone='deep'] { color: hsl(var(--profile-hue) 62% 70%); }
+:root[data-appearance='light'] .profile-mark { color: hsl(var(--profile-hue) 50% 30%); background: hsl(var(--profile-hue) 42% 46% / .16); }
+:root[data-appearance='light'] .profile-mark[data-tone='deep'] { color: hsl(var(--profile-hue) 50% 40%); }
 @media (prefers-reduced-motion: reduce) { .profile-mark { transition: none; } }
 
 /* The toolbar Profile chip: the identity mark and name; quiet until hovered, never a status. */

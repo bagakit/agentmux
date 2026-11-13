@@ -41,8 +41,10 @@
 .browser-profile-editor__hues { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: calc(-1 * var(--sp-3)); }
 .browser-profile-editor__hues > button[style] {
   width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
-  background: hsl(var(--profile-hue) 52% 64%); box-shadow: var(--hl);
+  background: hsl(var(--profile-hue) 56% 66%); box-shadow: var(--hl);
 }
+/* The same second lightness step the mark uses, so a swatch looks like the mark it picks. */
+.browser-profile-editor__hues > button[style][data-tone='deep'] { background: hsl(var(--profile-hue) 56% 50%); }
 .browser-profile-editor__hues > button[style][aria-checked='true'] { box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 4px hsl(var(--profile-hue) 52% 64% / .7); }
 .browser-profile-editor__hues > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .browser-profile-editor__auto { min-height: 22px; padding: 0 var(--sp-3); border: 0; border-radius: 999px; color: var(--text-3); background: var(--wash-1); font: inherit; font-size: var(--fs-meta); cursor: pointer; }

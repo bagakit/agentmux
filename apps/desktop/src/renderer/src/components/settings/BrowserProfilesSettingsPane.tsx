@@ -11,7 +11,7 @@ import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
-import { PROFILE_HUES, ProfileMark, profileHue } from '../ProfileMark'
+import { PROFILE_HUES, ProfileMark, profileTone } from '../ProfileMark'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
 import * as Menu from '../HoverDropdownMenu'
@@ -29,7 +29,7 @@ const ThemeNavigationNextIcon = semanticIconComponent('navigation.next')
 
 /** The palette lives with the mark, so a chosen and an automatic Profile color can never drift apart. */
 export { PROFILE_HUES }
-const HUE_NAMES: Readonly<Record<number, string>> = { 180: 'Teal', 248: 'Indigo', 266: 'Violet', 284: 'Purple', 302: 'Orchid', 320: 'Magenta', 338: 'Rose' }
+const HUE_NAMES: Readonly<Record<number, string>> = { 178: 'Teal', 246: 'Indigo', 270: 'Violet', 294: 'Plum', 318: 'Orchid', 338: 'Rose' }
 
 /** What each skip reason means to the person who imported, said once here rather than per caller. */
 const SKIP_LABELS: Readonly<Record<BrowserProfileCookieSkipReason, string>> = {
@@ -285,7 +285,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
             const checked = profile.hue === hue
             return <RovingFocus.Item key={hue} asChild active={checked}>
               <button type="button" role="radio" aria-checked={checked} aria-label={HUE_NAMES[hue] ?? `Hue ${hue}`} title={HUE_NAMES[hue]}
-                style={{ '--profile-hue': hue } as CSSProperties} onClick={() => { closeHues(); if (!checked) void commit({ hue }) }} />
+                data-tone={profileTone(hue)} style={{ '--profile-hue': hue } as CSSProperties} onClick={() => { closeHues(); if (!checked) void commit({ hue }) }} />
             </RovingFocus.Item>
           })}
           <RovingFocus.Item asChild active={profile.hue === undefined}>
