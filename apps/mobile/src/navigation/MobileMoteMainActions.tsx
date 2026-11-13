@@ -97,7 +97,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
           id = query?.rollover?.creationOperationId ?? randomClientRequestId()
           intent = { runtimeId: runtime.runtimeId, deviceHostId, input: { operationId: id, content: { kind: 'new-agent', executorId: executor.id },
             destination: { spaceId: target.spaceId, zoneId: target.zoneId, newTab: true }, focus: false,
-            moteMain: { target, baseline: moteMainBaseline(baseline), expectedRoleRevision: reading.dialogue.main.roleRevision, sourceOperationId: id + ':source', bindOperationId: id + ':bind', ...(query ? { deferredInput: { operationId: query.operationId, prompt: query.prompt }, ...(query.rollover ? { rollover: query.rollover } : {}), ...(baseline.defaults.conversation ? { handover: true as const } : {}) } : {}) } }, phase: 'sending' }
+            moteMain: { target, baseline: moteMainBaseline(baseline), expectedRoleRevision: reading.dialogue.main.roleRevision, sourceOperationId: id + ':source', bindOperationId: id + ':bind', ...(query ? { deferredInput: { operationId: query.operationId, prompt: query.prompt }, ...(query.rollover ? { rollover: query.rollover } : {}) } : {}), ...(baseline.defaults.conversation ? { handover: true as const } : {}) } }, phase: 'sending' }
           await owner.retainAgentCreate(intent, recordId)
           if (!current()) return
           await client.forwardRpc('agent.open', intent.input)
