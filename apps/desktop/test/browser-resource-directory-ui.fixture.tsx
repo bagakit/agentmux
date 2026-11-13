@@ -335,7 +335,7 @@ it('keeps the exact Mobile Browser reader when a strict partial result omits tha
   material = result(['b'], 'partial')
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click()); await settle()
   expect(container.querySelector('a')?.href).toBe('https://a.example/')
-  expect(container.textContent).toContain('原 browserId 的当前网址尚未唯一确认')
+  expect(container.textContent).toContain('这个网页的当前网址还没确认。可以刷新重试。')
   expect(container.textContent).not.toContain('https://b.example/')
   expect(forwardRpc).toHaveBeenCalledTimes(2)
 })

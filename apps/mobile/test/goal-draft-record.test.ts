@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DeviceWorkfaceStore, DeviceWorkfaceRecordChangedError, emptyDeviceWorkface, parseDeviceWorkface } from '../src/recovery/device-workface'
-import { freezeMobileGoalUpdateRequest, type MobileGoalDraft } from '../src/recovery/goal-drafts'
+import { freezeMobileGoalUpdateRequest, MobileGoalDraftInvalidError, type MobileGoalDraft } from '../src/recovery/goal-drafts'
 
 const scope = { origin: 'http://192.168.2.45:8443', runtimeId: 'original-runtime', deviceHostId: 'original-host' }
 function draft(goalId = 'original-goal', description = '原目标草稿'): MobileGoalDraft {
@@ -56,7 +56,8 @@ describe('Goal drafts consume the original device transaction owner', () => {
     const d = disk(), owner = new DeviceWorkfaceStore(() => d.storage), a = pending(draft()), b = pending({ ...draft(), scope: { ...scope, runtimeId: 'other-runtime' } })
     await owner.editGoalDraft(null, a, null); await owner.editGoalDraft(null, b, null)
     expect(d.read().goalDrafts).toEqual([a, b])
-    expect(() => owner.editGoalDraft(a, b, null)).toThrow('原对象或 Host 不同')
+    expect(() => owner.editGoalDraft(a, b, null)).toThrow(MobileGoalDraftInvalidError)
+    expect(() => owner.editGoalDraft(a, b, null)).toThrow('目标草稿属于另一个目标或另一台 Mac，这次没有保存。')
     expect(d.read().goalDraftConflicts).toBeUndefined()
   })
   it('refuses a late callback after record replacement without inserting the original body or conflict into B', async () => {

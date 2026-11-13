@@ -55,7 +55,7 @@ it('exports the actual nonempty saved relationship through trusted Main and remo
   const openSession = vi.fn(), context = vi.fn()
   await act(async () => root.render(<MobileGoalsSurface client={mobile} visible connected openSession={openSession} onContextChange={context}
     initialContext={{ goalId: 'goal', mode: 'detail', discussion: null }} />))
-  const open = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '打开目标原讨论')
+  const open = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '打开目标讨论')
   await vi.waitFor(() => expect(open()).toBeDefined())
   await act(async () => open()!.click())
   await vi.waitFor(() => expect(container.querySelector('.mobile-zone-workface .mobile-agent-row__open')).not.toBeNull())

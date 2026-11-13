@@ -112,7 +112,7 @@ it('the actual Mobile creator admits one original Session and durable workface w
   const resumedPhone = await connectRelayHostedClient({ offer: latest.offer, name: 'Private Mobile original creator continuation', signal: resumedController.signal, createWebSocket: url => new WebSocket(url) })
   cleanup.push(async () => { resumedController.abort(); await resumedPhone.dispose() })
   await act(async () => { root.render(<MobileAgentCreate client={resumedPhone} connected visible target={{ spaceId, zoneId }} platform={createBrowserPlatform()} onClose={() => {}} openSession={() => {}} />) })
-  const continueButton = [...document.querySelectorAll('button')].find(button => button.textContent === '继续原创建')!
+  const continueButton = [...document.querySelectorAll('button')].find(button => button.textContent === '继续上次创建')!
   expect(continueButton).toBeDefined(); await act(async () => { continueButton.click() })
   const continued = await until(async () => { await act(async () => {}); return {
     record: getDeviceWorkface().snapshot().record.agentCreates!.find(intent => intent.input.operationId === interruptedOperation),

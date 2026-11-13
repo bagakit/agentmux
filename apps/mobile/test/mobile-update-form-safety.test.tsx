@@ -146,8 +146,8 @@ it('never replaces an existing operation with a different exact request or accep
     method: 'goal.link-session' as const, request: { goalId: 'goal-original', operationId: 'collision-original', sessionId: 'session-original' } }
   await owner.retainGoalRequest(item, recordId)
   const different = { ...item, request: { ...item.request, sessionId: 'session-other' } }
-  await expect(Promise.resolve().then(() => owner.retainGoalRequest(different, recordId))).rejects.toThrow('其他请求')
-  await expect(Promise.resolve().then(() => owner.confirmGoalRequest(different, recordId))).rejects.toThrow('其他请求')
+  await expect(Promise.resolve().then(() => owner.retainGoalRequest(different, recordId))).rejects.toThrow('这个操作标识已用于另一个请求，记录没有被覆盖。')
+  await expect(Promise.resolve().then(() => owner.confirmGoalRequest(different, recordId))).rejects.toThrow('操作记录已在别处更新，这次结果没有覆盖它。')
   expect(owner.snapshot().record.goalOperationRecords).toContainEqual(item)
   await owner.confirmGoalRequest(item, recordId)
   expect(owner.snapshot().record.goalOperationRecords).not.toContainEqual(item)

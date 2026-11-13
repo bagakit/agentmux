@@ -110,7 +110,7 @@ it.each(['success', 'unknown', 'presentation-error'] as const)('shows assignment
   await click(button(view.element, '保存负责人分配'))
   expect(view.element.textContent).toContain(outcome === 'success' ? '负责人分配已保存' : outcome === 'unknown' ? 'Mac 还没确认分配' : 'Mac 已确认操作')
   expect(button(view.element, '保存负责人分配').disabled).toBe(false)
-  if (outcome === 'presentation-error') expect(view.element.textContent).not.toContain('分配回执未确认')
+  if (outcome === 'presentation-error') expect(view.element.textContent).not.toContain('Mac 还没确认分配')
   expect(rpc.mock.calls.filter(([method]) => method === 'goal.assign')).toHaveLength(1)
   await act(async () => { release.resolve(); await release.promise })
   await vi.waitFor(() => expect(owner.snapshot().record.goalOperationRecords?.length ?? 0).toBe(outcome === 'unknown' ? 1 : 0))

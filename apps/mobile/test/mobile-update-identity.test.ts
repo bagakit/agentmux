@@ -40,7 +40,7 @@ it('retains an unresolved handoff and binds it to the exact original key and off
   expect(matchesReloadIdentity(original, 'other-offer', 'original-record')).toBe(false)
   expect(matchesReloadIdentity(other, 'original-offer', 'original-record')).toBe(false)
   expect(matchesReloadIdentity(original, 'original-offer', 'replacement-record')).toBe(false)
-  expect(() => prepareReloadIdentity(other, 'original-offer', 'original-record')).toThrow('尚未解决')
+  expect(() => prepareReloadIdentity(other, 'original-offer', 'original-record')).toThrow('上次更新网页的连接交接还没完成，请先恢复那次连接。')
   expect(matchesReloadIdentity(original, 'original-offer', 'original-record')).toBe(true)
   finishReloadIdentity(other, 'original-offer', 'original-record')
   expect(matchesReloadIdentity(original, 'original-offer', 'original-record')).toBe(true)

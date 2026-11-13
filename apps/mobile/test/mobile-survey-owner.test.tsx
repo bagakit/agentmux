@@ -92,7 +92,7 @@ describe('T-007 original Survey selected content frame', () => {
     await view.click('original.md'); await vi.waitFor(() => expect(view.fileRead).toHaveBeenCalledTimes(reads + 1))
     expect(view.fileRead.mock.calls.at(-1)?.[1]).toBe('docs/original.md')
     view.empty(); await view.click('刷新研究')
-    expect(view.element.textContent).toContain('当前绑定尚未重新确认')
+    expect(view.element.textContent).toContain('这个位置的绑定还没重新确认，可以返回目录核对。')
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
     view.failDirectory(); await view.click('刷新研究')
     expect(view.element.textContent).toContain('原目录观察暂缺')
@@ -118,7 +118,7 @@ describe('T-007 original Survey selected content frame', () => {
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); await view.click('查看网页')
     expect(view.element.querySelector('a')?.href).toBe('http://original.example/read')
-    expect(view.element.textContent).toContain('不控制 Mac 原 Browser')
+    expect(view.element.textContent).toContain('在手机上单独打开这个网页，不会控制 Mac 上的浏览器。')
     await view.stepBack(); await view.click('original.note.md')
     expect(view.editor()).toBe(originalEditor); expect(view.editor().textContent).toContain('后来编辑不重注册Back')
     await vi.waitFor(() => expect(view.fileRead).toHaveBeenCalledTimes(reads + 1))

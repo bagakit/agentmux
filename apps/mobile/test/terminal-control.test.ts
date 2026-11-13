@@ -163,7 +163,7 @@ describe('explicit original Run terminal control', () => {
     const next = harness()
     h.control.rebind({ ...next.client, runtimeIdentity: () => ({ ...next.client.runtimeIdentity(), instanceId: 'other-runtime' }) })
     expect(h.control.enable()).toBe(false); expect(h.control.queuedText()).toBe('only original owner'); expect(next.write.mock.calls).toEqual([])
-    expect(h.control.facts().notice).toContain('属于另一台 Mac')
+    expect(h.control.facts().notice).toContain('终端服务已重新启动')
     h.control.rebind({ ...next.client, agentSession: () => ({ ...next.client.agentSession(), agentSessionId: 'another-session' }) })
     expect(h.control.enable()).toBe(false); expect(next.write.mock.calls).toEqual([])
     expect(h.control.facts().notice).toContain('还没确认这个对话')

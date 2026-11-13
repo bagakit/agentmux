@@ -251,8 +251,8 @@ export async function captureOriginalCreation(page, input) {
   const form = page.locator('.mobile-agent-create')
   const card = form.locator('.mobile-create-receipt').filter({ hasText: input.operationId })
   if (await card.count() !== 1) throw Error('One original unknown creation card is required')
-  await card.getByRole('button', { name: '核对原创建操作', exact: true }).waitFor()
-  await card.getByRole('button', { name: '继续原创建', exact: true }).waitFor()
+  await card.getByRole('button', { name: '核对上次创建', exact: true }).waitFor()
+  await card.getByRole('button', { name: '继续上次创建', exact: true }).waitFor()
   await card.scrollIntoViewIfNeeded()
   const intent = await page.evaluate(operationId => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).agentCreates.find(intent => intent.input.operationId === operationId), input.operationId)
   if (intent.phase !== 'unknown') throw Error('The screenshot must show the retained original unknown operation')
@@ -263,7 +263,7 @@ export async function captureOriginalCreation(page, input) {
 export async function continueOriginalCreation(page, input) {
   const form = page.locator('.mobile-agent-create')
   const card = form.locator('.mobile-create-receipt').filter({ hasText: input.operationId })
-  await card.getByRole('button', { name: '继续原创建', exact: true }).click()
+  await card.getByRole('button', { name: '继续上次创建', exact: true }).click()
   await page.waitForFunction(operationId => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).agentCreates.some(intent =>
     intent.input.operationId === operationId && intent.phase === 'confirmed' && intent.agentSessionId), input.operationId)
   const intents = await page.evaluate(() => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).agentCreates)

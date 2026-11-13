@@ -124,7 +124,7 @@ it('does not show a late original inspection acknowledgement on a newly selected
   expect(acknowledge).toBeTypeOf('function')
   await view.render(<MobileAgentActions client={f.client} agentSessionId="other" connected copyText={f.copy} />)
   await act(async () => acknowledge())
-  expect(view.element.textContent).not.toContain('原恢复启动已确认')
+  expect(view.element.textContent).not.toContain('恢复已开始')
   expect(owner.snapshot().record.agentResumes?.at(-1)?.phase).toBe('confirmed')
 })
 it('keeps an original flight busy after leaving and returning, while another Agent remains actionable', async () => {
@@ -152,4 +152,27 @@ it('retains a typed superseded-Run conflict and only a new explicit action recov
   expect(input.agentSessionId).toBe('session-original'); expect(input.expectedRun).toEqual(next.run)
   expect(input.operationId).not.toBe(first.input.operationId)
   expect(getDeviceWorkface().snapshot().record.agentResumes).toContainEqual(first)
+})
+
+it('keeps a recovery failure readable while the exact native reason stays in technical details', async () => {
+  const f = setup(), owner = getDeviceWorkface()
+  const intent = { runtimeId: 'original-runtime', deviceHostId: null, hostId: 'host-original', input: { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, operationId: 'pending-failure', trigger: 'manual' as const }, phase: 'unknown' as const }
+  await owner.retainAgentResume(intent, owner.recordIdentity())
+  vi.mocked(f.client.forwardRpc!).mockImplementation(async method => {
+    if (method !== 'agent.inspect') throw Error('unexpected read')
+    return { session: { ...session(), continuityOperations: { [intent.input.operationId]: {
+      operationId: intent.input.operationId, agentSessionId: 'session-original', previousRun: session().run,
+      kind: 'failed', reason: 'native-resume-failed', error: 'ENOENT original-provider-context'
+    } } } } as never
+  })
+  const view = await mount(f.node)
+  await click(button(view.element, '核对恢复结果'))
+  const notice = view.element.querySelector('.mobile-agent-actions > .mobile-notice')!
+  expect(notice.querySelector('.mobile-notice__body > p')?.textContent).toBe('恢复还没完成，可以核对结果或继续这次恢复。')
+  const detail = notice.querySelector('details')!
+  expect(detail.open).toBe(false)
+  expect(detail.querySelector('summary')?.textContent).toBe('技术信息')
+  expect(detail.textContent).toContain('failed\nENOENT original-provider-context')
+  expect(owner.snapshot().record.agentResumes?.at(-1)).toEqual(intent)
+  expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
 })

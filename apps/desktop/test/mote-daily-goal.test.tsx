@@ -1233,8 +1233,8 @@ it('collaboration Mobile original controls save exact assignees and Supervisor t
   }
   try {
     await act(async () => root.render(<Consumer />))
-    const input = container.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement
-    const supervisor = container.querySelector('[aria-label="Supervisor Session ID"]') as HTMLInputElement
+    const input = container.querySelector('[aria-label="负责人会话 ID"]') as HTMLInputElement
+    const supervisor = container.querySelector('[aria-label="Supervisor 会话 ID"]') as HTMLInputElement
     const enter = async (field: HTMLInputElement, value: string) => { await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
     await enter(input, 'progress-agent'); await enter(supervisor, 'progress-agent')
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存负责人分配')!.click())

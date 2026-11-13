@@ -120,7 +120,7 @@ it('authenticated mounted Mobile saves waiting input into both native User cards
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
   await vi.waitFor(() => expect(dom.container.querySelector('.conversation-submission-summary')?.textContent).toContain('已保存 · 等待 Agent'), { timeout: 10_000 })
   expect(dom.container.querySelectorAll('[data-submission-id]')).toHaveLength(1)
-  expect(dom.container.querySelector('.conversation-submission-summary')?.textContent).not.toContain('提交未确认')
+  expect(dom.container.querySelector('.conversation-submission-summary')?.textContent).not.toContain('未确认')
   const waitingPage = await client.readAgentConversation({ hostId: 'local', agentSessionId: 'original-agent' })
   await vi.waitFor(async () => {
     const cards = nativeCards(), bound = (await services.connections.bindings!.list({})).bindings

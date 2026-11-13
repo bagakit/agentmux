@@ -68,7 +68,7 @@ const mutations = [
   { id: 'unknown-receipt-auto-sends-next-input', from: "state.mode === 'control' && !unknown() && queue.length", to: "state.mode === 'control' && queue.length" },
   { id: 'old-run-queue-reenabled', from: stale, to: '' },
   { id: 'late-ack-overwrites-new-intent', from: guard, to: '' },
-  { id: 'cold-intent-becomes-confirmed', from: "phase: 'unknown', message: '重启前的终端操作回执未确认", to: "phase: 'idle', message: '重启前的终端操作回执未确认" },
+  { id: 'cold-intent-becomes-confirmed', from: "state = { ...state, phase: 'unknown', message, notice: message }", to: "state = { ...state, phase: 'idle', message, notice: message }" },
   { id: 'original-run-identity-replaced', from: 'expectedRun: intent.run, data: intent.data', to: "expectedRun: { runId: 'different-run' }, data: intent.data" }
 ]
 const proofs = []

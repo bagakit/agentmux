@@ -23,8 +23,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     await capture(`attachment-reading-${width}-${appearance}`)
   }
   await resize(320, 760); await read('mobileProductScene.setAppearance("dark")')
-  await button('读取 参考截图.png的原目标', '.mobile-attachments')
-  assert.equal(await read('document.querySelector(".mobile-attachment-pending__identity")?.textContent.includes("Session session-mote")'), true)
+  await button('读取 参考截图.png的目标', '.mobile-attachments')
+  assert.equal(await read('document.querySelector(".mobile-attachment-pending__identity")?.textContent.includes("对话 session-mote")'), true)
   await capture('attachment-reading-identity-320-dark')
   await button('取消本次读取', '.mobile-attachments')
   await read(`(async()=>{const c=document.createElement('canvas');c.width=c.height=96;const g=c.getContext('2d');g.fillStyle='#81d5b2';g.fillRect(0,0,96,96);g.fillStyle='#23463f';g.fillRect(12,16,72,64);g.fillStyle='#f4e1bc';g.fillRect(20,25,56,8);g.fillRect(20,41,42,6);const b=await new Promise(resolve=>c.toBlob(resolve,'image/png'));const f=new File([b],'保留截图.png',{type:'image/png'});const e=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(e,'clipboardData',{value:{items:[{kind:'file',type:'image/png',getAsFile:()=>f}],getData:()=>''}});document.querySelector(${JSON.stringify(editor)}).dispatchEvent(e)})()`)

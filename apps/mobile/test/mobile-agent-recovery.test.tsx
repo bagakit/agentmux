@@ -40,7 +40,7 @@ it.each([
   await recoverMobileAgent({ ...f.request, expectedHostId })
   expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
   expect(getDeviceWorkface().snapshot().record.agentResumes).toBeUndefined()
-  expect(f.onNotice.mock.calls.at(-1)?.[0]).toContain('另一台 Mac')
+  expect(f.onNotice.mock.calls.at(-1)?.[1]).toContain('另一台 Mac')
 })
 it('an original unknown main-entry request is only inspected on the next explicit opening, never continued or replaced', async () => {
   const f = setup()
@@ -90,5 +90,5 @@ it('stays quiet on a confirmed reattach when opening a conversation, and still r
   const unknown = setup()
   vi.mocked(unknown.client.ensureAgentContinuity).mockRejectedValueOnce(new Error('receipt lost'))
   await recoverMobileAgent({ ...unknown.request, quietWhenConfirmed: true })
-  expect(unknown.onNotice).toHaveBeenCalledWith(expect.stringContaining('恢复未确认'))
+  expect(unknown.onNotice).toHaveBeenCalledWith(expect.stringContaining('恢复未确认'), 'receipt lost')
 })
