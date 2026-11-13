@@ -260,6 +260,18 @@ describe('mounted player', () => {
     expect(rules).toMatch(new RegExp(`\\.${owner}\\[hidden\\]\\s*\\{\\s*display:\\s*none;?\\s*\\}`))
   })
 
+  it('a narrow Region never hides part of the time readout, which would run the two clocks together', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 90 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    const time = container.querySelector('.media-player__time')!
+    expect(time.textContent).toBe('0:00 / 1:30')
+    const parts = new Set([...time.querySelectorAll('*')].flatMap(element => [...element.classList]))
+    const rules = stripCssComments(readStyleSheet('./media-player.css'))
+    const hidden = [...rules.matchAll(/([^{}]+)\{[^{}]*display:\s*none/g)].flatMap(match => match[1]!.split(',').map(selector => selector.trim()))
+    for (const selector of hidden) for (const part of parts) expect(selector, `${selector} hides ${part}`).not.toMatch(new RegExp(`\\.${part}(?![\\w-])`))
+  })
+
   it('leaving stops reading: pause, drop the source and reload the empty element', async () => {
     await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
     const video = media()
