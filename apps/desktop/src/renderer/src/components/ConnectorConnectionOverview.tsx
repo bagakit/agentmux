@@ -12,7 +12,7 @@ const OnlineIcon = semanticIconComponent('action.confirm'), UnknownIcon = semant
 export function ConnectorConnectionOverview({ binding, connection, report, hostingTarget, onCheck, onNavigate, compact = false, render }: {
   binding: RoomBinding; connection?: ConnectionRecord | undefined; report: GroupDiagnosis | null; hostingTarget?: ConnectionHostingTarget | null | undefined
   onCheck(): void; onNavigate?(section: 'overview' | 'diagnostics' | 'sharing' | 'sync' | 'channel-settings'): void; compact?: boolean
-  render?(view: { overview: ReactNode; diagnostics: ReactNode; action: ReactNode; feedback: ReactNode }): ReactNode
+  render?(view: { overview: ReactNode; diagnostics: ReactNode; action: ReactNode; sourceAction: ReactNode; feedback: ReactNode }): ReactNode
 }) {
   const model = connectorConnectionPresentation(report), key = JSON.stringify([hostingTarget, binding.connectionId, binding.bindingId, binding.revision])
   const current = useRef(key), live = useRef(true), flight = useRef<string | null>(null); current.current = key
@@ -44,7 +44,10 @@ export function ConnectorConnectionOverview({ binding, connection, report, hosti
       {receiver.feedback}
       {feedback ? <small role="status">{feedback}</small> : null}
     </section>
-    return render ? render({ overview, diagnostics: receiver.diagnostics, action: button, feedback: <>{receiver.feedback}{feedback ? <small role="status">{feedback}</small> : null}</> }) : overview
+    // Diagnostics always offer the publication owner's own recovery while the source needs it,
+    // independently of the receiving socket that decides the card's primary action.
+    const sourceAction = model.sourceRecovery ? <button className="primary-button" type="button" disabled={busy || !hostingTarget} data-source-recovery-action="recover" onClick={() => void recoverSource()}>{busy ? 'Requesting…' : 'Try sync now'}</button> : null
+    return render ? render({ overview, diagnostics: receiver.diagnostics, action: button, sourceAction, feedback: <>{receiver.feedback}{feedback ? <small role="status">{feedback}</small> : null}</> }) : overview
   }
   // Compact lists do not inspect every bot's retained operation. Its honest entry
   // opens the original recovery surface; source wake itself needs no bot capability read.

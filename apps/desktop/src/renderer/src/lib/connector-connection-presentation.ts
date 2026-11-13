@@ -23,7 +23,10 @@ export function connectorConnectionPresentation(report: GroupDiagnosis | null) {
   const policy = service?.enabled === false ? { kind: 'sync' as const, label: 'Review automatic sync', hint: 'Automatic sync is off' } :
     adapter?.enabled === false || current?.enabled === false ? { kind: 'channel-settings' as const, label: 'Open bot settings', hint: 'Automatic receiving is off' } :
     binding?.state === 'paused' ? { kind: 'sharing' as const, label: 'Review group sync', hint: 'This group is paused' } : null
-  const primary: 'sync' | 'channel-settings' | 'sharing' | 'source' | 'check' = policy ? policy.kind : state === 'online' && sourceNeedsRecovery ? 'source' : 'check'
+  // Publication reads outbound and does not depend on the receiving socket, so its recovery
+  // stays available whatever the receiver shows; it leads the card only while receiving is online.
+  const sourceRecovery = !policy && sourceNeedsRecovery
+  const primary: 'sync' | 'channel-settings' | 'sharing' | 'source' | 'check' = policy ? policy.kind : state === 'online' && sourceRecovery ? 'source' : 'check'
   const actionLabel = policy?.label ?? (primary === 'source' ? 'Try sync now' : state === 'recovering' ? 'Check progress' : state === 'unknown' ? 'Check connection' : 'Check status')
   const hint = policy?.hint ?? (busy ? active ? 'Reply sync busy · will retry automatically' : 'Reply sync is busy' :
     rewritten ? 'Reply sync stopped · history rewritten' : sourceNeedsRecovery ? 'Reply sync needs checking' : null)
@@ -32,6 +35,6 @@ export function connectorConnectionPresentation(report: GroupDiagnosis | null) {
     out?.effectObservation?.state === 'unknown' || out?.deliveries.some(row => row.state === 'unknown' || row.state === 'not-applied') ||
     !!out?.coverage?.gaps.length || sourceNeedsRecovery && !busy)
   const policyState = policy?.kind === 'sharing' ? 'paused' as const : policy ? 'off' as const : null
-  return { state, title, shortTitle, hint, primary, actionLabel, active, policyState, waiting, attention: needsCheck ? 'check' as const : null,
+  return { state, title, shortTitle, hint, primary, sourceRecovery, actionLabel, active, policyState, waiting, attention: needsCheck ? 'check' as const : null,
     scope: 'Receiving connection for this bot’s groups.' }
 }
