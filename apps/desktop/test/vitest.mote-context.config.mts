@@ -11,10 +11,11 @@ const aliases: Alias[] = []
 for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence', 'host']) {
   const directory = resolve(root, name === 'host' ? 'apps' : 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
-  const exports = (Object.entries(manifest.exports ?? {}) as [string, { import?: string; browser?: string }][])
+  const exports = (Object.entries(manifest.exports ?? {}) as [string, string | { import?: string; browser?: string }][])
     .sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
   for (const [entry, value] of exports) {
-    const target = value.browser ?? value.import
+    // A plain string export is a static asset path such as brand artwork; it maps to itself.
+    const target = typeof value === 'string' ? value : value.browser ?? value.import
     if (!target) continue
     const stem = target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts')
     const specifier = `@agentmux/${name}${entry === '.' ? '' : entry.slice(1)}`

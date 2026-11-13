@@ -115,6 +115,19 @@ it('entry hook stops observing input after the first interaction cancels admissi
  expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
 })
 
+// Core's unavailable result is a fact about this Main, not an unread operation: the issue names what
+// happened and the way forward, and the status is not the unconfirmed "check again" state.
+it('entry hook reports an exited Main with nothing to resume as unavailable with a way forward',async()=>{
+ setup();const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockResolvedValue({operation:null})
+ const ensure=vi.spyOn(api.moteDialogue,'ensureRecovery').mockImplementation(async request=>({operation:{...operation(request),kind:'unavailable',reason:'native-handle-unavailable',
+   evidence:{kind:'run-ended',state:'exited',observedAt:1},moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}}}))
+ const {root:r,container}=await root();await act(async()=>r.render(<Entry token="exited-main"/>))
+ await vi.waitFor(()=>expect(container.querySelector('output')?.getAttribute('data-entry-status')).toBe('unavailable'))
+ expect(container.textContent).toContain('主 Agent 已退出');expect(container.textContent).toContain('开始新一轮')
+ expect(container.textContent).not.toContain('尚未读到');expect(container.textContent).not.toContain('native-handle-unavailable')
+ expect(inspect).toHaveBeenCalledTimes(1);expect(ensure).toHaveBeenCalledTimes(1)
+})
+
 it.each(['pointerdown','close'] as const)('entry hook cannot turn a late absent inspect into first ensure after %s',async event=>{
  setup();let release!:(value:{operation:null})=>void
  const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(()=>new Promise(resolve=>{release=resolve})),ensure=vi.spyOn(api.moteDialogue,'ensureRecovery')
