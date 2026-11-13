@@ -39,24 +39,25 @@ describe('left-edge swipe back geometry', () => {
 
 describe('the bound edge gesture', () => {
   const roots: ReturnType<typeof createRoot>[] = []
-  afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = '' })
-  function touch(type: string, x: number, y: number, t: number) {
+  afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; vi.restoreAllMocks() })
+  function touch(type: string, x: number, y: number, t: number, identifier = 1, touches?: Array<{ identifier: number; clientX: number; clientY: number }>) {
     const event = new Event(type, { bubbles: true, cancelable: true }) as Event & { touches: unknown[]; changedTouches: unknown[] }
-    const point = { clientX: x, clientY: y }
+    const point = { identifier, clientX: x, clientY: y }
     Object.defineProperty(event, 'timeStamp', { value: t })
-    event.touches = type === 'touchend' ? [] : [point]; event.changedTouches = [point]
+    event.touches = touches ?? (type === 'touchend' ? [] : [point]); event.changedTouches = [point]
     return event
   }
   async function mount(enabled: boolean, onBack: () => void) {
-    function Layer() { const ref = useRef<HTMLElement>(null); useEdgeBack(ref, enabled, onBack); return <main ref={ref} /> }
+    function Layer({ revision }: { revision: number }) { const ref = useRef<HTMLElement>(null); useEdgeBack(ref, enabled, onBack, revision); return <main ref={ref}><div className="mobile-terminal-canvas" /></main> }
     const node = document.createElement('div'); document.body.append(node)
     const root = createRoot(node); roots.push(root)
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
-    await act(async () => root.render(<Layer />))
-    return node.querySelector('main')!
+    const render = (revision: number) => act(async () => root.render(<Layer revision={revision} />))
+    await render(0)
+    return { main: node.querySelector('main')!, render }
   }
   it('follows the finger, then calls the same Back once on a committed release', async () => {
-    const back = vi.fn(), main = await mount(true, back)
+    const back = vi.fn(), { main, render } = await mount(true, back)
     main.dispatchEvent(touch('touchstart', 6, 300, 0))
     const drag = touch('touchmove', 50, 302, 80); main.dispatchEvent(drag)
     expect(drag.defaultPrevented).toBe(true)
@@ -65,20 +66,54 @@ describe('the bound edge gesture', () => {
     main.dispatchEvent(touch('touchmove', 110, 304, 200))
     main.dispatchEvent(touch('touchend', 110, 304, 260))
     expect(back).toHaveBeenCalledTimes(1)
+    expect(main.dataset.edgeBack).toBe('committed')
+    expect(main.style.getPropertyValue('--mobile-edge-offset')).toBe('104px')
+    await render(1)
     expect(main.dataset.edgeBack).toBeUndefined()
     expect(main.style.getPropertyValue('--mobile-edge-offset')).toBe('')
   })
   it('does nothing when there is nothing to go back to, and leaves vertical scrolling alone', async () => {
-    const back = vi.fn(), off = await mount(false, back)
+    const back = vi.fn(), { main: off } = await mount(false, back)
     off.dispatchEvent(touch('touchstart', 6, 300, 0)); off.dispatchEvent(touch('touchmove', 120, 300, 80)); off.dispatchEvent(touch('touchend', 120, 300, 120))
     expect(back).not.toHaveBeenCalled()
-    const on = await mount(true, back)
+    const { main: on } = await mount(true, back)
     on.dispatchEvent(touch('touchstart', 6, 300, 0))
     const scroll = touch('touchmove', 10, 360, 60); on.dispatchEvent(scroll)
     expect(scroll.defaultPrevented).toBe(false)
     on.dispatchEvent(touch('touchend', 10, 420, 120))
     expect(back).not.toHaveBeenCalled()
   })
+  it('registers no blocking move listener for normal reading or the terminal canvas, and releases it on vertical movement', async () => {
+    const add = vi.spyOn(HTMLElement.prototype, 'addEventListener'), remove = vi.spyOn(HTMLElement.prototype, 'removeEventListener')
+    const { main } = await mount(true, vi.fn())
+    const moves = () => add.mock.calls.filter((args, index) => add.mock.instances[index] === main && args[0] === 'touchmove')
+    expect(moves()).toHaveLength(0)
+    main.dispatchEvent(touch('touchstart', 180, 300, 0))
+    const normal = touch('touchmove', 180, 400, 100); main.dispatchEvent(normal)
+    expect(normal.defaultPrevented).toBe(false); expect(moves()).toHaveLength(0)
+    main.querySelector('.mobile-terminal-canvas')!.dispatchEvent(touch('touchstart', 6, 300, 200))
+    expect(moves()).toHaveLength(0)
+    main.dispatchEvent(touch('touchstart', 6, 300, 300))
+    expect(moves()).toHaveLength(1); expect(moves()[0]![2]).toEqual({ passive: false })
+    const scroll = touch('touchmove', 10, 370, 400); main.dispatchEvent(scroll)
+    expect(scroll.defaultPrevented).toBe(false)
+    expect(remove.mock.calls.some((args, index) => remove.mock.instances[index] === main && args[0] === 'touchmove')).toBe(true)
+    expect(main.dataset.edgeBack).toBeUndefined()
+  })
+  it('keeps the starting finger identity and cancels as soon as a second finger lands', async () => {
+    const back = vi.fn(), { main } = await mount(true, back)
+    main.dispatchEvent(touch('touchstart', 6, 300, 0))
+    main.dispatchEvent(touch('touchmove', 30, 301, 80))
+    expect(main.dataset.edgeBack).toBe('tracking')
+    // A changed touch from another finger cannot finish the first finger's gesture.
+    main.dispatchEvent(touch('touchend', 300, 300, 100, 2, [{ identifier: 1, clientX: 30, clientY: 301 }]))
+    expect(back).not.toHaveBeenCalled(); expect(main.style.getPropertyValue('--mobile-edge-offset')).toBe('24px')
+    main.dispatchEvent(touch('touchstart', 300, 300, 120, 2, [{ identifier: 1, clientX: 30, clientY: 301 }, { identifier: 2, clientX: 300, clientY: 300 }]))
+    expect(main.dataset.edgeBack).toBeUndefined()
+    main.dispatchEvent(touch('touchmove', 150, 301, 150)); main.dispatchEvent(touch('touchend', 150, 301, 200))
+    expect(back).not.toHaveBeenCalled()
+  })
+
 })
 
 describe('dragging a sheet down to close', () => {
