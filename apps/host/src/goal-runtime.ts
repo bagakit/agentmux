@@ -185,6 +185,10 @@ export function createGoalRuntime(options: {
     inspectContinuousProgressInitial: async loop => {
       const initial = loop.initialDelivery
       if (!initial) return 'unconfirmed'
+      // The loop's frozen target must still be the same Agent at the same place: a different
+      // provider or workspace is another execution, whatever its input receipt says.
+      const session = exact(loop.hostId).agentSession(loop.agentSessionId)
+      if (session.kind !== 'agent' || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath) return 'unconfirmed'
       const original = await inspect({ hostId: loop.hostId, supervisorAgentSessionId: loop.agentSessionId, supervisorRunId: initial.condition.expectedRun.runId, operationId: initial.operationId })
       const admission = original?.admission, key = admission?.inputKey
       if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId || key?.kind !== 'prompt' || key.agentSessionId !== loop.agentSessionId || key.expectedRun.runId !== initial.condition.expectedRun.runId || key.submissionId !== initial.operationId || admission?.submissionId !== initial.operationId || admission.intent?.message?.userContent !== initial.prompt) return 'unconfirmed'
