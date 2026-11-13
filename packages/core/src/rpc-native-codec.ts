@@ -47,7 +47,7 @@ import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { parseAgentInputSubmissionReceipt as inputReceipt } from './agent-input-receipt-codec.js'
 import { parseMoteInputObservation, moteInputMember } from './mote-input.js'
 import { isGoalDelegationMethod } from './goal-delegation-methods.js'
-import { parseGoalDelegationParams, parseGoalDelegationResult } from './goal-delegation.js'
+import { parseGoalDelegationParams, parseGoalDelegationRpcResult } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult } from './mote-avatar-write.js'
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
@@ -407,7 +407,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isCapsuleRuntimeMethod(method)) return parseCapsuleRuntimeResult(value) as unknown as Record<string, unknown>
     if (isCapsuleMethod(method)) return parseCapsuleRpcResult(method, value, parseCapsuleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'app.search') return parseAgentMuxSearchPage(value, parseAgentMuxSearchInput(params)) as unknown as Record<string, unknown>
-    if (isGoalDelegationMethod(method)) return parseGoalDelegationResult(value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
+    if (isGoalDelegationMethod(method)) return parseGoalDelegationRpcResult(method, value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
     if (isAppWindowMethod(method)) return parseAppWindowPage(method, value, parseAppWindowParams(method, params)) as unknown as Record<string, unknown>

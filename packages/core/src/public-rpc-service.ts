@@ -76,7 +76,7 @@ import { createAgentMuxSearchObservationOwner } from './search-observation.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
 import { isConnectionMethod, parseConnectionParams, parseConnectionResult } from './connections-codec.js'
 import type { ConnectionMethod, ConnectionPort } from './connections-contract.js'
-import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationsOwner } from './goal-delegation.js'
+import { isGoalDelegationMethod, parseGoalDelegationParams, parseGoalDelegationRpcResult, type GoalDelegationsOwner } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarWriteMethod } from './mote-avatar-write.js'
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult, type MoteAvatarSeriesMethod } from './mote-avatar-series.js'
@@ -330,7 +330,7 @@ export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-sha
 const NATIVE_FIELDS = {
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
-  'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
+  'goal.report': ['goalId', 'operationId', 'sourceMessageId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
   'goal.progress': ['goalId', 'progress'],
   'goal.patrol': ['goalId', 'operationId'],
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
@@ -1549,9 +1549,15 @@ export class AgentMuxRpcService {
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
         : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal : null
       if (!actor) throw new AgentMuxError('Goal delegation requires its authenticated Agent, person or device.', 'CONTROL_PERMISSION_DENIED')
-      return parseGoalDelegationResult(await this.ports.goalDelegations.call(method, input, context,
+      let runtimeId = caller?.client.runtimeOwnerIdentity?.()?.runtimeId
+      if (caller && !runtimeId) {
+        // Original local identity is available without a new message handshake. Legacy
+        // clients may lack that proof; reads remain available and mutations judge it.
+        try { runtimeId = (await caller.client.agentCreationAuthority()).runtimeId } catch { /* unknown */ }
+      }
+      return parseGoalDelegationRpcResult(method, await this.ports.goalDelegations.call(method, input, context,
         { actor: actor as { kind: 'agent' | 'user' | 'device'; id: string },
-          ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId } : {}) }), input) as AgentMuxRpcResult<M>
+          ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId, ...(runtimeId ? { runtimeId } : {}) } : {}) }), input) as AgentMuxRpcResult<M>
     }
 
     if (isAppWindowMethod(method)) {

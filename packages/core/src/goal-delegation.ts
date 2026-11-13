@@ -18,13 +18,17 @@ import { AgentMuxError } from './errors.js'
 import { demandExecutionReferences, parseDemandProgressInput, parseDemandProgressUpdates, type DemandProgress, type DemandProgressInput } from '@agentmux/demand'
 import { parseGoalResponsibility, type GoalResponsibilityObservation } from './goal-responsibility.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
+import type { AgentMuxRpcResult } from './public-rpc.js'
+import { goalDelegationReportBody, goalReportApplication, readGoalDelegationSource, readGoalReportApplication } from './goal-delegation-source.js'
+export { goalDelegationReportBody, goalDelegationApplication, goalReportApplication, readGoalDelegationSource, readGoalReportApplication, assertGoalSourceReport } from './goal-delegation-source.js'
+export type { GoalDelegationSourceData } from './goal-delegation-source.js'
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
 export type GoalDelegationParamsMap = {
   'goal.delegation.prepare': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
   'goal.delegation.bind': { goalId: string; intent: DemandDelegationIntent }
   'goal.delegate': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
-  'goal.report': { goalId: string; operationId: string; report: DemandDelegationReportInput }
+  'goal.report': { goalId: string; operationId: string; sourceMessageId?: string; report: DemandDelegationReportInput }
   'goal.collect': { goalId: string; operationId: string; collection: DemandDelegationCollectionInput }
   'goal.delegations': { goalId: string }
   'goal.progress': { goalId: string; progress: DemandProgressInput }
@@ -37,9 +41,13 @@ export type GoalDelegationParamsMap = {
 }
 export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: { state: 'prepared' | 'confirmed' | 'unknown'; reason: string } }
 export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; plan?: GoalPlan; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: string | null; alignment?: import('@agentmux/demand').DemandAlignment } }
-export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: GoalDelegationResult }
+/** The worker submits a message at its own Core; it does not attest an update to the owner Goal. */
+export type GoalReportSubmissionResult = { kind: 'report-submission'; goalId: string; delegationOperationId: string;
+  sourceMessageId: string; submission: AgentMuxRpcResult<'agent.send'> }
+export type GoalReportResult = GoalDelegationResult | GoalReportSubmissionResult
+export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: M extends 'goal.report' ? GoalReportResult : GoalDelegationResult }
 /** Supplied after transport/Core caller admission, never from an editable business payload. */
-export type GoalDelegationAuthority = { actor: { kind: 'agent' | 'user' | 'device'; id: string }; hostId?: string; runId?: string }
+export type GoalDelegationAuthority = { actor: { kind: 'agent' | 'user' | 'device'; id: string }; hostId?: string; runId?: string; runtimeId?: string }
 export interface GoalDelegationsOwner {
   call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M], context: AgentMuxRpcCallContext,
     authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]>
@@ -69,12 +77,32 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
     }
   }
   const prepares = method === 'goal.delegation.prepare' || method === 'goal.delegate' || method === 'goal.delegation.bind'
-  const p = record(value, prepares ? method === 'goal.delegation.bind' ? ['goalId', 'intent'] : ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : method === 'goal.progress' ? ['goalId', 'progress'] : ['goalId'])
+  const p = record(value, prepares ? method === 'goal.delegation.bind' ? ['goalId', 'intent'] : ['goalId', 'intent', 'materials'] : method === 'goal.report' ? ['goalId', 'operationId', 'sourceMessageId', 'report'] : method === 'goal.collect' ? ['goalId', 'operationId', 'collection'] : method === 'goal.progress' ? ['goalId', 'progress'] : ['goalId'])
   return { goalId: id(p.goalId), ...(prepares ? { intent: parseDemandDelegationIntent(p.intent),
     ...(p.materials === undefined ? {} : { materials: Array.isArray(p.materials) ? p.materials.map(parseFileReadParams) : (() => { throw new AgentMuxError('Original materials must be exact File requests.', 'INVALID_CONTROL_REQUEST') })() }) }
     : method === 'goal.progress' ? { progress: parseDemandProgressInput(p.progress) }
-    : method === 'goal.report' ? { operationId: id(p.operationId), report: parseDemandDelegationReportInput(p.report) }
+    : method === 'goal.report' ? { operationId: id(p.operationId), report: parseDemandDelegationReportInput(p.report), ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: id(p.sourceMessageId) }) }
     : method === 'goal.collect' ? { operationId: id(p.operationId), collection: parseDemandDelegationCollectionInput(p.collection) } : {}) } as GoalDelegationParamsMap[M]
+}
+export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(method: M, value: unknown, input: GoalDelegationParamsMap[M]): GoalDelegationResultMap[M] {
+  const request = input as GoalDelegationParamsMap['goal.report']
+  if (method === 'goal.report' && request.sourceMessageId !== undefined) {
+    const p = record(value, ['kind', 'goalId', 'delegationOperationId', 'sourceMessageId', 'submission'])
+    if (p.kind !== 'report-submission' || p.goalId !== request.goalId || p.delegationOperationId !== request.operationId || p.sourceMessageId !== request.sourceMessageId)
+      throw new AgentMuxError('The report submission belongs to another original source.', 'CONTROL_PROTOCOL_ERROR')
+    const submission = parseRpcNativeResult('agent.send', p.submission, { target: { kind: 'reply', sourceMessageId: request.sourceMessageId },
+      operationId: request.report.operationId, messageId: request.report.replyMessageId, text: goalDelegationReportBody(request.goalId, request.operationId, request.report),
+      application: goalReportApplication(request.goalId, request.operationId, request.report) }) as unknown as AgentMuxRpcResult<'agent.send'>
+    const envelope = submission.envelope
+    if (envelope.messageId !== request.report.replyMessageId || envelope.operationId !== request.report.operationId || envelope.replyTo !== request.sourceMessageId ||
+        envelope.correlationId !== request.sourceMessageId || envelope.sender.kind !== 'agent-session' || envelope.senderSessionId !== request.report.authorAgentSessionId ||
+        envelope.body !== goalDelegationReportBody(request.goalId, request.operationId, request.report) ||
+        goalDelegationReportBody(request.goalId, request.operationId, readGoalReportApplication(submission, request.goalId, request.operationId)) !== goalDelegationReportBody(request.goalId, request.operationId, request.report))
+      throw new AgentMuxError('The original message receipt differs from this worker report. No Goal update was attested.', 'CONTROL_PROTOCOL_ERROR')
+    return { kind: 'report-submission', goalId: request.goalId, delegationOperationId: request.operationId,
+      sourceMessageId: request.sourceMessageId, submission } as GoalDelegationResultMap[M]
+  }
+  return parseGoalDelegationResult(value, input) as GoalDelegationResultMap[M]
 }
 export function parseGoalDelegationResult(value: unknown, input: { goalId: string }): GoalDelegationResult {
   const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'plan', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations', 'progressUpdates', 'responsibility', 'patrols', 'patrolObservations', 'goalState'])
@@ -108,12 +136,12 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
       }
       const communication = item.communication === undefined ? undefined : parseRpcNativeResult('message.dispatch.read', item.communication,
         { sourceMessageId: delegation.sourceMessageId, hostId: delegation.hostId }) as unknown as DispatchObservation & { hostId: string }
-      if (communication) assertGoalDelegationSource(delegation, communication.source)
+      if (communication) assertGoalDelegationSource(delegation, communication.source, input.goalId)
       const recoverableReport = item.recoverableReport === undefined ? undefined : parseDemandDelegationReportInput(item.recoverableReport)
       if (recoverableReport) {
         const reply = communication?.replies.find(message => message.envelope.messageId === recoverableReport.replyMessageId)
-        if (!reply ||
-          goalDelegationReportBody(input.goalId, operationId, readGoalDelegationWireReport(input.goalId, delegation, reply)) !== goalDelegationReportBody(input.goalId, operationId, recoverableReport))
+        if (!communication || !reply ||
+          goalDelegationReportBody(input.goalId, operationId, readGoalDelegationWireReport(input.goalId, delegation, reply, communication.source)) !== goalDelegationReportBody(input.goalId, operationId, recoverableReport))
           throw new AgentMuxError('Recovered report differs from its actual original worker reply.', 'CONTROL_PROTOCOL_ERROR')
       }
       const attention = item.attention === undefined ? undefined : (() => {
@@ -133,36 +161,50 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
     ...(p.grounding === undefined ? {} : { grounding: parseGrounding(p.grounding) }), ...(observations === undefined ? {} : { observations }) }
 }
 
-/** Stable wire encoding, distinct from display text and human acceptance. */
-export function goalDelegationReportBody(goalId: string, operationId: string, report: DemandDelegationReportInput): string {
-  return JSON.stringify({ schema: 'agentmux.goal-report.v1', goalId, delegationOperationId: operationId,
-    report: { operationId: report.operationId, replyMessageId: report.replyMessageId, authorAgentSessionId: report.authorAgentSessionId, grounding: report.grounding } })
-}
-export function assertGoalDelegationSource(saved: DemandDelegationIntent, message: DurableAgentMuxMessage): void {
+export function assertGoalDelegationSource(saved: DemandDelegationIntent & Partial<Pick<DemandDelegation, 'capturedCriteria' | 'runtimeIdentity'>>, message: DurableAgentMuxMessage, goalId?: string): void {
   const envelope = message.envelope
   if (envelope.operationId !== saved.operationId || envelope.messageId !== saved.sourceMessageId ||
     envelope.sender.kind !== 'agent-session' || envelope.sender.agentSessionId !== saved.ownerAgentSessionId || envelope.senderSessionId !== saved.ownerAgentSessionId || envelope.senderRunId !== saved.ownerRunId ||
     envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== saved.workerAgentSessionId || envelope.recipientSessionId !== saved.workerAgentSessionId || envelope.recipientRunId !== saved.workerRunId ||
     envelope.threadId !== saved.threadId || envelope.replyTo !== null || envelope.body !== saved.text)
     throw new AgentMuxError('The original Core source differs from the frozen Goal intent. The Agent remains available.', 'CONTROL_REQUEST_CONFLICT')
+  if (saved.runtimeIdentity && (!message.provenance || envelope.senderRuntimeId !== saved.runtimeIdentity.ownerRuntimeId ||
+      envelope.recipientRuntimeId !== saved.runtimeIdentity.workerRuntimeId || message.provenance.source.runtimeId !== saved.runtimeIdentity.ownerRuntimeId ||
+      message.provenance.target.runtimeId !== saved.runtimeIdentity.workerRuntimeId))
+    throw new AgentMuxError('The original Core source Runtime identities differ from this linked delegation.', 'CONTROL_REQUEST_CONFLICT')
+  if (envelope.application) {
+    const source = readGoalDelegationSource(message)
+    if (source.delegationOperationId !== saved.operationId || goalId !== undefined && source.goalId !== goalId ||
+        source.alignmentRevision !== saved.alignmentRevision || source.planNodeId !== saved.planNodeId ||
+        source.criteria.length !== saved.criterionIds.length || source.criteria.some(criterion => !saved.criterionIds.includes(criterion.id)) ||
+        saved.capturedCriteria && saved.capturedCriteria.some((criterion, index) => criterion.id !== source.criteria[index]?.id || criterion.text !== source.criteria[index]?.text))
+      throw new AgentMuxError('The signed Goal application differs from the frozen delegation standards.', 'CONTROL_REQUEST_CONFLICT')
+  }
 }
-export function assertGoalDelegationReply(saved: DemandDelegation, report: DemandDelegationReportInput, message: DurableAgentMuxMessage, body: string): void {
+export function assertGoalDelegationReply(saved: DemandDelegation, report: DemandDelegationReportInput, message: DurableAgentMuxMessage, body: string, source?: DurableAgentMuxMessage): void {
   const envelope = message.envelope
   if (envelope.operationId !== report.operationId || envelope.messageId !== report.replyMessageId || envelope.sender.kind !== 'agent-session' ||
     envelope.sender.agentSessionId !== saved.workerAgentSessionId || envelope.senderSessionId !== saved.workerAgentSessionId ||
     envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== saved.ownerAgentSessionId || envelope.recipientSessionId !== saved.ownerAgentSessionId ||
-    envelope.replyTo !== saved.sourceMessageId || envelope.threadId !== saved.threadId || envelope.body !== body)
+    envelope.senderRunId !== saved.workerRunId || envelope.recipientRunId !== saved.ownerRunId ||
+    envelope.replyTo !== saved.sourceMessageId || envelope.threadId !== saved.threadId || envelope.body !== body ||
+    saved.runtimeIdentity && (!message.provenance || envelope.senderRuntimeId !== saved.runtimeIdentity.workerRuntimeId || envelope.recipientRuntimeId !== saved.runtimeIdentity.ownerRuntimeId) ||
+    source && (envelope.senderRuntimeId !== source.envelope.recipientRuntimeId || envelope.recipientRuntimeId !== source.envelope.senderRuntimeId ||
+      source.provenance && !message.provenance))
     throw new AgentMuxError('The actual worker reply differs from this original report. No result was collected or accepted.', 'CONTROL_REQUEST_CONFLICT')
 }
-export function readGoalDelegationWireReport(goalId: string, saved: DemandDelegation, reply: DurableAgentMuxMessage): DemandDelegationReportInput {
-  let payload: unknown
-  try { payload = JSON.parse(reply.envelope.body) } catch { throw new AgentMuxError('The original reply has no structured Goal report. Inspect its evidence in the original Agent.', 'CONTROL_PROTOCOL_ERROR') }
-  const p = record(payload, ['schema', 'goalId', 'delegationOperationId', 'report'])
-  if (p.schema !== 'agentmux.goal-report.v1' || p.goalId !== goalId || p.delegationOperationId !== saved.operationId)
-    throw new AgentMuxError('The structured report refers to another original Goal or delegation.', 'CONTROL_PROTOCOL_ERROR')
-  const report = parseDemandDelegationReportInput(p.report)
+export function readGoalDelegationWireReport(goalId: string, saved: DemandDelegation, reply: DurableAgentMuxMessage, source?: DurableAgentMuxMessage): DemandDelegationReportInput {
+  const report = reply.envelope.application ? readGoalReportApplication(reply, goalId, saved.operationId) : (() => {
+    if (reply.provenance) throw new AgentMuxError('A signed remote report requires its explicit Goal application.', 'CONTROL_PROTOCOL_ERROR')
+    let payload: unknown
+    try { payload = JSON.parse(reply.envelope.body) } catch { throw new AgentMuxError('The original reply has no structured Goal report. Inspect its evidence in the original Agent.', 'CONTROL_PROTOCOL_ERROR') }
+    const p = record(payload, ['schema', 'goalId', 'delegationOperationId', 'report'])
+    if (p.schema !== 'agentmux.goal-report.v1' || p.goalId !== goalId || p.delegationOperationId !== saved.operationId)
+      throw new AgentMuxError('The structured report refers to another original Goal or delegation.', 'CONTROL_PROTOCOL_ERROR')
+    return parseDemandDelegationReportInput(p.report)
+  })()
   validateDemandDelegationReport(saved, report)
-  assertGoalDelegationReply(saved, report, reply, goalDelegationReportBody(goalId, saved.operationId, report))
+  assertGoalDelegationReply(saved, report, reply, goalDelegationReportBody(goalId, saved.operationId, report), source)
   return report
 }
 
