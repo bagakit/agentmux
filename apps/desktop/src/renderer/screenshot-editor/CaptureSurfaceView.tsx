@@ -62,7 +62,11 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
       const image = new Image(); image.src = target.image.dataUrl; await image.decode()
       await api.switchBackground(input.requestId, next)
     } catch (cause) { setStatus(presentError(cause)) }
-    finally { pending.current = false; setSwitching(false) }
+    finally {
+      pending.current = false
+      // After Main announces a background, its decode owns readiness. A refused request has no new frame to wait for.
+      if (requestedBackground.current !== next) setSwitching(false)
+    }
   }
 
   // Plain Tab chooses the other frozen background. Text editing and modified Tab keep their own navigation.
