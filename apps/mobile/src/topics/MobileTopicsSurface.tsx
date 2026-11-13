@@ -1,3 +1,4 @@
+import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -123,6 +124,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
   return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics" aria-label="Topics" hidden={!visible}>
     <header className="mobile-topics-actions mobile-page-header">
+      <MobileHeaderMenu hidden={Boolean(inTopic || categoryId)} />
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <div className="mobile-topics-heading">{(inTopic || category) && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>

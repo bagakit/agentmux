@@ -1,0 +1,68 @@
+/* Phone shell: floating bars, the five primary workfaces, directory headers and count badges.
+ * Imported by MobileApp so it arrives with the first screen. Colour and status roles
+ * come from the shared theme; geometry and material are mobile-owned. */
+
+/* Floating material for bars that content scrolls beneath. */
+.mobile-navigation-bar, .mobile-app[data-page-header='inline'] .mobile-page-header, .mobile-header {
+  background: var(--mobile-bar); -webkit-backdrop-filter: var(--mobile-bar-blur); backdrop-filter: var(--mobile-bar-blur);
+}
+
+/* Tab bar: exactly five equal workfaces, labels always visible, no menu. */
+.mobile-navigation-bar { grid-row: 5; display: block; padding: 4px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  border-top: 1px solid var(--mobile-hairline); box-shadow: none; }
+.mobile-navigation { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; min-height: calc(var(--mobile-tab-bar) - 8px); }
+.mobile-navigation button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 0; min-height: 48px; padding: 4px 0 2px; border-radius: var(--mobile-radius); background: transparent; color: var(--text-3);
+  font-size: var(--fs-micro); font-weight: 500; letter-spacing: .01em;
+  transition: color var(--dur-fast) ease, transform var(--dur-fast) ease; }
+.mobile-navigation button > span:not(.mobile-tab-badge) { line-height: 1.1; }
+.mobile-navigation button[aria-current='page'] { color: var(--text); background: transparent; font-weight: 650; }
+.mobile-navigation button[aria-current='page'] > svg { color: var(--green); }
+.mobile-navigation button:active { transform: scale(.94); background: transparent; }
+.mobile-navigation button[data-workface='mote'] > svg { margin-top: -1px; }
+/* One shared count chip: the tab badge, the back badge and the header capsule. */
+.mobile-tab-badge, .mobile-back-badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+  background: var(--mobile-attention); color: var(--mobile-attention-ink); font-size: var(--fs-micro); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.mobile-navigation .mobile-tab-badge { position: absolute; top: 2px; left: calc(50% + 6px); box-shadow: 0 0 0 2px var(--mobile-page); }
+.mobile-back-badge { margin-left: 2px; }
+
+/* Directory header: menu at the top-left, a large title, actions on the right. */
+.mobile-app[data-page-header='inline'] .mobile-main { padding-top: 0; }
+.mobile-app[data-page-header='inline'] .mobile-page-header { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: var(--sp-2);
+  min-height: 56px; margin: 0 calc(-1 * var(--mobile-gutter)); padding: max(6px, env(safe-area-inset-top)) var(--sp-3) 6px var(--sp-3);
+  border-bottom: 1px solid transparent; }
+.mobile-app[data-page-header='inline'] .mobile-page-header :is(h1, .mobile-topics-heading > h1) { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app[data-page-header='inline'] .mobile-page-header > div:not(.mobile-section-actions) { flex: 1; min-width: 0; }
+.mobile-app[data-page-header='inline'] .mobile-page-header > div:not(.mobile-section-actions) > p { display: none; }
+.mobile-app .mobile-header-menu { position: relative; flex: none; display: grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--mobile-radius);
+  background: transparent; box-shadow: none; transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
+.mobile-app .mobile-header-menu:active { transform: scale(.94); background: var(--mobile-group); }
+.mobile-header-menu .mobile-brand-icon { width: 28px; height: 28px; border-radius: calc(var(--mobile-radius) * .75); }
+.mobile-header-menu { color: var(--text); }
+.mobile-app .mobile-header-menu .mobile-status-dot, .mobile-header-menu .mobile-status-dot { position: absolute; right: 8px; top: 9px; width: 7px; height: 7px; }
+
+/* Directory pages share the 16px gutter. */
+.mobile-spatial-panel, .mobile-goals, .mobile-topics, .mobile-survey { padding-inline: var(--mobile-gutter); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-navigation button, .mobile-header-menu { transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease; }
+  .mobile-navigation button:active, .mobile-header-menu:active { transform: none; }
+}
+
+/* A directory's loading state keeps its header and menu so the shell is never menu-less. */
+.mobile-deferred-header { display: flex; align-items: center; gap: var(--sp-2); min-height: 56px; margin: calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5)) var(--sp-4); padding: max(6px, env(safe-area-inset-top)) var(--sp-3) 6px; }
+.mobile-deferred-header h1 { margin: 0; font-size: var(--fs-display); font-weight: 700; letter-spacing: -.02em; }
+
+
+/* Drawer: a titled sheet with grouped rows that match the directory list. */
+.mobile-drawer { width: min(86vw, 320px); padding: max(10px, env(safe-area-inset-top)) var(--mobile-gutter) max(16px, env(safe-area-inset-bottom)); border-right: 0;
+  background: var(--mobile-page); box-shadow: var(--elev-3); }
+.mobile-drawer .mobile-sheet-title h2 { margin: 6px 0 2px; font-size: var(--fs-display); font-weight: 700; letter-spacing: -.02em; }
+.mobile-drawer > p { margin: 0 0 var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-drawer :is(.mobile-drawer-workfaces, .mobile-drawer-settings) { display: grid; margin: 0 0 var(--sp-5); padding: 0 var(--sp-5); border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
+.mobile-drawer :is(.mobile-drawer-workfaces, .mobile-drawer-settings) > * + * { border-top: 1px solid var(--mobile-hairline); }
+.mobile-drawer .mobile-menu-row { min-height: 52px; padding: 8px 0; gap: var(--sp-5); font-size: var(--fs-body); font-weight: 550; }
+.mobile-drawer .mobile-menu-row small { font-weight: 400; }
+.mobile-drawer .mobile-home-select { min-height: 52px; font-size: var(--fs-body); font-weight: 550; }
+.mobile-drawer .mobile-home-select select { border: 0; background-color: var(--mobile-group-press); }

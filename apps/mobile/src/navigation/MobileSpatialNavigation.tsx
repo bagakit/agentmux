@@ -18,6 +18,8 @@ import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
 import { MobileAgentRow } from './MobileAgentRow'
+import { MobileHeaderMenu } from './MobileHeaderMenu'
+import type { MobileAgentPresentation } from './mobile-agent-status'
 import { ordinaryUnknownAgentStatus } from './mobile-agent-status'
 import { useMobileWebCatalogObservation } from '../mobile-web/use-mobile-web-observation'
 import './navigation.css'
@@ -29,14 +31,16 @@ export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxH
   openMainAgent?(id: string, identity: MobileObjectIdentity, hostId: string): void;
   visible?: boolean; sessions?: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
-  onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void }
+  onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void
+  /** Publishes the original presentation rows this directory already read, for the shell's needs-you counts. */
+  onPresentation?(client: AgentMuxHostedClient | null, rows: readonly MobileAgentPresentation[] | undefined): void }
 type Region = Catalog['regions'][number]
 /** A discovered SID is navigable even before the SDK has hydrated its metadata. */
 type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<Pick<AgentMuxAgentSession, 'providerId'>>
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, visible = true }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, onPresentation, visible = true }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -73,7 +77,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       try {
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
         const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
-        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog }
+        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog; onPresentation?.(client, value.catalog.agentPresentation) }
       } catch (error) { if (!disposed) setIssue(error instanceof Error ? error.message : '空间目录暂不可读，原记录保留。') }
       finally { inFlight = false; if (!disposed) setPending(false) }
       if (observed) observeCatalog?.(observed)
@@ -83,7 +87,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
     return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
-  }, [client, connected, visible, revision, observeCatalog])
+  }, [client, connected, visible, revision, observeCatalog, onPresentation])
   const previousHome = useRef(home), incoming = JSON.stringify(initialContext ?? null), previousIncoming = useRef(incoming)
   useEffect(() => {
     if (previousHome.current === home) return
@@ -339,7 +343,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
   return <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel">
-    <div className="mobile-section-heading mobile-page-header"><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
+    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions"><MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}

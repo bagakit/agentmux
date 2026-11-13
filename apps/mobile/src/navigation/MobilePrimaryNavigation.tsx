@@ -9,13 +9,18 @@ const workfaces = [
   { id: 'space', label: 'Space', icon: 'navigation.space' }
 ] as const
 
-export function MobilePrimaryNavigation({ current, onSelect }: {
-  current: MobilePrimaryWorkface | null; onSelect(value: MobilePrimaryWorkface): void
+/** Five equal primary workfaces. The needs-you count is presentation over typed facts. */
+export function MobilePrimaryNavigation({ current, onSelect, needsYou = 0 }: {
+  current: MobilePrimaryWorkface | null; onSelect(value: MobilePrimaryWorkface): void; needsYou?: number
 }) {
   return <nav className="mobile-navigation" aria-label="手机导航">
-    {workfaces.map(({ id, label, icon }) => <button key={id} type="button" data-workface={id}
-      aria-current={current === id ? 'page' : undefined} onClick={() => onSelect(id)}>
-      <SemanticIcon name={icon} size={id === 'mote' ? 21 : 18} /><span>{label}</span>
-    </button>)}
+    {workfaces.map(({ id, label, icon }) => {
+      const count = id === 'focus' && needsYou > 0 ? needsYou : 0
+      return <button key={id} type="button" data-workface={id} aria-current={current === id ? 'page' : undefined}
+        aria-label={label} {...(count ? { 'aria-description': `${count} 个需要你` } : {})} onClick={() => onSelect(id)}>
+        <SemanticIcon name={icon} size={id === 'mote' ? 24 : 22} /><span>{label}</span>
+        {count ? <span className="mobile-tab-badge" aria-hidden="true" data-count={count}>{count > 99 ? '99+' : count}</span> : null}
+      </button>
+    })}
   </nav>
 }

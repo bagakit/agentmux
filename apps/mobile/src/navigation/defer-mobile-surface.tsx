@@ -1,3 +1,4 @@
+import { MobileHeaderMenu } from './MobileHeaderMenu'
 import { Component, Suspense, lazy, useState, type ComponentType, type ReactNode } from 'react'
 
 import { MobileNotice } from '../notices/MobileNotice'
@@ -27,7 +28,8 @@ function LoadFailure({ active, label, failure, onReturn }: { active: boolean; la
 }
 
 /** Prepare a panel on first use, then retain its original mounted instance while hidden. */
-export function deferMobileSurface<P extends object>(label: string, load: () => Promise<{ default: ComponentType<P> }>) {
+/** `menu`: a top-level directory keeps the shell's menu in its header while its chunk loads. */
+export function deferMobileSurface<P extends object>(label: string, load: () => Promise<{ default: ComponentType<P> }>, { menu = false }: { menu?: boolean } = {}) {
   const Surface = lazy(load)
   return function DeferredMobileSurface({ loadWhen, onLoadReturn, loadingReturn = true, ...props }: P & { loadWhen: boolean; onLoadReturn(): void; loadingReturn?: boolean }) {
     const [visited, setVisited] = useState(loadWhen)
@@ -35,6 +37,7 @@ export function deferMobileSurface<P extends object>(label: string, load: () => 
     if (!visited && !loadWhen) return null
     return <LoadBoundary active={loadWhen} label={label} onReturn={onLoadReturn}>
       <Suspense fallback={<section className="mobile-deferred-surface" role="status" aria-busy="true" aria-label={`正在加载 ${label}`}>
+        {menu && <header className="mobile-page-header mobile-deferred-header"><MobileHeaderMenu /><h1>{label}</h1></header>}
         <span className="mobile-loading-label">正在加载 {label}…</span>
         <div className="mobile-loading-skeleton" aria-hidden="true"><span /><span /><span /></div>
         {loadingReturn && <button type="button" className="mobile-text-button" onClick={onLoadReturn}>返回</button>}

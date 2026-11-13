@@ -3,6 +3,7 @@ import { formatMobileTime, withMobileTime } from '../presentation/time'
 import { mobileGoalStatus as statuses, mobileGoalOutcome } from './presentation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -145,7 +146,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
-    <header className="mobile-page-header">{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回原目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
+    <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回原目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
     {!connected && <MobileNotice owner={client} identity={[connected]} role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</MobileNotice>}
     {!client?.forwardRpc && <MobileNotice owner={client} role="status">目标公共端口暂不可用，已读目标与会话保留。</MobileNotice>}
     {issue && <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice>}

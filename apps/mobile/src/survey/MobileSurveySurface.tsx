@@ -1,4 +1,5 @@
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
@@ -104,7 +105,7 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     if (region.agentSessionId) openSession(region.agentSessionId, { name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(address ? { context: address } : {}) })
   }
   return <MobileNoticeScope owner={client} identity={[context.zoneId,context.tabId,context.regionId]}><section className="mobile-survey" aria-label="Survey">
-    <header className="mobile-page-header">{activeBack && <button className="mobile-text-button" type="button" aria-label={context.regionId ? '返回研究内容' : '返回研究列表'} onClick={activeBack}><SemanticIcon name="navigation.back" size={16} /><span>{context.regionId ? '内容' : '研究'}</span></button>}
+    <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} />{activeBack && <button className="mobile-text-button" type="button" aria-label={context.regionId ? '返回研究内容' : '返回研究列表'} onClick={activeBack}><SemanticIcon name="navigation.back" size={16} /><span>{context.regionId ? '内容' : '研究'}</span></button>}
       <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '原选择的研究' : 'Survey'}</h1>
       <button type="button" className="mobile-icon-button" aria-label="刷新研究" title="刷新研究" onClick={refresh}><SemanticIcon name="action.refresh" size={18} /></button></header>
     {[issue, survey?.issue].filter(Boolean).map((message, index) => <MobileNotice owner={client} identity={[context.zoneId,message]} className="mobile-survey-issue" key={index}>{message}</MobileNotice>)}
