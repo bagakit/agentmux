@@ -16,7 +16,6 @@ const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeObjectActivityIcon = semanticIconComponent('object.activity')
 const ThemeFileDiffIcon = semanticIconComponent('file.diff')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 
 
@@ -109,7 +108,7 @@ export function SessionResultReviewContent({ sessionId, items, origin, controls,
             <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(path, workspace.id).then(onNavigate).catch(reportError)}><ThemeFileDiffIcon size={12} /> <span title={path}>{path}</span></button>
           )) : null}
           {workspace && uniqueTimelineDiffPath ? <button type="button" className="small-button" onClick={() => void openFileDiff(uniqueTimelineDiffPath, workspace.id).then(onNavigate).catch(reportError)}><ThemeFileDiffIcon size={12} /> Review changes</button> : null}
-          {previewUrls.map((previewUrl) => <button key={previewUrl} type="button" className="small-button" onClick={() => void openHttpLink(origin, previewUrl, 'tab').then(onNavigate).catch(reportError)}><ThemeObjectBrowserIcon size={12} /> <span title={previewUrl}>Preview</span> <ThemeActionOpenExternalIcon size={11} /></button>)}
+          {previewUrls.map((previewUrl) => <button key={previewUrl} type="button" className="small-button" onClick={() => void openHttpLink(origin, previewUrl, 'tab').then(onNavigate).catch(reportError)}><ThemeObjectBrowserIcon size={12} /> <span title={previewUrl}>Preview</span></button>)}
           <button type="button" className="small-button" onClick={() => { selectSession(session.id); onNavigate?.() }}><ThemeObjectConversationIcon size={12} /> Continue in Session</button>
         </div>
         {reviewState === 'read-failed' ? <span className="session-result-review__hint">Could not read changes for this workspace: {git.error}</span> : null}

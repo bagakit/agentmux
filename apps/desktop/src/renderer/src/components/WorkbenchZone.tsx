@@ -6,7 +6,6 @@ import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
 
 /** A Zone reference loads its original workbenches, never a second content tree. */
@@ -35,7 +34,7 @@ export function WorkbenchZone({ zoneId, catalog, projection, viewTargets, visibl
         <p>{empty ? 'Open a page. Follow an idea.' : 'We can’t open this research right now. Your saved content hasn’t been removed.'}</p>
         <button type="button" className="workbench-zone-state-action" onClick={() => canCreate && zone && layout
           ? onCreateTab(zone.workspaceId, layout.activeGroupId) : onStartBrowsing()}>
-          {canCreate ? 'Open a page' : 'Start browsing'}<ThemeActionOpenExternalIcon size={15} />
+          {canCreate ? 'Open a page' : 'Start browsing'}
         </button>
       </div>}
   </div>
