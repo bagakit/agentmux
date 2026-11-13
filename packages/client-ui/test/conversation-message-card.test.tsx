@@ -62,3 +62,22 @@ it('places collaboration context once in Info when compact details and continuat
   expect(host.querySelector('.conversation-input-details__body .log-turn__input-source')).not.toBeNull()
   expect(host.querySelector('.log-turn__body')).toBeNull()
 })
+
+it('stacks only the person’s own bubble, and only when the client asks; the default keeps the header row', async () => {
+  for (const role of ['human', 'agent', 'external'] as const) {
+    await render({ speaker: { role, id: role } })
+    expect(host.querySelector('.log-turn')?.getAttribute('data-message-layout'), role).toBeNull()
+  }
+  const stacked = async (props: Partial<ConversationMessageProps>) => act(async () => root.render(<ClientUiProvider platform={{ ...platform, messageLayout: 'stacked' }}>
+    <ConversationMessage messageId="message" content="Original body" {...props} /></ClientUiProvider>))
+  await stacked({ speaker: { role: 'human', id: 'human' } })
+  const turn = host.querySelector('.log-turn')!
+  expect(turn.getAttribute('data-message-layout')).toBe('stacked')
+  // Copy is still one reachable control; the sender stays in the accessible tree.
+  expect(turn.querySelectorAll('[title="Copy message"]')).toHaveLength(1)
+  expect(turn.querySelector('.log-turn__who')?.textContent).toBe('You')
+  for (const props of [{ speaker: { role: 'agent', id: 'agent' } }, { speaker: { role: 'external', id: 'external' } }, { speaker: { role: 'human', id: 'human' }, compact: true }] satisfies Partial<ConversationMessageProps>[]) {
+    await stacked(props)
+    expect(host.querySelector('.log-turn')?.getAttribute('data-message-layout'), JSON.stringify(props)).toBeNull()
+  }
+})
