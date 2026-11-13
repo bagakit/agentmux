@@ -246,6 +246,20 @@ it('a retake started in the window editor gives focus back to that editor, not t
   await pending
 })
 
+it('the selection the window editor delivers is where the next capture opens', async () => {
+  const f = await fixture(), pending = f.action.run(), first = await f.overlay()
+  const crop = { x: 0, y: 0, width: 1, height: 1 }
+  await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop, tool: 'rect' } })
+  const editor = await f.editing()
+  expect(await editor.invoke('finish', { requestId: editor.input.requestId, operationId: 'editor-copy', image: edited })).toEqual({ status: 'completed' })
+  await editor.invoke('cancel', { requestId: editor.input.requestId })
+  await pending
+  const next = f.action.run(), second = await f.overlay(2)
+  expect(second.input.initialCrop, 'the next capture opens on the selection the window editor delivered').toEqual(crop)
+  await second.invoke('cancel', { requestId: second.input.requestId })
+  await next
+})
+
 it('a retake after the editor already copied keeps the same consumer: the clipboard only, no second draft file', async () => {
   const f = await fixture(), pending = f.action.run(), first = await f.overlay()
   await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop: selection, tool: 'rect' } })
