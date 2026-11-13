@@ -21,6 +21,8 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
 let app: MoteAppFixture
 const originalLaunchAgent = useAppStore.getState().launchAgent
+// No Goal is created: the renderer never sends a public demand.create to the Goal owner.
+const goalCreates = (execute: { mock: { calls: Array<[{ operation: string }]> } }) => execute.mock.calls.filter(([request]) => request.operation === 'demand.create')
 const revision = 'sha256:' + 'a'.repeat(64), correctedRevision = 'sha256:' + 'b'.repeat(64)
 const root = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = root + '/idea-source.md'
 const material: FileDocument = { path, content: 'Old cached document.', revision }
@@ -43,7 +45,6 @@ beforeEach(() => {
   app = createMoteApp(); useLauncherState.setState({ drafts: {} })
   vi.spyOn(api.files, 'readPublic').mockImplementation(async params => read(params))
   vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
-  vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => () => {})
 })
 
 const ideaPanel = () => app.container.querySelector<HTMLElement>('[data-owning-idea-controls]')!
@@ -64,7 +65,7 @@ function scheduleReceipt(params: ScheduleParamsMap['schedule.create'], overrides
 describe('actual Mote idea controls and original Calendar consumer', () => {
   it('is off for an empty direction and prepares sources only on the actual user action before original human Save', async () => {
     useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin', progressPrompt: 'Periodic text must not replace a sourced idea.' } } })
-    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => scheduleReceipt(params)), goal = vi.spyOn(api.demands, 'create')
+    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => scheduleReceipt(params)), goal = vi.spyOn(api.goals, 'execute')
     await ideaUI(); vi.mocked(api.files.readPublic).mockClear()
     expect(ideaButton('Arrange sourced ideas').disabled).toBe(true); expect(create).not.toHaveBeenCalled(); expect(api.files.readPublic).not.toHaveBeenCalled()
     await edit(ideaPanel().querySelector<HTMLTextAreaElement>('[aria-label="Idea direction"]')!, 'Find an experiment I can evaluate.')
@@ -72,7 +73,7 @@ describe('actual Mote idea controls and original Calendar consumer', () => {
     const calendar = ideaPanel().querySelector<HTMLElement>('.calendar-schedules')!
     expect(calendar).not.toBeNull()
     const textarea = calendar.querySelector<HTMLTextAreaElement>('textarea')!
-    expect(textarea.value).toBe('Find an experiment I can evaluate.'); expect(textarea.value).not.toContain('Zone:'); expect(create).not.toHaveBeenCalled(); expect(goal).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('Find an experiment I can evaluate.'); expect(textarea.value).not.toContain('Zone:'); expect(create).not.toHaveBeenCalled(); expect(goalCreates(goal)).toEqual([])
     const context = calendar.querySelector<HTMLElement>('.calendar-schedules__context')!.textContent!
     expect(context).toContain(revision); expect(context).toContain('file.read / file.ls')
     expect(context).toContain('This request permits discussion and read-only research. Carry forward earlier authorization')
@@ -167,7 +168,7 @@ describe('original sourced idea intent preparation', () => {
   it('captures the explicitly selected Core target independently of Mote files and creates no arrangement, Goal, Launcher or Run', async () => {
     const before = useAppStore.getState(), session = { ...defaultAgent, workspacePath: _hygiene_fixturePath("other-execution-cwd"), control: { ...defaultAgent.control, agentSessionId: 'core-exact-agent' } }
     useAppStore.setState({ sessions: before.sessions.map(item => item.id === session.id ? session : item) })
-    const create = vi.spyOn(api.schedule, 'create'), goal = vi.spyOn(api.demands, 'create')
+    const create = vi.spyOn(api.schedule, 'create'), goal = vi.spyOn(api.goals, 'execute')
     const prepared = await prepareMoteIdeaSchedule(scope(), reference(), input, null, () => true)
     expect(prepared.target).toEqual({ hostId: session.control.hostId, agentSessionId: 'core-exact-agent', providerId: session.providerId, workspacePath: _hygiene_fixturePath("other-execution-cwd") })
     expect(prepared.message).toBe(input.direction); expect(Object.keys(prepared).sort()).toEqual(['frozenContext', 'message', 'sources', 'target'])
@@ -186,7 +187,7 @@ describe('original sourced idea intent preparation', () => {
     expect(prepared.frozenContext).not.toContain('only when asked')
     expect(prepared.frozenContext).not.toContain('{"'); expect(prepared.frozenContext).not.toContain('Old cached document.')
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
-    expect(create).not.toHaveBeenCalled(); expect(goal).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled(); expect(goalCreates(goal)).toEqual([]); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
   })
   it('rereads the explicitly chosen note and original SOUL rather than transporting cached revision or neighbor content', async () => {
     vi.mocked(api.files.readPublic).mockImplementation(async params => read(params, params.path === 'SOUL.md' ? 'Current SOUL.' : 'Corrected note.', correctedRevision))

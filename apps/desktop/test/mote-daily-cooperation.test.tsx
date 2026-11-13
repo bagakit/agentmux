@@ -18,6 +18,8 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 let app: MoteAppFixture
 const revision = 'sha256:' + 'a'.repeat(64), root = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
 const originalLaunchAgent = useAppStore.getState().launchAgent
+// No Goal is created: the renderer never sends a public demand.create to the Goal owner.
+const goalCreates = (execute: { mock: { calls: Array<[{ operation: string }]> } }) => execute.mock.calls.filter(([request]) => request.operation === 'demand.create')
 const scope = (id = PMO_TEAMS_TOPIC_ID) => ({ workspace: scratchWorkspace, topic: moteTopics.find(topic => topic.id === id)!, rootPath: scratchTopicDirectoryName(id) })
 const read = (params: FileReadParams, content = 'A saved, scoped decision.', rev = revision): FileReadResult => {
   const directory = params.zoneId === homeZoneId(directoryIdentity('local', _hygiene_fixturePath("topics/") + root)) ? root : scratchTopicDirectoryName(customMoteId)
@@ -197,13 +199,13 @@ describe('original Mote natural question and saved material preparation', () => 
     expect(note({ tabId: tab.id, regionId: tab.layout.activeRegionId })).toBeUndefined(); expect(app.launch).not.toHaveBeenCalled()
   })
   it('consumes the real Profile question caller and original helper from typed user input to the accurate editable Launcher', async () => {
-    const createGoal = vi.spyOn(api.demands, 'create')
+    const createGoal = vi.spyOn(api.goals, 'execute')
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
     const question = app.container.querySelector<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')!
     expect(question).not.toBeNull()
     expect(app.container.querySelector('[aria-label="Prepare this question in a new discussion"]')).toBeNull()
-    expect(createGoal).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+    expect(goalCreates(createGoal)).toEqual([]); expect(app.launch).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(question, 'My real first question')
@@ -214,7 +216,7 @@ describe('original Mote natural question and saved material preparation', () => 
     const state = useAppStore.getState(), tab = Object.values(state.tabs).find(tab => !before.tabs[tab.id])!
     expect(tab).toBeDefined(); expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toBe('My real first question')
     expect(state.agentComposerNotes[tab.layout.activeRegionId]).toContain(revision)
-    expect(state.agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.launch).not.toHaveBeenCalled(); expect(createGoal).not.toHaveBeenCalled()
+    expect(state.agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.launch).not.toHaveBeenCalled(); expect(goalCreates(createGoal)).toEqual([])
   })
   it('keeps later real Profile input while its original file read is pending', async () => {
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } }); await app.mount()

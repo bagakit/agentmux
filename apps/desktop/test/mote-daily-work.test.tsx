@@ -15,6 +15,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { moteGoalContext, goalsForMote, moteGoalSummary } from '../src/renderer/src/lib/mote-goals'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
+import { projectHostGoal } from '../../host/src/goal-projection'
+import type { AgentMuxControlRequest } from '@agentmux/core/control'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div') }))
 let app: MoteAppFixture
 const scope = (id = PMO_TEAMS_TOPIC_ID) => ({ workspace: scratchWorkspace, topic: moteTopics.find(item => item.id === id)!, rootPath: scratchTopicDirectoryName(id) })
@@ -105,8 +107,11 @@ describe('original Mote Goal composition and current-work caller', () => {
   })
   it('retains confirmed rows and unsent inputs when the original Goal read fails', async () => {
     vi.mocked(api.demands.list).mockRejectedValue(new Error('Goal disk temporarily unavailable.'))
+    // The panel's current read is the public demand.list; it fails before reaching the original owner.
+    const reads = vi.spyOn(api.goals, 'execute').mockImplementation(async request => { if (request.operation === 'demand.list') throw new Error('Goal disk temporarily unavailable.'); throw new Error('Only the original Goal read is expected: ' + request.operation) })
     const drafts = useAppStore.getState().agentComposerDrafts, panel = await profile()
-    expect(panel.textContent).toContain('Goal disk temporarily unavailable'); expect(panel.querySelector('[data-mote-goal="ours"]')).not.toBeNull()
+    await vi.waitFor(() => expect(panel.textContent).toContain('Goal disk temporarily unavailable')); expect(panel.querySelector('[data-mote-goal="ours"]')).not.toBeNull()
+    expect(reads.mock.calls.map(([request]) => request.operation)).toContain('demand.list')
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
   })
   it('keeps an unknown Mote resource visible as last confirmed facts while rejecting new association', async () => {
@@ -125,9 +130,17 @@ describe('original Mote Goal composition and current-work caller', () => {
       await owner.create({ id: 'first-real', title: 'First real goal', sessionIds: [defaultAgent.id] })
       await owner.create({ id: 'later-real', title: 'Later real goal', sessionIds: [defaultAgent.id] })
       vi.mocked(api.demands.list).mockImplementation(() => owner.list())
-      vi.spyOn(api.demands, 'linkSession').mockImplementation((id, sid) => owner.linkSession(id, sid))
+      // Only the Goal transport is substituted: the public demand.* request reaches the same durable Demand store
+      // and returns its original Host projection. The first association write is held before it reaches the store.
       const pending = new Promise<void>(resolve => { finish = resolve })
-      vi.spyOn(api.demands, 'update').mockImplementationOnce(async (id, patch) => { await pending; return owner.update(id, patch) })
+      const updates: Array<Extract<AgentMuxControlRequest, { operation: 'demand.update' }>> = []
+      vi.spyOn(api.goals, 'execute').mockImplementation(async request => {
+        if (request.operation === 'demand.list') return { operation: 'demand.list', demands: (await owner.list()).map(projectHostGoal) }
+        if (request.operation !== 'demand.update') throw new Error('Only the original Goal list and update are expected: ' + request.operation)
+        updates.push(structuredClone(request)); if (updates.length === 1) await pending
+        const saved = await owner.update(request.demandId, request.patch, { operationId: request.requestId, ...(request.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: request.expectedUpdatedAt }) })
+        return { operation: 'demand.update', demand: projectHostGoal(saved.demand), receipt: { demandId: saved.demand.id, updatedAt: saved.demand.updatedAt } }
+      })
       const panel = await profile()
       const select = async (label: string, value: string) => {
         const input = panel.querySelector<HTMLElement>('[aria-label="' + label + '"]')!
@@ -139,6 +152,7 @@ describe('original Mote Goal composition and current-work caller', () => {
       await select('Goal to associate with this Mote', 'later-real'); await select('Mote discussion for the goal', defaultAgent.id)
       await moteClick(panel.querySelector('[data-mote-goal="later-real"] .mote-current-work__copy')!)
       await act(async () => finish()); await settleMoteApp()
+      expect(updates.map(request => request.demandId)).toEqual(['first-real'])
       await expect.poll(async () => (await owner.list()).find(goal => goal.id === 'first-real')!.sessionIds, { timeout: 3000 }).toContain(neighborAgent.id)
       expect(panel.querySelector<HTMLElement>('[aria-label="Goal to associate with this Mote"]')?.dataset.value).toBe('later-real')
       expect(panel.querySelector<HTMLElement>('[aria-label="Mote discussion for the goal"]')?.dataset.value).toBe(defaultAgent.id)
