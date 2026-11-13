@@ -152,6 +152,8 @@ Browser 原页面采图、同图编辑、标注／裁剪／遮盖、原稿保存
 - 输入建议中的历史按需从原输入框就地展开；键盘上下选择、明确提交、Escape 收回与鼠标选择可用，IME 组合输入不误提交。未选定历史时保留当前草稿与选区；新的编辑、Workspace／Profile 或请求归属变化后，晚到历史与导航投影不能覆盖草稿或夺回焦点。列表不改变原 Browser／Tab／Region／分割生命周期，不因浮层隐藏整页；紧凑呈现只见密度 SSOT[《Browser RSI 操作表面》](../presentation/browser-workface.md#browser-rsi-操作表面)。
 - 地址／搜索框和网页基础文本编辑支持平台原生复制、粘贴、剪切及原选择语义；快捷键与按需菜单复用成熟编辑能力，不建立另一份剪贴板或全局快捷键通道。可编辑、只读、空选区、disabled、密码与 contenteditable 沿真实平台能力区分，正常密码编辑不额外受限，不读取或保存秘密／选区／剪贴板内容到历史或日志。人工菜单只编辑原 window／WebContents／frame 与原局部输入目标；导航、销毁、换页或人切到另一个输入后，旧菜单不作用新目标，也不夺回焦点。普通 input、textarea、contenteditable 与嵌入 frame 的基础编辑保持，现 Region 菜单不能截走输入的原生编辑入口；不以脚本赋值或合成 ClipboardEvent 冒原生成功。
 
+- 网页内容中的复制按钮可沿标准 Clipboard API 写入系统剪贴板；合法写入不被 WebAuthn 等专项能力的 Session 策略误拒绝。通用 Session 权限由同一 owner 组合，专项模块只解释自身能力。写入与读取分别裁决，修复复制不授予网页读取剪贴板或其他权限；原 Chromium 的安全上下文、文档焦点、用户激活及 frame 权限策略继续生效。权限查询通过、页面按钮响应与系统实际写入是不同结果，成功以实际写入确认，不能将声明了 API 或 query granted 视为复制完成。
+
 ### 原生网页子窗口
 
 - **同一 Browser owner 与公共目标。** 网页通过 `window.open`、链接或表单目标打开的子页面，进入与普通页面相同的 Browser 页面、控制与生命周期机制；各子页面具有准确的 Browser／navigation 身份，原 Workspace、Profile／匿名会话及来源关系按实际事实保留，不能借父页面 ID 冒充子页面。公共 `browser.targets` 可发现准确子页面，`browser.run`、历史、停止及其他标准公开能力直接消费同一 owner、授权与操作回执，不要求 Agent 另用窗口探测、标题匹配、同源脚本或 raw CDP 绕过正常目标寻址。能力、身份或观察未确认时如实表达，保留原页面、已有可用能力与恢复入口。
