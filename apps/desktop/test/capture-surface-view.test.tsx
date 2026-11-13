@@ -30,7 +30,7 @@ async function mount(owned: boolean) {
   const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => owned), onEvent: () => () => {},
     finish: vi.fn(async () => ({ status: 'completed' as const })), pin: vi.fn(), savePng: vi.fn(async () => ({ status: 'cancelled' as const })), copyText: vi.fn(),
     expand: vi.fn(async () => {}), cancel: vi.fn(async () => {}) } satisfies CaptureSurfaceApi
-  const input: CaptureSurfaceInput = { requestId: 'original-request', displayId: 1, frame: { x: 0, y: 0, width: 800, height: 500 }, scale: 2,
+  const input: CaptureSurfaceInput = { requestId: 'original-request', displayId: 1, frame: { x: 0, y: 0, width: 800, height: 500 }, scale: 2, safeTop: 0,
     attachToDraft: false, expandable: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, image, initialCrop: remembered }
   await act(async () => root.render(<CaptureSurfaceView key={Math.random()} input={input} api={api} />))
   await act(async () => { await Promise.resolve() })

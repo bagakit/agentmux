@@ -6,7 +6,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
 import { CaptureSurfaceView } from '../src/renderer/screenshot-editor/CaptureSurfaceView'
 import type { CaptureSurfaceApi } from '../src/shared/capture-surface'
-import { captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
+import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
 import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
@@ -15,7 +15,7 @@ vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => (
 
 // One 800 × 500 point display frozen at 2x: 1600 × 1000 image pixels.
 const image = { dataUrl: 'data:image/png;base64,AA==', width: 1600, height: 1000 }
-const FRAME = { width: 800, height: 500 }, BAR_WIDTH = 300, CHIP_WIDTH = 80
+const FRAME = { width: 800, height: 500, top: 0 }, BAR_WIDTH = 300, CHIP_WIDTH = 80
 // The overlay's laid-out size; normally the display, but layout rounding must not change the pixel scale.
 let layout = FRAME
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
@@ -58,8 +58,8 @@ function button(scope: ParentNode, name: string): HTMLButtonElement {
   const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === name)
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
-async function mount(origin?: { x: number; y: number }, windows?: Array<{ x: number; y: number; width: number; height: number }>, initialCrop?: { x: number; y: number; width: number; height: number }) {
-  const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}), ...(windows ? { windows } : {}),
+async function mount(origin?: { x: number; y: number }, windows?: Array<{ x: number; y: number; width: number; height: number }>, initialCrop?: { x: number; y: number; width: number; height: number }, safeTop?: number) {
+  const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}), ...(windows ? { windows } : {}), ...(safeTop ? { safeTop } : {}),
     ...(initialCrop ? { initialState: { shapes: [], crop: initialCrop } } : {}),
     onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onExpand: vi.fn(), onCopyColor: vi.fn(), onSelect: vi.fn() }
   const instance = Math.random()
@@ -385,6 +385,24 @@ describe('capture image annotation', () => {
     expect(await crop(), 'Command Z restores the selection before the move').toEqual(SELECTED)
   })
 
+  it('keeps the hint, toolbar, size chip and loupe below a camera housing while the selection still reaches the top edge', async () => {
+    const notched = { ...FRAME, top: 32 }
+    expect(captureToolbarPlacement({ x: 300, y: 100, width: 200, height: 40 }, BAR_WIDTH, { ...FRAME, height: 160 }).side, 'without a housing the bar fits above').toBe('above')
+    expect(captureToolbarPlacement({ x: 300, y: 100, width: 200, height: 40 }, BAR_WIDTH, { ...notched, height: 160 }).side, 'the housing takes the room above').toBe('inside')
+    expect(captureToolbarPlacement({ x: 300, y: 0, width: 200, height: 60 }, BAR_WIDTH, { ...notched, height: 120 }), 'a bar pushed inside a short top selection stays below the band')
+      .toEqual({ side: 'inside', left: 188, top: 32 + 12 })
+    expect(captureSizeChipPlacement({ x: 300, y: 40, width: 200, height: 100 }, CHIP_WIDTH, 'below', notched), 'a chip that would sit in the band moves inside the selection').toEqual({ left: 300, top: 44 })
+    expect(captureSizeChipPlacement({ x: 300, y: 0, width: 200, height: 100 }, CHIP_WIDTH, 'below', notched).top, 'a selection at the top edge keeps its chip below the band').toBe(32)
+    expect(captureLoupePlacement({ x: 790, y: 10 }, null, notched), 'at the top-right corner the loupe opens below the band and left of the pointer').toEqual({ left: 638, top: 32 })
+    expect(captureLoupePlacement({ x: 300, y: 200 }, { x: 250, y: 210, width: 300, height: 250 }, notched), 'a loupe above the pointer that would reach into the band is not chosen').toEqual({ left: 316, top: 216 })
+    const { editor, hint, drag, key, props } = await mount(undefined, undefined, undefined, 32)
+    const crop = async () => { await key('Enter'); return props.onComplete.mock.lastCall![0].crop }
+    expect(editor.style.getPropertyValue('--capture-safe-top'), 'the hint is placed below the band through one variable').toBe('32px')
+    expect(hint(), 'the hint still shows before a selection').not.toBeNull()
+    await drag([300, 0], [500, 200])
+    expect((await crop())?.y, 'the selection itself still reaches the top edge').toBe(0)
+  })
+
   it('keeps the size chip off the toolbar side and leaves room for the property popover', async () => {
     expect(captureToolbarPlacement({ x: 300, y: 300, width: 200, height: 140 }, BAR_WIDTH, FRAME), 'the bar flips above when the popover has no room below')
       .toEqual({ side: 'above', left: 200, top: 256 })
@@ -472,10 +490,24 @@ describe('capture image annotation', () => {
     expect(hint()?.textContent, 'with windows the hint names the click that selects one').toBe('Click a window or drag to select · Arrows nudge · Enter to finish · Esc to cancel')
   })
 
+  it('keeps the hint, toolbar, size chip and loupe below a camera housing in the mounted overlay', async () => {
+    const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
+      pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
+    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, width: FRAME.width, height: FRAME.height }, scale: 2, safeTop: 32, attachToDraft: false, expandable: true,
+      theme: { status: 'unavailable' as const, message: '' }, image: { mimeType: 'image/png' as const, byteLength: 1, ...image }, windows: [], initialCrop: { x: 600, y: 0, width: 400, height: 200 } }
+    await act(async () => root.render(<CaptureSurfaceView input={input} api={api} />)); await frame(); await frame()
+    const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!
+    await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load'))); await frame()
+    expect(editor.style.getPropertyValue('--capture-safe-top'), "the overlay forwards its display's band").toBe('32px')
+    // A selection at the top edge has no room for its size chip above, so the chip goes inside, below the band.
+    const chip = editor.querySelector<HTMLElement>('[aria-label="Selection size"]')!
+    expect(chip.style.top, 'the mounted size chip stays below the band').toBe('32px')
+  })
+
   it('the capture overlay hands its frozen windows to the editor, so a click there selects one', async () => {
     const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
       pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
-    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, ...FRAME }, scale: 2, attachToDraft: false, expandable: true,
+    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, ...FRAME }, scale: 2, safeTop: 0, attachToDraft: false, expandable: true,
       theme: { status: 'unavailable' as const, message: '' }, image: { mimeType: 'image/png' as const, byteLength: 1, ...image }, windows: [FRONT, BACK] }
     await act(async () => root.render(<CaptureSurfaceView input={input} api={api} />)); await frame(); await frame()
     const canvas = node.querySelector<HTMLCanvasElement>('[aria-label="Screenshot canvas"]')!

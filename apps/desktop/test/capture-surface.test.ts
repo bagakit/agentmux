@@ -55,8 +55,8 @@ const front = { windowId: 3, frame: { x: 1, y: 0.5, width: 2, height: 1 }, owner
 const across = { windowId: 5, frame: { x: -1, y: -1, width: 3, height: 2 } }
 const beyond = { windowId: 9, frame: { x: 4, y: 0, width: 2, height: 2 } }
 const frames = () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [
-  { displayId: 1, frame: main, scale: 2, windows: [front, across, beyond], png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
-  { displayId: 7, frame: side, scale: 1, windows: [across], png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
+  { displayId: 1, frame: main, scale: 2, safeTop: 0, windows: [front, across, beyond], png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
+  { displayId: 7, frame: side, scale: 1, safeTop: 0, windows: [across], png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
 const result = pngFromBytes(png(4, 2))
 
 let surface: CaptureSurface, ports: ReturnType<typeof makePorts>
