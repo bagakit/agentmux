@@ -11,6 +11,7 @@ import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, STAR
 import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentMuxAgentSession } from '../src/types.js'
 
 const directories: string[] = []
@@ -158,8 +159,9 @@ it('allows an explicit check after local artifact assembly failed and retains th
   const f = await fixture()
   const assemble = vi.fn(f.options.artifact).mockRejectedValueOnce(new Error('temporary local assembly failure'))
   const manager = new RemoteCoreUpgradeManager({ ...f.options, artifact: assemble })
-  await expect(manager.check(host)).rejects.toThrow('temporary local assembly failure')
-  expect(f.effects).toEqual([]); expect(f.maintenance).not.toHaveBeenCalled()
+  expect(await manager.check(host)).toMatchObject({ candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'temporary local assembly failure' },
+    current: { state: 'available', version: '0.1.0' }, eligible: false, reason: 'unverified' })
+  expect(f.effects).toEqual([]); expect(f.maintenance).toHaveBeenCalledOnce()
   expect((await manager.check(host)).eligible).toBe(true)
   expect((await manager.check(host)).eligible).toBe(true)
   expect(assemble).toHaveBeenCalledTimes(2); expect(f.effects).toEqual([])
@@ -352,4 +354,122 @@ it('public SDK apply and original inspect retain a valid failed receipt when the
     expect(original.receipt).toEqual(result.receipt)
     expect(f.effects).toEqual([])
   } finally { await rpc.dispose(); await server.stop() }
+})
+
+it.each(['same', 'different', 'unavailable', 'historical-without-summary'] as const)('original public SDK and compiled CLI reconcile the retained operation independently of %s current candidate', async variant => {
+  const f = await fixture(), checked = await f.manager.check(host)
+  f.setStartUnknown()
+  const original = await f.manager.upgrade(host, checked.expected!, 'original-review')
+  expect(original.status).toBe('unknown')
+  if (variant === 'historical-without-summary') {
+    // Model an original older App's persisted observation, rather than admitting
+    // an incompatible Native through today's new-upgrade contract.
+    const path = join(f.root, 'operations', original.operationId + '.json')
+    const retained = JSON.parse(await readFile(path, 'utf8'))
+    delete retained.receipt.candidate
+    retained.observed.nativeRuntime.protocolGeneration = 21
+    retained.observed.owner.ctxmux.protocolVersion = 21
+    await writeFile(path, JSON.stringify(retained))
+    f.native.protocolVersion = 21
+  }
+  const assemble = vi.fn(async () => {
+    if (variant === 'unavailable') throw new Error('Current App candidate assembly unavailable')
+    return { ...await f.options.artifact(), ...(variant === 'different' ? { digest: 'f'.repeat(64), requiredNativeProtocolVersion: 26, version: '2.0.0' } : {}) }
+  })
+  const reader = new RemoteCoreUpgradeManager({ ...f.options, artifact: assemble })
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'original-review.sock'), coreClients: () => [], execute: async request => {
+    if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await reader.inspect(host, request.requestId) }
+    if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await reader.check(host) }
+    throw new Error('Unexpected private review operation')
+  } })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try {
+    const inspected = await rpc.call('settings.hosts.upgrade-inspect', { id: host.id, operationId: original.operationId })
+    expect(inspected.receipt).toMatchObject({ operationId: original.operationId, status: 'completed', expected: original.expected })
+    expect(assemble).not.toHaveBeenCalled()
+    expect(inspected.receipt?.candidate).toEqual(variant === 'historical-without-summary' ? undefined : original.candidate)
+    const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+    const checkedCli = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-check', host.id], env)
+    expect(checkedCli.code, checkedCli.stderr).toBe(0)
+    const check = JSON.parse(checkedCli.stdout).result.check
+    expect(check.current).toMatchObject({ state: 'available', runtimeId: 'runtime' })
+    expect(check.latestOperation).toMatchObject({ operationId: original.operationId, status: 'completed', expected: original.expected })
+    if (variant === 'unavailable') expect(check).toMatchObject({ candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE' }, eligible: false, reason: 'unverified' })
+    if (variant === 'different') expect(check.candidate).toMatchObject({ digest: 'f'.repeat(64), requiredNativeProtocolVersion: 26 })
+    const cli = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-inspect', host.id, '--operation-id', original.operationId], env)
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result.receipt).toEqual(inspected.receipt)
+    expect(assemble).toHaveBeenCalledOnce()
+    expect(f.run.mock.calls.filter(([, args]) => args[1] === NATIVE_RUN_INVENTORY).every(([, , options]) => JSON.parse(options.input).releaseDirectory === fixturePath('scope/state/core-releases/') + digest)).toBe(true)
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  } finally { await rpc.dispose(); await server.stop() }
+}, 15_000)
+
+it.each(['identity', 'native-contract', 'native-capability', 'candidate-contract', 'inventory-protocol', 'run', 'missing-contract'] as const)('retained operation inspection keeps conflicting or insufficient %s evidence unknown without replay', async shape => {
+  const f = await fixture(), checked = await f.manager.check(host)
+  f.setStartUnknown(); await f.manager.upgrade(host, checked.expected!, 'uncertain-original')
+  if (shape === 'identity') f.native.instanceId = 'another-native'
+  if (shape === 'native-contract') f.native.protocolVersion = 21
+  if (shape === 'native-capability') f.compatibility.capabilities['native.recoverable_input'] = 2
+  if (shape === 'run') f.setChangedTerminal()
+  if (shape === 'missing-contract' || shape === 'candidate-contract') {
+    const path = join(f.root, 'operations', 'uncertain-original.json'), retained = JSON.parse(await readFile(path, 'utf8'))
+    if (shape === 'missing-contract') delete retained.observed.nativeRuntime
+    else retained.receipt.candidate.requiredNativeProtocolVersion = 21
+    await writeFile(path, JSON.stringify(retained))
+  }
+  if (shape === 'inventory-protocol') {
+    const execute = f.run.getMockImplementation()!
+    f.run.mockImplementation(async (...args) => {
+      const result = await execute(...args)
+      return args[1][1] === NATIVE_RUN_INVENTORY ? { ...result, stdout: JSON.stringify({ ...JSON.parse(result.stdout), protocolVersion: 21 }) } : result
+    })
+  }
+  const assemble = vi.fn(async () => { throw new Error('Must not assemble a new candidate to inspect the original') })
+  const inspected = await new RemoteCoreUpgradeManager({ ...f.options, artifact: assemble }).inspect(host, 'uncertain-original')
+  expect(inspected).toMatchObject({ operationId: 'uncertain-original', status: 'unknown', expected: checked.expected })
+  expect(assemble).not.toHaveBeenCalled()
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+})
+
+it('first public CLI check discovers an unresolved operation and current owner despite a failed local candidate, without inventing an admission', async () => {
+  const f = await fixture(), checked = await f.manager.check(host)
+  f.setShutdownUnknown(); const original = await f.manager.upgrade(host, checked.expected!, 'discover-original')
+  const artifact = vi.fn(async () => { throw new Error('Local candidate cannot be assembled') })
+  const reader = new RemoteCoreUpgradeManager({ ...f.options, artifact })
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'first-check.sock'), coreClients: () => [], execute: async request => {
+    if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await reader.check(host) }
+    if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await reader.inspect(host, request.requestId) }
+    throw new Error('Unexpected private first-check operation')
+  } })
+  await server.start()
+  try {
+    const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+    const result = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-check', host.id], env)
+    expect(result.code, result.stderr).toBe(0)
+    const check = JSON.parse(result.stdout).result.check
+    expect(check).toMatchObject({ candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'Local candidate cannot be assembled' },
+      current: { state: 'available', ownerInstanceId: 'original' }, latestOperation: { operationId: original.operationId, status: 'unknown' }, eligible: false, reason: 'unverified' })
+    expect(check.expected).toBeUndefined()
+    const inspect = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-inspect', host.id, '--operation-id', check.latestOperation.operationId], env)
+    expect(inspect.code, inspect.stderr).toBe(0)
+    expect(JSON.parse(inspect.stdout).result.receipt).toMatchObject({ operationId: original.operationId, status: 'unknown' })
+    expect(artifact).toHaveBeenCalledOnce()
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core'])
+  } finally { await server.stop() }
+})
+
+it('strict public check codec rejects mixed or admission-bearing unavailable candidate facts', async () => {
+  const f = await fixture(), ready = await f.manager.check(host)
+  const unavailable = { ...ready, candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'Unavailable local candidate' }, eligible: false, reason: 'unverified', expected: undefined }
+  expect(parseRemoteCoreUpgradeCheck(unavailable)).toMatchObject({ candidate: null, current: { state: 'available' } })
+  for (const invalid of [
+    { ...unavailable, candidateUnavailable: undefined },
+    { ...unavailable, candidateUnavailable: { detail: 'Missing code' } },
+    { ...unavailable, eligible: true, reason: 'ready', expected: ready.expected },
+    { ...unavailable, reason: 'up-to-date' },
+    { ...unavailable, candidate: ready.candidate },
+    { ...ready, candidateUnavailable: unavailable.candidateUnavailable }
+  ]) expect(() => parseRemoteCoreUpgradeCheck(invalid)).toThrow()
 })
