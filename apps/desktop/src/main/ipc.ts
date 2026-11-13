@@ -1,5 +1,6 @@
 import { AppCaptureSource } from './app-capture.js'
 import { WorkspaceFileSources } from './workspace-file-sources.js'
+import { WorkspaceCbrArchives } from './workspace-cbr-archives.js'
 import { AppRecordingOwner } from './app-recording.js'
 import { createAppCapturePort } from './app-capture-owner.js'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
@@ -434,6 +435,7 @@ export async function registerIpc(args: {
   const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
   const mediaStreams = new WorkspaceMediaStreams(files, id => config.workspaces.find(item => item.id === id))
   const fileSources = new WorkspaceFileSources(files, id => config.workspaces.find(item => item.id === id))
+  const comicArchives = new WorkspaceCbrArchives(fileSources)
   const releaseFileSources = () => { void fileSources.releaseCaller(contents.id).catch(error => process.stderr.write('File source cleanup failed: ' + String(error) + '\n')) }
   const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
@@ -1165,7 +1167,9 @@ export async function registerIpc(args: {
   handleWithEvent('files:readSource', async (event, id: string, readId: string, offset: number, length: number) => fileSources.read(event.sender.id, id, readId, offset, length))
   handleWithEvent('files:cancelSourceRead', async (event, id: string, readId: string) => { fileSources.cancel(event.sender.id, id, readId) })
   handleWithEvent('files:releaseSource', async (event, id: string) => { await fileSources.release(event.sender.id, id) })
-  handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
+  handleWithEvent('files:comicArchiveEntries', async (event, id: string, operationId: string) => comicArchives.entries(event.sender.id, id, operationId))
+  handleWithEvent('files:readComicArchiveEntry', async (event, id: string, operationId: string, path: string) => comicArchives.readEntry(event.sender.id, id, operationId, path))
+  handleWithEvent('files:renderDiagram', async (event, request: import('@agentmux/editor-extensions/diagram').FileDiagramRequest) => {
     return await diagramPreviews.render(request)
   })
   handleWithEvent('files:cancelDiagram', async (event, id: string) => {

@@ -1799,8 +1799,10 @@ export type AgentMuxDesktopApi = {
     readSource(id: string, readId: string, offset: number, length: number): Promise<import('./workspace-file-source').WorkspaceFileSourceReadResult>
     cancelSourceRead(id: string, readId: string): Promise<void>
     releaseSource(id: string): Promise<void>
+    comicArchiveEntries(id: string, operationId: string): Promise<import('./workspace-file-source').WorkspaceComicArchiveResult<import('./workspace-file-source').WorkspaceComicArchiveEntry[]>>
+    readComicArchiveEntry(id: string, operationId: string, path: string): Promise<import('./workspace-file-source').WorkspaceComicArchiveResult<Uint8Array>>
     /** CPU-heavy DOM engines own a disposable renderer for this request only. */
-    renderDiagram(request: import('./file-diagram').FileDiagramRequest): Promise<import('./file-diagram').FileDiagramResult>
+    renderDiagram(request: import('@agentmux/editor-extensions/diagram').FileDiagramRequest): Promise<import('@agentmux/editor-extensions/diagram').FileDiagramResult>
     cancelDiagram(id: string): Promise<void>
     build(workspaceId: string, request: import('./file-build').FileBuildRequest): Promise<import('./file-build').FileBuildSnapshot>
     inspectBuild(id: string): Promise<import('./file-build').FileBuildSnapshot | undefined>

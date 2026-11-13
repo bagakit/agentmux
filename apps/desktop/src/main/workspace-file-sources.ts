@@ -27,6 +27,7 @@ function readFailure(error: unknown): WorkspaceFileSourceFailure {
   if (code === 'WORKSPACE_PATH_ESCAPE') return failure('outside-workspace', code, 'This path points outside the Workspace. Its bytes were not read.')
   if (code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') return failure('changed', code, 'The file changed while it was opened. Reload to read the current file.')
   if (code === 'REMOTE_WORKSPACE_PREVIEW_UNAVAILABLE') return failure('unavailable', code, 'Random-access reading is unavailable for this remote Workspace. The original File remains available.')
+  if (code === 'WORKSPACE_MEDIA_NOT_REGULAR') return failure('unavailable', code, 'An original file byte source requires a regular file.')
   return failure('unavailable', code, error instanceof Error ? error.message : 'The original file could not be read. Reload to try again.')
 }
 

@@ -8,3 +8,5 @@ export type WorkspaceFileSourceFailure = {
 }
 export type WorkspaceFileSourceOpenResult = { status: 'ready'; id: string; size: number } | WorkspaceFileSourceFailure
 export type WorkspaceFileSourceReadResult = { status: 'read'; bytes: Uint8Array } | WorkspaceFileSourceFailure
+export type WorkspaceComicArchiveEntry = { path: string; size: number }
+export type WorkspaceComicArchiveResult<T> = { status: 'read'; value: T } | WorkspaceFileSourceFailure
