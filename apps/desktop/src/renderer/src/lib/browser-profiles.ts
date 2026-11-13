@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { BrowserProfileList, BrowserProfileSummary } from '../../../shared/contracts'
+import type { BrowserProfileList, BrowserProfileSummary, BrowserProfileFolder } from '../../../shared/contracts'
 import { api } from './api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
@@ -12,12 +12,13 @@ export type BrowserProfilesState = {
   revision: number | null
   /** Last list Main confirmed; kept while a later read fails. */
   profiles: BrowserProfileSummary[] | null
+  folders: BrowserProfileFolder[] | null
   error: string | null
   reading: boolean
 }
 
 type Listener = () => void
-const EMPTY: BrowserProfilesState = { revision: null, profiles: null, error: null, reading: false }
+const EMPTY: BrowserProfilesState = { revision: null, profiles: null, folders: null, error: null, reading: false }
 
 export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readProfiles' | 'onProfilesChanged'>) {
   let state = EMPTY
@@ -26,9 +27,9 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   let reading: Promise<void> | null = null
   const set = (next: BrowserProfilesState): void => { state = next; for (const listener of listeners) listener() }
   const accept = (list: BrowserProfileList): void => {
-    if (!list || !Number.isSafeInteger(list.revision) || !Array.isArray(list.profiles)) throw new Error('Main returned an unreadable Browser Profile list.')
+    if (!list || !Number.isSafeInteger(list.revision) || !Array.isArray(list.profiles) || !Array.isArray(list.folders)) throw new Error('Main returned an unreadable Browser Profile list.')
     if (state.revision !== null && list.revision < state.revision) return
-    set({ revision: list.revision, profiles: list.profiles, error: null, reading: state.reading })
+    set({ revision: list.revision, profiles: list.profiles, folders: list.folders, error: null, reading: state.reading })
   }
   // Concurrent consumers and retries share one Main read.
   const read = (): Promise<void> => reading ??= (async () => {

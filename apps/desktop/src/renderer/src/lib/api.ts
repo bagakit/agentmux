@@ -24,6 +24,7 @@ import type {
   BrowserProfileDeleteApproval,
   BrowserProfileSite,
   BrowserProfileSummary,
+  BrowserProfileList,
   BrowserSnapshot,
   BrowserViewport,
   RuntimeEvent,
@@ -360,10 +361,10 @@ const mockProxySignIns = new Map<string, string>()
 const mockBrowserProfileSites = new Map<string, BrowserProfileSite[]>([[mockDefaultBrowserProfile.id, [
   { site: 'github.com', cookies: 14 }, { site: 'figma.com', cookies: 9 }, { site: 'example.com', cookies: 2 }]]])
 let mockBrowserProfileRevision = 0
-const mockBrowserProfileListeners = new Set<(list: { revision: number; profiles: BrowserProfileSummary[] }) => void>()
+const mockBrowserProfileListeners = new Set<(list: BrowserProfileList) => void>()
 function publishMockBrowserProfiles(): void {
   mockBrowserProfileRevision += 1
-  const list = { revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles) }
+  const list = { revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }
   mockBrowserProfileListeners.forEach((listener) => listener(structuredClone(list)))
 }
 let mockBrowserImportSources: BrowserProfileImportSourceSummary[] = []
@@ -1448,12 +1449,13 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(browser)
     },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
-    readProfiles: async () => ({ revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles) }),
+    readProfiles: async () => ({ revision: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [] }),
     onProfilesChanged(listener) {
       mockBrowserProfileListeners.add(listener)
       return () => { mockBrowserProfileListeners.delete(listener) }
     },
     updateProfile: async (profileId, edit, expectedRevision) => {
+      if (edit.tags !== undefined || edit.folderId !== undefined || edit.pinned !== undefined) throw new Error('Profile organization requires the Desktop host.')
       if (expectedRevision !== mockBrowserProfileRevision) throw Object.assign(new Error('Browser Profiles changed since revision was read. Read them again and retry.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
       const current = mockBrowserProfiles.find((profile) => profile.id === profileId)
       if (!current) throw new Error(`Unknown Browser Profile: ${profileId}`)
@@ -1483,6 +1485,9 @@ const mockApi: AgentMuxDesktopApi = {
     recordInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     removeInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     clearInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
+    createProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
+    renameProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
+    deleteProfileFolder: async () => { throw new Error('Profile organization requires the Desktop host.') },
     copyProfile: async () => { throw new Error('Copying Browser Profile settings requires the desktop app.') },
     createProfile: async (label) => {
       const profile: BrowserProfileSummary = {

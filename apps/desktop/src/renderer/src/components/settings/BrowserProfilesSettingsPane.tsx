@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { SettingsNavigation } from '../SettingsNavigation'
-import type { BrowserProfileSite, BrowserProfileSummary } from '../../../../shared/contracts'
+import type { BrowserProfileSite, BrowserProfileSummary, BrowserProfileFolder } from '../../../../shared/contracts'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
@@ -14,6 +14,7 @@ import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from 
 import { PROFILE_HUES, ProfileMark, profileTone } from '../ProfileMark'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
+import { BrowserProfileOrganization } from './BrowserProfileOrganization'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import './settings-browser-profiles.css'
@@ -102,6 +103,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab)
     .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
   const profiles = list.profiles ?? []
+  const folders = list.folders ?? []
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'library' | 'editor'>('editor')
@@ -118,8 +120,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
 
   // Find by anything a person remembers about a Profile: its name, its note, or where it came from.
   const needle = query.trim().toLowerCase()
-  const visible = profiles.filter(profile => !needle || [profile.label, profile.notes ?? '', profile.source?.browserLabel ?? '', profile.source?.profileLabel ?? '']
-    .some(text => text.toLowerCase().includes(needle)))
+  const visible = profiles.filter(profile => !needle || [profile.label, profile.notes ?? '', profile.source?.browserLabel ?? '', profile.source?.profileLabel ?? '',
+    ...(profile.tags ?? []), folders.find(folder => folder.id === profile.folderId)?.label ?? ''].some(text => text.toLowerCase().includes(needle)))
+    .sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true))
   const run = (async (key: string, action: () => Promise<unknown>, report = false) => {
     if (busy) return report ? { code: null, message: '' } : false
     setBusy(key); setError(null); setErrorCode(null)
@@ -178,13 +181,13 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
           items={visible.map(profile => {
             const open = usesOf(profile.id, surfaces).filter(use => use.state === 'open').length
             return { id: profile.id, name: profile.label, detail: detailLine(profile),
-              mark: <ProfileMark profile={profile} />, status: open ? <span>{open} open</span> : undefined }
+              mark: <ProfileMark profile={profile} />, status: profile.pinned || open ? <span>{profile.pinned ? <span aria-label="Pinned Profile">Pinned</span> : null}{profile.pinned && open ? ' · ' : ''}{open ? `${open} open` : ''}</span> : undefined }
           })} />
         <div className="settings-resource-editor">
           <button className="small-button settings-resource-back" type="button" onClick={() => { setView('library'); setReturnFocus({ id: selected?.id ?? null }) }}>
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
-          {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
+          {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision} folders={folders}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, list.revision!)}
@@ -197,8 +200,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders }: {
   profile: BrowserProfileSummary
+  folders: BrowserProfileFolder[]
   revision: number
   uses: Use[]
   busy: string | null
@@ -321,6 +325,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
         </button>}
 
       {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onClick={() => void browserProfiles.refresh()}>Reload</button></> : null}</p> : null}
+
+      <BrowserProfileOrganization profile={profile} folders={folders} revision={revision} busy={busy !== null} run={run} onEdit={commit} />
 
       <section className="browser-profile-editor__section" aria-label="Agents">
         <h4>Agents</h4>
