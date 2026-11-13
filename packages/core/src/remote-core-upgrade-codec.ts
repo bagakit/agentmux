@@ -99,7 +99,7 @@ function replacementReceipt(value: unknown): NonNullable<RemoteCoreUpgradeReceip
   return { ...(p.stateCopy === undefined ? {} : { stateCopy: text(p.stateCopy) }), endedRunIds: runIds(p.endedRunIds),
     ...(p.survivingProcessIds === undefined ? {} : { survivingProcessIds: [...p.survivingProcessIds as number[]] }) }
 }
-function host(value: unknown): RemoteCoreUpgradeHost {
+export function parseRemoteCoreHost(value: unknown): RemoteCoreUpgradeHost {
   const p = record(value, ['id', 'kind', 'label', 'hostname', 'user', 'port', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId', 'transport', 'tailcat'])
   text(p.id); text(p.label)
   if (p.kind === 'local') {
@@ -158,7 +158,7 @@ export function parseRemoteCoreUpgradeReceipt(value: unknown): RemoteCoreUpgrade
     connectionAdoption = { state: a.state as NonNullable<RemoteCoreUpgradeReceipt['connectionAdoption']>['state'], readAt: count(a.readAt),
       ...(a.code === undefined ? {} : { code: text(a.code) }), ...(a.detail === undefined ? {} : { detail: text(a.detail) }) }
   }
-  return { input: host(p.input), operationId: text(p.operationId), expected,
+  return { input: parseRemoteCoreHost(p.input), operationId: text(p.operationId), expected,
     status: p.status as RemoteCoreUpgradeReceipt['status'], stage: p.stage as RemoteCoreUpgradeReceipt['stage'], detail: text(p.detail),
     ...(p.remoteCommand === undefined ? {} : { remoteCommand: text(p.remoteCommand) }), updatedAt: count(p.updatedAt),
     ...(target === undefined ? {} : { candidate: target }), ...(connectionAdoption === undefined ? {} : { connectionAdoption }),
@@ -174,7 +174,7 @@ export function parseRemoteCoreUpgradeCheck(value: unknown): RemoteCoreUpgradeCh
       plan && pinned?.nativeReplacement && JSON.stringify(plan.ending.map(run => run.runId)) !== JSON.stringify(pinned.nativeReplacement.endingRunIds)) {
     throw new AgentMuxError('Native replacement review does not match its admission.', 'CONTROL_PROTOCOL_ERROR')
   }
-  const serving = current(p.current), target = p.candidate === null ? null : candidate(p.candidate), input = host(p.input)
+  const serving = current(p.current), target = p.candidate === null ? null : candidate(p.candidate), input = parseRemoteCoreHost(p.input)
   let candidateUnavailable: RemoteCoreUpgradeCheck['candidateUnavailable']
   if (p.candidateUnavailable !== undefined) {
     const failure = record(p.candidateUnavailable, ['code', 'detail'])

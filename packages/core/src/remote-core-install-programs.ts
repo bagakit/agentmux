@@ -23,20 +23,28 @@ def listening(path):
  except Exception: return 'unknown'
  finally: s.close()
 def systemd():
+ unit_available=not os.path.lexists(os.path.join(home,'.config','systemd','user','agentmux-core.service'))
+ run=lambda *args: subprocess.run(list(args),capture_output=True,text=True,timeout=10)
  try:
-  run=lambda *args: subprocess.run(list(args),capture_output=True,text=True,timeout=10)
-  if run('systemctl','--user','show-environment').returncode!=0: return {'user':False,'linger':None}
+  if run('systemctl','--user','show-environment').returncode!=0: return {'user':False,'linger':None,'unitAvailable':unit_available}
+ except (FileNotFoundError,subprocess.TimeoutExpired): return {'user':False,'linger':None,'unitAvailable':unit_available}
+ try:
+  unit=run('systemctl','--user','show','agentmux-core.service','--property=LoadState','--value')
+  unit_available=unit_available and unit.stdout.strip()=='not-found' and unit.returncode in (0,1)
+ except (FileNotFoundError,subprocess.TimeoutExpired): unit_available=False
+ try:
   shown=run('loginctl','show-user',os.environ.get('USER') or str(os.getuid()),'--property=Linger')
   linger=shown.stdout.strip().split('=',1)[1]=='yes' if shown.returncode==0 and '=' in shown.stdout else None
-  return {'user':True,'linger':linger}
- except (FileNotFoundError,subprocess.TimeoutExpired): return {'user':False,'linger':None}
-installed=os.path.join(prefix,'state','core-releases','current')
+ except (FileNotFoundError,subprocess.TimeoutExpired): linger=None
+ return {'user':True,'linger':linger,'unitAvailable':unit_available}
+releases=os.path.join(prefix,'state','core-releases')
+installed=any(os.path.lexists(os.path.join(prefix,entry)) for entry in ['bin/amux','start.sh','serve.sh','state/semantic-runtime.json','state/agent-sessions.json']) or os.path.lexists(os.path.join(releases,'current')) or (os.path.isdir(releases) and bool(os.listdir(releases)))
 existing=prefix
 while not os.path.exists(existing): existing=os.path.dirname(existing)
 space=os.statvfs(existing)
 print(json.dumps({'platform':sys.platform,'machine':platform.machine(),'glibc':glibc(),'home':home,'prefix':prefix,
- 'user':os.environ.get('USER') or '','installed':os.path.lexists(installed),'socket':listening(os.path.join(prefix,'runtime','control.sock')),
- 'prefixEntries':sorted(os.listdir(prefix))[:20] if os.path.isdir(prefix) else None,'availableBytes':space.f_bavail*space.f_frsize,'systemd':systemd()}))
+ 'user':os.environ.get('USER') or '','installed':installed,'socket':listening(os.path.join(prefix,'runtime','control.sock')),
+ 'availableBytes':space.f_bavail*space.f_frsize,'systemd':systemd()}))
 `
 
 /** Unpacks the pinned Node into <prefix>/node/<version> once, from a base64 archive on
@@ -65,6 +73,12 @@ printf '{"node":"%s"}\n' "$node_dir/bin/node"
 export const INSTALL_SERVICE = String.raw`
 const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
 const p=JSON.parse(fs.readFileSync(0,'utf8')),q=s=>"'"+s.replaceAll("'","'\\''")+"'",D='$';
+const unitPath=path.join(p.home,'.config','systemd','user','agentmux-core.service');
+if(p.keepRunning==='systemd' && fs.existsSync(path.dirname(unitPath)) && fs.readdirSync(path.dirname(unitPath)).includes(path.basename(unitPath)))throw Error('An existing AgentMux user service was preserved. Choose the start script or inspect that service.');
+if(p.keepRunning==='systemd'){
+ const existing=cp.spawnSync('systemctl',['--user','show','agentmux-core.service','--property=LoadState','--value'],{encoding:'utf8',timeout:10000});
+ if(![0,1].includes(existing.status)||existing.stdout.trim()!=='not-found')throw Error('The named AgentMux user service already exists or could not be confirmed absent. Its original service was left unchanged.');
+}
 const prefix=p.prefix,state=path.join(prefix,'state'),runtime=path.join(prefix,'runtime'),current=path.join(state,'core-releases','current');
 const write=(file,text,mode)=>{const partial=file+'.partial';fs.writeFileSync(partial,text,{mode});fs.renameSync(partial,file);};
 fs.mkdirSync(path.join(prefix,'bin'),{recursive:true,mode:0o700});fs.mkdirSync(runtime,{recursive:true,mode:0o700});
@@ -81,8 +95,11 @@ if(p.keepRunning==='systemd'){
  const dir=path.join(p.home,'.config','systemd','user');fs.mkdirSync(dir,{recursive:true,mode:0o700});
  // The unit runs the same release resolution as start.sh, in the foreground, so systemd owns the process.
  write(path.join(prefix,'serve.sh'),'#!/bin/sh\nset -eu\n'+serve+'exec env -i '+env+' '+q(p.node)+' "$release/dist/headless-runtime-cli.js" serve\n',0o755);
- unit=path.join(dir,'agentmux-core.service');
- write(unit,'[Unit]\nDescription=AgentMux headless Core\n\n[Service]\nType=simple\nExecStart='+path.join(prefix,'serve.sh')+'\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n',0o644);
+ unit=unitPath;
+ const unitText='[Unit]\nDescription=AgentMux headless Core\n\n[Service]\nType=simple\nExecStart='+JSON.stringify(path.join(prefix,'serve.sh')).replaceAll('%','%%')+'\nKillMode=process\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n';
+ // Publish the complete unit exclusively: a concurrent install or user service is never overwritten.
+ const staging=fs.mkdtempSync(path.join(dir,'.agentmux-unit-'));
+ try{const candidate=path.join(staging,'unit');fs.writeFileSync(candidate,unitText,{mode:0o644});fs.linkSync(candidate,unit);}finally{fs.rmSync(staging,{recursive:true,force:true});}
  for(const args of [['--user','daemon-reload'],['--user','enable','--now','agentmux-core.service']]){
   const done=cp.spawnSync('systemctl',args,{encoding:'utf8',timeout:30000});
   if(done.status!==0)throw Error('systemctl '+args.join(' ')+' failed: '+(done.stderr||done.error?.message||'').trim());
@@ -101,7 +118,16 @@ const p=JSON.parse(fs.readFileSync(0,'utf8'));
 void(async()=>{
  const {connectAgentMuxRpc}=await import(url.pathToFileURL(path.join(p.releaseDirectory,'dist','public-rpc-client.js')).href);
  const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:p.socket}});
- try{const {owner}=await rpc.call('runtime.owner.identity',{},{signal:AbortSignal.timeout(20000)});console.log(JSON.stringify({owner}));}
+ try{
+  const {owner}=await rpc.call('runtime.owner.identity',{},{signal:AbortSignal.timeout(20000)});
+  if(!Number.isSafeInteger(owner.processId)||owner.processId<1)throw Error('The new Core process identity is unconfirmed.');
+  const base='/proc/'+owner.processId,argv=fs.readFileSync(base+'/cmdline','utf8').split(String.fromCharCode(0)).slice(0,-1);
+  const expected=fs.realpathSync(path.join(p.releaseDirectory,'dist','headless-runtime-cli.js'));
+  if(argv.length!==3||argv[2]!=='serve'||fs.realpathSync(argv[1])!==expected)throw Error('The responding Core runs another release.');
+  const env=Object.fromEntries(fs.readFileSync(base+'/environ','utf8').split(String.fromCharCode(0)).filter(Boolean).map(item=>{const at=item.indexOf('=');return [item.slice(0,at),item.slice(at+1)];}));
+  if(env.AGENTMUX_STATE_DIRECTORY!==path.dirname(path.dirname(p.releaseDirectory))||env.AGENTMUX_RUNTIME_DIRECTORY!==path.dirname(p.socket))throw Error('The responding Core serves another namespace.');
+  console.log(JSON.stringify({owner}));
+ }
  finally{await rpc.dispose();}
 })().catch(e=>{console.error(e.message);process.exitCode=1});
 `

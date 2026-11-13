@@ -1,4 +1,6 @@
-import { link, mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { link, mkdir, open, readFile, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { mintObjectId } from './object-id.js'
@@ -8,6 +10,7 @@ import type { PortableCoreArtifact } from './portable-core-artifact.js'
 import { linuxNodeArchive, type LinuxNodeArchive } from './linux-node.js'
 import { remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from './remote-core-upgrade.js'
 import { STAGE_CORE, SELECT_CORE_RELEASE } from './remote-core-upgrade-programs.js'
+import { parseRemoteCoreInstallReceipt, parseRemoteCoreInstallProbe } from './remote-core-install-codec.js'
 import { PROBE_CORE_INSTALL, INSTALL_NODE, INSTALL_SERVICE, READ_INSTALLED_OWNER } from './remote-core-install-programs.js'
 
 export type RemoteCoreKeepRunning = 'start-script' | 'systemd'
@@ -19,11 +22,13 @@ export type RemoteCoreInstallProbe = {
   /** What answers on the prefix's control socket. */
   socket: 'absent' | 'stale' | 'serving' | 'other-file' | 'unknown'
   availableBytes: number
-  systemd: { user: boolean; linger: boolean | null }
+  systemd: { user: boolean; linger: boolean | null; unitAvailable: boolean }
 }
 export type RemoteCoreInstallExpected = { targetDigest: string; prefix: string; candidateDigest: string; nodeSha256: string; keepRunning: RemoteCoreKeepRunning }
 export type RemoteCoreInstallCheck = {
   input: RemoteCoreUpgradeHost
+  latestOperation?: RemoteCoreInstallReceipt
+  unreadableOperations?: string[]
   probe?: RemoteCoreInstallProbe
   eligible: boolean
   /** ready: nothing installed and nothing serving; installed: only an upgrade applies. */
@@ -41,6 +46,8 @@ export type RemoteCoreInstallReceipt = {
   status: 'running' | 'completed' | 'failed' | 'unknown'
   stage: 'preparing' | 'pushing-node' | 'staging-core' | 'starting' | 'confirming' | 'completed'
   detail: string; updatedAt: number
+  /** Main's saved connection adoption, independent from installation completion. */
+  connectionAdoption?: { state: 'connected' | 'unconfirmed' | 'pending-confirmation'; readAt: number; detail: string; code?: string }
   /** Filled as each stage confirms it; a completed install has all of them. */
   installed?: { remoteCommand: string; remoteSocketPath: string; runtimeId: string; startScript: string; unit: string | null }
 }
@@ -52,7 +59,15 @@ export type RemoteCoreInstallOptions = {
   /** How long to wait between identity reads while the new Core starts. */
   startPollMs?: number
 }
-type Retained = { receipt: RemoteCoreInstallReceipt }
+type Retained = { receipt: RemoteCoreInstallReceipt; connection?: {
+  node: string; releaseDirectory: string; remoteCommand: string; remoteSocketPath: string; startScript: string; unit: string | null
+} }
+const fileLocks = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
+function installScope(input: RemoteCoreUpgradeHost, prefix: string): string {
+  return createHash('sha256').update(JSON.stringify(input.kind === 'ssh'
+    ? { hostname: input.hostname, user: input.user ?? null, port: input.port ?? 22, prefix }
+    : { id: input.id, prefix })).digest('hex')
+}
 
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 const MIN_GLIBC = [2, 34]
@@ -68,6 +83,7 @@ function glibcSupported(version: string | null): boolean {
  * an installed or answering prefix is refused and left to the upgrade owner. */
 export class RemoteCoreInstallManager {
   private readonly active = new Map<string, Promise<RemoteCoreInstallReceipt>>()
+  private readonly targets = new Set<string>()
   constructor(private readonly options: RemoteCoreInstallOptions) {}
   private host(input: RemoteCoreUpgradeHost): ExecutionHost {
     if (input.kind !== 'ssh' || input.transport === 'tailcat') throw new AgentMuxError('A first Core install needs a saved SSH Host; Tailcat only reaches a Core that already runs.', 'CORE_INSTALL_UNAVAILABLE')
@@ -86,18 +102,22 @@ export class RemoteCoreInstallManager {
     return await (this.options.node ?? (() => linuxNodeArchive(join(this.options.stateDirectory, 'linux-node'))))()
   }
   private async probe(input: RemoteCoreUpgradeHost, prefix: string | undefined): Promise<RemoteCoreInstallProbe> {
-    return await this.program<RemoteCoreInstallProbe>(input, '/usr/bin/python3', ['-c', PROBE_CORE_INSTALL], { prefix: prefix ?? null })
+    return parseRemoteCoreInstallProbe(await this.program<unknown>(input, '/usr/bin/python3', ['-c', PROBE_CORE_INSTALL], { prefix: prefix ?? null }))
   }
   private expected(input: RemoteCoreUpgradeHost, probe: RemoteCoreInstallProbe, artifact: PortableCoreArtifact, node: LinuxNodeArchive): Omit<RemoteCoreInstallExpected, 'keepRunning'> {
     return { targetDigest: remoteCoreUpgradeTargetDigest(input), prefix: probe.prefix, candidateDigest: artifact.digest, nodeSha256: node.sha256 }
   }
-  /** Read-only. Nothing is written on the Host or in local operation records. */
+  /** Remote read-only. Original local receipts may be reconciled; no installation is started. */
   async check(input: RemoteCoreUpgradeHost, prefix?: string): Promise<RemoteCoreInstallCheck> {
-    const captured = structuredClone(input)
+    const captured = structuredClone(input), records = await this.latest(captured), latestOperation = records.latestOperation
+    const original = { input: captured, ...records }
+    if (captured.kind === 'ssh' && captured.runtimeId) return { ...original, eligible: false, reason: 'unverified',
+      detail: 'This Host already has a saved Runtime identity. Keep its original connection and recovery path; an empty or unavailable directory does not authorize replacing that identity. Use a separate unbound Host for a new installation.' }
     let probe: RemoteCoreInstallProbe
     try { probe = await this.probe(captured, prefix) }
-    catch (error) { return { input: captured, eligible: false, reason: 'unverified', detail: `The Host could not be probed: ${errorText(error)}` } }
-    const base = { input: captured, probe }
+    catch (error) { return { ...original, eligible: false, reason: 'unverified', detail: `The Host could not be probed: ${errorText(error)}` } }
+    const base = { ...original, probe }
+    if (latestOperation?.status === 'running' || latestOperation?.status === 'unknown') return { ...base, eligible: false, reason: 'unverified', detail: 'Inspect the original install operation before another installation; its outcome is not confirmed.' }
     if (probe.platform !== 'linux' || !['x86_64', 'amd64'].includes(probe.machine)) {
       return { ...base, eligible: false, reason: 'unsupported', detail: `This Host is ${probe.platform} ${probe.machine}; a first install supports Linux x64 only.` }
     }
@@ -121,16 +141,66 @@ export class RemoteCoreInstallManager {
       candidate: { digest: artifact.digest, sourceCommit: artifact.sourceCommit, version: artifact.version },
       node: { version: node.version, sha256: node.sha256 },
       keepRunning: [{ mode: 'start-script', available: true, startsAtBoot: false },
-        { mode: 'systemd', available: probe.systemd.user, startsAtBoot: probe.systemd.user ? probe.systemd.linger : null }],
+        { mode: 'systemd', available: probe.systemd.user && probe.systemd.unitAvailable, startsAtBoot: probe.systemd.user ? probe.systemd.linger : null }],
       expected: this.expected(captured, probe, artifact, node) }
+  }
+  private matches(input: RemoteCoreUpgradeHost, receipt: RemoteCoreInstallReceipt): boolean {
+    const current = remoteCoreUpgradeTargetDigest(input)
+    return current === receipt.expected.targetDigest || Boolean(receipt.installed && receipt.input.kind === 'ssh' &&
+      current === remoteCoreUpgradeTargetDigest({ ...receipt.input, remoteCommand: receipt.installed.remoteCommand,
+        remoteSocketPath: receipt.installed.remoteSocketPath, runtimeId: receipt.installed.runtimeId }))
+  }
+  private async latest(input: RemoteCoreUpgradeHost): Promise<Pick<RemoteCoreInstallCheck, 'latestOperation' | 'unreadableOperations'>> {
+    let names: string[]
+    try { names = await readdir(join(this.options.stateDirectory, 'install-operations')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}; throw error }
+    let latest: RemoteCoreInstallReceipt | undefined
+    const unreadableOperations: string[] = []
+    for (const name of names) {
+      if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name)) continue
+      let retained: Retained | null
+      try { retained = await this.read(name.slice(0, -5)) }
+      catch (error) {
+        if (error instanceof AgentMuxError && error.code === 'CORE_INSTALL_RECORD_UNREADABLE') { unreadableOperations.push(name.slice(0, -5)); continue }
+        throw error
+      }
+      if (retained && this.matches(input, retained.receipt) && (!latest ||
+          ['running', 'unknown'].includes(retained.receipt.status) || !['running', 'unknown'].includes(latest.status) && retained.receipt.updatedAt > latest.updatedAt)) latest = retained.receipt
+    }
+    const latestOperation = latest ? await this.inspect(input, latest.operationId) : null
+    return { ...(latestOperation ? { latestOperation } : {}),
+      ...(unreadableOperations.length ? { unreadableOperations } : {}) }
+  }
+  private async unconfirmedScope(scope: string): Promise<boolean> {
+    let names: string[]
+    try { names = await readdir(join(this.options.stateDirectory, 'install-operations')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    for (const name of names) {
+      if (!/^[A-Za-z0-9_-]{1,128}\.json$/u.test(name)) continue
+      let record: Retained | null
+      try { record = await this.read(name.slice(0, -5)) }
+      catch (error) { if (error instanceof AgentMuxError && error.code === 'CORE_INSTALL_RECORD_UNREADABLE') continue; throw error }
+      if (record && installScope(record.receipt.input, record.receipt.expected.prefix) === scope &&
+          (record.receipt.status === 'running' || record.receipt.status === 'unknown')) return true
+    }
+    return false
   }
   private path(operationId: string): string {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(operationId)) throw new AgentMuxError('Install operation ID is invalid.', 'INVALID_CONTROL_REQUEST')
     return join(this.options.stateDirectory, 'install-operations', operationId + '.json')
   }
   private async read(operationId: string): Promise<Retained | null> {
-    try { return JSON.parse(await readFile(this.path(operationId), 'utf8')) as Retained }
+    let source: string
+    try { source = await readFile(this.path(operationId), 'utf8') }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+    try {
+      const value = JSON.parse(source) as Retained
+      value.receipt = parseRemoteCoreInstallReceipt(value.receipt)
+      if (value.receipt.operationId !== operationId) throw new Error('Another operation')
+      return value
+    } catch {
+      throw new AgentMuxError('The original install record is unreadable. Its target and outcome remain unknown; it is retained and not replayed.', 'CORE_INSTALL_RECORD_UNREADABLE')
+    }
   }
   private async save(value: Retained): Promise<void> {
     value.receipt.updatedAt = Date.now()
@@ -140,17 +210,35 @@ export class RemoteCoreInstallManager {
   async inspect(input: RemoteCoreUpgradeHost, operationId: string): Promise<RemoteCoreInstallReceipt | null> {
     const retained = await this.read(operationId)
     if (!retained) return null
-    if (retained.receipt.expected.targetDigest !== remoteCoreUpgradeTargetDigest(input)) throw new AgentMuxError('This install belongs to another Host configuration.', 'CONFIG_CONFLICT')
+    if (!this.matches(input, retained.receipt)) throw new AgentMuxError('This install belongs to another Host configuration.', 'CONFIG_CONFLICT')
     if (retained.receipt.status === 'running' && !this.active.has(operationId)) {
-      retained.receipt.status = 'unknown'
-      retained.receipt.detail = 'The install owner stopped before confirming this install. It is kept as unknown and is not repeated.'
-      await this.save(retained)
+      const lease = await open(join(this.options.stateDirectory, 'install-operations', installScope(retained.receipt.input, retained.receipt.expected.prefix) + '.lock'), 'a+', 0o600)
+      try {
+        if (fileLocks.tryLock(lease.fd)) {
+          retained.receipt.status = 'unknown'
+          retained.receipt.detail = 'The install owner stopped before confirming this install. Inspecting only reads the original service; it never repeats installation.'
+          await this.save(retained)
+        }
+      } finally { await lease.close() }
+    }
+    if (retained.receipt.status === 'unknown' && retained.connection) {
+      try {
+        const c = retained.connection, p = retained.receipt.expected.prefix
+        if (!c.node.startsWith(join(p, 'node') + '/') || !/^v[0-9]+\.[0-9]+\.[0-9]+\/bin\/node$/u.test(c.node.slice(join(p, 'node').length + 1)) || c.releaseDirectory !== join(p, 'state', 'core-releases', retained.receipt.expected.candidateDigest) ||
+            c.remoteSocketPath !== join(p, 'runtime', 'control.sock') || c.remoteCommand !== join(p, 'bin', 'amux')) throw new Error('Unconfirmed original service')
+        const { owner } = await this.program<{ owner: { runtimeId?: unknown; availability?: unknown } }>(retained.receipt.input, c.node, ['-e', READ_INSTALLED_OWNER], { releaseDirectory: c.releaseDirectory, socket: c.remoteSocketPath })
+        if (owner.availability !== 'connected' || typeof owner.runtimeId !== 'string' || !owner.runtimeId) throw new Error('Unconfirmed owner')
+        retained.receipt.installed = { remoteCommand: c.remoteCommand, remoteSocketPath: c.remoteSocketPath, runtimeId: owner.runtimeId, startScript: c.startScript, unit: c.unit }
+        retained.receipt.status = 'completed'; retained.receipt.stage = 'completed'; retained.receipt.detail = 'The original installation is now confirmed serving. No installation step was repeated.'
+        await this.save(retained)
+      } catch { /* Observation gaps retain the original unknown result. */ }
     }
     return structuredClone(retained.receipt)
   }
   async install(input: RemoteCoreUpgradeHost, expected: RemoteCoreInstallExpected, operationId: string): Promise<RemoteCoreInstallReceipt> {
     const captured = structuredClone(input)
     this.path(operationId)
+    if (captured.kind === 'ssh' && captured.runtimeId) throw new AgentMuxError('A first installation cannot replace this Host’s saved Runtime identity. Keep its original connection and recovery path.', 'CONFIG_CONFLICT')
     if (expected.targetDigest !== remoteCoreUpgradeTargetDigest(captured)) throw new AgentMuxError('Host input changed after the install check.', 'CONFIG_CONFLICT')
     if (expected.keepRunning !== 'start-script' && expected.keepRunning !== 'systemd') throw new AgentMuxError('Choose how the Core stays running.', 'INVALID_CONTROL_REQUEST')
     const retained = await this.read(operationId)
@@ -158,11 +246,28 @@ export class RemoteCoreInstallManager {
       if (JSON.stringify(retained.receipt.expected) !== JSON.stringify(expected)) throw new AgentMuxError('This operation ID belongs to another install.', 'CONFIG_CONFLICT')
       return await this.active.get(operationId) ?? (await this.inspect(captured, operationId))!
     }
-    const work = this.execute(captured, expected, operationId)
-    this.active.set(operationId, work)
-    try { return await work } finally { this.active.delete(operationId) }
+    const scope = installScope(captured, expected.prefix)
+    if (this.targets.has(scope)) throw new AgentMuxError('This exact install target is already being installed.', 'CONFIG_CONFLICT')
+    this.targets.add(scope)
+    try {
+      const prior = (await this.latest(captured)).latestOperation
+      if (prior?.status === 'running' || prior?.status === 'unknown') throw new AgentMuxError('The original installation is unconfirmed. Inspect its original operation instead of starting another.', 'CONFIG_CONFLICT')
+      const work = this.execute(captured, expected, operationId)
+      this.active.set(operationId, work)
+      try { return await work } finally { this.active.delete(operationId) }
+    } finally { this.targets.delete(scope) }
   }
   private async execute(input: RemoteCoreUpgradeHost, expected: RemoteCoreInstallExpected, operationId: string): Promise<RemoteCoreInstallReceipt> {
+    const directory = join(this.options.stateDirectory, 'install-operations')
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const lease = await open(join(directory, installScope(input, expected.prefix) + '.lock'), 'a+', 0o600)
+    try {
+      if (!fileLocks.tryLock(lease.fd)) throw new AgentMuxError('Another owner is installing this exact target.', 'CONFIG_CONFLICT')
+      if (await this.unconfirmedScope(installScope(input, expected.prefix))) throw new AgentMuxError('The previous install is unconfirmed. Inspect the original operation.', 'CONFIG_CONFLICT')
+      return await this.executeLocked(input, expected, operationId)
+    } finally { await lease.close() }
+  }
+  private async executeLocked(input: RemoteCoreUpgradeHost, expected: RemoteCoreInstallExpected, operationId: string): Promise<RemoteCoreInstallReceipt> {
     const value: Retained = { receipt: { input, expected, operationId, status: 'running', stage: 'preparing', detail: 'Checking the Host again before installing.', updatedAt: Date.now() } }
     // Reserve the original ID exclusively, so another owner cannot admit the same operation.
     await mkdir(join(this.options.stateDirectory, 'install-operations'), { recursive: true, mode: 0o700 })
@@ -173,8 +278,8 @@ export class RemoteCoreInstallManager {
     let changed = false
     try {
       const [probe, artifact, node] = await Promise.all([this.probe(input, expected.prefix), this.options.artifact(), this.node()])
-      const admitted = probe.prefix === expected.prefix && !probe.installed && (probe.socket === 'absent' || probe.socket === 'stale') &&
-        artifact.digest === expected.candidateDigest && node.sha256 === expected.nodeSha256 && (expected.keepRunning !== 'systemd' || probe.systemd.user)
+      const admitted = probe.platform === 'linux' && ['x86_64', 'amd64'].includes(probe.machine) && glibcSupported(probe.glibc) && probe.availableBytes >= MIN_FREE_BYTES && probe.prefix === expected.prefix && !probe.installed && (probe.socket === 'absent' || probe.socket === 'stale') &&
+        artifact.digest === expected.candidateDigest && node.sha256 === expected.nodeSha256 && (expected.keepRunning !== 'systemd' || probe.systemd.user && probe.systemd.unitAvailable)
       if (!admitted) throw new AgentMuxError('The Host, the bundled Core or the chosen way to keep running changed since the check. Check again; nothing was installed.', 'CONFIG_CONFLICT')
       changed = true
       value.receipt.stage = 'pushing-node'; value.receipt.detail = `Copying Node ${node.version} to the Host.`; await this.save(value)
@@ -189,12 +294,16 @@ export class RemoteCoreInstallManager {
       if (staged.digest !== artifact.digest || staged.releaseDirectory !== join(state, 'core-releases', artifact.digest)) throw new AgentMuxError('The staging receipt belongs to another release.', 'CORE_INSTALL_RESPONSE_UNKNOWN')
       const selected = await this.program<{ current?: unknown }>(input, remoteNode, ['-e', SELECT_CORE_RELEASE], { stateDirectory: state, digest: artifact.digest, operationId })
       if (selected.current !== artifact.digest) throw new AgentMuxError('The current release receipt belongs to another release.', 'CORE_INSTALL_RESPONSE_UNKNOWN')
+      value.connection = { node: remoteNode, releaseDirectory: staged.releaseDirectory, remoteCommand: join(expected.prefix, 'bin', 'amux'),
+        remoteSocketPath: join(expected.prefix, 'runtime', 'control.sock'), startScript: join(expected.prefix, 'start.sh'),
+        unit: expected.keepRunning === 'systemd' ? join(probe.home, '.config', 'systemd', 'user', 'agentmux-core.service') : null }
       value.receipt.stage = 'starting'
       value.receipt.detail = expected.keepRunning === 'systemd' ? 'Writing the user service and starting the Core.' : 'Writing the start script and starting the Core.'; await this.save(value)
       const service = await this.program<{ remoteCommand: string; remoteSocketPath: string; startScript: string; unit: string | null }>(input, remoteNode, ['-e', INSTALL_SERVICE],
         { prefix: expected.prefix, node: remoteNode, home: probe.home, keepRunning: expected.keepRunning })
       if (service.remoteCommand !== join(expected.prefix, 'bin', 'amux') || service.remoteSocketPath !== join(expected.prefix, 'runtime', 'control.sock') ||
-          (expected.keepRunning === 'systemd') !== (service.unit !== null)) throw new AgentMuxError('The service receipt names another location.', 'CORE_INSTALL_RESPONSE_UNKNOWN')
+          service.startScript !== value.connection.startScript || service.unit !== value.connection.unit) throw new AgentMuxError('The service receipt names another location.', 'CORE_INSTALL_RESPONSE_UNKNOWN')
+      value.connection = { node: remoteNode, releaseDirectory: staged.releaseDirectory, ...service }
       value.receipt.stage = 'confirming'; value.receipt.detail = 'Reading the new Core identity.'; await this.save(value)
       let owner: { runtimeId?: unknown; availability?: unknown } | undefined, last: unknown
       for (let attempt = 0; attempt < 60 && !owner; attempt++) {
@@ -208,7 +317,7 @@ export class RemoteCoreInstallManager {
       value.receipt.status = 'completed'; value.receipt.stage = 'completed'
       value.receipt.detail = expected.keepRunning === 'systemd'
         ? probe.systemd.linger ? 'Installed. The Core runs as a user service and starts at boot.' : 'Installed. The Core runs as a user service; it starts at boot only after linger is enabled for this user.'
-        : `Installed. After this machine restarts, run ${service.startScript} or start it from this app.`
+        : `Installed. After this machine restarts, run ${service.startScript}.`
     } catch (error) {
       // Before any remote write the install simply did not happen; after one, its outcome is unknown.
       value.receipt.status = changed ? 'unknown' : 'failed'
