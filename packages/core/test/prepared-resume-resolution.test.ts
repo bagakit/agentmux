@@ -408,3 +408,22 @@ it('explicit resolution leaves an independent healthy Session and its real input
   expect((await f.inner.kernel.status(healthy.run.runId)).state.type).toBe('running')
   expect(f.stop).not.toHaveBeenCalled()
 })
+
+it('explicit resolution reports a successor Start confirmed not applied after handoff with its code, not a code-less pending', async () => {
+  const f = await fixture()
+  f.start.mockRejectedValueOnce(new Error('Unknown original Start'))
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  const successorKey = agentLifecycleOperationIdentity('resume', f.previous.agentSessionId, 'handoff-not-applied')
+  f.start.mockImplementationOnce(async (_request: unknown, operationId: string) => {
+    throw new core.AgentMuxError('Controlled Runtime refusal before any process', 'CTXMUX_io', undefined, undefined, undefined,
+      { operationId, disposition: 'not_applied' })
+  })
+  const manual = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'handoff-not-applied', trigger: 'manual', args: f.request.args, env: f.request.env }
+  const result = await f.client.ensureAgentContinuity(manual)
+  expect(f.start).toHaveBeenCalledTimes(2); expect(f.start.mock.calls[1]![1]).toBe(successorKey)
+  expect(result).toMatchObject({ kind: 'pending', continuity: { kind: 'pending', errorCode: 'CTXMUX_io', resolution: { outcome: 'retired' } } })
+  expect((await f.store.readMetadata(f.previous.agentSessionId))!.continuity).toMatchObject({ errorCode: 'CTXMUX_io', error: expect.stringContaining('Controlled Runtime refusal') })
+  // The original Session keeps its Run and native identity; a new manual intent can still continue it.
+  const continued = await f.client.ensureAgentContinuity({ ...manual, operationId: 'after-not-applied' })
+  expect(continued.kind).toBe('resumed'); expect(f.inputCount()).toBe(0)
+})
