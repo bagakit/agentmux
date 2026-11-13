@@ -119,8 +119,15 @@ it('preserves uncertain confirmation identity across inspection and reopening wi
   expect(container.querySelector<HTMLDetailsElement>('.capsule-question__history')!.open).toBe(true)
   expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
   const original = structuredClone(nativeConfirm.mock.calls[0]![0])
-  expect(container.textContent).toContain(original.operationId); expect(container.textContent).toContain('input unconfirmed')
+  expect(container.textContent).toContain(original.operationId)
   expect(container.textContent).not.toContain('Continue saved confirmation')
+  // One unknown result reads once as "check the result": the status names it, the original reason waits in its details.
+  const said = [...container.querySelectorAll('.capsule-question__body > [role="status"], .capsule-question__body > p, .capsule-question__actions > [role="status"]')].map(node => node.textContent ?? '')
+  expect(said.filter(text => /unconfirmed|unknown|check/iu.test(text))).toEqual(['Answer saved · result needs checking'])
+  const operation = [...container.querySelectorAll('.capsule-question__body > details')].find(node => node.querySelector('summary')?.textContent === 'Original operation')!
+  expect(operation.textContent).toContain('Original input observation is unavailable.')
+  // The panel heading names the panel, never a stage the answer has already passed.
+  expect(container.querySelector('.capsule-chrome__heading')!.textContent).toBe('Page answers')
   await click('Inspect original operation')
   expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
   expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
@@ -183,7 +190,7 @@ it('keeps an unobserved confirmation frozen and inspect-only without guessing th
   await click('Inspect original operation')
   expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
   expect(button('Confirm answer').disabled).toBe(true); expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(0)
-  expect(editor().value).toBe(original.answer); expect(container.textContent).toContain('still unconfirmed')
+  expect(editor().value).toBe(original.answer); expect(container.textContent).toContain('Checked: still unconfirmed. Nothing was sent again.')
 })
 
 it('retains current editor text across a late request refresh and keeps the native page in a separate bounded surface', async () => {
