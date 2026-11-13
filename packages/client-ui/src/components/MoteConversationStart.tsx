@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { MoteMainPeriod } from '@agentmux/core/mote-dialogue'
+import type { MoteDialogueLink, MoteMainPeriod } from '@agentmux/core/mote-dialogue'
 import { SemanticIcon } from '../theme/icons.js'
 import '../styles/mote-conversation-start.css'
 
@@ -34,6 +34,21 @@ export function MoteConversationStart({ name, portrait, brand, composer, history
 export type MoteConversationHistoryItem = {
   id: string; title: string; author?: string | undefined; period?: MoteMainPeriod | undefined
   current?: boolean; sourceIssue?: string | undefined
+}
+export type MoteConversationHistorySource = Extract<MoteDialogueLink, { kind: 'main' }>
+export type MoteConversationHistoryRow = { item: MoteConversationHistoryItem; source: MoteConversationHistorySource }
+
+/** One row per original Main tenure; the row at the current role revision is the live Main, not an ended period. */
+export function moteConversationHistoryRows(links: readonly MoteDialogueLink[], roleRevision: string | null | undefined,
+  author?: (reference: MoteConversationHistorySource['reference']) => string | undefined): MoteConversationHistoryRow[] {
+  const rows = new Map<string, MoteConversationHistoryRow>()
+  for (const source of links) if (source.kind === 'main') {
+    const id = source.period?.id ?? JSON.stringify(['legacy-main', source.roleRevision, source.operationId])
+    if (!rows.has(id)) rows.set(id, { source, item: { id, title: '主对话', author: author?.(source.reference), period: source.period,
+      current: roleRevision != null && source.roleRevision === roleRevision,
+      sourceIssue: source.period?.range.kind === 'unconfirmed' ? source.period.range.issue : undefined } })
+  }
+  return [...rows.values()]
 }
 
 function time(value: number | null | undefined, locale?: string): string | null {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
-import { MoteConversationStart as StartScene, MoteConversationHistory, type MoteConversationHistoryItem } from '@agentmux/client-ui/components/MoteConversationStart'
-import { agentPromptSubmissionOutcome, type MoteDialogueLink } from '@agentmux/core/mote-dialogue'
+import { MoteConversationStart as StartScene, MoteConversationHistory, moteConversationHistoryRows, type MoteConversationHistorySource as Source } from '@agentmux/client-ui/components/MoteConversationStart'
+import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { MoteMainActions, type MoteStartActions } from './MoteMainActions'
@@ -15,16 +15,6 @@ import { readMoteMainAction, type MoteMainActionResult } from '../lib/mote-main-
 import type { MoteWorkfaceScope, MoteRolloverStart } from '../lib/mote-workface'
 import { sessionPresentationById } from '../lib/session-presentation'
 
-type Source = Extract<MoteDialogueLink, { kind: 'main' }>
-export function desktopMoteStartHistory(links: readonly MoteDialogueLink[], roleRevision?: string | null) {
-  const rows = new Map<string, { item: MoteConversationHistoryItem; source: Source }>()
-  for (const source of links) if (source.kind === 'main') {
-    const id = source.period?.id ?? JSON.stringify([source.roleRevision, source.operationId])
-    if (!rows.has(id)) rows.set(id, { source, item: { id, title: '主对话', period: source.period,
-      current: source.roleRevision === roleRevision, sourceIssue: source.period?.range.kind === 'unconfirmed' ? source.period.range.issue : undefined } })
-  }
-  return [...rows.values()]
-}
 
 /** The welcome uses the existing durable Launcher draft and original Main setup admission. */
 export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenPeriod, automatic }: {
@@ -44,7 +34,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   const submission = useRef<{ operationId: string; prompt: string; revision: number; lifetime: object } | null>(null)
   const automaticSettling = useRef<string | null>(null), automaticRevision = useRef(edits.current)
   const sessions = useAppStore(state => state.sessions)
-  const history = desktopMoteStartHistory(dialogue?.page?.links ?? [], dialogue?.page?.main.roleRevision).map(row => {
+  const history = moteConversationHistoryRows(dialogue?.page?.links ?? [], dialogue?.page?.main.roleRevision).map(row => {
     const candidate = sessionPresentationById(sessions).get(row.source.reference.sessionId)
     const label = candidate?.kind === 'agent' && candidate.control.hostId === row.source.reference.hostId ? candidate.label : undefined
     return { ...row, item: { ...row.item, ...(label ? { title: label } : {}) } }

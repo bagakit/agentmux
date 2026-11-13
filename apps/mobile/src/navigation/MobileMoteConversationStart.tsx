@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { AgentComposer, ClientUiProvider, expandSemanticReferences } from '@agentmux/client-ui'
-import { MoteConversationStart, MoteConversationHistory, type MoteConversationHistoryItem } from '@agentmux/client-ui/components/MoteConversationStart'
-import { agentPromptSubmissionOutcome, type MoteDialogueLink, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
+import { MoteConversationStart, MoteConversationHistory, moteConversationHistoryRows, type MoteConversationHistorySource as Source } from '@agentmux/client-ui/components/MoteConversationStart'
+import { agentPromptSubmissionOutcome, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import { deriveObjectId } from '@agentmux/core/object-id'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import type { MoteDefaultConversation, MotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -28,22 +28,12 @@ function AutomaticStart({ state, query, begin }: { state: MobileMoteMainStartSta
   return null
 }
 
-type Source = Extract<MoteDialogueLink, { kind: 'main' }>
 /** Device draft address only. It never identifies a Session or grants a launch. */
 export function mobileMoteStartDraftKey(client: AgentMuxHostedClient | null, target: MotePreferencesTarget) {
   const owner = getDeviceWorkface(), record = owner.snapshotIdentity()
   return JSON.stringify(['mote-main-start', deriveObjectId('mobile-mote-main-draft', JSON.stringify([record.host?.origin || location.origin,
     client?.runtimeOwnerIdentity?.()?.runtimeId ?? null, record.host?.hostId ?? null, target.spaceId, target.zoneId,
     target.expectedResource.hostId, target.expectedResource.workspaceId, target.expectedResource.workspacePath]))])
-}
-export function mobileMoteStartHistory(links: readonly MoteDialogueLink[], memberName?: (reference: MoteDefaultConversation) => string | undefined): { item: MoteConversationHistoryItem; source: Source }[] {
-  const periods = new Map<string, { item: MoteConversationHistoryItem; source: Source }>()
-  for (const source of links) if (source.kind === 'main') {
-    const id = source.period?.id ?? JSON.stringify(['legacy-main', source.roleRevision, source.operationId])
-    if (!periods.has(id)) periods.set(id, { source, item: { id, title: '主对话', author: memberName?.(source.reference),
-      period: source.period, sourceIssue: source.period?.range.kind === 'unconfirmed' ? source.period.range.issue : undefined } })
-  }
-  return [...periods.values()]
 }
 
 /** Welcome is a view over the existing Device draft and Core setup intent, never a new input queue. */
@@ -61,7 +51,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
   source.current = { client, key, visible, recordId }
   const submission = useRef<{ operationId: string; prompt: string; raw: string; confirm?: AutomaticQuery['confirm'] | undefined; ownsDraft: boolean; revision: number; source: typeof source.current } | null>(null)
   useMobileWebUpdateSafetyOwner(() => local.hasUnconfirmedSave || local.saveIssue ? '本次主对话草稿尚未确认保存；请保全后再更新网页。' : null)
-  const history = mobileMoteStartHistory(dialogue.page?.links ?? [], memberName)
+  const history = moteConversationHistoryRows(dialogue.page?.links ?? [], dialogue.page?.main.roleRevision, memberName)
   async function confirmed(result: MoteMainSetupResult, query: { operationId: string; prompt: string }) {
     const original = submission.current, intent = result.record?.moteMain?.deferredInput
     const outcome = agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)
@@ -127,7 +117,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
         {draft && <button type="button" onClick={() => { void platform.copyText(draft, error => setNotice(error instanceof Error ? error.message : String(error))) }}>复制本次草稿</button>}
         </details>
       </>}
-      history={<MoteConversationHistory items={history.map(value => value.item)} onOpen={item => { const original = history.find(value => value.item.id === item.id); if (original) onOpenPeriod(original.source) }}
+      history={<MoteConversationHistory items={history.map(value => value.item)} onOpen={item => { const original = history.find(value => value.item.id === item.id); if (original) item.current ? onOpenMain(original.source.reference) : onOpenPeriod(original.source) }}
         reading={dialogue.loading} onMore={dialogue.page?.next ? () => { void dialogue.older() } : undefined} issue={dialogue.issue ? <p role="status">{dialogue.issue}</p> : undefined} />}
     /></ClientUiProvider>} />
 }
