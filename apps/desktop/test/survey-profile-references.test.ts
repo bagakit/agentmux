@@ -37,6 +37,68 @@ function arrange() {
   return { tab, tabs, layouts, catalog: spatialCatalog(useAppStore.getState(), []) }
 }
 
+it('native page closure removes only the terminal Browser reference and keeps mixed work and unknown references', () => {
+  const f = arrange(), other = { regionId: 'retained-other-region', browserId: 'other-browser' }
+  const document = useAppStore.getState().documents, dirty = useAppStore.getState().dirtyDocuments
+  useAppStore.setState({ surveyPageReferences: [page, other], surveyZoneSelection: { kind: 'page', ...page } })
+  useAppStore.getState().applyBrowserEvent({ type: 'closed', id: page.browserId })
+  const state = useAppStore.getState()
+  expect(state.surveyPageReferences).toEqual([other]); expect(state.surveyZoneSelection).toBeNull()
+  expect(state.tabs[f.tab.id]?.regions[page.regionId]).toBeUndefined()
+  expect(state.tabs[f.tab.id]?.regions['original-agent']).toEqual(f.tab.regions['original-agent'])
+  expect(state.tabs[f.tab.id]?.regions['dirty-file']).toEqual(f.tab.regions['dirty-file'])
+  expect(state.documents).toBe(document); expect(state.dirtyDocuments).toBe(dirty)
+})
+
+it.each(['released', 'unavailable'] as const)('native page closure keeps Survey membership after %s observation', type => {
+  arrange()
+  useAppStore.setState({ surveyPageReferences: [page], surveyZoneSelection: { kind: 'page', ...page } })
+  useAppStore.getState().applyBrowserEvent(type === 'released'
+    ? { type, id: page.browserId, navigationId: 'original-document' }
+    : { type, id: page.browserId, error: 'Original owner unavailable' })
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual({ kind: 'page', ...page })
+})
+
+it('native page closure keeps the unread original preference bytes', () => {
+  arrange()
+  const raw = [page, { unknown: 'original unread data' }], read = readSurveyPagePreferences(raw)
+  useAppStore.setState({ surveyPageReferences: read.references, surveyPageReadRecovery: read.recovery })
+  useAppStore.getState().applyBrowserEvent({ type: 'closed', id: page.browserId })
+  const state = useAppStore.getState()
+  expect(state.surveyPageReferences).toEqual([])
+  expect(state.surveyPageReadRecovery?.source).toBe(raw)
+  expect((useAppStore.persist.getOptions().partialize!(state) as { surveyPageReferences: unknown }).surveyPageReferences).toBe(raw)
+})
+
+it('native page closure keeps a replacement Browser in the same Region', () => {
+  const f = arrange(), replacement = { regionId: page.regionId, browserId: 'another-browser' }
+  const tabs = { ...f.tabs, [f.tab.id]: { ...f.tab, regions: { ...f.tab.regions,
+    [page.regionId]: { ...f.tab.regions[page.regionId]!, browserId: replacement.browserId, id: replacement.browserId } as never } } }
+  useAppStore.setState({ tabs, surveyPageReferences: [replacement], surveyZoneSelection: { kind: 'page', ...replacement } })
+  useAppStore.getState().applyBrowserEvent({ type: 'closed', id: page.browserId })
+  expect(useAppStore.getState().tabs).toBe(tabs)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([replacement])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual({ kind: 'page', ...replacement })
+})
+
+it('native page closure ignores a late Desktop preference read of the closed reference', async () => {
+  arrange()
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
+  const { api } = await import('../src/renderer/src/lib/api')
+  const raw = [page, { unknown: 'original unread source' }], read = readSurveyPagePreferences(raw)
+  useAppStore.setState({ surveyPageReferences: read.references, surveyPageReadRecovery: read.recovery })
+  let finish!: (value: string) => void
+  vi.spyOn(api.ui, 'readWorkbenchState').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const pending = useAppStore.getState().retrySurveyPagesRead()
+  useAppStore.getState().applyBrowserEvent({ type: 'closed', id: page.browserId })
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+  finish(JSON.stringify({ state: { surveyPageReferences: raw }, version: 1 }))
+  await pending
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+  expect(useAppStore.getState().surveyPageReadRecovery?.source).toBe(raw)
+})
+
 it('public page codecs retain the exact occupant condition and reject duplicates, authority fields and one-sided CAS', () => {
   expect(parseSurveyPageReferences([page])).toEqual([page])
   expect(() => parseSurveyPageReferences([{ ...page, profileId: 'not-an-authority' }])).toThrow()

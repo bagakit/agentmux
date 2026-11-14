@@ -254,6 +254,82 @@ function browserManager(window: ReturnType<typeof fakeWindow>['window'], recover
   ), appLinkHost(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, recoveryPreviews, {}, agents)
 }
 
+describe('Browser native page closure', () => {
+  it('closes only the original ordinary page after accepted native close and destruction', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('result-page', 'https://result.example/complete', 'workspace-a')
+    await manager.create('kept-page', 'https://original.example/work', 'workspace-a')
+    const result = f.children[0]!, kept = f.children[1]!
+    result.webContents.emit('close')
+    expect(manager.target('result-page')?.status).toBe('ready')
+    expect(f.sent.some(event => event.type === 'closed')).toBe(false)
+    result.webContents.close()
+    expect(f.sent).toContainEqual({ type: 'closed', id: 'result-page' })
+    expect(f.sent.some(event => event.type === 'unavailable' && event.id === 'result-page')).toBe(false)
+    expect(manager.target('result-page')).toBeNull()
+    expect(kept.webContents.isDestroyed()).toBe(false)
+    expect(manager.target('kept-page')?.url).toBe('https://original.example/work')
+    manager.dispose()
+  })
+
+  it('keeps destruction without an accepted close recoverable under the original identity', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('unexpected-page', 'https://original.example/work', 'workspace-a')
+    f.children[0]!.webContents.close()
+    expect(f.sent).toContainEqual(expect.objectContaining({ type: 'unavailable', id: 'unexpected-page' }))
+    expect(f.sent.some(event => event.type === 'closed')).toBe(false)
+    await expect(manager.restore('unexpected-page', { workspaceId: 'workspace-a' })).resolves.toMatchObject({ id: 'unexpected-page' })
+    expect(manager.target('unexpected-page')?.status).toBe('ready')
+    manager.dispose()
+  })
+
+  it.each(['will-prevent-unload', 'navigation'])('does not reuse close intent after %s', async cause => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('retained-page', 'https://original.example/work', 'workspace-a')
+    const page = f.children[0]!.webContents
+    page.emit('close')
+    if (cause === 'navigation') page.finishLoad('https://replacement.example/work')
+    else page.emit('will-prevent-unload')
+    expect(manager.target('retained-page')?.status).toBe('ready')
+    expect(f.sent.some(event => event.type === 'closed')).toBe(false)
+    page.close()
+    expect(f.sent).toContainEqual(expect.objectContaining({ type: 'unavailable', id: 'retained-page' }))
+    expect(f.sent.some(event => event.type === 'closed')).toBe(false)
+    manager.dispose()
+  })
+
+  it('does not let a prior vetoed resource release swallow a later page close', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('prior-release', 'https://original.example/work')
+    const page = f.children[0]!.webContents
+    const close = vi.spyOn(page, 'close').mockImplementationOnce(() => page.emit('will-prevent-unload'))
+    await expect(release(manager, 'prior-release')).resolves.toMatchObject({ status: 'retained', reasons: ['beforeunload'] })
+    close.mockRestore()
+    f.sent.length = 0
+    page.emit('close')
+    page.close()
+    expect(f.sent).toContainEqual({ type: 'closed', id: 'prior-release' })
+    expect(f.sent.some(event => event.type === 'released' || event.type === 'unavailable')).toBe(false)
+    manager.dispose()
+  })
+
+  it('keeps a still pending native release as resource release rather than closing the Browser', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('pending-release', 'https://original.example/work')
+    const page = f.children[0]!.webContents
+    const close = vi.spyOn(page, 'close').mockImplementationOnce(() => {})
+    const pending = release(manager, 'pending-release')
+    expect(close).toHaveBeenCalledTimes(1)
+    close.mockRestore()
+    page.emit('close')
+    page.close()
+    await expect(pending).resolves.toMatchObject({ status: 'released' })
+    expect(f.sent).toContainEqual(expect.objectContaining({ type: 'released', id: 'pending-release' }))
+    expect(f.sent.some(event => event.type === 'closed')).toBe(false)
+    manager.dispose()
+  })
+})
+
 describe('Browser exact Agent association and trusted handoff', () => {
   const recipient = { kind: 'agent' as const, hostId: 'original-host', agentSessionId: 'created-agent', run: { runId: 'created-run' } }
   const identity = { hostId: recipient.hostId, agentSessionId: recipient.agentSessionId }
