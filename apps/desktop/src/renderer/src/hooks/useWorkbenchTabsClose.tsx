@@ -5,17 +5,24 @@ import { useAppStore } from '../store'
 import { preparedCloseConfirmation, lastViewCloseCopy, lastViewCloseStops, type LastViewCloseConfirmation } from '../lib/last-view-close-confirmation'
 import { samePreparedCloseReview } from '../lib/workbench-close-owner'
 import { ConfirmationDialog } from '../components/ConfirmationDialog'
+import { useSourceWorkbenchClose } from './useSourceWorkbenchClose'
+import { requiresSourceWorkbenchClose } from '../lib/source-workbench-close'
 
 export type WorkbenchTabsCloseRequest = { workspaceId: string; group: Pick<TabGroup, 'id' | 'tabOrder'>; tabIds: readonly string[]; subject: string }
 type Pending = { request: WorkbenchTabsCloseRequest; remaining: string[]; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null; confirmation: LastViewCloseConfirmation }
 /** Each GUI confirmation applies exactly the same durable plan as the public CLI. */
 export function useWorkbenchTabsClose() {
+  const sourceClose = useSourceWorkbenchClose()
   const [pending, setPending] = useState<Pending | null>(null), [closing, setClosing] = useState(false), running = useRef(false)
   async function advance(request: WorkbenchTabsCloseRequest, ids: readonly string[]): Promise<void> {
     const remaining = [...ids]
     while (remaining.length) {
       const tabId = remaining.shift()!, state = useAppStore.getState()
       if (!state.tabs[tabId] || !state.checkTabClose(request.workspaceId, request.group.id, tabId)) continue
+      if (requiresSourceWorkbenchClose(state, tabId)) {
+        if (!await sourceClose.request({ displayWorkspaceId: request.workspaceId, groupId: request.group.id, tabId, regionId: state.tabs[tabId]!.layout.activeRegionId }, 'tab', request.subject)) return
+        continue
+      }
       try {
         const record = await state.prepareWorkbenchClose({ target: { kind: 'tab-occurrence', displayWorkspaceId: request.workspaceId, groupId: request.group.id, tabId }, keepAgentSessions: false })
         const confirmation = preparedCloseConfirmation(record, useAppStore.getState())
@@ -51,5 +58,5 @@ export function useWorkbenchTabsClose() {
     subject={pending?.request.subject ?? ''} confirmLabel={copy?.confirmLabel ?? 'Close'}
     {...(copy?.secondaryLabel ? { secondaryLabel: copy.secondaryLabel, onSecondary: () => void confirm(true) } : {})}
     busy={closing} onCancel={() => !closing && setPending(null)} onConfirm={() => void confirm()} />
-  return { request, dialog, closing }
+  return { request, dialog: <>{dialog}{sourceClose.dialog}</>, closing }
 }

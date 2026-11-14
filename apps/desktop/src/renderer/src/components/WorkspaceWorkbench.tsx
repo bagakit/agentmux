@@ -4,6 +4,8 @@ import type { SpaceCloseReceipt } from '@agentmux/core'
 import { samePreparedCloseReview } from '../lib/workbench-close-owner'
 import { WorkbenchRegionOwner } from './WorkbenchRegionOwners'
 import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
+import { useSourceWorkbenchClose } from '../hooks/useSourceWorkbenchClose'
+import { requiresSourceWorkbenchClose } from '../lib/source-workbench-close'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
@@ -803,6 +805,7 @@ function WorkbenchRegionContent({
   const reportError = useAppStore.getState().reportError
   const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
+  const sourceClose = useSourceWorkbenchClose()
   const surface = tab.regions[node.regionId]
   const projectionSource = sourceRegionProjectionReference(surface)
   const source = useAppStore(state => projectionSource ? originalSourceEntryByKey(state, spaceMountKey(projectionSource.reference)) : undefined)
@@ -830,6 +833,10 @@ function WorkbenchRegionContent({
       const occurrences = Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.flatMap(group => group.tabOrder.includes(tab.id) ? [{ displayWorkspaceId, groupId: group.id }] : []))
       const matches = occurrences.filter(o => (!groupId || o.groupId === groupId) && (!reference || o.displayWorkspaceId === reference.displayWorkspaceId && o.groupId === reference.groupId))
       if (matches.length !== 1) throw new Error('Choose this Region’s exact original display occurrence before closing it. Its content and resources are retained.')
+      if (requiresSourceWorkbenchClose(state, tab.id, node.regionId)) {
+        await sourceClose.request({ ...matches[0]!, tabId: tab.id, regionId: node.regionId }, 'region', 'Original workface')
+        return
+      }
       const record = await state.prepareWorkbenchClose({ target: { kind: 'region', ...matches[0]!, tabId: tab.id, regionId: node.regionId }, keepAgentSessions: false })
       const confirmation = preparedCloseConfirmation(record, useAppStore.getState())
       if (!confirmation) { await state.applyWorkbenchClose(record); return }
@@ -1025,6 +1032,7 @@ function WorkbenchRegionContent({
         onCancel={() => !closingRegion && setConfirmingClose(null)}
         onConfirm={() => void confirmRegionClose(false)}
       />
+      {sourceClose.dialog}
   </>
 }
 
