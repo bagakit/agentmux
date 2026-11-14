@@ -1,5 +1,14 @@
 import { NATIVE_CONVERSATION_SOURCE } from './conversation-sources.js'
-import type { AgentMessageChannel, AgentSessionUserMessageSource } from '@agentmux/core'
+import type { AgentMessageChannel, AgentPromptInputKey, AgentSessionUserMessageSource } from '@agentmux/core'
+
+/** Submission userContent with a message key retains rendered wire. Captured
+ * external journal records instead store envelope.body, just like prompt bodies.
+ * These are producer facts, never inferred from tags or a displayed author. */
+export function conversationInputTextBoundary(key: AgentPromptInputKey | undefined, hasPublicBody: boolean,
+  capturedExternalBody = false,
+  fallback: 'wire' | 'body' = 'wire'): 'wire' | 'body' {
+  return hasPublicBody ? key?.kind === 'message' && !capturedExternalBody ? 'wire' : 'body' : fallback
+}
 
 const channelLabels: Readonly<Record<AgentMessageChannel, string>> = {
   terminal: '终端',

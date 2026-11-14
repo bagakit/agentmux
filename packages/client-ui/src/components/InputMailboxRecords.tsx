@@ -11,6 +11,7 @@ import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentat
 import { useClientUiPlatform } from '../platform.js'
 import { inputMailboxItemKey, type useAgentInputMailbox } from '../lib/use-agent-input-mailbox.js'
 import { AGENTMUX_SYSTEM_SPEAKER_ID, speakerOfUserMessage, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
+import { conversationInputTextBoundary } from '../lib/conversation-input-source.js'
 
 export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<ConversationMessageProps, 'inputContext' | 'inputContextSource' | 'copyText'> & { text: string | null; previewText?: string; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string; a2aNotificationId?: string } {
   const author = sessionInputMailboxAuthor(item)
@@ -29,7 +30,7 @@ export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<Conv
   const message = admission?.intent?.message ?? record?.launch?.message
   // Core performPromptSubmission records the original prompt body here, but a message-key producer records its rendered wire.
   return { text: message?.userContent ?? item.record?.admission?.intent?.prompt ?? item.record?.launch?.prompt ?? null,
-    contentBoundary: item.key.kind === 'prompt' && message?.userContent !== undefined ? 'body' : 'wire',
+    contentBoundary: conversationInputTextBoundary(item.key, message?.userContent !== undefined),
     inputContext: message?.inputContext, inputContextSource: message?.inputContextSource,
     ...(admission?.intent?.prompt !== undefined ? { copyText: admission.intent.prompt } : record?.launch?.prompt !== undefined ? { copyText: record.launch.prompt } : {}),
     speaker, source: message?.sourceChannel ?? '原提交', state: item.record ? '原提交已登记' : '原提交观察未确认',

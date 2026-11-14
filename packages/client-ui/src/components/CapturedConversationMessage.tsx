@@ -12,6 +12,7 @@ import { conversationMessageSourceKey } from '../lib/conversation-message-locati
 import { ConversationSendReceipt, ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
 import { useClientUiPlatform } from '../platform.js'
 import { conversationSendReceiptState, resolveConversationShowSendReceipts } from '../lib/conversation-send-receipts.js'
+import { conversationInputTextBoundary } from '../lib/conversation-input-source.js'
 export type CapturedMessagePresentation = Pick<ConversationMessageProps, 'detailsOnlyMetadata' | 'sourceLabelsInDetails' | 'showInputSource'> & {
   expandedContent: boolean
   inputReadPending: boolean
@@ -42,7 +43,8 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
   const input = record?.input ?? item
   const message = <ConversationMessage {...props} sendReceipt={Boolean(sendReceipt)} {...(record?.executionHostId ? { executionHostId: record.executionHostId } : {})} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     {...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})}
-    a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire' : item.kind === 'user_message' && input.publicContent === 'confirmed' ? 'body' : props.contentBoundary ?? 'wire'}
+    a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire'
+      : conversationInputTextBoundary(input.inputRef, item.kind === 'user_message' && input.publicContent === 'confirmed', item.authorExternal !== undefined, props.contentBoundary)}
     {...(originalSubmission ? { messageStatus: <><ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} showTime={false} attentionOnly={props.detailsOnlyMetadata} active={showSendReceipts && props.active !== false && !confirmed && !props.expandedContent} />{showSendReceipts && inputReadPending && props.active !== false && !confirmed && !props.expandedContent ? <span role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}{props.messageStatus}</> } : {})}
     messageDetails={<>{originalSubmission ? <ConversationSubmissionFacts record={originalSubmission} /> : <dl className="conversation-input-details__facts">
       <dt>记录方式</dt><dd>{source.label}</dd>
