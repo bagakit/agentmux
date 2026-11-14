@@ -7,6 +7,7 @@ import original from '../mote-daily-goal/vitest.config.mts'
 const repository = resolve(import.meta.dirname, '../../../../..')
 export default defineConfig({ ...original,
   resolve: { ...original.resolve, alias: [
+    { find: /^@agentmux\/identity\/runtime-source$/, replacement: resolve(repository, 'packages/identity/dist/runtime-source.js') },
     { find: /^@scure\/base$/, replacement: resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') },
     { find: /^@agentmux\/git$/, replacement: resolve(repository, 'packages/git/src/index.ts') },
     ...(original.resolve?.alias as Array<{ find: RegExp; replacement: string }> ?? [])

@@ -1,4 +1,3 @@
-import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -29,7 +28,7 @@ const bridge = vi.hoisted(() => ({  api: null as AgentMuxPreloadApi | null, invo
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { [name]: api }) } },
   ipcRenderer: { invoke: bridge.invoke,
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.renderer.get(channel) ?? new Set(); set.add(fn); bridge.renderer.set(channel, set) },
@@ -39,19 +38,32 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
+    off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false, on: vi.fn(), off: vi.fn(), once: vi.fn() },
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false, encryptString: vi.fn(), decryptString: vi.fn() },
+  BrowserWindow: { fromWebContents: vi.fn(), getFocusedWindow: vi.fn(() => null) },
+  Notification: class { static isSupported() { return false }; show() {} }
 }))
-vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
-  AgentMuxControlServer: class { constructor(options: any) { bridge.controlOptions = options } async start() {} async stop() {} }
-}))
+vi.mock('@agentmux/core', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core')>()
+  return { ...actual, AgentMuxControlServer: class extends actual.AgentMuxControlServer {
+    constructor(options: any) { super(options); bridge.controlOptions = options }
+  } }
+})
 import { openDemandStore } from '@agentmux/demand'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { AgentMuxControlServer as PublicServer } from '../../../packages/core/src/public-rpc-server'
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
+// Keep this Node build tool's file import.meta URL outside the DOM transform.
+const nodeRequire = createRequire(resolve('packages/core/package.json'))
+const { browserSourceBuild } = nodeRequire('../browser/scripts/source-build.mjs')
+const demandAliases = Object.fromEntries(Object.entries(nodeRequire('../demand/package.json').exports as Record<string, { import: string }>).map(([key, value]) => [
+  `@agentmux/demand${key === '.' ? '' : key.slice(1)}`, resolve(process.env.AGENTMUX_DAILY_GOAL_REPOSITORY!, 'packages/demand', value.import.replace('./dist/src/', './src/').replace(/\.js$/u, '.ts'))
+]))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -63,10 +75,25 @@ import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-
 import { issueAgentCapability, hashAgentCapability } from '../../../packages/core/src/agent-capability'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  cookieFiles = { setFileOwner: vi.fn(), setConfirmationHandler: vi.fn() }
+  extensions = { setConfirmationHandler: vi.fn() }
+  onChange = vi.fn(() => () => {})
+  onEnvironmentApplicationChange = vi.fn(() => () => {})
+  cleanupApprovedTrash = vi.fn(async () => {})
+  async initialize() {}
+  async dispose() {}
+} }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
+  setPresentationWindowOwner = vi.fn()
+  refreshAgentFeedback = vi.fn()
+  capsuleDocumentIds = vi.fn(() => [])
+  release = vi.fn()
+  flushProfileActivity = vi.fn(async () => {})
+  dispose() {}
+} }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
 await vi.hoisted(async () => { await import('../src/preload/index') })
@@ -78,6 +105,7 @@ import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
+import { createHostGoals } from '../../host/src/goals'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { GoalContinuationControl } from '../src/renderer/src/components/GoalContinuationControl'
@@ -100,7 +128,7 @@ beforeAll(async () => {
   cliRoot = await mkdtemp(join(tmpdir(), 'ag-goal-cli-')); sourceCli = join(cliRoot, 'agentmux.mjs')
   const repository = process.env.AGENTMUX_DAILY_GOAL_REPOSITORY!, proof = process.env.AGENTMUX_DAILY_GOAL_PROOF ?? process.env.AGENTMUX_GOAL_CONTENT_PROOF
   expect(repository).toBeTruthy()
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand/goal-plan': resolve(repository, 'packages/demand/src/goal-plan.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
+  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { ...demandAliases, '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
     plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
       if (proof && (args.path.startsWith(resolve(repository, 'packages/core/src') + '/') || args.path.startsWith(resolve(repository, 'packages/demand/src') + '/'))) appendFileSync(proof, JSON.stringify({ file: relative(repository, args.path), sha256: createHash('sha256').update(readFileSync(args.path)).digest('hex'), consumer: 'actual-source-cli' }) + '\n')
       const mutant = process.env.AGENTMUX_DAILY_GOAL_MUTANT ? JSON.parse(process.env.AGENTMUX_DAILY_GOAL_MUTANT) : null
@@ -117,6 +145,8 @@ beforeAll(async () => {
 afterAll(async () => { await rm(cliRoot, { recursive: true, force: true }) })
 const initial = useAppStore.getState()
 let demands: ReturnType<typeof openDemandStore>
+let userState: ReturnType<typeof testWorkbenchUserState>
+let hostGoals: ReturnType<typeof createHostGoals>, hostService: AgentMuxRpcService
 let directory: string, client: AgentMuxClient, runtime: RuntimeController, manager: ContinuousProgressLoopManager
 let disposeIpc: (() => Promise<void>) | undefined, disposeStore: (() => void) | undefined
 let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxStoredAgentSession
@@ -162,8 +192,19 @@ beforeEach(async () => {
   runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', label: 'Private local', kind: 'local' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  hostGoals = createHostGoals({ configurationPath: join(directory, 'config.json'), projects: async () => [],
+    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner' }) }) as never,
+    coreCall: (_hostId, method, params, context) => hostService.call(method, params, context) })
+  hostService = new AgentMuxRpcService({ coreClients: () => runtime.rpcClients(), goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
+    execute: (request, _name, originalContext) => useAppStore.getState().executeControl(request, originalContext?.signal, { admittedControlRequestId: request.requestId }),
+    progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
+  const originalCore = runtime.callOriginalCore.bind(runtime)
+  vi.spyOn(runtime, 'callOriginalCore').mockImplementation((hostId, method, params, context) => {
+    if (hostId === 'local' && (method.startsWith('goal.') || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.') || method === 'agent.open' || method === 'agent.provider.ls')) return hostService.call(method, params, context) as never
+    return originalCore(hostId, method, params, context)
+  })
+  demands = hostGoals.demands
   config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
-  demands = openDemandStore({ root: join(directory, 'goals') })
   await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
@@ -189,11 +230,13 @@ beforeEach(async () => {
     } else send()
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
-  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(bridge.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  const fixtureDocuments = testAppDocumentSources(bridge.sender)
+  userState = testWorkbenchUserState()
+  disposeIpc = await registerIpc({ workbenchUserState: userState, appDocumentSources: fixtureDocuments, workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: expect.getState().currentTestName?.startsWith('Mote new-chat origin:')
       ? new MoteOriginWorkspaceFiles(() => ({ kind: 'local' }) as never)
-      : { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
+      : { read: vi.fn(), listFiles: vi.fn(), readDirectory: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender } as IpcMainInvokeEvent, ...values)
@@ -213,8 +256,10 @@ afterEach(async () => {
   await act(async () => root?.unmount()); container?.remove(); disposeStore?.(); disposeStore = undefined
   useAppStore.setState(initial, true)
   window.dispatchEvent(new Event('pagehide'))
-  await api.ui.requestStorageFlush()
-  const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
+  const writer = userState.observe()
+  // No writes means there is no checkpoint to confirm. Actual write failures still flush and surface.
+  if (writer.lastConfirmedWrite || writer.lastFailure) await api.ui.requestStorageFlush()
+  const cleanup = await Promise.allSettled([hostGoals?.dispose(), hostService?.dispose(), manager?.stop(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 })
@@ -286,7 +331,7 @@ it('original activity public Source CLI authenticates the author and reaches Mai
     const recovered = await typed.call('goal.activity.inspect', { goalId: 'goal', operationId: 'activity-lost' })
     expect(recovered.activity).toMatchObject({ operationId: 'activity-lost', actorId: session.agentSessionId, kind: 'test' })
     expect((await demands.get('goal'))?.activities.filter(row => row.operationId === 'activity-lost')).toHaveLength(1)
-    const reopened = openDemandStore({ root: join(directory, 'goals') })
+    const reopened = openDemandStore({ root: join(directory, 'demands') })
     expect(await reopened.inspectActivity('goal', body.operationId)).toMatchObject({ activity, diskDurability: 'confirmed' })
     expect((await reopened.get('goal'))?.activities.some(row => row.id === 'old-activity')).toBe(true)
     expect((await typed.call('app.snapshot', { include: ['goals', 'activity'] })).activity).toContainEqual({ goalId: 'goal', ...activity })
@@ -884,7 +929,7 @@ it('closing the last actual resource Tab and opening a new discussion retain ori
   expect(goalsForMote(useAppStore.getState().demands, after.sessionIds, after.contentRef).map(goal => goal.id)).toContain('goal')
   const next = { ...createWorkbenchTab('new-discussion', { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' }), topicId: scope.topic.id, space: scope.address }
   useAppStore.setState({ tabs: { [next.id]: next }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('new-group', [next.id]) } })
-  const restarted = await openDemandStore({ root: join(directory, 'goals') }).get('goal')
+  const restarted = await openDemandStore({ root: join(directory, 'demands') }).get('goal')
   expect(restarted).toEqual(original)
   const fresh = moteGoalContext(useAppStore.getState(), scope)
   expect(goalsForMote(useAppStore.getState().demands, fresh.sessionIds, fresh.contentRef).map(goal => goal.id)).toContain('goal')
@@ -1394,9 +1439,12 @@ function PickerDetail() {
   const demand = useAppStore(state => state.demands.goal)!
   return <GoalDetail demand={{ ...demand, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />
 }
+async function readPickerPersistedState() { return JSON.parse(await api.ui.readWorkbenchState()).state }
 async function pickerButton(label: string) {
-  const node = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent?.trim() === label)
-  expect(node, label).toBeDefined(); await act(async () => node!.click()); return node!
+  const matches = [...document.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.isConnected && button.checkVisibility() && (button.getAttribute('aria-label') === label || button.textContent?.trim() === label))
+  expect(matches, label).toHaveLength(1)
+  await vi.waitFor(() => expect(matches[0]!.disabled).toBe(false), { timeout: 5000 })
+  await act(async () => matches[0]!.click()); return matches[0]!
 }
 async function pickerCore() {
   const privateRoot = join(directory, 'picker-private-core'); await mkdir(privateRoot)
@@ -1415,13 +1463,16 @@ it('Demand picker: common properties and accurate names are in the actual body; 
   const rows = goalAgentRows({ ...useAppStore.getState(), config: { ...config, workspaces: [...config.workspaces, workspace] }, sessions: [project, source], agentNames: { 'source-view': 'Named requester' } }, demand, ['unavailable-original'])
   expect(rows.map(row => row.reference)).toEqual(['accurate-source', 'project-agent', 'unavailable-original'])
   expect(rows[0]).toMatchObject({ name: 'Named requester', participated: true, related: false, selectable: true }); expect(demand.sessionIds).toEqual([])
-  useAppStore.setState({ sessions: useAppStore.getState().sessions.map(item => item.id === session.agentSessionId ? { ...item, id: 'local:original-presentation' } : item), agentNames: { 'local:original-presentation': 'Named original colleague' } })
   await act(async () => root.render(<PickerDetail />))
+  const sessions = useAppStore.getState().sessions.map(item => item.id === session.agentSessionId ? { ...item, id: 'local:original-presentation' } : item)
+  const currentSession = sessions.find(item => item.control.agentSessionId === session.agentSessionId)!
+  useAppStore.setState({ sessions, agentNames: { [currentSession.id]: 'Named original colleague' } })
   expect(container.querySelector('.goals-common-properties')).not.toBeNull()
-  expect(container.querySelector('.goals-common-properties')!.compareDocumentPosition(container.querySelector('.goals-intent-body') ?? container.querySelector('.goals-alignment')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  // Main reading precedes secondary properties in the current Goal detail contract.
+  expect(container.querySelector('.goals-common-properties')!.compareDocumentPosition(container.querySelector('.goals-intent-body') ?? container.querySelector('.goals-alignment')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
   expect(container.querySelector('.goal-collaboration')).not.toBeNull()
   await pickerButton('Choose Goal assignees')
-  expect(document.querySelector(`[data-session-id="${session.agentSessionId}"]`)?.textContent).toContain('Named original colleague')
+  await vi.waitFor(() => expect(document.querySelector(`[data-session-id="${session.agentSessionId}"]`)?.textContent).toContain('Named original colleague'), { timeout: 5000 })
   expect(document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.checked).toBe(true)
   await pickerButton('Save relationships')
   await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')).toBeNull())
@@ -1445,18 +1496,27 @@ it('Demand picker: retained multiselect and opening CAS survive remount and conf
   await chooseField(document.querySelector<HTMLElement>('[aria-label="Replacement Supervisor"]')!, '')
   const retained = useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey('goal', 'assignees')]!
   expect(retained).toMatchObject({ selected: [], expectedUpdatedAt: opening, replacement: '' })
-  const written = JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state
-  expect(restoredGoalAgentSelectionDrafts(written.goalAgentSelectionDrafts)).toEqual(useAppStore.getState().goalAgentSelectionDrafts)
+  await vi.waitFor(async () => {
+    const written = await readPickerPersistedState()
+    expect(restoredGoalAgentSelectionDrafts(written.goalAgentSelectionDrafts)).toEqual(useAppStore.getState().goalAgentSelectionDrafts)
+  }, { timeout: 5000 })
   await pickerButton('Cancel')
   await demands.update('goal', { priority: 'urgent' }); await act(async () => useAppStore.getState().refreshDemand('goal'))
+  await vi.waitFor(async () => expect(useAppStore.getState().demands.goal!.updatedAt).toBe((await demands.get('goal'))!.updatedAt), { timeout: 5000 })
   await pickerButton('Choose Goal assignees')
   expect(document.querySelector<HTMLInputElement>(`[data-session-id="${session.agentSessionId}"] input`)!.checked).toBe(false)
   expect(document.querySelector<HTMLElement>('[aria-label="Replacement Supervisor"]')?.dataset.value).toBe('')
   await pickerButton('Save relationships')
   expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId]); expect((await demands.get('goal'))!.supervisorSessionId).toBe(session.agentSessionId)
-  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')?.textContent).toContain('Relationships are not saved'))
+  await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')?.textContent).toContain('Goal changed'))
   expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry save')).toBe(false)
-  await pickerButton('Use current Goal version for this draft'); await pickerButton('Save relationships')
+  await pickerButton('Use current Goal version for this draft')
+  await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent?.trim() === 'Save relationships')).toBe(true), { timeout: 5000 })
+  await pickerButton('Save relationships')
+  await vi.waitFor(() => {
+    const picker = document.querySelector('.goal-agent-picker')
+    return !picker || picker.querySelector('button.primary-button')?.disabled === false
+  }, { timeout: 10000 })
   await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([]))
   expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: [], supervisorSessionId: null, sessionIds: [session.agentSessionId], priority: 'urgent' })
   expect(writes).toEqual([]); expect(manager.list()).toEqual([])
@@ -1470,13 +1530,14 @@ it('Demand picker: Mote creation waits on the original owner, freezes one OP, pr
   await chooseField(document.querySelector<HTMLElement>('[aria-label="Mote for new Session"]')!, scope.topic.id)
   await chooseField(document.querySelector<HTMLElement>('[aria-label="New Session Agent configuration"]')!, 'picker-fixture')
   const actual = useAppStore.getState().executeControl, lost = vi.spyOn(useAppStore.getState(), 'executeControl').mockImplementation(async request => {
-    const result = await actual(request); if (request.operation === 'agent.open') throw new Error('Original creation acknowledgement lost'); return result
+    const result = await actual(request, undefined, { admittedControlRequestId: request.requestId }); if (request.operation === 'agent.open') throw new Error('Original creation acknowledgement lost'); return result
   })
   useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'Original useful unsent draft')
   const activeBefore = structuredClone(useAppStore.getState().workbenchSpaceSelection), originalTab = structuredClone(useAppStore.getState().tabs['content-tab'])
   expect(activeBefore).toMatchObject({ tabId: 'content-tab', regionId: 'content-region' })
   expect(originalTab?.regions['content-region']).toMatchObject({ kind: 'agent', sessionId: session.agentSessionId })
-  await pickerButton('Create Mote Session'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  await pickerButton('Create Mote Session')
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
   const draft = readGoalAgentCreationDraft(useAppStore.getState().goalAgentCreationDrafts[goalCreationDraftKey('goal', 'assignees')], 'goal', 'assignees')!
   expect(draft).toMatchObject({ phase: 'may-have-dispatched', request: { focus: false, content: { kind: 'new-agent', executorId: 'picker-fixture' } } })
   expect(draft.request.content).not.toHaveProperty('prompt'); expect(draft.request.content).not.toHaveProperty('executionWorkspaceId')
@@ -1488,8 +1549,8 @@ it('Demand picker: Mote creation waits on the original owner, freezes one OP, pr
   release(); await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker')!.textContent).toContain('acknowledgement lost'))
   const originalPrepared = await delayed.mock.results[0]!.value
   expect(originalPrepared.absolutePath).toBe(scratchTopicIdentityPath(scope.workspace, scope.topic))
-  expect(originalPrepared.prompt).toContain('Mote personality from')
-  if (scope.topic.wiki?.enabled) expect(originalPrepared.prompt).toContain(scope.topic.wiki.content)
+  expect(originalPrepared.prompt).toContain('Your persistent Mote identity is launcher:leader')
+  if (scope.topic.wiki?.enabled) expect(originalPrepared.optionalContext.map(context => context.text).join('\n')).toContain(scope.topic.wiki.content)
   delayed.mockRestore(); lost.mockRestore()
   expect(useAppStore.getState().workbenchSpaceSelection).toEqual(activeBefore)
   expect(useAppStore.getState().tabs['content-tab']).toEqual(originalTab)
@@ -1503,8 +1564,14 @@ it('Demand picker: Mote creation waits on the original owner, freezes one OP, pr
   expect(inspected.requestId).toBe(draft.operationId)
   const createdId = inspected.agentSessionId!
   expect(createdId).toBe(await f.core.resolveAgentCreationSessionId(draft.operationId))
-  expect(readGoalAgentCreationDraft(restoredGoalAgentCreationDrafts(JSON.parse(window.localStorage.getItem('agentmux-workbench-v1')!).state.goalAgentCreationDrafts)[goalCreationDraftKey('goal', 'assignees')], 'goal', 'assignees')?.operationId).toBe(draft.operationId)
+  await vi.waitFor(async () => {
+    expect(readGoalAgentCreationDraft(restoredGoalAgentCreationDrafts((await readPickerPersistedState()).goalAgentCreationDrafts)[goalCreationDraftKey('goal', 'assignees')], 'goal', 'assignees')?.operationId).toBe(draft.operationId)
+  }, { timeout: 5000 })
   await pickerButton('Save relationships')
+  await vi.waitFor(() => {
+    const picker = document.querySelector('.goal-agent-picker')
+    return !picker || picker.querySelector('button.primary-button')?.disabled === false
+  }, { timeout: 10000 })
   await vi.waitFor(async () => expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]))
   expect((await demands.get('goal'))!.assigneeSessionIds).toEqual([session.agentSessionId, createdId]); expect((await demands.get('goal'))!.sessionIds).toContain(createdId)
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
