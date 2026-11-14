@@ -20,6 +20,8 @@ export type AgentMuxRpcConnection = {
   /** Actual receiving hop; a frame cannot assert its own provenance. */
   transport?: 'unix' | 'http' | 'relay'
   signal: AbortSignal
+  /** Independent pre-admission opening lifetime; never the admitted business operation signal. */
+  openingSignal?: AbortSignal
   /** Trusted original author restriction; JSON cannot supply a callback. */
   assertCurrent?(): void | Promise<void>
   stream: boolean
@@ -39,6 +41,7 @@ export class AgentMuxRpcDispatcher {
         try {
           const { caller, runtimeFence, ...params } = rpcRecord(request.params ?? {})
           const context: AgentMuxRpcCallContext = { signal: channel.signal, afterResponse: channel.afterResponse, responseId: request.id ?? null,
+            ...(channel.openingSignal ? { openingSignal: channel.openingSignal } : {}),
             ...(channel.assertCurrent ? { assertCurrent: channel.assertCurrent } : {}),
             ...(runtimeFence === undefined ? {} : { runtimeFence: rpcRecord(runtimeFence, ['runtimeId', 'ownerInstanceId']) as NonNullable<AgentMuxRpcCallContext['runtimeFence']> }),
             ...(channel.principal === undefined ? {} : { principal: channel.principal }),

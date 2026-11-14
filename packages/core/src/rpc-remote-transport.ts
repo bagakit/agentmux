@@ -62,7 +62,7 @@ export class AgentMuxRpcRemoteTransport {
   /** Read only local carrier facts; never establish a channel or send a request. */
   remoteTransportObservation(): RemoteTransportObservation { return { ...this.observation, observedAt: Date.now() } }
   async open(request: JSONRPCRequest, receive: (frame: unknown) => void, end: (error?: Error) => void,
-    signal: AbortSignal, dispatch: () => void): Promise<{ dispose(): Promise<void> }> {
+    signal: AbortSignal, dispatch: () => void, options: { cancelOpening?: boolean } = {}): Promise<{ dispose(): Promise<void> }> {
     let channel: AgentMuxRpcStdioProcessTransport
     try { channel = await observeRead(this.selection, signal) }
     catch (error) {
@@ -72,7 +72,7 @@ export class AgentMuxRpcRemoteTransport {
         { disposition: 'not_applied', confirmedInputBytes: null }, error.logId)
       throw error
     }
-    return await channel.open(request, receive, end, signal, dispatch)
+    return await channel.open(request, receive, end, signal, dispatch, options)
   }
   dispose(): void {
     if (this.closed) return

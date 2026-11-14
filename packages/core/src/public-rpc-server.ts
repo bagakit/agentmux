@@ -12,8 +12,8 @@ import { ControlEndpointPublication } from './control-endpoint-publication.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcLines, rpcEncode, AGENTMUX_RPC_MAX_MESSAGE_BYTES,
-  parseRpcRequest, rpcRecord, rpcFailure, type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
-import type { AgentMuxRpcStreamMethod, AgentMuxRpcPrincipal } from './public-rpc.js'
+  parseRpcRequest, parseRpcOpeningCancel, rpcRecord, rpcFailure, type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
+import { isAgentMuxRpcMethod, isAgentMuxRpcStream, type AgentMuxRpcStreamMethod, type AgentMuxRpcPrincipal } from './public-rpc.js'
 import { RPC_FORWARD, RpcForwardingAuthority, receiveForwardedCall, type RpcForwardingPeer } from './rpc-forwarding.js'
 import { CoreRelayGateway, type AgentMuxRelayGatewaySource } from './public-rpc-relay-gateway.js'
 
@@ -254,11 +254,18 @@ export class AgentMuxControlServer {
     let forwarded: ReturnType<AgentMuxControlServer['connection']> | undefined
     let delegated: Awaited<ReturnType<typeof receiveForwardedCall>> | undefined
     let activeCalls = 0
+    const openingControllers = new Map<string | number, AbortController>()
     const releaseDelegation = () => { if (activeCalls === 0) { delegated?.dispose(); delegated = undefined } }
     socket.once('close', () => { this.sockets.delete(socket); channel.dispose(); forwarded?.dispose(); releaseDelegation() })
     const receive = async (value: unknown): Promise<void> => {
       let incoming = value
       const source = value && typeof value === 'object' && !Array.isArray(value) ? value as { method?: unknown } : undefined
+      if (mode === 'ordinary' && source?.method === 'system.opening.cancel') {
+        const requestId = parseRpcOpeningCancel(value)
+        openingControllers.get(requestId)?.abort(new AgentMuxError(
+          'The original opening reader was cancelled; admitted operations and shared carriers are retained.', 'CONTROL_CANCELLED'))
+        return
+      }
       if (source?.method === RPC_FORWARD.target) {
         if (mode !== 'ordinary') throw new AgentMuxError('Forwarding negotiation already ended.', 'CONTROL_PERMISSION_DENIED')
         const request = parseRpcRequest(value); rpcRecord(request.params, [])
@@ -293,7 +300,13 @@ export class AgentMuxControlServer {
         if (!forwarded || request.method !== 'system.subscription.cancel') throw new AgentMuxError('A forwarding grant authorizes only its exact original request.', 'CONTROL_PERMISSION_DENIED')
       }
       const owner = forwarded ?? channel
-      const context = { ...owner.context, afterResponse: [] as Array<() => void | Promise<void>> }
+      const request = Array.isArray(incoming) ? undefined : parseRpcRequest(incoming)
+      const openingId = request && Object.hasOwn(request, 'id') && request.id !== null && isAgentMuxRpcMethod(request.method) &&
+        !isAgentMuxRpcStream(request.method, rpcRecord(request.params ?? {})) ? request.id : undefined
+      const openingController = openingId === undefined ? undefined : new AbortController()
+      if (openingId !== undefined) openingControllers.set(openingId, openingController!)
+      const context = { ...owner.context, afterResponse: [] as Array<() => void | Promise<void>>,
+        ...(openingController ? { openingSignal: AbortSignal.any([owner.context.signal, openingController.signal]) } : {}) }
       let responded = false
       activeCalls++
       try {
@@ -305,6 +318,7 @@ export class AgentMuxControlServer {
         if (responded) owner.dispose()
         else throw error
       } finally {
+        if (openingId !== undefined && openingControllers.get(openingId) === openingController) openingControllers.delete(openingId)
         activeCalls--
         if (socket.destroyed || forwarded && forwarded.subscriptions.size === 0) releaseDelegation()
       }

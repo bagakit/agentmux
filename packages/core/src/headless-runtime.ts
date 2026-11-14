@@ -38,7 +38,7 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
   /** Borrow original remote Hosts. An exact selector may join their handle assembly; an omitted selector stays cached. */
-  coreClients?: (hostId?: string) => readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
+  coreClients?: (hostId?: string, read?: { signal?: AbortSignal | undefined }) => readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** The original Host composes only its exact configured public edge transports. */
   routeEdge?: HostRouteGatewayOptions['edge']
   routeEdges?: HostRouteGatewayOptions['edges']
@@ -231,7 +231,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
       nodePublishing: new NodePublishingOwner({ stateDirectory, runtimeId, ownerInstanceId }),
-      coreClients: async hostId => [{ hostId: 'local', client: client! }, ...(await options.coreClients?.(hostId) ?? [])],
+      coreClients: async (hostId, read) => [{ hostId: 'local', client: client! }, ...(await (read === undefined
+        ? options.coreClients?.(hostId) : options.coreClients?.(hostId, read)) ?? [])],
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()

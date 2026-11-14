@@ -53,6 +53,17 @@ export function parseRpcRequest(value: unknown): JSONRPCRequest {
   }
   return source as unknown as JSONRPCRequest
 }
+export function parseRpcOpeningCancel(value: unknown): string | number {
+  const request = parseRpcRequest(value)
+  if (Object.hasOwn(request, 'id') || request.method !== 'system.opening.cancel') {
+    throw new AgentMuxError('Invalid opening cancellation notification.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const params = rpcRecord(request.params, ['requestId'], 'CONTROL_PROTOCOL_ERROR')
+  if (Object.keys(params).length !== 1 || !isRpcId(params.requestId) || params.requestId === null) {
+    throw new AgentMuxError('Opening cancellation requires its original request ID.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return params.requestId
+}
 export function parseRpcResponse(value: unknown): JSONRPCResponse {
   const source = rpcRecord(value, ['jsonrpc', 'id', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
   if (source.jsonrpc !== '2.0' || !Object.hasOwn(source, 'id') || !isRpcId(source.id) ||

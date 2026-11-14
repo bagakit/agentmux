@@ -4,7 +4,8 @@ import { AgentMuxError } from './errors.js'
 import { AgentMuxRpcLines, parseRpcRequest, parseRpcResponse, rpcEncode, rpcResponseError } from './public-rpc-frame.js'
 
 type Reader = { dispose(): Promise<void> }
-type Consumer = { receive(frame: unknown): void; end(error?: Error): void; subscriptionId?: string; dispose(): void }
+type Consumer = { receive(frame: unknown): void; end(error?: Error): void; subscriptionId?: string; dispose(): void;
+  dispatched: boolean; answered: boolean; cancelOpening: boolean; openingCancellationSent: boolean }
 type PendingWrite = { encoded: string; signal: AbortSignal | undefined; dispatch: (() => void) | undefined; resolve(): void; reject(error: Error): void; abort(): void }
 
 /** Physical framing is shared; each original request and subscription retains its own reader. */
@@ -62,6 +63,7 @@ export class AgentMuxRpcStreamTransport {
               .catch(error => this.fail(error instanceof Error ? error : new Error(String(error))))
             return
           }
+          consumer.answered = true
           if (!response.error && typeof result?.subscriptionId === 'string') {
             consumer.subscriptionId = result.subscriptionId; this.subscriptions.set(result.subscriptionId, consumer)
           }
@@ -126,7 +128,7 @@ export class AgentMuxRpcStreamTransport {
     this.requests.clear(); this.subscriptions.clear()
   }
   async open(request: JSONRPCRequest, receive: Consumer['receive'], end: Consumer['end'], signal: AbortSignal,
-    onEstablished: () => void): Promise<Reader> {
+    onEstablished: () => void, options: { cancelOpening?: boolean } = {}): Promise<Reader> {
     let abortWaiting!: () => void
     const cancelled = new Promise<never>((_, reject) => { abortWaiting = () => reject(new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED')) })
     signal.addEventListener('abort', abortWaiting, { once: true })
@@ -137,7 +139,13 @@ export class AgentMuxRpcStreamTransport {
     let disposed = false
     const dispose = () => {
       if (disposed) return; disposed = true; signal.removeEventListener('abort', abort)
+      const cancelOpening = consumer.cancelOpening && consumer.dispatched && !consumer.answered && !consumer.openingCancellationSent && !consumer.subscriptionId
       this.requests.delete(id)
+      if (cancelOpening && !this.closed) {
+        consumer.openingCancellationSent = true
+        void this.write({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: id } })
+          .catch(error => this.fail(error instanceof Error ? error : new Error(String(error))))
+      }
       if (consumer.subscriptionId) {
         this.subscriptions.delete(consumer.subscriptionId)
         if (!this.closed) {
@@ -147,10 +155,11 @@ export class AgentMuxRpcStreamTransport {
       }
     }
     const abort = () => { dispose(); end(new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED')) }
-    const consumer: Consumer = { receive, end, dispose }
+    const consumer: Consumer = { receive, end, dispose, dispatched: false, answered: false,
+      cancelOpening: options.cancelOpening === true, openingCancellationSent: false }
     this.requests.set(id, consumer); signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) { abort(); throw new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED') }
-    try { await this.write(request, signal, onEstablished) } catch (error) { dispose(); throw error }
+    try { await this.write(request, signal, () => { consumer.dispatched = true; onEstablished() }) } catch (error) { dispose(); throw error }
     return { dispose: async () => { dispose() } }
   }
   dispose(): void { this.fail(new AgentMuxError('RPC client was disposed.', 'CONTROL_CANCELLED')) }

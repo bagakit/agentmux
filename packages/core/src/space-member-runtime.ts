@@ -78,6 +78,7 @@ export async function spaceMemberRuntime(ports: {
   } else {
     if (original.routeDelegation || original.caller || original.principal?.kind !== 'user') throw new AgentMuxError('This foreign member needs the current viewer’s original verified route and receiver grant.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
     const matches = (await ports.clients(initial.hostId)).filter(item => item.hostId === initial.hostId)
+    original.openingSignal?.throwIfAborted()
     if (matches.length !== 1) throw new AgentMuxError('The original member carrier is unavailable or ambiguous.', 'UNKNOWN_HOST')
     const client = matches[0]!.client
     if (!client.forwardRpc || !client.subscribeRpc) throw new AgentMuxError('The original carrier has no public member interaction transport.', 'RUNTIME_UNAVAILABLE')

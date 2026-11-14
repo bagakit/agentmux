@@ -331,7 +331,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Complete configured locator scope, including routes without a prepared client. Never starts a client. */
   nodeLocatorHosts?(): readonly string[] | Promise<readonly string[]>
   /** Omitted selector reads the existing cache; a qualified owner may join exact Host initialization. The selector grants no authority. */
-  coreClients?(hostId?: string): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
+  coreClients?(hostId?: string, read?: { signal?: AbortSignal | undefined }): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Borrow the configured Host's original public transport, preserving its caller and Runtime fence. */
   callOriginalCore?<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
@@ -359,6 +359,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
 export type AgentMuxRpcCallContext = { routeDelegation?: VerifiedHostRouteDelegation; caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+  /** Optional pre-admission read-opening lifetime. Never substitutes for the business operation signal. */
+  openingSignal?: AbortSignal;
   /** In-process transport capability. Never decoded from business arguments. */
   forwarding?: import('./rpc-forwarding.js').RpcForwardingSource;
   /** Exact receiving wire ID for response capacity; never supplied by business params. */
@@ -656,7 +658,7 @@ export class AgentMuxRpcService {
   private async spaceMemberRuntime(input: import('./space-member.js').SpaceMemberParams[keyof import('./space-member.js').SpaceMemberParams], context: AgentMuxRpcCallContext) {
     const source = await this.hosted('runtime.owner.identity', { expectedRuntimeId: input.target.reference.runtimeId }, context)
     await source.owner.call('runtime.owner.identity', source.params, context)
-    return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId),
+    return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId, { signal: context.openingSignal ?? context.signal }),
       ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
         call: async (method, params, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original) },
         subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }
@@ -687,8 +689,8 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence({ ...context,runtimeFence })
     } }
   }
-  private async clients(hostId?: string): Promise<readonly AgentMuxRpcCoreClient[]> {
-    if (this.ports.coreClients) return await this.ports.coreClients(hostId)
+  private async clients(hostId?: string, read?: { signal?: AbortSignal | undefined }): Promise<readonly AgentMuxRpcCoreClient[]> {
+    if (this.ports.coreClients) return read === undefined ? await this.ports.coreClients(hostId) : await this.ports.coreClients(hostId, read)
     this.local ??= import('./runtime-client.js').then(({ connectLocalAgentMux }) => connectLocalAgentMux())
     return [{ hostId: 'local', client: await this.local }]
   }
@@ -4789,7 +4791,7 @@ export class AgentMuxRpcService {
         let queue: ReturnType<typeof createHostedTransferQueue>
         const reader = await observeSpaceSessions({ authority: this.spaceAuthority,
           sources: snapshot => readSpaceSessionSources(this.spatial, snapshot),
-          observe: createSpaceSessionObserver({ local: original.owner, clients: async hostId => await this.ports.coreClients?.(hostId) ?? [],
+          observe: createSpaceSessionObserver({ local: original.owner, clients: async (hostId, signal) => await this.ports.coreClients?.(hostId, { signal }) ?? [],
             context: { ...context, signal: controller.signal }, reference: input.reference, ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}) }) },
         input.reference, value => queue.write(hostedTransfer({ kind: 'event', event: value }, mintObjectId())), error => queue.fail(error), controller.signal)
         let admitted: string | undefined

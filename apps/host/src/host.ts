@@ -30,6 +30,7 @@ import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
   type AgentProvider, type AgentMuxRpcMobileAccessState, type AgentMuxRpcMobileLinkCandidate } from '@agentmux/core'
 import { isConnectionMethod } from '@agentmux/core/connections'
+import { observeRead } from '@agentmux/core/observation-read'
 import { isMoteConnectionMethod } from '@agentmux/core/mote-connections'
 import { DeviceAuthority } from './device-authority.js'
 import { networkInterfaces } from 'node:os'
@@ -418,8 +419,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(configurationPath ? { executorConfigurations: (id?: string) => readConfiguredExecutors(configurationPath, id) } : {}),
       ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
-      ...(options.connections?.clients ? { coreClients: async (hostId?: string) => {
-        if (hostId !== undefined && hostId !== 'local') await options.connections!.clientsReady?.()
+      ...(options.connections?.clients ? { coreClients: async (hostId?: string, read?: { signal?: AbortSignal | undefined }) => {
+        if (hostId !== undefined && hostId !== 'local') {
+          await observeRead(Promise.resolve().then(() => options.connections!.clientsReady?.()), read?.signal)
+          read?.signal?.throwIfAborted()
+        }
         return options.connections!.clients!(hostId)
       } } : {}),
       routeEdge: async edgeId => {
