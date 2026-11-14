@@ -5,6 +5,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { FocusContextRow } from '../../../src/renderer/src/components/FocusContextRow'
 import type { RuntimeEvent, SessionSnapshot } from '../../../src/shared/contracts'
+import { createOperationOutputStream } from './operation-output-stream.mjs'
 
 /** Controlled Native facts only. No fixture writes a client operation phase or request. */
 export function configureOperationSources(snapshot: any, creations: Record<string, any>, restored: boolean, originalIds?: string[]) {
@@ -37,7 +38,9 @@ export function installOperationFixture({ snapshot, creations, boot, saveRuntime
   const stops: Record<string, any> = { ...(boot?.operationFixture?.stops ?? {}) }
   const counters = { projection: 0, cardMutations: 0, streamLines: 0 }
   const inputs: any[] = [], subscribers = new Map<(event: RuntimeEvent) => void, any>()
-  let streamTimer: ReturnType<typeof setInterval> | undefined, cardsVisible = true
+  let cardsVisible = true
+  const outputStream = createOperationOutputStream((bounded: boolean) =>
+    line(`Controlled live output ${bounded ? String(counters.streamLines).padStart(10, '0') : counters.streamLines}\r\n`))
   const baseEvents = api.sessions.onEvent, baseWrite = api.sessions.write, baseAttach = api.sessions.attach
   api.sessions.onEvent = (listener, control) => {
     subscribers.set(listener, control)
@@ -158,16 +161,16 @@ export function installOperationFixture({ snapshot, creations, boot, saveRuntime
     async save() { await saveRuntime() },
     facts: () => ({ originals, pending: [...pending].map(([operationId, entry]) => ({ operationId, kind: entry.kind })), calls: [...calls],
       operations: useAppStore.getState().agentOperations, counters: { ...counters }, inputs: [...inputs], outputBytes: Object.fromEntries(Object.entries(output).map(([id, data]) => [id, new TextEncoder().encode(data).length])),
-      cardsVisible, sourceControls: sourceSessions.map(session => session.control), terminal: terminalFacts() }),
+      cardsVisible, streaming: outputStream.running, sourceControls: sourceSessions.map(session => session.control), terminal: terminalFacts() }),
     creation(mode: typeof controls.creation) { controls.creation = mode },
     resolve: resolveOperation, unrelated,
     showCards(value: boolean) { cardsVisible = value; const pane = element.querySelector<HTMLElement>('#agent-operation-cards'); if (pane) pane.hidden = !value },
     offscreen(value: boolean) { const pane = element.querySelector<HTMLElement>('#agent-operation-cards'); if (pane) pane.style.transform = value ? 'translateY(200vh)' : '' },
     scrollCards(value: number) { const pane = element.querySelector<HTMLElement>('#agent-operation-cards'); if (pane) pane.scrollTop = value },
-    stream(value: boolean) {
-      if (streamTimer) clearInterval(streamTimer)
+    stream(value: boolean, count?: number) {
+      outputStream.stop()
       if (value) { if (counters.streamLines === 0) line(Array.from({ length: 180 }, (_, index) => `Controlled ordered terminal history ${index}\r\n`).join(''))
-        streamTimer = setInterval(() => line(`Controlled live output ${counters.streamLines}\r\n`), 160) }
+        outputStream.start(count) }
     }
   }
 }
