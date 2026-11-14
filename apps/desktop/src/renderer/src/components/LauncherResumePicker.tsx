@@ -1,3 +1,4 @@
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
@@ -394,7 +395,7 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
                   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1); searchRef.current?.focus() }
                 }}>
                 <span className="launcher-resume__row-head"><AgentAvatar label={row.name} providerId={candidate.providerId} size={18} />
-                  <strong>{row.name}</strong>{active ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
+                  <strong>{row.name}</strong><AgentWorkModeBadge source={'native' in candidate ? { hostId: candidate.hostId, workspacePath: candidate.workspacePath, resourceUnobserved: true } : candidate} hosts={config?.hosts} embedded />{active ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
                 <span className="launcher-resume__row-recap" title={row.recap ? `${row.recap.source}: ${row.recap.displayText ?? row.recap.text}` : preview?.error}>
                   {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : row.recap.source === 'Last prompt' ? 'Input' : row.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : 'Saved conversation excerpt'} · </span>{row.recap.displayText ?? row.recap.text}</>

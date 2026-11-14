@@ -41,6 +41,8 @@ export function launcherManagedCandidates(candidates: readonly AgentSessionRecov
     saved.set(session.id, { agentSessionId: session.id, hostId: session.hostId, workspacePath: session.workspacePath,
       providerId: session.providerId, executorId: session.executorId, capabilities: session.capabilities,
       label: session.label, createdAt: session.createdAt, updatedAt: session.updatedAt, run: session.control.run,
+      ...(session.workPlacement ? { workPlacement: session.workPlacement } : {}),
+      ...(session.toolExecution ? { toolExecution: session.toolExecution } : {}),
       ...(session.nativeSessionId ? { nativeSessionId: session.nativeSessionId } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) })
   }

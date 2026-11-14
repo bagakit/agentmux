@@ -45,12 +45,12 @@ export function useGoalAgentPresentation(agentSessionId: string | null | undefin
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session => session.control.agentSessionId === agentSessionId &&
       session.control.hostId === session.hostId && (hostId === undefined || session.control.hostId === hostId))
     const session = matches.length === 1 ? matches[0] : undefined
-    return session ? { id: session.id, label: session.label, providerId: session.providerId, hostId: session.control.hostId, toolExecution: session.toolExecution ?? null } : null
+    return session ? { id: session.id, label: session.label, providerId: session.providerId, hostId: session.control.hostId, toolExecution: session.toolExecution ?? null, workPlacement: session.workPlacement, workspacePath: session.workspacePath } : null
   }))
   const userName = useAppStore(state => presentation ? state.agentNames[presentation.id] : undefined)
   const firstPrompt = useAppStore(useMemo(() => presentation ? createFirstPromptSelector(presentation.id) : () => null, [presentation?.id]))
   return { name: presentation ? agentDisplayName({ userName, firstPrompt, fallbackLabel: presentation.label, providerLabel: presentation.providerId }) : null,
-    hostId: presentation?.hostId ?? null, toolExecution: presentation?.toolExecution ?? null }
+    hostId: presentation?.hostId ?? null, toolExecution: presentation?.toolExecution ?? null, workPlacement: presentation?.workPlacement, workspacePath: presentation?.workspacePath }
 }
 
 export function useGoalAgentName(agentSessionId: string | null | undefined, hostId?: string): string | null {

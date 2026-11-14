@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalPlanNodeProjection, GoalPlanNodeState, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
@@ -118,12 +119,12 @@ function NodeExecutor({ item }: { item: GoalPlanNodeView }) {
   const hosts = useAppStore(state => state.config?.hosts)
   if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
   const host = hosts?.find(host => host.id === executor.hostId)
-  const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.toolExecution!.resourceHostId)
-  const place = presentation.toolExecution ? `Tools · ${toolsHost?.label ?? presentation.toolExecution.resourceHostId}`
+  const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.workPlacement?.resourceHostId)
+  const place = presentation.toolExecution ? `Tools · ${toolsHost?.label ?? presentation.workPlacement?.resourceHostId ?? 'Host unknown'}`
     : presentation.hostId ? `${host?.kind === 'ssh' ? 'Remote' : 'Agent'} · ${host?.label ?? presentation.hostId}`
       : `Agent · ${host?.label ?? executor.hostId} · position unknown`
   return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}${presentation.toolExecution ? ` · ${presentation.toolExecution.workspacePath}` : ''}`}>
-    <ThemeObjectAgentIcon size={11} aria-hidden="true" /><span className="goal-plan-node__name">{presentation.name ?? executor.agentSessionId}</span><span className="goal-plan-node__place">{place}</span>
+    <ThemeObjectAgentIcon size={11} aria-hidden="true" /><span className="goal-plan-node__name">{presentation.name ?? executor.agentSessionId}</span><AgentWorkModeBadge source={presentation.hostId && presentation.workspacePath ? {hostId: presentation.hostId, workspacePath: presentation.workspacePath, toolExecution: presentation.toolExecution ?? undefined, workPlacement: presentation.workPlacement} : undefined} hosts={hosts} embedded /><span className="goal-plan-node__place">{place}</span>
   </span>
 }
 

@@ -1,3 +1,5 @@
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
+import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { openWorkbenchWindow } from '../lib/workbench-windows'
@@ -212,7 +214,8 @@ function SortableWorkbenchTab({
   // 标签上画的标记序列：一张 Tab 可以含多个 Region，标签要画出它的种类构成，而不是只画标题那一个。
   // 「谁是 Agent」的判断在 `tabMarkAgentFactsFor` 里，不在这里——这个文件在 node 里 import 不了（经
   // api.ts 的一个 vite define），留在这里的任何取值判断都无法被测试执行到。这里只剩一句转发。
-  const agentFactsFor = tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars)
+  const agentFactsFor = tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars, config ? workReferenceHostId(config.hosts) : null)
+  const primaryWorkMode = session?.kind === 'agent' ? agentWorkPlacement(session, config ? workReferenceHostId(config.hosts) : null).mode : null
   const marks = workbenchTabMarks(tab, agentFactsFor)
   // 标记簇在上限处截断且刻意不画 `+N`（标签宽度极紧）。折掉的种类改由 tooltip 兜住，两条 tooltip
   // 路径都取它——没有 Session 的多 Region Tab 同样需要（见 `surfaceTabTooltip`）。
@@ -462,7 +465,7 @@ function SortableWorkbenchTab({
           ref={setNodeRef}
           type="button"
           data-workbench-tab-id={tab.id}
-          className={`workbench-tab ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
+          className={`workbench-tab ${primaryWorkMode && primaryWorkMode !== 'local' ? 'workbench-tab--remote' : ''} ${group.activeTabId === tab.id ? 'workbench-tab--active' : ''} ${
             isDragging ? 'workbench-tab--dragging' : ''
           }`}
           {...(session ? { [DESKTOP_SESSION_ATTRIBUTE]: session.id } : {})}
@@ -514,6 +517,7 @@ function SortableWorkbenchTab({
           ) : (
             <span className="workbench-tab__label">{displayName}</span>
           )}
+          {session?.kind === 'agent' ? <AgentWorkModeBadge source={session} hosts={config?.hosts} embedded /> : null}
           {dirty ? <ThemeStatusDirtyIcon size={6} className="workbench-tab__dirty" role="img" aria-hidden="false" aria-label="Unsaved" /> : null}
           <span
             role="button"

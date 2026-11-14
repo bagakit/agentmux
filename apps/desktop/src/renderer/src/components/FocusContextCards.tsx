@@ -1,3 +1,4 @@
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { Fragment, useLayoutEffect, useReducer, useRef, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import type { FocusContext } from '../lib/focus-context'
@@ -134,7 +135,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
             event.preventDefault(); event.stopPropagation()
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
-          }}><span className="focus-context__copy">{topic ? <FocusTopicLabel topic={topic} /> : null}<strong>{context.name}</strong><span className="focus-context__detail">{context.stateLabel}</span></span></button>}
+          }}><span className="focus-context__copy">{topic ? <FocusTopicLabel topic={topic} /> : null}<strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span></button>}
     </div></Fragment>
   })}</div>
 }

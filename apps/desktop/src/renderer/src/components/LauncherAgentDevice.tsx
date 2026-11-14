@@ -1,69 +1,64 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore, type LauncherExecutionSelection } from '../store'
-import { HostIcon } from './HostBadge'
-import { SelectionField } from './SelectionField'
+import { agentWorkModeLabel, launcherWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
+import { AgentWorkModeSetup } from './AgentWorkModeSetup'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
-/**
- * Where the Agent runs, beside the Agent list. The project and its device stay
- * fixed by the Space entry. Settings-prepared arrangements are read here, not edited.
- */
+const ModeIcon = semanticIconComponent('object.remote-execution')
+const DownIcon = semanticIconComponent('navigation.down')
+const NO_WORKSPACES: WorkspaceRecord[] = []
+
+/** One compact entry for every direction, editing the original unstarted Launcher only. */
 export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicitAgentWorkspaceId, disabled, active, onSelect, onPreparingChange, onEditArrangement }: {
-  hosts: readonly HostConfig[]; workspace: WorkspaceRecord | undefined; agentWorkspace: WorkspaceRecord | undefined
+  hosts: HostConfig[]; workspace: WorkspaceRecord | undefined; agentWorkspace: WorkspaceRecord | undefined
   explicitAgentWorkspaceId: string | undefined; disabled: boolean; active: boolean
   onSelect(selection: LauncherExecutionSelection): boolean
   onPreparingChange(pending: boolean): void
   onEditArrangement?: (() => void) | undefined
 }) {
-  const [pendingHost, setPendingHost] = useState<string | null>(null)
-  const [failure, setFailure] = useState<{ hostId: string; message: string } | null>(null)
-  const request = useRef<AbortController | null>(null)
-  function cancel() { request.current?.abort(); request.current = null; setPendingHost(null); onPreparingChange(false) }
-  // Leaving this exact project or this Launcher cancels preparation; unrelated navigation does not.
-  useEffect(() => { cancel(); setFailure(null); return cancel }, [workspace?.id, workspace?.hostId, workspace?.path])
-  useEffect(() => { if (!active) cancel() }, [active])
-  if (!workspace || isScratchWorkspaceId(workspace.id)) return null
-  const projectHost = hosts.find(host => host.id === workspace.hostId)
-  const agentHost = hosts.find(host => host.id === agentWorkspace?.hostId)
-  const settingsArrangement = explicitAgentWorkspaceId !== undefined &&
-    (projectHost?.kind !== 'local' || agentWorkspace?.hostId === workspace.hostId)
-  if (settingsArrangement) {
-    const label = agentHost?.label ?? agentWorkspace?.hostId ?? 'Unknown device'
-    return <div className="launcher-agent-device" data-arrangement="settings">
-      <span className="launcher-agent-device__read"><span>Runs on</span><strong>{label}</strong>
-        <code title={agentWorkspace?.path}>{agentWorkspace?.path ?? 'Startup directory unavailable'}</code></span>
-      <button type="button" className="launcher-agent-device__action" disabled={disabled}
-        onClick={() => onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: null })}>Use project device</button>
-      {onEditArrangement ? <button type="button" className="launcher-agent-device__action" onClick={onEditArrangement}>Remote Agents</button> : null}
-    </div>
-  }
-  // A single configured device or a remote project leaves nothing to choose here.
-  if (projectHost?.kind !== 'local' || hosts.length < 2) return null
-  async function choose(hostId: string) {
-    cancel(); setFailure(null)
-    if (!workspace || !hostId) return
-    if (hostId === workspace.hostId) { onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: null }); return }
-    const controller = new AbortController()
-    request.current = controller; setPendingHost(hostId); onPreparingChange(true)
-    try {
-      const directory = await useAppStore.getState().prepareAgentHostWorkspace(hostId, { signal: controller.signal })
-      if (controller.signal.aborted || request.current !== controller) return
-      onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: directory.id })
-    } catch (cause) {
-      if (!controller.signal.aborted && request.current === controller) setFailure({ hostId, message: cause instanceof Error ? cause.message : 'The Agent device could not be prepared.' })
-    } finally { if (request.current === controller) { request.current = null; setPendingHost(null); onPreparingChange(false) } }
-  }
-  const current = pendingHost ?? agentWorkspace?.hostId ?? workspace.hostId
-  const options = hosts.map(host => ({ value: host.id, icon: <HostIcon kind={host.kind} size={13} />,
-    label: `${host.label}${hosts.some(other => other.id !== host.id && other.label === host.label) ? ` · ${host.id}` : ''}`,
-    ...(host.id === workspace.hostId ? { description: 'Project device' } : {}) }))
-  return <div className="launcher-agent-device" data-pending={pendingHost !== null || undefined}>
-    <span className="launcher-agent-device__label" aria-hidden="true">Runs on</span>
-    <SelectionField label="Runs on" value={current} options={options} disabled={disabled || !active}
-      onValueChange={hostId => { if (hostId !== current) void choose(hostId) }} />
-    {pendingHost ? <span className="launcher-agent-device__status" role="status">Preparing…</span>
-      : failure ? <span className="launcher-agent-device__status" role="status" data-state="failed">{failure.message}
-        <button type="button" className="launcher-agent-device__action" onClick={() => void choose(failure.hostId)}>Retry</button></span> : null}
-  </div>
+  const workspaces = useAppStore(state => state.config?.workspaces ?? NO_WORKSPACES)
+  const [open, setOpen] = useState(false), [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  const [content, setContent] = useState<HTMLDivElement | null>(null)
+  const surface = useRef<HTMLDivElement>(null)
+  const attach = useCallback((node: HTMLDivElement | null) => { surface.current = node; setContent(node) }, [])
+  useEffect(() => { onPreparingChange(open && active); return () => onPreparingChange(false) }, [open, active])
+  useEffect(() => { if (!active) setOpen(false) }, [active])
+  useEffect(() => { setOpen(false) }, [workspace?.id, workspace?.hostId, workspace?.path])
+  useLayoutEffect(() => {
+    if (!open || !active || !anchor || !content) return
+    let current = true
+    const position = async () => {
+      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(8), flip(), shift({ padding: 12 }),
+        size({ padding: 12, apply: ({ availableHeight, availableWidth }) => {
+          if (current) Object.assign(content.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, availableWidth)}px` })
+        } })] })
+      if (current) Object.assign(content.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+    }
+    const stop = autoUpdate(anchor, content, () => { void position() })
+    return () => { current = false; stop() }
+  }, [open, active, anchor, content])
+  if (!workspace) return null
+  const placement = launcherWorkPlacement(workspace, agentWorkspace ?? workspace, workReferenceHostId(hosts))
+  if (isScratchWorkspaceId(workspace.id)) return <span className="launcher-work-arrangement" title="This context keeps its original project and Agent. Split tools require registered project folders.">
+    <ModeIcon size={12} /><span>{agentWorkModeLabel(placement.mode)}</span>{onEditArrangement ? <button className="agent-work-text-action" type="button" onClick={onEditArrangement}>Remote work</button> : null}
+  </span>
+  return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
+    <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
+      aria-label="Work mode" title={`Edit work arrangement · ${agentWorkModeLabel(placement.mode)}`}><ModeIcon size={13} /><span>{agentWorkModeLabel(placement.mode)}</span><DownIcon size={11} /></button></Dialog.Trigger></span>
+    <DocumentOverlayPortal component={Dialog.Portal}>
+      <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
+        onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
+        <Dialog.Title>Edit work arrangement</Dialog.Title>
+        <Dialog.Description>Choose where the project and Agent work. Apply here, then launch with your original task.</Dialog.Description>
+        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal actionLabel="Apply arrangement" disabled={disabled}
+          initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null }}
+          onCancel={() => setOpen(false)} onApply={selection => { const applied = onSelect(selection); if (applied) setOpen(false); return applied }} />
+      </Dialog.Content>
+    </DocumentOverlayPortal>
+  </Dialog.Root>
 }

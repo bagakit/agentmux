@@ -1,9 +1,9 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { projectConversationSummary } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
-import type { AgentSessionHistoryDescriptor, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
-import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentWorkPlacement, AppConfig, SessionHistoryDescriptor, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { type ScratchTopicSnapshot, scratchTopicIdFromWorkspacePath } from '@agentmux/host/mote-model'
 import { focusLaneForSession, type AgentFocusLane } from './agent-focus'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
@@ -23,6 +23,9 @@ import type { AgentObservation } from '@agentmux/core/agent-status'
 export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
 export type FocusBucket = typeof FOCUS_BUCKETS[number]
 export type FocusContext = {
+  toolExecution?: Extract<SessionSnapshot, { kind: 'agent' }>['toolExecution'] | undefined
+  workPlacement?: AgentWorkPlacement | undefined
+  resourceUnobserved?: boolean | undefined
   /** Original semantic control, independent of a client's presentation id. */
   control?: Extract<SessionSnapshot, { kind: 'agent' }>['control']
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
@@ -45,8 +48,8 @@ export type FocusContext = {
   activitySemantic?: AgentObservation['semantic']
 }
 /** A retained descriptor supplies reading metadata, never a synthetic Session or current Run. */
-export function retainedFocusContext(source: AgentSessionHistoryDescriptor, name?: string): FocusContext {
-  return { id: source.agentSessionId, hostId: source.hostId, name: name ?? source.agentSessionId,
+export function retainedFocusContext(source: SessionHistoryDescriptor, name?: string): FocusContext {
+  return { id: source.agentSessionId, hostId: source.hostId, resourceUnobserved: !source.history, ...(source.workPlacement ? { workPlacement: source.workPlacement } : {}), ...(source.history?.toolExecution ? { toolExecution: source.history.toolExecution } : {}), name: name ?? source.agentSessionId,
     kind: 'agent', providerId: source.history?.providerId ?? null, ...(source.history?.executorId ? { executorId: source.history.executorId } : {}),
     workspacePath: source.history?.workspacePath ?? '', workspace: undefined, workspaceId: '', workspaceName: 'Retained Session', topicId: null,
     runId: '', runUnobserved: true, processState: 'interrupted', state: 'disconnected', stateLabel: source.state === 'retired' ? 'Retired' : 'Unobserved', bucket: 'idle',
@@ -226,7 +229,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const displayState = presentation.state
   const retainedRunIds = [...new Set(items.flatMap(item => item.activityState ? [item.activityState.run.runId] : []))]
   return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: displayState, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
-    ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control } : {}),
+    ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control, ...(session.workPlacement ? { workPlacement: session.workPlacement } : {}), ...(session.toolExecution ? { toolExecution: session.toolExecution } : {}) } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, detailKind,
@@ -236,6 +239,12 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
   return (a.kind === 'agent' ? a.nativeHandle?.sessionId ?? a.nativeSessionId : null) === (b.kind === 'agent' ? b.nativeHandle?.sessionId ?? b.nativeSessionId : null)
     && a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && (a.kind === 'agent' ? a.executorId : null) === (b.kind === 'agent' ? b.executorId : null)
+    && (a.kind === 'agent' ? a.toolExecution?.bindingId : undefined) === (b.kind === 'agent' ? b.toolExecution?.bindingId : undefined)
+    && (a.kind === 'agent' ? a.toolExecution?.resourceHostId : undefined) === (b.kind === 'agent' ? b.toolExecution?.resourceHostId : undefined)
+    && (a.kind === 'agent' ? a.toolExecution?.resourceRuntimeId : undefined) === (b.kind === 'agent' ? b.toolExecution?.resourceRuntimeId : undefined)
+    && (a.kind === 'agent' ? a.toolExecution?.workspacePath : undefined) === (b.kind === 'agent' ? b.toolExecution?.workspacePath : undefined)
+    && (a.kind === 'agent' ? a.workPlacement?.agentHostId : undefined) === (b.kind === 'agent' ? b.workPlacement?.agentHostId : undefined)
+    && (a.kind === 'agent' ? a.workPlacement?.resourceHostId : undefined) === (b.kind === 'agent' ? b.workPlacement?.resourceHostId : undefined)
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
     && a.status.detail === b.status.detail && a.runUnobserved === b.runUnobserved
     && a.status.source === b.status.source

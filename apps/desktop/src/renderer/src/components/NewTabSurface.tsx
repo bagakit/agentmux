@@ -411,13 +411,10 @@ export function NewTabSurface({
         const result = state.selectLauncherExecution({ ...launcherRef, displayWorkspaceId, groupId: tabGroupId }, selection, { navigateProject: false, reveal: !projection })
         if (projection) projection.onSelect(result)
       } else {
-        const createdId = state.openLauncher({ workspaceId: workspace.id, ...creationTarget, tabGroupId,
-          reveal: Boolean(creationTarget && !projection), initialExecution: selection,
-          initialInputs: { prompt, names, optionsByProvider, sourceLauncherId: launcherId } })
-        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
-        if (!created) return false
-        if (projection) projection.onSelect({ displayWorkspaceId: creationTarget?.displayWorkspaceId ?? workspace.id,
-          groupId: tabGroupId, tabId: created.id, regionId: created.layout.activeRegionId })
+        const displayWorkspaceId = projection?.displayWorkspaceId ?? creationTarget?.displayWorkspaceId ?? workspace.id
+        const result = state.selectLauncherExecution({ displayWorkspaceId, groupId: tabGroupId, resourceWorkspaceId: workspace.id },
+          selection, { navigateProject: false, reveal: !projection })
+        if (projection) projection.onSelect(result)
       }
       return true
     } catch (cause) { setError(presentError(cause)); return false }
@@ -511,7 +508,7 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
         <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Preparing device…' : 'Launch'}</button>
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
         </div>
       </div> : null}
       {emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {

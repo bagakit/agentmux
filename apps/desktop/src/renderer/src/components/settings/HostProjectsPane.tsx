@@ -72,30 +72,33 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         const state = useAppStore.getState()
         const current = state.config?.workspaces.find(item => item.id === workspace.id)
         if (state.activeWorkspaceId !== workspace.id || current?.hostId !== workspace.hostId) {
-          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent was not started.',
-            error: 'The selected work context changed. Open this folder again before starting an Agent.' })
+          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent Launcher was not prepared.',
+            error: 'The selected work context changed. Open this folder again before preparing an Agent.' })
           return
         }
         const currentHost = state.config?.hosts.find(item => item.id === workspace.hostId)
         const currentExecutors = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId])
         if (!configValuesEqual(selectedHost, currentHost) || !currentExecutors.some(item => item.id === startExecutor && item.detection?.state !== 'missing')) {
-          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent was not started.',
+          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent Launcher was not prepared.',
             error: 'The selected Agent configuration or connection changed. Choose an Agent on the saved connection again, or open without an Agent.' })
           return
         }
         const layout = state.layouts[workspace.id]
         if (!layout) {
-          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent was not started.',
+          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent Launcher was not prepared.',
             error: 'Its work surface is not confirmed. Open the registered folder to continue.' })
           return
         }
-        await state.launchAgent(startExecutor, '', layout.activeGroupId)
-        setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent start was requested; check its work surface for the result.' })
+        const tabId = state.openLauncher({ workspaceId: workspace.id, reveal: true })
+        const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
+        if (!tab) throw new Error('The Agent Launcher could not be opened. The registered folder is kept.')
+        useAppStore.getState().setLauncherExecutionWorkspace({ tabId: tab.id, regionId: tab.layout.activeRegionId }, workspace.id, startExecutor)
+        setProgress({ workspace, stage: 'opened', message: 'Agent Launcher opened. Review its work mode and task, then Launch explicitly.' })
       }
       if (visible.current) onClose?.()
     } catch (cause) {
       setProgress(current => ({ workspace, stage: current?.stage ?? 'registered',
-        message: current?.stage === 'opened' ? 'Folder opened. Agent start did not return a confirmed result.' : 'Folder registered. Opening did not complete.',
+        message: current?.stage === 'opened' ? 'Folder opened. Agent Launcher preparation did not return a confirmed result.' : 'Folder registered. Opening did not complete.',
         error: presentError(cause) }))
     }
   }
@@ -145,12 +148,12 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <label className="host-projects__path"><span>Folder path</span><TextInput value={path} placeholder="Project directory"
         onChange={event => setPath(event.target.value)} /></label>
       <label><span>Name <small>optional</small></span><TextInput value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
-      <label><span>Start after opening <small>optional</small></span><select value={executorId} onChange={event => { setExecutorId(event.target.value); setSelectionHost(host ? structuredClone(host) : undefined) }}>
+      <label><span>Prepare an Agent <small>optional</small></span><select value={executorId} onChange={event => { setExecutorId(event.target.value); setSelectionHost(host ? structuredClone(host) : undefined) }}>
         <option value="">Open without an Agent</option>
         {!selectionCurrent ? <option value={executorId} disabled>Previous Agent selection unavailable — choose again</option> : null}
         {executors.filter(executor => selectionCurrent || executor.id !== executorId).map(executor => <option key={executor.id} value={executor.id}>{executor.label} · {executorDetectionLabel(executor.detection)}</option>)}
       </select></label>
-      <p className="field-hint host-projects__path">Uses the folder on this environment. Agent startup reports the actual connection and command result.</p>
+      <p className="field-hint host-projects__path">Opens this folder on the saved Host. Prepare an Agent in its Launcher and review the work mode before starting.</p>
       {host?.kind === 'ssh' ? <div className="host-projects__path" role="status">
         <p className="field-hint">{inventoryMatches && inventory.state === 'error'
           ? `Agent discovery did not complete. ${inventory.detail ?? 'The connection result is unknown.'} Saved choices remain available.`
@@ -162,7 +165,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <footer className="host-projects__actions">
         <button type="button" className="small-button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</button>
         <button type="submit" className="primary-button" data-open-folder disabled={!host || !path.trim() || busy}>
-          {busy ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open and start Agent' : 'Open folder'}
+          {busy ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open Agent Launcher' : 'Open folder'}
         </button>
       </footer>
     </form>

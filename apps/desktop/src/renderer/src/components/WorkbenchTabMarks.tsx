@@ -1,3 +1,4 @@
+import { agentWorkModeLabel } from '../lib/agent-work-mode'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
 import { AgentAvatar } from './AgentAvatar'
@@ -7,6 +8,11 @@ const FileIcon = semanticIconComponent('object.file')
 const ThemeGitCompareIcon = semanticIconComponent('git.compare')
 const ControlledBrowserIcon = semanticIconComponent('object.agent-controlled-browser')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const RemoteProjectIcon = semanticIconComponent('object.folder')
+const RemoteAgentIcon = semanticIconComponent('object.host')
+const RemoteWorkspaceIcon = semanticIconComponent('object.remote-execution')
+const UnknownPlacementIcon = semanticIconComponent('status.unknown')
+
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 
 
@@ -47,8 +53,9 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
   switch (mark.kind) {
     case 'agent':
       return (
-        <i className="workbench-tab__agent-mark">
+        <i className="workbench-tab__agent-mark" data-work-mode={mark.workMode} title={mark.workMode && mark.workMode !== 'local' ? agentWorkModeLabel(mark.workMode) : undefined}>
           <AgentAvatar providerId={mark.providerId} sessionId={mark.sessionId} executorId={mark.executorId} appearance={mark.appearance} state={mark.status.state} detail={mark.status.detail} size={16} />
+          {mark.workMode && mark.workMode !== 'local' ? <small className="workbench-tab__mode-mark" aria-label={agentWorkModeLabel(mark.workMode)}>{mark.workMode === 'remote-project' ? <RemoteProjectIcon size={9} /> : mark.workMode === 'remote-agent' ? <RemoteAgentIcon size={9} /> : mark.workMode === 'remote-workspace' ? <RemoteWorkspaceIcon size={9} /> : <UnknownPlacementIcon size={9} />}</small> : null}
         </i>
       )
     case 'terminal':

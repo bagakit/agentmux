@@ -1,3 +1,4 @@
+import { workReferenceHostId } from '../lib/agent-work-mode'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { documentKey, titleWorkbenchSurface, type WorkbenchTab } from '../lib/workbench-tabs'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
@@ -23,7 +24,7 @@ export function SurveyTabColumn({ tab, selected, onSelect }: { tab: WorkbenchTab
   const document = useAppStore(state => surface.kind === 'file' ? state.documents[documentKey(surface.workspaceId, surface.path)] : undefined)
   const noteName = useNoteFileName(surface.kind === 'file' ? surface.workspaceId : undefined, surface.kind === 'file' ? surface.path : undefined)
   const title = workbenchTabDisplayName(tab, sessions, names, timelines, metadata, noteName)
-  const marks = workbenchTabMarks(tab, tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars))
+  const marks = workbenchTabMarks(tab, tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars, config ? workReferenceHostId(config.hosts) : null))
   const Icon = surface.kind === 'file' ? document && parseNoteFile(document).status === 'valid' ? NoteIcon : FileIcon : BrowserIcon
   const customPrimary = surface.kind === 'browser' || surface.kind === 'file'
   return <button type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}

@@ -231,3 +231,16 @@
 .pane-action--split > svg:last-child { margin-left:-1px; opacity: .65; }
 .pane-split-menu { min-width: 148px; max-height: var(--radix-dropdown-menu-content-available-height); }
 .pane-action--stop:hover { color: var(--red); }
+
+/* A remote Agent tab reserves both its name and explicit placement; local density stays ordinary. */
+.workbench-tab--remote { width: 264px; min-width: 240px; max-width: 264px; flex-basis: 264px; }
+.workbench-tab__agent-mark[data-work-mode]:not([data-work-mode="local"]) { width: auto; align-items: center; gap: 2px; }
+.workbench-tab__mode-mark { display: inline-flex; align-items: center; color: var(--text-2); font-style: normal; }
+.workbench-tab .agent-work-mode-badge { border: 0; padding-inline: 3px; background: transparent; }
+
+/* The three mode glyphs remain readable when the Tab strip is narrower than its full label. */
+.workbench-tab-strip { container-type: inline-size; }
+@container (max-width: 320px) {
+  .workbench-tab--remote { width: 168px; min-width: 144px; max-width: 168px; flex-basis: 168px; }
+  .workbench-tab .agent-work-mode-badge > span { display: none; }
+}
