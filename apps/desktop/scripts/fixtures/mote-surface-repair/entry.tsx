@@ -1,4 +1,6 @@
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
+import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { moteWorkbenchProjection } from '../../../src/renderer/src/lib/mote-workbench-projection'
@@ -9,6 +11,8 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { MoteDetailsPanel } from '../../../src/renderer/src/components/MoteDetailsPanel'
 import { MoteWorkface } from '../../../src/renderer/src/components/MoteWorkface'
+import { MoteSpaceFrame } from '../../../src/renderer/src/components/MoteSpaceFrame'
+import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } from '../../../src/renderer/src/lib/space-content-presentation'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -73,6 +77,25 @@ api.scratch.ensureMote = async () => {
   if (contextPending) await new Promise<void>(resolve => { contextPending = resolve })
   return quickTopic()
 }
+const calendarNavigation = new URLSearchParams(location.search).get('calendarNavigation') === '1'
+if (calendarNavigation) {
+  mountThemeRuntime(window, { appAppearance: 'dark' })
+  api.moteDialogue.read = async query => ({
+    main: { target: query.target, identity: { hostId: workspace.hostId, moteId: topic.id }, status: 'ready', resource: null,
+      documentRevision: 'original-document', roleRevision: 'original-role', current: conversation, issue: null },
+    links: [], incarnation: 'page-navigation', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null
+  })
+  topic.confirmedDirectoryPaths = [topic.directoryPath]
+  const followUp = { hostId: workspace.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: topic.directoryPath,
+    loopId: 'follow-up', creationOperationId: 'plan-follow-up', futureIntentId: 'original-follow-up', revision: 1,
+    intervalMs: 60_000, everyMs: 7_200_000, prompt: 'Review project decisions', status: 'active', nextCheckAt: Date.now() + 60_000 }
+  api.schedule.list = async params => {
+    if (params.scope && (params.scope.hostId !== workspace.hostId || params.scope.workspacePath !== topic.directoryPath)) throw Error('Unexpected Mote schedule scope')
+    return validateScheduleRpcResult('schedule.list', { schedules: [followUp], executionScope: 'connected-host' }, params)
+  }
+  api.schedule.history = async params => validateScheduleRpcResult('schedule.history', { scheduleId: params.scheduleId, from: params.from, to: params.to, nextCursor: null,
+    executionScope: 'connected-host', coverage: 'recorded-inputs', entries: [], ...(params.bucketStarts ? { buckets: [] } : {}) }, params)
+}
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
   title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
   description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
@@ -120,6 +143,7 @@ if (restored) {
 }
 function Scene() {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
+  const presentation = useSpaceContentPresentationOwner()
   // Match App visibility: a floating close is not a background Space entry.
   const backgroundVisible = terminalRestartOnly ? false : !floating.open
   const state = useAppStore()
@@ -155,7 +179,11 @@ function Scene() {
     open: () => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}), close: () => requestPmoTeamsTopicFloatingClose({restoreFocus: false}),
     mode: (mode: 'activity' | 'terminal') => useAppStore.getState().setViewMode(session.id, mode, {focus: false}),
     floatSize: (width: number,height: number) => setFloating({size: {width,height},railMode: 'avatars'}),
-    theme: (light: boolean) => { document.documentElement.dataset.appearance = light ? 'light' : 'dark' },
+    theme: (light: boolean) => {
+      const appearance = light ? 'light' : 'dark'
+      if (calendarNavigation) updateThemeSelection({ appAppearance: appearance })
+      else document.documentElement.dataset.appearance = appearance
+    },
     missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },
     reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true },
     enter: () => useAppStore.getState().openScratchTopic(topic.id, workspace.id),
@@ -163,9 +191,12 @@ function Scene() {
     restartInput: () => { const state = useAppStore.getState(); return { config: state.config, sessions: [session], tabs: state.tabs, layouts: state.layouts, spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests, topics: [quickTopic(), secondTopic], selection: state.workbenchSpaceSelection, agentComposerDrafts: state.agentComposerDrafts,
       launcherState: useLauncherState.persist.getOptions().partialize!(useLauncherState.getState()), disk, viewModes: state.viewModes, quickMode: { path: rootPath + '/MOTE.md', content: disk[rootPath + '/MOTE.md'], conversation } } }
   } })
-  return <DesktopClientUiProvider><WindowOverlayHost /><main className="persona-scene">
+  const workbench = <section className={"persona-scene__work" + (terminalRestartOnly ? " workspace-workbench-slot--parked" : "")} aria-hidden={terminalRestartOnly || undefined} inert={terminalRestartOnly}><MoteWorkface workspaceId={workspace.id} visible={backgroundVisible}><WorkspaceWorkbench workspaceId={workspace.id} visible={backgroundVisible} viewTargets={targets} topicId={topic.id} topicIsolation="bound-only" /></MoteWorkface></section>
+  return <DesktopClientUiProvider><WindowOverlayHost /><main className="persona-scene" style={calendarNavigation ? {display:'flex', flexDirection:'column'} : undefined}>
     {contextProof ? null : <aside className="persona-scene__profile"><MoteDetailsPanel key={epoch} scope={scope} reference={reference} onOpenPath={materials.open} onCreateNote={() => {}} /></aside>}
-    <section className={"persona-scene__work" + (terminalRestartOnly ? " workspace-workbench-slot--parked" : "")} aria-hidden={terminalRestartOnly || undefined} inert={terminalRestartOnly}><MoteWorkface workspaceId={workspace.id} visible={backgroundVisible}><WorkspaceWorkbench workspaceId={workspace.id} visible={backgroundVisible} viewTargets={targets} topicId={topic.id} topicIsolation="bound-only" /></MoteWorkface></section>
+    {calendarNavigation ? <SpaceContentPresentationContext.Provider value={presentation}>
+      <MoteSpaceFrame workspaceId={workspace.id} active={backgroundVisible}>{workbench}</MoteSpaceFrame>
+    </SpaceContentPresentationContext.Provider> : workbench}
     <div data-pmo-teams-topic-launcher className="surface-proof-invoker"><button type="button" aria-label="Open Mote" onClick={() => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation})}>Mote</button></div>
     <PmoTeamsTopicFloatingPanel floating={floating} setFloating={setFloating} projectionState={projection} />
   </main></DesktopClientUiProvider>

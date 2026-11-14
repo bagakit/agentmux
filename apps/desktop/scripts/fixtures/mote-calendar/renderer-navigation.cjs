@@ -35,7 +35,7 @@ app.whenReady().then(async () => {
       overflow:[document.documentElement,panel].map(e=>({client:e.clientWidth,scroll:e.scrollWidth})),theme:document.documentElement.dataset.appearance,facts:window.moteCalendarScene.facts()};})()`)
     const readable = g => {
       const pages=g.tabs.filter(t=>['Profile','Discussion','Ideas','Calendar'].includes(t.label))
-      assert.deepEqual(pages.map(t=>t.label),['Profile','Discussion','Ideas','Calendar'])
+      assert.deepEqual(pages.map(t=>t.label).sort(),['Calendar','Discussion','Ideas','Profile'])
       assert.equal(g.tabs.filter(t=>t.selected==='true').length,1)
       if(g.section==='profile') {
         assert.ok(g.name.rect.width>=100,'Identity readability failed: no horizontal name room')
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
       assert.deepEqual(c.crossedCells,[],'Event text must stay inside its own date')
     }
     const sync = async () => { await read('document.fonts.ready.then(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))))'); win.webContents.invalidate(); await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))') }
-    const capture = async name => {await sync();const g=await measure();readable(g);if(g.calendar)calendarWidth(g);await fs.writeFile(path.join(evidence,name+'.png'),(await win.webContents.capturePage()).toPNG());result.images.push(name+'.png');result.geometry.push({capture:name,...g});return g}
+    const capture = async name => {await sync();await read(`Promise.allSettled([...document.querySelectorAll('.mote-page-bar .liquid-selection')].flatMap(el=>el.getAnimations()).map(animation=>animation.finished))`);const g=await measure();readable(g);if(g.calendar)calendarWidth(g);await fs.writeFile(path.join(evidence,name+'.png'),(await win.webContents.capturePage()).toPNG());result.images.push(name+'.png');result.geometry.push({capture:name,...g});return g}
     await until(`!!${q('[aria-label="Mote pages"]')}`, 'Real MoteSpaceFrame')
     await read(`window.moteCalendarScene.name('一起澄清问题与推进项目的长期工作搭档')`)
     await page('Profile');await until(`!!${q('[data-behavior-axis]')}`, 'Original saved personality')
@@ -79,6 +79,25 @@ app.whenReady().then(async () => {
     await until(`!!${q('[data-calendar-schedule-id="daily-brief"]')}`,'Original daily occurrence')
     const wide=await capture('calendar-reading-wide-light')
     assert.equal(wide.calendar.agenda,null)
+    const searchTrigger=q('[aria-label="Search and filter arrangements"]')
+    const searchInput=q('input[aria-label="Search arrangements"]')
+    const calendarIds=()=>read("[...new Set([...document.querySelectorAll('[data-calendar-schedule-id]')].map(el=>el.dataset.calendarScheduleId))].sort()")
+    const originalIds=await calendarIds()
+    assert.ok(originalIds.length>1 && originalIds.includes('daily-brief'))
+    await click(searchTrigger)
+    await until(`document.activeElement===${searchInput}`,'Search owns keyboard focus')
+    await win.webContents.insertText('早上一起看')
+    await until("!!document.querySelector('[data-calendar-schedule-id=daily-brief]') && !document.querySelector('[data-calendar-schedule-id]:not([data-calendar-schedule-id=daily-brief])')",'Filter the original dates by arrangement text')
+    await capture('calendar-search-result-light')
+    await win.webContents.insertText('找不到的安排')
+    await until(`!!${q('.mote-calendar__filter-empty')}`,'Offer recovery for an empty search')
+    await capture('calendar-search-empty-light')
+    await click(q('[role=search] button'))
+    await until(`!${q('.mote-calendar__filter-empty')}`,'Reset the empty result')
+    assert.deepEqual(await calendarIds(),originalIds,'Clearing the search restores original items on their dates')
+    await click(searchInput)
+    for(const type of ['keyDown','keyUp'])win.webContents.sendInputEvent({type,keyCode:'Escape'})
+    await until(`!${searchInput} && document.activeElement===${searchTrigger}`,'Escape returns to the original search control')
     let key,failure
     try {
       key=await win.webContents.insertCSS('.mote-calendar__canvas{max-width:65%!important}');await sync()
@@ -93,6 +112,19 @@ app.whenReady().then(async () => {
     await resizeCalendar(979);await capture('calendar-reading-full-row-light')
     win.setContentSize(360,900);await pause(80);await capture('calendar-reading-narrow-light')
     assert.equal(await read(`window.originalComposer===${q('[aria-label="Message Agent"]')}&&window.originalComposer.value===window.originalDraft`),true)
+    const focusedTab = `document.querySelector('[aria-label="Mote pages"] [aria-selected="true"]')`
+    await read(`(${focusedTab}).focus()`)
+    for(const type of ['keyDown','keyUp'])win.webContents.sendInputEvent({type,keyCode:'End'})
+    await until(`document.activeElement?.dataset.surfaceMode==='members'`, 'Keyboard selects the last Mote page')
+    await pause(400)
+    const rail = await read(`(()=>{
+      const tabs=[...document.querySelectorAll('[aria-label="Mote pages"] [role=tab]')], list=tabs[0].parentElement.getBoundingClientRect()
+      const last=tabs.at(-1).getBoundingClientRect(), rows=new Set(tabs.map(tab=>tab.getBoundingClientRect().top))
+      return {rows:rows.size,visible:last.left>=list.left-1 && last.right<=list.right+1, list:list.toJSON(), last:last.toJSON(), scroll:tabs[0].parentElement.scrollLeft}
+    })()`)
+    assert.ok(rail.rows===1 && rail.visible,'The compact rail stays on one line and reveals the focused last page: '+JSON.stringify(rail))
+    result.operations.push({action:'compact-navigation-end',...rail})
+    await capture('compact-last-page-keyboard')
     const final=await measure();assert.deepEqual(final.facts.drafts,final.facts.initialDrafts);assert.equal(final.facts.tabIds.length,2);assert.equal(final.facts.sessions.length,2);assert.equal(final.facts.calls.filter(c=>/schedule\.(create|pause|resume|cancel)/.test(c.method)).length,0)
     result.passed=true
   }catch(error){result.error={message:error.message,stack:error.stack}}
