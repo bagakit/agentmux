@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -14,7 +14,7 @@ const native = vi.hoisted(() => {
       setDevicePermissionHandler: vi.fn(), setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn() })
     return session
   }
-  const site = (url: string) => { try { return new URL(url).host } catch { return url } }
+  const site = (url: string) => { try { const parsed = new URL(url); return parsed.hostname || parsed.href.split('#')[0]! } catch { return url } }
   class Contents {
     url = ''; title = ''; loading = false; destroyed = false
     history: string[] = []; index = -1
@@ -120,6 +120,54 @@ function owner() {
 const settled = () => new Promise(resolve => setImmediate(resolve))
 
 describe('Browser page zoom per site and Profile', () => {
+  it.each([0, 200])('[zoom-cost] reads only related native pages with %i unrelated pages', async unrelated => {
+    const { manager, contents, published } = owner()
+    await manager.create('source', 'https://shared.test/source', 'workspace', 'personal')
+    await manager.create('peer', 'https://shared.test/peer', 'workspace', 'personal')
+    for (let i = 0; i < unrelated; i++) await manager.create(`unrelated-${i}`, `https://unrelated-${i}.test/`, 'workspace', 'personal')
+    await settled()
+    const source = vi.spyOn(contents('https://shared.test/source'), 'getZoomFactor'), peer = vi.spyOn(contents('https://shared.test/peer'), 'getZoomFactor')
+    const strangers = Array.from({ length: unrelated }, (_, i) => vi.spyOn(contents(`https://unrelated-${i}.test/`), 'getZoomFactor'))
+    manager.zoom('source', 'in')
+    if (process.env.AGENTMUX_ZOOM_COST_RECEIPT) appendFileSync(process.env.AGENTMUX_ZOOM_COST_RECEIPT, JSON.stringify({ unrelated, sourceReads: source.mock.calls.length, peerReads: peer.mock.calls.length, unrelatedReads: strangers.reduce((n, read) => n + read.mock.calls.length, 0) }) + '\n')
+    expect(source).toHaveBeenCalledTimes(2); expect(peer).toHaveBeenCalledTimes(1)
+    expect(strangers.reduce((n, read) => n + read.mock.calls.length, 0)).toBe(0)
+    expect(published('peer').at(-1)?.zoomFactor).toBe(1)
+  })
+
+  it('[zoom-cost] follows native host scope across ports and protocols, and full hostless URLs without fragments', async () => {
+    const { manager, latest, contents } = owner()
+    const pages = { a: 'http://shared.test:8000/a', b: 'https://shared.test:9000/b', blank: 'about:blank', fragment: 'about:blank' }
+    for (const [id, url] of Object.entries(pages)) await manager.create(id, url, 'workspace', 'personal')
+    // A same-document native commit is observed on the already admitted blank page.
+    contents('about:blank').commit('about:blank#part')
+    await settled()
+    manager.zoom('a', 'in'); expect(latest('b')?.zoomFactor).toBe(1)
+    manager.zoom('blank', 'in'); expect(latest('fragment')?.zoomFactor).toBe(1)
+  })
+
+  it('[zoom-cost] moves a navigated page to its real scope and removes old native views on Profile replacement and close', async () => {
+    const { manager, contents, latest } = owner()
+    await manager.create('a', 'https://shared.test/a', 'workspace', 'personal')
+    await manager.create('b', 'https://shared.test/b', 'workspace', 'personal')
+    await manager.create('work', 'https://shared.test/work', 'workspace', 'work')
+    await settled()
+    const old = contents('https://shared.test/b')
+    await manager.navigate('b', 'https://other.test/b'); await settled()
+    const otherRead = vi.spyOn(old, 'getZoomFactor')
+    manager.zoom('a', 'in'); expect(otherRead).not.toHaveBeenCalled()
+    await manager.navigate('b', 'https://shared.test/b'); await settled()
+    await manager.switchProfile('b', 'work'); await settled()
+    const switched = contents('https://shared.test/b'), switchedRead = vi.spyOn(switched, 'getZoomFactor')
+    otherRead.mockClear(); manager.zoom('a', 'in')
+    expect(otherRead).not.toHaveBeenCalled(); expect(switchedRead).not.toHaveBeenCalled()
+    manager.zoom('work', 'out'); expect(latest('b')?.zoomFactor).toBe(0.8)
+    await manager.close('b'); switchedRead.mockClear()
+    manager.zoom('work', 'reset'); expect(switchedRead).not.toHaveBeenCalled()
+    await manager.close('a'); await manager.close('work')
+    expect(Reflect.get(manager, 'zoomScopes').size).toBe(0)
+  })
+
   it('steps through the common preset levels and returns to the product default', () => {
     expect([steppedBrowserZoom(0.9, 'in'), steppedBrowserZoom(1, 'in'), steppedBrowserZoom(0.9, 'out')]).toEqual([1, 1.1, 0.8])
     expect([steppedBrowserZoom(1.1, 'reset'), steppedBrowserZoom(3, 'reset')]).toEqual([0.9, 0.9])
