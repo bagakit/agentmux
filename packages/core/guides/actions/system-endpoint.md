@@ -23,6 +23,9 @@ Local Hosts and non-Unix configuration services use the original default or expl
 credential paths from another machine cannot be interpreted as local key files. An unbound saved
 Runtime remains unknown; inspect that Host before choosing a target. A Source must authenticate
 the original caller; the selector grants no person/device or cross-Host authority.
+Saved SSH identityFile must be absolute or an SSH ~ home reference. Other relative paths have no
+confirmed configuration-owner base and are not interpreted in the CLI cwd; the saved record and
+other connection paths remain intact. Tailcat's original named-key semantics are unchanged.
 Help, skill and version remain offline. Local/static commands and the Unix stdio bridge do not
 accept --source-host; system endpoint --inspect may observe the selected Source.
 Run system endpoint to discover the default without connecting.

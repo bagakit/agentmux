@@ -207,6 +207,8 @@ Goal 模块同时面向管理者和执行者，沿[执行责任、停滞告警�
 
 CLI 的显式 `--source-host ID` 复用本机原 Unix 配置 owner 已保存的 SSH Host，和 `--endpoint` 互斥。配置只读一次，以准确 ID 取得完整连接目标和原绑定 Runtime；不注册、测试、安装或自动修复连接。私钥路径属于配置 owner 的机器，因此该选择只支持本机配置服务，不借远端配置中的路径读取本机密钥；本地 Host 和未绑定 Runtime 不猜目标，保留原默认与显式 endpoint 入口。传输使用原 SSH／Tailcat 转换与调用者凭据，Source 不承认原主体时明确拒绝，不能剥离 caller 或冒充 person。
 
+同机仍不代表同 cwd：保存的 SSH identityFile 使用绝对路径或 OpenSSH 自有的 `~` home 引用时原样交传输；其他相对路径没有已确认的配置 owner 目录基准，只在此新 selector 表达路径来源未确认，保原配置与其他连接入口。不从 CLI cwd 猜测、不读密钥验证；Tailcat 原命名 key 语义不变。
+
 同一调用固定保存目标与原 Runtime，再从该 Source 取得本次 owner instance；普通调用、前置读取及各类订阅都携带同一 fence。业务参数中的 Host／空间／资源仍属于 Source 命名空间，配置 alias 不替代它们。配置后来改变不重解析或改投；已取得的原回执继续交还原请求，未知结果保留原 operationId，不自动重发。help、skill、version 不连接服务；本地分析、静态输出和原 Unix stdio 桥不借此选择冒充远端执行。
 
 该 selector 取得身份后，CLI 成功及错误信封保留本次 `source: {configuredHostId,runtimeId,ownerInstanceId}`，不放连接 descriptor 或凭据，不修改原业务 result。输出原 JSON-RPC 帧的 reader 先给一条独立 CLI Source 关联记录，再保原帧；特殊 reader 的 CLI 信封同样保关联。配置 alias 后来改变时，查旧操作须重新定位同一 Runtime，不能由当前 alias 的新 Runtime 代查；原 instance 只是这次捕获事实，跨重启可在同一 Runtime 取得 fresh instance 后查原操作，不把旧 instance 变成永久恢复门禁。取身份前的失败不补造 Source instance。
