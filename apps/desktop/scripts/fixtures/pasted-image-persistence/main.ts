@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
@@ -69,6 +69,9 @@ async function run() {
   dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer/index.html') }, loading: null }), window, workbenchWindows: windows, runtime, configStore: store, initialConfig: config,
     applicationAccess, workbenchUserState: new WorkbenchUserStateStore(join(root, 'workbench-user-state.json')), scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
   await window.loadFile(join(root, 'renderer/index.html'))
+  const legacyPath = join(pastedDirectory(app.getPath('home')), sha + '.png')
+  await mkdir(pastedDirectory(app.getPath('home')), { recursive: true })
+  await writeFile(legacyPath, bytes)
   const evaluate = (expression: string) => window.webContents.executeJavaScript(expression)
   const until = async (expression: string) => {
     for (let attempt = 0; attempt < 200; attempt++) { const result = await evaluate(expression); if (result) return result; await new Promise(resolve => setTimeout(resolve, 25)) }
@@ -95,6 +98,10 @@ async function run() {
   assert.match(saves[1].result, /\/paste-[1-9A-HJ-NP-Za-km-z]{12}\.png$/u, 'actual IPC must return the compact Base58 pasted-image name')
   assert.equal(saves[1].result, originalPath, 'actual IPC must consume the deterministic short-name writer')
   assert.equal((await readFile(originalPath)).equals(bytes), true)
+  const legacy = await stat(legacyPath), compact = await stat(originalPath)
+  assert.deepEqual({ dev: compact.dev, ino: compact.ino }, { dev: legacy.dev, ino: legacy.ino }, 'new short reference must link the same confirmed legacy image')
+  const oldRead = await evaluate(`window.agentmux.ui.readPastedImage(${JSON.stringify(legacyPath)})`)
+  assert.equal(oldRead.dataUrl, 'data:image/png;base64,' + bytes.toString('base64'), 'old image references remain readable through the production IPC')
   assert.equal(report.uploads.length, 1, 'the actual Composer must reach file.upload exactly once for the confirmed paste')
   const uploadReceipt = report.uploads[0]
   assert.equal(uploadReceipt.input.dataBase64, bytes.toString('base64'), 'retainInputImage → file.upload must preserve the original image bytes')
@@ -131,7 +138,7 @@ async function run() {
   assert.notEqual(child.pid, process.pid)
   assert.equal(child.receipt.path, originalPath, 'second ordinary process must reconcile the same original artifact')
   assert.equal(child.image, 'data:image/png;base64,' + bytes.toString('base64'))
-  assert.deepEqual(await readdir(pastedDirectory(app.getPath('home'))), [filename])
+  assert.deepEqual((await readdir(pastedDirectory(app.getPath('home')))).sort(), [filename, sha + '.png'].sort())
   report.secondProcess = child; report.consumer = facts; report.passed = true
   await evaluate('pastedProof.dispose()')
 }

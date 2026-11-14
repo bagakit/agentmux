@@ -1,12 +1,13 @@
 import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { spawn, execFileSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { createRequire, isBuiltin } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile, rm, cp, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build, transform } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
@@ -18,7 +19,8 @@ assert.ok(args.length === 0 || args.length === 2 && args[0] === '--receipt', 'Us
 const receiptPath = args[1] ? resolve(args[1]) : join(output, 'receipt.json')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()
 const receipt = { schema: 'agentmux.pasted-image-persistence-proof.v1', passed: false,
-  candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), runs: [], sharedTreeMutations: 0 }
+  candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), runs: [], sharedTreeMutations: 0, cleanup: [] }
+const nativeDirectories = [], nativePids = new Map()
 async function bind(file) {
   const name = relative(root, file), sha = hash(await readFile(file))
   if (sources.has(name)) assert.equal(sources.get(name), sha, 'Bound source changed: ' + name)
@@ -26,13 +28,9 @@ async function bind(file) {
 }
 async function save() { await mkdir(dirname(receiptPath), { recursive: true }); await writeFile(receiptPath, JSON.stringify({ ...receipt, sources: Object.fromEntries(sources) }, null, 2)) }
 async function execute(file, args, env, label) {
-  const result = await new Promise((resolve, reject) => {
-    const child = spawn(file, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] }); let log = '', timedOut = false
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes })
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 120000)
-    child.once('error', error => { clearTimeout(timer); reject(error) })
-    child.once('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal, timedOut, log }) })
-  })
+  const lines = [], observed = await runProbeProcess(file, args, { cwd: root, env, timeoutMs: 120000,
+    onLine: line => lines.push(line), onSpawn: ({ originalPid }) => { if (env.AGENTMUX_PASTED_PROOF_ROOT) nativePids.set(env.AGENTMUX_PASTED_PROOF_ROOT, originalPid) } })
+  const result = { code: observed.exitCode, signal: observed.exitSignal, timedOut: observed.timedOut, log: lines.join('\n'), observed }
   await writeFile(join(output, label + '.log'), result.log)
   assert.equal(result.timedOut, false, 'Timeout cannot qualify: ' + label)
   assert.equal(result.signal, null, 'Signal cannot qualify: ' + label)
@@ -44,8 +42,8 @@ const mutations = [
     expected: 'derives stable short Base58 names from the full hash and normalized extension' },
   { id: 'random-final-name', file: writer, from: "deriveObjectId('pasted-image.v1', JSON.stringify([sha256, extension]))", to: 'mintObjectId()',
     expected: 'derives stable short Base58 names from the full hash and normalized extension' },
-  { id: 'legacy-reconciliation', file: writer, from: 'await confirm(legacyPath, bytes); path = legacyPath', to: '/* private mutant: skip legacy reconciliation */',
-    expected: 'reuses a matching legacy SHA object without publishing a short-name copy' },
+  { id: 'legacy-reconciliation', file: writer, from: 'await link(legacyPath, path)', to: "await (await import('node:fs/promises')).copyFile(legacyPath, path, constants.COPYFILE_EXCL)",
+    expected: 'returns a stable short reference linked to the matching legacy object without copying or changing old references' },
   { id: 'retained-bytes', file: writer, from: 'await confirm(path, bytes)', to: '/* private mutant: trust filename */', expected: 'refuses changed retained bytes' },
   { id: 'no-overwrite', file: writer, from: 'await link(temporary, path)', to: "await (await import('node:fs/promises')).rename(temporary, path)", expected: 'refuses changed retained bytes' },
   { id: 'directory-confirmation', file: writer, from: 'await syncDirectory(directory)', to: '/* private mutant: omit publication sync */', expected: 'does not report success when directory synchronization is unconfirmed' },
@@ -59,12 +57,6 @@ async function mutationReceipt(mutation) {
   return mutation ? { id: mutation.id, file: mutation.file, original: sources.get(mutation.file),
     consumed: hash((await readFile(join(root, mutation.file), 'utf8')).replace(mutation.from, mutation.to)) } : null
 }
-for (const mutation of mutations) {
-  const file = join(root, mutation.file); await bind(file)
-  const original = await readFile(file, 'utf8')
-  assert.equal(original.split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id)
-  await transform(original.replace(mutation.from, mutation.to), { loader: 'ts', target: 'esnext', sourcefile: mutation.file })
-}
 // Honor the workspace's declared browser source exports, including CSS imports. Installed
 // workspace links may point at a different worktree and cannot supply this candidate's UI.
 const browserSourceAliases = []
@@ -73,8 +65,11 @@ for (const name of await readdir(join(root, 'packages'))) {
   let pkg; try { pkg = JSON.parse(await readFile(manifest, 'utf8')) } catch { continue }
   await bind(manifest)
   for (const [key, spec] of Object.entries(pkg.exports ?? {}).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
-    const target = typeof spec === 'string' ? spec : spec.browser
-    if (!target || !(target.startsWith('./src/') || target.startsWith('./brand/'))) continue
+    const declared = typeof spec === 'string' ? spec : spec.browser ?? spec.import
+    if (typeof declared !== 'string') continue
+    const target = declared.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts')
+    if (!(target.startsWith('./src/') || target.startsWith('./brand/'))) continue
+    try { await stat(resolve(dirname(manifest), target.split('*')[0])) } catch { continue }
     const pattern = pkg.name + (key === '.' ? '' : key.slice(1))
     browserSourceAliases.push({ find: new RegExp('^' + pattern.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\*', '(.+)') + '$'),
       replacement: resolve(dirname(manifest), target).replace('*', '$1') })
@@ -88,7 +83,7 @@ export default {...base,cacheDir:${JSON.stringify(join(output, label + '-cache')
   const result = await execute(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,
     '--reporter=default', '--reporter=json', '--outputFile.json=' + report], { ...process.env, NODE_ENV: 'test' }, label)
   const tests = JSON.parse(await readFile(report, 'utf8'))
-  assert.equal(tests.testResults.length, 2); assert.equal(tests.numTotalTests, 28); assert.equal(tests.numPendingTests, 0)
+  assert.equal(tests.testResults.length, 2); assert.equal(tests.numTotalTests, 30); assert.equal(tests.numPendingTests, 0)
   assert.equal(tests.numRuntimeErrorTestSuites ?? 0, 0)
   assert.doesNotMatch(result.log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/u)
   assert.doesNotMatch(result.log, /test timed out/iu, 'An individual test timeout cannot qualify RED')
@@ -129,12 +124,28 @@ function externalDependency(specifier, importer) {
 let renderer
 async function native(label, mutation) {
   const directory = await mkdtemp(join(tmpdir(), 'amp-'))
+  nativeDirectories.push(directory)
+  // Preserve both Core's dynamic native dependencies and Desktop's workspace package discovery.
+  const modules = join(directory, 'node_modules'); await mkdir(modules)
+  for (const folder of ['packages/core/node_modules', 'apps/desktop/node_modules']) {
+    for (const entry of await readdir(join(root, folder))) {
+      if (entry.startsWith('.')) continue
+      const names = entry.startsWith('@') ? (await readdir(join(root, folder, entry))).map(name => entry + '/' + name) : [entry]
+      for (const name of names) {
+        const target = join(modules, name); await mkdir(dirname(target), { recursive: true })
+        try { await symlink(join(root, folder, name), target, 'dir') }
+        catch (error) { if (error.code !== 'EEXIST') throw error }
+      }
+    }
+  }
   let applied = false
   const options = { absWorkingDir: root, bundle: true, platform: 'node', format: 'esm', external: ['electron'], metafile: true, logLevel: 'warning',
     banner: { js: "import {createRequire as __proofRequire} from 'node:module';const require=__proofRequire(import.meta.url);" },
     plugins: [{ name: 'original-pasted-production', setup(plugin) {
       plugin.onResolve({ filter: /^[^./]/ }, async args => {
         if (isBuiltin(args.path) || args.path === 'electron') return null
+        const alias = browserSourceAliases.find(alias => alias.find.test(args.path))
+        if (alias) return { path: args.path.replace(alias.find, alias.replacement) }
         const path = externalDependency(args.path, args.importer); await bind(path); return { path, external: true }
       })
       plugin.onLoad({ filter: /\.ts$/ }, async args => {
@@ -144,7 +155,12 @@ async function native(label, mutation) {
     } }] }
   const main = await build({ ...options, entryPoints: ['apps/desktop/scripts/fixtures/pasted-image-persistence/main.ts'], outfile: join(directory, 'main.mjs') })
   const storage = await build({ ...options, stdin: { resolveDir: root, loader: 'ts', contents: 'export {savePastedImage} from "./apps/desktop/src/main/pasted-image-write.ts";export {readPastedImage} from "./apps/desktop/src/main/pasted-image-read.ts"' }, outfile: join(directory, 'storage.mjs') })
-  const preload = await build({ ...options, plugins: [], platform: 'browser', conditions: ['module', 'browser', 'production'],
+  const preload = await build({ ...options, plugins: [{ name: 'candidate-preload-source-exports', setup(plugin) {
+    plugin.onResolve({ filter: /^@agentmux\// }, args => {
+      const alias = browserSourceAliases.find(alias => alias.find.test(args.path))
+      return alias ? { path: args.path.replace(alias.find, alias.replacement) } : null
+    })
+  } }], platform: 'browser', conditions: ['module', 'browser', 'production'],
     mainFields: ['browser', 'module', 'jsnext:main', 'jsnext', 'main'], format: 'cjs', banner: undefined,
     entryPoints: ['apps/desktop/src/preload/index.ts'], outfile: join(directory, 'preload.cjs') })
   for (const built of [main, storage, preload]) for (const file of Object.keys(built.metafile.inputs)) if (file !== '<stdin>') await bind(resolve(root, file))
@@ -171,7 +187,7 @@ async function native(label, mutation) {
 const root=${JSON.stringify(directory)};for(const key of ['home','appData','userData','sessionData']){const target=path.join(root,key);fs.mkdirSync(target,{recursive:true});app.setPath(key,target)};
 app.on('window-all-closed',()=>{});import(${JSON.stringify(pathToFileURL(join(directory, 'main.mjs')).href)}).catch(error=>{console.error(error);fs.writeFileSync(path.join(root,'native-receipt.json'),JSON.stringify({passed:false,failure:{name:error.name,message:error.message,stack:error.stack}}));app.exit(1)});`)
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AGENTMUX_|CTXMUX_)/u.test(name) && name !== 'ELECTRON_RUN_AS_NODE'))
-  Object.assign(env, { HOME: join(directory, 'home'), AGENTMUX_PASTED_PROOF_ROOT: directory, AGENTMUX_PASTED_PROOF_NODE: process.execPath,
+  Object.assign(env, { AGENTMUX_PASTED_PROOF_ROOT: directory, AGENTMUX_PASTED_PROOF_NODE: process.execPath,
     AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
   const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env, label)
@@ -185,6 +201,12 @@ app.on('window-all-closed',()=>{});import(${JSON.stringify(pathToFileURL(join(di
   console.log(label + ': ' + (mutation ? 'AssertionRED' : 'GREEN'))
 }
 try {
+  for (const mutation of mutations) {
+    const file = join(root, mutation.file); await bind(file)
+    const original = await readFile(file, 'utf8')
+    assert.equal(original.split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id)
+    await transform(original.replace(mutation.from, mutation.to), { loader: 'ts', target: 'esnext', sourcefile: mutation.file })
+  }
   await bind(import.meta.filename)
   for (const file of ['apps/desktop/test/pasted-image-write.test.ts', 'apps/desktop/test/pasted-image-read.test.ts', 'apps/desktop/test/pasted-image-persistence.config.mts']) await bind(join(root, file))
   await units('baseline')
@@ -198,4 +220,17 @@ try {
   receipt.baselineQualified = true
   receipt.passed = !baselineOnly
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
+for (const directory of nativeDirectories) {
+  try {
+    const pid = nativePids.get(directory)
+    if (pid) await stopProbeProcesses(pid, directory)
+    assert.deepEqual(await listProbeProcesses(pid, directory), [], 'No fixture runtime may remain before cleanup')
+    await rm(directory, { recursive: true, force: true }); receipt.cleanup.push({ path: directory, removed: true })
+  } catch (error) { receipt.passed = false; process.exitCode = 1; receipt.cleanup.push({ path: directory, removed: false, issue: error.message }) }
+}
+if (!receiptPath.startsWith(output + '/')) {
+  const logs = join(dirname(receiptPath), 'pasted-proof-logs'); await mkdir(logs, { recursive: true })
+  for (const name of await readdir(output)) if (/\.(?:log|json)$/u.test(name)) await cp(join(output, name), join(logs, name))
+  await rm(output, { recursive: true, force: true }); receipt.cleanup.push({ path: output, removed: true })
+}
 await save(); console.log('Pasted image proof: ' + receiptPath)

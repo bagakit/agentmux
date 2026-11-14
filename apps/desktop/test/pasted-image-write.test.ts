@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { deriveObjectId } from '@agentmux/core/object-id'
@@ -146,15 +146,39 @@ describe('original pasted image storage', () => {
     expect(await readFile(result.path)).toEqual(bytes)
   })
 
-  it('reuses a matching legacy SHA object without publishing a short-name copy', async () => {
+  it('returns a stable short reference linked to the matching legacy object without copying or changing old references', async () => {
     const root = await home(), directory = pastedDirectory(root), legacyPath = join(directory, digest(bytes) + '.png')
     await mkdir(directory, { recursive: true })
     await writeFile(legacyPath, bytes)
     const result = await savePastedImage(root, { bytes, extension: 'png' })
-    expect(result).toEqual({ path: legacyPath, sha256: digest(bytes), byteLength: bytes.length, diskDurability: 'confirmed' })
+    const shortPath = join(directory, `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([digest(bytes), 'png']))}.png`)
+    expect(result).toEqual({ path: shortPath, sha256: digest(bytes), byteLength: bytes.length, diskDurability: 'confirmed' })
     expect(await savePastedImage(root, { bytes, extension: 'png' })).toEqual(result)
     expect((await readPastedImage(root, legacyPath))?.dataUrl.split(',')[1]).toBe(bytes.toString('base64'))
-    expect(await readdir(directory)).toEqual([digest(bytes) + '.png'])
+    expect((await readPastedImage(root, shortPath))?.dataUrl.split(',')[1]).toBe(bytes.toString('base64'))
+    const old = await stat(legacyPath), compact = await stat(shortPath)
+    expect({ dev: compact.dev, ino: compact.ino }).toEqual({ dev: old.dev, ino: old.ino })
+    expect((await readdir(directory)).sort()).toEqual([digest(bytes) + '.png', shortPath.split('/').at(-1)!].sort())
+  })
+
+  it('preserves both objects when a legacy image meets a conflicting short name', async () => {
+    const root = await home(), directory = pastedDirectory(root), legacyPath = join(directory, digest(bytes) + '.png')
+    const shortPath = join(directory, `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([digest(bytes), 'png']))}.png`)
+    await mkdir(directory, { recursive: true }); await writeFile(legacyPath, bytes); await writeFile(shortPath, 'Another original image')
+    await expect(savePastedImage(root, { bytes, extension: 'png' })).rejects.toThrow('unconfirmed')
+    expect(await readFile(legacyPath)).toEqual(bytes)
+    expect(await readFile(shortPath, 'utf8')).toBe('Another original image')
+  })
+
+  it('reuses an already confirmed canonical short object when a legacy copy has identical bytes but another inode', async () => {
+    const root = await home(), directory = pastedDirectory(root), legacyPath = join(directory, digest(bytes) + '.png')
+    const shortPath = join(directory, `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([digest(bytes), 'png']))}.png`)
+    await mkdir(directory, { recursive: true }); await writeFile(legacyPath, bytes); await writeFile(shortPath, bytes)
+    const legacy = await stat(legacyPath), compact = await stat(shortPath)
+    expect(legacy.ino).not.toBe(compact.ino)
+    expect((await savePastedImage(root, { bytes, extension: 'png' })).path).toBe(shortPath)
+    expect((await stat(legacyPath)).ino).toBe(legacy.ino); expect((await stat(shortPath)).ino).toBe(compact.ino)
+    expect(await readFile(legacyPath)).toEqual(bytes); expect(await readFile(shortPath)).toEqual(bytes)
   })
 
   it.each(['changed', 'unreadable'] as const)('refuses a %s legacy object without hiding it behind a short-name copy', async condition => {
