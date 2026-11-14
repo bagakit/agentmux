@@ -32,7 +32,7 @@ const mutationCases = { 'surface-windows': {
   'duplicate-region-host': { file: 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', before: 'const nativeRegionTarget = projectedSurface\n', after: "const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'\n" },
   'close-on-weak-save': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!) }', after: "try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!); if (survey.outcome !== 'registered') await api.browser.close(browserId) }" }
 }, 'profile-switch': {
-  'steal-environment-keyboard-focus': { file: 'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx', before: 'if (!toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&', after: 'if (false && !toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&' }
+  'steal-environment-keyboard-focus': { file: 'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx', before: 'if (!toolsOpen && !selection && focused && surface?.contains(focused) &&', after: 'if (false && !toolsOpen && !selection && focused && surface?.contains(focused) &&' }
 }, 'context-menu': {
   'omit-context-profile-admission': { file: 'apps/desktop/src/renderer/src/lib/browser-native-opening.ts',
     before: "if (event.opening?.collectInSurvey || (fromSurveyPage && destination !== 'region')) {",
@@ -256,6 +256,6 @@ try {
   receipt.originRequests = origins.requests
   await save()
   await origins.close()
-  if (selectedCase === 'surface-windows' || selectedCase === 'context-menu') await rm(directory, { recursive: true, force: true })
+  if (selectedCase === 'surface-windows' || selectedCase === 'context-menu' || selectedCase === 'profile-switch') await rm(directory, { recursive: true, force: true })
 }
 // Receipts and screenshots remain in the original evidence directory.

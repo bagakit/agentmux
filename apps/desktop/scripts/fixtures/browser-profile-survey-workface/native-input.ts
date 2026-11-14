@@ -39,39 +39,33 @@ export function nativeInput(contents: WebContents, trace: any[]) {
     assert.equal(await read(`document.querySelector(${JSON.stringify(selector)}).value`), value, 'Actual native input must contain the requested fixture value')
     trace.push({ kind: 'text-input', contentsId: contents.id, selector, length: value.length })
   }
-  const select = async (selector: string, value: string) => {
+  const select = async (selector: string, value: string, keepFocus = false) => {
     await click(selector)
-    await key('Escape','Escape',27)
-    const target = await nativeUntil(() => read(`(()=>{
-      const e=document.querySelector(${JSON.stringify(selector)});if(!e?.checkVisibility()||e.disabled)return null;
-      const options=[...e.options].filter(o=>!o.disabled),i=options.findIndex(o=>o.value===${JSON.stringify(value)});if(i<0)return null;
-      e.scrollIntoView({block:'nearest'});e.focus();globalThis.profileSurveySelectEvents??=[];
-      globalThis.profileSurveyKeyEvents??=[];
-      if(!globalThis.profileSurveyKeyObserver){globalThis.profileSurveyKeyObserver=true;document.addEventListener('keydown',event=>{globalThis.profileSurveyKeyEvents.push({key:event.key,tag:event.target?.tagName,label:event.target?.getAttribute?.('aria-label'),trusted:event.isTrusted});globalThis.profileSurveyKeyEvents=globalThis.profileSurveyKeyEvents.slice(-16)},true)}
-      e.addEventListener('change',event=>globalThis.profileSurveySelectEvents.push({value:e.value,trusted:event.isTrusted}),{once:true});return{i,from:options.findIndex(o=>o.value===e.value),label:options[i].textContent.trim()};
+    const option = `[role="option"][data-value="${value}"]:not(:disabled)`
+    const count = await nativeUntil(() => read(`(()=>{
+      const target = document.querySelector(${JSON.stringify(option)});
+      if (!target?.checkVisibility()) return 0;
+      globalThis.profileSurveySelectEvents ??= [];
+      const observe = event => {
+        if (event.key !== 'Enter') return;
+        globalThis.profileSurveySelectEvents.push({value:target.dataset.value,trusted:event.isTrusted});
+        target.removeEventListener('keydown', observe, true);
+      };
+      target.addEventListener('keydown', observe, true);
+      return target.closest('[role="listbox"]').querySelectorAll('[role="option"]:not(:disabled)').length;
     })()`), 'original selectable option ' + value)
-    const attempt:any={kind:'keyboard-select',contentsId:contents.id,selector,value,target,state:'dispatched',steps:[]}
-    trace.push(attempt)
-    const snapshot=()=>read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return{value:e?.value,activeTag:document.activeElement?.tagName,activeLabel:document.activeElement?.getAttribute('aria-label'),documentFocus:document.hasFocus(),keys:globalThis.profileSurveyKeyEvents?.slice(-5),changes:globalThis.profileSurveySelectEvents?.slice(-5)}})()`)
-    attempt.steps.push(await snapshot())
-    // Chromium on macOS delegates arrow handling to its native popup. The
-    // repository's native handoff fixture uses trusted type-ahead instead.
-    // The label comes from the exact requested option value, and the final
-    // value is checked below; no displayed name grants a Profile identity.
-    if(target.from!==target.i){
-      await pause(1100)
-      for(const character of target.label){
-        await contents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'char',key:character,text:character,unmodifiedText:character})
-        const observed=await snapshot();attempt.steps.push(observed)
-        assert.equal(observed.activeTag,'SELECT','Changing the Survey environment keeps keyboard focus on the person’s original selector')
-        assert.equal(observed.activeLabel,'Survey environment','The same original environment selector keeps keyboard input')
-      }
+    for (let step = 0; step < count; step++) {
+      if (await read(`document.activeElement?.matches(${JSON.stringify(option)})`)) break
+      await key('ArrowDown', 'ArrowDown', 40)
     }
+    assert.equal(await read(`document.activeElement?.matches(${JSON.stringify(option)})`), true, 'Keyboard reaches the exact Survey environment option')
     await key('Enter', 'Enter', 13)
-    attempt.steps.push(await snapshot())
-    await nativeUntil(() => read(`document.querySelector(${JSON.stringify(selector)})?.value===${JSON.stringify(value)}`), 'actual selected option')
-    attempt.state='confirmed'
-    await pause(70)
+    await nativeUntil(() => read(`document.querySelector(${JSON.stringify(selector)})?.dataset.value === ${JSON.stringify(value)}`), 'actual selected option')
+    await nativeUntil(() => read(`!document.querySelector('.survey-profile-picker__menu')`), 'closed Survey environment selector')
+    const changes = await read('globalThis.profileSurveySelectEvents.slice(-1)')
+    assert.deepEqual(changes, [{ value, trusted: true }])
+    trace.push({ kind: 'keyboard-select', contentsId: contents.id, selector, value, state: 'confirmed', steps: [{ changes }] })
+    if (keepFocus) assert.ok(await read(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`), 'Changing the Survey environment keeps keyboard focus on the person’s original selector')
   }
   return { read, click, fill, select, key, release() { if(attachedHere&&!contents.isDestroyed()&&contents.debugger.isAttached())contents.debugger.detach() } }
 }

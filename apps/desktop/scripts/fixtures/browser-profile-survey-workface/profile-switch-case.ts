@@ -36,8 +36,8 @@ export async function profileSwitchCase(ctx: Context) {
   const nativeCalls = () => ports.calls.filter(call => ['browser:create', 'browser:switchProfile', 'browser:navigate', 'browser:close', 'browser:setDefaultProfile'].includes(call.channel)).length
   const memberList = () => result(['space', 'survey-list'])
   const showSurvey = async () => { await input.click('.surface-navigation__utilities button:first-child'); assert.equal((await facts()).mainSurface, 'survey') }
-  const choose = async (value: string) => {
-    await input.select(environment, value)
+  const choose = async (value: string, keepFocus?: boolean) => {
+    await input.select(environment, value, keepFocus)
     const expected = value === 'default' ? { kind: 'default' } : named(value.slice('profile:'.length))
     await nativeUntil(async () => JSON.stringify((await facts()).surveyProfileView) === JSON.stringify(expected), 'the original Profile view preference')
     const publicView=await result(['space','ls','--presentation'])
@@ -179,8 +179,16 @@ export async function profileSwitchCase(ctx: Context) {
     assert.ok(legacyZone)
     const file = await result(['file', 'open', '--path', 'original.txt', '--zone', legacyZone.zoneId])
     const actor = await result(['agent', 'open', '--executor', 'proof', '--execution-workspace', ctx.legacyWorkspaceId, '--zone', legacyZone.zoneId, '--tab', file.placement.tabId, '--region', file.placement.regionId, '--split', 'right'])
-    const a = (await result(['browser', 'profile', 'create', '--label', 'Same environment name'])).profile
-    const b = (await result(['browser', 'profile', 'create', '--label', 'Same environment name'])).profile
+    const createProfile = async (operationId: string) => {
+      const { creation } = await result(['browser', 'profile', 'create', '--label', 'Same environment name', '--operation-id', operationId])
+      assert.equal(creation.durability, 'confirmed')
+      assert.equal(creation.current.state, 'present')
+      const profile = (await result(['browser', 'profile', 'ls'])).profiles.find((profile: any) => profile.id === creation.current.createdId)
+      assert.ok(profile, 'The original Profile must appear in its directory')
+      return profile
+    }
+    const a = await createProfile('create-profile-a')
+    const b = await createProfile('create-profile-b')
     assert.notEqual(a.id, b.id)
     const pageA = await result(['browser', 'open', '--url', origins.loginUrl + '?profile-A', '--profile', a.id, '--right-of', file.placement.regionId])
     const pageB = await result(['browser', 'open', '--url', origins.loginUrl + '?profile-B', '--profile', b.id, '--right-of', file.placement.regionId])
@@ -191,12 +199,19 @@ export async function profileSwitchCase(ctx: Context) {
     await result(['space', 'survey-list', '--input', '-'], JSON.stringify({ collection: { zoneIds: [...current.collectedZoneIds, legacyZone.zoneId], expectedZoneIds: current.collectedZoneIds } }))
     await showSurvey(); await choose('profile:' + b.id); await activatePage(pageB.survey.reference)
     const beforeFilter = nativeCalls(), bContentsId = viewB.webContents.id
-    await choose('profile:' + a.id)
+    await choose('profile:' + a.id, true)
     assert.equal((await facts()).surveySelection, null, 'A view with only the current B page returns to the original start, without picking an A page')
     assert.equal(viewB.webContents.isDestroyed(), false); assert.equal(viewB.webContents.id, bContentsId)
     assert.equal(await viewB.webContents.executeJavaScript(`document.querySelector(${JSON.stringify('[aria-label="Page draft"]')})?.value`), 'Keep the original B page input', 'Filtering keeps the original B document input')
     assert.deepEqual(await identity(viewB), { user: 'person-B' })
     assert.equal(nativeCalls(), beforeFilter, 'The environment picker changes no native binding, address, default, creation or lifetime')
+    await input.click(environment)
+    await nativeUntil(() => evaluate(`document.querySelector('.survey-profile-picker__menu [role="listbox"]')?.checkVisibility()`), 'open Profile listbox after filtering')
+    assert.ok(await evaluate(`[...document.querySelectorAll('.survey-profile-picker__menu .selection-field__footer button')].some(button => button.textContent === 'Manage environments…' && button.checkVisibility())`))
+    await capture('picker-open', 'dark', 740, 840)
+    await capture('picker-open', 'light', 1280, 900)
+    await input.key('Escape', 'Escape', 27)
+    mark('profile-picker-remains-mounted-with-page-input', { a: pageA.survey.reference, b: pageB.survey.reference })
     await activatePage(pageA.survey.reference); assert.deepEqual(await identity(viewA), { user: 'person-A' })
     for (const target of [a.id, b.id]) {
       await choose('profile:' + target)
