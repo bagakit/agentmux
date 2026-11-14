@@ -46,6 +46,48 @@ async function refreshVisible() {
 }
 
 describe('original calendar control', () => {
+  it('keeps an original scheduled message save visible after Back and retries only the original request', async () => {
+    const create = vi.spyOn(api.schedule, 'create').mockRejectedValueOnce(new Error('The save reply was lost'))
+    const inspect = vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: null, executionScope: 'connected-host' })
+    await dom.render(<CalendarScheduleControl target={target} unified />)
+    const overview = dom.container.querySelector<HTMLElement>('[data-automation-view="overview"]')!
+    await clickText('New automation')
+    await edit('[aria-label="Repeat interval in minutes"]', '20')
+    await edit('[aria-label="Arranged message"]', 'Keep the original scheduled message')
+    await clickText('Save arrangement')
+    expect(create).toHaveBeenCalledTimes(1)
+    const original = create.mock.calls[0]![0]
+    expect(original).toMatchObject({ target, prompt: 'Keep the original scheduled message', everyMs: 1_200_000 })
+
+    await dom.click('[aria-label="Back to automations"]')
+    expect(overview.hidden).toBe(false)
+    expect(overview.textContent).toContain('Scheduled message save unconfirmed')
+    expect(overview.textContent).not.toContain('Schedule a message for this Agent')
+    await refreshVisible()
+    expect(overview.textContent).toContain('Scheduled message save unconfirmed')
+    await clickText('Review original request')
+    const editor = dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!
+    expect(editor.querySelector('h3')?.textContent).toBe('Original request')
+    expect(editor.querySelector('.calendar-schedules__original')?.textContent).toContain(original.prompt)
+    expect(editor.querySelector('.calendar-schedules__original')?.textContent).toContain('Every 20 minutes')
+    expect(editor.querySelector<HTMLFormElement>('.calendar-schedules__form')?.hidden).toBe(true)
+    await clickText('Check original operation')
+    expect(inspect).toHaveBeenCalledExactlyOnceWith({ operationId: original.operationId })
+    expect(create).toHaveBeenCalledTimes(1)
+
+    const { calendar: _calendar, ...arrangement } = saved()
+    create.mockResolvedValueOnce(receipt({ ...arrangement, everyMs: 1_200_000, intervalMs: 1000,
+      prompt: original.prompt, creationOperationId: original.operationId }))
+    await clickText('Retry original operation')
+    expect(create).toHaveBeenNthCalledWith(2, original)
+    expect(editor.querySelector('.schedule-create__confirmation')?.textContent).toBe('Arrangement saved.')
+    expect(editor.querySelector<HTMLFormElement>('.calendar-schedules__form')?.hidden).toBe(true)
+    await dom.click('[aria-label="Back to automations"]')
+    expect(overview.textContent).not.toContain('Scheduled message save unconfirmed')
+    expect(overview.querySelector('[data-schedule-id="saved-calendar"]')?.textContent).toContain(original.prompt)
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+
   it('exposes the complete single-line prompt in compact arrangement details', async () => {
     const prompt = 'Keep this original full message readable. '.repeat(18) + 'The final instruction remains available.'
     vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ prompt })], executionScope: 'connected-host' })

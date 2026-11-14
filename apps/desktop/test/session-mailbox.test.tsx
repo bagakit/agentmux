@@ -17,6 +17,7 @@ import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-n
 import { serviceNoticeFingerprint } from '../src/renderer/src/lib/use-service-notices'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 
 function composerSession(...args: Parameters<typeof processSession>): ReturnType<typeof processSession> {
   const original = processSession(...args)
@@ -851,6 +852,64 @@ it('projects loop status without adding unread or pending mail, switching pages,
   await dom.render(null)
   expect(dispose).toHaveBeenCalledTimes(1)
   expect(scheduleDispose).toHaveBeenCalledTimes(1)
+})
+
+it('scopes an original scheduled message save to its Session from the mailbox through reopening', async () => {
+  const original = composerSession()
+  const other = composerSession('agent-2')
+  const target = { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId,
+    providerId: original.providerId, workspacePath: original.workspacePath }
+  const key = 'schedule-create:' + JSON.stringify(target)
+  const pending = { action: 'create' as const, params: { target, operationId: 'original-scheduled-save', everyMs: 1_200_000, prompt: 'Keep this request' } }
+  const scheduled = { ...progressLoop(), ...target, everyMs: 60_000, loopId: 'other-saved-arrangement' }
+  vi.mocked(api.schedule.list).mockImplementation(async query => ({
+    executionScope: 'connected-host', schedules: query.target?.agentSessionId === target.agentSessionId ? [scheduled] : []
+  }))
+  vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
+  useAppStore.setState({ sessions: [original, other] })
+  const previousDraft = useLauncherState.getState().drafts[key]
+  useLauncherState.getState().setScheduleDraft(key, { pending })
+  const create = vi.spyOn(api.schedule, 'create')
+  try {
+    await dom.render(<AgentSessionComposer sessionId={original.id} />)
+    expect(trigger().title).toContain('Automation: scheduled message save unconfirmed')
+    expect(trigger().querySelector('.composer-mailbox__progress')).not.toBeNull()
+    expect(mailbox().querySelector('[data-automation-view="overview"]')).toBeNull()
+    await toggle('open')
+    expect(mailbox().querySelector('.composer-mailbox__automation-status')?.textContent).toBe('Save unconfirmed')
+    await folder('progress')
+    await vi.waitFor(() => expect(mailbox().querySelector('[data-schedule-id="other-saved-arrangement"]')).not.toBeNull())
+    expect(mailbox().querySelector('[data-automation-view="overview"]')?.textContent).toContain('Scheduled message save unconfirmed')
+    const review = [...mailbox().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review original request')!
+    await act(async () => review.click())
+    const request = mailbox().querySelector('.calendar-schedules__original')
+    expect(request?.textContent).toContain('Every 20 minutes')
+    expect(request?.textContent).toContain(pending.params.prompt)
+    await dom.click('[aria-label="Back to automations"]')
+
+    await toggle('closed')
+    await toggle('open')
+    await folder('progress')
+    expect(mailbox().querySelector('[data-automation-view="overview"]:not([hidden])')?.textContent).toContain('Scheduled message save unconfirmed')
+    expect(trigger().title).toContain('Automation: scheduled message save unconfirmed')
+    expect(create).not.toHaveBeenCalled()
+    expect(dom.draft()).toBe('Keep my draft')
+
+    await dom.render(<AgentSessionComposer sessionId={other.id} />)
+    expect(trigger().title).not.toContain('scheduled message save unconfirmed')
+    await toggle('open')
+    await folder('progress')
+    await vi.waitFor(() => expect(api.schedule.list).toHaveBeenCalledWith({ target: { ...target, agentSessionId: other.control.agentSessionId } }))
+    expect(mailbox().querySelector('[data-automation-view="overview"]')?.textContent).not.toContain('Scheduled message save unconfirmed')
+    expect(useLauncherState.getState().drafts[key]?.schedule?.pending).toEqual(pending)
+  } finally {
+    await act(async () => useLauncherState.setState(state => {
+      const drafts = { ...state.drafts }
+      if (previousDraft) drafts[key] = previousDraft
+      else delete drafts[key]
+      return { drafts }
+    }))
+  }
 })
 
 it('retains every progress field and unconfirmed composition through page, close and Composer mode changes with one observer', async () => {
