@@ -388,9 +388,9 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
   const { request, requestKey, responseUnavailableReason, responseEntry, responseAttempt, responseDisabled,
     respond, inspectResponse, retainedResponses, unidentifiedResponses } = useMobileInteractionController({ local, client,
       agentSessionId, session, available })
-  function responseStatus(key: string, attempt: ResponseAttempt) {
+  function responseStatus(key: string, attempt: ResponseAttempt, active = false) {
     return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
-      <MobileNotice identity={[attempt.original?.input.operationId,attempt.phase,attempt.message]} role="status">
+      <MobileNotice identity={[attempt.original?.input.operationId, attempt.phase, attempt.message]} role="status" dismissible={!active}>
         <span className="mobile-send-status__line" title={attempt.message}>{attempt.message}</span>
         <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询答复结果</button>
       </MobileNotice>
@@ -620,7 +620,7 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
         <AgentInteractionCard key={requestKey} request={request} labels={mobileInteractionLabels} disabled={responseDisabled}
           getMoteSource={() => moteSource}
           responseUnavailableReason={responseUnavailableReason}
-          responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt) : undefined}
+          responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt, true) : undefined}
           observedResponse={responseAttempt?.original && responseAttempt.receipt
             ? { input: responseAttempt.original.input, receipt: responseAttempt.receipt } : undefined}
           {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
