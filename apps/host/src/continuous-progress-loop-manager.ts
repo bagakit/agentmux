@@ -5,7 +5,7 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
-import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from './continuous-progress-task-source.js'
+import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
 import { decideCheckIn, type CheckInObservation } from './agent-schedule-check-in.js'
@@ -289,7 +289,7 @@ export class ContinuousProgressLoopManager {
     for (const controller of this.activations.get(this.targetKey(target)) ?? []) controller.abort()
     for (const loop of this.list(target)) this.cancelDelivery(loop.loopId)
   }
-  private async goalSource(loop: ContinuousProgressLoop): Promise<{ action: 'continue' | 'pause' | 'stop' | 'defer'; reason: string }> {
+  private async goalSource(loop: ContinuousProgressLoop): Promise<GoalProgressDecision | { action: 'defer'; reason: string }> {
     if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
     let goal: GoalProgressRecord | null
     try {
@@ -735,6 +735,7 @@ export class ContinuousProgressLoopManager {
       this.activeDelivery = { loopId: claim.loop.loopId, controller }
       let outcome: LoopTickOutcome = 'skipped'
       let pending = claim.loop.pendingCompletion
+      let goalContinuation: string | undefined
       let newCheckInClaim = false
       // Until a pending send is saved and handed to the input owner, a failure proves nothing was
       // sent: the tick is skipped and the next one retries. Afterwards the result stays unknown.
@@ -745,6 +746,7 @@ export class ContinuousProgressLoopManager {
           const source = await this.goalSource(this.require(claim.loop.loopId))
           if (!isCurrent()) continue
           if (source.action !== 'continue') { await this.pauseForSource(claim.loop, source); continue }
+          goalContinuation = source.continuation
         }
         if (claim.loop.managedSource && !await this.admitMaintenance(claim.loop, checkAt)) continue
         if (pending && claim.loop.lastOutcome === 'unknown') {
@@ -779,8 +781,8 @@ export class ContinuousProgressLoopManager {
             // A pending operation is retried only by explicit resume and keeps its identity.
             // If the observed completion changed, the old claim has no authority to send.
             if (!pending) {
-              let prompt = claim.loop.prompt
-              let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
+              let prompt = goalContinuation ?? claim.loop.prompt
+              let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
               if (futureIntent) {
                 const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
                 if (!original || original.operationId !== claim.loop.creationOperationId || original.message?.userContent !== prompt) {

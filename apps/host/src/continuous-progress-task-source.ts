@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 import type { ContinuousProgressTaskSource } from '@agentmux/core'
-import type { DemandDelegation } from '@agentmux/demand/delegations'
-import { projectGoalPlan, type GoalPlan } from '@agentmux/demand/goal-plan'
+import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
+import { projectGoalPlan, type GoalPlan, type GoalPlanProjection } from '@agentmux/demand/goal-plan'
 
 const execute = promisify(execFile)
 export function validateContinuousProgressTaskSource(value: unknown): asserts value is ContinuousProgressTaskSource {
@@ -51,15 +51,16 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
 
 export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; assigneeSessionIds: string[]; supervisorSessionId: string | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> }; plan?: GoalPlan; delegations?: DemandDelegation[] }
 export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
+export type GoalProgressDecision = { action: 'continue' | 'pause' | 'stop'; reason: string; continuation?: string }
 
 /** Main interprets the original Goal snapshot; this does not live in Core's scheduler. */
-export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>, goal: GoalProgressRecord | null | undefined): { action: 'continue' | 'pause' | 'stop'; reason: string } {
+export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>, goal: GoalProgressRecord | null | undefined): GoalProgressDecision {
   if (!goal || goal.id !== source.goalId) return { action: 'pause', reason: 'The original Goal is unavailable; its loop and Agent are retained.' }
   const prefix = `Goal ${source.goalId}: `
   if (goal.status === 'done' || goal.status === 'cancelled') return { action: 'stop', reason: prefix + goal.status + '; the Agent Run is kept.' }
   if (goal.status === 'blocked') return { action: 'pause', reason: prefix + 'blocked; review the original Goal.' }
   if (goal.alignment?.revision !== source.alignmentRevision || goal.alignment.confirmedAt === null) return { action: 'pause', reason: prefix + 'the original confirmed scope changed. Stop this loop before explicitly starting the new scope.' }
-  if (goal.plan) return decideGoalPlanProgress(prefix, goal.plan, goal.delegations ?? [], goal.alignment.criteria)
+  if (goal.plan) return decideGoalPlanProgress(prefix, goal.plan, goal.delegations ?? [], goal.alignment.criteria, source)
   return { action: 'continue', reason: prefix + `confirmed scope r${source.alignmentRevision}; source checked.` }
 }
 
@@ -68,13 +69,25 @@ export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskS
  * are unknown (the Supervisor reconciles them from the original receipt); pause only when the
  * human must accept results or the plan needs a revision to move.
  */
-function decideGoalPlanProgress(prefix: string, plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: Array<{ id: string; text: string }>): { action: 'continue' | 'pause'; reason: string } {
+function decideGoalPlanProgress(prefix: string, plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: Array<{ id: string; text: string }>, source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>): GoalProgressDecision {
   const projection = projectGoalPlan(plan, delegations, criteria)
   const named = (states: readonly string[]) => projection.nodes.filter(item => states.includes(item.state)).map(item => item.node.id)
   const open = { ready: named(['ready']), changes: named(['changes']), working: named(['working']), review: named(['review']), unknown: named(['unknown']) }
   const parts = Object.entries(open).filter(([, ids]) => ids.length).map(([state, ids]) => `${state}: ${ids.join(', ')}`)
   const progress = `plan r${plan.revision} ${projection.done}/${projection.total} done`
-  if (parts.length) return { action: 'continue', reason: `${prefix}${progress}; ${parts.join('; ')}.${open.unknown.length ? ' Reconcile unknown nodes from their original delegation receipts before acting on them.' : ''}` }
+  if (parts.length) return { action: 'continue', reason: `${prefix}${progress}; ${parts.join('; ')}.${open.unknown.length ? ' Reconcile unknown nodes from their original delegation receipts before acting on them.' : ''}`,
+    continuation: goalPlanContinuation(source, projection) }
   if (projection.total > 0 && projection.done === projection.total) return { action: 'pause', reason: `${prefix}${progress}; every node passed review. Waiting for a person to accept the Goal results.` }
   return { action: 'pause', reason: `${prefix}${progress}; remaining nodes wait on cancelled dependencies (${named(['waiting']).join(', ')}). Revise the plan to move them.` }
+}
+
+/** Freeze identifiers from the same owner snapshot that qualified this occurrence. Node bodies stay in goal plan. */
+function goalPlanContinuation(source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>, projection: GoalPlanProjection): string {
+  const nodes = projection.nodes.filter(item => ['ready', 'working', 'review', 'changes', 'unknown'].includes(item.state)).map(item => ({
+    id: item.node.id, state: item.state, executor: item.node.executor, unknown: item.unknown,
+    attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, sourceMessageId: item.delegation.sourceMessageId,
+      threadId: item.delegation.threadId, workerHostId: delegationWorkerHostId(item.delegation), workerAgentSessionId: item.delegation.workerAgentSessionId } : null
+  }))
+  return `Manage the original Goal ${source.goalId} within its confirmed scope r${source.alignmentRevision} as its Supervisor. Read amux goal plan --goal ${JSON.stringify(source.goalId)} for the node outcomes and checks. Delegate ready work, independently review reported work, return requested changes along the original thread, and reconcile unknown nodes by their named reasons before acting. Keep each original delegation and thread; do not resend an unknown delivery. Plan completion still requires a person to accept the Goal results.\n\n`
+    + JSON.stringify({ schema: 'agentmux.goal-plan-continuation.v1', goalId: source.goalId, alignmentRevision: source.alignmentRevision, planRevision: projection.revision, nodes })
 }
