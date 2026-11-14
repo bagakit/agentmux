@@ -747,7 +747,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
 
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
-  return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform() && ownerDocument === document}
+  return <section ref={surfaceRef} data-knowledge-surface="survey" className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform() && ownerDocument === document}
     style={{ ...surveyThumbnailStyle(config?.browser.surveyThumbnails), '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">{!sidebarCollapsed && windowAction}

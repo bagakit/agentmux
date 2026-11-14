@@ -1,5 +1,5 @@
 import type { FocusAgentTarget } from './focus-agent-navigation'
-import { workbenchDocuments, workbenchDocumentIdentity } from './workbench-window-registry'
+import { workbenchDocuments, workbenchDocumentIdentity, originalWorkbenchHost, workbenchDocumentVisible, isWorkbenchSurfaceDetached, workbenchSurfaceDocument, type WorkbenchSurface } from './workbench-window-registry'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
   AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection, AgentMuxDesktopSpaceSelection } from '@agentmux/core'
 import type { WorkbenchTab } from './workbench-tabs'
@@ -159,42 +159,53 @@ function observeFloating(owner: DesktopAppPresentationOwner | null, tabs: Readon
       : desktopElementVisible(panel) && Boolean(region && panel?.contains(region) && desktopElementVisible(region)) ? 'visible' : 'pending' }
 }
 
-export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tabs: Readonly<Record<string, WorkbenchTab>>):
+/** Freeze the original document. A return or restart during a request cannot confirm its replacement. */
+export function desktopSurfaceWindow(surface: WorkbenchSurface | undefined) {
+  if (!surface || !isWorkbenchSurfaceDetached(surface)) return null
+  const doc = workbenchSurfaceDocument(surface)
+  return { surface, doc, identity: workbenchDocumentIdentity(doc) }
+}
+export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tabs: Readonly<Record<string, WorkbenchTab>>,
+  independent?: ReturnType<typeof desktopSurfaceWindow>):
   Pick<AgentMuxDesktopObservation, 'presentation' | 'floating' | 'overlays' | 'input'> {
   const owner = typeof document === 'undefined' ? null : appReader?.() ?? null
   const overlays = readDesktopOverlays()
   const blockers: AgentMuxDesktopPresentation['blockers'] = []
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')
-  const survey = selection.surface === 'survey' ? selection.survey : null
+  const surface = independent?.surface ?? selection.surface
+  const survey = surface === 'survey' ? selection.survey : null
   const pageOwner = survey && 'kind' in survey ? surveyPageOwner(tabs, survey) : undefined
-  const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {}
+  const { tabId = null, regionId = null } = surface === 'space' ? selection.space ?? {}
     : survey ? 'kind' in survey ? survey.presentation ?? { tabId: pageOwner?.tab.id ?? null, regionId: survey.regionId } : survey.active ?? {} : {}
-  const windowTarget = selection.surface === 'space' && regionId ? primaryRegion(selection.space, tabs) : null
+  const windowTarget = surface === 'space' && regionId ? primaryRegion(selection.space, tabs) : null
   const windowIdentity = windowTarget && windowTarget.ownerDocument !== document ? workbenchDocumentIdentity(windowTarget.ownerDocument) : null
-  if (windowIdentity) blockers.length = 0
-  const base = { tabId, regionId, blockers }
+  if (windowIdentity || independent) blockers.length = 0
+  const currentWindow = independent?.identity && workbenchDocumentIdentity(independent.doc) === independent.identity && workbenchSurfaceDocument(independent.surface) === independent.doc
+  const base = { tabId, regionId, blockers, ...(independent && currentWindow ? { surface: independent.surface, ...independent.identity } : {}) }
   let presentation: AgentMuxDesktopPresentation = { ...base, provenance: 'unknown', state: 'unknown' }
   if (owner) {
     if (owner.loading) presentation = { ...base, provenance: 'observed', state: 'pending' }
     else if (windowIdentity && desktopElementVisible(windowTarget)) presentation = { ...base, ...windowIdentity, provenance: 'observed', state: 'window' }
-    else if (blockers.length || selection.surface === 'space' && owner.contentExpanded) presentation = { ...base, provenance: 'observed', state: 'covered' }
+    else if (blockers.length || surface === 'space' && owner.contentExpanded) presentation = { ...base, provenance: 'observed', state: 'covered' }
     else {
-      const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
-      const views = selection.surface === 'focus' && main ? [...(main.matches(`[data-desktop-focus-view="${selection.focusView}"]`) ? [main] : []), ...main.querySelectorAll<HTMLElement>(`[data-desktop-focus-view="${selection.focusView}"]`)]
+      const main = independent ? currentWindow && workbenchDocumentVisible(independent.doc)
+        ? originalWorkbenchHost({ kind: 'surface', surface: independent.surface })?.host.querySelector<HTMLElement>(`[data-knowledge-surface="${independent.surface}"]`) ?? null : null
+        : document.querySelector<HTMLElement>(`[data-desktop-surface="${surface}"]`)
+      const views = surface === 'focus' && main ? [...(main.matches(`[data-desktop-focus-view="${selection.focusView}"]`) ? [main] : []), ...main.querySelectorAll<HTMLElement>(`[data-desktop-focus-view="${selection.focusView}"]`)]
         .filter(element => desktopElementVisible(element) && !element.closest('[data-pmo-teams-topic-floating]')) : []
       const surveyRegions = survey && regionId && tabId ? Array.from(main?.querySelectorAll<HTMLElement>('[data-workbench-region-id]') ?? []).filter(region =>
         region.dataset.workbenchRegionId === regionId && desktopElementVisible(region) &&
         (region.closest<HTMLElement>('[data-workbench-primary-tab-id]')?.dataset.workbenchPrimaryTabId ??
           region.closest<HTMLElement>('[data-workbench-tab-id]')?.dataset.workbenchTabId) === tabId) : []
-      const target = selection.surface === 'focus' ? views.length === 1 ? views[0]! : null
-        : survey && regionId ? surveyRegions.length === 1 ? surveyRegions[0]! : null : selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
+      const target = surface === 'focus' ? views.length === 1 ? views[0]! : null
+        : survey && regionId ? surveyRegions.length === 1 ? surveyRegions[0]! : null : surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
         : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
-      const borrowed = selection.surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
-      const exactGoal = selection.surface !== 'goals' || !selection.goalId ||
+      const borrowed = surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
+      const exactGoal = surface !== 'goals' || !selection.goalId ||
         Boolean(main?.querySelector(`[data-goal-detail-id=${CSS.escape(selection.goalId)}]`))
       presentation = { ...base, provenance: 'observed', state: borrowed && desktopElementVisible(target) ? 'floating'
-        : desktopElementVisible(main) && desktopElementVisible(target) && Boolean(target && main?.contains(target)) && exactGoal ? 'main-visible' : 'pending' }
+        : desktopElementVisible(main) && desktopElementVisible(target) && Boolean(target && main?.contains(target)) && exactGoal ? independent ? 'window' : 'main-visible' : 'pending' }
     }
   }
   return { presentation, floating: observeFloating(owner, tabs), overlays, input: captureDesktopInput(tabs).fact }

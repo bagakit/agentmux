@@ -360,7 +360,7 @@ export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Part
   return { ...base, workspaceId: location.displayWorkspaceId, tabId: location.tabId, groupId: location.groupId, regionId: location.regionId }
 }
 
-export function desktopSelection(state: DesktopSelectionState & { focusView: 'list' | 'map' }, catalog: AgentMuxSpaceCatalog): AgentMuxDesktopSelection {
+export function desktopSelection(state: DesktopSelectionState & { focusView: 'list' | 'map' }, catalog: AgentMuxSpaceCatalog, includeSurvey = false): AgentMuxDesktopSelection {
   let space = state.workbenchSpaceSelection?.workspaceId === state.activeWorkspaceId ? state.workbenchSpaceSelection : null
   if (!space && state.activeWorkspaceId) {
     const layout = state.layouts[state.activeWorkspaceId]
@@ -379,7 +379,7 @@ export function desktopSelection(state: DesktopSelectionState & { focusView: 'li
     space = ordinary
   }
   return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, focusView: state.mainSurface === 'agents' ? state.focusView : null, space, goalId: state.selectedDemandId,
-    ...(state.mainSurface === 'survey' ? { survey: surveySelectionPresentation(state.surveyZoneSelection ?? null) } : {}) }
+    ...(state.mainSurface === 'survey' || includeSurvey ? { survey: surveySelectionPresentation(state.surveyZoneSelection ?? null) } : {}) }
 }
 
 /** A confirmed user close follows only a confirmed member of this exact Zone.

@@ -180,7 +180,8 @@ import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, requestDesktopSurveyNavigation, requestDesktopFocusWorkfaceReveal, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { presentKnowledgeSurface } from './lib/knowledge-surface-navigation'
+import { captureDesktopInput, desktopSurfaceWindow, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, requestDesktopSurveyNavigation, requestDesktopFocusWorkfaceReveal, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { refreshNotebookLibrary, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -8109,7 +8110,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const topics = scratchTopicsForConfig(currentFacts.config, currentFacts.scratchTopicSnapshots) ?? []
       const catalog = spatialCatalog(get(), topics)
       const before = captureDesktopInput(get().tabs)
-      const beforeSelection = desktopSelection(get(), catalog)
+      const requestedSurface = request.target.kind === 'survey' ? 'survey' : request.target.kind === 'surface' ? request.target.surface : undefined
+      const knowledgeSurface = requestedSurface === 'survey' || requestedSurface === 'recall' ? requestedSurface : undefined
+      const independent = desktopSurfaceWindow(knowledgeSurface)
+      const readSelection = () => desktopSelection(get(), catalog, independent?.surface === 'survey')
+      const beforeSelection = readSelection()
       const settingsBefore = request.target.kind === 'settings' ? readDesktopOverlays() : undefined
       const expectedAgentMatches = (regionId: string | null): boolean => {
         const original = spatialCatalog(get(), topics).regions.find(region => region.regionId === regionId)
@@ -8149,10 +8154,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               ...(request.target.eventId === undefined ? {} : { eventId: request.target.eventId }) } })
         } else if (request.target.kind === 'survey') {
           requestDesktopSurveyNavigation(request.target)
+          await presentKnowledgeSurface('survey', get().setMainSurface)
         } else if (request.target.kind === 'focus-agent') {
           get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
-          get().setMainSurface(desktopMainSurface[request.target.surface])
+          if (knowledgeSurface) await presentKnowledgeSurface(knowledgeSurface, get().setMainSurface)
+          else get().setMainSurface(desktopMainSurface[request.target.surface])
           if (request.target.surface === 'focus' && request.target.view !== undefined) get().setFocusView(request.target.view)
           set({ workbenchNavigationInputPolicy: request.inputPolicy })
         } else {
@@ -8177,12 +8184,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         issues.push(actual ?? { step: 'navigation', code: signal?.aborted ? 'CONTROL_CANCELLED' : 'NAVIGATION_UNCONFIRMED',
           message: presentError(error), recovery: 'The original workface is kept. Inspect the client before another navigation.' })
       }
-      const expected = desktopSelection(get(), catalog)
+      const expected = readSelection()
       let caretIntentNonce: number | undefined
       const revealRequestId = request.target.kind === 'focus-agent' ? get().focusAgentReveal?.requestId : undefined
       if (navigationState !== 'rejected' && request.target.kind !== 'focus-agent' && request.target.kind !== 'settings' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
       if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.space?.tabId && expected.space.regionId) {
-        const observed = readDesktopPresentation(expected, get().tabs)
+        const observed = readDesktopPresentation(expected, get().tabs, independent)
         if (observed.overlays.provenance === 'observed' && !observed.presentation.blockers.length) {
           get().focusRegion(expected.space.workspaceId, expected.space.tabId, expected.space.regionId, 'keyboard', expected.space.groupId ?? undefined)
           caretIntentNonce = get().regionCaretFocus?.nonce
@@ -8190,12 +8197,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
-        const actual = desktopSelection(get(), catalog)
+        const actual = readSelection()
         if (request.target.kind === 'mote' && !request.target.address) return get().moteDiscussionEntry?.token !== moteEntryToken ||
           actual.space?.spaceId !== request.target.spaceId || Boolean('spaceId' in request.target && readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         if (request.target.kind === 'goal' && request.target.section) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(request.target))
-        const observed = readDesktopPresentation(actual, get().tabs)
+        const observed = readDesktopPresentation(actual, get().tabs, independent)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
           observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true && (request.target.hostId === undefined || observed.overlays.settingsPage.hostId === request.target.hostId)
         if (request.target.kind === 'focus-agent') return get().focusAgentReveal?.requestId !== revealRequestId ||
@@ -8207,7 +8214,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const save = request.target.kind === 'settings' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'Settings navigation is transient. The original workface selection and preferences are unchanged.' } : navigationState === 'rejected' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
-      const selection = desktopSelection(get(), catalog)
+      const selection = readSelection()
       const retainedMote = request.target.kind === 'mote' && selection.space?.spaceId === request.target.spaceId && get().moteDiscussionEntry?.token === moteEntryToken
       if (navigationState !== 'rejected' && (signal?.aborted || (request.target.kind === 'mote' ? !retainedMote : JSON.stringify(selection) !== JSON.stringify(expected)))) {
         navigationState = 'unconfirmed'
@@ -8222,7 +8229,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             recovery: 'The later workface and healthy Agents are kept. Inspect the original Session before explicitly retrying its link.' })
         }
       }
-      const observed = readDesktopPresentation(selection, get().tabs)
+      const observed = readDesktopPresentation(selection, get().tabs, independent)
+      if (independent && navigationState !== 'rejected' && observed.presentation.surface !== independent.surface) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'presentation', code: 'SURFACE_WINDOW_CHANGED', message: 'The original surface window changed during this navigation.',
+          recovery: 'Inspect the current window and the saved selection before navigating again.' })
+      }
       const goalPresentation = request.target.kind === 'goal' ? readGoalReadingPresentation(request.target) : null
       if (goalPresentation) observed.presentation = { ...observed.presentation, goal: goalPresentation }
       if (navigationState !== 'rejected' && request.target.kind === 'goal' && (request.target.runtimeId !== undefined || request.target.section) &&

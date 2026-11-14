@@ -42,6 +42,8 @@ export type AgentMuxDesktopInput = {
 export type AgentMuxDesktopPresentation = {
   provenance: AgentMuxDesktopProvenance
   state: 'main-visible' | 'floating' | 'window' | 'covered' | 'pending' | 'unknown'
+  /** Navigation surface hosted in the identified independent document. Main selection stays separate. */
+  surface?: 'survey' | 'recall'
   windowId?: string; documentGeneration?: string
   tabId: string | null; regionId: string | null
   blockers: ('settings' | 'quick-switcher')[]

@@ -167,7 +167,8 @@ function input(value: unknown, code: Code): AgentMuxDesktopInput {
     connected: nullableBoolean(source.connected, 'Input connected', code), visible: nullableBoolean(source.visible, 'Input visible', code), inert: nullableBoolean(source.inert, 'Input inert', code) }
 }
 function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
-  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration', 'mote', 'goal'], code)
+  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration', 'surface', 'mote', 'goal'], code)
+  const surface = source.surface === undefined ? undefined : member(source.surface, ['survey', 'recall'] as const, 'Independent surface', code)
   const mote = Object.hasOwn(source, 'mote') ? (() => {
     const value = fields(source.mote, ['spaceId', 'page', 'eventId'], code)
     const page = member(value.page, ['discussion', 'threads'], 'Mote page', code)
@@ -181,9 +182,10 @@ function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
       section: member(value.section, ['overview', 'plan', 'activity'] as const, 'Presented Goal section', code) }
   })()
   const result = { ...(goal ? { goal } : {}), ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
-    ...documentIdentity(source, source.state === 'window', code),
+    ...documentIdentity(source, source.state === 'window' || surface !== undefined, code), ...(surface ? { surface } : {}),
     tabId: nullableId(source.tabId, 'Presented Tab', code), regionId: nullableId(source.regionId, 'Presented Region', code),
     blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher'] as const, 'Overlay blocker', code), code) }
+  if (surface && result.state !== 'window' && result.state !== 'pending' && result.state !== 'unknown') fail('The independent surface requires its original native document.', code)
   if (new Set(result.blockers).size !== result.blockers.length ||
     ((result.state === 'main-visible' || result.state === 'window') && (result.provenance !== 'observed' || result.blockers.length > 0)) ||
     (result.state === 'covered' && result.blockers.length === 0)) fail('Desktop presentation facts disagree.', code)
@@ -255,11 +257,15 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   if (address && (!link || link.address.runtimeId !== address.runtimeId || link.address.linkId !== address.linkId || link.target.runtimeId !== address.runtimeId))
     fail('The public Mote receipt lost its exact original address binding.', code)
   if (!address && link) fail('An address resolution cannot replace a literal navigation request.', code)
+  const independent = result.presentation.surface
+  const targetSurface = navigation.requested.kind === 'survey' ? 'survey' : navigation.requested.kind === 'surface' ? navigation.requested.surface : undefined
+  if (independent && independent !== targetSurface) fail('The independent surface does not match the original navigation target.', code)
+  const presentedSurface = independent ?? navigation.selection.surface
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
     const requested = navigation.requested, actual = navigation.selection
     if (requested.kind === 'survey') {
       const selected = actual.survey, target = requested.selection
-      if (actual.surface !== 'survey' || !selected || (target.kind === 'page'
+      if (presentedSurface !== 'survey' || !selected || (target.kind === 'page'
         ? !('kind' in selected) || selected.regionId !== target.regionId || selected.browserId !== target.browserId
         : !('zoneId' in selected) || selected.zoneId !== target.zoneId)) fail('Survey receipt does not confirm the exact saved reference.', code)
     }
@@ -274,7 +280,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       result.presentation.goal !== undefined && result.presentation.goal.goalId !== requested.goalId ||
       requested.runtimeId !== undefined && (result.presentation.goal?.runtimeId !== requested.runtimeId || result.presentation.goal?.namespace !== requested.namespace) ||
       requested.section !== undefined && result.presentation.goal?.section !== requested.section)) fail('Goal receipt target is mismatched.', code)
-    if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
+    if (requested.kind === 'surface' && (presentedSurface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'mote') {
       const original=requested.address ? navigation.moteLink?.target : requested
       if (!original || actual.surface !== 'space' || actual.space?.spaceId !== original.spaceId || !result.presentation.mote ||
@@ -288,17 +294,17 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       }
     }
   }
-  if (result.focus.agent?.state === 'visible' && (navigation.selection.surface !== 'focus' || navigation.selection.focusView !== 'list' || result.presentation.state !== 'main-visible'))
+  if (result.focus.agent?.state === 'visible' && (navigation.selection.surface !== 'focus' || navigation.selection.focusView !== 'list' || !independent && result.presentation.state !== 'main-visible'))
     fail('A visible Focus Agent requires the actual Focus list presentation.', code)
-  const map = navigation.selection.surface === 'focus' && navigation.selection.focusView === 'map'
+  const map = presentedSurface === 'focus' && navigation.selection.focusView === 'map'
   if (map && (result.presentation.tabId !== null || result.presentation.regionId !== null || result.presentation.windowId !== undefined ||
     result.presentation.documentGeneration !== undefined || result.presentation.state === 'floating' || result.presentation.state === 'window')) {
     fail('A map presentation cannot identify a retained, borrowed or native Region.', code)
   }
   if (result.presentation.state === 'main-visible' || result.presentation.state === 'floating' || result.presentation.state === 'window') {
     const survey = navigation.selection.survey
-    const presented = navigation.selection.surface === 'space' ? navigation.selection.space
-      : navigation.selection.surface === 'survey' && survey ? ('zoneId' in survey ? survey.active
+    const presented = presentedSurface === 'space' ? navigation.selection.space
+      : presentedSurface === 'survey' && survey ? ('zoneId' in survey ? survey.active
         : survey.presentation ?? { tabId: result.presentation.tabId, regionId: survey.regionId }) : null
     if (result.presentation.provenance !== 'observed' || result.presentation.tabId !== (presented?.tabId ?? null) ||
       result.presentation.regionId !== (presented?.regionId ?? null) ||

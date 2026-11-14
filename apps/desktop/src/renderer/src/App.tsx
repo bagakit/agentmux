@@ -428,7 +428,6 @@ function DesktopApp() {
     }
     surveyOccurrence.current = reference ?? null
     state.setSurveyZoneSelection(selected)
-    state.setMainSurface('survey')
   }
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
