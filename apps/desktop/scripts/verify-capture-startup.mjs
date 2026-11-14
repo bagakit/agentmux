@@ -238,7 +238,7 @@ async function electron() {
     }
     assert.equal(receipt.native.length, 64, 'first/repeat x single/dual x included/excluded each has four independent process pairs')
     for (const count of [1, 2]) for (const background of ['included', 'excluded']) for (const iteration of [1, 2]) {
-      const rows = receipt.native.filter(scene => scene.count === count && scene.background === background)
+      const rows = receipt.native.filter(scene => scene.count === count && scene.background === background && scene.captures[0]?.iteration === iteration)
       const pairs = []
       for (const pair of [1, 2, 3, 4]) {
         const before = rows.find(scene => scene.pair === pair && scene.variant === 'baseline')?.captures.find(capture => capture.iteration === iteration)?.actualShownMs
