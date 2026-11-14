@@ -421,6 +421,41 @@ it('recovers the original draft after a queue write failure and a Run change wit
   expect(submit).toHaveBeenCalledTimes(2)
 })
 
+it('checks an observed handoff without rejoining until Core confirms the original continuation', async () => {
+  const session = composerSession(), expectedRun = session.control.run
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun, submissionId: originalOp }
+  const ref = { key, waitGeneration: 2 }
+  const readOnly: AgentInputSubmissionReceipt = {
+    key, ref, status: 'unknown', observation: 'closed', persistence: 'observed', admission: null,
+    control: { ref, state: 'dispatch-authorized', gateId: 'original-gate', at: _liveTailFixtureEpoch(0, 0, 1) }
+  }
+  const durable: AgentInputSubmissionReceipt = { ...readOnly, persistence: 'confirmed', continuation: 'continue-handoff' }
+  useAppStore.setState({ agentSteerQueues: { [sid]: [entry(originalOp, { promptCondition: null,
+    directInputBinding: { expectedRun, admissionIntent: { kind: 'manual-actor' } }, directInputControl: session.control
+  })] } })
+  vi.mocked(api.sessions.inspectInput).mockResolvedValue(readOnly)
+  const rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting').mockResolvedValue(durable)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  await click(action(card(), '立即发送这条待发消息'))
+  await settled(() => expect(original().inputReceipt).toMatchObject({ persistence: 'observed', status: 'unknown' }))
+  expect(rejoin).not.toHaveBeenCalled()
+  expect(card().textContent).toContain('保存未确认')
+  await act(async () => useAppStore.setState({ sessions: [{ ...session, control: { ...session.control, run: { runId: 'replacement-run' } } }] }))
+  vi.mocked(api.sessions.inspectInput).mockResolvedValue({ ...readOnly, status: 'terminal-confirmed' })
+  await act(async () => {
+    await expect(useAppStore.getState().sendQueuedAgentSteer(sid, originalOp)).resolves.toBe('unconfirmed')
+  })
+  expect(original().archived).toBeUndefined()
+  expect(rejoin).not.toHaveBeenCalled()
+  vi.mocked(api.sessions.inspectInput).mockResolvedValue(durable)
+  await click(action(card(), '立即发送这条待发消息'))
+  await settled(() => expect(rejoin).toHaveBeenCalledExactlyOnceWith(session.control, ref))
+  expect(original().inputReceipt).toMatchObject({ ref, persistence: 'confirmed', continuation: 'continue-handoff' })
+  expect(action(card(), '继续原投递').disabled).toBe(false)
+  expect(submit).not.toHaveBeenCalled()
+})
+
 it('shows actual copy failure before success and keeps an old unknown operation unknown despite this-call CF0', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(refusal('read-only preparation refused'))
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('clipboard refused')).mockResolvedValue()
@@ -459,7 +494,8 @@ it('records the actual final condition and execution of a freshly bound first cl
     expectedRunId: 'run-agent-1', afterSubmissionId: null, execution: 'immediate', stage: 'core-submit' })
   const newLogs = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
     .filter(key => key?.startsWith('agentmux.delivery-attempt.') && !before.has(key))
-  expect(newLogs).toEqual([`agentmux.delivery-attempt.${id}`])
+  expect(newLogs).toHaveLength(1)
+  expect(JSON.parse(localStorage.getItem(newLogs[0]!)!).record.logId).toBe(id)
   await act(async () => { await useAppStore.getState().flushAgentSteerQueue(sid) })
   expect(submit).toHaveBeenCalledOnce()
   expect(submit.mock.calls[0]![3]).toEqual(actualCondition)
