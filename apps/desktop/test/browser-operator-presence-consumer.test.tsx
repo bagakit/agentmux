@@ -89,7 +89,7 @@ it('does not wait for cold decoding before the real browser.run Store branch com
     caller: { agentSessionId: 'presentation-agent', capability: 'managed' } })
   expect(receipt).toMatchObject({ operation: 'browser.run', result: 'action-result' })
   expect(api.browser.runScript).toHaveBeenCalledExactlyOnceWith(operation.browserId, 'return 1',
-    { id: 'canonical-agent', name: 'Navigator', providerId: 'codex' }, operation.id)
+    { id: 'canonical-agent', name: 'Navigator', providerId: 'codex' }, operation.id, { agentSessionId: 'presentation-agent' })
   expect(api.browser.setOperatorAvatar).not.toHaveBeenCalled()
   expect(images.prepare.mock.calls[0]![0]).toMatchObject({ document, providerId: 'codex', appearance,
     colors: { mark: '#8192a3', enamel: '#101214', badge: '#f0f1f2', badgeBackground: '#242628' } })
@@ -196,18 +196,18 @@ it('reads the actual hosting document palette and shares canonical identity with
   await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'original-replay-request', operation: 'browser.replay',
     browserId: operation.browserId, operationId: plan.operationId, caller: { agentSessionId: 'presentation-agent', capability: 'managed' } })
   expect(api.browser.runReplay).toHaveBeenCalledExactlyOnceWith(operation.browserId, plan,
-    { id: 'canonical-agent', name: 'Navigator', providerId: 'codex' })
+    { id: 'canonical-agent', name: 'Navigator', providerId: 'codex' }, { agentSessionId: 'presentation-agent' })
   frame.remove()
 })
 
-it('takes control through the actual BrowserPane and original public stop even before activity details catch up', async () => {
+it('takes control through the actual BrowserPane and the original Browser takeover even before activity details catch up', async () => {
   const [{ BrowserPane }, { createClientUiRoot }] = await Promise.all([
     import('../src/renderer/src/components/BrowserPane'), import('./helpers/client-ui-render')
   ])
   await act(async () => root.unmount()); root = createClientUiRoot(host)
   useAppStore.setState({ toolsOpen: false })
   const page = await api.browser.create(operation.browserId, operation.url, 'original-workspace')
-  const stop = vi.spyOn(api.browser, 'stopOperationById').mockResolvedValue(null)
+  const takeover = vi.spyOn(api.browser, 'takeControl').mockResolvedValue(page)
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
   for (const detail of [null, { ...operation, id: 'stale-activity-operation' }]) {
@@ -216,7 +216,7 @@ it('takes control through the actual BrowserPane and original public stop even b
     const button = host.querySelector<HTMLButtonElement>('[aria-label="Take control of Browser"]')
     expect(button).not.toBeNull()
     await act(async () => button!.click())
-    expect(stop.mock.calls.at(-1)).toEqual([control.activeOperationId])
+    expect(takeover.mock.calls.at(-1)).toEqual([operation.browserId])
   }
-  expect(stop).toHaveBeenCalledTimes(2)
+  expect(takeover).toHaveBeenCalledTimes(2)
 })
