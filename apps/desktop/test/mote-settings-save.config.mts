@@ -1,0 +1,6 @@
+import { defineConfig } from 'vitest/config'
+import { relative, resolve } from 'node:path'
+import original from './mote-initialization.config.mts'
+import { transformMoteSettingsSource } from './mote-settings-save-mutations.mjs'
+const root=resolve(import.meta.dirname,'../../..')
+export default defineConfig({...original,plugins:[...(original.plugins??[]),{name:'original-settings-source',enforce:'pre',transform(source,id){const loaded=transformMoteSettingsSource(source,relative(root,id.split('?')[0]!),'vitest');return loaded===source?null:{code:loaded,map:null}}}],test:{...original.test,include:process.env.MOTE_SETTINGS_REGRESSION?['packages/core/test/mote-dialogue.test.ts','apps/desktop/test/mote-main-rotation.test.tsx']:['packages/core/test/mote-preferences-placement.test.ts','apps/desktop/test/mote-settings-save.test.tsx',...(process.env.MOTE_SETTINGS_BINDING?['apps/desktop/test/mote-main-rotation.test.tsx']:[])],maxWorkers:1,fileParallelism:false,testTimeout:45000,passWithNoTests:false,...(process.env.MOTE_SETTINGS_REGRESSION?{testNamePattern:'actual original Files CAS preserves A and B main sources|independent actual CLI preferences save settles only its complete original binding|matching bind operation ID alone cannot certify'}:{}),...(process.env.MOTE_SETTINGS_BINDING?{testNamePattern:'a preference-only request with no placement'}:{})}})

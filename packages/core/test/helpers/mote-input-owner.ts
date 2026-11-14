@@ -14,7 +14,7 @@ import { DurableAgentMuxMessageQueue } from '../../src/agent-global-message-queu
 import type { MoteInputOwner } from '../../src/mote-input-owner.js'
 import { createHostMoteInputSource } from '../../../../apps/host/src/mote-input-source.js'
 import { createHostContent } from '../../../../apps/host/src/content-owner.js'
-import { homeZoneId, serializeMoteQuickMode, scratchTopicDirectoryName } from '../../../../apps/host/src/mote-model.js'
+import { directoryIdentity, homeZoneId, serializeMoteQuickMode, scratchTopicDirectoryName } from '../../../../apps/host/src/mote-model.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 import { runSourceObjectCli } from './source-object-cli.js'
 import { objectCliEnvironment } from './object-cli-rpc.js'
@@ -41,7 +41,7 @@ class MoteClient extends AgentMuxClient {
 export const moteInputTestOwnerModule = { AgentMuxClient: MoteClient, AgentMuxFileAgentSessionStore }
 const jsonl = (rows: unknown[]) => rows.map((value) => JSON.stringify(value)).join('\n') + '\n'
 
-export async function createMoteInputFixture() {
+export async function createMoteInputFixture(options: { directoryAddress?: boolean } = {}) {
   const cleanup: Array<() => Promise<unknown>> = []
   const f = await rpcOwnerFixture(['member', 'primary', 'stranger'], moteInputTestOwnerModule)
   cleanup.push(f.close)
@@ -52,6 +52,7 @@ export async function createMoteInputFixture() {
   const scratch = join(f.root, 'scratch'),
     directory = join(scratch, scratchTopicDirectoryName('AbCdEfGh1234'))
   await mkdir(directory, { recursive: true })
+  const source = options.directoryAddress ? { ...moteInputTestSource, spaceId: directoryIdentity('local', directory), zoneId: homeZoneId(directoryIdentity('local', directory)) } : moteInputTestSource
   const configurationPath = join(f.root, 'configuration.json')
   await writeFile(
     configurationPath,

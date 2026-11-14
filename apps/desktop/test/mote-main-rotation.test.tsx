@@ -31,7 +31,7 @@ import { MoteDialogueViewProvider } from '../src/renderer/src/lib/mote-dialogue-
 import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
-import { moteMainBindingDefaults, moteMainBindingInput, pendingMoteMainCreation } from '../../../packages/core/src/spatial-agent-open-contract'
+import { moteMainBindingDefaults, moteMainBindingInput, matchesMoteMainBindingInput, pendingMoteMainCreation } from '../../../packages/core/src/spatial-agent-open-contract'
 import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
@@ -561,4 +561,12 @@ it('original source evidence after a later Main preserves only actual writer fac
   expect(reconciled.record.moteMainFollowUps.bindingObserved).toEqual(observed.bindingObserved);expect(pendingMoteMainCreation((await f.spatial.read())!.graph,f.target)).toBeNull()
   const final=await f.quick.read({kind:'quick',target:f.target})
   expect(final.defaults).toMatchObject({conversation:f.old,presence:writerValues.presence});expect(f.save).toHaveBeenCalledTimes(2);expect(f.h.started).toHaveLength(1)
+})
+
+it('a preference-only request with no placement cannot certify an original Main creation binding',async()=>{
+ const f=await fixture(),admission=await originalAdmission(f),binding=moteMainBindingInput(admission.record,admission.baseline)
+ expect(matchesMoteMainBindingInput(admission.record,binding)).toBe(true)
+ const {destination:_,...withoutPlacement}=binding
+ expect(matchesMoteMainBindingInput(admission.record,withoutPlacement)).toBe(false)
+ expect(f.save).not.toHaveBeenCalled();expect(f.h.rawInput).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 })
