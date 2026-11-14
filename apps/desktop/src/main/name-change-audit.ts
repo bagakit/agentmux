@@ -1,6 +1,6 @@
 import type { AgentMuxNameContext, AgentMuxNameTarget } from '@agentmux/core/control'
 import type { AppConfig } from '../shared/contracts.js'
-import { unknownNameContext } from '../../../host/src/name-change-audit.js'
+import { unknownNameContext, type NamedChange } from '../../../host/src/name-change-audit.js'
 export { NameChangeAudit, nameChangeRequests, unknownNameContext, type NameChangeRecordPort, type NamedChange } from '../../../host/src/name-change-audit.js'
 
 export function desktopNameContext(entryPoint: string, sender: unknown, expected: unknown,
