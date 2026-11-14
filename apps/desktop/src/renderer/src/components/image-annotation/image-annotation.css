@@ -9,7 +9,7 @@
 .image-annotation-toolbar__tools, .image-annotation-toolbar__history, .image-annotation-toolbar__actions, .image-annotation-toolbar__colors, .image-annotation-toolbar__group, .image-annotation-toolbar__output { display: flex; align-items: center; gap: 3px; min-width: 0; }
 .image-annotation-toolbar__tools { display: flex; flex: 1; gap: 3px; }
 .image-annotation-editor .image-annotation-toolbar__compact { display: none; }
-.image-annotation-tools-menu { min-width: 190px; max-height: min(70vh, 480px); }
+.tab-context-menu.image-annotation-tools-menu { min-width: 190px; max-height: min(70vh, 480px, var(--radix-dropdown-menu-content-available-height, 70vh)); overflow-y: auto; }
 .image-annotation-tools-menu [data-state="checked"] { color: var(--green-text); background: var(--wash-2); }
 .image-annotation-editor .image-annotation-toolbar__tools button, .image-annotation-editor .image-annotation-toolbar__history button { min-width: 28px; width: 28px; height: 28px; padding-inline: 4px; }
 .image-annotation-toolbar__history button:last-child { width: auto; min-width: 34px; }
