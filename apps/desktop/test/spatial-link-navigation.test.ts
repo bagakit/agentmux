@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { webcrypto } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { AgentMuxControlServer } from '../../../packages/core/dist/control-host.js'
+import { AgentMuxControlServer } from '../../../packages/core/src/control-host'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { formatAmuxObjectLink, parseAmuxObjectLink, parseAgentMuxControlRequest, type TopicCategory } from '@agentmux/core'
@@ -17,6 +17,7 @@ import { DesktopFocusFailure, resolveDesktopSpaceSelection } from '../src/render
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { moteAgent } from './fixtures/mote-workface'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const initial = useAppStore.getState()
@@ -39,7 +40,8 @@ function arrange(count = 2) {
     return [address.zoneId, { spaceId: address.spaceId, workspaceId: workspace.id, topicId: value.id, contentKind: 'topic' as const, relations: { [work.spaceId]: true } }]
   }))
   useAppStore.setState({ config, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench',
-    topicCategories: [work, ideas], spaceZoneBindings: bindings, sessions: [], tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])),
+    topicCategories: [work, ideas], spaceZoneBindings: bindings, sessions: [],
+    scratchTopicSnapshots:{[workspace.id]:{scope:scratchTopicsScope(workspace),revision:1,topics:members,error:null,reading:false}}, tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])),
     layouts: { [workspace.id]: createWorkspaceLayout('group', tabs.map(tab => tab.id)) }, workbenchSpaceSelection: null,
     agentComposerDrafts: { original: 'Unsent original draft' } })
   return { state: useAppStore.getState(), catalog: spatialCatalog(useAppStore.getState(), members), members }
@@ -100,14 +102,14 @@ describe('original Space focus resolver and control owner', () => {
     const after = useAppStore.getState()
     expect(after.tabs).toBe(state.tabs); expect(after.layouts).toBe(state.layouts); expect(after.sessions).toBe(state.sessions); expect(after.agentComposerDrafts).toBe(state.agentComposerDrafts)
   })
-  it('does not let late original Topic discovery overwrite a newer deliberate navigation', async () => {
+  it('does not let a necessary original Goal read overwrite a newer deliberate navigation', async () => {
     const { state } = arrange()
-    let resolve!: (value: ScratchTopicSnapshot[]) => void
-    vi.mocked(api.scratch.listTopics).mockImplementationOnce(() => new Promise(done => { resolve = done }))
-    const pending = state.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'late', operation: 'focus', target: { kind: 'space', spaceId: work.spaceId }, inputPolicy: 'preserve' }))
+    let resolve!: (value: any) => void
+    vi.spyOn(api.goals,'execute').mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const pending = state.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'late', operation: 'focus', target: { kind: 'goal', goalId:'original',runtimeId:'original-runtime',namespace:'private' }, inputPolicy: 'preserve' }))
     const later = { spaceId: ideas.spaceId, zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }
     useAppStore.setState({ workbenchSpaceSelection: later })
-    resolve(topics)
+    resolve({operation:'demand.show',demand:null})
     const result = await pending
     if (result.operation !== 'focus') throw new Error('Expected focus')
     expect(result.navigation.state).toBe('rejected'); expect(result.issues.map(issue => issue.code)).toContain('NAVIGATION_CHANGED')
@@ -153,14 +155,14 @@ describe('original Space focus resolver and control owner', () => {
       }, null, 2), { mode: 0o600 })
     } finally { await server.stop(); await rm(root, { recursive: true }) }
   }, 30_000)
-  it('keeps a newer navigation even when the user leaves and returns to the starting workface before discovery replies', async () => {
+  it('keeps a newer navigation even when the user leaves and returns before the required Goal source replies', async () => {
     const { state } = arrange()
-    let resolve!: (value: ScratchTopicSnapshot[]) => void
-    vi.mocked(api.scratch.listTopics).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    let resolve!: (value: any) => void
+    vi.spyOn(api.goals,'execute').mockImplementationOnce(() => new Promise(done => { resolve = done }))
     const subscribe = vi.spyOn(useAppStore, 'subscribe')
-    const pending = state.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'returning-user', operation: 'focus', target: { kind: 'space', spaceId: work.spaceId }, inputPolicy: 'preserve' }))
+    const pending = state.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'returning-user', operation: 'focus', target: { kind: 'goal', goalId:'original',runtimeId:'original-runtime',namespace:'private' }, inputPolicy: 'preserve' }))
     useAppStore.setState({ mainSurface: 'agents' }); useAppStore.setState({ mainSurface: state.mainSurface })
-    resolve(topics)
+    resolve({operation:'demand.show',demand:null})
     const result = await pending
     if (result.operation !== 'focus') throw new Error('Expected focus')
     expect(result.navigation.state).toBe('rejected'); expect(result.issues.map(issue => issue.code)).toContain('NAVIGATION_CHANGED')
