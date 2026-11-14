@@ -1142,3 +1142,55 @@ it('[composition-browser-secondary-same-resource] original page menu keeps the s
   expect(input.value).toBe('Unsubmitted original secondary address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
   expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
 })
+
+it('[survey-pin-ui] original row menu pins and unpins research while preserving its original group, order and input', async () => {
+  await dom.render(<App />)
+  const state = useAppStore.getState(), organization = state.surveyOrganization, membership = state.surveyCollectedZones, tabs = state.tabs
+  const initial = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].map(row => row.dataset.surveyZoneId)
+  expect(document.querySelector('[aria-label="Pinned Survey items"]')).toBeNull()
+  await menu('Options for Target research'); await click(named('Pin'))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Pinned Survey items"] [data-survey-zone-id]')?.getAttribute('data-survey-zone-id')).toBe(zones.target))
+  expect(document.querySelector('[aria-label="Pinned Survey items"] .survey-pin-mark')).not.toBeNull()
+  expect([...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].filter(row => row.dataset.surveyZoneId === zones.target)).toHaveLength(1)
+  expect(useAppStore.getState().surveyOrganization).toBe(organization); expect(useAppStore.getState().surveyCollectedZones).toBe(membership)
+  expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().surveyZoneSelection).toBe(state.surveyZoneSelection)
+  const read = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'read-menu-pin', operation: 'space.survey-list' })
+  expect(read).toMatchObject({ pinnedReferences: [{ kind: 'zone', zoneId: zones.target }] })
+  await menu('Options for Target research'); await click(named('Unpin'))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Pinned Survey items"]')).toBeNull())
+  expect([...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].map(row => row.dataset.surveyZoneId)).toEqual(initial)
+  expect(useAppStore.getState().tabs).toBe(tabs)
+})
+
+it('[survey-pin-ui] an ordinary page remains unpinned until its menu action and keeps its exact Close while pinned', async () => {
+  const page = await horizontalPages(), before = useAppStore.getState(), oldFile = source().regions['composition-file'], oldAgent = source().regions['composition-agent-region']
+  expect(document.querySelector('[aria-label="Pinned Survey items"]')).toBeNull()
+  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] .survey-item-options')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Pin'))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Pinned Survey items"] [data-survey-page-region-id="composition-page"] .survey-item-tab-close')).not.toBeNull())
+  const read = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'read-exact-menu-pin', operation: 'space.survey-list' })
+  expect(read).toMatchObject({ pinnedReferences: [{ kind: 'page', ...page }] })
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await click(horizontalPageClose()); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  expect(close).toHaveBeenCalledWith(page.browserId)
+  expect(source().regions['composition-file']).toBe(oldFile); expect(source().regions['composition-agent-region']).toBe(oldAgent)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(document.querySelector('[aria-label="Pinned Survey items"] [data-survey-page-region-id="composition-page"]')).toBeNull()
+})
+
+it('[survey-pin-ui] a retained unavailable research can be unpinned without deleting its reference or other preferences', async () => {
+  const state = useAppStore.getState(), key = JSON.stringify(['zone', 'retained-missing-zone'])
+  useAppStore.setState({ surveyCollectedZones: { ...state.surveyCollectedZones, 'retained-missing-zone': true },
+    pinnedItems: { ...state.pinnedItems, 'survey-workbench': [key] } })
+  await dom.render(<App />)
+  const beforeUnpin = useAppStore.getState()
+  const row = document.querySelector<HTMLElement>('[data-survey-zone-id="retained-missing-zone"]')!
+  expect(row).not.toBeNull()
+  const options = row.querySelector<HTMLElement>('[aria-haspopup="menu"]')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Unpin'))
+  await vi.waitFor(() => expect(useAppStore.getState().pinnedItems['survey-workbench']).toBeUndefined())
+  expect(useAppStore.getState().surveyCollectedZones['retained-missing-zone']).toBe(true)
+  expect(useAppStore.getState().tabs).toBe(beforeUnpin.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+})
