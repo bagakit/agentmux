@@ -111,8 +111,9 @@ describe('Remote execution reading and navigation', () => {
     config = { ...config, workspaces: config.workspaces.map(project => project.id !== 'remote-project' ? project : { ...project,
       name: 'An exceptionally long project name for the resource workstation', path: '/original/project/with/a/long/unambiguous/resource/location' }) }
     await pane()
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-start"]')!.click())
     await act(async () => dom.container.querySelector<HTMLInputElement>('input[value="remote-project"]')!.click())
-    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Project for this arrangement"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Working folder for this arrangement"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
     await act(async () => document.querySelector<HTMLElement>('[role=menuitemradio][data-value="remote-project"]')!.click())
     const target = dom.container.querySelector('.agent-work-end')!
     expect(target.textContent).toContain('An exceptionally long project name for the resource workstation')
@@ -120,6 +121,7 @@ describe('Remote execution reading and navigation', () => {
     expect(target.querySelector('code')!.textContent).toBe('/original/project/with/a/long/unambiguous/resource/location')
     expect(dom.container.querySelector<HTMLButtonElement>('.agent-work-setup__actions .primary-button')!.disabled).toBe(false)
     width = 1000; await act(async () => resize())
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-existing"]')!.click())
     await dom.click('[data-resource-row="retained-25"]')
     expect(dom.container.querySelector<HTMLElement>('.remote-execution-library')!.hidden).toBe(false)
   })

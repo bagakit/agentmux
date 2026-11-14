@@ -37,7 +37,7 @@ async function pane(active = true) {
   await dom.render(<Pane config={config} active={active} onClose={close} onNavigate={() => {}} />)
 }
 async function selectWork(selector: string) {
-  const tab = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab]:nth-child(2)')!
+  const tab = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-existing"]')!
   await act(async () => tab.click())
   const row = dom.container.querySelector<HTMLElement>(selector)!
   expect(row.closest('[hidden],[inert]')).toBeNull()
@@ -55,7 +55,10 @@ async function chooseField(label: string, value: string) {
   const item = document.querySelector<HTMLElement>(`[role=menuitemradio][data-value="${value}"]`)
   expect(item).not.toBeNull(); await act(async () => item!.click())
 }
-const chooseProject = (id: string) => chooseField('Project for this arrangement', id)
+const chooseProject = (id: string) => chooseField('Working folder for this arrangement', id)
+async function startPreparation() {
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-start"]')!.click())
+}
 async function toggleGuide(open: boolean) {
   const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="guide"]')
   expect(guide).not.toBeNull()
@@ -73,7 +76,7 @@ describe('Remote execution Settings', () => {
     await pane()
     expect(dom.container.textContent?.match(/No remote work yet/gu)).toHaveLength(1)
     expect(dom.container.querySelector('.remote-execution-bindings__body')).toBeNull()
-    expect(dom.container.querySelector('.agent-work-setup__actions .primary-button')).not.toBeNull()
+    expect(dom.container.querySelector('.agent-work-setup')).toBeNull()
   })
   it('reveals the same guide after retained narrow binding detail without replacing original work', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width: 600 } as DOMRect))
@@ -147,11 +150,12 @@ describe('Remote execution Settings', () => {
   })
 
   it('is one compiled Remote navigation contribution and its real page is reachable', async () => {
-    expect(settingsNavGroups('').find(group => group.id === 'environment')?.items.map(item => item.id)).toEqual(['hosts', 'remote-execution', 'mobile'])
+    expect(settingsNavGroups('').find(group => group.id === 'environment')?.items.map(item => item.id).filter(id => ['hosts', 'remote-execution', 'mobile'].includes(id))).toEqual(['hosts', 'remote-execution', 'mobile'])
     expect(visibleSettingsSections('Remote execution').map(item => item.id)).toContain('remote-execution')
     await dom.render(<SettingsPanel initialSection="overview" onClose={close} />)
     await dom.click('nav [data-settings-target="remote-execution"]')
-    expect(dom.container.querySelector('[data-settings-pane="remote-execution"] [aria-label="Project for this arrangement"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-settings-pane="remote-execution"] [aria-label="Working folder for this arrangement"]')).toBeNull()
+    expect(dom.container.querySelector('[role=tab][aria-selected=true]')?.textContent).toContain('Existing work')
   })
 
   it('prepares the exact chosen Project through the real Store and retains drafts without starting an Agent', async () => {
@@ -159,7 +163,7 @@ describe('Remote execution Settings', () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
     vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: 'remote', homeDirectory: '/same/project' })
     const before = useAppStore.getState()
-    await pane(); await chooseProject('project-local'); await chooseField('Agent runs on', 'remote'); await button('Open in Launcher')
+    await pane(); await startPreparation(); await chooseProject('project-local'); await chooseField('Agent runs on', 'remote'); await button('Open in Launcher')
     expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'project-local', reveal: true, initialExecution: { resourceWorkspaceId: 'project-local', agentWorkspaceId: 'project-remote' } })
     const tabId = open.mock.results[0]!.value as string
     expect(tabId).toBeTruthy()
@@ -172,8 +176,8 @@ describe('Remote execution Settings', () => {
   })
 
   it('excludes Scratch and preserves the page when original Launcher preparation is unavailable', async () => {
-    await pane()
-    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Project for this arrangement"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+    await pane(); await startPreparation()
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Working folder for this arrangement"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
     const options = [...document.querySelectorAll<HTMLElement>('[role=menuitemradio][data-value]')].map(item => item.dataset.value)
     expect(options).toContain('project-local'); expect(options).not.toContain('project-remote'); expect(options).not.toContain('__scratch__')
     vi.spyOn(useAppStore.getState(), 'openLauncher').mockReturnValue(undefined)

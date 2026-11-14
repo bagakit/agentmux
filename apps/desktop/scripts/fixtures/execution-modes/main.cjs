@@ -144,7 +144,7 @@ app.whenReady().then(async () => {
   await edit();await frame('mode-editor-narrow');await read(`executionProofVisible('.agent-work-setup__actions .primary-button').scrollIntoView({block:'nearest'})`);await frame('mode-editor-narrow-actions');await apply()
   await viewport(840,430);await frame('remote-agent-short')
   await viewport(1180,850);await tools(true)
-  await read('executionModesVisual.inventory("ready","local")');await edit('remote-project');await choose('Project for this arrangement','remote-project');await frame('remote-project-editor');await apply()
+  await read('executionModesVisual.inventory("ready","local")');await edit('remote-project');await choose('Working folder for this arrangement','remote-project');await frame('remote-project-editor');await apply()
   await until(`executionProofVisible('[aria-label="Work mode"]').textContent.includes('Remote Project')`)
   const navigated=await facts()
   remoteId=navigated.selection.tabId;remoteRegion=navigated.selection.regionId

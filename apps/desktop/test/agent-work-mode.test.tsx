@@ -57,7 +57,7 @@ it('selecting Reach through its full Surface still prepares the original two end
   await dom.render(<AgentWorkModeSetup config={config} active allowLocal initialMode="remote-agent" initialSelection={{ resourceWorkspaceId: local.id, agentWorkspaceId: null }} actionLabel="Prepare" onApply={apply} />)
   const reach = dom.container.querySelector<HTMLInputElement>('input[value="remote-project"]')!
   await act(async () => reach.closest('label')!.click())
-  await chooseField(dom.container.querySelector<HTMLElement>('[aria-label="Project for this arrangement"]')!, remote.id)
+  await chooseField(dom.container.querySelector<HTMLElement>('[aria-label="Working folder for this arrangement"]')!, remote.id)
   expect(apply).not.toHaveBeenCalled(); expect(api.hosts.home).not.toHaveBeenCalled()
   await dom.click('.agent-work-setup__actions .primary-button')
   expect(apply).toHaveBeenCalledExactlyOnceWith({ resourceWorkspaceId: remote.id, agentWorkspaceId: local.id })

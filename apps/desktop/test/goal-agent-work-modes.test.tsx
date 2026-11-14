@@ -27,7 +27,7 @@ const picker=()=>dom.render(<GoalAgentPicker demand={goal} role="assignees" onSa
 const surface=()=>document.querySelector<HTMLElement>('.goal-agent-picker')!
 async function button(text:string){const found=[...surface().querySelectorAll<HTMLButtonElement>('button')].filter(n=>n.textContent?.trim()===text);expect(found).toHaveLength(1);await act(async()=>found[0]!.click())}
 async function field(label:string,value:string){await chooseField(surface().querySelector<HTMLElement>(`[aria-label="${label}"]`)!,value)}
-async function prepare(mode:string){await button('New Agent');await act(async()=>surface().querySelector<HTMLInputElement>(`input[type=radio][value="${mode}"]`)!.click());await field('Project for this arrangement',mode==='remote-project'||mode==='remote-workspace'?project.id:local.id);if(mode==='remote-agent')await field('Agent runs on',remote.id)}
+async function prepare(mode:string){await button('New Agent');await act(async()=>surface().querySelector<HTMLInputElement>(`input[type=radio][value="${mode}"]`)!.click());await field('Working folder for this arrangement',mode==='remote-project'||mode==='remote-workspace'?project.id:local.id);if(mode==='remote-agent')await field('Agent runs on',remote.id)}
 
 it.each(['local','remote-project','remote-agent','remote-workspace'])('Goal picker work modes: %s prepares the exact public request while the original relationship owner retains it',async mode=>{
  const control=vi.spyOn(useAppStore.getState(),'executeControl').mockRejectedValue(new Error('Original creation acknowledgement unknown'))
@@ -60,7 +60,7 @@ it('Goal picker work modes: the native registered folder receipt selects that ex
  vi.spyOn(api.workspaces,'chooseLocalFolder').mockResolvedValue(registered)
  await picker();await button('New Agent');await button('Choose local folder…')
  expect(useAppStore.getState().config!.workspaces.find(item=>item.id===registered.id)).toEqual(registered)
- expect(surface().querySelector<HTMLButtonElement>('[aria-label="Project for this arrangement"]')!.dataset.value).toBe(registered.id)
+ expect(surface().querySelector<HTMLButtonElement>('[aria-label="Working folder for this arrangement"]')!.dataset.value).toBe(registered.id)
  expect(surface().querySelector('.agent-work-ends')?.textContent).toContain(registered.path)
  expect(useAppStore.getState().agentComposerDrafts).toBe(before);expect(save).not.toHaveBeenCalled();expect(close).not.toHaveBeenCalled()
 })

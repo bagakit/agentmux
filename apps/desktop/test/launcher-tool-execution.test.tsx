@@ -52,7 +52,7 @@ async function editorAction(text: string) {
   expect(action).not.toBeUndefined(); await act(async () => action.click())
 }
 async function configure(mode: string, projectId: string, hostId?: string, startupId?: string) {
-  await openEditor(); await editorMode(mode); await editorField('Project for this arrangement', projectId)
+  await openEditor(); await editorMode(mode); await editorField('Working folder for this arrangement', projectId)
   if (hostId !== undefined) await editorField('Agent runs on', hostId)
   if (startupId !== undefined) await editorField('Agent starts in', startupId)
   await editorAction('Apply arrangement')
@@ -192,7 +192,7 @@ it.each(['remote-project', 'remote-workspace'])('%s opens the exact project’s 
   const prompt = 'Inspect [original.md](agentmux-file:%40original.md) and keep @relative/path here.'
   await act(async () => useAppStore.getState().setAgentComposerDraft('input', prompt))
   const before = useAppStore.getState(), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home)
-  await openEditor(); await editorMode(desiredMode); await editorField('Project for this arrangement', remoteProject.id)
+  await openEditor(); await editorMode(desiredMode); await editorField('Working folder for this arrangement', remoteProject.id)
   expect(editor().textContent).toContain('Original drafts stay with their project')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(home).not.toHaveBeenCalled()
   await editorAction('Cancel')
