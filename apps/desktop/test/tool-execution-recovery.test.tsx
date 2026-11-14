@@ -106,7 +106,11 @@ async function originalConnection() {
   const renderer = new EventEmitter(), sender = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (channel: string, value: unknown) => renderer.emit(channel, {}, value) })
   const handlers = new Map<string, (...args: any[]) => unknown>()
   let trusted = true
-  registerExecutionBindingIpc({ handle: (channel, handler) => { handlers.set(channel, handler) },  bindings: service, readers })
+  // registerIpc owns the trusted Desktop envelope; this fixture controls that transport leaf.
+  registerExecutionBindingIpc({ handle: (channel, handler) => { handlers.set(channel, (event, ...values) => {
+    if (!trusted) throw new Error('Sender is not the original trusted Desktop')
+    return handler(event, ...values)
+  }) }, bindings: service, readers })
   const invokes: { channel: string; values: unknown[] }[] = []
   const transport = createExecutionBindingApi({ invoke: async (channel, ...values) => { invokes.push({ channel, values }); return await handlers.get(channel)!({ sender }, ...values) }, on: (channel, listener) => { renderer.on(channel, listener); return renderer as any }, off: (channel, listener) => { renderer.off(channel, listener); return renderer as any } })
   vi.spyOn(api.sessions, 'executionBinding').mockImplementation(transport.executionBinding)
