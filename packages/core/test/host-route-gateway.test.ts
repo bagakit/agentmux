@@ -334,6 +334,40 @@ test('an exact current viewer member parent preserves A and refuses another payl
   expect(f.arrivals.filter(value => value.consumer !== null)).toHaveLength(delivered)
 })
 
+test('a signed conversation-only member child keeps its original actor and C without acquiring a Run', async () => {
+  const f = await fixture(), a = f.e, actor = { source: a.identity, ...principal }
+  const parentRoute = { source: a.identity, hops: [{ edgeId: 'B', target: f.b.identity }] }
+  const target = { kind: 'conversation' as const, reference: { runtimeId: f.b.identity.runtimeId, spaceId: 'original-space' }, regionId: 'original-region',
+    runtimeId: f.d.identity.runtimeId, agentSessionId: 'original-SID', expectedAdmission: { kind: 'creation' as const, operationId: 'original-reading-C' } }
+  const input = { target, call: { method: 'runtime.invoke' as const, params: { consumerId: 'original-viewer', fence: f.call.params.fence,
+    invocation: { method: 'readAgentConversation' as const, args: [{ hostId: 'local', agentSessionId: target.agentSessionId, limit: 3, maxBytes: 65536 }] } } } }
+  await f.configure(a, [{ id: 'B', route: parentRoute }], [])
+  await f.configure(f.b, [{ id: 'D', route: f.route }], [{ id: 'A-reading', delegator: a.identity, actor, destination: f.b.identity, scopes: ['space.member.call'] }])
+  const cGrant = f.grant('B-reading', f.b.identity, actor), dGrant = f.grant('C-reading', f.c.identity, actor)
+  cGrant.scopes.push('runtime.invoke/readAgentConversation'); dGrant.scopes.push('runtime.invoke/readAgentConversation')
+  cGrant.scopes.push('runtime.invoke/runtimeSubject'); dGrant.scopes.push('runtime.invoke/runtimeSubject')
+  await f.configure(f.c, [], [cGrant]); await f.configure(f.d, [], [dGrant])
+  let native = false
+  f.intercept.set('B', async (_method, params, context) => {
+    const request = structuredClone(params) as typeof input
+    const authorization = await f.b.gateway.authorizeMemberControl({ ...request, createOperationId: target.expectedAdmission.operationId }, context)
+    expect(authorization.scope).toMatchObject({ kind: 'member-control', operation: { access: 'conversation', expectedAdmission: target.expectedAdmission } })
+    expect((authorization.scope as { operation: unknown }).operation).not.toHaveProperty('runId')
+    const forwarded = structuredClone(request.call.params)
+    if (native) (forwarded.invocation as { method: string; args: unknown[] }) = { method: 'runtimeSubject', args: [{ kind: 'agent-session', agentSessionId: target.agentSessionId }] }
+    return await executionRouteRpc(f.b.gateway, f.route, authorization, undefined, context).call('runtime.invoke', forwarded)
+  })
+  const sdk = routedAgentMuxRpc(a.rpc, 'B', parentRoute)
+  const read = await sdk.call('space.member.call', input).then(value => ({ value }), error => ({ error }))
+  expect(read).toEqual({ value: { value: null } })
+  expect(f.arrivals.at(-1)?.actor).toEqual(actor)
+  const count = f.arrivals.filter(item => item.consumer !== null).length
+  native = true
+  const refused = await sdk.call('space.member.call', input).then(value => ({ value }), error => ({ code: error.code }))
+  expect(refused).toEqual({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(f.arrivals.filter(item => item.consumer !== null)).toHaveLength(count)
+})
+
 test('one exact member keeps its original Hosted namespace across actions and another Run cannot release it', async () => {
   const f = await fixture(true), target = { reference: { runtimeId: f.b.identity.runtimeId, spaceId: 'original-space' }, regionId: 'original-region',
     runtimeId: f.d.identity.runtimeId, agentSessionId: 'original-SID', expectedRun: { runId: 'original-run' } }

@@ -7,9 +7,26 @@ import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
+import { createPreloadSpaceMount } from '../src/preload/space-mount'
 
-const exposed = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() }))
-vi.mock('electron', () => ({ app: { getPath: () => '/tmp/agentmux-startup-observation-fixture' }, contextBridge: { exposeInMainWorld: (_name: string, value: AgentMuxPreloadApi) => { exposed.api = value } },
+// Electron preserves callable proxies, but not an AbortSignal's prototype.
+// Exercise every nested surface through that same serialization boundary.
+const exposed = vi.hoisted(() => {
+  const bridge = (value: any): any => {
+    if (typeof value === 'function') return (...args: unknown[]) => {
+      const result = value(...args.map(bridge))
+      return result instanceof Promise ? result.then(bridge) : bridge(result)
+    }
+    if (value && typeof value === 'object') {
+      if (value instanceof AbortSignal) return {}
+      if (Array.isArray(value)) return value.map(bridge)
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, bridge(item)]))
+    }
+    return value
+  }
+  return { api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn(), bridge }
+})
+vi.mock('electron', () => ({ app: { getPath: () => '/tmp/agentmux-startup-observation-fixture' }, contextBridge: { exposeInMainWorld: (_name: string, value: AgentMuxPreloadApi) => { exposed.api = exposed.bridge(value) } },
   ipcRenderer: { invoke: exposed.invoke, on: exposed.on, removeListener: exposed.removeListener }, webFrame: { getZoomFactor: () => 1 } }))
 import '../src/preload/index'
 
@@ -66,4 +83,36 @@ test('a cancellable original member read crosses the public preload and actual C
   controller.abort()
   await vi.waitFor(() => expect(f.renderer.listenerCount('spaceMounts:memberEvent')).toBe(0))
   expect(await original.d.core.readAgentSession(sid)).toEqual(beforeSession)
+})
+
+test('nested bridged read and conversation calls cancel only their own original IPC token', async () => {
+  const calls: Array<{ token: string; memberToken: string; method: string; input: any }> = [], cancelled: string[] = []
+  const waiting = new Map<string, (value: unknown) => void>()
+  const ipc = { on() {}, removeListener() {}, invoke: async (channel: string, ...args: any[]) => {
+    if (channel === 'spaceMounts:member') return { ok: true, value: { id: 'original-member', hostId: 'original-carrier' } }
+    if (channel === 'spaceMounts:cancel') { cancelled.push(args[0]); return }
+    expect(channel).toBe('spaceMounts:memberCall')
+    const [token, memberToken, method, input] = args; calls.push({ token, memberToken, method, input })
+    if (input.input?.cursor) return await new Promise(resolve => waiting.set(input.input.cursor, resolve))
+    return { ok: true, value: { originalMethod: method } }
+  } }
+  const port = createRendererSpaceMount(exposed.bridge(createPreloadSpaceMount(ipc as never)))
+  const target = { hostId: 'original-carrier', target: { reference: { runtimeId: 'source', spaceId: 'original-space' }, regionId: 'original-region',
+    runtimeId: 'execution', agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' } } }
+  const surface = await port.member(target, () => {})
+  for (const [method, input] of [['read', {}], ['conversationRead', { input: { limit: 3, maxBytes: 65536 } }], ['conversationWatch', {}]] as const) {
+    expect(await surface.call(method, input, new AbortController().signal)).toEqual({ originalMethod: method })
+  }
+  const one = new AbortController(), two = new AbortController()
+  const a = surface.call('conversationRead', { input: { cursor: 'original-a' } }, one.signal).then(value => ({ value }), error => ({ error }))
+  const b = surface.call('conversationRead', { input: { cursor: 'original-b' } }, two.signal)
+  await vi.waitFor(() => expect(waiting.size).toBe(2)); one.abort()
+  expect(cancelled).toEqual([calls.find(call => call.input.input?.cursor === 'original-a')!.token])
+  waiting.get('original-a')!({ ok: true, value: { originalMethod: 'conversationRead' } })
+  waiting.get('original-b')!({ ok: true, value: { originalMethod: 'conversationRead' } })
+  expect(await a).toHaveProperty('error')
+  expect(await b).toEqual({ originalMethod: 'conversationRead' })
+  expect(new Set(calls.map(call => call.memberToken)).size).toBe(1)
+  expect(calls.slice(0, 3).map(call => call.method)).toEqual(['read', 'conversationRead', 'conversationWatch'])
+  await surface.dispose()
 })
