@@ -1,3 +1,5 @@
+import type { GoalRelationAccess } from '@agentmux/core/control'
+import { GoalRelationAccessFields } from './GoalRelationAccessFields'
 import { demandAgentReferenceKey, mergeDemandAgentReferences } from '@agentmux/demand/relations'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
@@ -10,7 +12,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore, type LauncherExecutionSelection } from '../store'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
-import { goalAgentRows, goalAgentRowReference, goalAgentSelectionKey, goalCreationDraftKey, readGoalAgentSelectionDraft, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
+import { addedGoalSourceReferences, goalAgentRows, goalAgentRowReference, goalAgentSelectionKey, goalCreationDraftKey, readGoalAgentSelectionDraft, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
 import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
 import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
@@ -30,7 +32,7 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 
 
-export type GoalRelationSave = (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1], expectedUpdatedAt: number) => Promise<boolean>
+export type GoalRelationSave = (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1], expectedUpdatedAt: number, relationAccess?: GoalRelationAccess[]) => Promise<boolean>
 const labels = { assignees: 'Assignees', related: 'Related sessions', supervisor: 'Supervisor' }
 export function GoalAgentFace({ row }: { row: GoalAgentRow }) {
   const avatar = useAppStore(state => row.session?.executorId ? state.config?.executors[row.session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[row.session.executorId] : undefined)
@@ -157,15 +159,18 @@ function GoalAgentPickerEditor({ demand, role, saved, onSave, onClose }: { deman
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { creating.current = null; setBusy(false) }
   }
-  async function save() {
-    if (removingSupervisor && replacement === undefined) { setIssue('Choose a replacement Supervisor or explicitly clear it before saving.'); return }
-    const patch = role === 'supervisor' ? { supervisorSessionId: selected[0] ?? null }
+  function relationshipPatch() {
+    return role === 'supervisor' ? { supervisorSessionId: selected[0] ?? null }
       : role === 'related' ? { sessionIds: selected }
       : { assigneeSessionIds: selected, ...(removingSupervisor ? { supervisorSessionId: replacement || null } : {}) }
+  }
+  async function save() {
+    if (removingSupervisor && replacement === undefined) { setIssue('Choose a replacement Supervisor or explicitly clear it before saving.'); return }
+    const patch = relationshipPatch()
     const submittedSelection = selectionRef.current
     setBusy(true); setIssue(null)
     try {
-      if (!await onSave(patch, expectedUpdatedAt)) { setIssue('Relationships are not saved. Your selected Agents and created Session are retained. Review the current Goal and retry.'); return }
+      if (!await onSave(patch, expectedUpdatedAt, submittedSelection.relationAccess)) { setIssue('Relationships are not saved. Your selected Agents and created Session are retained. Review the current Goal and retry.'); return }
       if (draft && report?.agent?.createOperationId === draft.operationId && report.agent.creationPersistence !== 'unconfirmed' && report.save.diskDurability === 'confirmed') await clearGoalAgentCreationDraft(demand.id, draft.role, draft.operationId)
       await clearGoalAgentSelectionDraft(demand.id, role, submittedSelection)
       onClose()
@@ -240,6 +245,7 @@ function GoalAgentPickerEditor({ demand, role, saved, onSave, onClose }: { deman
           {draft ? <div className="goal-agent-picker__receipt" role="status"><strong>{report?.agent?.createOperationId === draft.operationId ? 'Original Session observed' : draft.phase === 'not-dispatched' ? 'Creation has not been dispatched' : 'Creation confirmation pending'}</strong>
             <span>{report?.agent?.agentSessionId ?? draft.operationId}</span><span>Creation: {report?.agent ? report.agent.creationPersistence === 'unconfirmed' ? 'Saving unconfirmed' : 'Recorded by Core' : 'Unconfirmed'} · Task: {report?.agent?.initialPrompt === 'not-requested' ? 'Not sent' : 'Not confirmed'} · Relationship: Save separately</span>
             {report?.issues.map((entry, index) => <span key={index}>{entry.message}</span>)}<button type="button" className="small-button" disabled={busy} onClick={() => { if (draft.phase === 'not-dispatched') void dispatchOriginal(draft); else void inspectOriginal(draft) }}>{draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original operation'}</button></div> : null}
+          <GoalRelationAccessFields references={addedGoalSourceReferences(demand, relationshipPatch())} hosts={state.config?.hosts ?? []} accesses={selection.relationAccess ?? []} disabled={busy} onChange={relationAccess => changeSelection({ relationAccess })} />
           {changed ? <div className="goals-service" role="status">The Goal changed while this selection was open. Your draft is retained.<button type="button" className="small-button" disabled={busy} onClick={() => { changeSelection({ expectedUpdatedAt: demand.updatedAt }); setIssue(null) }}>Use current Goal version for this draft</button></div> : null}
           {issue ? <p className="goals-service" role="status">{issue}</p> : null}
           <footer><span>{role === 'supervisor' ? selected.length ? 'One Supervisor selected' : 'Supervisor cleared' : `${selected.length} selected`}</span><button type="button" className="small-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>{busy ? 'Working…' : 'Save relationships'}</button></footer>

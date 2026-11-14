@@ -1,3 +1,4 @@
+import { parseGoalRelationAccesses, type GoalRelationAccess } from '@agentmux/core/goal-agent-reference'
 import { parseDemandAgentReference, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from '@agentmux/demand/relations'
 import type { AgentMuxControlRequest } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -18,7 +19,7 @@ export type GoalAgentCreationDraft = {
   phase: 'not-dispatched' | 'may-have-dispatched'
   request: Extract<AgentMuxControlRequest, { operation: 'agent.open' }>
 }
-export type GoalAgentSelectionDraft = { goalId: string; role: GoalAgentRole; selected: DemandAgentReference[]; expectedUpdatedAt: number; replacement?: DemandAgentReference }
+export type GoalAgentSelectionDraft = { goalId: string; role: GoalAgentRole; selected: DemandAgentReference[]; expectedUpdatedAt: number; replacement?: DemandAgentReference; relationAccess?: GoalRelationAccess[] }
 export const goalCreationDraftKey = (goalId: string, role: GoalAgentRole): string => JSON.stringify([goalId, role])
 export function restoredGoalAgentCreationDrafts(value: unknown): Record<string, GoalAgentCreationDraft> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -45,10 +46,11 @@ export function restoredGoalAgentSelectionDrafts(value: unknown): Record<string,
 export function readGoalAgentSelectionDraft(value: unknown, goalId: string, role: GoalAgentRole): GoalAgentSelectionDraft | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return
   const draft = value as Record<string, unknown>
-  if (Object.keys(draft).some(key => !['goalId', 'role', 'selected', 'expectedUpdatedAt', 'replacement'].includes(key)) ||
+  if (Object.keys(draft).some(key => !['goalId', 'role', 'selected', 'expectedUpdatedAt', 'replacement', 'relationAccess'].includes(key)) ||
       draft.goalId !== goalId || draft.role !== role || !Array.isArray(draft.selected) || typeof draft.expectedUpdatedAt !== 'number' || !Number.isFinite(draft.expectedUpdatedAt)) return
   try { return { goalId, role, selected: mergeDemandAgentReferences(draft.selected.map(parseDemandAgentReference)), expectedUpdatedAt: draft.expectedUpdatedAt,
-    ...(draft.replacement === undefined ? {} : { replacement: draft.replacement === '' ? '' : parseDemandAgentReference(draft.replacement) }) } }
+    ...(draft.replacement === undefined ? {} : { replacement: draft.replacement === '' ? '' : parseDemandAgentReference(draft.replacement) }),
+    ...(draft.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(draft.relationAccess) }) } }
   catch { return } // Keep the original opaque entry; this reader cannot edit or dispatch it.
 }
 type Inputs = Pick<ReturnType<typeof useAppStore.getState>, 'sessions' | 'config' | 'agentNames' | 'timelines' | 'scratchTopicSnapshots'>
@@ -117,3 +119,15 @@ export function goalAgentRows(state: Inputs, goal: DemandRecord, retainedIds: re
 
 export const goalAgentRowReference = (row: GoalAgentRow): DemandAgentReference => row.reference
 export const goalAgentSelectionKey = demandAgentReferenceKey
+
+/** Dirty relationship inputs only; the original Goal owner still qualifies each addition. */
+export function addedGoalSourceReferences(goal: DemandRecord, patch: Partial<Pick<DemandRecord, 'sessionIds' | 'assigneeSessionIds' | 'supervisorSessionId'>>) {
+  const added: DemandAgentReference[] = []
+  const refs = (value: DemandRecord['supervisorSessionId'] | DemandRecord['sessionIds'] | undefined): DemandAgentReference[] => value == null ? [] : Array.isArray(value) ? value : [value]
+  for (const field of ['sessionIds', 'assigneeSessionIds', 'supervisorSessionId'] as const) {
+    if (!Object.hasOwn(patch, field)) continue
+    const original = new Set(refs(goal[field]).map(demandAgentReferenceKey))
+    added.push(...refs(patch[field]).filter(ref => typeof ref !== 'string' && !original.has(demandAgentReferenceKey(ref))))
+  }
+  return mergeDemandAgentReferences(added).filter((ref): ref is Exclude<DemandAgentReference, string> => typeof ref !== 'string')
+}

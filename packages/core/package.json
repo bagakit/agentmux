@@ -446,6 +446,10 @@
       "types": "./dist/executor-contract.d.ts",
       "import": "./dist/executor-contract.js"
     },
+    "./goal-agent-reference": {
+      "types": "./dist/goal-agent-reference.d.ts",
+      "import": "./dist/goal-agent-reference.js"
+    },
     "./host-route": {
       "types": "./dist/host-route.d.ts",
       "import": "./dist/host-route.js"

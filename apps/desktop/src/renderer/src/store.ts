@@ -1,3 +1,4 @@
+import type { GoalRelationAccess } from '@agentmux/core/control'
 import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
@@ -1296,7 +1297,7 @@ export type AppState = GitReadingActions & {
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
   }, controlRequestId?: string): Promise<string>
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number): Promise<void>
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number, relationAccess?: GoalRelationAccess[]): Promise<void>
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -8873,13 +8874,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     return goal.id
   },
-  async updateDemand(id, patch, controlRequestId, expectedUpdatedAt) {
+  async updateDemand(id, patch, controlRequestId, expectedUpdatedAt, relationAccess) {
     const current = get().demands[id]
     if (!current) throw new Error(`Goal ${id} is unavailable`)
     if (patch.contentRefs?.some(ref => !confirmedGoalContentReference(workbenchSelectionCatalog(get()), ref))) throw controlFailure('INVALID_CONTROL_REQUEST', 'The exact Goal content resource is unconfirmed. Existing work is retained.')
     const { decisionLog, ...input } = patch
     const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.update', requestId: controlRequestId ?? mintObjectId(),
-      demandId: id, patch: input, expectedUpdatedAt: expectedUpdatedAt ?? current.updatedAt,
+      demandId: id, patch: input, expectedUpdatedAt: expectedUpdatedAt ?? current.updatedAt, ...(relationAccess === undefined ? {} : { relationAccess }),
       ...(decisionLog?.length ? { decision: decisionLog.at(-1)! } : {}) })
     if (result.operation !== 'demand.update') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal update returned another operation.')
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))

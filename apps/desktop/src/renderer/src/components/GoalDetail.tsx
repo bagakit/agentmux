@@ -80,9 +80,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const saved = await copyTextToClipboard(link, error => setCopyIssue(error instanceof Error ? error.message : String(error)))
     if (saved) setCopied(kind)
   }
-  async function update(patch: Parameters<typeof updateDemand>[1], expectedUpdatedAt?: number): Promise<boolean> {
-    try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); return true }
-    catch (error) { if (expectedUpdatedAt !== undefined) return false; failedPatch.current = { ...failedPatch.current, ...patch }; setSaveError(error instanceof Error ? error.message : String(error)); return false }
+  async function update(patch: Parameters<typeof updateDemand>[1], expectedUpdatedAt?: number, relationAccess?: Parameters<typeof updateDemand>[4]): Promise<boolean> {
+    try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt, relationAccess); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); return true }
+    catch (error) { if (expectedUpdatedAt !== undefined) throw error; failedPatch.current = { ...failedPatch.current, ...patch }; setSaveError(error instanceof Error ? error.message : String(error)); return false }
   }
   const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={value => editGoalDraft(demand.id, 'description', value)} onBlur={() => { if (descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const recipient = useGoalDiscussionRecipient(demand.id)

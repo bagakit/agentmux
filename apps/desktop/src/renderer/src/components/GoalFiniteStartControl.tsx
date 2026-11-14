@@ -83,6 +83,6 @@ export function GoalFiniteStartControl({ demand, primary = false, embedded = fal
     {pending ? <div className="goals-inline-actions"><span className="goals-caption" data-goal-current-conclusion={conclusion ? true : undefined} data-goal-current-source={conclusion ? 'start' : undefined}>{conclusion ?? 'Original request retained'}</span><button className={primary ? 'primary-button' : 'small-button'} type="button" disabled={busy} onClick={() => void run(() => intent?.phase === 'not-attempted' ? start() : inspect(pending.operationId))}>{busy ? 'Checking…' : intent?.phase === 'not-attempted' ? 'Submit retained task' : 'Inspect original Start'}</button></div>
       : hasOriginalTask ? <>{!embedded ? <a className="small-button" href={`#goal-work-${demand.id}`}>View original work</a> : null}<details className="goal-finite-start__another"><summary>Start another one-time task</summary>{newTask}</details></> : newTask}
     {message ? <p className="goals-service" role="status">{message}</p> : null}
-    {picker ? <GoalAgentPicker demand={demand} role="assignees" onSave={async (patch, expectedUpdatedAt) => { await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt); return true }} onClose={() => setPicker(false)} /> : null}
+    {picker ? <GoalAgentPicker demand={demand} role="assignees" onSave={async (patch, expectedUpdatedAt, relationAccess) => { await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt, relationAccess); return true }} onClose={() => setPicker(false)} /> : null}
   </section>
 }
