@@ -2,7 +2,7 @@
 
 `@agentmux/client-ui` is the design system shared by AgentMux clients. Its **components** give an individual action, field or reading surface consistent behavior. Its **interaction patterns** describe how a person completes a task that spans several controls, such as finding the work surfaces for an Agent. A host can implement a pattern with its own layout and navigation.
 
-The package is private to the AgentMux workspace. The React entries use React and React DOM `^19.2.0`. The package also owns shared Note syntax and document-format helpers. Some domain-specific entries depend on the public types and functions of the workspace’s `@agentmux/core` package. Hosts supply observations and perform actions. The library has no application store, conversation log or Runtime client.
+The package is private to the AgentMux workspace. The portable entries below use React and React DOM `^19.2.0`. The package also owns shared Note syntax and document-format helpers. Some domain-specific entries depend on the public types and functions of the workspace’s `@agentmux/core` package. Hosts supply observations and perform actions. The library has no application store, conversation log or Runtime client.
 
 ## Start here
 
@@ -36,7 +36,24 @@ export function DraftForm({ onSave }: { onSave: (text: string) => void }) {
 }
 ```
 
-## Modules
+## Portable entries
+
+Use these exact import paths under `@agentmux/client-ui/`. Each example imports its own styles. Render its default export in a React host, then try it with keyboard focus, at narrow width and with reduced motion.
+
+| Purpose | Imports | Local styles and example |
+| --- | --- | --- |
+| Actions | `components/Button`, `components/IconButton` | `styles/buttons.css`. [Toggle, disabled action and pending save](examples/actions.tsx). |
+| Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
+| Overlays | `components/Modal`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
+| Readable feedback | `components/InlineRenameField` | `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css`. [Rename, pending receipt and retryable error](examples/feedback.tsx). |
+| Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
+| Theme | `theme`, `theme/model`, `icons` | `styles/theme-defaults.css` for initial tokens, `styles/palette.css` for semantic surfaces and `styles/semantic-icons.css` for icon motion. [Light, dark and reduced motion](examples/theme.tsx). |
+
+Mount `mountThemeRuntime(window)` from `theme` once per browser document to install the shared sprite and tokens. The feedback and location components render glyph references into that sprite. Import the shared palette for error and feedback colors. The host sets density and layout, as in [the example host stylesheet](examples/host.css). Keep Overlay focus and Portal targets in the owning document.
+
+Node consumers can import the theme model to resolve light and dark tokens without a DOM. Interactive entries render in a React host. Import CSS through a CSS-aware browser bundler.
+
+## Workspace modules
 
 Imports in the table use the prefix `@agentmux/client-ui/` unless written in full.
 

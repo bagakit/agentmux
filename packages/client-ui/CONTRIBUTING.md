@@ -40,6 +40,12 @@ pnpm run typecheck
 pnpm test
 ```
 
+## Maintain the portable entries
+
+Add portable entries and their styles to `scripts/supported-entries.mjs`. Run `pnpm run generate:entries` to write the exact workspace exports. The same entry definitions produce the distribution exports for compiled JavaScript, declarations and CSS. Keep workspace-specific entry mappings in the package manifest and preserve their actual callers when changing them.
+
+Add a runnable example under `examples/` and link to it from the README. After building, run `node scripts/verify-supported-entries.mjs`. It resolves the examples against source and compiled types, measures the actual browser inputs, and runs their actions with Chromium. The reference browser host supplies one sprite and switches the shared theme. Record licensing and external installation evidence separately for a distribution candidate.
+
 ## Prepare a standalone release
 
 The current distribution is a private workspace package. For a standalone candidate, build and pack it, then install the resulting archive in a clean app outside the monorepo. Try the documented imports, types and CSS with the declared peer versions. Render a basic field and drive a pattern through a neutral host adapter. Measure the entry's actual import graph and bundle cost. The basic field should work without an AgentMux runtime, terminal or rich editor.
