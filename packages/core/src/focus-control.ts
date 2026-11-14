@@ -133,7 +133,6 @@ function member(value: unknown, code: string): AgentMuxFocusMember {
       return { hostId: text(at.hostId, code, true), workspaceId: text(at.workspaceId, code, true), groupId: text(at.groupId, code, true), tabId: text(at.tabId, code, true), regionId: text(at.regionId, code, true) }
     }) } }
   if (result.excerpt && result.excerpt.text.length > FOCUS_EXCERPT_MAX) fail(code)
-  if (result.availability !== 'observed' && result.agent !== null) fail(code)
   return result
 }
 /** Strict public and IPC reply validation; presentation strings grant no control authority. */
