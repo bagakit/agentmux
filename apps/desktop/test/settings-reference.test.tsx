@@ -6,6 +6,7 @@ import { settingsNavGroups } from '../src/renderer/src/components/settings/setti
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { chooseField } from './helpers/selection-field'
 const dom = composerDOM()
 let ids: string[]
 beforeEach(async () => {
@@ -23,8 +24,8 @@ async function fill(node: HTMLInputElement, value: string) {
 const name = () => dom.container.querySelector<HTMLInputElement>('[data-executor-name]')!
 const provider = (id: string) => dom.click(`[aria-label="Providers"] [data-resource-row="provider:${id}"]`)
 async function scope(value: 'templates' | 'host') {
-  const node = dom.container.querySelector<HTMLSelectElement>('[aria-label="Executor configuration scope"]')!
-  await act(async () => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })) })
+  const node = dom.container.querySelector<HTMLButtonElement>('[aria-label="Executor configuration scope"]')!
+  await chooseField(node, value)
 }
 it('sidebar: named groups and exact routes remain available through the registered Settings shell', async () => {
   const close = vi.fn()

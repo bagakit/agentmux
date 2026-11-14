@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { chooseField } from './helpers/selection-field'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -48,8 +49,8 @@ async function waitForReceipt() {
 async function mount() {
   await dom.render(<SettingsPanel initialSection="agents" onClose={() => {}} />)
   await act(async () => {
-    const scope = dom.container.querySelector<HTMLSelectElement>('[aria-label="Executor configuration scope"]')!
-    scope.value = 'host'; scope.dispatchEvent(new Event('change', { bubbles: true }))
+    const scope = dom.container.querySelector<HTMLButtonElement>('[aria-label="Executor configuration scope"]')!
+    await chooseField(scope, 'host')
   })
   await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Register command')!.click())
   await fill('ID', 'controlled-wrapper'); await fill('name', 'Captured registration')
