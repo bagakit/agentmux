@@ -943,3 +943,16 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
     }, 240_000)
   }
 )
+
+it('compiled Host codecs initialize the same nonempty RPC registry independently of the first imported leaf', async () => {
+  for (const leaf of ['public-rpc-host-settings.js', 'host-network-observation.js']) {
+    const entry = new URL('../dist/' + leaf, import.meta.url).href
+    const registry = new URL('../dist/public-rpc.js', import.meta.url).href
+    const settings = new URL('../dist/public-rpc-host-settings.js', import.meta.url).href
+    const script = `await import(${JSON.stringify(entry)}); const rpc = await import(${JSON.stringify(registry)}); const host = await import(${JSON.stringify(settings)}); const methods = Object.keys(host.AGENTMUX_RPC_HOST_SETTINGS_METHODS); if (!methods.length || methods.some(method => !rpc.isAgentMuxRpcMethod(method) || rpc.AGENTMUX_RPC_NATIVE_METHODS[method] !== host.AGENTMUX_RPC_HOST_SETTINGS_METHODS[method])) throw new Error('Original Host methods were omitted during module initialization'); process.stdout.write(String(methods.length))`
+    const result = await execFileAsync(process.execPath, ['--input-type=module', '-e', script], { cwd: repositoryRoot }).then(value => ({ ...value, code: 0 }), error => ({ stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? ''), code: error.code }))
+    expect(result.code, leaf + ': ' + result.stderr).toBe(0)
+    expect(Number(result.stdout), leaf).toBeGreaterThan(0)
+    expect(result.stderr, leaf).toBe('')
+  }
+})
